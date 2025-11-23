@@ -1,0 +1,31 @@
+[project]
+name = "tsingai-lens"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "accelerate>=0.33.0",
+    "faiss-cpu>=1.8.0",
+    "fastapi>=0.115.0",
+    "httpx[socks]>=0.28.1",
+    "jinja2>=3.1.4",
+    "langchain>=0.2.12",
+    "langchain-community>=0.2.11",
+    "langchain-openai>=1.0.3",
+    "markdown>=3.6",
+    "networkx>=3.3",
+    "openai>=1.40.0",
+    "pandas>=2.2.2",
+    "pydantic-settings>=2.12.0",
+    "pymupdf>=1.24.4",
+    "pypdf>=4.3.1",
+    "python-docx>=1.1.2",
+    "python-dotenv>=1.0.1",
+    "python-multipart>=0.0.9",
+    "sentence-transformers>=2.6.0",
+    "spacy>=3.7.6",
+    "transformers>=4.43.0",
+    "uvicorn[standard]>=0.30.0",
+    "yake>=0.4.8",
+]

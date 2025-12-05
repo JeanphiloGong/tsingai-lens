@@ -1,6 +1,11 @@
 from typing import List, Optional
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - allows running without openai installed
+    class OpenAI:  # type: ignore
+        def __init__(self, api_key=None, base_url=None):
+            raise ImportError("openai package not installed. Install it or provide a stub for tests.")
 
 
 class LLMClient:

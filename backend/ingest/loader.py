@@ -3,21 +3,33 @@ import csv
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF
+except ImportError:  # pragma: no cover - optional for environments without PDF support
+    fitz = None
 import markdown
-import pandas as pd
 from docx import Document as DocxDocument
 
 
-def read_pdf(path: Path) -> Tuple[str, List[Dict]]:
-    """Extract text and a lightweight image manifest from PDF."""
+def _require_fitz():
+    if fitz is None:
+        return False
+    return True
+
+
+def read_pdf(path: Path) -> Tuple[List[Tuple[int, str]], List[Dict]]:
+    """Extract per-page text (1-based page numbers) and a lightweight image manifest from PDF."""
+    if not _require_fitz():
+        # Fallback: return placeholder text if PyMuPDF is unavailable in this interpreter
+        placeholder = f"[PDF parsing unavailable in current environment] {path.name}"
+        return [(1, placeholder)], []
     doc = fitz.open(path)
-    texts: List[str] = []
+    pages: List[Tuple[int, str]] = []
     images: List[Dict] = []
 
     for page_index in range(len(doc)):
         page = doc[page_index]
-        texts.append(page.get_text("text"))
+        pages.append((page_index + 1, page.get_text("text")))
 
         for img_index, img in enumerate(page.get_images(full=True)):
             xref = img[0]
@@ -33,26 +45,26 @@ def read_pdf(path: Path) -> Tuple[str, List[Dict]]:
                 }
             )
 
-    return "\n".join(texts), images
+    return pages, images
 
 
-def read_docx(path: Path) -> str:
+def read_docx(path: Path) -> List[Tuple[int, str]]:
     doc = DocxDocument(path)
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    return "\n".join(paragraphs)
+    return [(1, "\n".join(paragraphs))]
 
 
-def read_markdown(path: Path) -> str:
+def read_markdown(path: Path) -> List[Tuple[int, str]]:
     text = Path(path).read_text(encoding="utf-8")
     html = markdown.markdown(text)
-    return html
+    return [(1, html)]
 
 
-def read_txt(path: Path) -> str:
-    return Path(path).read_text(encoding="utf-8")
+def read_txt(path: Path) -> List[Tuple[int, str]]:
+    return [(1, Path(path).read_text(encoding="utf-8"))]
 
 
-def read_csv(path: Path, limit: int = 50) -> str:
+def read_csv(path: Path, limit: int = 50) -> List[Tuple[int, str]]:
     """Read CSV into text representation; limit rows to avoid huge payloads."""
     rows: List[str] = []
     with open(path, newline="", encoding="utf-8") as fp:
@@ -62,11 +74,11 @@ def read_csv(path: Path, limit: int = 50) -> str:
             if i >= limit:
                 rows.append("... (truncated)")
                 break
-    return "\n".join(rows)
+    return [(1, "\n".join(rows))]
 
 
-def load_file(path: Path) -> Tuple[str, List[Dict]]:
-    """Load supported file types and return (text, images)."""
+def load_file(path: Path) -> Tuple[List[Tuple[int, str]], List[Dict]]:
+    """Load supported file types and return ([(page_no, text)], images)."""
     suffix = path.suffix.lower()
     if suffix == ".pdf":
         return read_pdf(path)

@@ -1,12 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from controllers.documents import router
+from fastapi.staticfiles import StaticFiles
+from controllers import file, graph, chat
 from utils.logger import setup_logger
+from config import (
+        DATA_DIR
+        )
 
 # 初始化全局日志，确保 controllers/services 的日志能输出
 setup_logger("lens")
-
 
 def create_app() -> FastAPI:
     app = FastAPI(title="TsingAI-Lens API", version="0.3.0-graphrag")
@@ -17,7 +19,13 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(router)
+
+    # 将data目录挂载为静态资源
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=DATA_DIR), name="static")
+    app.include_router(file.router)
+    app.include_router(graph.router)
+    app.include_router(chat.router)
     return app
 
 

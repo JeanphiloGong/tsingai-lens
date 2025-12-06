@@ -14,17 +14,23 @@ class DocumentRecord(BaseModel):
     tags: List[str] = Field(default_factory=list)
     metadata: Dict = Field(default_factory=dict)
     created_at: str
+    status: str = "pending"
+    status_message: str = ""
+    updated_at: Optional[str] = None
 
 
 class DocumentListResponse(BaseModel):
     items: List[DocumentRecord] = Field(default_factory=list)
 
+class ImageItem(BaseModel):
+    url: str
+    mime_type: Optional[str] = None
 
 class DocumentMeta(BaseModel):
     keywords: List[str] = Field(default_factory=list)
     graph: Dict = Field(default_factory=dict)
     mindmap: Dict = Field(default_factory=dict)
-    images: List = Field(default_factory=list)
+    images: List[ImageItem] = Field(default_factory=list)
     summary: str = ""
 
 
@@ -40,14 +46,6 @@ class DocumentKeywordsResponse(BaseModel):
 class DocumentGraphResponse(BaseModel):
     graph: Dict = Field(default_factory=dict)
     mindmap: Dict = Field(default_factory=dict)
-
-
-class DocumentUploadResponse(BaseModel):
-    id: str
-    keywords: List[str] = Field(default_factory=list)
-    graph: Dict
-    mindmap: Dict = Field(default_factory=dict)
-    summary: str = ""
 
 
 class SourceItem(BaseModel):

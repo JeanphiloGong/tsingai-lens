@@ -9,8 +9,6 @@ from graphrag.schema import Edge, Node, Source
 
 
 class GraphStore:
-    """Lightweight graph store backed by networkx + JSON persistence."""
-
     def __init__(self, path: Path):
         self.path = Path(path)
         self.graph = nx.MultiDiGraph()

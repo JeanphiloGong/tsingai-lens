@@ -9,8 +9,6 @@ from graphrag.store import GraphStore
 
 
 class CommunityManager:
-    """Detects communities and generates summaries."""
-
     def __init__(self, store: GraphStore, llm: LLMClient):
         self.store = store
         self.llm = llm

@@ -37,16 +37,16 @@
 
 tsingai-lens/
 ├── backend/
+│   ├── controllers/    # FastAPI 路由：/file、/graph、/chat
+│   ├── services/       # 文件管理、GraphRAG、Chat 等服务层
 │   ├── ingest/         # 文档导入与切片处理
-│   ├── graphrag/       # 图谱抽取、存储、检索
-│   ├── graph/          # 关键词等辅助图相关工具
-│   ├── config/         # 配置文件与模型路径
-│   ├── deploy/         # Docker、Nginx、启动脚本等
-│   └── tests/          # 单元测试目录
-├── frontend/           # 图谱、导图、仪表盘可视化
-├── docs/               # 用户文档与部署指南
-├── MaxKB/              # 上游参考项目
-└── README.md
+│   ├── graphrag/       # 图谱构建与检索
+│   ├── config/         # 配置与常量
+│   ├── data/           # 存储目录（文档、图谱、元数据）
+│   └── tests/          # 单元测试
+├── frontend/           # 可选前端静态资源
+├── docs/               # 顶层文档
+└── backend/docs/       # API 文档（如 api.md）
 
 ````
 
@@ -62,8 +62,8 @@ export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
 
-# 启动后端
-uvicorn main:app --reload
+# 启动后端（默认 8000，如需和文档一致可用 8010）
+uvicorn main:app --reload --port 8010
 
 # 打开前端（纯静态）
 python -m http.server 8001 -d ../frontend
@@ -71,10 +71,14 @@ python -m http.server 8001 -d ../frontend
 
 ## 核心 API
 
-- `POST /documents` 上传 PDF/DOCX/TXT/MD/CSV → 自动切片、关键词、图谱抽取、摘要。
-- `GET /documents` / `GET /documents/{id}` 文档列表与详情。
-- `GET /documents/{id}/keywords`、`GET /documents/{id}/graph` 取关键词、知识图谱/思维导图。
-- `POST /query` 基于 GraphRAG，对图谱子图生成回答并返回溯源片段。
+- `/file/upload`：上传文件，后台触发入图流程，返回 `doc_id` 与处理状态。
+- `/file/status/{doc_id}`：查询文件处理状态。
+- `/graph/health`：健康检查。
+- `/graph/documents` & `/graph/documents/{doc_id}`：文档列表与详情（含 keywords/graph/mindmap 等元数据）。
+- `/graph/documents/{doc_id}/keywords`、`/graph/documents/{doc_id}/graph`：关键词与图谱快照。
+- `/chat/query`：基于 GraphRAG 的图谱问答，返回回答与溯源片段。
+
+详见更新后的 API 文档：`backend/docs/api.md`（中文，含 curl 示例）。
 
 ## 模型说明
 

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from domain.graph import ImageAsset
+
 @dataclass
 class DocumentData:
     status: str = "pending"
@@ -20,7 +22,7 @@ class DocumentMeta:
     keywords: list[str] = field(default_factory=list)
     graph: dict[str, Any] = field(default_factory=dict)
     mindmap: dict[str, Any] = field(default_factory=dict)
-    images: list[dict[str, Any]] = field(default_factory=list)
+    images: list[ImageAsset] = field(default_factory=list)
     info: MetaInfo = field(default_factory=MetaInfo)
 
 
@@ -41,6 +43,5 @@ class Document:
     def update_meta(self, meta: DocumentMeta):
         self.meta = meta
         self.updated_at = datetime.utcnow()
-
 
 

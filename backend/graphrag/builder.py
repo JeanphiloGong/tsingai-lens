@@ -1,10 +1,13 @@
 import json
+import logging
 from typing import Dict, List, Tuple
 
 from graphrag.prompts import build_extraction_prompt
 from graphrag.schema import Source
 from graphrag.store import GraphStore
 from services.llm_client import LLMClient
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_parse_json(text: str) -> List[Dict]:
@@ -47,13 +50,18 @@ class GraphBuilder:
         return triples
 
     def ingest_chunks(self, chunked: List[Tuple[str, Dict]], doc_id: str, source: str) -> None:
-        for chunk_text, meta in chunked:
+        total = len(chunked)
+        logger.info("开始入图库文档，doc_id=%s，chunks=%s，source=%s", doc_id, total, source)
+        for idx, (chunk_text, meta) in enumerate(chunked, start=1):
             meta = dict(meta)
             meta["doc_id"] = doc_id
             meta["source"] = source
             triples = self.extract_triples(chunk_text, meta)
             self._merge_triples(triples, chunk_text, meta)
+            if idx % 10 == 0 or idx == total:
+                logger.info("入图进度 doc_id=%s：%s/%s", doc_id, idx, total)
         self.store.save()
+        logger.info("入图完成，doc_id=%s，总chunk=%s", doc_id, total)
 
     def _merge_triples(self, triples: List[Dict], chunk_text: str, meta: Dict) -> None:
         if not triples:

@@ -53,11 +53,24 @@ def get_document(doc_id: str, file_svc: FileService = Depends(get_file_service))
         logger.warning("文档未找到，doc_id=%s", doc_id)
         raise HTTPException(status_code=404, detail="Document not found")
     meta = doc.meta
+    images = []
+    for img in meta.images:
+        if hasattr(img, "__dict__"):
+            images.append(
+                {
+                    "url": getattr(img, "url", ""),
+                    "mime_type": getattr(img, "mime_type", None),
+                    "width": getattr(img, "width", None),
+                    "height": getattr(img, "height", None),
+                }
+            )
+        else:
+            images.append(img)
     meta_dict = {
         "keywords": meta.keywords,
         "graph": meta.graph,
         "mindmap": meta.mindmap,
-        "images": meta.images,
+        "images": images,
         "info": meta.info.__dict__,
     }
     logger.info("文档详情返回，doc_id=%s，元数据存在=%s", doc_id, bool(meta))

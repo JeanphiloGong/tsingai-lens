@@ -1,11 +1,13 @@
 import json
 import uuid
 from abc import ABC, abstractmethod
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
 from domain.document import Document, DocumentData, DocumentMeta, MetaInfo
+from domain.graph import ImageAsset
 
 
 class BaseDocumentTable(ABC):
@@ -63,7 +65,7 @@ class JsonDocumentTable(BaseDocumentTable):
                 "keywords": doc.meta.keywords,
                 "graph": doc.meta.graph,
                 "mindmap": doc.meta.mindmap,
-                "images": doc.meta.images,
+                "images": [self._serialize_image(img) for img in doc.meta.images],
                 "info": {
                     "type": doc.meta.info.type,
                     "size": doc.meta.info.size,
@@ -94,6 +96,7 @@ class JsonDocumentTable(BaseDocumentTable):
         data_block = rec.get("data", {})
         meta_block = rec.get("meta", {})
         info_block = meta_block.get("info", {})
+        images_block = meta_block.get("images", [])
         return Document(
             id=rec["id"],
             filename=rec["filename"],
@@ -105,7 +108,7 @@ class JsonDocumentTable(BaseDocumentTable):
                 keywords=meta_block.get("keywords", []),
                 graph=meta_block.get("graph", {}),
                 mindmap=meta_block.get("mindmap", {}),
-                images=meta_block.get("images", []),
+                images=[self._deserialize_image(img) for img in images_block],
                 info=MetaInfo(
                     type=info_block.get("type", ""),
                     size=info_block.get("size", 0),
@@ -115,3 +118,29 @@ class JsonDocumentTable(BaseDocumentTable):
             created_at=datetime.fromisoformat(rec["created_at"]),
             updated_at=datetime.fromisoformat(rec.get("updated_at", rec["created_at"])),
         )
+
+    def _serialize_image(self, img):
+        if isinstance(img, ImageAsset):
+            return {
+                "url": img.url,
+                "mime_type": img.mime_type,
+                "width": img.width,
+                "height": img.height,
+            }
+        if is_dataclass(img):
+            return asdict(img)
+        if isinstance(img, dict):
+            return img
+        return {"url": str(img)}
+
+    def _deserialize_image(self, img):
+        if isinstance(img, ImageAsset):
+            return img
+        if isinstance(img, dict):
+            return ImageAsset(
+                url=img.get("url", ""),
+                mime_type=img.get("mime_type"),
+                width=img.get("width"),
+                height=img.get("height"),
+            )
+        return ImageAsset(url=str(img))

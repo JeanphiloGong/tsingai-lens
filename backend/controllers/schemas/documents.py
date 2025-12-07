@@ -25,6 +25,8 @@ class DocumentListResponse(BaseModel):
 class ImageItem(BaseModel):
     url: str
     mime_type: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
 
 class DocumentMeta(BaseModel):
     keywords: List[str] = Field(default_factory=list)

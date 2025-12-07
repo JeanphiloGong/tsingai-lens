@@ -8,7 +8,7 @@
     - `file`（必填）：上传文件。
     - `tags`（可选）：逗号分隔标签，如 `tag1,tag2`。
     - `metadata`（可选）：JSON 字符串，附加元数据，如 `{"source":"manual"}`。
-  - 返回：`id`（文档 ID）、`status`（初始为 pending）。
+  - 返回：`id`（文档 ID）、`status`（初始为 `pending`）。
   - 示例：
     ```bash
     curl -X POST http://localhost:8010/file/upload \

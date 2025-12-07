@@ -3,11 +3,12 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from controllers.deps.documents import get_chat_service
-from controllers.schemas import QueryResponse
+from controllers.schemas import QueryResponse, SourceItem
 from services.chat_service import ChatService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
+MAX_SOURCES = 20
 
 
 @router.post("/query", response_model=QueryResponse, summary="图谱问答")
@@ -19,4 +20,15 @@ async def query_documents(payload: dict, chat_svc: ChatService = Depends(get_cha
     top_k_cards = int(payload.get("top_k_cards", 5))
     max_edges = int(payload.get("max_edges", 80))
     result = chat_svc.query(query=query, mode=mode, top_k_cards=top_k_cards, max_edges=max_edges)
-    return QueryResponse(answer=result.answer, sources=result.sources)
+    sources = []
+    for s in result.sources:
+        if len(sources) >= MAX_SOURCES:
+            break
+        if isinstance(s, SourceItem):
+            sources.append(s)
+        elif isinstance(s, dict):
+            sources.append(SourceItem(**s))
+        else:
+            sources.append(SourceItem(**s.__dict__))
+    logger.info("图谱问答结果截断来源，原始=%s，返回=%s", len(result.sources), len(sources))
+    return QueryResponse(answer=result.answer, sources=sources)

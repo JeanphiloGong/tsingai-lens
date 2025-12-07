@@ -10,8 +10,4 @@ class FileStatusResponse(BaseModel):
 
 class FileUploadResponse(BaseModel):
     id: str
-    keywords: List[str] = Field(default_factory=list)
-    graph: Dict
-    mindmap: Dict = Field(default_factory=dict)
-    summary: str = ""
     status: Optional[str] = None

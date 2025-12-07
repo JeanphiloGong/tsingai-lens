@@ -8,8 +8,6 @@ from services.llm_client import LLMClient
 
 
 class GraphRetriever:
-    """GraphRAG-style retriever with community cards."""
-
     def __init__(self, store: GraphStore, llm: LLMClient):
         self.store = store
         self.llm = llm

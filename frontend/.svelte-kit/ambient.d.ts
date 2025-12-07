@@ -61,6 +61,7 @@ declare module '$env/static/private' {
 	export const DBUS_STARTER_BUS_TYPE: string;
 	export const SYSTEMD_EXEC_PID: string;
 	export const DBUS_SESSION_BUS_ADDRESS: string;
+	export const npm_config_engine_strict: string;
 	export const COLORTERM: string;
 	export const COLOR: string;
 	export const NVM_DIR: string;
@@ -141,6 +142,7 @@ declare module '$env/static/private' {
 	export const SPARK_HOME: string;
 	export const INIT_CWD: string;
 	export const NODE_ENV: string;
+	export const PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS: string;
 }
 
 /**
@@ -205,6 +207,7 @@ declare module '$env/dynamic/private' {
 		DBUS_STARTER_BUS_TYPE: string;
 		SYSTEMD_EXEC_PID: string;
 		DBUS_SESSION_BUS_ADDRESS: string;
+		npm_config_engine_strict: string;
 		COLORTERM: string;
 		COLOR: string;
 		NVM_DIR: string;
@@ -285,6 +288,7 @@ declare module '$env/dynamic/private' {
 		SPARK_HOME: string;
 		INIT_CWD: string;
 		NODE_ENV: string;
+		PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS: string;
 		[key: `PUBLIC_${string}`]: undefined;
 		[key: `${string}`]: string | undefined;
 	}

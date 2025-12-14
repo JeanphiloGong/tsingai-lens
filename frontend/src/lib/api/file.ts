@@ -1,7 +1,5 @@
 import { apiBase, handle } from './http';
-import type { DocumentRecord } from './types/common';
 import type { UploadResponse, FileStatusResponse } from './types/file';
-import type { DocumentDetailResponse } from './types/graph';
 
 // 上传文件
 export async function uploadFile(params: { file: File; tags?: string; metadata?: string }) {

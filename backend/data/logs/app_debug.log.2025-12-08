@@ -1,0 +1,48 @@
+2025-12-08 07:50:37 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:50:37 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:50:37 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:50:37 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:50:58 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:50:58 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:50:58 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:50:58 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:51:12 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:51:12 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:51:12 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:51:12 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:51:35 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:51:35 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:51:35 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:51:35 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:51:55 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:51:55 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:51:55 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:51:55 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:52:06 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:52:06 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:52:06 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:52:06 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:52:32 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:52:32 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:52:32 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:52:32 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:54:02 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:54:02 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:54:02 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:54:02 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:55:17 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:55:17 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:55:17 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:55:17 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:55:41 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:55:41 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:55:41 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:55:41 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:57:38 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:57:38 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:57:38 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:57:38 | controllers.graph        | INFO     | 文档列表返回，数量=11
+2025-12-08 07:58:21 | controllers.graph        | INFO     | graph 健康检查被调用
+2025-12-08 07:58:21 | controllers.graph        | INFO     | 请求文档列表
+2025-12-08 07:58:21 | services.file_service    | INFO     | 列出文档，数量=11
+2025-12-08 07:58:21 | controllers.graph        | INFO     | 文档列表返回，数量=11

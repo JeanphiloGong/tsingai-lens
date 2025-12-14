@@ -90,6 +90,7 @@
     init();
   });
 
+// 初始化界面
   async function init() {
     healthLoading = true;
     try {
@@ -104,11 +105,14 @@
     await loadList();
   }
 
+// 检测文件是否上传
   function onFileChange(event: Event) {
     const t = event.target as HTMLInputElement;
     file = t.files?.[0] ?? null;
   }
 
+
+// 文件上传方法
   async function handleUpload() {
     if (!file) {
       uploadMsg = '请选择文件';
@@ -125,9 +129,11 @@
     uploading = true;
     uploadMsg = '上传中...';
     try {
+      // 上传文件
       const res = await uploadFile({ file, tags, metadata });
       lastUploadId = res.id;
       uploadMsg = `已提交, 状态: ${res.status || 'pending'}`;
+      // 获取文件处理状态
       pollStatus(res.id);
       await loadList();
       selectedId = res.id;
@@ -139,6 +145,7 @@
     }
   }
 
+// 获取文件处理状态
   async function pollStatus(id: string) {
     let status = 'pending';
     while (status === 'pending' || status === 'processing') {
@@ -156,6 +163,7 @@
     }
   }
 
+// 获取文件列表
   async function loadList() {
     listLoading = true;
     errorMsg = '';
@@ -174,6 +182,7 @@
     await loadDetail(id);
   }
 
+  // 加载文件处理细节
   async function loadDetail(id: string) {
     detailLoading = true;
     errorMsg = '';
@@ -214,6 +223,7 @@
     );
   }
 
+  // 处理输入问题
   async function handleQuery() {
     if (!queryText.trim()) {
       queryError = '请输入问题';
@@ -245,6 +255,8 @@
     return palette[hash % palette.length];
   }
 
+  // 绘制节点界面
+  // 这个部分需要修改为使用现有的知识图谱工具
   function buildLayout(graph?: GraphData): { nodes: LayoutNode[]; edges: LayoutEdge[] } {
     if (!graph?.nodes?.length) return { nodes: [], edges: [] };
     const count = graph.nodes.length;

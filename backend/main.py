@@ -1,11 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from controllers import file, graph, chat
+from controllers import file, graph, chat, experiment
 from utils.logger import setup_logger
-from config import (
-        DATA_DIR
-        )
+from config import DATA_DIR
 
 # 初始化全局日志，确保 controllers/services 的日志能输出
 setup_logger("lens")
@@ -26,6 +24,7 @@ def create_app() -> FastAPI:
     app.include_router(file.router)
     app.include_router(graph.router)
     app.include_router(chat.router)
+    app.include_router(experiment.router)
     return app
 
 

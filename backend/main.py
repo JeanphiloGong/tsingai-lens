@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from controllers import chat, file, graph, retrieval
+from controllers import chat, file, retrieval
 from utils.logger import setup_logger
 from config import DATA_DIR
 
@@ -22,7 +22,6 @@ def create_app() -> FastAPI:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=DATA_DIR), name="static")
     app.include_router(file.router)
-    app.include_router(graph.router)
     app.include_router(chat.router)
     app.include_router(retrieval.router)
     return app

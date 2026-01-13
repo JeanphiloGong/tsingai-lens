@@ -1,0 +1,50 @@
+# Basic GraphRAG config for file-based indexing.
+# Secrets are read from environment or .env alongside this file.
+
+root_dir: "../../"
+
+models:
+  default_chat_model:
+    type: chat
+    model_provider: openai
+    model: gpt-4o-mini
+    api_key: ${LLM_API_KEY}
+    api_base: ${LLM_BASE_URL}
+    model_supports_json: true
+  default_embedding_model:
+    type: embedding
+    model_provider: openai
+    model: text-embedding-3-small
+    api_key: ${LLM_API_KEY}
+    api_base: ${LLM_BASE_URL}
+
+input:
+  storage:
+    type: file
+    base_dir: "../documents"
+  file_type: text
+  encoding: "utf-8"
+  file_pattern: ".*\\.txt$$"
+
+output:
+  type: file
+  base_dir: "../output"
+
+update_index_output:
+  type: file
+  base_dir: "../update_output"
+
+cache:
+  type: file
+  base_dir: "../cache"
+
+reporting:
+  type: file
+  base_dir: "../logs"
+
+vector_store:
+  default_vector_store:
+    type: lancedb
+    db_uri: "../vector_store/lancedb"
+    container_name: "default"
+    overwrite: true

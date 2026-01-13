@@ -1,32 +1,28 @@
-"""
-pipeline workflow types
-"""
+# Copyright (c) 2024 Microsoft Corporation.
+# Licensed under the MIT License
+
+"""Pipeline workflow types."""
+
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-
-from retrieval.config.models.
 from retrieval.config.models.graph_rag_config import GraphRagConfig
 from retrieval.index.typing.context import PipelineRunContext
 
+
 @dataclass
 class WorkflowFunctionOutput:
-    """
-    data container for workflow function results.
-    """
+    """Data container for Workflow function results."""
+
     result: Any | None
-    """
-    the result of the workflow function. thsi can be anythind - we use it only for loggin downstream and expect each workflow function to write official outpus to the provided storage.
-    """
+    """The result of the workflow function. This can be anything - we use it only for logging downstream, and expect each workflow function to write official outputs to the provided storage."""
     stop: bool = False
-    """
-    flag to indicate if the workflow should stop after this function. this should only be used when continuation could cause an unstable failure
-    """
+    """Flag to indicate if the workflow should stop after this function. This should only be used when continuation could cause an unstable failure."""
 
 
 WorkflowFunction = Callable[
-        [GraphRagConfig, PipelineRunContext],
-        Awaitable[WorkflowFunctionOutput],
-        ]
-
+    [GraphRagConfig, PipelineRunContext],
+    Awaitable[WorkflowFunctionOutput],
+]
 Workflow = tuple[str, WorkflowFunction]

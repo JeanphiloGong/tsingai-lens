@@ -1,22 +1,27 @@
+# Copyright (c) 2024 Microsoft Corporation.
+# Licensed under the MIT License
+
+"""A module containing load method definition."""
+
 import logging
 from pathlib import Path
+
 import pandas as pd
 
-
 from retrieval.config.models.input_config import InputConfig
+from retrieval.index.input.util import load_files
 from retrieval.index.utils.hashing import gen_sha512_hash
 from retrieval.storage.pipeline_storage import PipelineStorage
 
 logger = logging.getLogger(__name__)
 
 
-async def  load_text(
-        config: InputConfig,
-        storage: PipelineStorage,
-        ) -> pd.DataFrame:
-    """
-    load text input from a directory
-    """
+async def load_text(
+    config: InputConfig,
+    storage: PipelineStorage,
+) -> pd.DataFrame:
+    """Load text inputs from a directory."""
+
     async def load_file(path: str, group: dict | None = None) -> pd.DataFrame:
         if group is None:
             group = {}
@@ -28,4 +33,3 @@ async def  load_text(
         return pd.DataFrame([new_item])
 
     return await load_files(load_file, config, storage)
-

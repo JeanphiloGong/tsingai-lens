@@ -9,6 +9,15 @@ from .documents import (
     QueryResponse,
     SourceItem,
 )
+from .retrieval import (
+    ConfigCreateRequest,
+    ConfigDetailResponse,
+    ConfigItem,
+    ConfigListResponse,
+    ConfigUploadResponse,
+    IndexRequest,
+    IndexResponse,
+)
 
 __all__ = [
     "DocumentDetailResponse",
@@ -20,4 +29,11 @@ __all__ = [
     "HealthResponse",
     "QueryResponse",
     "SourceItem",
+    "IndexRequest",
+    "IndexResponse",
+    "ConfigUploadResponse",
+    "ConfigListResponse",
+    "ConfigDetailResponse",
+    "ConfigCreateRequest",
+    "ConfigItem",
 ]

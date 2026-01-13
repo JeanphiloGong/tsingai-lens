@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from controllers import file, graph, chat, experiment
+from controllers import chat, file, graph, retrieval
 from utils.logger import setup_logger
 from config import DATA_DIR
 
@@ -24,7 +24,7 @@ def create_app() -> FastAPI:
     app.include_router(file.router)
     app.include_router(graph.router)
     app.include_router(chat.router)
-    app.include_router(experiment.router)
+    app.include_router(retrieval.router)
     return app
 
 

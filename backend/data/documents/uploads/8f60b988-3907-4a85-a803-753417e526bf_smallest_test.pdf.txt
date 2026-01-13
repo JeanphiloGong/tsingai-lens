@@ -1,0 +1,535 @@
+ScienceDirect
+Available online at www.sciencedirect.com
+www.elsevier.com/locate/procedia 
+Procedia CIRP 74 (2018) 5–11
+2212-8271 © 2018 The Authors. Published by Elsevier Ltd. This is an open access article under the CC BY-NC-ND license 
+(https://creativecommons.org/licenses/by-nc-nd/4.0/)
+Peer-review under responsibility of the Bayerisches Laserzentrum GmbH.
+10.1016/j.procir.2018.08.002
+© 2018 The Authors. Published by Elsevier Ltd. This is an open access article under the CC BY-NC-ND license 
+(https://creativecommons.org/licenses/by-nc-nd/4.0/)
+Peer-review under responsibility of the Bayerisches Laserzentrum GmbH.
+Keywords: Selective Laser Melting (SLM); Base plate preheating
+1. Introduction
+Selective 
+Laser 
+Melting 
+(SLM) 
+is 
+an 
+Additive 
+Manufacturing (AM) technique in which thin layers of metal 
+powder material are selectively molten by a laser, layer after 
+layer. There is an increasing industrial demand for a larger 
+pallet of materials that can be applied in SLM.
+One of the main difficulties, which impedes the SLM
+material development, originates from the large thermal 
+stresses that occur in SLM parts due to the high thermal 
+gradients. This thermal stress issue can potentially be resolved 
+by elevating the temperature of the base plate during the 
+fabrication, hence reducing temperature gradients during SLM 
+[1-3].
+This addition of preheating during SLM has proven to be
+promising for several cases where cracks could be prohibited 
+[1], residual stresses were decreased [3] and/or mechanical 
+properties improved [4]. This can, however, also affect other 
+material properties or characteristics. To better illustrate these 
+effects, the research presented here gives an overview of the 
+effect of preheating on a variety of SLM part characteristics 
+such 
+as 
+density,
+internal 
+stresses, 
+crack 
+formation,
+microstructure and mechanical properties. The corresponding 
+drawbacks, originating from long exposure of SLM materials
+to elevated preheating temperatures, are also demonstrated.
+Within this research, four materials are examined:
+•
+The first material is the high strength aluminum alloy 
+Al7075 containing 5.1-6.1wt% Zn, 2.1-2.9wt% Mg and 
+1.2-2wt% Cu. Because of its high specific strength, this 
+alloy is mainly used for automotive and aerospace 
+applications. After SLM production, Al7075 parts, 
+however, suffer from crack formation [5].
+•
+The nickel alloy Hastelloy X (chemical composition in 
+Table 1) is often used in high temperature applications 
+such as gas turbines. Depending on its exact chemical 
+composition [6] and on the SLM parameters used, this 
+material also suffers from cracking.
+Application of base plate preheating during selective laser melting
+R. Mertensa*, S. Dadbakhsha, J. Van Humbeeckb, J.-P. Krutha
+aKU Leuven, Department of Mechanical Engineering, Member of Flanders Make, Celestijnenlaan 300 box 2420, 3001 Leuven, Belgium
+bKU Leuven, Department of Materials Engineering, Kasteelpark Arenberg 44 box 2450, 3001 Leuven, Belgium
+* Corresponding author. Tel.: +32-163-773-21. E-mail address: raya.mertens@kuleuven.be
+- Keynote Paper -
+Abstract
+Base plate preheating is one of the recent enhancing tools added to the process of Selective Laser Melting (SLM). This tool aims at a reduction 
+of thermal stresses in SLM parts, achieved by decreasing the thermal gradients during SLM processing. In the current study, base plate 
+preheating up to a temperature of 400°C is applied during SLM of 4 different materials, including aluminum 7075 alloy, nickel alloy Hastelloy
+X, H13 tool steel and CoCr. General trends, as well as material specific effects are discussed regarding part density, crack formation, internal 
+stresses, microstructure and mechanical properties. These show how base plate preheating can induce different influences according to each 
+particular material category.
+10th CIRP Conference on Photonic Technologies [LANE 2018]
+This is a resupply of March 2023 as the template used in the publication of the original article contained errors. The content of the article has remained unaffected.
+
+6
+R. Mertens  et al. / Procedia CIRP 74 (2018) 5–11
+•
+H13 (chemical composition in Table 1) is a hot working 
+tool steel with a high hardness and wear resistance, a
+good thermal fatigue performance and high toughness 
+and strength at elevated temperatures. This material can 
+be processed through SLM without major difficulties. It 
+was, however, shown that the application of preheating 
+largely influences the microstructure and mechanical 
+properties of SLM H13 tool steel [4].
+•
+Lastly, CoCr (27-30wt% Cr and 5-7wt% Mo) combines 
+good corrosion resistance (even at elevated temperatures)
+with mechanical properties comparable to stainless steel. 
+It is often used in industrial as well as biomedical 
+applications. Extensive research has been performed on 
+SLM of CoCr [7-10].
+Table 1. Chemical composition of Hastelloy X and H13 tool steel.
+Wt%
+Ni
+Fe
+Cr
+Mo
+Co
+Si
+V
+W
+C
+HX
+Bal. 17-20
+20.5-23
+8-10
+1.5-2.5
+<1
+-
+0.6-1 0.05-0.07
+H13
+-
+≥91
+5.13-5.25 1.33-1.4
+-
+1
+1
+-
+0.32-0.4
+2. Methods
+For the SLM production, Materialise Magics software was 
+used for the file preparation and an in-house developed SLM-
+machine of KU Leuven was used for part production. The 
+SLM machine is equipped with a Yb:YAG fiber laser with a 
+maximum output power of 300W and a beam diameter d1/e² of 
+50µm. Base plate preheating was applied using a resistive 
+heating element underneath the base plate. The temperature is 
+controlled within ± 0.5°C using a thermocouple attached to 
+the heating element and a PID control loop. Since the 
+temperature is only measured underneath the base plate, the 
+temperature may vary depending on the part height. However, 
+the limited height of most parts in this work, i.e. 10mm, 
+guarantees a relatively homogeneous temperature throughout 
+the build height. 
+For all materials, a parameter optimization was performed 
+using the power (P) and scan speed (v) ranges as illustrated in 
+Table 2. Furthermore, preheating was applied up to 400°C. 
+Layer thickness and hatch spacing were kept constant at 
+respectively 30µm and 105µm.
+Table 2. Investigated parameter ranges to optimize the SLM process for all 
+four materials.
+Material
+Power [W]
+Scan speed [mm/s]
+Al7075
+100-300
+500-1500
+Hastelloy X
+120-270
+400-1600
+H13 tool steel
+120-220
+400-2000
+CoCr
+150-300
+200-1400
+3. Results and discussion
+Each of the following paragraphs describes the effect of 
+base plate preheating on one of the material characteristics. 
+Density, crack formation, internal stresses, microstructure and 
+mechanical properties are analyzed in depth. In a last section, 
+the influence of extended exposure to elevated temperatures is 
+described for Hastelloy X.
+3.1. Density
+Fig. 1 shows the Archimedes density of H13 tool steel 
+parts produced using different laser power and scan speed, 
+and using different preheating temperatures. First of all, it 
+should be noted that the variation caused by preheating
+(within this limited range of applied preheating temperatures)
+is small in comparison to the influence of other process 
+parameters such as laser power and scan speed.
+Furthermore, application of preheating contributes to the 
+total energy input required to densify the material. When the 
+combination of scan speed and laser power results in low 
+density, application of preheating leads to an increase of the 
+part density (Fig. 2). Fig. 3 shows an example where full 
+density (>99.5%) was obtained by using a higher preheating 
+temperature.
+Fig. 1. Relative density graph of H13 tool steel parts produced by SLM (t = 
+30µm; h = 105µm).
+However, when laser energy input is adequate in order to 
+obtain a dense SLM part, addition of preheating might result 
+in an excess of the total energy input, enlarging the melt pool 
+size and increasing melt pool instabilities. This can decrease 
+the part density as occurred for H13 tool steel when a power 
+of 220W and scan speed of 1200 or 1600mm/s is applied (Fig. 
+1). In this case, density values decreased when the preheating 
+temperature increased from 200°C to 400°C.
+In the excessive laser energy region, when low scan speeds 
+are applied (scan speed of 400mm/s in Fig. 1), parts suffer 
+from keyhole porosity (Fig. 5 shows examples of keyhole 
+porosity for Hastelloy X). In this region, there is no clear 
+trend in the effect of preheating. The part density is, however, 
+insufficient for all applied preheating temperatures.
+Finally, a parameter window can be defined in which dense 
+parts are obtained for all examined preheating temperatures 
+within the considered temperature range. For H13 tool steel, a 
+parameter set consisting of a power of 220W and scan speed 
+of 800mm/s without and with preheating up to 400°C shows 
+maximum part density results. It is worth mentioning that 
+comparable trends are observed for all investigated materials 
+since part density is rather process related.
+This is a resupply of March 2023 as the template used in the publication of the original article contained errors. The content of the article has remained unaffected.
+
+R. Mertens  et al. / Procedia CIRP 74 (2018) 5–11
+7
+Fig. 2. Optical microscopy images of Hastelloy X specimens (side view) with 
+increasing preheating temperature (P = 170W; v = 1600mm/s).
+Fig. 3. Optical microscopy images of Hastelloy X produced at P = 170W and 
+v = 1200mm/s with varying preheating temperature. The remaining porosity 
+is indicated by red circles.
+3.2. Internal stresses and crack formation
+The main motivation to apply preheating during the SLM 
+process is the possible reduction in thermal stresses. This 
+reduction was quantified by Vrancken et. al. for the titanium 
+alloy Ti6Al4V. A reduction of 50% in residual stresses was 
+found when a preheating temperature of 400°C was applied 
+[3].
+Such a reduction in thermal stresses is beneficial for the 
+overall stability of SLM parts, especially in high demanding 
+load applications since large internal stresses might lead to 
+geometrical deformations and premature failure. In the 
+extreme cases, such internal stresses can even induce 
+macrocracks developing in SLM parts. This has been well 
+demonstrated by Kempen et. al. as the large macrocracks in
+SLM M2 tool steel parts without preheating have been 
+successfully diminished by application of preheating at 300°C 
+[1].
+In addition to large macrocracks, smaller microcracks can 
+also form in the SLM materials. For example, in the case of 
+high strength aluminum alloys such as Al7075, microcracks 
+can abundantly form after SLM processing without preheating 
+(Fig. 4). Although the application of preheating largely 
+reduces this cracking behavior, it fails to completely prevent 
+the microcrack formation, as Fig. 4 still shows the presence of 
+large cracks after use of preheating at 400°C. This change in 
+crack behavior
+can be attributed to the precipitation 
+phenomena of the main
+strengthening phase (MgZn2),
+occurring at temperatures below 300°C [5]. 
+Without application of preheating, the temperature of the 
+freshly solidified material decreases below 300°C during the 
+SLM process. This allows precipitates (such as MgZn2) to 
+form during production, which consequently may embrittle 
+the material. This together with the high thermal stresses 
+induced by SLM (which are intensified for this alloy due to its 
+broad solidification interval and large thermal expansion)
+leads to the abundant formation of microcracks throughout the 
+entire part. 
+In contrast, when the freshly solidified material is kept at 
+an elevated temperature of 400°C, the situation changes 
+completely. Mg and Zn will both remain in solid solution and 
+the formation of MgZn2 precipitates is postponed until after 
+the SLM process. The embrittlement is therefore avoided, 
+reducing the fine branched cracking. However, thermal 
+stresses during SLM and after cooling down are still
+sufficiently high to cause cracks (despite the cracking 
+significantly reduces after the application of preheating, as 
+seen in Fig. 4).
+Fig. 4. Optical microscopy images of Al7075 parts produced at different 
+preheating temperatures.
+The nickel alloy Hastelloy X also suffers from crack 
+formation after SLM processing. Hastelloy X, however, does 
+not have a phase transformation occurring in the range of the
+applied preheating temperatures. Furthermore, and related to 
+this, it was found that preheating up to 400°C does not have a 
+significant effect on crack formation in Hastelloy X parts.
+This is a resupply of March 2023 as the template used in the publication of the original article contained errors. The content of the article has remained unaffected.
+
+8
+R. Mertens  et al. / Procedia CIRP 74 (2018) 5–11
+It should be noted that in addition to preheating, the 
+applied parameter set can significantly alter the cracking. For 
+example, high laser energy inputs can lead to the formation of 
+excessively deep melt pools in SLM processed Hastelloy X 
+(Fig. 5). Solidification of these deep melt pools develops from 
+the sides towards the middle. As a result, cracks appear 
+vertically, in the middle of the melt pool where the two 
+solidification fronts (from left and right) should meet. In 
+comparison, a lower laser energy parameter set leads to a 
+shallower melt pool which can prevent cracking to a large 
+extent even without preheating (as previously shown in Fig. 
+3a). Addition of the preheating to such a parameter set not 
+only 
+completely 
+diminishes 
+the 
+cracking, 
+but 
+also 
+significantly improves the density (Fig. 3c).
+Fig. 5. Optical microscopy image (side view) of a Hastelloy X specimen 
+produced using high laser energy without preheating (P = 270W; v = 
+400mm/s).
+It should, however, be noted that for some materials, a 
+reverse effect on internal stresses can occur. For H13 tool 
+steel, for example, compressive stresses are commonly found 
+at the outer surfaces of the parts after SLM production due to 
+the volume increase during the martensitic transformation in
+the material. It was however found that higher preheating 
+temperatures prohibit such a martensitic transformation (as 
+will be discussed more in depth in section 3.3). Therefore, 
+internal stresses evolved from a compressive nature without 
+preheating to tensile after application of preheating, as shown 
+in Fig. 6 [4].
+Fig. 6. Maximal principal stress measured in H13 SLM parts produced at 
+different preheating temperatures. Residual stresses are measured in-plane on 
+the top surface of SLM cubes using XRD.
+On the contrary, for CoCr, a material without phase 
+transformations below 400°C (as will be discussed in section 
+3.3), no significant difference in residual stresses at the outer 
+surface of SLM parts was measured, as illustrated in Fig. 7.
+Fig. 7. Maximal principal stress measured in CoCr SLM parts produced at 
+different preheating temperatures. 6 measurements were performed without 
+preheating (95% confidence interval shown), 2 with preheating at 400°C 
+(single measurements shown).
+3.3. Microstructure and mechanical properties
+Applying preheating influences the thermal history of the 
+material and might therefore influence the microstructure of 
+the parts. This influence is not equal for all materials, as it 
+depends on the transformation temperatures of the phases and 
+the melting points of the materials.
+When a
+phase 
+transformation or precipitation is possible
+below the 
+preheating temperature, significant changes are obtainable
+depending on the preheating temperature. However, when 
+such transformations only occur
+above the preheating 
+This is a resupply of March 2023 as the template used in the publication of the original article contained errors. The content of the article has remained unaffected.
+
+R. Mertens  et al. / Procedia CIRP 74 (2018) 5–11
+9
+temperature, microstructural variations due to preheating are 
+smaller or non-existing.
+Fig. 8 shows a first example, as Al7075 is largely affected 
+by preheating. As seen from Fig. 8, in parts produced without 
+preheating, melt pool boundaries are clearly visible in the 
+microstructure. These melt pools are visible due to the cell 
+size differences at the melt pool borders and interiors [5]. This 
+can be enhanced due to the precipitation in the heat affected 
+zone of each melt pool. The precipitates are mainly MgZn2
+particles forming below 300°C for this alloy [5]. However, at 
+a preheating temperature of 400°C, Zn and Mg fully dissolve 
+in the aluminum matrix, prohibiting the formation of MgZn2
+precipitates in the melt pool. As a result, the melt pool borders 
+fade and a more uniform microstructure appears (Fig. 8).
+Fig. 8. Optical microscopy images of etched Al7075 parts produced using 
+different base plate preheating temperatures (P = 270W; v = 1100mm/s).
+As a second example, the effect of preheating up to 400°C 
+on the microstructural and mechanical properties of SLM 
+made H13 tool steel is presented [4]. For this steel, the 
+austenite-martensite transformation temperature is about
+300°C. Application of a preheating temperature below this 
+critical temperature results in a largely tempered martensitic 
+microstructure 
+after 
+SLM. 
+When 
+higher 
+preheating 
+temperatures are applied, on the other hand, the material 
+remains in its austenitic state during the SLM process. 
+Afterwards, during cooling down to room temperature, a 
+bainitic microstructure forms and a low fraction of austenite 
+retains. This bainitic microstructure is only slightly tempered 
+after cooling down to room temperature at the end of the 
+process (in contrast to the highly tempered martensite formed 
+during SLM without preheating). Therefore, parts with this 
+bainitic microstructure, obtained via SLM at 400°C, possess a
+higher hardness and a higher ultimate tensile strength 
+compared to parts produced without preheating, as illustrated 
+in Fig. 9. To further analyze and predict such phenomena, one 
+may study the Continuous Cooling Transformation (CCT) 
+curves of a particular steel before selecting the preheating 
+temperature for SLM processing.
+Fig. 9. Tensile stress-strain curves for SLM-produced H13 using different 
+preheating temperatures [4].
+The two previous examples showed materials that are to a 
+large extend affected by preheating up to 400°C. In a contrary 
+case, CoCr is investigated. For CoCr, no precipitation or 
+transformation normally occurs below 400°C that influence 
+the properties. In fact, CoCr only undergoes an FCC to HCP 
+transformation around 1000°C, leading to a stable hexagonal 
+structure below this temperature. However, due to the fast 
+cooling during SLM, the metastable FCC phase largely 
+remains at room temperature. Interestingly, the amount/type 
+of this metastable FCC structure is not significantly 
+influenced by preheating up to 400°C. This can be seen in Fig. 
+10 where the XRD diffraction pattern shows similar peaks in 
+the two different cases. As a result, no significant effect on 
+tensile properties was obtained (Fig. 11).
+Fig. 10. X-ray diffraction patterns for CoCr parts produced without 
+preheating (NP) and with a preheating temperature of 400°C.
+This is a resupply of March 2023 as the template used in the publication of the original article contained errors. The content of the article has remained unaffected.
+
+10
+R. Mertens  et al. / Procedia CIRP 74 (2018) 5–11
+Fig. 11. Tensile stress-strain curves for SLM-produced CoCr using different 
+preheating temperatures.
+Despite the comparable phases in the SLM CoCr parts 
+made with or without preheating (Fig. 10), there is however a
+difference in their texture as the intensity of the peaks is 
+different. In fact, the (200) FCC peak at 2θ = 51° is more 
+pronounced when a preheating temperature of 400°C is 
+applied. This means that preheating intensifies the texture in 
+the (200) direction, which is regularly observed in SLM parts 
+due to the layered build [8, 11, 12]. This can be attributed to 
+deeper melt pools when preheating is applied.
+3.4. Long exposure to preheating temperature
+One of the concerns regarding the application of preheating 
+is the effect of prolonged exposure to a certain preheating 
+temperature. Within this research, a significant effect was 
+observed after long exposure to a temperature of 400°C for 
+nickel alloy Hastelloy X, as the microstructure was different 
+at the bottom and the top of a 90mm high part that was 
+SLMed for 32 hours. In fact, 32 hours of preheating at 400°C 
+significantly coarsened the grain structure, as shown in Fig.
+12. The coarser microstructure at the bottom of the part is 
+visible in as built parts, but becomes more clear in heat treated
+parts (solution
+treatment at 1200°C, followed by air 
+quenching).
+This is very remarkable since the alloy does not have low 
+temperature phase transformations (as discussed earlier), and 
+especially
+since this
+alloy is
+also
+used for
+elevated 
+temperature applications. Analyzing the effect of long 
+exposure to preheating temperatures is in particular important 
+for industrial applications, as large parts will require long 
+production times.
+Fig. 12. Optical microscopy images of 90mm tall SLM Hastelloy X bars
+made in the vertical direction using a preheating at 400°C (side view). The 
+pictures are taken before and after a solution heat treatment at 1200°C.
+4. Conclusion
+This research investigated the effect of base plate 
+preheating during SLM on part density, crack formation, 
+internal stresses, microstructure and mechanical properties for 
+4 different materials (Al7075, Hastelloy X, H13 tool steel and 
+CoCr).
+It was found that an elevated base plate temperature 
+provides an extra source of energy and densifies the SLM 
+material when laser energy is insufficient to obtain a dense 
+part. However, this densifying effect of preheating is less 
+strong compared to the effect of main laser parameters such as 
+laser power and scan speed, as was shown for the case of 
+H13.
+In some cases, such as for Al7075, application of 
+preheating can also reduce the crack formation in the parts, 
+though it may fail to completely prevent cracking. In the case
+of Al7075, a change in crack morphology was obtained due to 
+preheating at a temperature of 400°C.
+Residual stresses can partly be controlled by application of 
+preheating. Other factors such as phase transformations (e.g. 
+the martensitic phase transformation in H13 steel), however, 
+also largely affect stress formation in SLM parts. 
+Microstructural changes due to application of preheating 
+strongly depend on the processed material and its phase 
+transformations. It was found that the precipitation in Al7075 
+and the austenite-martensite transformation in H13 tool steel,
+both occurring at temperatures lower than 400°C, induce large 
+differences depending on the preheating temperatures applied 
+during SLM. In contrast, when the investigated material has 
+no transformation below the maximal preheating temperature, 
+the effect of preheating is non-existing or less pronounced.
+Lastly, it should be noted that the texture can still vary due 
+to preheating below the material transformation temperatures, 
+even when no clear change in tensile properties is observable 
+(as shown for CoCr). Also, the prolonged exposure to a 
+preheating temperature of 400°C can have a grain coarsening 
+effect such as in the case of Hastelloy X.
+This is a resupply of March 2023 as the template used in the publication of the original article contained errors. The content of the article has remained unaffected.
+
+R. Mertens  et al. / Procedia CIRP 74 (2018) 5–11
+11
+Acknowledgements
+The research leading to these results has received funding 
+from the KU Leuven GOA project SUMMA and from the 
+Flemish projects SIM-ICON Expamet (IWT#120593) and 
+SIM-SBO MultiMet (IWT#150010).
+References
+[1] Kempen K, Vrancken B, Buls S, Thijs L, Van Humbeeck J, Kruth J-P. 
+Selective Laser Melting of Crack-Free High Density M2 High Speed 
+Steel Parts by Baseplate Preheating. J. Manuf. Sci. Eng. 2014; 
+136:061026-6.
+[2] Sander J, Hufenbach J, Giebeler L, Wendrock H, Kühn U, Eckert J. 
+Microstructure and properties of FeCrMoVC tool steel produced by 
+selective laser melting. Mater. Des. 2016; 89:335-41.
+[3] Vrancken B, Buls S, Kruth J-P, Van Humbeeck J. Preheating of Selective 
+Laser Melted Ti6Al4V: Microstructure and Mechanical Properties. 
+Proceedings of the 13th World Conference on Titanium 2016; 1269-77.
+[4] Mertens R, Vrancken B, Holmstock N, Kinds Y, Kruth JP, Van 
+Humbeeck J. Influence of Powder Bed Preheating on Microstructure and 
+Mechanical Properties of H13 Tool Steel SLM Parts. Physics Procedia 
+2016; 83:882-90.
+[5] Montero Sistiaga ML, Mertens R, Vrancken B, Wang X, Van Hooreweder 
+B, Kruth J-P, Van Humbeeck J. Changing the alloy composition of 
+Al7075 for better processability by selective laser melting. J. Mater.
+Process. Technol. 2016; 238:437-45.
+[6] Tomus D, Rometsch PA, Heilmaier M, Wu X. Effect of minor alloying 
+elements on crack-formation characteristics of Hastelloy-X manufactured 
+by selective laser melting. Addit. Manuf. 2017; 16:65-72.
+[7] Hedberg YS, Qian B, Shen Z, Virtanen S, Odnevall Wallinder I. In vitro 
+biocompatibility of CoCrMo dental alloys fabricated by selective laser 
+melting. Dent. Mater. 2014; 30:525-34.
+[8] Kajima Y, Takaichi A, Nakamoto T, Kimura T, Yogo Y, Ashida M, Doi 
+H, Nomura N, Takahashi H, Hanawa T, Wakabayashi N. Fatigue strength 
+of Co–Cr–Mo alloy clasps prepared by selective laser melting. J. Mech.
+Behav. Biomed. Mater. 2016; 59:446-58.
+[9] Liverani E, Fortunato A, Leardini A, Belvedere C, Siegler S, Ceschini L, 
+Ascari A. Fabrication of Co–Cr–Mo endoprosthetic ankle devices by 
+means of Selective Laser Melting (SLM). Mater. Des. 2016; 106:60-8.
+[10] Takaichi A, Suyalatu, Nakamoto T, Joko N, Nomura N, Tsutsumi Y, 
+Migita S, Doi H, Kurosu S, Chiba A, Wakabayashi N, Igarashi Y, 
+Hanawa T. Microstructures and mechanical properties of Co–29Cr–6Mo 
+alloy fabricated by selective laser melting process for dental applications.
+J. Mech. Behav. Biomed. Mater. 2013; 21:67-76.
+[11] Thijs L, Kempen K, Kruth J-P, Van Humbeeck J. Fine-structured 
+aluminium products with controllable texture by selective laser melting 
+of pre-alloyed AlSi10Mg powder. Acta Mater. 2013; 61:1809-19.
+[12] Zhou X, Li K, Zhang D, Liu X, Ma J, Liu W, Shen Z. Textures formed 
+in a CoCrMo alloy by selective laser melting. J. Alloys Compd. 2015; 
+631:153-64.
+This is a resupply of March 2023 as the template used in the publication of the original article contained errors. The content of the article has remained unaffected.

@@ -25,6 +25,7 @@ DOCUMENTS_DIR = DATA_DIR / "documents"
 IMAGES_DIR = DATA_DIR / "images"
 INDEX_FILE = DOCUMENTS_DIR / "index.json"
 GRAPH_STORE_FILE = DATA_DIR / "graph_store.json"
+CONFIG_DIR = DATA_DIR / "configs"
 
 STATIC_IMAGE_URL = "/statc/images"
 

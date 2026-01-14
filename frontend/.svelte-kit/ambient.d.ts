@@ -27,6 +27,7 @@
  */
 declare module '$env/static/private' {
 	export const LESSOPEN: string;
+	export const PYTHONWARNINGS: string;
 	export const TMUX: string;
 	export const CONDA_PROMPT_MODIFIER: string;
 	export const HTTPS_PROXY: string;
@@ -38,7 +39,6 @@ declare module '$env/static/private' {
 	export const MAIL_USERNAME: string;
 	export const STARSHIP_SHELL: string;
 	export const all_proxy: string;
-	export const SSH_AGENT_PID: string;
 	export const XDG_SESSION_TYPE: string;
 	export const npm_node_execpath: string;
 	export const SHLVL: string;
@@ -80,6 +80,7 @@ declare module '$env/static/private' {
 	export const npm_config_cache: string;
 	export const GNOME_DESKTOP_SESSION_ID: string;
 	export const WINDOWPATH: string;
+	export const OPENAI_API_BASE: string;
 	export const npm_config_node_gyp: string;
 	export const PATH: string;
 	export const SESSION_MANAGER: string;
@@ -173,6 +174,7 @@ declare module '$env/static/public' {
 declare module '$env/dynamic/private' {
 	export const env: {
 		LESSOPEN: string;
+		PYTHONWARNINGS: string;
 		TMUX: string;
 		CONDA_PROMPT_MODIFIER: string;
 		HTTPS_PROXY: string;
@@ -184,7 +186,6 @@ declare module '$env/dynamic/private' {
 		MAIL_USERNAME: string;
 		STARSHIP_SHELL: string;
 		all_proxy: string;
-		SSH_AGENT_PID: string;
 		XDG_SESSION_TYPE: string;
 		npm_node_execpath: string;
 		SHLVL: string;
@@ -226,6 +227,7 @@ declare module '$env/dynamic/private' {
 		npm_config_cache: string;
 		GNOME_DESKTOP_SESSION_ID: string;
 		WINDOWPATH: string;
+		OPENAI_API_BASE: string;
 		npm_config_node_gyp: string;
 		PATH: string;
 		SESSION_MANAGER: string;

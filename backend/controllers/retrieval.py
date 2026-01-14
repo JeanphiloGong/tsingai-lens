@@ -529,8 +529,8 @@ async def export_graphml(
     """
     Export the knowledge graph as GraphML for tools like Gephi.
 
-    It reuses the same filtering options as /retrieval/graph. If output_path is
-    omitted, the default config output is used.
+    It supports filtering options for output_path, max_nodes, min_weight, and
+    community_id. If output_path is omitted, the default config output is used.
     """
     base_dir = _resolve_output_dir(output_path)
     (

@@ -5,6 +5,10 @@ export type Collection = {
   id: string;
   name?: string;
   created_at?: string;
+  updated_at?: string;
+  status?: string;
+  document_count?: number;
+  entity_count?: number;
 };
 
 export const collections = writable<Collection[]>([]);

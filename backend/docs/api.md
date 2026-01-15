@@ -23,12 +23,29 @@
     -F "verbose=false"
   ```
 
+- **POST** `/retrieval/input/upload` — 批量上传文件到输入存储（不触发索引）
+  - 表单字段：`files`（必填；支持多个 PDF/TXT）。
+  - 返回：`count` 与 `items`（包含 `stored_path` 等字段）。
+  ```bash
+  curl -X POST http://localhost:8010/retrieval/input/upload \
+    -F "files=@/path/to/paper1.pdf" \
+    -F "files=@/path/to/paper2.pdf"
+  ```
+
+- 批量导入推荐流程
+  1) 调用 `/retrieval/input/upload` 批量上传（仅入库，不索引）。
+  2) 调用 `/retrieval/index` 触发一次索引（会扫描 `input.storage.base_dir` 下符合 `file_pattern` 的所有文件）。
+  3) 调用 `/retrieval/graphml` 导出 Gephi 文件。
+
 - 图数据导出
   - **GET** `/retrieval/graphml` — 导出 GraphML（可用于 Gephi 等）
     - 查询参数：`output_path`（可选，使用 /retrieval/index 返回的路径或默认配置输出目录）、`max_nodes`（默认 200）、`min_weight`（默认 0.0，关系权重过滤）、`community_id`（可选，按社区筛选）。
     ```bash
     curl -OJ "http://localhost:8010/retrieval/graphml?max_nodes=200&min_weight=0"
     ```
+
+注意事项
+- PDF 需可复制文本（扫描版 PDF 暂不支持 OCR）。
 
 - 配置管理
   - **POST** `/retrieval/configs/upload` — 上传配置文件

@@ -70,6 +70,7 @@ python -m http.server 8001 -d ../frontend
 
 - `/retrieval/index`：根据配置启动标准索引流程。
 - `/retrieval/index/upload`：上传文件并使用默认配置触发索引。
+- `/retrieval/input/upload`：批量上传文件到输入存储（不触发索引）。
 - `/retrieval/graphml`：导出 GraphML 供可视化工具使用。
 - `/retrieval/configs`：配置文件上传、创建、查看与列表。
 
@@ -85,8 +86,9 @@ python -m http.server 8001 -d ../frontend
 
 ## Retrieval 流程（标准索引）
 
-- 上传文件：`POST /retrieval/index/upload`
-- 直接索引：`POST /retrieval/index`
+- 批量上传（不触发索引）：`POST /retrieval/input/upload`
+- 单文件上传并索引：`POST /retrieval/index/upload`
+- 直接索引（已准备好输入目录）：`POST /retrieval/index`
 - 图谱导出：`GET /retrieval/graphml`
 
 后续可以用 React/Vite 将 API 对接 MaxKB UI 或嵌入自定义仪表盘。

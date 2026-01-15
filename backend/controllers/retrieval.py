@@ -17,6 +17,7 @@ from controllers.schemas import (
     ConfigDetailResponse,
     ConfigListResponse,
     ConfigUploadResponse,
+    InputUploadResponse,
     IndexRequest,
     IndexResponse,
 )
@@ -507,6 +508,83 @@ async def upload_and_index(
         output_path=str(getattr(config.output, "base_dir", "") or ""),
         stored_input_path=str(stored_path),
     )
+
+
+@router.post(
+    "/input/upload",
+    response_model=InputUploadResponse,
+    summary="批量上传文件到输入存储（不触发索引）",
+)
+async def upload_inputs(
+    files: list[UploadFile] = File(...),
+) -> InputUploadResponse:
+    """Upload files into input storage without running the indexing pipeline."""
+    if not files:
+        raise HTTPException(status_code=400, detail="文件不能为空")
+
+    default_config = CONFIG_DIR / "default.yaml"
+    if not default_config.is_file():
+        logger.error("Default config missing at %s", default_config)
+        raise HTTPException(
+            status_code=500,
+            detail="默认配置不存在，请在 backend/data/configs 下提供 default.yaml",
+        )
+
+    try:
+        config = load_config(default_config.parent, config_filepath=default_config)
+        logger.info("Loaded default GraphRAG config from %s", default_config)
+    except Exception as exc:
+        logger.exception("Failed to load default GraphRAG config")
+        raise HTTPException(status_code=400, detail=f"配置加载失败: {exc}") from exc
+
+    try:
+        input_storage = create_storage_from_config(config.input.storage)
+    except Exception as exc:
+        logger.exception("Failed to create input storage")
+        raise HTTPException(status_code=500, detail=f"存储初始化失败: {exc}") from exc
+
+    base_dir = getattr(config.input.storage, "base_dir", None)
+    items: list[dict[str, Any]] = []
+    for file in files:
+        filename = file.filename
+        if not filename:
+            raise HTTPException(status_code=400, detail="文件名不能为空")
+
+        raw_bytes = await file.read()
+        suffix = filename.lower()
+        converted_to_text = False
+        if suffix.endswith(".pdf"):
+            logger.info("PDF detected; extracting text before storing filename=%s", filename)
+            text = _pdf_to_text(raw_bytes)
+            stored_name = f"uploads/{uuid4()}_{filename}.txt"
+            payload = text.encode("utf-8")
+            converted_to_text = True
+        elif suffix.endswith(".txt"):
+            stored_name = f"uploads/{uuid4()}_{filename}"
+            payload = raw_bytes
+        else:
+            raise HTTPException(status_code=400, detail="仅支持 PDF 或 TXT 文件")
+
+        logger.info(
+            "[controller.retrieval] Storing uploaded file filename=%s target_key=%s size_bytes=%s",
+            filename,
+            stored_name,
+            len(payload),
+        )
+        await input_storage.set(stored_name, payload)
+        stored_path = Path(base_dir) / stored_name if base_dir else stored_name
+        items.append(
+            {
+                "original_filename": filename,
+                "stored_name": stored_name,
+                "stored_path": str(stored_path),
+                "converted_to_text": converted_to_text,
+                "size_bytes": len(payload),
+            }
+        )
+
+    logger.info("Uploaded input files count=%s", len(items))
+    return InputUploadResponse(count=len(items), items=items)
 
 
 @router.get(

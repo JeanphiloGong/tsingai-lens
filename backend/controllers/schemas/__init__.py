@@ -4,6 +4,8 @@ from .retrieval import (
     ConfigItem,
     ConfigListResponse,
     ConfigUploadResponse,
+    InputUploadItem,
+    InputUploadResponse,
     IndexRequest,
     IndexResponse,
 )
@@ -16,4 +18,6 @@ __all__ = [
     "ConfigDetailResponse",
     "ConfigCreateRequest",
     "ConfigItem",
+    "InputUploadItem",
+    "InputUploadResponse",
 ]

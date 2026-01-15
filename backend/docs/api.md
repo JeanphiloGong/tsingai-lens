@@ -5,16 +5,19 @@
 ## 集合管理（/retrieval/collections）
 - **POST** `/retrieval/collections` — 创建集合
   - 请求体（JSON）：`name`（可选，集合名称）。
-  - 返回：`id`、`name`、`created_at`。
+  - 返回：`id`、`name`、`created_at`、`updated_at`、`status`、`document_count`、`entity_count`。
   ```bash
   curl -X POST http://localhost:8010/retrieval/collections \
     -H "Content-Type: application/json" \
     -d '{"name":"paper-lab"}'
   ```
 
-- **GET** `/retrieval/collections` — 列出集合
-  - 返回：`items`（每项包含 `id`、`name`、`created_at`）。
+- **GET** `/retrieval/collections` — 列出集合（含统计指标）
+  - 返回：`items`（每项包含 `id`、`name`、`created_at`、`updated_at`、`status`、`document_count`、`entity_count`）。
   - 说明：未指定 `collection_id` 的接口默认使用系统内置 `default` 集合。
+  - 字段说明：
+    - `status`：`ready`（有实体输出）/ `empty`（未完成索引）。
+    - `updated_at`：集合输出目录中的关键产物更新时间，缺失时可回退使用 `created_at`。
   ```bash
   curl http://localhost:8010/retrieval/collections
   ```

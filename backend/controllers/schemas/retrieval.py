@@ -92,6 +92,10 @@ class CollectionRecord(BaseModel):
     id: str
     name: str | None = None
     created_at: str
+    updated_at: str | None = None
+    status: str | None = None
+    document_count: int | None = None
+    entity_count: int | None = None
 
 
 class CollectionListResponse(BaseModel):

@@ -8,8 +8,8 @@ type Translations = Record<string, string | Translations>;
 const translations: Record<Language, Translations> = {
   en: {
     brand: {
-      title: 'Retrieval Studio',
-      sub: 'Index, store, export'
+      title: 'Lens',
+      sub: ''
     },
     nav: {
       home: 'Collections',
@@ -291,8 +291,8 @@ const translations: Record<Language, Translations> = {
   },
   zh: {
     brand: {
-      title: '科研助手',
-      sub: '索引 · 存储 · 导出'
+      title: 'Lens',
+      sub: ''
     },
     nav: {
       home: '集合',

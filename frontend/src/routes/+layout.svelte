@@ -12,10 +12,12 @@
 
   <header class="site-header">
     <div class="brand">
-      <div class="brand-mark">R</div>
+      <div class="brand-mark">L</div>
       <div class="brand-text">
         <div class="brand-title">{$t('brand.title')}</div>
-        <div class="brand-sub">{$t('brand.sub')}</div>
+        {#if $t('brand.sub')}
+          <div class="brand-sub">{$t('brand.sub')}</div>
+        {/if}
       </div>
     </div>
 

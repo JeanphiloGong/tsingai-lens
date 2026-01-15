@@ -1,6 +1,8 @@
 <script lang="ts">
   import './layout.css';
   import { page } from '$app/stores';
+  import ConnectionBar from './_shared/ConnectionBar.svelte';
+  import { language, t } from './_shared/i18n';
 </script>
 
 <div class="app-shell">
@@ -10,29 +12,48 @@
 
   <header class="site-header">
     <div class="brand">
-      <div class="brand-mark">R</div>
+      <div class="brand-mark">L</div>
       <div class="brand-text">
-        <div class="brand-title">Retrieval Studio</div>
-        <div class="brand-sub">Index, store, export</div>
+        <div class="brand-title">{$t('brand.title')}</div>
+        {#if $t('brand.sub')}
+          <div class="brand-sub">{$t('brand.sub')}</div>
+        {/if}
       </div>
     </div>
 
     <nav class="nav">
-      <a href="/" class:active={$page.url.pathname === '/'}>Console</a>
-      <a href="/docs" class:active={$page.url.pathname.startsWith('/docs')}>Docs</a>
+      <a href="/" class:active={$page.url.pathname === '/'}>{$t('nav.home')}</a>
+      <a href="/docs" class:active={$page.url.pathname.startsWith('/docs')}>{$t('nav.docs')}</a>
+      <a href="/system" class:active={$page.url.pathname.startsWith('/system')}>{$t('nav.system')}</a>
     </nav>
 
     <div class="header-meta">
-      <span class="badge">Auth: none</span>
-      <span class="meta-text">Base URL configurable</span>
+      <span class="badge">{$t('header.authNone')}</span>
+      <div class="lang-toggle" role="group" aria-label={$t('header.languageLabel')}>
+        <button
+          type="button"
+          class:active={$language === 'en'}
+          on:click={() => language.set('en')}
+        >
+          EN
+        </button>
+        <button
+          type="button"
+          class:active={$language === 'zh'}
+          on:click={() => language.set('zh')}
+        >
+          中文
+        </button>
+      </div>
     </div>
   </header>
 
   <main class="page">
+    <ConnectionBar />
     <slot />
   </main>
 
   <footer class="site-footer">
-    PDFs must contain selectable text. Scanned PDFs are not supported.
+    {$t('footer.pdfNote')}
   </footer>
 </div>

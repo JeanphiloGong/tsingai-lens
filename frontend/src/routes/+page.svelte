@@ -1,758 +1,307 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
+  import { goto } from '$app/navigation';
+  import { errorMessage } from './_shared/api';
+  import { createCollection, collections, fetchCollections } from './_shared/collections';
+  import { getBaseUrlValue, validateBaseUrl } from './_shared/base';
+  import { language, t } from './_shared/i18n';
 
-  const DEFAULT_BASE_URL = 'http://localhost:8010';
+  let loading = false;
+  let error = '';
+  let isCreateOpen = false;
+  let name = '';
+  let description = '';
+  let defaultConfig = true;
+  let createLoading = false;
+  let createError = '';
+  let rowMessages: Record<string, { message: string; type: 'info' | 'error' }> = {};
 
-  let baseUrl = DEFAULT_BASE_URL;
-  let baseStatus = '';
+  $: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
 
-  let configPath = '';
-  let indexMethod = 'standard';
-  let indexUpdateRun = false;
-  let indexVerbose = false;
-  let additionalContextText = '';
-  let indexConfigLoading = false;
-  let indexConfigError = '';
-  let indexConfigResult: unknown = null;
-
-  let indexFile: File | null = null;
-  let indexUploadMethod = 'standard';
-  let indexUploadUpdateRun = false;
-  let indexUploadVerbose = false;
-  let indexUploadLoading = false;
-  let indexUploadError = '';
-  let indexUploadResult: unknown = null;
-
-  let inputFiles: File[] = [];
-  let inputUploadLoading = false;
-  let inputUploadError = '';
-  let inputUploadResult: unknown = null;
-
-  let graphOutputPath = '';
-  let graphMaxNodes = 200;
-  let graphMinWeight = 0;
-  let graphCommunityId = '';
-  let graphLoading = false;
-  let graphError = '';
-  let graphStatus = '';
-
-  let configsLoading = false;
-  let configsError = '';
-  let configsResult: unknown = null;
-  let configList: string[] = [];
-  let selectedConfig = '';
-  let configContentLoading = false;
-  let configContentError = '';
-  let configContent = '';
-
-  let newConfigFilename = '';
-  let newConfigContent = '';
-  let configCreateLoading = false;
-  let configCreateError = '';
-  let configCreateResult: unknown = null;
-
-  let configUploadFile: File | null = null;
-  let configUploadLoading = false;
-  let configUploadError = '';
-  let configUploadResult: unknown = null;
-
-  onMount(() => {
-    if (!browser) return;
-    const stored = localStorage.getItem('retrieval.baseUrl');
-    if (stored) {
-      baseUrl = stored;
-    }
+  onMount(async () => {
+    await loadCollections();
   });
 
-  function errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : 'Unexpected error.';
-  }
-
-  function formatResult(data: unknown) {
-    if (data === null || data === undefined) return '';
-    return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  }
-
-  function getBaseUrl() {
-    const trimmed = baseUrl.trim();
-    if (!trimmed) {
-      throw new Error('Base URL is required.');
-    }
+  async function loadCollections() {
+    error = '';
+    loading = true;
     try {
-      new URL(trimmed);
-    } catch {
-      throw new Error('Base URL must be a valid URL.');
+      await fetchCollections();
+    } catch (err) {
+      error = errorMessage(err);
+    } finally {
+      loading = false;
     }
-    return trimmed.replace(/\/$/, '');
   }
 
-  function saveBaseUrl() {
-    const trimmed = baseUrl.trim();
-    if (!trimmed) {
-      baseStatus = 'Base URL is required.';
+  function openCreate() {
+    isCreateOpen = true;
+    createError = '';
+  }
+
+  function closeCreate() {
+    isCreateOpen = false;
+    name = '';
+    description = '';
+    defaultConfig = true;
+  }
+
+  function handleBackdropKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      closeCreate();
       return;
     }
-    try {
-      new URL(trimmed);
-    } catch {
-      baseStatus = 'Base URL must be a valid URL.';
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      closeCreate();
+    }
+  }
+
+  async function submitCreate(event: SubmitEvent) {
+    event.preventDefault();
+    createError = '';
+
+    if (!name.trim()) {
+      createError = $t('create.errorName');
       return;
     }
-    baseUrl = trimmed;
-    if (browser) {
-      localStorage.setItem('retrieval.baseUrl', trimmed);
+
+    createLoading = true;
+    try {
+      const result = await createCollection(name.trim());
+      await loadCollections();
+      closeCreate();
+      if (result?.id) {
+        await goto(`/collections/${result.id}`);
+      }
+    } catch (err) {
+      createError = errorMessage(err);
+    } finally {
+      createLoading = false;
     }
-    baseStatus = 'Saved for this browser.';
+  }
+
+  function formatDate(value?: string) {
+    if (!value) return $t('home.updatedPlaceholder');
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString(locale);
+  }
+
+  function setRowMessage(id: string, message: string, type: 'info' | 'error' = 'info') {
+    rowMessages = { ...rowMessages, [id]: { message, type } };
     window.setTimeout(() => {
-      baseStatus = '';
-    }, 2200);
+      const { [id]: _, ...rest } = rowMessages;
+      rowMessages = rest;
+    }, 3000);
   }
 
-  function resetBaseUrl() {
-    baseUrl = DEFAULT_BASE_URL;
-    if (browser) {
-      localStorage.setItem('retrieval.baseUrl', DEFAULT_BASE_URL);
-    }
-    baseStatus = 'Reset to default.';
-    window.setTimeout(() => {
-      baseStatus = '';
-    }, 2200);
-  }
-
-  async function requestJson(path: string, init: RequestInit = {}) {
-    const url = `${getBaseUrl()}${path}`;
-    const headers = new Headers(init.headers ?? {});
-    if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
-      headers.set('Content-Type', 'application/json');
-    }
-    const response = await fetch(url, { ...init, headers });
-    const text = await response.text();
-    const data = text ? parseMaybeJson(text) : null;
-    if (!response.ok) {
-      const detail = typeof data === 'string' ? data : JSON.stringify(data);
-      throw new Error(`${response.status} ${response.statusText}${detail ? ` - ${detail}` : ''}`);
-    }
-    return data;
-  }
-
-  async function requestText(path: string, init: RequestInit = {}) {
-    const url = `${getBaseUrl()}${path}`;
-    const response = await fetch(url, init);
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
-    }
-    return text;
-  }
-
-  function parseMaybeJson(value: string) {
+  async function exportGraph(collectionId: string) {
     try {
-      return JSON.parse(value);
-    } catch {
-      return value;
-    }
-  }
-
-  function handleIndexFileChange(event: Event) {
-    const target = event.currentTarget as HTMLInputElement;
-    indexFile = target.files?.[0] ?? null;
-  }
-
-  function handleInputFilesChange(event: Event) {
-    const target = event.currentTarget as HTMLInputElement;
-    inputFiles = target.files ? Array.from(target.files) : [];
-  }
-
-  function handleConfigUploadChange(event: Event) {
-    const target = event.currentTarget as HTMLInputElement;
-    configUploadFile = target.files?.[0] ?? null;
-  }
-
-  async function submitIndexConfig(event: SubmitEvent) {
-    event.preventDefault();
-    indexConfigError = '';
-    indexConfigResult = null;
-
-    const trimmedPath = configPath.trim();
-    if (!trimmedPath) {
-      indexConfigError = 'Config path is required.';
-      return;
-    }
-
-    let additionalContext: unknown = undefined;
-    if (additionalContextText.trim()) {
-      try {
-        additionalContext = JSON.parse(additionalContextText);
-      } catch {
-        indexConfigError = 'Additional context must be valid JSON.';
-        return;
-      }
-    }
-
-    indexConfigLoading = true;
-    try {
-      const payload: Record<string, unknown> = {
-        config_path: trimmedPath,
-        method: indexMethod,
-        is_update_run: indexUpdateRun,
-        verbose: indexVerbose
-      };
-      if (additionalContext !== undefined) {
-        payload.additional_context = additionalContext;
-      }
-      indexConfigResult = await requestJson('/retrieval/index', {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-    } catch (error) {
-      indexConfigError = errorMessage(error);
-    } finally {
-      indexConfigLoading = false;
-    }
-  }
-
-  async function submitIndexUpload(event: SubmitEvent) {
-    event.preventDefault();
-    indexUploadError = '';
-    indexUploadResult = null;
-
-    if (!indexFile) {
-      indexUploadError = 'Select a file to upload.';
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append('file', indexFile);
-    formData.append('method', indexUploadMethod);
-    formData.append('is_update_run', String(indexUploadUpdateRun));
-    formData.append('verbose', String(indexUploadVerbose));
-
-    indexUploadLoading = true;
-    try {
-      indexUploadResult = await requestJson('/retrieval/index/upload', {
-        method: 'POST',
-        body: formData
-      });
-    } catch (error) {
-      indexUploadError = errorMessage(error);
-    } finally {
-      indexUploadLoading = false;
-    }
-  }
-
-  async function submitInputUpload(event: SubmitEvent) {
-    event.preventDefault();
-    inputUploadError = '';
-    inputUploadResult = null;
-
-    if (!inputFiles.length) {
-      inputUploadError = 'Select one or more files.';
-      return;
-    }
-
-    const formData = new FormData();
-    inputFiles.forEach((file) => formData.append('files', file));
-
-    inputUploadLoading = true;
-    try {
-      inputUploadResult = await requestJson('/retrieval/input/upload', {
-        method: 'POST',
-        body: formData
-      });
-    } catch (error) {
-      inputUploadError = errorMessage(error);
-    } finally {
-      inputUploadLoading = false;
-    }
-  }
-
-  async function downloadGraph() {
-    graphError = '';
-    graphStatus = '';
-    graphLoading = true;
-
-    try {
-      const params = new URLSearchParams();
-      if (graphOutputPath.trim()) {
-        params.set('output_path', graphOutputPath.trim());
-      }
-      const maxNodes = Number.isFinite(graphMaxNodes) ? graphMaxNodes : 200;
-      const minWeight = Number.isFinite(graphMinWeight) ? graphMinWeight : 0;
-      params.set('max_nodes', String(maxNodes));
-      params.set('min_weight', String(minWeight));
-      if (graphCommunityId.trim()) {
-        params.set('community_id', graphCommunityId.trim());
-      }
-
-      const url = `${getBaseUrl()}/retrieval/graphml?${params.toString()}`;
+      setRowMessage(collectionId, $t('home.exporting'));
+      const base = validateBaseUrl(getBaseUrlValue());
+      const url = `${base}/retrieval/graphml?collection_id=${encodeURIComponent(
+        collectionId
+      )}&include_community=true`;
       const response = await fetch(url);
       if (!response.ok) {
         const text = await response.text();
         throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
       }
       const blob = await response.blob();
-      const fileName = `graph-${Date.now()}.graphml`;
+      const fileName = `graph-${collectionId}-${Date.now()}.graphml`;
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
       link.download = fileName;
       link.click();
       URL.revokeObjectURL(objectUrl);
-      graphStatus = `Downloaded ${fileName}`;
-    } catch (error) {
-      graphError = errorMessage(error);
-    } finally {
-      graphLoading = false;
+      setRowMessage(collectionId, $t('home.exported'));
+    } catch (err) {
+      setRowMessage(collectionId, errorMessage(err), 'error');
     }
   }
 
-  async function loadConfigs() {
-    configsError = '';
-    configsResult = null;
-    configList = [];
-    selectedConfig = '';
-
-    configsLoading = true;
+  async function reindexCollection(collectionId: string) {
     try {
-      const data = await requestJson('/retrieval/configs', { method: 'GET' });
-      configsResult = data;
-      if (Array.isArray(data)) {
-        configList = data.map(String);
-      } else if (data && typeof data === 'object') {
-        const record = data as Record<string, unknown>;
-        const list = record.configs ?? record.items ?? record.files ?? [];
-        if (Array.isArray(list)) {
-          configList = list.map(String);
-        }
-      }
-    } catch (error) {
-      configsError = errorMessage(error);
-    } finally {
-      configsLoading = false;
-    }
-  }
-
-  async function loadConfigContent() {
-    configContentError = '';
-    configContent = '';
-
-    if (!selectedConfig) {
-      configContentError = 'Select a config to view.';
-      return;
-    }
-
-    configContentLoading = true;
-    try {
-      const content = await requestText(`/retrieval/configs/${encodeURIComponent(selectedConfig)}`);
-      configContent = content;
-    } catch (error) {
-      configContentError = errorMessage(error);
-    } finally {
-      configContentLoading = false;
-    }
-  }
-
-  async function createConfig(event: SubmitEvent) {
-    event.preventDefault();
-    configCreateError = '';
-    configCreateResult = null;
-
-    if (!newConfigFilename.trim()) {
-      configCreateError = 'Filename is required.';
-      return;
-    }
-
-    if (!newConfigContent.trim()) {
-      configCreateError = 'Content is required.';
-      return;
-    }
-
-    configCreateLoading = true;
-    try {
-      configCreateResult = await requestJson('/retrieval/configs', {
+      setRowMessage(collectionId, $t('home.reindexing'));
+      await fetch(`${validateBaseUrl(getBaseUrlValue())}/retrieval/index`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          filename: newConfigFilename.trim(),
-          content: newConfigContent
+          collection_id: collectionId,
+          method: 'standard',
+          is_update_run: true,
+          verbose: false
         })
+      }).then(async (response) => {
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
+        }
       });
-    } catch (error) {
-      configCreateError = errorMessage(error);
-    } finally {
-      configCreateLoading = false;
-    }
-  }
-
-  async function uploadConfig(event: SubmitEvent) {
-    event.preventDefault();
-    configUploadError = '';
-    configUploadResult = null;
-
-    if (!configUploadFile) {
-      configUploadError = 'Select a config file to upload.';
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append('file', configUploadFile);
-
-    configUploadLoading = true;
-    try {
-      configUploadResult = await requestJson('/retrieval/configs/upload', {
-        method: 'POST',
-        body: formData
-      });
-    } catch (error) {
-      configUploadError = errorMessage(error);
-    } finally {
-      configUploadLoading = false;
+      setRowMessage(collectionId, $t('home.reindexStarted'));
+    } catch (err) {
+      setRowMessage(collectionId, errorMessage(err), 'error');
     }
   }
 </script>
 
 <svelte:head>
-  <title>Retrieval Console</title>
+  <title>{$t('home.title')}</title>
 </svelte:head>
 
-<section class="hero">
+<section class="hero hero--simple">
   <div class="fade-up">
-    <p class="eyebrow">Retrieval Console</p>
-    <h1>Index, map, and export your knowledge graph.</h1>
-    <p class="lead">
-      A single workspace to upload inputs, run indexing jobs, and export GraphML from the
-      retrieval backend.
-    </p>
-    <div class="flow">
-      <div class="flow-step">1. Upload input files</div>
-      <div class="flow-step">2. Run indexing</div>
-      <div class="flow-step">3. Export GraphML</div>
-    </div>
-  </div>
-
-  <div class="hero-panel fade-up delay-1">
-    <div>
-      <p class="eyebrow">Connection</p>
-      <h2>Base API URL</h2>
-      <p class="lead">Default is local; change it per deployment.</p>
-    </div>
-    <div class="field">
-      <label for="base-url">Base URL</label>
-      <input
-        id="base-url"
-        class="input"
-        bind:value={baseUrl}
-        placeholder={DEFAULT_BASE_URL}
-        autocomplete="url"
-      />
-    </div>
-    <div class="toggle-row">
-      <button class="btn btn--primary" type="button" on:click={saveBaseUrl}>Save</button>
-      <button class="btn btn--ghost" type="button" on:click={resetBaseUrl}>Use default</button>
-    </div>
-    {#if baseStatus}
-      <div class="status" role="status" aria-live="polite">{baseStatus}</div>
-    {/if}
-    <span class="pill">No auth required</span>
+    <p class="eyebrow">{$t('home.eyebrow')}</p>
+    <h1>{$t('home.title')}</h1>
+    <p class="lead">{$t('home.lead')}</p>
   </div>
 </section>
 
-<section class="card fade-up delay-2">
-  <h3>Batch import flow</h3>
-  <p>Recommended order for large uploads.</p>
-  <div class="flow">
-    <div class="flow-step">POST /retrieval/input/upload</div>
-    <div class="flow-step">POST /retrieval/index</div>
-    <div class="flow-step">GET /retrieval/graphml</div>
-  </div>
+<section class="collection-toolbar">
+  <button class="btn btn--primary" type="button" on:click={openCreate}>
+    {$t('home.primaryAction')}
+  </button>
 </section>
 
-<section>
-  <div class="section-header">
-    <h2 class="section-title">Indexing</h2>
-    <p class="section-sub">Start indexing from a config file or upload a document directly.</p>
-  </div>
-  <div class="grid">
-    <div class="card fade-up">
-      <span class="pill">POST /retrieval/index</span>
-      <h3>Index with config</h3>
-      <p>Run an indexing workflow based on an existing config file.</p>
-      <form on:submit={submitIndexConfig}>
-        <div class="field">
-          <label for="config-path">Config path</label>
-          <input
-            id="config-path"
-            class="input"
-            bind:value={configPath}
-            placeholder="/path/to/config.yaml"
-            required
-          />
-        </div>
-        <div class="field">
-          <label for="index-method">Method</label>
-          <select id="index-method" class="select" bind:value={indexMethod}>
-            <option value="standard">standard</option>
-            <option value="fast">fast</option>
-            <option value="standard-update">standard-update</option>
-            <option value="fast-update">fast-update</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="additional-context">Additional context (JSON)</label>
-          <textarea
-            id="additional-context"
-            class="textarea"
-            bind:value={additionalContextText}
-            placeholder={'{"project":"alpha"}'}
-          ></textarea>
-        </div>
-        <div class="toggle-row">
-          <label>
-            <input type="checkbox" bind:checked={indexUpdateRun} />
-            Update run
-          </label>
-          <label>
-            <input type="checkbox" bind:checked={indexVerbose} />
-            Verbose
-          </label>
-        </div>
-        <button class="btn btn--primary" type="submit" disabled={indexConfigLoading}>
-          {indexConfigLoading ? 'Running...' : 'Start index'}
-        </button>
-      </form>
-      {#if indexConfigError}
-        <div class="status status--error" role="alert">{indexConfigError}</div>
-      {/if}
-      {#if indexConfigResult !== null}
-        <pre class="code-block">{formatResult(indexConfigResult)}</pre>
-      {/if}
-    </div>
+{#if loading}
+  <div class="status" role="status" aria-live="polite">{$t('home.loading')}</div>
+{/if}
 
-    <div class="card fade-up delay-1">
-      <span class="pill">POST /retrieval/index/upload</span>
-      <h3>Upload file + index</h3>
-      <p>Upload a PDF or TXT and run the default indexing config.</p>
-      <form on:submit={submitIndexUpload}>
-        <div class="field">
-          <label for="index-file">File</label>
-          <input id="index-file" class="input" type="file" on:change={handleIndexFileChange} />
-        </div>
-        <div class="field">
-          <label for="index-upload-method">Method</label>
-          <select id="index-upload-method" class="select" bind:value={indexUploadMethod}>
-            <option value="standard">standard</option>
-            <option value="fast">fast</option>
-            <option value="standard-update">standard-update</option>
-            <option value="fast-update">fast-update</option>
-          </select>
-        </div>
-        <div class="toggle-row">
-          <label>
-            <input type="checkbox" bind:checked={indexUploadUpdateRun} />
-            Update run
-          </label>
-          <label>
-            <input type="checkbox" bind:checked={indexUploadVerbose} />
-            Verbose
-          </label>
-        </div>
-        <button class="btn btn--primary" type="submit" disabled={indexUploadLoading}>
-          {indexUploadLoading ? 'Uploading...' : 'Upload + index'}
-        </button>
-      </form>
-      {#if indexUploadError}
-        <div class="status status--error" role="alert">{indexUploadError}</div>
-      {/if}
-      {#if indexUploadResult !== null}
-        <pre class="code-block">{formatResult(indexUploadResult)}</pre>
-      {/if}
-    </div>
-  </div>
-</section>
+{#if error}
+  <div class="status status--error" role="alert">{error}</div>
+{/if}
 
-<section>
-  <div class="section-header">
-    <h2 class="section-title">Input storage</h2>
-    <p class="section-sub">Upload multiple files without triggering indexing.</p>
-  </div>
-  <div class="grid">
-    <div class="card fade-up">
-      <span class="pill">POST /retrieval/input/upload</span>
-      <h3>Batch upload</h3>
-      <p>Store multiple files in input storage for later indexing.</p>
-      <form on:submit={submitInputUpload}>
-        <div class="field">
-          <label for="input-files">Files</label>
-          <input
-            id="input-files"
-            class="input"
-            type="file"
-            multiple
-            on:change={handleInputFilesChange}
-          />
-        </div>
-        <button class="btn btn--primary" type="submit" disabled={inputUploadLoading}>
-        {inputUploadLoading
-          ? 'Uploading...'
-          : `Upload${inputFiles.length ? ` (${inputFiles.length})` : ''}`}
-        </button>
-      </form>
-      {#if inputUploadError}
-        <div class="status status--error" role="alert">{inputUploadError}</div>
-      {/if}
-      {#if inputUploadResult !== null}
-        <pre class="code-block">{formatResult(inputUploadResult)}</pre>
-      {/if}
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="section-header">
-    <h2 class="section-title">Graph export</h2>
-    <p class="section-sub">Download GraphML for Gephi or other graph tools.</p>
-  </div>
-  <div class="grid">
-    <div class="card fade-up">
-      <span class="pill">GET /retrieval/graphml</span>
-      <h3>Export GraphML</h3>
-      <p>Filter by node count, weight, or community.</p>
-      <div class="field">
-        <label for="graph-output">Output path (optional)</label>
-        <input id="graph-output" class="input" bind:value={graphOutputPath} placeholder="/path" />
-      </div>
-      <div class="field">
-        <label for="graph-max">Max nodes</label>
-        <input id="graph-max" class="input" type="number" bind:value={graphMaxNodes} min="1" />
-      </div>
-      <div class="field">
-        <label for="graph-weight">Min weight</label>
-        <input id="graph-weight" class="input" type="number" bind:value={graphMinWeight} step="0.1" />
-      </div>
-      <div class="field">
-        <label for="graph-community">Community ID (optional)</label>
-        <input id="graph-community" class="input" bind:value={graphCommunityId} />
-      </div>
-      <button class="btn btn--primary" type="button" on:click={downloadGraph} disabled={graphLoading}>
-        {graphLoading ? 'Preparing...' : 'Download GraphML'}
-      </button>
-      {#if graphError}
-        <div class="status status--error" role="alert">{graphError}</div>
-      {/if}
-      {#if graphStatus}
-        <div class="status" role="status" aria-live="polite">{graphStatus}</div>
-      {/if}
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="section-header">
-    <h2 class="section-title">Config management</h2>
-    <p class="section-sub">List, inspect, and create indexing configurations.</p>
-  </div>
-  <div class="grid">
-    <div class="card fade-up">
-      <span class="pill">GET /retrieval/configs</span>
-      <h3>List configs</h3>
-      <p>Load available config files from the backend.</p>
-      <button class="btn btn--primary" type="button" on:click={loadConfigs} disabled={configsLoading}>
-        {configsLoading ? 'Loading...' : 'Load configs'}
-      </button>
-      {#if configsError}
-        <div class="status status--error" role="alert">{configsError}</div>
-      {/if}
-      {#if configList.length}
-        <div class="list">
-          {#each configList as config}
-            <button
-              type="button"
-              class="btn btn--ghost list-button"
-              class:active={selectedConfig === config}
-              on:click={() => (selectedConfig = config)}
-            >
-              {config}
-            </button>
+{#if !$collections.length && !loading}
+  <section class="card empty-state">
+    <h3>{$t('home.emptyTitle')}</h3>
+    <p>{$t('home.emptyDesc')}</p>
+    <button class="btn btn--primary" type="button" on:click={openCreate}>
+      {$t('home.emptyCta')}
+    </button>
+  </section>
+{:else if $collections.length}
+  <section class="card">
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{$t('home.tableName')}</th>
+            <th>{$t('home.tableStatus')}</th>
+            <th>{$t('home.tableDocs')}</th>
+            <th>{$t('home.tableEntities')}</th>
+            <th>{$t('home.tableUpdated')}</th>
+            <th>{$t('home.tableActions')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each $collections as collection}
+            <tr>
+              <td>
+                <div class="table-main">
+                  <div class="table-title">{collection.name || collection.id}</div>
+                  <div class="table-sub">{collection.id}</div>
+                </div>
+              </td>
+              <td>{$t('home.statusUnknown')}</td>
+              <td>{$t('home.metricsPlaceholder')}</td>
+              <td>{$t('home.metricsPlaceholder')}</td>
+              <td>{formatDate(collection.created_at)}</td>
+              <td>
+                <div class="table-actions">
+                  <a class="btn btn--ghost btn--small" href={`/collections/${collection.id}`}>
+                    {$t('home.actionOpen')}
+                  </a>
+                  <button
+                    class="btn btn--ghost btn--small"
+                    type="button"
+                    on:click={() => exportGraph(collection.id)}
+                  >
+                    {$t('home.actionExport')}
+                  </button>
+                  <button
+                    class="btn btn--ghost btn--small"
+                    type="button"
+                    on:click={() => reindexCollection(collection.id)}
+                  >
+                    {$t('home.actionReindex')}
+                  </button>
+                </div>
+                {#if rowMessages[collection.id]}
+                  <div
+                    class={`status ${rowMessages[collection.id].type === 'error' ? 'status--error' : ''}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {rowMessages[collection.id].message}
+                  </div>
+                {/if}
+              </td>
+            </tr>
           {/each}
-        </div>
-      {:else if configsResult !== null}
-        <pre class="code-block">{formatResult(configsResult)}</pre>
-      {/if}
-      <div class="divider"></div>
-      <button class="btn btn--ghost" type="button" on:click={loadConfigContent}>
-        View selected config
-      </button>
-      {#if configContentLoading}
-        <div class="status" role="status" aria-live="polite">Loading config...</div>
-      {/if}
-      {#if configContentError}
-        <div class="status status--error" role="alert">{configContentError}</div>
-      {/if}
-      {#if configContent}
-        <pre class="code-block">{configContent}</pre>
-      {/if}
+        </tbody>
+      </table>
     </div>
+    <div class="note">{$t('home.noteStats')}</div>
+    <div class="note">{$t('home.noteUpdated')}</div>
+  </section>
+{/if}
 
-    <div class="card fade-up delay-1">
-      <span class="pill">POST /retrieval/configs</span>
-      <h3>Create config</h3>
-      <p>Create a new config from raw YAML content.</p>
-      <form on:submit={createConfig}>
+{#if isCreateOpen}
+  <div
+    class="modal-backdrop"
+    role="button"
+    tabindex="0"
+    aria-label={$t('create.cancel')}
+    on:click={closeCreate}
+    on:keydown={handleBackdropKeydown}
+  >
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>{$t('create.title')}</h3>
+      </div>
+      <form on:submit={submitCreate}>
         <div class="field">
-          <label for="config-filename">Filename</label>
+          <label for="collection-name">{$t('create.nameLabel')}</label>
           <input
-            id="config-filename"
+            id="collection-name"
             class="input"
-            bind:value={newConfigFilename}
-            placeholder="my-config.yaml"
+            bind:value={name}
+            placeholder={$t('create.namePlaceholder')}
             required
           />
         </div>
         <div class="field">
-          <label for="config-content">Content</label>
-          <textarea
-            id="config-content"
-            class="textarea"
-            bind:value={newConfigContent}
-            placeholder="# yaml here"
-          ></textarea>
-        </div>
-        <button class="btn btn--primary" type="submit" disabled={configCreateLoading}>
-          {configCreateLoading ? 'Saving...' : 'Create config'}
-        </button>
-      </form>
-      {#if configCreateError}
-        <div class="status status--error" role="alert">{configCreateError}</div>
-      {/if}
-      {#if configCreateResult !== null}
-        <pre class="code-block">{formatResult(configCreateResult)}</pre>
-      {/if}
-    </div>
-
-    <div class="card fade-up delay-2">
-      <span class="pill">POST /retrieval/configs/upload</span>
-      <h3>Upload config</h3>
-      <p>Upload a config file as multipart form data.</p>
-      <form on:submit={uploadConfig}>
-        <div class="field">
-          <label for="config-upload">Config file</label>
+          <label for="collection-desc">{$t('create.descLabel')}</label>
           <input
-            id="config-upload"
+            id="collection-desc"
             class="input"
-            type="file"
-            on:change={handleConfigUploadChange}
+            bind:value={description}
+            placeholder={$t('create.descPlaceholder')}
+            disabled
           />
+          <p class="meta-text">{$t('create.descHelper')}</p>
         </div>
-        <button class="btn btn--primary" type="submit" disabled={configUploadLoading}>
-          {configUploadLoading ? 'Uploading...' : 'Upload config'}
-        </button>
+        <div class="toggle-row">
+          <label>
+            <input type="checkbox" bind:checked={defaultConfig} disabled />
+            {$t('create.defaultConfigLabel')}
+          </label>
+          <span class="meta-text">{$t('create.defaultConfigHelper')}</span>
+        </div>
+        {#if createError}
+          <div class="status status--error" role="alert">{createError}</div>
+        {/if}
+        <div class="modal-actions">
+          <button class="btn btn--ghost" type="button" on:click={closeCreate}>
+            {$t('create.cancel')}
+          </button>
+          <button class="btn btn--primary" type="submit" disabled={createLoading}>
+            {createLoading ? $t('create.creating') : $t('create.submit')}
+          </button>
+        </div>
       </form>
-      {#if configUploadError}
-        <div class="status status--error" role="alert">{configUploadError}</div>
-      {/if}
-      {#if configUploadResult !== null}
-        <pre class="code-block">{formatResult(configUploadResult)}</pre>
-      {/if}
     </div>
   </div>
-</section>
+{/if}

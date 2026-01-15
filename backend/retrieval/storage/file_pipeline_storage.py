@@ -119,8 +119,10 @@ class FilePipelineStorage(PipelineStorage):
         is_bytes = isinstance(value, bytes)
         write_type = "wb" if is_bytes else "w"
         encoding = None if is_bytes else encoding or self._encoding
+        file_path = join_path(self._root_dir, key)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiofiles.open(
-            join_path(self._root_dir, key),
+            file_path,
             cast("Any", write_type),
             encoding=encoding,
         ) as f:

@@ -3,13 +3,13 @@
 
 from pydantic import BaseModel, Field
 
-from retrieval.config.enums import IndexingMethod
+from retrieval.config.enums import IndexingMethod, SearchMethod
 
 
 class IndexRequest(BaseModel):
     """Request payload to start indexing."""
 
-    config_path: str = Field(..., description="配置文件路径（YAML/JSON/ENV）")
+    collection_id: str | None = Field(default=None, description="集合 ID")
     method: IndexingMethod | str = Field(
         default=IndexingMethod.Standard, description="索引模式"
     )
@@ -30,39 +30,37 @@ class IndexResponse(BaseModel):
     stored_input_path: str | None = None
 
 
-class ConfigUploadResponse(BaseModel):
-    """Response after uploading a config file."""
+class QueryRequest(BaseModel):
+    """Request payload to query an indexed knowledge graph."""
 
-    filename: str
-    path: str
-
-
-class ConfigItem(BaseModel):
-    """Config metadata for listing."""
-
-    filename: str
-    path: str
-    modified_at: float
-
-
-class ConfigListResponse(BaseModel):
-    """Response containing available configs."""
-
-    items: list[ConfigItem]
-
-
-class ConfigCreateRequest(BaseModel):
-    """Create a new config file from raw content."""
-
-    filename: str = Field(..., description="文件名，支持 .yml/.yaml/.json/.env")
-    content: str = Field(..., description="文件内容")
+    query: str = Field(..., description="检索问题")
+    method: SearchMethod | str = Field(
+        default=SearchMethod.GLOBAL, description="检索方法"
+    )
+    collection_id: str | None = Field(default=None, description="集合 ID")
+    response_type: str = Field(
+        default="List of 5-7 Points", description="回答格式描述"
+    )
+    community_level: int | None = Field(
+        default=2, description="社区层级（local/drift/global 可用）"
+    )
+    dynamic_community_selection: bool = Field(
+        default=False, description="global 模式动态社区选择"
+    )
+    include_context: bool = Field(
+        default=False, description="是否返回 context_data"
+    )
+    verbose: bool = Field(default=False, description="是否输出详细日志")
 
 
-class ConfigDetailResponse(BaseModel):
-    """Config file content payload."""
+class QueryResponse(BaseModel):
+    """Response payload for query results."""
 
-    filename: str
-    content: str
+    answer: object
+    method: str
+    collection_id: str
+    output_path: str
+    context_data: dict | list | None = None
 
 
 class InputUploadItem(BaseModel):
@@ -80,3 +78,23 @@ class InputUploadResponse(BaseModel):
 
     count: int
     items: list[InputUploadItem]
+
+
+class CollectionCreateRequest(BaseModel):
+    """Request payload to create a collection."""
+
+    name: str | None = Field(default=None, description="集合名称")
+
+
+class CollectionRecord(BaseModel):
+    """Collection metadata."""
+
+    id: str
+    name: str | None = None
+    created_at: str
+
+
+class CollectionListResponse(BaseModel):
+    """Response containing available collections."""
+
+    items: list[CollectionRecord]

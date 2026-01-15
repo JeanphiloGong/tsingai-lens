@@ -1,23 +1,23 @@
 from .retrieval import (
-    ConfigCreateRequest,
-    ConfigDetailResponse,
-    ConfigItem,
-    ConfigListResponse,
-    ConfigUploadResponse,
+    CollectionCreateRequest,
+    CollectionListResponse,
+    CollectionRecord,
     InputUploadItem,
     InputUploadResponse,
     IndexRequest,
     IndexResponse,
+    QueryRequest,
+    QueryResponse,
 )
 
 __all__ = [
     "IndexRequest",
     "IndexResponse",
-    "ConfigUploadResponse",
-    "ConfigListResponse",
-    "ConfigDetailResponse",
-    "ConfigCreateRequest",
-    "ConfigItem",
     "InputUploadItem",
     "InputUploadResponse",
+    "QueryRequest",
+    "QueryResponse",
+    "CollectionCreateRequest",
+    "CollectionRecord",
+    "CollectionListResponse",
 ]

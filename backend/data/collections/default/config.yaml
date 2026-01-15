@@ -1,0 +1,41 @@
+root_dir: "/home/jeanphilo/Documents/Ichigo_Documents/03_\u793E\u4F1A\u79D1\u5B66\
+  _\u5546\u4E1A_\u6CD5\u5F8B/\u751F\u8D22\u6709\u9053/\u521B\u4E1A\u9879\u76EE/date/2026/jan/week3/14,Wed/lens-backend/backend/data/collections/default"
+models:
+  default_chat_model:
+    type: chat
+    model_provider: openai
+    model: gpt-4o-mini
+    api_key: ${LLM_API_KEY}
+    api_base: ${LLM_BASE_URL}
+    model_supports_json: true
+  default_embedding_model:
+    type: embedding
+    model_provider: openai
+    model: text-embedding-3-small
+    api_key: ${LLM_API_KEY}
+    api_base: ${LLM_BASE_URL}
+input:
+  storage:
+    type: file
+    base_dir: input
+  file_type: text
+  encoding: utf-8
+  file_pattern: .*\.txt$$
+output:
+  type: file
+  base_dir: output
+update_index_output:
+  type: file
+  base_dir: update_output
+cache:
+  type: file
+  base_dir: cache
+reporting:
+  type: file
+  base_dir: logs
+vector_store:
+  default_vector_store:
+    type: lancedb
+    db_uri: vector_store/lancedb
+    container_name: default
+    overwrite: true

@@ -63,3 +63,20 @@ class ConfigDetailResponse(BaseModel):
 
     filename: str
     content: str
+
+
+class InputUploadItem(BaseModel):
+    """Uploaded input file metadata."""
+
+    original_filename: str
+    stored_name: str
+    stored_path: str
+    converted_to_text: bool = False
+    size_bytes: int
+
+
+class InputUploadResponse(BaseModel):
+    """Response for input file uploads without indexing."""
+
+    count: int
+    items: list[InputUploadItem]

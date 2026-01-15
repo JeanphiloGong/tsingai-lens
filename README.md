@@ -8,7 +8,7 @@
 
 - 支持多种文献格式（PDF、Word、TXT、Markdown 等）
 - 从文献中自动提取摘要、关键词
-- 基于 GraphRAG 构建实体级知识图谱并做图谱问答
+- 基于 Retrieval 标准索引（GraphRAG pipeline）构建知识图谱与检索输出
 - 自动识别并归纳无量纲公式结构
 - 可扩展对接到前端可视化或笔记系统（如 Obsidian、Logseq）
 
@@ -16,17 +16,15 @@
 
 | 模块 | 功能描述 |
 |------|----------|
-| 📄 文献导入 | 支持批量导入 PDF/DOCX/TXT/MD，自动分段切片 |
-| 🏷️ 关键词提取 | 基于 YAKE 的关键词抽取 |
-| 📚 本地知识库 | GraphRAG：抽取实体/关系图谱并持久化到本地 |
-| 🔍 智能检索与问答 | 基于图谱子图采样 + LLM 生成回答 |
-| 🧠 知识图谱生成 | LLM 抽取三元组构图，保留溯源页码与片段 |
-| 🧭 思维导图输出 | （可选）基于图谱数据生成导图/可视化 |
-| 📐 无量纲公式归纳 | 自动抽取文中数理公式并转化为维度无关表达式 |
+| 📄 文献导入 | 通过 `/retrieval/index/upload` 上传并进入标准索引流程 |
+| 📚 标准索引 | Retrieval（GraphRAG pipeline）构建实体/关系与索引结果 |
+| 🧠 知识图谱生成 | 生成实体/关系图谱并支持导出与可视化 |
+| 🔍 图谱导出 | 提供 GraphML 导出用于 Gephi 等工具 |
+| ⚙️ 配置管理 | 支持配置文件上传、创建与查看 |
 
 ## 🛠️ 技术栈
 
-- 后端：Python, FastAPI, GraphRAG（networkx 持久化），PyMuPDF, YAKE
+- 后端：Python, FastAPI, GraphRAG（networkx 持久化），PyMuPDF
 - 前端：React（可选），mindmap.js, D3.js
 - 部署：Docker, Docker Compose
 - 模型支持：OpenAI 兼容 API / 本地 LLM（如 Qwen, Mistral）
@@ -37,12 +35,11 @@
 
 tsingai-lens/
 ├── backend/
-│   ├── controllers/    # FastAPI 路由：/file、/graph、/chat
-│   ├── services/       # 文件管理、GraphRAG、Chat 等服务层
-│   ├── ingest/         # 文档导入与切片处理
-│   ├── graphrag/       # 图谱构建与检索
-│   ├── config/         # 配置与常量
-│   ├── data/           # 存储目录（文档、图谱、元数据）
+│   ├── controllers/    # FastAPI 路由：/retrieval
+│   ├── retrieval/      # GraphRAG 标准检索与索引流程
+│   ├── utils/          # 工具模块（日志等）
+│   ├── config.py       # 配置与常量
+│   ├── data/           # 存储目录（配置、索引、输出）
 │   └── tests/          # 单元测试
 ├── frontend/           # 可选前端静态资源
 ├── docs/               # 顶层文档
@@ -71,12 +68,11 @@ python -m http.server 8001 -d ../frontend
 
 ## 核心 API
 
-- `/file/upload`：上传文件，后台触发入图流程，返回 `doc_id` 与处理状态。
-- `/file/status/{doc_id}`：查询文件处理状态。
-- `/graph/health`：健康检查。
-- `/graph/documents` & `/graph/documents/{doc_id}`：文档列表与详情（含 keywords/graph/mindmap 等元数据）。
-- `/graph/documents/{doc_id}/keywords`、`/graph/documents/{doc_id}/graph`：关键词与图谱快照。
-- `/chat/query`：基于 GraphRAG 的图谱问答，返回回答与溯源片段。
+- `/retrieval/index`：根据配置启动标准索引流程。
+- `/retrieval/index/upload`：上传文件并使用默认配置触发索引。
+- `/retrieval/input/upload`：批量上传文件到输入存储（不触发索引）。
+- `/retrieval/graphml`：导出 GraphML 供可视化工具使用。
+- `/retrieval/configs`：配置文件上传、创建、查看与列表。
 
 详见更新后的 API 文档：`backend/docs/api.md`（中文，含 curl 示例）。
 
@@ -86,15 +82,13 @@ python -m http.server 8001 -d ../frontend
 
 ## 前端体验
 
-打开 `frontend/index.html`，可完成：
-- 上传文献，获取返回的文档 `id`
-- 基于图谱问答获取结果
-- 基于 `id` 查看关键词和图谱 JSON
+当前后端仅提供 `/retrieval` 相关接口，前端需要按索引与导出结果进行对接与展示。
 
-## GraphRAG 模式（本地实验优化）
+## Retrieval 流程（标准索引）
 
-- 上传 PDF：`POST /documents`，自动切页切片并抽取实体/关系构建本地图谱（`data/graph_store.json`）。
-- 基于图谱问答：`POST /query`，参数 `query="<目标>"`，`mode=optimize`（输出针对目标的实验优化建议）或 `mode=methods`（输出实验方法/流程片段）。
-- 响应形态：`{answer, sources:[{doc_id,page,chunk_id,snippet,edge_id}]}`，便于溯源页码/片段。
+- 批量上传（不触发索引）：`POST /retrieval/input/upload`
+- 单文件上传并索引：`POST /retrieval/index/upload`
+- 直接索引（已准备好输入目录）：`POST /retrieval/index`
+- 图谱导出：`GET /retrieval/graphml`
 
 后续可以用 React/Vite 将 API 对接 MaxKB UI 或嵌入自定义仪表盘。

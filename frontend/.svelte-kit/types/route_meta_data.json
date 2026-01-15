@@ -1,4 +1,21 @@
 {
 	"/": [],
-	"/docs": []
+	"/collections/[id]": [],
+	"/collections/[id]/documents": [],
+	"/collections/[id]/graph": [],
+	"/collections/[id]/reports": [],
+	"/collections/[id]/search": [],
+	"/collections/[id]/settings": [],
+	"/configs": [],
+	"/configs/create": [],
+	"/configs/list": [],
+	"/configs/upload": [],
+	"/configs/view": [],
+	"/docs": [],
+	"/export": [],
+	"/index": [],
+	"/index/config": [],
+	"/index/upload": [],
+	"/system": [],
+	"/upload": []
 }

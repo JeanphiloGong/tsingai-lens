@@ -161,6 +161,101 @@ def _load_collection_config(collection_id: str | None) -> tuple[Any, str]:
     return config, resolved_id
 
 
+def _collection_output_dir(collection_dir: Path) -> Path:
+    config_path = collection_dir / "config.yaml"
+    if config_path.is_file():
+        try:
+            config_data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            logger.warning("Failed to read collection config: %s", config_path)
+        else:
+            if isinstance(config_data, dict):
+                output_cfg = config_data.get("output", {})
+                if isinstance(output_cfg, dict):
+                    base_dir = output_cfg.get("base_dir")
+                    if base_dir:
+                        output_path = Path(base_dir)
+                        if not output_path.is_absolute():
+                            output_path = collection_dir / output_path
+                        return output_path
+    return collection_dir / "output"
+
+
+def _read_parquet_row_count(path: Path) -> int | None:
+    if not path.is_file():
+        return None
+    try:
+        try:
+            import pyarrow.parquet as pq
+
+            return int(pq.ParquetFile(path).metadata.num_rows)
+        except Exception:
+            df = pd.read_parquet(path)
+            return int(len(df))
+    except Exception:
+        logger.exception("Failed to read parquet row count: %s", path)
+        return None
+
+
+def _read_stats_num_documents(path: Path) -> int | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("Failed to read stats: %s", path)
+        return None
+    if isinstance(payload, dict):
+        num_documents = payload.get("num_documents")
+        if num_documents is not None:
+            return int(num_documents)
+        update_documents = payload.get("update_documents")
+        if update_documents is not None:
+            return int(update_documents)
+    return None
+
+
+def _latest_output_time(output_dir: Path) -> str | None:
+    if not output_dir.is_dir():
+        return None
+    candidates = [
+        "stats.json",
+        "context.json",
+        "documents.parquet",
+        "entities.parquet",
+        "relationships.parquet",
+        "communities.parquet",
+    ]
+    mtimes: list[float] = []
+    for name in candidates:
+        path = output_dir / name
+        if path.is_file():
+            mtimes.append(path.stat().st_mtime)
+    if not mtimes:
+        return None
+    return datetime.fromtimestamp(max(mtimes), tz=timezone.utc).isoformat()
+
+
+def _collection_metrics(collection_dir: Path) -> dict[str, Any]:
+    output_dir = _collection_output_dir(collection_dir)
+    document_count = _read_parquet_row_count(output_dir / "documents.parquet")
+    if document_count is None:
+        document_count = _read_stats_num_documents(output_dir / "stats.json")
+    if document_count is None:
+        document_count = 0
+    entity_count = _read_parquet_row_count(output_dir / "entities.parquet")
+    if entity_count is None:
+        entity_count = 0
+    updated_at = _latest_output_time(output_dir)
+    status = "ready" if entity_count > 0 else "empty"
+    return {
+        "status": status,
+        "document_count": document_count,
+        "entity_count": entity_count,
+        "updated_at": updated_at,
+    }
+
+
 def _read_parquet_or_error(path: Path, label: str) -> pd.DataFrame:
     """Read a parquet file and raise a friendly HTTP error if missing or broken."""
     if not path.is_file():
@@ -464,6 +559,10 @@ async def create_collection(payload: CollectionCreateRequest) -> CollectionRecor
         id=collection_id,
         name=payload.name,
         created_at=datetime.now(timezone.utc).isoformat(),
+        updated_at=None,
+        status="empty",
+        document_count=0,
+        entity_count=0,
     )
 
 
@@ -480,11 +579,16 @@ async def list_collections() -> CollectionListResponse:
         if not path.is_dir():
             continue
         meta = _read_collection_meta(path)
+        metrics = _collection_metrics(path)
         items.append(
             CollectionRecord(
                 id=meta.get("id", path.name),
                 name=meta.get("name"),
                 created_at=meta.get("created_at", ""),
+                updated_at=metrics["updated_at"],
+                status=metrics["status"],
+                document_count=metrics["document_count"],
+                entity_count=metrics["entity_count"],
             )
         )
     return CollectionListResponse(items=items)

@@ -88,6 +88,19 @@
     return date.toLocaleString(locale);
   }
 
+  function formatStatus(status?: string) {
+    if (!status) return $t('home.statusUnknown');
+    if (status === 'ready') return $t('home.statusReady');
+    if (status === 'empty') return $t('home.statusEmpty');
+    return status;
+  }
+
+  function formatCount(value: unknown) {
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string' && value.trim() !== '') return value;
+    return $t('home.metricsPlaceholder');
+  }
+
   function setRowMessage(id: string, message: string, type: 'info' | 'error' = 'info') {
     rowMessages = { ...rowMessages, [id]: { message, type } };
     window.setTimeout(() => {
@@ -204,10 +217,10 @@
                   <div class="table-sub">{collection.id}</div>
                 </div>
               </td>
-              <td>{$t('home.statusUnknown')}</td>
-              <td>{$t('home.metricsPlaceholder')}</td>
-              <td>{$t('home.metricsPlaceholder')}</td>
-              <td>{formatDate(collection.created_at)}</td>
+              <td>{formatStatus(collection.status)}</td>
+              <td>{formatCount(collection.document_count)}</td>
+              <td>{formatCount(collection.entity_count)}</td>
+              <td>{formatDate(collection.updated_at || collection.created_at)}</td>
               <td>
                 <div class="table-actions">
                   <a class="btn btn--ghost btn--small" href={`/collections/${collection.id}`}>

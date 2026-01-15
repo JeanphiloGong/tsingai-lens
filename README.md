@@ -1,31 +1,29 @@
 # TsingAI-Lens: 清华科研文献智能助手
 
-**TsingAI-Lens** 是一个为清华场景定制的私有部署科研助手，基于 [MaxKB](https://github.com/RealityArchitect/MaxKB) 构建，面向科研人员提供一站式文献处理、语义问答、关键词抽取、知识图谱与思维导图自动生成的 AI 系统。
+**TsingAI-Lens** 是一个可私有部署的科研文献后端，基于 Retrieval（GraphRAG pipeline）构建，提供文献导入、索引、知识图谱与结构化检索能力。
 
 ## 📌 项目目标
 
 构建一个本地可部署、支持私有化文献管理的智能助手系统，具备以下能力：
 
-- 支持多种文献格式（PDF、Word、TXT、Markdown 等）
-- 从文献中自动提取摘要、关键词
+- 支持多种文献格式（PDF、TXT 等，PDF 将提取纯文本后入库）
 - 基于 Retrieval 标准索引（GraphRAG pipeline）构建知识图谱与检索输出
-- 自动识别并归纳无量纲公式结构
-- 可扩展对接到前端可视化或笔记系统（如 Obsidian、Logseq）
+- 输出可导入 Gephi 的 GraphML 图谱
+- 以“集合”为核心组织论文、索引与导出流程
 
 ## 🧠 核心功能
 
 | 模块 | 功能描述 |
 |------|----------|
-| 📄 文献导入 | 通过 `/retrieval/index/upload` 上传并进入标准索引流程 |
+| 📄 文献导入 | 上传论文到集合输入存储（支持批量） |
 | 📚 标准索引 | Retrieval（GraphRAG pipeline）构建实体/关系与索引结果 |
 | 🧠 知识图谱生成 | 生成实体/关系图谱并支持导出与可视化 |
 | 🔍 图谱导出 | 提供 GraphML 导出用于 Gephi 等工具 |
-| ⚙️ 配置管理 | 支持配置文件上传、创建与查看 |
+| 🗂️ 集合管理 | 创建与列出集合，查询集合统计信息 |
 
 ## 🛠️ 技术栈
 
 - 后端：Python, FastAPI, GraphRAG（networkx 持久化），PyMuPDF
-- 前端：React（可选），mindmap.js, D3.js
 - 部署：Docker, Docker Compose
 - 模型支持：OpenAI 兼容 API / 本地 LLM（如 Qwen, Mistral）
 
@@ -39,13 +37,13 @@ tsingai-lens/
 │   ├── retrieval/      # GraphRAG 标准检索与索引流程
 │   ├── utils/          # 工具模块（日志等）
 │   ├── config.py       # 配置与常量
-│   ├── data/           # 存储目录（配置、索引、输出）
+│   ├── data/           # 存储目录（配置、集合、索引、输出）
 │   └── tests/          # 单元测试
 ├── frontend/           # 可选前端静态资源
 ├── docs/               # 顶层文档
 └── backend/docs/       # API 文档（如 api.md）
 
-````
+```
 
 ## 🚀 快速启动（本地开发）
 
@@ -62,33 +60,41 @@ export LLM_API_KEY=sk-local
 # 启动后端（默认 8000，如需和文档一致可用 8010）
 uvicorn main:app --reload --port 8010
 
-# 打开前端（纯静态）
-python -m http.server 8001 -d ../frontend
 ```
 
 ## 核心 API
 
-- `/retrieval/index`：根据配置启动标准索引流程。
-- `/retrieval/index/upload`：上传文件并使用默认配置触发索引。
-- `/retrieval/input/upload`：批量上传文件到输入存储（不触发索引）。
-- `/retrieval/graphml`：导出 GraphML 供可视化工具使用。
-- `/retrieval/configs`：配置文件上传、创建、查看与列表。
+- `/retrieval/collections`：创建/列出集合（含统计指标）。
+- `/retrieval/index`：对集合启动标准索引流程。
+- `/retrieval/index/upload`：上传单文件并触发索引。
+- `/retrieval/input/upload`：批量上传文件到集合输入存储（不触发索引）。
+- `/retrieval/query`：基于集合索引结果进行结构化检索。
+- `/retrieval/graphml`：导出 GraphML 供 Gephi 等工具使用（支持 `include_community`、`community_id`）。
 
 详见更新后的 API 文档：`backend/docs/api.md`（中文，含 curl 示例）。
+
+## 集合列表字段说明
+
+- `status`：`ready`（有实体输出）/ `empty`（未完成索引）。
+- `document_count`：集合内文档数（来自 `documents.parquet` 或索引统计）。
+- `entity_count`：集合内实体数（来自 `entities.parquet`）。
+- `updated_at`：集合输出目录关键产物更新时间，缺失时可回退使用 `created_at`。
+
+## 推荐使用流程（MVP）
+
+1) 创建集合（可选）：`POST /retrieval/collections`
+2) 批量上传论文：`POST /retrieval/input/upload`
+3) 启动索引：`POST /retrieval/index`
+4) 导出图谱：`GET /retrieval/graphml`
+5) 进入检索：`POST /retrieval/query`
+
+## GraphML 导出参数（常用）
+
+- `include_community`：默认 `true`，在节点上输出 `community` 字段用于 Gephi 分组着色。
+- `community_id`：按社区过滤导出。
+- `max_nodes`：限制最大节点数（避免过大文件）。
+- `min_weight`：按关系权重过滤。
 
 ## 模型说明
 
 - 生成模型使用 OpenAI 兼容接口，默认 `LLM_MODEL=qwen1.5-8b-chat`。可指向本地 Qwen-8B、DashScope 或其他兼容端点。
-
-## 前端体验
-
-当前后端仅提供 `/retrieval` 相关接口，前端需要按索引与导出结果进行对接与展示。
-
-## Retrieval 流程（标准索引）
-
-- 批量上传（不触发索引）：`POST /retrieval/input/upload`
-- 单文件上传并索引：`POST /retrieval/index/upload`
-- 直接索引（已准备好输入目录）：`POST /retrieval/index`
-- 图谱导出：`GET /retrieval/graphml`
-
-后续可以用 React/Vite 将 API 对接 MaxKB UI 或嵌入自定义仪表盘。

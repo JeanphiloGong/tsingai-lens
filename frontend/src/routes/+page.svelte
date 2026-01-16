@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { errorMessage } from './_shared/api';
   import { createCollection, collections, fetchCollections } from './_shared/collections';
+  import type { Collection } from './_shared/collections';
   import { getBaseUrlValue, validateBaseUrl } from './_shared/base';
   import { language, t } from './_shared/i18n';
 
@@ -135,16 +136,23 @@
     }
   }
 
-  async function reindexCollection(collectionId: string) {
+  function hasArtifacts(collection: Collection) {
+    if (collection.status === 'ready') return true;
+    if (typeof collection.entity_count === 'number') return collection.entity_count > 0;
+    if (typeof collection.document_count === 'number') return collection.document_count > 0;
+    return false;
+  }
+
+  async function runIndex(collectionId: string, isUpdateRun: boolean) {
     try {
-      setRowMessage(collectionId, $t('home.reindexing'));
+      setRowMessage(collectionId, isUpdateRun ? $t('home.reindexing') : $t('home.indexing'));
       await fetch(`${validateBaseUrl(getBaseUrlValue())}/retrieval/index`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           collection_id: collectionId,
           method: 'standard',
-          is_update_run: true,
+          is_update_run: isUpdateRun,
           verbose: false
         })
       }).then(async (response) => {
@@ -153,7 +161,7 @@
           throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
         }
       });
-      setRowMessage(collectionId, $t('home.reindexStarted'));
+      setRowMessage(collectionId, isUpdateRun ? $t('home.reindexStarted') : $t('home.indexStarted'));
     } catch (err) {
       setRowMessage(collectionId, errorMessage(err), 'error');
     }
@@ -236,9 +244,9 @@
                   <button
                     class="btn btn--ghost btn--small"
                     type="button"
-                    on:click={() => reindexCollection(collection.id)}
+                    on:click={() => runIndex(collection.id, hasArtifacts(collection))}
                   >
-                    {$t('home.actionReindex')}
+                    {hasArtifacts(collection) ? $t('home.actionReindex') : $t('home.actionIndex')}
                   </button>
                 </div>
                 {#if rowMessages[collection.id]}

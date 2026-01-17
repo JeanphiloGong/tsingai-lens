@@ -11,7 +11,6 @@
     <p class="eyebrow">{$t('docs.eyebrow')}</p>
     <h1>{$t('docs.title')}</h1>
     <p class="lead">{$t('docs.lead')}</p>
-    <span class="pill">{$t('docs.authNote')}</span>
   </div>
 </section>
 
@@ -27,103 +26,68 @@
 
 <section>
   <div class="section-header">
-    <h2 class="section-title">{$t('docs.collectionsTitle')}</h2>
-    <p class="section-sub">{$t('docs.collectionsSub')}</p>
+    <h2 class="section-title">{$t('docs.workflowTitle')}</h2>
+    <p class="section-sub">{$t('docs.workflowSub')}</p>
   </div>
   <div class="docs-grid">
     <article class="card">
-      <span class="pill">POST /retrieval/collections</span>
-      <h3>{$t('docs.collectionsCreateTitle')}</h3>
-      <p>{$t('docs.collectionsCreateDesc')}</p>
-      <pre class="code-block"><code>curl -X POST http://localhost:8010/retrieval/collections \
-  -H "Content-Type: application/json" \
-  -d '&#123;"name":"paper-lab"&#125;'</code></pre>
+      <span class="pill">01</span>
+      <h3>{$t('docs.workflowCreateTitle')}</h3>
+      <p>{$t('docs.workflowCreateDesc')}</p>
     </article>
 
     <article class="card">
-      <span class="pill">GET /retrieval/collections</span>
-      <h3>{$t('docs.collectionsListTitle')}</h3>
-      <p>{$t('docs.collectionsListDesc')}</p>
-      <pre class="code-block"><code>curl http://localhost:8010/retrieval/collections</code></pre>
+      <span class="pill">02</span>
+      <h3>{$t('docs.workflowUploadTitle')}</h3>
+      <p>{$t('docs.workflowUploadDesc')}</p>
+    </article>
+
+    <article class="card">
+      <span class="pill">03</span>
+      <h3>{$t('docs.workflowIndexTitle')}</h3>
+      <p>{$t('docs.workflowIndexDesc')}</p>
+    </article>
+
+    <article class="card">
+      <span class="pill">04</span>
+      <h3>{$t('docs.workflowSearchTitle')}</h3>
+      <p>{$t('docs.workflowSearchDesc')}</p>
+    </article>
+
+    <article class="card">
+      <span class="pill">05</span>
+      <h3>{$t('docs.workflowGraphTitle')}</h3>
+      <p>{$t('docs.workflowGraphDesc')}</p>
     </article>
   </div>
 </section>
 
 <section>
   <div class="section-header">
-    <h2 class="section-title">{$t('docs.indexingTitle')}</h2>
-    <p class="section-sub">{$t('docs.indexingSub')}</p>
+    <h2 class="section-title">{$t('docs.navTitle')}</h2>
+    <p class="section-sub">{$t('docs.navSub')}</p>
   </div>
   <div class="docs-grid">
     <article class="card">
-      <span class="pill">POST /retrieval/index</span>
-      <h3>{$t('docs.indexTitle')}</h3>
-      <p>{$t('docs.indexDesc')}</p>
-      <pre class="code-block"><code>curl -X POST http://localhost:8010/retrieval/index \
-  -H "Content-Type: application/json" \
-  -d '&#123;"collection_id":"&lt;COLLECTION_ID&gt;","method":"standard","is_update_run":false,"verbose":false&#125;'</code></pre>
+      <h3>{$t('docs.navOverview')}</h3>
     </article>
-
     <article class="card">
-      <span class="pill">POST /retrieval/index/upload</span>
-      <h3>{$t('docs.indexUploadTitle')}</h3>
-      <p>{$t('docs.indexUploadDesc')}</p>
-      <pre class="code-block"><code>curl -X POST http://localhost:8010/retrieval/index/upload \
-  -F "file=@/path/to/document.pdf" \
-  -F "collection_id=&lt;COLLECTION_ID&gt;" \
-  -F "method=standard" \
-  -F "is_update_run=false" \
-  -F "verbose=false"</code></pre>
+      <h3>{$t('docs.navDocuments')}</h3>
     </article>
-
     <article class="card">
-      <span class="pill">POST /retrieval/input/upload</span>
-      <h3>{$t('docs.inputUploadTitle')}</h3>
-      <p>{$t('docs.inputUploadDesc')}</p>
-      <pre class="code-block"><code>curl -X POST http://localhost:8010/retrieval/input/upload \
-  -F "collection_id=&lt;COLLECTION_ID&gt;" \
-  -F "files=@/path/to/paper1.pdf" \
-  -F "files=@/path/to/paper2.pdf"</code></pre>
+      <h3>{$t('docs.navSearch')}</h3>
     </article>
-  </div>
-</section>
-
-<section>
-  <div class="section-header">
-    <h2 class="section-title">{$t('docs.queryTitle')}</h2>
-    <p class="section-sub">{$t('docs.querySub')}</p>
-  </div>
-  <div class="docs-grid">
     <article class="card">
-      <span class="pill">POST /retrieval/query</span>
-      <h3>{$t('docs.queryCallTitle')}</h3>
-      <p>{$t('docs.queryCallDesc')}</p>
-      <pre class="code-block"><code>curl -X POST http://localhost:8010/retrieval/query \
-  -H "Content-Type: application/json" \
-  -d '&#123;
-    "collection_id":"&lt;COLLECTION_ID&gt;",
-    "query":"Provide an actionable experimental plan",
-    "method":"global",
-    "response_type":"List of 5-7 Points",
-    "include_context":false
-  &#125;'</code></pre>
+      <h3>{$t('docs.navGraph')}</h3>
     </article>
-  </div>
-</section>
-
-<section>
-  <div class="section-header">
-    <h2 class="section-title">{$t('docs.graphTitle')}</h2>
-    <p class="section-sub">{$t('docs.graphSub')}</p>
-  </div>
-  <div class="docs-grid">
     <article class="card">
-      <span class="pill">GET /retrieval/graphml</span>
-      <h3>{$t('docs.graphCallTitle')}</h3>
-      <p>{$t('docs.graphCallDesc')}</p>
-      <pre class="code-block"><code>curl -OJ "http://localhost:8010/retrieval/graphml?collection_id=&lt;COLLECTION_ID&gt;&amp;max_nodes=200&amp;min_weight=0&amp;include_community=true"</code></pre>
+      <h3>{$t('docs.navReports')}</h3>
+    </article>
+    <article class="card">
+      <h3>{$t('docs.navSettings')}</h3>
     </article>
   </div>
+  <p class="note">{$t('docs.navNote')}</p>
 </section>
 
 <section>
@@ -136,14 +100,7 @@
       <li class="tutorial-step">
         <strong>{$t('docs.tutorialStep1Title')}</strong>
         <p>{$t('docs.tutorialStep1Desc1')}</p>
-        <pre class="code-block"><code>snapshots:
-  graphml: true</code></pre>
         <p>{$t('docs.tutorialStep1Desc2')}</p>
-        <pre class="code-block"><code>embed_graph:
-  enabled: true
-umap:
-  enabled: true</code></pre>
-        <p>{$t('docs.tutorialStep1Desc3')}</p>
       </li>
       <li class="tutorial-step">
         <strong>{$t('docs.tutorialStep2Title')}</strong>
@@ -153,7 +110,6 @@ umap:
         <strong>{$t('docs.tutorialStep3Title')}</strong>
         <p>{$t('docs.tutorialStep3Desc1')}</p>
         <p>{$t('docs.tutorialStep3Desc2')}</p>
-        <p>{$t('docs.tutorialStep3Desc3')}</p>
       </li>
       <li class="tutorial-step">
         <strong>{$t('docs.tutorialStep4Title')}</strong>
@@ -165,8 +121,6 @@ umap:
         <strong>{$t('docs.tutorialStep5Title')}</strong>
         <p>{$t('docs.tutorialStep5Desc1')}</p>
         <p>{$t('docs.tutorialStep5Desc2')}</p>
-        <p>{$t('docs.tutorialStep5Desc3')}</p>
-        <p>{$t('docs.tutorialStep5Desc4')}</p>
       </li>
       <li class="tutorial-step">
         <strong>{$t('docs.tutorialStep6Title')}</strong>
@@ -174,17 +128,12 @@ umap:
         <p>{$t('docs.tutorialStep6Desc2')}</p>
         <p>{$t('docs.tutorialStep6Desc3')}</p>
         <p>{$t('docs.tutorialStep6Desc4')}</p>
-        <p>{$t('docs.tutorialStep6Desc5')}</p>
-        <p>{$t('docs.tutorialStep6Desc6')}</p>
       </li>
       <li class="tutorial-step">
         <strong>{$t('docs.tutorialStep7Title')}</strong>
         <p>{$t('docs.tutorialStep7Desc1')}</p>
         <p>{$t('docs.tutorialStep7Desc2')}</p>
         <p>{$t('docs.tutorialStep7Desc3')}</p>
-        <p>{$t('docs.tutorialStep7Desc4')}</p>
-        <p>{$t('docs.tutorialStep7Desc5')}</p>
-        <p>{$t('docs.tutorialStep7Desc6')}</p>
       </li>
       <li class="tutorial-step">
         <strong>{$t('docs.tutorialStep8Title')}</strong>
@@ -197,16 +146,11 @@ umap:
         <p>{$t('docs.tutorialStep9Desc1')}</p>
         <p>{$t('docs.tutorialStep9Desc2')}</p>
         <p>{$t('docs.tutorialStep9Desc3')}</p>
-        <p>{$t('docs.tutorialStep9Desc4')}</p>
-        <p>{$t('docs.tutorialStep9Desc5')}</p>
-        <p>{$t('docs.tutorialStep9Desc6')}</p>
-        <p>{$t('docs.tutorialStep9Desc7')}</p>
       </li>
       <li class="tutorial-step">
         <strong>{$t('docs.tutorialStep10Title')}</strong>
         <p>{$t('docs.tutorialStep10Desc1')}</p>
         <p>{$t('docs.tutorialStep10Desc2')}</p>
-        <p>{$t('docs.tutorialStep10Desc3')}</p>
       </li>
     </ol>
   </div>

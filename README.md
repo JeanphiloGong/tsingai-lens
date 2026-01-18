@@ -54,6 +54,24 @@ tsingai-lens/
 - `backend/README.md` — backend setup and usage.
 - `backend/docs/api.md` — API reference and curl examples.
 
+## Docker Compose (Recommended)
+
+Prereqs: Docker + Docker Compose.
+
+```bash
+cp backend/.env.example backend/.env
+# edit backend/.env with your LLM settings
+docker compose up --build
+```
+
+Access:
+- Frontend: http://localhost:8080
+- Backend API: http://localhost:8010/docs
+
+Notes:
+- Backend data is persisted under `backend/data` (mounted into the container).
+- The frontend defaults to calling `http://localhost:8010` (adjust in the UI if needed).
+
 ---
 
 # 中文说明
@@ -111,3 +129,21 @@ tsingai-lens/
 
 - `backend/README.md` — 后端部署与使用说明。
 - `backend/docs/api.md` — API 参考与示例。
+
+## Docker Compose（推荐）
+
+前置条件：Docker + Docker Compose。
+
+```bash
+cp backend/.env.example backend/.env
+# 在 backend/.env 中填写 LLM 配置
+docker compose up --build
+```
+
+访问入口：
+- 前端：http://localhost:8080
+- 后端 API：http://localhost:8010/docs
+
+说明：
+- 后端数据会持久化到 `backend/data`（容器内挂载）。
+- 前端默认访问 `http://localhost:8010`（如需可在页面中修改）。

@@ -1,0 +1,9 @@
+node_modules
+.svelte-kit
+build
+dist
+.env
+.env.*
+README.md
+npm-debug.log
+yarn-error.log

@@ -218,3 +218,4 @@ wheels/
 .venv
 *data/logs/*
 AGENTS.md
+*data/collections/*

@@ -1,5 +1,6 @@
 from .retrieval import (
     CollectionCreateRequest,
+    CollectionDeleteResponse,
     CollectionListResponse,
     CollectionRecord,
     InputUploadItem,
@@ -18,6 +19,7 @@ __all__ = [
     "QueryRequest",
     "QueryResponse",
     "CollectionCreateRequest",
+    "CollectionDeleteResponse",
     "CollectionRecord",
     "CollectionListResponse",
 ]

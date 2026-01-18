@@ -102,3 +102,11 @@ class CollectionListResponse(BaseModel):
     """Response containing available collections."""
 
     items: list[CollectionRecord]
+
+
+class CollectionDeleteResponse(BaseModel):
+    """Response payload for collection deletion."""
+
+    id: str
+    deleted_at: str
+    status: str = "deleted"

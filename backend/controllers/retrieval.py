@@ -2,6 +2,7 @@
 
 import json
 import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from config import CONFIG_DIR
 from controllers.schemas import (
     CollectionCreateRequest,
+    CollectionDeleteResponse,
     CollectionListResponse,
     CollectionRecord,
     InputUploadResponse,
@@ -592,6 +594,42 @@ async def list_collections() -> CollectionListResponse:
             )
         )
     return CollectionListResponse(items=items)
+
+
+@router.delete(
+    "/collections/{collection_id}",
+    response_model=CollectionDeleteResponse,
+    summary="删除集合",
+)
+async def delete_collection(collection_id: str) -> CollectionDeleteResponse:
+    """Delete a collection and all stored files."""
+    if collection_id == DEFAULT_COLLECTION_ID:
+        raise HTTPException(status_code=400, detail="默认集合禁止删除")
+
+    collection_dir = _collection_dir(collection_id)
+    if not collection_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"集合不存在: {collection_id}")
+
+    try:
+        collection_dir_resolved = collection_dir.resolve()
+        collections_root = COLLECTIONS_DIR.resolve()
+        try:
+            collection_dir_resolved.relative_to(collections_root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="非法集合 ID") from exc
+        if collection_dir.is_symlink():
+            raise HTTPException(status_code=400, detail="集合路径不可为符号链接")
+        shutil.rmtree(collection_dir)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to delete collection")
+        raise HTTPException(status_code=500, detail=f"集合删除失败: {exc}") from exc
+
+    return CollectionDeleteResponse(
+        id=collection_id,
+        deleted_at=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 @router.post(

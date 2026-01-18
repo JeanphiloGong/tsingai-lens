@@ -24,8 +24,8 @@ const translations: Record<Language, Translations> = {
       pdfNote: 'PDFs must contain selectable text. Scanned PDFs are not supported.'
     },
     connection: {
-      title: 'Connection',
-      helper: 'Set the base URL once for all steps.',
+      title: 'Base URL',
+      helper: 'Set the base URL used for all requests.',
       baseUrlLabel: 'Base URL',
       save: 'Save',
       reset: 'Reset',
@@ -313,8 +313,8 @@ const translations: Record<Language, Translations> = {
       pdfNote: 'PDF 需可复制文本，扫描版暂不支持。'
     },
     connection: {
-      title: '连接',
-      helper: '设置一次 Base URL，全部步骤通用。',
+      title: 'Base URL',
+      helper: '设置所有请求使用的 Base URL。',
       baseUrlLabel: 'Base URL',
       save: '保存',
       reset: '重置',

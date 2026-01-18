@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { page } from '$app/stores';
   import Graph from 'graphology';
   import forceAtlas2 from 'graphology-layout-forceatlas2';
@@ -61,6 +61,10 @@
     }
     disposeRenderer();
     graph = null;
+  });
+
+  onMount(() => {
+    loadPreview();
   });
 
   function setPreviewStatus(message: string) {
@@ -332,8 +336,8 @@
       <p class="lead">{$t('graph.previewLead')}</p>
     </div>
     <div class="preview-actions">
-      <button class="btn btn--primary" type="button" on:click={loadPreview} disabled={previewLoading}>
-        {previewLoading ? $t('graph.previewLoading') : $t('graph.previewLoad')}
+      <button class="btn btn--ghost" type="button" on:click={loadPreview} disabled={previewLoading}>
+        {$t('graph.previewLoad')}
       </button>
       <button class="btn btn--ghost" type="button" on:click={exportPreviewImage} disabled={!graph}>
         {$t('graph.exportImage')}
@@ -400,6 +404,9 @@
       </div>
       {#if graph && (!includeCommunity || !communityOptions.length)}
         <p class="note">{$t('graph.previewTipNoCommunity')}</p>
+      {/if}
+      {#if previewLoading}
+        <div class="status" role="status" aria-live="polite">{$t('graph.previewLoading')}</div>
       {/if}
       {#if previewStatus}
         <div class="status status--dismissible" role="status" aria-live="polite">

@@ -47,6 +47,7 @@
   let graphContainer: HTMLDivElement | null = null;
   let renderer: Sigma | null = null;
   let graph: Graph | null = null;
+  let themeObserver: MutationObserver | null = null;
 
   function disposeRenderer() {
     if (renderer) {
@@ -55,9 +56,26 @@
     }
   }
 
+  function getThemeInk() {
+    if (typeof window === 'undefined') return '#0f1b2d';
+    const value = getComputedStyle(document.documentElement).getPropertyValue('--color-ink').trim();
+    return value || '#0f1b2d';
+  }
+
+  function applyRendererTheme() {
+    if (!renderer) return;
+    const ink = getThemeInk();
+    renderer.setSetting('labelColor', { color: ink });
+    renderer.setSetting('edgeLabelColor', { color: ink });
+  }
+
   onDestroy(() => {
     if (previewStatusTimeout) {
       clearTimeout(previewStatusTimeout);
+    }
+    if (themeObserver) {
+      themeObserver.disconnect();
+      themeObserver = null;
     }
     disposeRenderer();
     graph = null;
@@ -65,6 +83,15 @@
 
   onMount(() => {
     loadPreview();
+    if (typeof MutationObserver !== 'undefined') {
+      themeObserver = new MutationObserver(() => {
+        applyRendererTheme();
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme']
+      });
+    }
   });
 
   function setPreviewStatus(message: string) {
@@ -260,6 +287,7 @@
           labelRenderedSizeThreshold: 6,
           renderEdgeLabels: false
         });
+        applyRendererTheme();
       }
 
       communityFilter = 'all';

@@ -1,5 +1,7 @@
 test-results
 node_modules
+node_modules/.vite/
+node_modules/.package-lock.json
 
 # Output
 .output
@@ -8,6 +10,9 @@ node_modules
 .wrangler
 /.svelte-kit
 /build
+
+# Tooling caches
+.vite/
 
 # OS
 .DS_Store

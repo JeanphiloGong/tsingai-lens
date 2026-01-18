@@ -11,6 +11,12 @@ export type Collection = {
   entity_count?: number;
 };
 
+export type DeleteCollectionResult = {
+  id: string;
+  deleted_at?: string;
+  status?: string;
+};
+
 export const collections = writable<Collection[]>([]);
 
 function normalizeCollections(data: unknown): Collection[] {
@@ -44,4 +50,11 @@ export async function createCollection(name?: string) {
     body: JSON.stringify(payload)
   });
   return data as Collection;
+}
+
+export async function deleteCollection(collectionId: string) {
+  const data = await requestJson(`/retrieval/collections/${encodeURIComponent(collectionId)}`, {
+    method: 'DELETE'
+  });
+  return data as DeleteCollectionResult;
 }

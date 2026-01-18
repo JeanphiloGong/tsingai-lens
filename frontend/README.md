@@ -25,6 +25,16 @@ npm run dev
 npm run dev -- --open
 ```
 
+## Troubleshooting
+
+If `npm install` fails during `svelte-kit sync` with a "Cannot find module ... @sveltejs/vite-plugin-svelte ... configure.js" error, clean caches and reinstall:
+
+```sh
+rm -rf node_modules
+npm cache clean --force
+npm install
+```
+
 ## Building
 
 To create a production version of your app:

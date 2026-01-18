@@ -12,6 +12,14 @@ from .retrieval import (
     IndexResponse,
     QueryRequest,
     QueryResponse,
+    ReportCommunityDetailResponse,
+    ReportCommunityListResponse,
+    ReportCommunitySummary,
+    ReportDocumentItem,
+    ReportEntityItem,
+    ReportPatternItem,
+    ReportPatternsResponse,
+    ReportRelationshipItem,
 )
 
 __all__ = [
@@ -28,4 +36,12 @@ __all__ = [
     "CollectionFileRecord",
     "CollectionRecord",
     "CollectionListResponse",
+    "ReportCommunityDetailResponse",
+    "ReportCommunityListResponse",
+    "ReportCommunitySummary",
+    "ReportDocumentItem",
+    "ReportEntityItem",
+    "ReportPatternItem",
+    "ReportPatternsResponse",
+    "ReportRelationshipItem",
 ]

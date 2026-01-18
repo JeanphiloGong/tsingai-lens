@@ -86,10 +86,20 @@
 ## 图数据导出（/retrieval）
 - **GET** `/retrieval/graphml` — 导出 GraphML（可用于 Gephi 等）
   - 查询参数：`collection_id`（可选），`max_nodes`（默认 200）、`min_weight`（默认 0.0，关系权重过滤）、`community_id`（可选，按社区筛选）、`include_community`（可选，默认 `true`，是否输出节点 `community` 字段用于分组着色）。
+  - GraphML 字段：
+    - 节点字段：`label`、`type`、`description`、`degree`、`frequency`、`x`、`y`、`community`
+    - 边字段：`weight`、`description`
+    - 证据字段（节点/边共用）：
+      - `text_unit_ids`：关联文本单元 ID 列表（JSON 字符串）。
+      - `text_unit_count`：文本单元数量。
+      - `document_ids`：来源文档 ID 列表（JSON 字符串）。
+      - `document_titles`：来源文档标题列表（JSON 字符串）。
+      - `document_count`：来源文档数量。
   ```bash
   curl -OJ "http://localhost:8010/retrieval/graphml?collection_id=<COLLECTION_ID>&max_nodes=200&min_weight=0&include_community=true"
   ```
 
 注意事项
 - PDF 需可复制文本（扫描版 PDF 暂不支持 OCR）。
+- 证据字段依赖 `text_units.parquet` 与 `documents.parquet`，若缺失则不输出。
 - 配置由服务端在集合级别管理，客户端无需传入配置路径。

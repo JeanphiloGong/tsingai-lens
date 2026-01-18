@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { errorMessage } from './_shared/api';
-  import { createCollection, collections, fetchCollections } from './_shared/collections';
+  import { createCollection, collections, deleteCollection, fetchCollections } from './_shared/collections';
   import type { Collection } from './_shared/collections';
   import { getBaseUrlValue, validateBaseUrl } from './_shared/base';
   import { language, t } from './_shared/i18n';
@@ -15,6 +15,9 @@
   let defaultConfig = true;
   let createLoading = false;
   let createError = '';
+  let deleteTarget: Collection | null = null;
+  let deleteError = '';
+  let deleteLoading = false;
   let rowMessages: Record<string, { message: string; type: 'info' | 'error' }> = {};
 
   $: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
@@ -45,6 +48,17 @@
     name = '';
     description = '';
     defaultConfig = true;
+  }
+
+  function openCollection(collectionId: string) {
+    goto(`/collections/${collectionId}`);
+  }
+
+  function handleRowKeydown(event: KeyboardEvent, collectionId: string) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openCollection(collectionId);
+    }
   }
 
   function handleBackdropKeydown(event: KeyboardEvent) {
@@ -100,6 +114,44 @@
     if (typeof value === 'number') return String(value);
     if (typeof value === 'string' && value.trim() !== '') return value;
     return $t('home.metricsPlaceholder');
+  }
+
+  function openDelete(collection: Collection) {
+    deleteTarget = collection;
+    deleteError = '';
+  }
+
+  function closeDelete() {
+    deleteTarget = null;
+    deleteError = '';
+    deleteLoading = false;
+  }
+
+  function handleDeleteBackdropKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      closeDelete();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      closeDelete();
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    deleteError = '';
+    deleteLoading = true;
+
+    try {
+      await deleteCollection(deleteTarget.id);
+      await loadCollections();
+      closeDelete();
+    } catch (err) {
+      deleteError = errorMessage(err);
+    } finally {
+      deleteLoading = false;
+    }
   }
 
   function setRowMessage(id: string, message: string, type: 'info' | 'error' = 'info') {
@@ -218,7 +270,14 @@
         </thead>
         <tbody>
           {#each $collections as collection}
-            <tr>
+            <tr
+              class="data-row data-row--clickable"
+              role="link"
+              tabindex="0"
+              aria-label={$t('home.openRowLabel', { name: collection.name || collection.id })}
+              on:click={() => openCollection(collection.id)}
+              on:keydown={(event) => handleRowKeydown(event, collection.id)}
+            >
               <td>
                 <div class="table-main">
                   <div class="table-title">{collection.name || collection.id}</div>
@@ -231,22 +290,28 @@
               <td>{formatDate(collection.updated_at || collection.created_at)}</td>
               <td>
                 <div class="table-actions">
-                  <a class="btn btn--ghost btn--small" href={`/collections/${collection.id}`}>
-                    {$t('home.actionOpen')}
-                  </a>
                   <button
                     class="btn btn--ghost btn--small"
                     type="button"
-                    on:click={() => exportGraph(collection.id)}
+                    on:click|stopPropagation={() => exportGraph(collection.id)}
                   >
                     {$t('home.actionExport')}
                   </button>
                   <button
                     class="btn btn--ghost btn--small"
                     type="button"
-                    on:click={() => runIndex(collection.id, hasArtifacts(collection))}
+                    on:click|stopPropagation={() => runIndex(collection.id, hasArtifacts(collection))}
                   >
                     {hasArtifacts(collection) ? $t('home.actionReindex') : $t('home.actionIndex')}
+                  </button>
+                  <button
+                    class="btn btn--ghost btn--small btn--danger"
+                    type="button"
+                    disabled={collection.id === 'default'}
+                    title={collection.id === 'default' ? $t('home.deleteDisabled') : ''}
+                    on:click|stopPropagation={() => openDelete(collection)}
+                  >
+                    {$t('home.actionDelete')}
                   </button>
                 </div>
                 {#if rowMessages[collection.id]}
@@ -321,6 +386,37 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+{/if}
+
+{#if deleteTarget}
+  <div
+    class="modal-backdrop"
+    role="button"
+    tabindex="0"
+    aria-label={$t('home.deleteCancel')}
+    on:click={closeDelete}
+    on:keydown={handleDeleteBackdropKeydown}
+  >
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>{$t('home.deleteTitle')}</h3>
+        <p class="meta-text">
+          {$t('home.deleteDesc', { name: deleteTarget.name || deleteTarget.id })}
+        </p>
+      </div>
+      {#if deleteError}
+        <div class="status status--error" role="alert">{deleteError}</div>
+      {/if}
+      <div class="modal-actions">
+        <button class="btn btn--ghost" type="button" on:click={closeDelete}>
+          {$t('home.deleteCancel')}
+        </button>
+        <button class="btn btn--danger" type="button" on:click={confirmDelete} disabled={deleteLoading}>
+          {deleteLoading ? $t('home.deleteDeleting') : $t('home.deleteConfirm')}
+        </button>
+      </div>
     </div>
   </div>
 {/if}

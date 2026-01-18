@@ -4,12 +4,19 @@
   import { onMount } from 'svelte';
   import ConnectionBar from './_shared/ConnectionBar.svelte';
   import { language, t } from './_shared/i18n';
+  import { themePreference } from './_shared/theme';
+  import type { ThemePreference } from './_shared/theme';
 
   let isLangOpen = false;
   let langMenu: HTMLDivElement | null = null;
+  let isThemeOpen = false;
+  let themeMenu: HTMLDivElement | null = null;
 
   function toggleLangMenu() {
     isLangOpen = !isLangOpen;
+    if (isLangOpen) {
+      isThemeOpen = false;
+    }
   }
 
   function closeLangMenu() {
@@ -27,12 +34,36 @@
     }
   }
 
+  function toggleThemeMenu() {
+    isThemeOpen = !isThemeOpen;
+    if (isThemeOpen) {
+      isLangOpen = false;
+    }
+  }
+
+  function closeThemeMenu() {
+    isThemeOpen = false;
+  }
+
+  function setTheme(value: ThemePreference) {
+    themePreference.set(value);
+    isThemeOpen = false;
+  }
+
+  function handleThemeKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      closeThemeMenu();
+    }
+  }
+
   onMount(() => {
     const handleClick = (event: MouseEvent) => {
-      if (!isLangOpen) return;
       const target = event.target as Node;
-      if (langMenu && !langMenu.contains(target)) {
+      if (isLangOpen && langMenu && !langMenu.contains(target)) {
         isLangOpen = false;
+      }
+      if (isThemeOpen && themeMenu && !themeMenu.contains(target)) {
+        isThemeOpen = false;
       }
     };
     window.addEventListener('click', handleClick);
@@ -61,6 +92,45 @@
         {$t('nav.docs')}
       </a>
       <ConnectionBar />
+      <div
+        class="theme-menu"
+        bind:this={themeMenu}
+        on:keydown={handleThemeKeydown}
+        aria-label={$t('header.themeLabel')}
+      >
+        <button
+          type="button"
+          class="header-action"
+          aria-haspopup="menu"
+          aria-expanded={isThemeOpen}
+          on:click|stopPropagation={toggleThemeMenu}
+        >
+          {$t('header.themeLabel')}
+          <span class="theme-state">
+            {#if $themePreference === 'system'}
+              {$t('header.themeSystem')}
+            {:else if $themePreference === 'light'}
+              {$t('header.themeLight')}
+            {:else}
+              {$t('header.themeDark')}
+            {/if}
+          </span>
+          <span class="chevron" aria-hidden="true">▾</span>
+        </button>
+        {#if isThemeOpen}
+          <div class="lang-dropdown" role="menu">
+            <button type="button" role="menuitem" class:active={$themePreference === 'system'} on:click={() => setTheme('system')}>
+              {$t('header.themeSystem')}
+            </button>
+            <button type="button" role="menuitem" class:active={$themePreference === 'light'} on:click={() => setTheme('light')}>
+              {$t('header.themeLight')}
+            </button>
+            <button type="button" role="menuitem" class:active={$themePreference === 'dark'} on:click={() => setTheme('dark')}>
+              {$t('header.themeDark')}
+            </button>
+          </div>
+        {/if}
+      </div>
       <div
         class="lang-menu"
         bind:this={langMenu}

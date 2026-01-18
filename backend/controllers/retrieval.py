@@ -4,6 +4,7 @@ from fastapi import APIRouter, File, Form, Query, UploadFile
 from fastapi.responses import Response
 
 from app.usecases import collections as collections_uc
+from app.usecases import files as files_uc
 from app.usecases import graphml as graphml_uc
 from app.usecases import indexing as indexing_uc
 from app.usecases import inputs as inputs_uc
@@ -11,6 +12,8 @@ from app.usecases import query as query_uc
 from controllers.schemas import (
     CollectionCreateRequest,
     CollectionDeleteResponse,
+    CollectionFileDeleteResponse,
+    CollectionFileListResponse,
     CollectionListResponse,
     CollectionRecord,
     InputUploadResponse,
@@ -58,6 +61,42 @@ async def list_collections() -> CollectionListResponse:
 async def delete_collection(collection_id: str) -> CollectionDeleteResponse:
     """Delete a collection and all stored files."""
     return collections_uc.delete_collection(collection_id)
+
+
+@router.post(
+    "/collections/{collection_id}/files",
+    response_model=InputUploadResponse,
+    summary="向集合上传文件（不触发索引）",
+)
+async def upload_collection_files(
+    collection_id: str,
+    files: list[UploadFile] = File(...),
+) -> InputUploadResponse:
+    """Upload files into a collection without running the indexing pipeline."""
+    return await files_uc.upload_collection_files(collection_id, files)
+
+
+@router.get(
+    "/collections/{collection_id}/files",
+    response_model=CollectionFileListResponse,
+    summary="列出集合文件",
+)
+async def list_collection_files(collection_id: str) -> CollectionFileListResponse:
+    """List input files within a collection."""
+    return await files_uc.list_collection_files(collection_id)
+
+
+@router.delete(
+    "/collections/{collection_id}/files",
+    response_model=CollectionFileDeleteResponse,
+    summary="删除集合文件",
+)
+async def delete_collection_file(
+    collection_id: str,
+    key: str = Query(..., description="文件 key（如 uploads/<uuid>_<name>.txt）"),
+) -> CollectionFileDeleteResponse:
+    """Delete a single input file from a collection."""
+    return await files_uc.delete_collection_file(collection_id, key)
 
 
 @router.post(

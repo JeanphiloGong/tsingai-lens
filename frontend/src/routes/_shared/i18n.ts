@@ -62,8 +62,8 @@ const translations: Record<Language, Translations> = {
       indexStarted: 'Full index started',
       reindexing: 'Starting index...',
       reindexStarted: 'Index started',
-      noteStats: 'Status and basic metrics come from collections; deeper metrics are pending.',
-      noteUpdated: 'Updated time uses created_at until updated_at is available.'
+      noteStats: '',
+      noteUpdated: ''
     },
     create: {
       title: 'Create collection',
@@ -351,8 +351,8 @@ const translations: Record<Language, Translations> = {
       indexStarted: '全量索引已启动',
       reindexing: '正在启动索引...',
       reindexStarted: '索引已启动',
-      noteStats: '状态与基础指标来自集合接口，深度指标稍后补充。',
-      noteUpdated: '未提供 updated_at 时，暂用 created_at 显示。'
+      noteStats: '',
+      noteUpdated: ''
     },
     create: {
       title: '创建集合',

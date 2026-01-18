@@ -297,6 +297,20 @@ textarea {
   color: var(--color-subtle);
 }
 
+.data-row--clickable {
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.data-row--clickable:hover {
+  background: rgba(43, 111, 247, 0.08);
+}
+
+.data-row--clickable:focus-visible {
+  outline: 2px solid rgba(43, 111, 247, 0.4);
+  outline-offset: -2px;
+}
+
 .table-main {
   display: flex;
   flex-direction: column;
@@ -811,6 +825,16 @@ textarea {
 .btn--ghost {
   border-color: var(--color-line);
   background: transparent;
+}
+
+.btn--danger {
+  border-color: rgba(231, 76, 60, 0.5);
+  color: #9c2f2f;
+  background: rgba(231, 76, 60, 0.12);
+}
+
+.btn--danger:hover {
+  background: rgba(231, 76, 60, 0.2);
 }
 
 .btn:disabled {

@@ -22,6 +22,13 @@
   curl http://localhost:8010/retrieval/collections
   ```
 
+- **DELETE** `/retrieval/collections/{collection_id}` — 删除集合
+  - 说明：删除集合目录及其全部输出文件；`default` 集合不可删除。
+  - 返回：`id`、`deleted_at`、`status`（固定为 `deleted`）。
+  ```bash
+  curl -X DELETE http://localhost:8010/retrieval/collections/<COLLECTION_ID>
+  ```
+
 ## 索引与上传（/retrieval）
 - **POST** `/retrieval/index` — 启动索引流程
   - 请求体（JSON）：`collection_id`（可选）、`method`（默认 `standard`，可选：`standard`/`fast`）、`is_update_run`（默认 `false`）、`verbose`（默认 `false`）、`additional_context`（可选字典）。

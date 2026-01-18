@@ -19,7 +19,7 @@
 | 📚 标准索引 | Retrieval（GraphRAG pipeline）构建实体/关系与索引结果 |
 | 🧠 知识图谱生成 | 生成实体/关系图谱并支持导出与可视化 |
 | 🔍 图谱导出 | 提供 GraphML 导出用于 Gephi 等工具 |
-| 🗂️ 集合管理 | 创建与列出集合，查询集合统计信息 |
+| 🗂️ 集合管理 | 创建/列出/删除集合，查询集合统计信息 |
 
 ## 🛠️ 技术栈
 
@@ -39,7 +39,6 @@ tsingai-lens/
 │   ├── config.py       # 配置与常量
 │   ├── data/           # 存储目录（配置、集合、索引、输出）
 │   └── tests/          # 单元测试
-├── frontend/           # 可选前端静态资源
 ├── docs/               # 顶层文档
 └── backend/docs/       # API 文档（如 api.md）
 
@@ -65,6 +64,7 @@ uvicorn main:app --reload --port 8010
 ## 核心 API
 
 - `/retrieval/collections`：创建/列出集合（含统计指标）。
+- `/retrieval/collections/{collection_id}`：删除集合（默认集合不可删除）。
 - `/retrieval/index`：对集合启动标准索引流程。
 - `/retrieval/index/upload`：上传单文件并触发索引。
 - `/retrieval/input/upload`：批量上传文件到集合输入存储（不触发索引）。

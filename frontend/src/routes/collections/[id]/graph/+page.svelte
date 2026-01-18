@@ -67,6 +67,7 @@
     const ink = getThemeInk();
     renderer.setSetting('labelColor', { color: ink });
     renderer.setSetting('edgeLabelColor', { color: ink });
+    renderer.setSetting('defaultEdgeColor', ink);
   }
 
   onDestroy(() => {

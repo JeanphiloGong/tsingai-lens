@@ -264,8 +264,6 @@
         </tbody>
       </table>
     </div>
-    <div class="note">{$t('home.noteStats')}</div>
-    <div class="note">{$t('home.noteUpdated')}</div>
   </section>
 {/if}
 

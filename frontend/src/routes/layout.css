@@ -168,53 +168,77 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-.header-link {
-  font-size: 0.82rem;
-  color: var(--color-subtle);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.header-link.active {
-  color: var(--color-ink);
-}
-
-.header-actions .btn {
-  padding: 6px 10px;
-  font-size: 0.75rem;
-  box-shadow: none;
-}
-
-.header-actions .btn--ghost {
-  background: rgba(255, 255, 255, 0.7);
-  border-color: rgba(15, 27, 45, 0.15);
-}
-
-.lang-toggle {
+.header-action {
   display: inline-flex;
-  gap: 4px;
-  padding: 3px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
   border-radius: 999px;
+  border: 1px solid rgba(15, 27, 45, 0.15);
   background: rgba(255, 255, 255, 0.7);
-  border: 1px solid var(--color-line);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  transition: all 0.2s ease;
 }
 
-.lang-toggle button {
+.header-action:hover {
+  color: var(--color-ink);
+  border-color: rgba(43, 111, 247, 0.35);
+  box-shadow: 0 8px 18px rgba(15, 40, 90, 0.12);
+}
+
+.header-action.active {
+  color: var(--color-ink);
+  border-color: rgba(43, 111, 247, 0.45);
+  background: #fff;
+}
+
+.header-action .chevron {
+  font-size: 0.65rem;
+}
+
+.lang-menu {
+  position: relative;
+}
+
+.lang-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 160px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--color-line);
+  background: #fff;
+  box-shadow: var(--shadow-tight);
+  display: grid;
+  gap: 4px;
+  z-index: 20;
+}
+
+.lang-dropdown button {
   border: none;
   background: transparent;
-  padding: 5px 8px;
-  border-radius: 999px;
-  font-size: 0.72rem;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 0.82rem;
   color: var(--color-muted);
+  text-align: left;
   cursor: pointer;
 }
 
-.lang-toggle button.active {
-  background: #fff;
+.lang-dropdown button:hover {
+  background: rgba(43, 111, 247, 0.08);
   color: var(--color-ink);
-  box-shadow: 0 6px 14px rgba(15, 40, 90, 0.12);
+}
+
+.lang-dropdown button.active {
+  background: rgba(43, 111, 247, 0.12);
+  color: var(--color-ink);
 }
 
 .badge {

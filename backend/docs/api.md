@@ -29,6 +29,29 @@
   curl -X DELETE http://localhost:8010/retrieval/collections/<COLLECTION_ID>
   ```
 
+## 集合文件管理（/retrieval/collections/{collection_id}/files）
+- **POST** `/retrieval/collections/{collection_id}/files` — 向集合上传文件（不触发索引）
+  - 表单字段：`files`（必填；支持多个 PDF/TXT）。
+  - 返回：`count` 与 `items`（包含 `stored_path` 等字段）。
+  ```bash
+  curl -X POST http://localhost:8010/retrieval/collections/<COLLECTION_ID>/files \
+    -F "files=@/path/to/paper1.pdf" \
+    -F "files=@/path/to/paper2.pdf"
+  ```
+
+- **GET** `/retrieval/collections/{collection_id}/files` — 列出集合文件
+  - 返回：`collection_id`、`count` 与 `items`（每项包含 `key`、`original_filename`、`stored_path`、`size_bytes`、`created_at`）。
+  ```bash
+  curl http://localhost:8010/retrieval/collections/<COLLECTION_ID>/files
+  ```
+
+- **DELETE** `/retrieval/collections/{collection_id}/files` — 删除集合文件
+  - 查询参数：`key`（必填，文件 key，如 `uploads/<uuid>_<name>.txt`）。
+  - 返回：`collection_id`、`key`、`deleted_at`、`status`（固定为 `deleted`）。
+  ```bash
+  curl -X DELETE "http://localhost:8010/retrieval/collections/<COLLECTION_ID>/files?key=uploads/<FILE_KEY>"
+  ```
+
 ## 索引与上传（/retrieval）
 - **POST** `/retrieval/index` — 启动索引流程
   - 请求体（JSON）：`collection_id`（可选）、`method`（默认 `standard`，可选：`standard`/`fast`）、`is_update_run`（默认 `false`）、`verbose`（默认 `false`）、`additional_context`（可选字典）。
@@ -63,7 +86,7 @@
 
 - 批量导入推荐流程
   1) 可选：调用 `/retrieval/collections` 创建集合。
-  2) 调用 `/retrieval/input/upload` 批量上传（仅入库，不索引）。
+  2) 调用 `/retrieval/collections/{collection_id}/files` 批量上传（仅入库，不索引）。
   3) 调用 `/retrieval/index` 触发一次索引（扫描集合输入目录）。
   4) 调用 `/retrieval/graphml` 导出 Gephi 文件。
 
@@ -88,13 +111,13 @@
   - 查询参数：`collection_id`（可选），`max_nodes`（默认 200）、`min_weight`（默认 0.0，关系权重过滤）、`community_id`（可选，按社区筛选）、`include_community`（可选，默认 `true`，是否输出节点 `community` 字段用于分组着色）。
   - GraphML 字段：
     - 节点字段：`label`、`type`、`description`、`degree`、`frequency`、`x`、`y`、`community`
-    - 边字段：`weight`、`description`
-    - 证据字段（节点/边共用）：
-      - `text_unit_ids`：关联文本单元 ID 列表（JSON 字符串）。
-      - `text_unit_count`：文本单元数量。
-      - `document_ids`：来源文档 ID 列表（JSON 字符串）。
-      - `document_titles`：来源文档标题列表（JSON 字符串）。
-      - `document_count`：来源文档数量。
+    - 边字段：`weight`、`edge_description`
+    - 证据字段（节点）：
+      - `node_text_unit_ids`、`node_text_unit_count`
+      - `node_document_ids`、`node_document_titles`、`node_document_count`
+    - 证据字段（边）：
+      - `edge_text_unit_ids`、`edge_text_unit_count`
+      - `edge_document_ids`、`edge_document_titles`、`edge_document_count`
   ```bash
   curl -OJ "http://localhost:8010/retrieval/graphml?collection_id=<COLLECTION_ID>&max_nodes=200&min_weight=0&include_community=true"
   ```

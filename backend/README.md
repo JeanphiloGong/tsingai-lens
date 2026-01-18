@@ -5,6 +5,7 @@ This directory contains the FastAPI backend for TsingAI-Lens. It manages collect
 ## Capabilities
 
 - Upload PDF/TXT into collections (PDF is converted to text before indexing).
+- Manage collection input files (add/list/delete).
 - Run GraphRAG indexing pipelines (standard/fast).
 - Export GraphML for Gephi, including evidence metadata.
 - Query indexed outputs with structured retrieval.
@@ -19,6 +20,7 @@ This directory contains the FastAPI backend for TsingAI-Lens. It manages collect
 
 ```
 backend/
+├── app/          # Application layer (use cases/services)
 ├── controllers/  # FastAPI routes (/retrieval)
 ├── retrieval/    # GraphRAG indexing/retrieval pipelines
 ├── utils/        # helpers (logging, etc.)
@@ -47,6 +49,9 @@ uvicorn main:app --reload --port 8010
 - POST `/retrieval/collections` - create collection
 - GET `/retrieval/collections` - list collections with stats
 - DELETE `/retrieval/collections/{collection_id}` - delete collection (default cannot be deleted)
+- POST `/retrieval/collections/{collection_id}/files` - upload files to a collection
+- GET `/retrieval/collections/{collection_id}/files` - list collection files
+- DELETE `/retrieval/collections/{collection_id}/files` - delete a collection file
 - POST `/retrieval/index` - run indexing on a collection
 - POST `/retrieval/index/upload` - upload a file and index immediately
 - POST `/retrieval/input/upload` - upload multiple files without indexing
@@ -63,7 +68,7 @@ uvicorn main:app --reload --port 8010
 ## Recommended Flow (MVP)
 
 1) Optional: POST `/retrieval/collections`
-2) POST `/retrieval/input/upload`
+2) POST `/retrieval/collections/{collection_id}/files`
 3) POST `/retrieval/index`
 4) GET `/retrieval/graphml`
 5) POST `/retrieval/query`
@@ -76,8 +81,10 @@ uvicorn main:app --reload --port 8010
 - `min_weight`: filter relationships by weight
 
 GraphML evidence fields (nodes and edges):
-- `text_unit_ids`, `text_unit_count`
-- `document_ids`, `document_titles`, `document_count`
+- `node_text_unit_ids`, `node_text_unit_count`
+- `node_document_ids`, `node_document_titles`, `node_document_count`
+- `edge_text_unit_ids`, `edge_text_unit_count`
+- `edge_document_ids`, `edge_document_titles`, `edge_document_count`
 
 ## Model Configuration
 
@@ -106,6 +113,7 @@ Backend uses an OpenAI-compatible endpoint. Set:
 ## 能力清单
 
 - 上传 PDF/TXT 到集合（PDF 会先抽取为文本）。
+- 集合文件管理（添加/列表/删除）。
 - 运行 GraphRAG 索引流程（standard/fast）。
 - 导出 GraphML 供 Gephi 使用，包含证据字段。
 - 基于索引结果进行结构化检索。
@@ -120,6 +128,7 @@ Backend uses an OpenAI-compatible endpoint. Set:
 
 ```
 backend/
+├── app/          # 应用层（use cases / services）
 ├── controllers/  # FastAPI 路由（/retrieval）
 ├── retrieval/    # GraphRAG 索引/检索流程
 ├── utils/        # 工具模块（日志等）
@@ -148,6 +157,9 @@ uvicorn main:app --reload --port 8010
 - POST `/retrieval/collections` - 创建集合
 - GET `/retrieval/collections` - 列出集合与统计
 - DELETE `/retrieval/collections/{collection_id}` - 删除集合（默认集合不可删）
+- POST `/retrieval/collections/{collection_id}/files` - 上传集合文件
+- GET `/retrieval/collections/{collection_id}/files` - 列出集合文件
+- DELETE `/retrieval/collections/{collection_id}/files` - 删除集合文件
 - POST `/retrieval/index` - 触发索引
 - POST `/retrieval/index/upload` - 上传单文件并索引
 - POST `/retrieval/input/upload` - 批量上传不索引
@@ -164,7 +176,7 @@ uvicorn main:app --reload --port 8010
 ## 推荐流程（MVP）
 
 1) 可选：POST `/retrieval/collections`
-2) POST `/retrieval/input/upload`
+2) POST `/retrieval/collections/{collection_id}/files`
 3) POST `/retrieval/index`
 4) GET `/retrieval/graphml`
 5) POST `/retrieval/query`
@@ -177,8 +189,10 @@ uvicorn main:app --reload --port 8010
 - `min_weight`：按关系权重过滤
 
 GraphML 证据字段（节点/边共用）：
-- `text_unit_ids`、`text_unit_count`
-- `document_ids`、`document_titles`、`document_count`
+- `node_text_unit_ids`、`node_text_unit_count`
+- `node_document_ids`、`node_document_titles`、`node_document_count`
+- `edge_text_unit_ids`、`edge_text_unit_count`
+- `edge_document_ids`、`edge_document_titles`、`edge_document_count`
 
 ## 模型配置
 

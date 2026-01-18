@@ -1,100 +1,113 @@
-# TsingAI-Lens: 清华科研文献智能助手
+# TsingAI-Lens: Research Literature Intelligence Assistant
 
-**TsingAI-Lens** 是一个可私有部署的科研文献后端，基于 Retrieval（GraphRAG pipeline）构建，提供文献导入、索引、知识图谱与结构化检索能力。
+TsingAI-Lens is a self-hosted research literature system focused on batch ingestion, knowledge graph extraction, and structured retrieval for analysis and visualization.
 
-## 📌 项目目标
+## Overview
 
-构建一个本地可部署、支持私有化文献管理的智能助手系统，具备以下能力：
+The system is built around a “collection” concept: each collection groups papers, indexing outputs, and exported graph artifacts. This keeps workflows predictable and makes it easy to manage multiple research topics in parallel.
 
-- 支持多种文献格式（PDF、TXT 等，PDF 将提取纯文本后入库）
-- 基于 Retrieval 标准索引（GraphRAG pipeline）构建知识图谱与检索输出
-- 输出可导入 Gephi 的 GraphML 图谱
-- 以“集合”为核心组织论文、索引与导出流程
+## Project Goals
 
-## 🧠 核心功能
+- Enable reliable ingestion and indexing for 10–100 papers per collection.
+- Produce GraphML outputs for Gephi-based exploration.
+- Provide structured retrieval for evidence-based answers.
+- Keep the system self-hostable and privacy-friendly.
 
-| 模块 | 功能描述 |
-|------|----------|
-| 📄 文献导入 | 上传论文到集合输入存储（支持批量） |
-| 📚 标准索引 | Retrieval（GraphRAG pipeline）构建实体/关系与索引结果 |
-| 🧠 知识图谱生成 | 生成实体/关系图谱并支持导出与可视化 |
-| 🔍 图谱导出 | 提供 GraphML 导出用于 Gephi 等工具 |
-| 🗂️ 集合管理 | 创建/列出/删除集合，查询集合统计信息 |
+## Scope and Non-Goals
 
-## 🛠️ 技术栈
+Scope:
+- PDF/TXT ingestion and text extraction (PDF must be selectable text).
+- Knowledge graph extraction and community clustering.
+- Graph export for Gephi and offline analysis.
 
-- 后端：Python, FastAPI, GraphRAG（networkx 持久化），PyMuPDF
-- 部署：Docker, Docker Compose
-- 模型支持：OpenAI 兼容 API / 本地 LLM（如 Qwen, Mistral）
+Non-goals:
+- End-user chat experience (MVP focuses on backend workflows).
+- OCR for scanned PDFs.
+- Complex frontend visualization.
 
-## 🗂️ 项目结构
+## Core Capabilities
+
+- Collection-based ingestion and indexing.
+- GraphML export for visualization tools.
+- Structured retrieval with optional context evidence.
+
+## Repository Layout
 
 ```
-
 tsingai-lens/
-├── backend/
-│   ├── controllers/    # FastAPI 路由：/retrieval
-│   ├── retrieval/      # GraphRAG 标准检索与索引流程
-│   ├── utils/          # 工具模块（日志等）
-│   ├── config.py       # 配置与常量
-│   ├── data/           # 存储目录（配置、集合、索引、输出）
-│   └── tests/          # 单元测试
-├── docs/               # 顶层文档
-└── backend/docs/       # API 文档（如 api.md）
-
+├── backend/      # Backend service and retrieval workflows
+├── frontend/     # Optional frontend assets
+├── docs/         # Project-level documentation
+└── backend/docs/ # Backend API documentation
 ```
 
-## 🚀 快速启动（本地开发）
+## Typical User Journey (High-Level)
 
-```bash
-cd backend
-uv venv .venv && source .venv/bin/activate
-uv sync   # 使用 uv.lock 安装依赖（已通过 uv add 管理）
+1) Create a collection.
+2) Upload papers into the collection.
+3) Run indexing once to build the graph.
+4) Export GraphML for Gephi.
+5) Run structured queries for insights.
 
-# 配置本地/远程 LLM，Qwen-8B 的 OpenAI 兼容推理服务示例
-export LLM_BASE_URL=http://localhost:11434/v1
-export LLM_MODEL=qwen1.5-8b-chat
-export LLM_API_KEY=sk-local
+## Documentation
 
-# 启动后端（默认 8000，如需和文档一致可用 8010）
-uvicorn main:app --reload --port 8010
+- `backend/README.md` — backend setup and usage.
+- `backend/docs/api.md` — API reference and curl examples.
+
+---
+
+# 中文说明
+
+## 项目概述
+
+TsingAI-Lens 是一个可私有化部署的科研文献系统，聚焦批量导入、知识图谱抽取与结构化检索，支持分析与可视化。
+
+系统以“集合”为核心组织论文、索引结果与图谱导出，使流程清晰可控，便于并行管理多个研究主题。
+
+## 项目目标
+
+- 支持 10–100 篇论文稳定导入与索引。
+- 产出可在 Gephi 中查看的 GraphML 图谱。
+- 提供结构化检索以支持证据驱动结论。
+- 支持私有化部署与数据可控。
+
+## 范围与非目标
+
+范围：
+- PDF/TXT 导入与文本抽取（PDF 需可复制文本）。
+- 知识图谱抽取与社区聚类。
+- 图谱导出与离线分析。
+
+非目标：
+- 面向终端用户的聊天体验（MVP 以后端流程为主）。
+- 扫描版 PDF OCR。
+- 复杂前端可视化。
+
+## 核心能力
+
+- 基于集合的导入与索引。
+- GraphML 导出用于图谱可视化。
+- 结构化检索与证据上下文输出。
+
+## 仓库结构
 
 ```
+tsingai-lens/
+├── backend/      # 后端服务与检索流程
+├── frontend/     # 可选前端资源
+├── docs/         # 项目级文档
+└── backend/docs/ # 后端 API 文档
+```
 
-## 核心 API
+## 典型使用流程（高阶）
 
-- `/retrieval/collections`：创建/列出集合（含统计指标）。
-- `/retrieval/collections/{collection_id}`：删除集合（默认集合不可删除）。
-- `/retrieval/index`：对集合启动标准索引流程。
-- `/retrieval/index/upload`：上传单文件并触发索引。
-- `/retrieval/input/upload`：批量上传文件到集合输入存储（不触发索引）。
-- `/retrieval/query`：基于集合索引结果进行结构化检索。
-- `/retrieval/graphml`：导出 GraphML 供 Gephi 等工具使用（支持 `include_community`、`community_id`）。
+1) 创建集合。
+2) 上传论文到集合。
+3) 执行索引构建图谱。
+4) 导出 GraphML 并在 Gephi 中查看。
+5) 发起结构化检索获取洞察。
 
-详见更新后的 API 文档：`backend/docs/api.md`（中文，含 curl 示例）。
+## 文档入口
 
-## 集合列表字段说明
-
-- `status`：`ready`（有实体输出）/ `empty`（未完成索引）。
-- `document_count`：集合内文档数（来自 `documents.parquet` 或索引统计）。
-- `entity_count`：集合内实体数（来自 `entities.parquet`）。
-- `updated_at`：集合输出目录关键产物更新时间，缺失时可回退使用 `created_at`。
-
-## 推荐使用流程（MVP）
-
-1) 创建集合（可选）：`POST /retrieval/collections`
-2) 批量上传论文：`POST /retrieval/input/upload`
-3) 启动索引：`POST /retrieval/index`
-4) 导出图谱：`GET /retrieval/graphml`
-5) 进入检索：`POST /retrieval/query`
-
-## GraphML 导出参数（常用）
-
-- `include_community`：默认 `true`，在节点上输出 `community` 字段用于 Gephi 分组着色。
-- `community_id`：按社区过滤导出。
-- `max_nodes`：限制最大节点数（避免过大文件）。
-- `min_weight`：按关系权重过滤。
-
-## 模型说明
-
-- 生成模型使用 OpenAI 兼容接口，默认 `LLM_MODEL=qwen1.5-8b-chat`。可指向本地 Qwen-8B、DashScope 或其他兼容端点。
+- `backend/README.md` — 后端部署与使用说明。
+- `backend/docs/api.md` — API 参考与示例。

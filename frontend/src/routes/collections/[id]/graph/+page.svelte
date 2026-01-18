@@ -63,6 +63,23 @@
     graph = null;
   });
 
+  function setPreviewStatus(message: string) {
+    if (previewStatusTimeout) {
+      clearTimeout(previewStatusTimeout);
+      previewStatusTimeout = null;
+    }
+    previewStatus = message;
+    if (!message) return;
+    previewStatusTimeout = setTimeout(() => {
+      previewStatus = '';
+      previewStatusTimeout = null;
+    }, 2600);
+  }
+
+  function dismissPreviewStatus() {
+    setPreviewStatus('');
+  }
+
   function getGraphUrl() {
     const params = new URLSearchParams();
     params.set('collection_id', collectionId);
@@ -475,19 +492,3 @@
     <li>{$t('graph.tip3')}</li>
   </ul>
 </section>
-  function setPreviewStatus(message: string) {
-    if (previewStatusTimeout) {
-      clearTimeout(previewStatusTimeout);
-      previewStatusTimeout = null;
-    }
-    previewStatus = message;
-    if (!message) return;
-    previewStatusTimeout = setTimeout(() => {
-      previewStatus = '';
-      previewStatusTimeout = null;
-    }, 2600);
-  }
-
-  function dismissPreviewStatus() {
-    setPreviewStatus('');
-  }

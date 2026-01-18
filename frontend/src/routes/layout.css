@@ -171,6 +171,12 @@ textarea {
   flex-wrap: wrap;
 }
 
+.header-action-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 .header-action {
   display: inline-flex;
   align-items: center;
@@ -199,6 +205,20 @@ textarea {
 
 .header-action .chevron {
   font-size: 0.65rem;
+}
+
+.header-toast {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(60, 201, 245, 0.4);
+  background: rgba(60, 201, 245, 0.12);
+  color: #0d5c78;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  box-shadow: 0 10px 24px rgba(15, 40, 90, 0.12);
 }
 
 .lang-menu {
@@ -366,8 +386,47 @@ textarea {
   overflow-y: auto;
 }
 
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .modal-header h3 {
   margin: 0;
+}
+
+.modal-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-close {
+  border: 1px solid var(--color-line);
+  background: #fff;
+  color: var(--color-subtle);
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-close:hover {
+  color: var(--color-ink);
+  border-color: rgba(43, 111, 247, 0.35);
+  background: rgba(43, 111, 247, 0.1);
+}
+
+.modal-close:focus-visible {
+  outline: 2px solid rgba(43, 111, 247, 0.4);
+  outline-offset: 2px;
 }
 
 .modal-form {

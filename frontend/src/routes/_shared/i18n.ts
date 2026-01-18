@@ -28,6 +28,7 @@ const translations: Record<Language, Translations> = {
       helper: 'Set the base URL used for all requests.',
       baseUrlLabel: 'Base URL',
       save: 'Save',
+      close: 'Close',
       reset: 'Reset',
       saved: 'Saved',
       resetStatus: 'Reset to default'
@@ -325,6 +326,7 @@ const translations: Record<Language, Translations> = {
       helper: '设置所有请求使用的 Base URL。',
       baseUrlLabel: 'Base URL',
       save: '保存',
+      close: '关闭',
       reset: '重置',
       saved: '已保存',
       resetStatus: '已重置为默认'

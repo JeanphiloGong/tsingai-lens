@@ -70,9 +70,12 @@ RUN set -eux; \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local /usr/local
+COPY --from=builder /app/.venv /app/.venv
 COPY . .
 
-ENV PYTHONPATH=/app
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH=/app
 
 EXPOSE 8010
 

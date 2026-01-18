@@ -18,7 +18,11 @@ const translations: Record<Language, Translations> = {
     },
     header: {
       authNone: 'Auth: none',
-      languageLabel: 'Language'
+      languageLabel: 'Language',
+      themeLabel: 'Theme',
+      themeSystem: 'System',
+      themeLight: 'Light',
+      themeDark: 'Dark'
     },
     footer: {
       pdfNote: 'PDFs must contain selectable text. Scanned PDFs are not supported.'
@@ -316,7 +320,11 @@ const translations: Record<Language, Translations> = {
     },
     header: {
       authNone: '鉴权：无',
-      languageLabel: '语言'
+      languageLabel: '语言',
+      themeLabel: '主题',
+      themeSystem: '跟随系统',
+      themeLight: '浅色',
+      themeDark: '深色'
     },
     footer: {
       pdfNote: 'PDF 需可复制文本，扫描版暂不支持。'

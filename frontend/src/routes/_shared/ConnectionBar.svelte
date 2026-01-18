@@ -63,7 +63,7 @@
   }
 </script>
 
-<button class="btn btn--ghost btn--small" type="button" on:click={openModal}>
+<button class="header-action" type="button" on:click={openModal}>
   {$t('connection.title')}
 </button>
 

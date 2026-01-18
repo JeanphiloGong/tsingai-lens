@@ -80,6 +80,33 @@ class InputUploadResponse(BaseModel):
     items: list[InputUploadItem]
 
 
+class CollectionFileRecord(BaseModel):
+    """Metadata for a collection input file."""
+
+    key: str
+    original_filename: str | None = None
+    stored_path: str | None = None
+    size_bytes: int | None = None
+    created_at: str | None = None
+
+
+class CollectionFileListResponse(BaseModel):
+    """Response containing collection input files."""
+
+    collection_id: str
+    count: int
+    items: list[CollectionFileRecord]
+
+
+class CollectionFileDeleteResponse(BaseModel):
+    """Response payload for collection file deletion."""
+
+    collection_id: str
+    key: str
+    deleted_at: str | None = None
+    status: str = "deleted"
+
+
 class CollectionCreateRequest(BaseModel):
     """Request payload to create a collection."""
 

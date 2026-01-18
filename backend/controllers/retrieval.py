@@ -269,6 +269,16 @@ def _read_parquet_or_error(path: Path, label: str) -> pd.DataFrame:
         raise HTTPException(status_code=500, detail=f"{label} 读取失败: {exc}") from exc
 
 
+def _read_parquet_optional(path: Path, label: str) -> pd.DataFrame | None:
+    if not path.is_file():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        logger.warning("Failed to read %s from %s", label, path)
+        return None
+
+
 def _safe_int(value: Any) -> int | None:
     try:
         if pd.isna(value):
@@ -285,6 +295,56 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _listify(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            if isinstance(item, float) and pd.isna(item):
+                continue
+            items.append(str(item))
+        return items
+    if isinstance(value, float) and pd.isna(value):
+        return []
+    return [str(value)]
+
+
+def _serialize_list(values: list[str]) -> str | None:
+    if not values:
+        return None
+    return json.dumps(values, ensure_ascii=False)
+
+
+def _build_source_fields(
+    text_unit_ids_value: Any,
+    text_unit_to_docs: dict[str, list[str]],
+    doc_id_to_title: dict[str, str],
+) -> dict[str, Any]:
+    text_unit_ids = sorted(set(_listify(text_unit_ids_value)))
+    doc_ids: list[str] = []
+    if text_unit_ids:
+        doc_ids = sorted(
+            {
+                doc_id
+                for text_unit_id in text_unit_ids
+                for doc_id in text_unit_to_docs.get(text_unit_id, [])
+            }
+        )
+    doc_titles = [
+        title for doc_id in doc_ids if (title := doc_id_to_title.get(doc_id))
+    ]
+    return {
+        "text_unit_ids": _serialize_list(text_unit_ids),
+        "text_unit_count": len(text_unit_ids) if text_unit_ids else None,
+        "document_ids": _serialize_list(doc_ids),
+        "document_titles": _serialize_list(doc_titles),
+        "document_count": len(doc_ids) if doc_ids else None,
+    }
 
 
 def _load_graph_payload(
@@ -312,6 +372,34 @@ def _load_graph_payload(
             raise HTTPException(status_code=404, detail="社区数据不存在，无法筛选")
         elif include_community:
             logger.warning("社区数据不存在，跳过 community 字段输出")
+
+    text_units = _read_parquet_optional(base_dir / "text_units.parquet", "文本单元")
+    documents = _read_parquet_optional(base_dir / "documents.parquet", "文档")
+    text_unit_to_docs: dict[str, list[str]] = {}
+    if text_units is not None and {
+        "id",
+        "document_ids",
+    }.issubset(text_units.columns):
+        for _, row in text_units.iterrows():
+            text_unit_id = row.get("id")
+            if text_unit_id is None or (
+                isinstance(text_unit_id, float) and pd.isna(text_unit_id)
+            ):
+                continue
+            doc_ids = _listify(row.get("document_ids"))
+            if doc_ids:
+                text_unit_to_docs[str(text_unit_id)] = doc_ids
+
+    doc_id_to_title: dict[str, str] = {}
+    if documents is not None and {"id", "title"}.issubset(documents.columns):
+        for _, row in documents.iterrows():
+            doc_id = row.get("id")
+            title = row.get("title")
+            if doc_id is None or (isinstance(doc_id, float) and pd.isna(doc_id)):
+                continue
+            if title is None or (isinstance(title, float) and pd.isna(title)):
+                continue
+            doc_id_to_title[str(doc_id)] = str(title)
 
     community_label = None
     community_row = None
@@ -404,6 +492,9 @@ def _load_graph_payload(
             "x": _safe_float(row.x),
             "y": _safe_float(row.y),
             "community": community_map.get(str(row.id)),
+            **_build_source_fields(
+                row.text_unit_ids, text_unit_to_docs, doc_id_to_title
+            ),
         }
         for _, row in entities.iterrows()
     ]
@@ -415,6 +506,9 @@ def _load_graph_payload(
             "target": map_entity(row.target),
             "weight": _safe_float(row.weight),
             "description": row.description if not pd.isna(row.description) else None,
+            **_build_source_fields(
+                row.text_unit_ids, text_unit_to_docs, doc_id_to_title
+            ),
         }
         for _, row in relationships.iterrows()
     ]
@@ -429,12 +523,17 @@ def _to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byt
     key_defs = [
         ("label", "node", "string"),
         ("type", "node", "string"),
-        ("description", "node", "string"),
+        ("description", "all", "string"),
         ("degree", "node", "int"),
         ("frequency", "node", "int"),
         ("x", "node", "double"),
         ("y", "node", "double"),
         ("community", "node", "int"),
+        ("text_unit_ids", "all", "string"),
+        ("text_unit_count", "all", "int"),
+        ("document_ids", "all", "string"),
+        ("document_titles", "all", "string"),
+        ("document_count", "all", "int"),
         ("weight", "edge", "double"),
     ]
     has_community = any(node.get("community") is not None for node in nodes)
@@ -468,6 +567,11 @@ def _to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byt
             "x",
             "y",
             "community",
+            "text_unit_ids",
+            "text_unit_count",
+            "document_ids",
+            "document_titles",
+            "document_count",
         ]:
             add_data(n, key, node.get(key))
 
@@ -479,7 +583,15 @@ def _to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byt
             source=edge["source"],
             target=edge["target"],
         )
-        for key in ["weight", "description"]:
+        for key in [
+            "weight",
+            "description",
+            "text_unit_ids",
+            "text_unit_count",
+            "document_ids",
+            "document_titles",
+            "document_count",
+        ]:
             add_data(e, key, edge.get(key))
 
     return tostring(gml, encoding="utf-8", xml_declaration=True)

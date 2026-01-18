@@ -29,6 +29,7 @@
 
     <div class="header-meta">
       <span class="badge">{$t('header.authNone')}</span>
+      <ConnectionBar />
       <div class="lang-toggle" role="group" aria-label={$t('header.languageLabel')}>
         <button
           type="button"
@@ -49,7 +50,6 @@
   </header>
 
   <main class="page">
-    <ConnectionBar />
     <slot />
   </main>
 

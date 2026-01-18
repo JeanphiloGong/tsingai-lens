@@ -334,6 +334,12 @@ textarea {
   margin: 0;
 }
 
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

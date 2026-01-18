@@ -21,14 +21,10 @@
       </div>
     </div>
 
-    <nav class="nav">
-      <a href="/" class:active={$page.url.pathname === '/'}>{$t('nav.home')}</a>
-      <a href="/docs" class:active={$page.url.pathname.startsWith('/docs')}>{$t('nav.docs')}</a>
-      <a href="/system" class:active={$page.url.pathname.startsWith('/system')}>{$t('nav.system')}</a>
-    </nav>
-
-    <div class="header-meta">
-      <span class="badge">{$t('header.authNone')}</span>
+    <div class="header-actions">
+      <a class="header-link" href="/docs" class:active={$page.url.pathname.startsWith('/docs')}>
+        {$t('nav.docs')}
+      </a>
       <ConnectionBar />
       <div class="lang-toggle" role="group" aria-label={$t('header.languageLabel')}>
         <button

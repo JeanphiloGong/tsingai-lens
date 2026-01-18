@@ -35,6 +35,7 @@
   let previewLoading = false;
   let previewError = '';
   let previewStatus = '';
+  let previewStatusTimeout: ReturnType<typeof setTimeout> | null = null;
   let previewQuery = '';
   let communityFilter = 'all';
   let communityOptions: string[] = [];
@@ -55,6 +56,9 @@
   }
 
   onDestroy(() => {
+    if (previewStatusTimeout) {
+      clearTimeout(previewStatusTimeout);
+    }
     disposeRenderer();
     graph = null;
   });
@@ -187,7 +191,7 @@
 
   async function loadPreview() {
     previewError = '';
-    previewStatus = '';
+    setPreviewStatus('');
     exportImageStatus = '';
     previewLoading = true;
 
@@ -239,7 +243,7 @@
 
       communityFilter = 'all';
       applyViewFilters();
-      previewStatus = $t('graph.previewLoaded');
+      setPreviewStatus($t('graph.previewLoaded'));
     } catch (err) {
       previewError = errorMessage(err);
     } finally {
@@ -381,7 +385,17 @@
         <p class="note">{$t('graph.previewTipNoCommunity')}</p>
       {/if}
       {#if previewStatus}
-        <div class="status" role="status" aria-live="polite">{previewStatus}</div>
+        <div class="status status--dismissible" role="status" aria-live="polite">
+          <span>{previewStatus}</span>
+          <button
+            class="status__close"
+            type="button"
+            aria-label={$t('graph.previewStatusClose')}
+            on:click={dismissPreviewStatus}
+          >
+            x
+          </button>
+        </div>
       {/if}
       {#if previewError}
         <div class="status status--error" role="alert">{previewError}</div>
@@ -461,3 +475,19 @@
     <li>{$t('graph.tip3')}</li>
   </ul>
 </section>
+  function setPreviewStatus(message: string) {
+    if (previewStatusTimeout) {
+      clearTimeout(previewStatusTimeout);
+      previewStatusTimeout = null;
+    }
+    previewStatus = message;
+    if (!message) return;
+    previewStatusTimeout = setTimeout(() => {
+      previewStatus = '';
+      previewStatusTimeout = null;
+    }, 2600);
+  }
+
+  function dismissPreviewStatus() {
+    setPreviewStatus('');
+  }

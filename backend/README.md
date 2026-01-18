@@ -6,7 +6,7 @@ This directory contains the FastAPI backend for TsingAI-Lens. It manages collect
 
 - Upload PDF/TXT into collections (PDF is converted to text before indexing).
 - Run GraphRAG indexing pipelines (standard/fast).
-- Export GraphML for Gephi.
+- Export GraphML for Gephi, including evidence metadata.
 - Query indexed outputs with structured retrieval.
 
 ## Tech Stack
@@ -75,6 +75,10 @@ uvicorn main:app --reload --port 8010
 - `max_nodes`: limit node count
 - `min_weight`: filter relationships by weight
 
+GraphML evidence fields (nodes and edges):
+- `text_unit_ids`, `text_unit_count`
+- `document_ids`, `document_titles`, `document_count`
+
 ## Model Configuration
 
 Backend uses an OpenAI-compatible endpoint. Set:
@@ -103,7 +107,7 @@ Backend uses an OpenAI-compatible endpoint. Set:
 
 - 上传 PDF/TXT 到集合（PDF 会先抽取为文本）。
 - 运行 GraphRAG 索引流程（standard/fast）。
-- 导出 GraphML 供 Gephi 使用。
+- 导出 GraphML 供 Gephi 使用，包含证据字段。
 - 基于索引结果进行结构化检索。
 
 ## 技术栈
@@ -171,6 +175,10 @@ uvicorn main:app --reload --port 8010
 - `community_id`：导出指定社区
 - `max_nodes`：限制节点数量
 - `min_weight`：按关系权重过滤
+
+GraphML 证据字段（节点/边共用）：
+- `text_unit_ids`、`text_unit_count`
+- `document_ids`、`document_titles`、`document_count`
 
 ## 模型配置
 

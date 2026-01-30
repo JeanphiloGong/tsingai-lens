@@ -1,12 +1,18 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { errorMessage, formatResult, requestJson } from '../../../_shared/api';
+  import {
+    deleteCollectionFile,
+    listCollectionFiles,
+    uploadCollectionFiles,
+    type CollectionFile
+  } from '../../../_shared/files';
   import { t } from '../../../_shared/i18n';
 
   $: collectionId = $page.params.id;
 
   let showModal = false;
-  let files: File[] = [];
+  let selectedFiles: File[] = [];
   let isDragging = false;
   let indexAfterUpload = true;
   let indexMode: 'update' | 'rebuild' = 'update';
@@ -17,10 +23,17 @@
   let indexResult: unknown = null;
   let indexStatus = '';
   let fileInput: HTMLInputElement | null = null;
+  let collectionFiles: CollectionFile[] = [];
+  let filesLoading = false;
+  let filesError = '';
+  let deleteTarget: CollectionFile | null = null;
+  let deleteLoading = false;
+  let deleteError = '';
+  let loadedCollectionId = '';
 
   function openModal() {
     showModal = true;
-    files = [];
+    selectedFiles = [];
     isDragging = false;
     indexAfterUpload = true;
     indexMode = 'update';
@@ -47,7 +60,7 @@
   }
 
   function handleFiles(fileList: FileList | null) {
-    files = fileList ? Array.from(fileList) : [];
+    selectedFiles = fileList ? Array.from(fileList) : [];
   }
 
   function handleDrop(event: DragEvent) {
@@ -70,27 +83,101 @@
     fileInput?.click();
   }
 
+  function formatDate(value?: string) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
+  }
+
+  function formatBytes(value?: number) {
+    if (value === undefined || value === null) return '-';
+    if (value < 1024) return `${value} B`;
+    const kb = value / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(1)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(1)} GB`;
+  }
+
+  function getFileLabel(file: CollectionFile) {
+    return file.original_filename || file.key || file.stored_path || $t('documents.untitledFile');
+  }
+
+  function getFileSub(file: CollectionFile) {
+    return file.key || file.stored_path || '';
+  }
+
+  async function loadFiles() {
+    filesLoading = true;
+    filesError = '';
+    try {
+      const data = await listCollectionFiles(collectionId);
+      collectionFiles = Array.isArray(data.items) ? data.items : [];
+    } catch (err) {
+      filesError = errorMessage(err);
+    } finally {
+      filesLoading = false;
+    }
+  }
+
+  function openDelete(file: CollectionFile) {
+    deleteTarget = file;
+    deleteError = '';
+  }
+
+  function closeDelete() {
+    deleteTarget = null;
+    deleteLoading = false;
+    deleteError = '';
+  }
+
+  function handleDeleteBackdropKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      closeDelete();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      closeDelete();
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    deleteLoading = true;
+    deleteError = '';
+    try {
+      await deleteCollectionFile(collectionId, deleteTarget.key);
+      closeDelete();
+      await loadFiles();
+    } catch (err) {
+      deleteError = errorMessage(err);
+      deleteLoading = false;
+    }
+  }
+
+  $: if (collectionId && collectionId !== loadedCollectionId) {
+    loadedCollectionId = collectionId;
+    loadFiles();
+  }
+
   async function submitUpload() {
     uploadError = '';
     uploadResult = null;
     indexResult = null;
     indexStatus = '';
 
-    if (!files.length) {
+    if (!selectedFiles.length) {
       uploadError = $t('documents.errorNoFiles');
       return;
     }
 
-    const formData = new FormData();
-    formData.append('collection_id', collectionId);
-    files.forEach((file) => formData.append('files', file));
-
     uploadLoading = true;
     try {
-      uploadResult = await requestJson('/retrieval/input/upload', {
-        method: 'POST',
-        body: formData
-      });
+      uploadResult = await uploadCollectionFiles(collectionId, selectedFiles);
+      await loadFiles();
       indexStatus = $t('documents.uploadDone');
       if (indexAfterUpload) {
         indexStatus = $t('documents.indexing');
@@ -127,8 +214,50 @@
 
 <section class="card">
   <h3>{$t('documents.listTitle')}</h3>
-  <p class="note">{$t('documents.listPlaceholder')}</p>
-  <p class="meta-text">{$t('documents.listHelper')}</p>
+  {#if filesLoading}
+    <div class="status" role="status" aria-live="polite">{$t('documents.listLoading')}</div>
+  {:else if filesError}
+    <div class="status status--error" role="alert">{filesError}</div>
+  {:else if !collectionFiles.length}
+    <p class="note">{$t('documents.listEmptyTitle')}</p>
+    <p class="meta-text">{$t('documents.listEmptyDesc')}</p>
+  {:else}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{$t('documents.tableName')}</th>
+            <th>{$t('documents.tableSize')}</th>
+            <th>{$t('documents.tableCreated')}</th>
+            <th>{$t('documents.tableActions')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each collectionFiles as file}
+            <tr>
+              <td>
+                <div class="table-main">
+                  <div class="table-title">{getFileLabel(file)}</div>
+                  {#if getFileSub(file)}
+                    <div class="table-sub file-meta">{getFileSub(file)}</div>
+                  {/if}
+                </div>
+              </td>
+              <td>{formatBytes(file.size_bytes)}</td>
+              <td>{formatDate(file.created_at)}</td>
+              <td>
+                <div class="table-actions">
+                  <button class="btn btn--ghost btn--small btn--danger" type="button" on:click={() => openDelete(file)}>
+                    {$t('documents.actionDelete')}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {/if}
 </section>
 
 {#if uploadResult !== null || indexResult !== null || uploadError}
@@ -196,8 +325,8 @@
         />
         <div class="dropzone-title">{$t('documents.dropHint')}</div>
         <div class="dropzone-sub">{$t('documents.browse')}</div>
-        {#if files.length}
-          <div class="dropzone-files">{$t('documents.selectedCount', { count: files.length })}</div>
+        {#if selectedFiles.length}
+          <div class="dropzone-files">{$t('documents.selectedCount', { count: selectedFiles.length })}</div>
         {/if}
       </div>
 
@@ -252,6 +381,44 @@
         </button>
         <button class="btn btn--primary" type="button" on:click={submitUpload} disabled={uploadLoading}>
           {uploadLoading ? $t('documents.uploading') : $t('documents.upload')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if deleteTarget}
+  <div
+    class="modal-backdrop"
+    role="button"
+    tabindex="0"
+    aria-label={$t('documents.deleteCancel')}
+    on:click={closeDelete}
+    on:keydown={handleDeleteBackdropKeydown}
+  >
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+      <div class="modal-header">
+        <div class="modal-title">
+          <h3>{$t('documents.deleteTitle')}</h3>
+          <p class="meta-text">
+            {$t('documents.deleteDesc', { name: getFileLabel(deleteTarget) })}
+          </p>
+        </div>
+        <button class="modal-close" type="button" on:click={closeDelete} aria-label={$t('documents.deleteCancel')}>
+          x
+        </button>
+      </div>
+
+      {#if deleteError}
+        <div class="status status--error" role="alert">{deleteError}</div>
+      {/if}
+
+      <div class="modal-actions">
+        <button class="btn btn--ghost" type="button" on:click={closeDelete}>
+          {$t('documents.deleteCancel')}
+        </button>
+        <button class="btn btn--danger" type="button" on:click={confirmDelete} disabled={deleteLoading}>
+          {deleteLoading ? $t('documents.deleting') : $t('documents.deleteConfirm')}
         </button>
       </div>
     </div>

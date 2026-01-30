@@ -22,6 +22,44 @@
     '#4ab4d3'
   ];
 
+  type NodeDetail = {
+    id: string;
+    label: string;
+    type?: string;
+    description?: string;
+    community?: string;
+    degree?: number;
+    frequency?: number;
+    node_text_unit_ids?: string;
+    node_text_unit_count?: number;
+    node_document_ids?: string;
+    node_document_titles?: string;
+    node_document_count?: number;
+  };
+
+  type EdgeDetail = {
+    id: string;
+    source: string;
+    target: string;
+    sourceLabel: string;
+    targetLabel: string;
+    weight?: number;
+    edge_description?: string;
+    edge_text_unit_ids?: string;
+    edge_text_unit_count?: number;
+    edge_document_ids?: string;
+    edge_document_titles?: string;
+    edge_document_count?: number;
+  };
+
+  type EvidencePreview = {
+    items: string[];
+    extra: number;
+  };
+
+  const listPreviewLimit = 4;
+  const emptyPreview: EvidencePreview = { items: [], extra: 0 };
+
   $: collectionId = $page.params.id;
 
   let maxNodes = 200;
@@ -48,6 +86,21 @@
   let renderer: Sigma | null = null;
   let graph: Graph | null = null;
   let themeObserver: MutationObserver | null = null;
+  let selectedNode: NodeDetail | null = null;
+  let selectedEdge: EdgeDetail | null = null;
+  let nodeDocumentPreview: EvidencePreview = emptyPreview;
+  let nodeTextUnitPreview: EvidencePreview = emptyPreview;
+  let edgeDocumentPreview: EvidencePreview = emptyPreview;
+  let edgeTextUnitPreview: EvidencePreview = emptyPreview;
+
+  $: nodeDocumentPreview = selectedNode
+    ? buildPreview(selectedNode.node_document_titles || selectedNode.node_document_ids)
+    : emptyPreview;
+  $: nodeTextUnitPreview = selectedNode ? buildPreview(selectedNode.node_text_unit_ids) : emptyPreview;
+  $: edgeDocumentPreview = selectedEdge
+    ? buildPreview(selectedEdge.edge_document_titles || selectedEdge.edge_document_ids)
+    : emptyPreview;
+  $: edgeTextUnitPreview = selectedEdge ? buildPreview(selectedEdge.edge_text_unit_ids) : emptyPreview;
 
   function disposeRenderer() {
     if (renderer) {
@@ -68,6 +121,119 @@
     renderer.setSetting('labelColor', { color: ink });
     renderer.setSetting('edgeLabelColor', { color: ink });
     renderer.setSetting('defaultEdgeColor', ink);
+  }
+
+  function toText(value: unknown) {
+    if (value === undefined || value === null) return undefined;
+    const text = String(value).trim();
+    return text ? text : undefined;
+  }
+
+  function toNumber(value: unknown) {
+    if (value === undefined || value === null) return undefined;
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  function splitList(value?: string) {
+    if (!value) return [];
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item) => String(item).trim()).filter(Boolean);
+        }
+      } catch {
+        // fall through to delimiter handling
+      }
+    }
+    const separators = ['|', ';', ','];
+    for (const separator of separators) {
+      if (trimmed.includes(separator)) {
+        return trimmed
+          .split(separator)
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+    }
+    return [trimmed];
+  }
+
+  function buildPreview(value?: string): EvidencePreview {
+    const items = splitList(value);
+    const limited = items.slice(0, listPreviewLimit);
+    return {
+      items: limited,
+      extra: Math.max(0, items.length - limited.length)
+    };
+  }
+
+  function getNodeLabel(nodeId: string) {
+    if (!graph) return nodeId;
+    const attrs = graph.getNodeAttributes(nodeId) as Record<string, unknown>;
+    return String(attrs.label ?? nodeId);
+  }
+
+  function clearSelection() {
+    selectedNode = null;
+    selectedEdge = null;
+  }
+
+  function selectNode(nodeId: string) {
+    if (!graph) return;
+    const attrs = graph.getNodeAttributes(nodeId) as Record<string, unknown>;
+    selectedEdge = null;
+    selectedNode = {
+      id: nodeId,
+      label: String(attrs.label ?? nodeId),
+      type: toText(attrs.type),
+      description: toText(attrs.description),
+      community: toText(attrs.community),
+      degree: toNumber(attrs.degree) ?? graph.degree(nodeId),
+      frequency: toNumber(attrs.frequency),
+      node_text_unit_ids: toText(attrs.node_text_unit_ids),
+      node_text_unit_count: toNumber(attrs.node_text_unit_count),
+      node_document_ids: toText(attrs.node_document_ids),
+      node_document_titles: toText(attrs.node_document_titles),
+      node_document_count: toNumber(attrs.node_document_count)
+    };
+  }
+
+  function selectEdge(edgeId: string) {
+    if (!graph) return;
+    const attrs = graph.getEdgeAttributes(edgeId) as Record<string, unknown>;
+    const source = graph.source(edgeId) as string;
+    const target = graph.target(edgeId) as string;
+    selectedNode = null;
+    selectedEdge = {
+      id: edgeId,
+      source,
+      target,
+      sourceLabel: getNodeLabel(source),
+      targetLabel: getNodeLabel(target),
+      weight: toNumber(attrs.weight),
+      edge_description: toText(attrs.edge_description),
+      edge_text_unit_ids: toText(attrs.edge_text_unit_ids),
+      edge_text_unit_count: toNumber(attrs.edge_text_unit_count),
+      edge_document_ids: toText(attrs.edge_document_ids),
+      edge_document_titles: toText(attrs.edge_document_titles),
+      edge_document_count: toNumber(attrs.edge_document_count)
+    };
+  }
+
+  function attachRendererEvents() {
+    if (!renderer) return;
+    renderer.on('clickNode', (payload) => {
+      selectNode(payload.node);
+    });
+    renderer.on('clickEdge', (payload) => {
+      selectEdge(payload.edge);
+    });
+    renderer.on('clickStage', () => {
+      clearSelection();
+    });
   }
 
   onDestroy(() => {
@@ -129,12 +295,16 @@
   function buildGraph() {
     if (!graph) return;
 
-    graph.forEachNode((node) => {
+    graph.forEachNode((node, attrs) => {
       const degree = graph ? graph.degree(node) : 0;
       const size = Math.max(4, Math.min(18, degree + 4));
       graph?.setNodeAttribute(node, 'size', size);
-      graph?.setNodeAttribute(node, 'x', Math.random());
-      graph?.setNodeAttribute(node, 'y', Math.random());
+      if (typeof attrs.x !== 'number') {
+        graph?.setNodeAttribute(node, 'x', Math.random());
+      }
+      if (typeof attrs.y !== 'number') {
+        graph?.setNodeAttribute(node, 'y', Math.random());
+      }
     });
   }
 
@@ -242,6 +412,7 @@
     previewError = '';
     setPreviewStatus('');
     exportImageStatus = '';
+    clearSelection();
     previewLoading = true;
 
     try {
@@ -258,7 +429,18 @@
         if (!nextGraph.hasNode(node.id)) {
           nextGraph.addNode(node.id, {
             label: node.label,
-            community: node.community
+            community: node.community,
+            type: node.type,
+            description: node.description,
+            degree: node.degree,
+            frequency: node.frequency,
+            x: node.x,
+            y: node.y,
+            node_text_unit_ids: node.node_text_unit_ids,
+            node_text_unit_count: node.node_text_unit_count,
+            node_document_ids: node.node_document_ids,
+            node_document_titles: node.node_document_titles,
+            node_document_count: node.node_document_count
           });
         }
       });
@@ -266,7 +448,15 @@
       parsed.edges.forEach((edge) => {
         if (!nextGraph.hasNode(edge.source) || !nextGraph.hasNode(edge.target)) return;
         if (nextGraph.hasEdge(edge.id)) return;
-        nextGraph.addEdgeWithKey(edge.id, edge.source, edge.target, { weight: edge.weight });
+        nextGraph.addEdgeWithKey(edge.id, edge.source, edge.target, {
+          weight: edge.weight,
+          edge_description: edge.edge_description,
+          edge_text_unit_ids: edge.edge_text_unit_ids,
+          edge_text_unit_count: edge.edge_text_unit_count,
+          edge_document_ids: edge.edge_document_ids,
+          edge_document_titles: edge.edge_document_titles,
+          edge_document_count: edge.edge_document_count
+        });
       });
 
       graph = nextGraph;
@@ -286,9 +476,11 @@
       if (graphContainer) {
         renderer = new Sigma(graph, graphContainer, {
           labelRenderedSizeThreshold: 6,
-          renderEdgeLabels: false
+          renderEdgeLabels: false,
+          enableEdgeClickEvents: true
         });
         applyRendererTheme();
+        attachRendererEvents();
       }
 
       communityFilter = 'all';
@@ -430,6 +622,155 @@
       <div class="graph-stats">
         <span>{$t('graph.visibleNodes')}: {visibleNodes}</span>
         <span>{$t('graph.visibleEdges')}: {visibleEdges}</span>
+      </div>
+      <div class="graph-details">
+        <div class="graph-details__header">
+          <span>{$t('graph.detailsTitle')}</span>
+          {#if selectedNode || selectedEdge}
+            <button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
+              {$t('graph.detailsClear')}
+            </button>
+          {/if}
+        </div>
+        {#if selectedNode}
+          <div class="detail-primary">
+            <span class="detail-tag">{$t('graph.detailsNode')}</span>
+            <span class="detail-name">{selectedNode.label}</span>
+          </div>
+          <dl class="detail-list">
+            {#if selectedNode.type}
+              <div class="detail-row">
+                <dt>{$t('graph.detailType')}</dt>
+                <dd>{selectedNode.type}</dd>
+              </div>
+            {/if}
+            {#if selectedNode.community}
+              <div class="detail-row">
+                <dt>{$t('graph.detailCommunity')}</dt>
+                <dd>{selectedNode.community}</dd>
+              </div>
+            {/if}
+            {#if typeof selectedNode.degree === 'number'}
+              <div class="detail-row">
+                <dt>{$t('graph.detailDegree')}</dt>
+                <dd>{selectedNode.degree}</dd>
+              </div>
+            {/if}
+            {#if typeof selectedNode.frequency === 'number'}
+              <div class="detail-row">
+                <dt>{$t('graph.detailFrequency')}</dt>
+                <dd>{selectedNode.frequency}</dd>
+              </div>
+            {/if}
+            {#if selectedNode.description}
+              <div class="detail-row detail-row--wide">
+                <dt>{$t('graph.detailDescription')}</dt>
+                <dd>{selectedNode.description}</dd>
+              </div>
+            {/if}
+          </dl>
+          {#if typeof selectedNode.node_document_count === 'number' || nodeDocumentPreview.items.length}
+            <div class="detail-section">
+              <div class="detail-section__title">
+                {$t('graph.detailDocuments')}
+                {#if typeof selectedNode.node_document_count === 'number'}
+                  <span class="detail-count">{selectedNode.node_document_count}</span>
+                {/if}
+              </div>
+              {#if nodeDocumentPreview.items.length}
+                <div class="detail-chips">
+                  {#each nodeDocumentPreview.items as item}
+                    <span class="detail-chip">{item}</span>
+                  {/each}
+                  {#if nodeDocumentPreview.extra > 0}
+                    <span class="detail-chip detail-chip--muted">+{nodeDocumentPreview.extra}</span>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
+          {#if typeof selectedNode.node_text_unit_count === 'number' || nodeTextUnitPreview.items.length}
+            <div class="detail-section">
+              <div class="detail-section__title">
+                {$t('graph.detailTextUnits')}
+                {#if typeof selectedNode.node_text_unit_count === 'number'}
+                  <span class="detail-count">{selectedNode.node_text_unit_count}</span>
+                {/if}
+              </div>
+              {#if nodeTextUnitPreview.items.length}
+                <div class="detail-chips">
+                  {#each nodeTextUnitPreview.items as item}
+                    <span class="detail-chip">{item}</span>
+                  {/each}
+                  {#if nodeTextUnitPreview.extra > 0}
+                    <span class="detail-chip detail-chip--muted">+{nodeTextUnitPreview.extra}</span>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
+        {:else if selectedEdge}
+          <div class="detail-primary">
+            <span class="detail-tag">{$t('graph.detailsEdge')}</span>
+            <span class="detail-name">{selectedEdge.sourceLabel} -> {selectedEdge.targetLabel}</span>
+          </div>
+          <dl class="detail-list">
+            {#if typeof selectedEdge.weight === 'number'}
+              <div class="detail-row">
+                <dt>{$t('graph.detailWeight')}</dt>
+                <dd>{selectedEdge.weight}</dd>
+              </div>
+            {/if}
+            {#if selectedEdge.edge_description}
+              <div class="detail-row detail-row--wide">
+                <dt>{$t('graph.detailDescription')}</dt>
+                <dd>{selectedEdge.edge_description}</dd>
+              </div>
+            {/if}
+          </dl>
+          {#if typeof selectedEdge.edge_document_count === 'number' || edgeDocumentPreview.items.length}
+            <div class="detail-section">
+              <div class="detail-section__title">
+                {$t('graph.detailDocuments')}
+                {#if typeof selectedEdge.edge_document_count === 'number'}
+                  <span class="detail-count">{selectedEdge.edge_document_count}</span>
+                {/if}
+              </div>
+              {#if edgeDocumentPreview.items.length}
+                <div class="detail-chips">
+                  {#each edgeDocumentPreview.items as item}
+                    <span class="detail-chip">{item}</span>
+                  {/each}
+                  {#if edgeDocumentPreview.extra > 0}
+                    <span class="detail-chip detail-chip--muted">+{edgeDocumentPreview.extra}</span>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
+          {#if typeof selectedEdge.edge_text_unit_count === 'number' || edgeTextUnitPreview.items.length}
+            <div class="detail-section">
+              <div class="detail-section__title">
+                {$t('graph.detailTextUnits')}
+                {#if typeof selectedEdge.edge_text_unit_count === 'number'}
+                  <span class="detail-count">{selectedEdge.edge_text_unit_count}</span>
+                {/if}
+              </div>
+              {#if edgeTextUnitPreview.items.length}
+                <div class="detail-chips">
+                  {#each edgeTextUnitPreview.items as item}
+                    <span class="detail-chip">{item}</span>
+                  {/each}
+                  {#if edgeTextUnitPreview.extra > 0}
+                    <span class="detail-chip detail-chip--muted">+{edgeTextUnitPreview.extra}</span>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
+        {:else}
+          <p class="meta-text">{$t('graph.detailsEmpty')}</p>
+        {/if}
       </div>
       {#if graph && (!includeCommunity || !communityOptions.length)}
         <p class="note">{$t('graph.previewTipNoCommunity')}</p>

@@ -127,6 +127,62 @@
 - 证据字段依赖 `text_units.parquet` 与 `documents.parquet`，若缺失则不输出。
 - 配置由服务端在集合级别管理，客户端无需传入配置路径。
 
+## Protocol 产物与 SOP（/retrieval/protocol）
+- 说明：这些接口消费 protocol 中间产物。`output_path` 为空时，会回退到默认 collection 的 output 目录。
+
+- **POST** `/retrieval/protocol/extract` — 读取并汇总 protocol 产物
+  - 请求体（JSON）：
+    - `output_path`（可选）：GraphRAG 输出目录
+    - `paper_ids`（可选）：按论文 ID 过滤
+    - `limit`（可选，默认 `50`，范围 `1-500`）
+  - 返回：`summary`、`sections`、`procedure_blocks`、`protocol_steps`。
+  ```bash
+  curl -X POST http://localhost:8010/retrieval/protocol/extract \
+    -H "Content-Type: application/json" \
+    -d '{"output_path":"/path/to/output","paper_ids":["paper-1"],"limit":20}'
+  ```
+
+- **GET** `/retrieval/protocol/steps` — 列出 protocol steps
+  - 查询参数：
+    - `output_path`（可选）
+    - `paper_id`（可选）
+    - `block_type`（可选）
+    - `limit`（默认 `50`，范围 `1-500`）
+    - `offset`（默认 `0`）
+  ```bash
+  curl "http://localhost:8010/retrieval/protocol/steps?output_path=/path/to/output&paper_id=paper-1&limit=20"
+  ```
+
+- **GET** `/retrieval/protocol/search` — 检索 protocol steps
+  - 查询参数：
+    - `q`（必填）
+    - `output_path`（可选）
+    - `paper_id`（可选）
+    - `limit`（默认 `10`，范围 `1-100`）
+  ```bash
+  curl "http://localhost:8010/retrieval/protocol/search?q=anneal%20N2&output_path=/path/to/output&limit=5"
+  ```
+
+- **POST** `/retrieval/protocol/sop` — 基于 protocol steps 生成结构化 SOP 草案
+  - 请求体（JSON）：
+    - `goal`（必填）
+    - `output_path`（可选）
+    - `paper_ids`（可选数组）
+    - `target_properties`（可选数组）
+    - `max_steps`（可选，默认 `12`，范围 `1-50`）
+  - 返回：`count`、`sop_draft`。
+  ```bash
+  curl -X POST http://localhost:8010/retrieval/protocol/sop \
+    -H "Content-Type: application/json" \
+    -d '{
+      "goal":"Design a composite protocol for mechanical and thermal optimization",
+      "output_path":"/path/to/output",
+      "target_properties":["mechanical","thermal"],
+      "paper_ids":["paper-1"],
+      "max_steps":8
+    }'
+  ```
+
 ## Protocol 数据合同（字段定义）
 - 下列结构为即将接入 `/retrieval/protocol/*` 接口的合同定义，本次先定义字段，不代表路由已全部实现。
 - 目录级输入统一使用 `output_path` 指向 GraphRAG 产物目录；为空时回退默认配置输出目录。

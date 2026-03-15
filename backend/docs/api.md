@@ -126,3 +126,94 @@
 - PDF 需可复制文本（扫描版 PDF 暂不支持 OCR）。
 - 证据字段依赖 `text_units.parquet` 与 `documents.parquet`，若缺失则不输出。
 - 配置由服务端在集合级别管理，客户端无需传入配置路径。
+
+## Protocol 数据合同（字段定义）
+- 下列结构为即将接入 `/retrieval/protocol/*` 接口的合同定义，本次先定义字段，不代表路由已全部实现。
+- 目录级输入统一使用 `output_path` 指向 GraphRAG 产物目录；为空时回退默认配置输出目录。
+
+- `NormalizedValueItem`
+  - `value`：归一化后的数值。
+  - `unit`：归一化单位，建议温度统一 `K`、时长统一 `s`、压力统一 `Pa`。
+  - `raw_value`：原始文本值。
+  - `operator`：`=`、`>`、`<`、`~`、`range`。
+  - `min_value` / `max_value`：区间值。
+  - `status`：`reported` / `inferred` / `not_reported` / `ambiguous`。
+
+- `ConditionItem`
+  - `temperature` / `duration` / `pressure` / `heating_rate` / `cooling_rate` / `ph`
+  - `atmosphere`
+  - `environment`
+  - `raw_text`
+
+- `MaterialRefItem`
+  - `name`
+  - `formula`
+  - `role`：`precursor` / `solvent` / `additive` / `matrix` / `filler` / `sample` / `product` / `other`
+  - `amount`
+  - `composition_note`
+  - `grade`
+  - `source_text`
+
+- `MeasurementSpecItem`
+  - `method`
+  - `instrument`
+  - `target_property`
+  - `metrics`
+  - `conditions`
+  - `output_ref`
+  - `source_text`
+
+- `ControlSpecItem`
+  - `control_type`：`baseline` / `blank` / `untreated` / `literature` / `ablation` / `other`
+  - `description`
+  - `rationale`
+  - `source_text`
+
+- `EvidenceRefItem`
+  - `paper_id`
+  - `section_id`
+  - `block_id`
+  - `snippet_id`
+  - `section_type`
+  - `page_start` / `page_end`
+  - `figure_or_table`
+  - `quote_span`
+  - `source_text`
+  - `confidence_score`
+
+- `ProtocolStepItem`
+  - `step_id`
+  - `paper_id`
+  - `order`
+  - `action`
+  - `section_id`
+  - `block_id`
+  - `phase`：`preparation` / `synthesis` / `post_treatment` / `characterization` / `property_test` / `analysis` / `other`
+  - `materials`
+  - `conditions`
+  - `purpose`
+  - `expected_output`
+  - `characterization`
+  - `controls`
+  - `evidence_refs`
+  - `confidence_score`
+
+- `SOPDraftItem`
+  - `sop_id`
+  - `objective`
+  - `hypothesis`
+  - `variables`
+  - `constraints`
+  - `controls`
+  - `steps`
+  - `measurement_plan`
+  - `acceptance_criteria`
+  - `risks`
+  - `open_questions`
+  - `review_status`
+
+- 预留请求/响应模型
+  - `ProtocolExtractRequest` / `ProtocolExtractResponse`
+  - `ProtocolStepListResponse`
+  - `ProtocolSearchHit` / `ProtocolSearchResponse`
+  - `SOPDraftRequest` / `SOPDraftResponse`

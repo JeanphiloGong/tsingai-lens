@@ -131,6 +131,7 @@
 
 ## Protocol 产物与 SOP（/retrieval/protocol）
 - 说明：这些接口消费 protocol 中间产物。`output_path` 为空时，会回退到默认 collection 的 output 目录。
+- `/retrieval/protocol/extract` 只消费上游已经生成的 `sections.parquet`、`procedure_blocks.parquet`、`protocol_steps.parquet`，不会自行执行 parser/extractor。
 
 - **POST** `/retrieval/protocol/extract` — 读取并汇总 protocol 产物
   - 请求体（JSON）：

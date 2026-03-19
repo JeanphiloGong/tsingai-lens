@@ -55,6 +55,7 @@
 ## 索引与上传（/retrieval）
 - **POST** `/retrieval/index` — 启动索引流程
   - 请求体（JSON）：`collection_id`（可选）、`method`（默认 `standard`，可选：`standard`/`fast`）、`is_update_run`（默认 `false`）、`verbose`（默认 `false`）、`additional_context`（可选字典）。
+  - 成功完成 GraphRAG 索引后，会继续自动生成 protocol 产物：`sections.parquet`、`procedure_blocks.parquet`、`protocol_steps.parquet`。
   - 返回：`status`、`workflows`、`errors`、`output_path`、`stored_input_path`。
   ```bash
   curl -X POST http://localhost:8010/retrieval/index \
@@ -64,6 +65,7 @@
 
 - **POST** `/retrieval/index/upload` — 上传文件并启动索引
   - 表单字段：`file`（必填；PDF 会先提取纯文本再入库），`collection_id`（可选），`method`（可选，默认 `standard`），`is_update_run`（可选，默认 `false`），`verbose`（可选，默认 `false`）。
+  - 成功完成 GraphRAG 索引后，会继续自动生成 protocol 产物：`sections.parquet`、`procedure_blocks.parquet`、`protocol_steps.parquet`。
   - 返回：同上，额外返回 `stored_input_path`（存储的输入文件路径/键）。
   ```bash
   curl -X POST http://localhost:8010/retrieval/index/upload \

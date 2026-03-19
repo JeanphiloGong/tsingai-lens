@@ -8,7 +8,7 @@
   let status = '';
   let error = '';
   let isOpen = false;
-  let statusTimeout: ReturnType<typeof setTimeout> | null = null;
+  let statusTimeout: number | null = null;
 
   onMount(() => {
     draft = $baseUrl;
@@ -16,7 +16,7 @@
 
   onDestroy(() => {
     if (statusTimeout) {
-      clearTimeout(statusTimeout);
+      window.clearTimeout(statusTimeout);
     }
   });
 
@@ -44,7 +44,7 @@
 
   function setStatus(message: string) {
     if (statusTimeout) {
-      clearTimeout(statusTimeout);
+      window.clearTimeout(statusTimeout);
       statusTimeout = null;
     }
     status = message;
@@ -91,10 +91,10 @@
     role="button"
     tabindex="0"
     aria-label={$t('connection.close')}
-    on:click={closeModal}
+    on:click|self={closeModal}
     on:keydown={handleBackdropKeydown}
   >
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <div class="modal-title">
           <h3>{$t('connection.title')}</h3>

@@ -338,10 +338,10 @@
     role="button"
     tabindex="0"
     aria-label={$t('create.cancel')}
-    on:click={closeCreate}
+    on:click|self={closeCreate}
     on:keydown={handleBackdropKeydown}
   >
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <h3>{$t('create.title')}</h3>
       </div>
@@ -396,10 +396,10 @@
     role="button"
     tabindex="0"
     aria-label={$t('home.deleteCancel')}
-    on:click={closeDelete}
+    on:click|self={closeDelete}
     on:keydown={handleDeleteBackdropKeydown}
   >
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <h3>{$t('home.deleteTitle')}</h3>
         <p class="meta-text">

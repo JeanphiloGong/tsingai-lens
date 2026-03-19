@@ -95,7 +95,7 @@
       <div
         class="theme-menu"
         bind:this={themeMenu}
-        on:keydown={handleThemeKeydown}
+        role="group"
         aria-label={$t('header.themeLabel')}
       >
         <button
@@ -104,6 +104,7 @@
           aria-haspopup="menu"
           aria-expanded={isThemeOpen}
           on:click|stopPropagation={toggleThemeMenu}
+          on:keydown={handleThemeKeydown}
         >
           {$t('header.themeLabel')}
           <span class="theme-state">
@@ -118,7 +119,7 @@
           <span class="chevron" aria-hidden="true">▾</span>
         </button>
         {#if isThemeOpen}
-          <div class="lang-dropdown" role="menu">
+          <div class="lang-dropdown" role="menu" tabindex="-1" on:keydown={handleThemeKeydown}>
             <button type="button" role="menuitem" class:active={$themePreference === 'system'} on:click={() => setTheme('system')}>
               {$t('header.themeSystem')}
             </button>
@@ -134,7 +135,7 @@
       <div
         class="lang-menu"
         bind:this={langMenu}
-        on:keydown={handleLangKeydown}
+        role="group"
         aria-label={$t('header.languageLabel')}
       >
         <button
@@ -143,12 +144,13 @@
           aria-haspopup="menu"
           aria-expanded={isLangOpen}
           on:click|stopPropagation={toggleLangMenu}
+          on:keydown={handleLangKeydown}
         >
           {$t('header.languageLabel')}
           <span class="chevron" aria-hidden="true">▾</span>
         </button>
         {#if isLangOpen}
-          <div class="lang-dropdown" role="menu">
+          <div class="lang-dropdown" role="menu" tabindex="-1" on:keydown={handleLangKeydown}>
             <button type="button" role="menuitem" class:active={$language === 'en'} on:click={() => setLanguage('en')}>
               EN
             </button>

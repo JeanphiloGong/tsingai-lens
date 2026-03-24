@@ -3,7 +3,11 @@ import { derived, writable } from 'svelte/store';
 
 export type Language = 'en' | 'zh';
 
-type Translations = Record<string, string | Translations>;
+type TranslationValue = string | Translations;
+
+interface Translations {
+  [key: string]: TranslationValue;
+}
 
 const translations: Record<Language, Translations> = {
   en: {
@@ -666,7 +670,7 @@ function format(template: string, vars: Record<string, string | number> = {}) {
 
 function lookupTranslation(lang: Language, key: string) {
   const parts = key.split('.');
-  let value: Translations | string | undefined = translations[lang];
+  let value: TranslationValue | undefined = translations[lang];
   for (const part of parts) {
     if (!value || typeof value !== 'object' || !(part in value)) {
       return null;

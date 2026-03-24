@@ -20,6 +20,15 @@ logger = logging.getLogger(__name__)
 COLLECTIONS_DIR = CONFIG_DIR.parent / "collections"
 DEFAULT_COLLECTION_ID = "default"
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "default.yaml"
+LEGACY_DATA_DIR = CONFIG_DIR.parent
+LEGACY_DEFAULT_PATHS = {
+    "input_base_dir": "../../documents",
+    "output_base_dir": "../../output",
+    "update_output_base_dir": "../../update_output",
+    "cache_base_dir": "../../cache",
+    "reporting_base_dir": "../../logs",
+    "vector_store_uri": "../../vector_store/lancedb",
+}
 
 
 def collection_dir(collection_id: str) -> Path:
@@ -44,6 +53,84 @@ def write_collection_meta(collection_id: str, name: str | None) -> None:
         json.dumps(meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _resolve_collection_path(base_dir: Path, value: str | None, default: str) -> Path:
+    path = Path(value or default)
+    if not path.is_absolute():
+        path = (base_dir / path).resolve()
+    return path
+
+
+def _sync_default_collection_legacy_config(default_dir: Path) -> None:
+    config_path = default_dir / "config.yaml"
+    if not config_path.is_file():
+        return
+    legacy_output_dir = LEGACY_DATA_DIR / "output"
+    if not legacy_output_dir.is_dir():
+        return
+
+    try:
+        config_data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        logger.warning("Failed to read default collection config: %s", config_path)
+        return
+
+    if not isinstance(config_data, dict):
+        logger.warning("Default collection config is not a mapping: %s", config_path)
+        return
+
+    output_cfg = config_data.get("output", {})
+    current_output = output_cfg.get("base_dir") if isinstance(output_cfg, dict) else None
+    current_output_dir = _resolve_collection_path(default_dir, current_output, "output")
+    if current_output_dir.is_dir():
+        return
+
+    changed = False
+
+    if config_data.get("root_dir") != ".":
+        config_data["root_dir"] = "."
+        changed = True
+
+    input_cfg = config_data.setdefault("input", {})
+    if isinstance(input_cfg, dict):
+        storage_cfg = input_cfg.setdefault("storage", {})
+        if isinstance(storage_cfg, dict):
+            expected = LEGACY_DEFAULT_PATHS["input_base_dir"]
+            if storage_cfg.get("base_dir") != expected:
+                storage_cfg["base_dir"] = expected
+                changed = True
+
+    for section, key_name in [
+        ("output", "output_base_dir"),
+        ("update_index_output", "update_output_base_dir"),
+        ("cache", "cache_base_dir"),
+        ("reporting", "reporting_base_dir"),
+    ]:
+        section_cfg = config_data.setdefault(section, {})
+        if isinstance(section_cfg, dict):
+            expected = LEGACY_DEFAULT_PATHS[key_name]
+            if section_cfg.get("base_dir") != expected:
+                section_cfg["base_dir"] = expected
+                changed = True
+
+    vector_store_cfg = config_data.setdefault("vector_store", {})
+    if isinstance(vector_store_cfg, dict):
+        default_store = vector_store_cfg.setdefault("default_vector_store", {})
+        if isinstance(default_store, dict):
+            expected = LEGACY_DEFAULT_PATHS["vector_store_uri"]
+            if default_store.get("db_uri") != expected:
+                default_store["db_uri"] = expected
+                changed = True
+
+    if not changed:
+        return
+
+    config_path.write_text(
+        yaml.safe_dump(config_data, sort_keys=False, allow_unicode=False),
+        encoding="utf-8",
+    )
+    logger.info("Synced default collection config to legacy data layout")
 
 
 def create_collection_dirs(target_dir: Path) -> None:
@@ -98,6 +185,7 @@ def ensure_default_collection() -> None:
         create_collection_dirs(default_dir)
         create_collection_config(default_dir, DEFAULT_CONFIG_PATH)
         write_collection_meta(DEFAULT_COLLECTION_ID, "default")
+    _sync_default_collection_legacy_config(collection_dir(DEFAULT_COLLECTION_ID))
 
 
 def ensure_collection_exists(collection_id: str) -> Path:

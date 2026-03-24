@@ -60,7 +60,9 @@
   const listPreviewLimit = 4;
   const emptyPreview: EvidencePreview = { items: [], extra: 0 };
 
-  $: collectionId = $page.params.id;
+  let collectionId = '';
+
+  $: collectionId = $page.params.id ?? '';
 
   let maxNodes = 200;
   let minWeight = 0;
@@ -280,7 +282,9 @@
 
   function getGraphUrl() {
     const params = new URLSearchParams();
-    params.set('collection_id', collectionId);
+    if (collectionId) {
+      params.set('collection_id', collectionId);
+    }
     params.set('max_nodes', String(maxNodes));
     params.set('min_weight', String(minWeight));
     if (communityId.trim()) {
@@ -389,6 +393,7 @@
     try {
       forceAtlas2.assign(graph, {
         iterations: 120,
+        weighted: true,
         settings: {
           scalingRatio: 6,
           gravity: 1.2,
@@ -465,6 +470,7 @@
       applyColors();
       forceAtlas2.assign(graph, {
         iterations: 120,
+        weighted: true,
         settings: {
           scalingRatio: 6,
           gravity: 1.2,

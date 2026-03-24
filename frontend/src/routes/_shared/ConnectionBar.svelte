@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { baseUrl, DEFAULT_BASE_URL, validateBaseUrl } from './base';
+  import { baseUrl, getDefaultBaseUrl, validateBaseUrl } from './base';
   import { errorMessage } from './api';
   import { t } from './i18n';
   import { onDestroy, onMount } from 'svelte';
 
-  let draft = DEFAULT_BASE_URL;
+  let draft = getDefaultBaseUrl();
   let status = '';
   let error = '';
   let isOpen = false;
-  let statusTimeout: ReturnType<typeof setTimeout> | null = null;
+  let statusTimeout: number | null = null;
 
   onMount(() => {
     draft = $baseUrl;
@@ -16,7 +16,7 @@
 
   onDestroy(() => {
     if (statusTimeout) {
-      clearTimeout(statusTimeout);
+      window.clearTimeout(statusTimeout);
     }
   });
 
@@ -44,7 +44,7 @@
 
   function setStatus(message: string) {
     if (statusTimeout) {
-      clearTimeout(statusTimeout);
+      window.clearTimeout(statusTimeout);
       statusTimeout = null;
     }
     status = message;
@@ -70,8 +70,9 @@
 
   function reset() {
     error = '';
-    draft = DEFAULT_BASE_URL;
-    baseUrl.set(DEFAULT_BASE_URL);
+    const nextBaseUrl = getDefaultBaseUrl();
+    draft = nextBaseUrl;
+    baseUrl.set(nextBaseUrl);
     setStatus($t('connection.resetStatus'));
   }
 </script>
@@ -91,10 +92,10 @@
     role="button"
     tabindex="0"
     aria-label={$t('connection.close')}
-    on:click={closeModal}
+    on:click|self={closeModal}
     on:keydown={handleBackdropKeydown}
   >
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <div class="modal-title">
           <h3>{$t('connection.title')}</h3>
@@ -107,7 +108,7 @@
       <form class="modal-form" on:submit|preventDefault={save}>
         <div class="field">
           <label for="base-url">{$t('connection.baseUrlLabel')}</label>
-          <input id="base-url" class="input" bind:value={draft} placeholder={DEFAULT_BASE_URL} />
+          <input id="base-url" class="input" bind:value={draft} placeholder={getDefaultBaseUrl()} />
         </div>
         {#if status && isOpen}
           <div class="status" role="status" aria-live="polite">{status}</div>

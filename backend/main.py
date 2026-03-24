@@ -9,7 +9,7 @@ from config import DATA_DIR
 setup_logger("lens")
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="TsingAI-Lens API", version="0.3.0")
+    app = FastAPI(title="TsingAI-Lens API", version="0.1.1")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

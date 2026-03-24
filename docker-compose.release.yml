@@ -1,0 +1,18 @@
+services:
+  backend:
+    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:-v0.1.0}
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend/data:/app/data
+    expose:
+      - "8010"
+    restart: unless-stopped
+
+  frontend:
+    image: ${LENS_FRONTEND_IMAGE:-jeanphilo/tsingai-lens-frontend}:${LENS_VERSION:-v0.1.0}
+    ports:
+      - "${LENS_HTTP_PORT:-8080}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

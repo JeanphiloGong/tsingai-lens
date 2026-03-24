@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { baseUrl, DEFAULT_BASE_URL, validateBaseUrl } from './base';
+  import { baseUrl, getDefaultBaseUrl, validateBaseUrl } from './base';
   import { errorMessage } from './api';
   import { t } from './i18n';
   import { onDestroy, onMount } from 'svelte';
 
-  let draft = DEFAULT_BASE_URL;
+  let draft = getDefaultBaseUrl();
   let status = '';
   let error = '';
   let isOpen = false;
@@ -70,8 +70,9 @@
 
   function reset() {
     error = '';
-    draft = DEFAULT_BASE_URL;
-    baseUrl.set(DEFAULT_BASE_URL);
+    const nextBaseUrl = getDefaultBaseUrl();
+    draft = nextBaseUrl;
+    baseUrl.set(nextBaseUrl);
     setStatus($t('connection.resetStatus'));
   }
 </script>
@@ -107,7 +108,7 @@
       <form class="modal-form" on:submit|preventDefault={save}>
         <div class="field">
           <label for="base-url">{$t('connection.baseUrlLabel')}</label>
-          <input id="base-url" class="input" bind:value={draft} placeholder={DEFAULT_BASE_URL} />
+          <input id="base-url" class="input" bind:value={draft} placeholder={getDefaultBaseUrl()} />
         </div>
         {#if status && isOpen}
           <div class="status" role="status" aria-live="polite">{status}</div>

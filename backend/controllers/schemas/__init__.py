@@ -21,7 +21,7 @@ from .retrieval import (
     ReportPatternsResponse,
     ReportRelationshipItem,
 )
-from .task import ArtifactStatusResponse, IndexTaskCreateRequest, TaskResponse
+from .task import ArtifactStatusResponse, IndexTaskCreateRequest, TaskListResponse, TaskResponse
 from .workspace import (
     WorkspaceArtifactStatusResponse,
     WorkspaceCapabilitiesResponse,
@@ -52,6 +52,7 @@ __all__ = [
     "ReportRelationshipItem",
     "IndexTaskCreateRequest",
     "TaskResponse",
+    "TaskListResponse",
     "ArtifactStatusResponse",
     "WorkspaceArtifactStatusResponse",
     "WorkspaceCapabilitiesResponse",

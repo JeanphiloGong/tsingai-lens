@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from controllers.schemas.task import (
     ArtifactStatusResponse,
     IndexTaskCreateRequest,
+    TaskListResponse,
     TaskResponse,
 )
 from services.artifact_registry_service import ArtifactRegistryService
@@ -53,6 +54,34 @@ async def create_index_task(
         payload.additional_context,
     )
     return TaskResponse(**task)
+
+
+@router.get(
+    "/collections/{collection_id}/tasks",
+    response_model=TaskListResponse,
+    summary="列出集合任务历史",
+)
+async def list_collection_tasks(
+    collection_id: str,
+    status: str | None = Query(default=None, description="按任务状态过滤"),
+    limit: int = Query(default=20, ge=1, le=200, description="返回数量"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+) -> TaskListResponse:
+    try:
+        collection_service.get_collection(collection_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    items = [
+        TaskResponse(**record)
+        for record in task_service.list_tasks(
+            collection_id=collection_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+    ]
+    return TaskListResponse(collection_id=collection_id, count=len(items), items=items)
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse, summary="查询任务状态")

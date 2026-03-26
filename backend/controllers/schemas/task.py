@@ -71,3 +71,11 @@ class ArtifactStatusResponse(BaseModel):
     )
     graphml_ready: bool = Field(default=False, description="graph.graphml 是否存在")
     updated_at: str = Field(..., description="更新时间")
+
+
+class TaskListResponse(BaseModel):
+    """Collection-scoped task listing payload."""
+
+    collection_id: str = Field(..., description="集合 ID")
+    count: int = Field(..., description="返回任务数量")
+    items: list[TaskResponse] = Field(default_factory=list, description="任务列表")

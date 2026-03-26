@@ -195,6 +195,20 @@ def test_collection_task_and_query_flow(app_client):
     assert task_status.json()["status"] == "completed"
     assert task_status.json()["current_stage"] == "artifacts_ready"
 
+    collection_tasks = app_client.get(f"/collections/{collection_id}/tasks")
+    assert collection_tasks.status_code == 200
+    tasks_body = collection_tasks.json()
+    assert tasks_body["collection_id"] == collection_id
+    assert tasks_body["count"] >= 1
+    assert tasks_body["items"][0]["task_id"] == task_id
+
+    completed_tasks = app_client.get(
+        f"/collections/{collection_id}/tasks",
+        params={"status": "completed", "limit": 5, "offset": 0},
+    )
+    assert completed_tasks.status_code == 200
+    assert completed_tasks.json()["count"] >= 1
+
     artifacts = app_client.get(f"/tasks/{task_id}/artifacts")
     assert artifacts.status_code == 200
     body = artifacts.json()

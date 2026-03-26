@@ -171,6 +171,12 @@
     -d '{"method":"standard","is_update_run":false,"verbose":false}'
   ```
 
+- **GET** `/collections/{collection_id}/tasks` — 列出集合任务历史
+  - 查询参数：`status`（可选）、`limit`（默认 `20`）、`offset`（默认 `0`）。
+  ```bash
+  curl "http://localhost:8010/collections/<collection_id>/tasks?status=completed&limit=20&offset=0"
+  ```
+
 - **GET** `/tasks/{task_id}` — 查询任务状态
   ```bash
   curl http://localhost:8010/tasks/<task_id>

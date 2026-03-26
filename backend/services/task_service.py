@@ -61,7 +61,13 @@ class TaskService:
             raise FileNotFoundError(f"task not found: {task_id}")
         return record
 
-    def list_tasks(self, collection_id: str | None = None, limit: int | None = None) -> list[dict]:
+    def list_tasks(
+        self,
+        collection_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict]:
         tasks: list[dict] = []
         for task_path in sorted(self.root_dir.glob("task_*.json")):
             record = self._read(task_path, None)
@@ -69,8 +75,12 @@ class TaskService:
                 continue
             if collection_id and record.get("collection_id") != collection_id:
                 continue
+            if status and record.get("status") != status:
+                continue
             tasks.append(record)
         tasks.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+        if offset > 0:
+            tasks = tasks[offset:]
         if limit is not None:
             return tasks[:limit]
         return tasks

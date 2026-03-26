@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from config import DATA_DIR
-from controllers import chat, collections, file, retrieval, tasks
+from controllers import chat, collections, file, retrieval, tasks, workspace
 from utils.logger import setup_logger
 
 # 初始化全局日志，确保 controllers/services 的日志能输出
@@ -26,6 +26,7 @@ def create_app() -> FastAPI:
     app.include_router(retrieval.router)
     app.include_router(collections.router)
     app.include_router(tasks.router)
+    app.include_router(workspace.router)
     return app
 
 

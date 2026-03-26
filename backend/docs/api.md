@@ -129,6 +129,95 @@
 - 证据字段依赖 `text_units.parquet` 与 `documents.parquet`，若缺失则不输出。
 - 配置由服务端在集合级别管理，客户端无需传入配置路径。
 
+## 集合、任务与工作区（App Layer）
+- 说明：这一层是产品主入口，围绕 `collection_id` 和 `task_id` 工作；`/retrieval/*` 继续保留为兼容和调试接口。
+
+- **POST** `/collections` — 创建论文集合
+  - 请求体（JSON）：`name`（必填）、`description`（可选）、`default_method`（可选，默认 `standard`）。
+  ```bash
+  curl -X POST http://localhost:8010/collections \
+    -H "Content-Type: application/json" \
+    -d '{"name":"Composite Papers","description":"复合材料论文集合"}'
+  ```
+
+- **GET** `/collections` — 列出论文集合
+  ```bash
+  curl http://localhost:8010/collections
+  ```
+
+- **GET** `/collections/{collection_id}` — 获取集合详情
+  ```bash
+  curl http://localhost:8010/collections/<collection_id>
+  ```
+
+- **POST** `/collections/{collection_id}/files` — 上传论文到集合
+  - 表单字段：`file`（必填；PDF 会自动转为文本后落到集合输入目录）。
+  ```bash
+  curl -X POST http://localhost:8010/collections/<collection_id>/files \
+    -F "file=@/path/to/paper.pdf"
+  ```
+
+- **GET** `/collections/{collection_id}/files` — 列出集合文件
+  ```bash
+  curl http://localhost:8010/collections/<collection_id>/files
+  ```
+
+- **POST** `/collections/{collection_id}/tasks/index` — 创建集合索引任务
+  - 请求体（JSON）：`method`、`is_update_run`、`verbose`、`additional_context`。
+  - 返回：`task_id`、`status`、`current_stage`、`progress_percent`。
+  ```bash
+  curl -X POST http://localhost:8010/collections/<collection_id>/tasks/index \
+    -H "Content-Type: application/json" \
+    -d '{"method":"standard","is_update_run":false,"verbose":false}'
+  ```
+
+- **GET** `/tasks/{task_id}` — 查询任务状态
+  ```bash
+  curl http://localhost:8010/tasks/<task_id>
+  ```
+
+- **GET** `/tasks/{task_id}/artifacts` — 查询任务产物状态
+  ```bash
+  curl http://localhost:8010/tasks/<task_id>/artifacts
+  ```
+
+- **GET** `/collections/{collection_id}/workspace` — 获取集合工作区概览
+  - 返回：`collection`、`file_count`、`status_summary`、`artifacts`、`latest_task`、`recent_tasks`、`capabilities`。
+  ```bash
+  curl http://localhost:8010/collections/<collection_id>/workspace
+  ```
+
+- **GET** `/collections/{collection_id}/graph` — 获取集合图数据
+  - 查询参数：`max_nodes`（默认 `200`）、`min_weight`（默认 `0.0`）、`community_id`（可选）。
+  ```bash
+  curl "http://localhost:8010/collections/<collection_id>/graph?max_nodes=200&min_weight=0"
+  ```
+
+- **GET** `/collections/{collection_id}/graphml` — 导出集合 GraphML
+  ```bash
+  curl -OJ "http://localhost:8010/collections/<collection_id>/graphml?max_nodes=200&min_weight=0"
+  ```
+
+- **GET** `/collections/{collection_id}/protocol/steps` — 列出集合 protocol steps
+  - 查询参数：`paper_id`、`block_type`、`limit`、`offset`。
+  ```bash
+  curl "http://localhost:8010/collections/<collection_id>/protocol/steps?limit=20"
+  ```
+
+- **GET** `/collections/{collection_id}/protocol/search` — 检索集合 protocol steps
+  - 查询参数：`q`（必填）、`paper_id`（可选）、`limit`（默认 `10`）。
+  ```bash
+  curl "http://localhost:8010/collections/<collection_id>/protocol/search?q=anneal%20600C&limit=5"
+  ```
+
+- **POST** `/collections/{collection_id}/protocol/sop` — 为集合生成 SOP 草案
+  - 请求体（JSON）：`goal`、`target_properties`、`paper_ids`、`max_steps`。
+  ```bash
+  curl -X POST http://localhost:8010/collections/<collection_id>/protocol/sop \
+    -H "Content-Type: application/json" \
+    -d '{"goal":"为复合材料设计实验方案","target_properties":["mechanical","thermal"],"max_steps":8}'
+  ```
+
 ## Protocol 产物与 SOP（/retrieval/protocol）
 - 说明：这些接口消费 protocol 中间产物。`output_path` 为空时，会回退到默认 collection 的 output 目录。
 - `/retrieval/protocol/extract` 只消费上游已经生成的 `sections.parquet`、`procedure_blocks.parquet`、`protocol_steps.parquet`，不会自行执行 parser/extractor。

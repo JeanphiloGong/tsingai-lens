@@ -5,14 +5,6 @@
   import { listCollectionFiles, uploadCollectionFiles, type CollectionFile } from '../../_shared/files';
   import { t } from '../../_shared/i18n';
   import {
-    getCommunityReportDetail,
-    listCommunityReports,
-    listReportPatterns,
-    type ReportCommunityDetailResponse,
-    type ReportCommunitySummary,
-    type ReportPatternItem
-  } from '../../_shared/reports';
-  import {
     createIndexTask,
     getTask,
     getTaskArtifacts,
@@ -44,24 +36,13 @@
   let filesError = '';
 
   let advancedOpen = false;
-  let reportsLoading = false;
-  let reportsLoaded = false;
-  let reportsError = '';
-  let detailLoading = false;
-  let patterns: ReportPatternItem[] = [];
-  let communities: ReportCommunitySummary[] = [];
-  let selectedCommunity: ReportCommunityDetailResponse | null = null;
 
   $: collectionId = $page.params.id ?? '';
   $: if ($page.url.hash.startsWith('#advanced')) {
     advancedOpen = true;
   }
-  $: if (advancedOpen && collectionId && !reportsLoaded && !reportsLoading) {
-    void loadReports();
-  }
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
-    resetReports();
     clearPoll();
     void Promise.all([loadWorkspace(), loadFiles()]);
   }
@@ -82,16 +63,6 @@
     pollTimer = setTimeout(() => {
       void refreshTask(taskId);
     }, 2500);
-  }
-
-  function resetReports() {
-    reportsLoading = false;
-    reportsLoaded = false;
-    reportsError = '';
-    detailLoading = false;
-    patterns = [];
-    communities = [];
-    selectedCommunity = null;
   }
 
   function mergeTask(task: Task) {
@@ -155,54 +126,6 @@
       collectionFiles = [];
     } finally {
       filesLoading = false;
-    }
-  }
-
-  async function loadReports(force = false) {
-    if (!force && (reportsLoading || reportsLoaded || !collectionId)) return;
-
-    reportsLoading = true;
-    reportsError = '';
-    try {
-      const [patternResponse, communityResponse] = await Promise.all([
-        listReportPatterns(collectionId, { level: 2, limit: 6, sort: 'rating' }),
-        listCommunityReports(collectionId, { level: 2, limit: 12, offset: 0, minSize: 0, sort: 'rating' })
-      ]);
-      patterns = patternResponse.items;
-      communities = communityResponse.items;
-      reportsLoaded = true;
-
-      const first = communityResponse.items[0];
-      if (first?.community_id !== undefined && first.community_id !== null) {
-        await selectCommunity(String(first.community_id));
-      } else {
-        selectedCommunity = null;
-      }
-    } catch (err) {
-      reportsError = errorMessage(err);
-      patterns = [];
-      communities = [];
-      selectedCommunity = null;
-    } finally {
-      reportsLoading = false;
-    }
-  }
-
-  async function selectCommunity(communityId: string) {
-    detailLoading = true;
-    reportsError = '';
-    try {
-      selectedCommunity = await getCommunityReportDetail(collectionId, communityId, {
-        level: 2,
-        entityLimit: 10,
-        relationshipLimit: 10,
-        documentLimit: 10
-      });
-    } catch (err) {
-      reportsError = errorMessage(err);
-      selectedCommunity = null;
-    } finally {
-      detailLoading = false;
     }
   }
 
@@ -832,84 +755,16 @@
 
       <section id="advanced-reports" class="result-grid result-grid--tasks">
         <div class="result-card">
-          <div class="card-header-inline">
-            <div>
-              <h4>{$t('reports.title')}</h4>
-              <p class="meta-text">{$t('reports.lead')}</p>
-            </div>
-            <button class="btn btn--ghost btn--small" type="button" on:click={() => loadReports(true)}>
-              {$t('reports.submit')}
-            </button>
-          </div>
-
-          {#if reportsLoading}
-            <div class="status" role="status" aria-live="polite">{$t('reports.loading')}</div>
-          {:else if reportsError}
-            <div class="status status--error" role="alert">{reportsError}</div>
-          {:else if !patterns.length && !communities.length}
-            <p class="note">{$t('reports.emptyCommunities')}</p>
-          {:else}
-            <div class="detail-section">
-              <div class="detail-section__title">{$t('reports.patternsTitle')}</div>
-              <div class="result-grid">
-                {#each patterns as item}
-                  <article class="result-card">
-                    <div class="table-title">{item.title || `${$t('reports.communityLabel')} ${item.community_id ?? '--'}`}</div>
-                    <div class="table-sub">rating: {item.rating ?? '--'} · size: {item.size ?? '--'}</div>
-                    <p class="result-text">{item.summary || '--'}</p>
-                  </article>
-                {/each}
-              </div>
-            </div>
-
-            <div class="detail-section">
-              <div class="detail-section__title">{$t('reports.communitiesTitle')}</div>
-              <div class="table-wrapper">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>{$t('reports.communityLabel')}</th>
-                      <th>{$t('reports.ratingLabel')}</th>
-                      <th>{$t('reports.sizeLabel')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {#each communities as item}
-                      <tr
-                        class:selected-row={selectedCommunity?.community_id === item.community_id}
-                        on:click={() => item.community_id !== undefined && item.community_id !== null && selectCommunity(String(item.community_id))}
-                      >
-                        <td>{item.title || item.community_id || '--'}</td>
-                        <td>{item.rating ?? '--'}</td>
-                        <td>{item.size ?? '--'}</td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          {/if}
+          <h4>{$t('reports.title')}</h4>
+          <p class="meta-text">{$t('reports.degradedLead')}</p>
+          <p class="note">{$t('reports.degradedNote')}</p>
         </div>
 
         <div class="result-card">
-          {#if detailLoading}
-            <div class="status" role="status" aria-live="polite">{$t('reports.detailLoading')}</div>
-          {:else if selectedCommunity}
-            <div class="table-main">
-              <div class="table-title">{selectedCommunity.title || selectedCommunity.community_id}</div>
-              <div class="table-sub">
-                {$t('reports.ratingLabel')}: {selectedCommunity.rating ?? '--'} · {$t('reports.sizeLabel')}: {selectedCommunity.size ?? '--'}
-              </div>
-            </div>
-            <p class="result-text">{selectedCommunity.summary || '--'}</p>
-            <div class="detail-chips">
-              <span class="detail-chip">{$t('reports.entitiesLabel')}: {selectedCommunity.entities.length}</span>
-              <span class="detail-chip">{$t('reports.relationshipsLabel')}: {selectedCommunity.relationships.length}</span>
-              <span class="detail-chip">{$t('reports.documentsLabel')}: {selectedCommunity.documents.length}</span>
-            </div>
-          {:else}
-            <p class="note">{$t('reports.emptyDetail')}</p>
-          {/if}
+          <div class="detail-section">
+            <div class="detail-section__title">{$t('reports.degradedTitle')}</div>
+            <p class="result-text">{$t('reports.degradedBody')}</p>
+          </div>
         </div>
       </section>
     </details>

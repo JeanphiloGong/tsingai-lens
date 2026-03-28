@@ -374,6 +374,11 @@ const translations: Record<Language, Translations> = {
     reports: {
       title: 'Reports',
       lead: 'Review community summaries and pattern-level findings derived from indexed reports.',
+      degradedLead: 'Reports stay out of the default app-layer workflow until a collection-scoped reports API exists.',
+      degradedNote: 'This workspace no longer calls retrieval reports endpoints by default for app-layer collections.',
+      degradedTitle: 'Temporarily hidden in workspace',
+      degradedBody:
+        'Community reports and pattern summaries still need a dedicated collection-scoped API. Until then, the workspace keeps this area as a non-fetching placeholder to avoid misleading 404s.',
       loading: 'Loading reports...',
       submit: 'Refresh',
       patternsTitle: 'Pattern summaries',
@@ -850,6 +855,11 @@ const translations: Record<Language, Translations> = {
     reports: {
       title: '报告',
       lead: '查看社区总结以及从社区报告中提炼出的规律。',
+      degradedLead: '在 collection 维度的 reports 接口补齐前，报告能力暂时不进入 app-layer 默认工作流。',
+      degradedNote: '当前工作区不会再默认请求 retrieval reports 接口，避免新集合出现误导性的 404。',
+      degradedTitle: '工作区中暂时隐藏',
+      degradedBody:
+        '社区报告和规律总结仍需要单独的 collection-scoped reports API。在接口补齐前，这里只保留不触发请求的占位说明。',
       loading: '报告加载中...',
       submit: '刷新',
       patternsTitle: '规律总结',

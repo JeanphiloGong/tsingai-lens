@@ -28,6 +28,10 @@ function buildUrl(path: string) {
   return `${base}${path}`;
 }
 
+export function buildApiUrl(path: string) {
+  return buildUrl(path);
+}
+
 export async function requestJson(path: string, init: RequestInit = {}) {
   const url = buildUrl(path);
   const headers = new Headers(init.headers ?? {});
@@ -57,4 +61,16 @@ export async function requestText(path: string, init: RequestInit = {}) {
   }
 
   return text;
+}
+
+export async function requestBlob(path: string, init: RequestInit = {}) {
+  const url = buildUrl(path);
+  const response = await fetch(url, init);
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
+  }
+
+  return response.blob();
 }

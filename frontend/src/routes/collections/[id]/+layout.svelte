@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
-  import { collections, fetchCollections } from '../../_shared/collections';
+  import { collections, fetchCollection, fetchCollections } from '../../_shared/collections';
   import { t } from '../../_shared/i18n';
 
   $: collectionId = $page.params.id;
@@ -10,6 +10,9 @@
   onMount(() => {
     if (!$collections.length) {
       fetchCollections().catch(() => null);
+    }
+    if (collectionId) {
+      fetchCollection(collectionId).catch(() => null);
     }
   });
 </script>
@@ -35,34 +38,22 @@
     {$t('collection.tabs.overview')}
   </a>
   <a
-    href={`/collections/${collectionId}/documents`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/documents`)}
+    href={`/collections/${collectionId}/steps`}
+    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/steps`)}
   >
-    {$t('collection.tabs.documents')}
+    {$t('collection.tabs.steps')}
   </a>
   <a
-    href={`/collections/${collectionId}/search`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/search`)}
+    href={`/collections/${collectionId}/sop`}
+    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/sop`)}
   >
-    {$t('collection.tabs.search')}
+    {$t('collection.tabs.sop')}
   </a>
   <a
     href={`/collections/${collectionId}/graph`}
     class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/graph`)}
   >
     {$t('collection.tabs.graph')}
-  </a>
-  <a
-    href={`/collections/${collectionId}/reports`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/reports`)}
-  >
-    {$t('collection.tabs.reports')}
-  </a>
-  <a
-    href={`/collections/${collectionId}/settings`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/settings`)}
-  >
-    {$t('collection.tabs.settings')}
   </a>
 </nav>
 

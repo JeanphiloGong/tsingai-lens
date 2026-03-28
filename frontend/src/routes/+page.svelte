@@ -2,22 +2,19 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { errorMessage } from './_shared/api';
-  import { createCollection, collections, deleteCollection, fetchCollections } from './_shared/collections';
-  import type { Collection } from './_shared/collections';
-  import { getBaseUrlValue, validateBaseUrl } from './_shared/base';
+  import { createCollection, collections, fetchCollections, type Collection } from './_shared/collections';
+  import { buildCollectionGraphmlUrl } from './_shared/graph';
   import { language, t } from './_shared/i18n';
+  import { createIndexTask } from './_shared/tasks';
 
   let loading = false;
   let error = '';
   let isCreateOpen = false;
   let name = '';
   let description = '';
-  let defaultConfig = true;
+  let defaultMethod = 'standard';
   let createLoading = false;
   let createError = '';
-  let deleteTarget: Collection | null = null;
-  let deleteError = '';
-  let deleteLoading = false;
   let rowMessages: Record<string, { message: string; type: 'info' | 'error' }> = {};
 
   $: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
@@ -47,7 +44,8 @@
     isCreateOpen = false;
     name = '';
     description = '';
-    defaultConfig = true;
+    defaultMethod = 'standard';
+    createError = '';
   }
 
   function openCollection(collectionId: string) {
@@ -83,12 +81,14 @@
 
     createLoading = true;
     try {
-      const result = await createCollection(name.trim());
-      await loadCollections();
+      const result = await createCollection({
+        name: name.trim(),
+        description: description.trim(),
+        defaultMethod
+      });
       closeCreate();
-      if (result?.id) {
-        await goto(`/collections/${result.id}`);
-      }
+      await loadCollections();
+      await goto(`/collections/${result.id}`);
     } catch (err) {
       createError = errorMessage(err);
     } finally {
@@ -103,55 +103,18 @@
     return date.toLocaleString(locale);
   }
 
-  function formatStatus(status?: string) {
+  function formatStatus(status?: string | null) {
     if (!status) return $t('home.statusUnknown');
-    if (status === 'ready') return $t('home.statusReady');
-    if (status === 'empty') return $t('home.statusEmpty');
-    return status;
+
+    const key = `home.status.${status}`;
+    const translated = $t(key);
+    return translated === key ? status : translated;
   }
 
   function formatCount(value: unknown) {
-    if (typeof value === 'number') return String(value);
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
     if (typeof value === 'string' && value.trim() !== '') return value;
     return $t('home.metricsPlaceholder');
-  }
-
-  function openDelete(collection: Collection) {
-    deleteTarget = collection;
-    deleteError = '';
-  }
-
-  function closeDelete() {
-    deleteTarget = null;
-    deleteError = '';
-    deleteLoading = false;
-  }
-
-  function handleDeleteBackdropKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      closeDelete();
-      return;
-    }
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      closeDelete();
-    }
-  }
-
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    deleteError = '';
-    deleteLoading = true;
-
-    try {
-      await deleteCollection(deleteTarget.id);
-      await loadCollections();
-      closeDelete();
-    } catch (err) {
-      deleteError = errorMessage(err);
-    } finally {
-      deleteLoading = false;
-    }
   }
 
   function setRowMessage(id: string, message: string, type: 'info' | 'error' = 'info') {
@@ -165,17 +128,15 @@
   async function exportGraph(collectionId: string) {
     try {
       setRowMessage(collectionId, $t('home.exporting'));
-      const base = validateBaseUrl(getBaseUrlValue());
-      const url = `${base}/retrieval/graphml?collection_id=${encodeURIComponent(
-        collectionId
-      )}&include_community=true`;
-      const response = await fetch(url);
+      const response = await fetch(buildCollectionGraphmlUrl(collectionId, { maxNodes: 200, minWeight: 0 }));
       if (!response.ok) {
         const text = await response.text();
         throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
       }
       const blob = await response.blob();
-      const fileName = `graph-${collectionId}-${Date.now()}.graphml`;
+      const disposition = response.headers.get('content-disposition') ?? '';
+      const matched = disposition.match(/filename="(.+?)"/i);
+      const fileName = matched?.[1] ?? `graph-${collectionId}-${Date.now()}.graphml`;
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
@@ -188,34 +149,22 @@
     }
   }
 
-  function hasArtifacts(collection: Collection) {
-    if (collection.status === 'ready') return true;
-    if (typeof collection.entity_count === 'number') return collection.entity_count > 0;
-    if (typeof collection.document_count === 'number') return collection.document_count > 0;
-    return false;
-  }
+  async function runIndex(collection: Collection) {
+    if (!collection.paper_count) {
+      setRowMessage(collection.id, $t('home.indexNoFiles'), 'error');
+      return;
+    }
 
-  async function runIndex(collectionId: string, isUpdateRun: boolean) {
     try {
-      setRowMessage(collectionId, isUpdateRun ? $t('home.reindexing') : $t('home.indexing'));
-      await fetch(`${validateBaseUrl(getBaseUrlValue())}/retrieval/index`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          collection_id: collectionId,
-          method: 'standard',
-          is_update_run: isUpdateRun,
-          verbose: false
-        })
-      }).then(async (response) => {
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
-        }
+      setRowMessage(collection.id, $t('home.indexing'));
+      const task = await createIndexTask(collection.id, {
+        method: collection.default_method ?? 'standard',
+        isUpdateRun: false,
+        verbose: false
       });
-      setRowMessage(collectionId, isUpdateRun ? $t('home.reindexStarted') : $t('home.indexStarted'));
+      setRowMessage(collection.id, $t('home.indexStarted', { taskId: task.task_id }));
     } catch (err) {
-      setRowMessage(collectionId, errorMessage(err), 'error');
+      setRowMessage(collection.id, errorMessage(err), 'error');
     }
   }
 </script>
@@ -263,7 +212,7 @@
             <th>{$t('home.tableName')}</th>
             <th>{$t('home.tableStatus')}</th>
             <th>{$t('home.tableDocs')}</th>
-            <th>{$t('home.tableEntities')}</th>
+            <th>{$t('home.tableMethod')}</th>
             <th>{$t('home.tableUpdated')}</th>
             <th>{$t('home.tableActions')}</th>
           </tr>
@@ -282,11 +231,14 @@
                 <div class="table-main">
                   <div class="table-title">{collection.name || collection.id}</div>
                   <div class="table-sub">{collection.id}</div>
+                  {#if collection.description}
+                    <div class="table-sub">{collection.description}</div>
+                  {/if}
                 </div>
               </td>
               <td>{formatStatus(collection.status)}</td>
-              <td>{formatCount(collection.document_count)}</td>
-              <td>{formatCount(collection.entity_count)}</td>
+              <td>{formatCount(collection.paper_count)}</td>
+              <td>{collection.default_method || 'standard'}</td>
               <td>{formatDate(collection.updated_at || collection.created_at)}</td>
               <td>
                 <div class="table-actions">
@@ -300,19 +252,17 @@
                   <button
                     class="btn btn--ghost btn--small"
                     type="button"
-                    on:click|stopPropagation={() => runIndex(collection.id, hasArtifacts(collection))}
+                    on:click|stopPropagation={() => runIndex(collection)}
                   >
-                    {hasArtifacts(collection) ? $t('home.actionReindex') : $t('home.actionIndex')}
+                    {$t('home.actionIndex')}
                   </button>
-                  <button
-                    class="btn btn--ghost btn--small btn--danger"
-                    type="button"
-                    disabled={collection.id === 'default'}
-                    title={collection.id === 'default' ? $t('home.deleteDisabled') : ''}
-                    on:click|stopPropagation={() => openDelete(collection)}
+                  <a
+                    class="btn btn--ghost btn--small"
+                    href={`/collections/${collection.id}`}
+                    on:click|stopPropagation
                   >
-                    {$t('home.actionDelete')}
-                  </button>
+                    {$t('home.actionTasks')}
+                  </a>
                 </div>
                 {#if rowMessages[collection.id]}
                   <div
@@ -345,7 +295,7 @@
       <div class="modal-header">
         <h3>{$t('create.title')}</h3>
       </div>
-      <form on:submit={submitCreate}>
+      <form class="modal-form" on:submit={submitCreate}>
         <div class="field">
           <label for="collection-name">{$t('create.nameLabel')}</label>
           <input
@@ -358,25 +308,27 @@
         </div>
         <div class="field">
           <label for="collection-desc">{$t('create.descLabel')}</label>
-          <input
+          <textarea
             id="collection-desc"
-            class="input"
+            class="textarea"
             bind:value={description}
             placeholder={$t('create.descPlaceholder')}
-            disabled
-          />
-          <p class="meta-text">{$t('create.descHelper')}</p>
+            rows="3"
+          ></textarea>
+          <span class="meta-text">{$t('create.descHelper')}</span>
         </div>
-        <div class="toggle-row">
-          <label>
-            <input type="checkbox" bind:checked={defaultConfig} disabled />
-            {$t('create.defaultConfigLabel')}
-          </label>
-          <span class="meta-text">{$t('create.defaultConfigHelper')}</span>
+        <div class="field">
+          <label for="collection-method">{$t('create.methodLabel')}</label>
+          <select id="collection-method" class="select" bind:value={defaultMethod}>
+            <option value="standard">standard</option>
+            <option value="fast">fast</option>
+          </select>
         </div>
+
         {#if createError}
           <div class="status status--error" role="alert">{createError}</div>
         {/if}
+
         <div class="modal-actions">
           <button class="btn btn--ghost" type="button" on:click={closeCreate}>
             {$t('create.cancel')}
@@ -386,37 +338,6 @@
           </button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
-
-{#if deleteTarget}
-  <div
-    class="modal-backdrop"
-    role="button"
-    tabindex="0"
-    aria-label={$t('home.deleteCancel')}
-    on:click|self={closeDelete}
-    on:keydown={handleDeleteBackdropKeydown}
-  >
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
-      <div class="modal-header">
-        <h3>{$t('home.deleteTitle')}</h3>
-        <p class="meta-text">
-          {$t('home.deleteDesc', { name: deleteTarget.name || deleteTarget.id })}
-        </p>
-      </div>
-      {#if deleteError}
-        <div class="status status--error" role="alert">{deleteError}</div>
-      {/if}
-      <div class="modal-actions">
-        <button class="btn btn--ghost" type="button" on:click={closeDelete}>
-          {$t('home.deleteCancel')}
-        </button>
-        <button class="btn btn--danger" type="button" on:click={confirmDelete} disabled={deleteLoading}>
-          {deleteLoading ? $t('home.deleteDeleting') : $t('home.deleteConfirm')}
-        </button>
-      </div>
     </div>
   </div>
 {/if}

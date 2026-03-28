@@ -64,30 +64,32 @@
 
 <section>
   <div class="section-header">
-    <h2 class="section-title">{$t('docs.navTitle')}</h2>
-    <p class="section-sub">{$t('docs.navSub')}</p>
+    <h2 class="section-title">{$t('docs.surfaceTitle')}</h2>
+    <p class="section-sub">{$t('docs.surfaceSub')}</p>
   </div>
   <div class="docs-grid">
     <article class="card">
-      <h3>{$t('docs.navOverview')}</h3>
+      <h3>{$t('docs.surfaceWorkspaceTitle')}</h3>
+      <p>{$t('docs.surfaceWorkspaceDesc')}</p>
     </article>
     <article class="card">
-      <h3>{$t('docs.navDocuments')}</h3>
+      <h3>{$t('docs.surfaceStepsTitle')}</h3>
+      <p>{$t('docs.surfaceStepsDesc')}</p>
     </article>
     <article class="card">
-      <h3>{$t('docs.navSearch')}</h3>
+      <h3>{$t('docs.surfaceSopTitle')}</h3>
+      <p>{$t('docs.surfaceSopDesc')}</p>
     </article>
     <article class="card">
-      <h3>{$t('docs.navGraph')}</h3>
-    </article>
-    <article class="card">
-      <h3>{$t('docs.navReports')}</h3>
-    </article>
-    <article class="card">
-      <h3>{$t('docs.navSettings')}</h3>
+      <h3>{$t('docs.surfaceGraphTitle')}</h3>
+      <p>{$t('docs.surfaceGraphDesc')}</p>
     </article>
   </div>
-  <p class="note">{$t('docs.navNote')}</p>
+</section>
+
+<section class="card">
+  <span class="pill">{$t('docs.advancedTitle')}</span>
+  <p>{$t('docs.advancedDesc')}</p>
 </section>
 
 <section>

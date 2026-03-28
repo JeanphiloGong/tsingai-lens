@@ -1367,7 +1367,20 @@ textarea {
   margin-top: 24px;
   color: var(--color-subtle);
   font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
   text-align: center;
+}
+
+.site-footer a {
+  color: var(--color-muted);
+}
+
+.site-footer a:hover {
+  color: var(--color-ink);
 }
 
 .fade-up {

@@ -258,7 +258,7 @@
                   </button>
                   <a
                     class="btn btn--ghost btn--small"
-                    href={`/collections/${collection.id}/tasks`}
+                    href={`/collections/${collection.id}`}
                     on:click|stopPropagation
                   >
                     {$t('home.actionTasks')}

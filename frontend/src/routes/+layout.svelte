@@ -88,8 +88,12 @@
     </a>
 
     <div class="header-actions">
-      <a class="header-action" href="/docs" class:active={$page.url.pathname.startsWith('/docs')}>
-        {$t('nav.docs')}
+      <a
+        class="header-action"
+        href="/"
+        class:active={$page.url.pathname === '/' || $page.url.pathname.startsWith('/collections')}
+      >
+        {$t('nav.home')}
       </a>
       <ConnectionBar />
       <div
@@ -168,6 +172,8 @@
   </main>
 
   <footer class="site-footer">
-    {$t('footer.pdfNote')}
+    <a href="/docs">{$t('nav.docs')}</a>
+    <span>·</span>
+    <span>{$t('footer.pdfNote')}</span>
   </footer>
 </div>

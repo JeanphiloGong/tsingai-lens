@@ -1,11 +1,18 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { errorMessage } from '../../../_shared/api';
-  import { listProtocolSteps, type NormalizedValueItem, type ProtocolStepItem } from '../../../_shared/protocol';
+  import {
+    listProtocolSteps,
+    searchProtocolSteps,
+    type NormalizedValueItem,
+    type ProtocolSearchResponse,
+    type ProtocolStepItem
+  } from '../../../_shared/protocol';
   import { t } from '../../../_shared/i18n';
 
   $: collectionId = $page.params.id ?? '';
 
+  let query = '';
   let paperId = '';
   let blockType = '';
   let limit = 20;
@@ -14,11 +21,17 @@
   let error = '';
   let total = 0;
   let steps: ProtocolStepItem[] = [];
+  let searchResult: ProtocolSearchResponse | null = null;
   let loadedCollectionId = '';
 
   function formatConfidence(value?: number | null) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
     return value.toFixed(2);
+  }
+
+  function formatScore(value?: number | null) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
+    return value.toFixed(3);
   }
 
   function formatConditionValue(value?: NormalizedValueItem | null) {
@@ -53,18 +66,30 @@
     loading = true;
     error = '';
     try {
-      const response = await listProtocolSteps(collectionId, {
-        paperId: paperId.trim(),
-        blockType: blockType.trim(),
-        limit,
-        offset
-      });
-      steps = response.items;
-      total = response.count;
+      const [stepResponse, stepSearchResponse] = await Promise.all([
+        listProtocolSteps(collectionId, {
+          paperId: paperId.trim(),
+          blockType: blockType.trim(),
+          limit,
+          offset
+        }),
+        query.trim()
+          ? searchProtocolSteps(collectionId, {
+              query: query.trim(),
+              paperId: paperId.trim(),
+              limit: Math.min(limit, 10)
+            })
+          : Promise.resolve(null)
+      ]);
+
+      steps = stepResponse.items;
+      total = stepResponse.count;
+      searchResult = stepSearchResponse;
     } catch (err) {
       error = errorMessage(err);
       steps = [];
       total = 0;
+      searchResult = null;
     } finally {
       loading = false;
     }
@@ -72,7 +97,7 @@
 
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
-    loadSteps();
+    void loadSteps();
   }
 
   async function submit(event: SubmitEvent) {
@@ -87,22 +112,30 @@
 </svelte:head>
 
 <section class="card fade-up">
-  <h2>{$t('steps.title')}</h2>
-  <p class="lead">{$t('steps.lead')}</p>
+  <div class="card-header-inline">
+    <div>
+      <h2>{$t('steps.title')}</h2>
+      <p class="lead">{$t('steps.lead')}</p>
+    </div>
+    <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
+      {$t('steps.nextSop')}
+    </a>
+  </div>
+
   <form on:submit={submit}>
     <div class="form-grid">
+      <div class="field">
+        <label for="query">{$t('search.inputLabel')}</label>
+        <input id="query" class="input" bind:value={query} placeholder={$t('search.placeholder')} />
+        <span class="meta-text">{$t('steps.searchHelper')}</span>
+      </div>
       <div class="field">
         <label for="paperId">{$t('steps.paperIdLabel')}</label>
         <input id="paperId" class="input" bind:value={paperId} placeholder={$t('steps.paperIdPlaceholder')} />
       </div>
       <div class="field">
         <label for="blockType">{$t('steps.blockTypeLabel')}</label>
-        <input
-          id="blockType"
-          class="input"
-          bind:value={blockType}
-          placeholder={$t('steps.blockTypePlaceholder')}
-        />
+        <input id="blockType" class="input" bind:value={blockType} placeholder={$t('steps.blockTypePlaceholder')} />
       </div>
       <div class="field">
         <label for="limit">{$t('steps.limitLabel')}</label>
@@ -115,10 +148,56 @@
       </button>
     </div>
   </form>
+
   {#if error}
     <div class="status status--error" role="alert">{error}</div>
   {/if}
 </section>
+
+{#if query.trim()}
+  <section class="card">
+    <div class="card-header-inline">
+      <div>
+        <h3>{$t('search.resultTitle')}</h3>
+        <p class="meta-text">{$t('search.resultCount', { count: searchResult?.count ?? 0 })}</p>
+      </div>
+    </div>
+
+    {#if loading}
+      <div class="status" role="status" aria-live="polite">{$t('search.searching')}</div>
+    {:else if searchResult && searchResult.items.length}
+      <div class="result-grid">
+        {#each searchResult.items as item}
+          <article class="result-card">
+            <div class="table-main">
+              <div class="table-title">{item.action}</div>
+              <div class="table-sub">{item.step_id}</div>
+            </div>
+            <dl class="detail-list">
+              <div class="detail-row">
+                <dt>{$t('search.paperIdLabel')}</dt>
+                <dd>{item.paper_id}</dd>
+              </div>
+              <div class="detail-row">
+                <dt>{$t('search.matchFieldsLabel')}</dt>
+                <dd>{item.matched_fields.join(', ') || '--'}</dd>
+              </div>
+              <div class="detail-row">
+                <dt>{$t('search.scoreLabel')}</dt>
+                <dd>{formatScore(item.score)}</dd>
+              </div>
+            </dl>
+            {#if item.excerpt}
+              <p class="result-text">{item.excerpt}</p>
+            {/if}
+          </article>
+        {/each}
+      </div>
+    {:else}
+      <p class="note">{$t('search.noResults')}</p>
+    {/if}
+  </section>
+{/if}
 
 <section class="card">
   <div class="card-header-inline">
@@ -145,6 +224,7 @@
             </div>
             <div class="table-sub">{step.step_id}</div>
           </div>
+
           <dl class="detail-list">
             <div class="detail-row">
               <dt>{$t('steps.paperIdLabel')}</dt>

@@ -38,28 +38,10 @@
     {$t('collection.tabs.overview')}
   </a>
   <a
-    href={`/collections/${collectionId}/documents`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/documents`)}
-  >
-    {$t('collection.tabs.documents')}
-  </a>
-  <a
-    href={`/collections/${collectionId}/tasks`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/tasks`)}
-  >
-    {$t('collection.tabs.tasks')}
-  </a>
-  <a
     href={`/collections/${collectionId}/steps`}
     class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/steps`)}
   >
     {$t('collection.tabs.steps')}
-  </a>
-  <a
-    href={`/collections/${collectionId}/search`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/search`)}
-  >
-    {$t('collection.tabs.search')}
   </a>
   <a
     href={`/collections/${collectionId}/sop`}
@@ -72,18 +54,6 @@
     class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/graph`)}
   >
     {$t('collection.tabs.graph')}
-  </a>
-  <a
-    href={`/collections/${collectionId}/reports`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/reports`)}
-  >
-    {$t('collection.tabs.reports')}
-  </a>
-  <a
-    href={`/collections/${collectionId}/settings`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/settings`)}
-  >
-    {$t('collection.tabs.settings')}
   </a>
 </nav>
 

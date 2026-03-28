@@ -61,6 +61,29 @@ class CollectionService:
             encoding="utf-8",
         )
 
+    def _normalize_collection_record(
+        self,
+        record: dict | None,
+        collection_id: str,
+    ) -> dict:
+        payload = dict(record or {})
+        created_at = payload.get("created_at") or _now_iso()
+        updated_at = payload.get("updated_at") or created_at
+
+        if not payload.get("collection_id"):
+            payload["collection_id"] = str(payload.get("id") or collection_id)
+
+        if "name" not in payload or payload.get("name") is None:
+            payload["name"] = payload["collection_id"]
+        payload.setdefault("description", None)
+        payload.setdefault("status", "idle")
+        payload.setdefault("default_method", "standard")
+        payload["paper_count"] = int(payload.get("paper_count") or 0)
+        payload["created_at"] = str(created_at)
+        payload["updated_at"] = str(updated_at)
+        payload.pop("id", None)
+        return payload
+
     def create_collection(
         self,
         name: str,
@@ -104,7 +127,12 @@ class CollectionService:
     def list_collections(self) -> list[dict]:
         items: list[dict] = []
         for meta_path in sorted(self.root_dir.glob("*/meta.json")):
-            items.append(self._read_json(meta_path, {}))
+            collection_id = meta_path.parent.name
+            record = self._normalize_collection_record(
+                self._read_json(meta_path, {}),
+                collection_id,
+            )
+            items.append(record)
         return items
 
     def get_collection(self, collection_id: str) -> dict:
@@ -112,7 +140,10 @@ class CollectionService:
         record = self._read_json(paths.meta_path, None)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return record
+        normalized = self._normalize_collection_record(record, collection_id)
+        if normalized != record:
+            self._write_json(paths.meta_path, normalized)
+        return normalized
 
     def update_collection(self, collection_id: str, **fields) -> dict:
         paths = self.get_paths(collection_id)

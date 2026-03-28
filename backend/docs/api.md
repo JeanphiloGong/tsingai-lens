@@ -55,6 +55,7 @@
 ## 索引与上传（/retrieval）
 - **POST** `/retrieval/index` — 启动索引流程
   - 请求体（JSON）：`collection_id`（可选）、`method`（默认 `standard`，可选：`standard`/`fast`）、`is_update_run`（默认 `false`）、`verbose`（默认 `false`）、`additional_context`（可选字典）。
+  - 成功完成 GraphRAG 索引后，会继续自动生成 protocol 产物：`sections.parquet`、`procedure_blocks.parquet`、`protocol_steps.parquet`。
   - 返回：`status`、`workflows`、`errors`、`output_path`、`stored_input_path`。
   ```bash
   curl -X POST http://localhost:8010/retrieval/index \
@@ -64,6 +65,7 @@
 
 - **POST** `/retrieval/index/upload` — 上传文件并启动索引
   - 表单字段：`file`（必填；PDF 会先提取纯文本再入库），`collection_id`（可选），`method`（可选，默认 `standard`），`is_update_run`（可选，默认 `false`），`verbose`（可选，默认 `false`）。
+  - 成功完成 GraphRAG 索引后，会继续自动生成 protocol 产物：`sections.parquet`、`procedure_blocks.parquet`、`protocol_steps.parquet`。
   - 返回：同上，额外返回 `stored_input_path`（存储的输入文件路径/键）。
   ```bash
   curl -X POST http://localhost:8010/retrieval/index/upload \
@@ -126,3 +128,246 @@
 - PDF 需可复制文本（扫描版 PDF 暂不支持 OCR）。
 - 证据字段依赖 `text_units.parquet` 与 `documents.parquet`，若缺失则不输出。
 - 配置由服务端在集合级别管理，客户端无需传入配置路径。
+
+## 集合、任务与工作区（App Layer）
+- 说明：这一层是产品主入口，围绕 `collection_id` 和 `task_id` 工作；`/retrieval/*` 继续保留为兼容和调试接口。
+
+- **POST** `/collections` — 创建论文集合
+  - 请求体（JSON）：`name`（必填）、`description`（可选）、`default_method`（可选，默认 `standard`）。
+  ```bash
+  curl -X POST http://localhost:8010/collections \
+    -H "Content-Type: application/json" \
+    -d '{"name":"Composite Papers","description":"复合材料论文集合"}'
+  ```
+
+- **GET** `/collections` — 列出论文集合
+  ```bash
+  curl http://localhost:8010/collections
+  ```
+
+- **GET** `/collections/{collection_id}` — 获取集合详情
+  ```bash
+  curl http://localhost:8010/collections/<collection_id>
+  ```
+
+- **POST** `/collections/{collection_id}/files` — 上传论文到集合
+  - 表单字段：`file`（必填；PDF 会自动转为文本后落到集合输入目录）。
+  ```bash
+  curl -X POST http://localhost:8010/collections/<collection_id>/files \
+    -F "file=@/path/to/paper.pdf"
+  ```
+
+- **GET** `/collections/{collection_id}/files` — 列出集合文件
+  ```bash
+  curl http://localhost:8010/collections/<collection_id>/files
+  ```
+
+- **POST** `/collections/{collection_id}/tasks/index` — 创建集合索引任务
+  - 请求体（JSON）：`method`、`is_update_run`、`verbose`、`additional_context`。
+  - 返回：`task_id`、`status`、`current_stage`、`progress_percent`。
+  ```bash
+  curl -X POST http://localhost:8010/collections/<collection_id>/tasks/index \
+    -H "Content-Type: application/json" \
+    -d '{"method":"standard","is_update_run":false,"verbose":false}'
+  ```
+
+- **GET** `/collections/{collection_id}/tasks` — 列出集合任务历史
+  - 查询参数：`status`（可选）、`limit`（默认 `20`）、`offset`（默认 `0`）。
+  ```bash
+  curl "http://localhost:8010/collections/<collection_id>/tasks?status=completed&limit=20&offset=0"
+  ```
+
+- **GET** `/tasks/{task_id}` — 查询任务状态
+  ```bash
+  curl http://localhost:8010/tasks/<task_id>
+  ```
+
+- **GET** `/tasks/{task_id}/artifacts` — 查询任务产物状态
+  ```bash
+  curl http://localhost:8010/tasks/<task_id>/artifacts
+  ```
+
+- **GET** `/collections/{collection_id}/workspace` — 获取集合工作区概览
+  - 返回：`collection`、`file_count`、`status_summary`、`artifacts`、`latest_task`、`recent_tasks`、`capabilities`。
+  ```bash
+  curl http://localhost:8010/collections/<collection_id>/workspace
+  ```
+
+- **GET** `/collections/{collection_id}/graph` — 获取集合图数据
+  - 查询参数：`max_nodes`（默认 `200`）、`min_weight`（默认 `0.0`）、`community_id`（可选）。
+  ```bash
+  curl "http://localhost:8010/collections/<collection_id>/graph?max_nodes=200&min_weight=0"
+  ```
+
+- **GET** `/collections/{collection_id}/graphml` — 导出集合 GraphML
+  ```bash
+  curl -OJ "http://localhost:8010/collections/<collection_id>/graphml?max_nodes=200&min_weight=0"
+  ```
+
+- **GET** `/collections/{collection_id}/protocol/steps` — 列出集合 protocol steps
+  - 查询参数：`paper_id`、`block_type`、`limit`、`offset`。
+  ```bash
+  curl "http://localhost:8010/collections/<collection_id>/protocol/steps?limit=20"
+  ```
+
+- **GET** `/collections/{collection_id}/protocol/search` — 检索集合 protocol steps
+  - 查询参数：`q`（必填）、`paper_id`（可选）、`limit`（默认 `10`）。
+  ```bash
+  curl "http://localhost:8010/collections/<collection_id>/protocol/search?q=anneal%20600C&limit=5"
+  ```
+
+- **POST** `/collections/{collection_id}/protocol/sop` — 为集合生成 SOP 草案
+  - 请求体（JSON）：`goal`、`target_properties`、`paper_ids`、`max_steps`。
+  ```bash
+  curl -X POST http://localhost:8010/collections/<collection_id>/protocol/sop \
+    -H "Content-Type: application/json" \
+    -d '{"goal":"为复合材料设计实验方案","target_properties":["mechanical","thermal"],"max_steps":8}'
+  ```
+
+## Protocol 产物与 SOP（/retrieval/protocol）
+- 说明：这些接口消费 protocol 中间产物。`output_path` 为空时，会回退到默认 collection 的 output 目录。
+- `/retrieval/protocol/extract` 只消费上游已经生成的 `sections.parquet`、`procedure_blocks.parquet`、`protocol_steps.parquet`，不会自行执行 parser/extractor。
+
+- **POST** `/retrieval/protocol/extract` — 读取并汇总 protocol 产物
+  - 请求体（JSON）：
+    - `output_path`（可选）：GraphRAG 输出目录
+    - `paper_ids`（可选）：按论文 ID 过滤
+    - `limit`（可选，默认 `50`，范围 `1-500`）
+  - 返回：`summary`、`sections`、`procedure_blocks`、`protocol_steps`。
+  ```bash
+  curl -X POST http://localhost:8010/retrieval/protocol/extract \
+    -H "Content-Type: application/json" \
+    -d '{"output_path":"/path/to/output","paper_ids":["paper-1"],"limit":20}'
+  ```
+
+- **GET** `/retrieval/protocol/steps` — 列出 protocol steps
+  - 查询参数：
+    - `output_path`（可选）
+    - `paper_id`（可选）
+    - `block_type`（可选）
+    - `limit`（默认 `50`，范围 `1-500`）
+    - `offset`（默认 `0`）
+  ```bash
+  curl "http://localhost:8010/retrieval/protocol/steps?output_path=/path/to/output&paper_id=paper-1&limit=20"
+  ```
+
+- **GET** `/retrieval/protocol/search` — 检索 protocol steps
+  - 查询参数：
+    - `q`（必填）
+    - `output_path`（可选）
+    - `paper_id`（可选）
+    - `limit`（默认 `10`，范围 `1-100`）
+  ```bash
+  curl "http://localhost:8010/retrieval/protocol/search?q=anneal%20N2&output_path=/path/to/output&limit=5"
+  ```
+
+- **POST** `/retrieval/protocol/sop` — 基于 protocol steps 生成结构化 SOP 草案
+  - 请求体（JSON）：
+    - `goal`（必填）
+    - `output_path`（可选）
+    - `paper_ids`（可选数组）
+    - `target_properties`（可选数组）
+    - `max_steps`（可选，默认 `12`，范围 `1-50`）
+  - 返回：`count`、`sop_draft`。
+  ```bash
+  curl -X POST http://localhost:8010/retrieval/protocol/sop \
+    -H "Content-Type: application/json" \
+    -d '{
+      "goal":"Design a composite protocol for mechanical and thermal optimization",
+      "output_path":"/path/to/output",
+      "target_properties":["mechanical","thermal"],
+      "paper_ids":["paper-1"],
+      "max_steps":8
+    }'
+  ```
+
+## Protocol 数据合同（字段定义）
+- 下列结构为即将接入 `/retrieval/protocol/*` 接口的合同定义，本次先定义字段，不代表路由已全部实现。
+- 目录级输入统一使用 `output_path` 指向 GraphRAG 产物目录；为空时回退默认配置输出目录。
+
+- `NormalizedValueItem`
+  - `value`：归一化后的数值。
+  - `unit`：归一化单位，建议温度统一 `K`、时长统一 `s`、压力统一 `Pa`。
+  - `raw_value`：原始文本值。
+  - `operator`：`=`、`>`、`<`、`~`、`range`。
+  - `min_value` / `max_value`：区间值。
+  - `status`：`reported` / `inferred` / `not_reported` / `ambiguous`。
+
+- `ConditionItem`
+  - `temperature` / `duration` / `pressure` / `heating_rate` / `cooling_rate` / `ph`
+  - `atmosphere`
+  - `environment`
+  - `raw_text`
+
+- `MaterialRefItem`
+  - `name`
+  - `formula`
+  - `role`：`precursor` / `solvent` / `additive` / `matrix` / `filler` / `sample` / `product` / `other`
+  - `amount`
+  - `composition_note`
+  - `grade`
+  - `source_text`
+
+- `MeasurementSpecItem`
+  - `method`
+  - `instrument`
+  - `target_property`
+  - `metrics`
+  - `conditions`
+  - `output_ref`
+  - `source_text`
+
+- `ControlSpecItem`
+  - `control_type`：`baseline` / `blank` / `untreated` / `literature` / `ablation` / `other`
+  - `description`
+  - `rationale`
+  - `source_text`
+
+- `EvidenceRefItem`
+  - `paper_id`
+  - `section_id`
+  - `block_id`
+  - `snippet_id`
+  - `section_type`
+  - `page_start` / `page_end`
+  - `figure_or_table`
+  - `quote_span`
+  - `source_text`
+  - `confidence_score`
+
+- `ProtocolStepItem`
+  - `step_id`
+  - `paper_id`
+  - `order`
+  - `action`
+  - `section_id`
+  - `block_id`
+  - `phase`：`preparation` / `synthesis` / `post_treatment` / `characterization` / `property_test` / `analysis` / `other`
+  - `materials`
+  - `conditions`
+  - `purpose`
+  - `expected_output`
+  - `characterization`
+  - `controls`
+  - `evidence_refs`
+  - `confidence_score`
+
+- `SOPDraftItem`
+  - `sop_id`
+  - `objective`
+  - `hypothesis`
+  - `variables`
+  - `constraints`
+  - `controls`
+  - `steps`
+  - `measurement_plan`
+  - `acceptance_criteria`
+  - `risks`
+  - `open_questions`
+  - `review_status`
+
+- 预留请求/响应模型
+  - `ProtocolExtractRequest` / `ProtocolExtractResponse`
+  - `ProtocolStepListResponse`
+  - `ProtocolSearchHit` / `ProtocolSearchResponse`
+  - `SOPDraftRequest` / `SOPDraftResponse`

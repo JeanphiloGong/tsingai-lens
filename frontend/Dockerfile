@@ -1,6 +1,10 @@
 FROM node:20-alpine AS build
 
+ARG PUBLIC_API_BASE_URL=same-origin
+
 WORKDIR /app
+
+ENV PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL}
 
 COPY package.json package-lock.json ./
 RUN npm ci

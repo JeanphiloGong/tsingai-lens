@@ -14,6 +14,7 @@ from controllers.schemas import IndexRequest, IndexResponse
 from retrieval.api.index import build_index
 from retrieval.config.enums import IndexingMethod
 from retrieval.utils.api import create_storage_from_config
+from services import protocol_pipeline_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,33 @@ def _format_context_excerpt(value: Any, limit: int = 200) -> str:
     if len(text) > limit:
         return f"{text[:limit]}... (truncated, len={len(text)})"
     return text
+
+
+def _resolve_output_dir(config: Any) -> Path:
+    """Resolve the concrete output directory from a loaded collection config."""
+    base_dir = Path(getattr(config.output, "base_dir", getattr(config, "root_dir", ".")))
+    if not base_dir.is_absolute():
+        root_dir = Path(getattr(config, "root_dir", ".")).expanduser().resolve()
+        base_dir = (root_dir / base_dir).resolve()
+    return base_dir
+
+
+def _run_protocol_postprocess(output_dir: Path) -> str | None:
+    """Build protocol artifacts after indexing and convert failures into response errors."""
+    try:
+        result = protocol_pipeline_service.build_protocol_artifacts(output_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Protocol postprocess failed output_dir=%s", output_dir)
+        return f"Protocol 产物生成失败: {exc}"
+
+    logger.info(
+        "Protocol artifacts generated output_dir=%s sections=%s procedure_blocks=%s protocol_steps=%s",
+        result.output_dir,
+        result.section_count,
+        result.procedure_block_count,
+        result.protocol_step_count,
+    )
+    return None
 
 
 async def start_indexing(request: IndexRequest) -> IndexResponse:
@@ -62,12 +90,18 @@ async def start_indexing(request: IndexRequest) -> IndexResponse:
         raise HTTPException(status_code=500, detail=f"流程执行失败: {exc}") from exc
 
     errors = [err for o in outputs for err in (o.errors or [])]
+    output_dir = _resolve_output_dir(config)
+    if not errors:
+        protocol_error = _run_protocol_postprocess(output_dir)
+        if protocol_error:
+            errors.append(protocol_error)
     status = "ok" if not errors else "error"
     logger.info(
-        "Indexing finished status=%s workflows=%s error_count=%s",
+        "Indexing finished status=%s workflows=%s error_count=%s output_dir=%s",
         status,
         [o.workflow for o in outputs],
         len(errors),
+        output_dir,
     )
     if errors:
         logger.warning("Indexing completed with errors: %s", [str(e) for e in errors])
@@ -76,7 +110,7 @@ async def start_indexing(request: IndexRequest) -> IndexResponse:
         status=status,
         workflows=[o.workflow for o in outputs],
         errors=[str(e) for e in errors] or None,
-        output_path=str(getattr(config.output, "base_dir", "") or ""),
+        output_path=str(output_dir),
         stored_input_path=None,
     )
 
@@ -151,13 +185,19 @@ async def upload_and_index(
         raise HTTPException(status_code=500, detail=f"流程执行失败: {exc}") from exc
 
     errors = [err for o in outputs for err in (o.errors or [])]
+    output_dir = _resolve_output_dir(config)
+    if not errors:
+        protocol_error = _run_protocol_postprocess(output_dir)
+        if protocol_error:
+            errors.append(protocol_error)
     status = "ok" if not errors else "error"
     logger.info(
-        "Indexing finished for upload status=%s workflows=%s error_count=%s stored_input_path=%s",
+        "Indexing finished for upload status=%s workflows=%s error_count=%s stored_input_path=%s output_dir=%s",
         status,
         [o.workflow for o in outputs],
         len(errors),
         stored_path,
+        output_dir,
     )
     if errors:
         logger.warning("Indexing completed with errors: %s", [str(e) for e in errors])
@@ -166,6 +206,6 @@ async def upload_and_index(
         status=status,
         workflows=[o.workflow for o in outputs],
         errors=[str(e) for e in errors] or None,
-        output_path=str(getattr(config.output, "base_dir", "") or ""),
+        output_path=str(output_dir),
         stored_input_path=str(stored_path),
     )

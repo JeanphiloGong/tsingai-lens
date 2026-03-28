@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pandas as pd
+
+if "devtools" not in sys.modules:
+    sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
+
+from services.artifact_registry_service import ArtifactRegistryService
+from services.collection_service import CollectionService
+from services.index_task_runner import IndexTaskRunner
+from services.task_service import TaskService
+
+
+class DummyWorkflowOutput:
+    def __init__(self, workflow: str = "index", errors: list[str] | None = None):
+        self.workflow = workflow
+        self.errors = errors
+
+
+def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
+    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
+        frame = self.reset_index(drop=True) if index else self
+        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
+
+    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        return pd.DataFrame(payload)
+
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
+    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        output=SimpleNamespace(base_dir=str(output_dir)),
+        input=SimpleNamespace(storage=SimpleNamespace(base_dir=str(input_dir))),
+        root_dir=str(output_dir.parent),
+    )
+
+
+def _write_index_outputs(output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Composite Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                        "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
+                        "Characterization",
+                        "XRD and SEM were used to characterize the powders.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                "document_ids": ["paper-1"],
+            },
+            {
+                "id": "tu-2",
+                "text": "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
+                "document_ids": ["paper-1"],
+            },
+        ]
+    )
+    entities = pd.DataFrame([{"id": "ent-1", "title": "epoxy"}])
+    relationships = pd.DataFrame([{"source": "epoxy", "target": "SiO2", "weight": 1.0}])
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    entities.to_parquet(output_dir / "entities.parquet", index=False)
+    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
+
+
+def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    import services.index_task_runner as task_runner_module
+
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
+
+    collection = collection_service.create_collection("Composite Papers")
+    paths = collection_service.get_paths(collection["collection_id"])
+    collection_service.add_file(collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal.")
+
+    default_config = tmp_path / "configs" / "default.yaml"
+    default_config.parent.mkdir(parents=True, exist_ok=True)
+    default_config.write_text("dummy: true\n", encoding="utf-8")
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003
+        _write_index_outputs(paths.output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
+    monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
+    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+
+    task = task_service.create_task(collection["collection_id"], "index")
+    result = asyncio.run(runner.run_index_task(task["task_id"], collection["collection_id"]))
+
+    assert result["status"] == "completed"
+    assert result["current_stage"] == "artifacts_ready"
+    artifacts = artifact_registry.get(collection["collection_id"])
+    assert artifacts["documents_ready"] is True
+    assert artifacts["graph_ready"] is True
+    assert artifacts["sections_ready"] is True
+    assert artifacts["procedure_blocks_ready"] is True
+    assert artifacts["protocol_steps_ready"] is True

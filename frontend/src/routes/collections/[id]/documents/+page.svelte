@@ -9,7 +9,9 @@
   } from '../../../_shared/files';
   import { t } from '../../../_shared/i18n';
 
-  $: collectionId = $page.params.id;
+  let collectionId = '';
+
+  $: collectionId = $page.params.id ?? '';
 
   let showModal = false;
   let selectedFiles: File[] = [];
@@ -298,10 +300,10 @@
     role="button"
     tabindex="0"
     aria-label={$t('create.cancel')}
-    on:click={closeModal}
+    on:click|self={closeModal}
     on:keydown={handleBackdropKeydown}
   >
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <h3>{$t('documents.modalTitle')}</h3>
         <p class="meta-text">{$t('documents.modalLead')}</p>
@@ -337,8 +339,8 @@
         </label>
       </div>
 
-      <div class="field">
-        <label>{$t('documents.indexModeLabel')}</label>
+      <fieldset class="field fieldset">
+        <legend>{$t('documents.indexModeLabel')}</legend>
         <div class="radio-group">
           <label>
             <input
@@ -361,7 +363,7 @@
             {$t('documents.indexModeRebuild')}
           </label>
         </div>
-      </div>
+      </fieldset>
 
       <div class="field">
         <label for="index-method">{$t('documents.methodLabel')}</label>
@@ -393,10 +395,10 @@
     role="button"
     tabindex="0"
     aria-label={$t('documents.deleteCancel')}
-    on:click={closeDelete}
+    on:click|self={closeDelete}
     on:keydown={handleDeleteBackdropKeydown}
   >
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" on:click|stopPropagation>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <div class="modal-title">
           <h3>{$t('documents.deleteTitle')}</h3>

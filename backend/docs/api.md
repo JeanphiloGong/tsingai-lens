@@ -7,6 +7,10 @@
 - 结果接口优先：图谱、protocol、SOP 都优先走 collection 维度接口
 - 兼容 / 调试接口：`/retrieval/*`
 - 不建议前端默认直接调用：`/retrieval/index`、`/retrieval/index/upload`、`/retrieval/protocol/*`
+- 当前没有独立的 `/chat` 或 `/file` controller：
+  - 文件上传/列表能力已并入 `POST/GET /collections/{collection_id}/files`
+  - 底层兼容上传仍保留在 `/retrieval/input/upload` 和 `/retrieval/index/upload`
+  - 检索问答能力当前通过 `/retrieval/query` 提供，产品主流程优先使用 collection 维度结果接口
 
 ## 前端标准调用顺序
 1. `GET /collections`
@@ -84,6 +88,7 @@
 
 ## 产品主入口（App Layer）
 - 说明：这一层是科研助手的主流程入口，围绕 `collection_id` 和 `task_id` 工作。
+- 说明：本分支不再挂载独立 `chat` / `file` 路由，相关能力已合并到本章节与 `/retrieval` 兼容接口中。
 
 ### 集合与文件
 - **POST** `/collections` — 创建论文集合
@@ -193,6 +198,7 @@
 
 ## 兼容 / 调试接口（/retrieval）
 - 说明：这部分保留给兼容旧调用、底层调试和排障使用，不建议前端作为默认产品入口直接接入。
+- 说明：`/retrieval` 仍保留上传、索引、问答与导出能力，但它是引擎层接口，不再代表产品主流程。
 
 ### 旧集合接口
 - **POST** `/retrieval/collections` — 创建集合

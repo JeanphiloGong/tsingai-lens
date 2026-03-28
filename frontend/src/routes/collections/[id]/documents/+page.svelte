@@ -1,13 +1,18 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { page } from '$app/stores';
-  import { errorMessage, formatResult, requestJson } from '../../../_shared/api';
-  import {
-    deleteCollectionFile,
-    listCollectionFiles,
-    uploadCollectionFiles,
-    type CollectionFile
-  } from '../../../_shared/files';
+  import { errorMessage } from '../../../_shared/api';
+  import { listCollectionFiles, uploadCollectionFiles, type CollectionFile } from '../../../_shared/files';
   import { t } from '../../../_shared/i18n';
+  import {
+    createIndexTask,
+    getTask,
+    getTaskArtifacts,
+    isTaskActive,
+    listCollectionTasks,
+    type ArtifactStatus,
+    type Task
+  } from '../../../_shared/tasks';
 
   let collectionId = '';
 
@@ -21,17 +26,35 @@
   let method = 'standard';
   let uploadLoading = false;
   let uploadError = '';
-  let uploadResult: unknown = null;
-  let indexResult: unknown = null;
-  let indexStatus = '';
+  let uploadResult: { count: number; items: CollectionFile[] } | null = null;
   let fileInput: HTMLInputElement | null = null;
   let collectionFiles: CollectionFile[] = [];
   let filesLoading = false;
   let filesError = '';
-  let deleteTarget: CollectionFile | null = null;
-  let deleteLoading = false;
-  let deleteError = '';
+  let currentTask: Task | null = null;
+  let currentArtifacts: ArtifactStatus | null = null;
+  let taskLoading = false;
+  let taskError = '';
   let loadedCollectionId = '';
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearPoll() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function schedulePoll(taskId: string) {
+    clearPoll();
+    pollTimer = setTimeout(() => {
+      refreshTask(taskId).catch(() => null);
+    }, 2500);
+  }
+
+  onDestroy(() => {
+    clearPoll();
+  });
 
   function openModal() {
     showModal = true;
@@ -42,8 +65,6 @@
     method = 'standard';
     uploadError = '';
     uploadResult = null;
-    indexResult = null;
-    indexStatus = '';
   }
 
   function closeModal() {
@@ -85,7 +106,7 @@
     fileInput?.click();
   }
 
-  function formatDate(value?: string) {
+  function formatDate(value?: string | null) {
     if (!value) return '-';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
@@ -93,7 +114,7 @@
   }
 
   function formatBytes(value?: number) {
-    if (value === undefined || value === null) return '-';
+    if (value === undefined || value === null || Number.isNaN(value)) return '-';
     if (value < 1024) return `${value} B`;
     const kb = value / 1024;
     if (kb < 1024) return `${kb.toFixed(1)} KB`;
@@ -103,12 +124,31 @@
     return `${gb.toFixed(1)} GB`;
   }
 
+  function formatTaskStatus(status?: string | null) {
+    if (!status) return $t('tasks.statusUnknown');
+    const key = `tasks.status.${status}`;
+    const translated = $t(key);
+    return translated === key ? status : translated;
+  }
+
+  function formatTaskStage(stage?: string | null) {
+    if (!stage) return $t('tasks.stageUnknown');
+    const key = `tasks.stage.${stage}`;
+    const translated = $t(key);
+    return translated === key ? stage : translated;
+  }
+
+  function formatPercent(value?: number | null) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
+    return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
+  }
+
   function getFileLabel(file: CollectionFile) {
-    return file.original_filename || file.key || file.stored_path || $t('documents.untitledFile');
+    return file.original_filename || file.stored_filename || file.file_id || $t('documents.untitledFile');
   }
 
   function getFileSub(file: CollectionFile) {
-    return file.key || file.stored_path || '';
+    return file.stored_filename || file.stored_path || '';
   }
 
   async function loadFiles() {
@@ -116,7 +156,7 @@
     filesError = '';
     try {
       const data = await listCollectionFiles(collectionId);
-      collectionFiles = Array.isArray(data.items) ? data.items : [];
+      collectionFiles = data.items;
     } catch (err) {
       filesError = errorMessage(err);
     } finally {
@@ -124,52 +164,63 @@
     }
   }
 
-  function openDelete(file: CollectionFile) {
-    deleteTarget = file;
-    deleteError = '';
-  }
-
-  function closeDelete() {
-    deleteTarget = null;
-    deleteLoading = false;
-    deleteError = '';
-  }
-
-  function handleDeleteBackdropKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      closeDelete();
-      return;
-    }
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      closeDelete();
-    }
-  }
-
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    deleteLoading = true;
-    deleteError = '';
+  async function loadLatestTask() {
+    taskError = '';
+    taskLoading = true;
     try {
-      await deleteCollectionFile(collectionId, deleteTarget.key);
-      closeDelete();
-      await loadFiles();
+      const tasks = await listCollectionTasks(collectionId, { limit: 1, offset: 0 });
+      currentTask = tasks.items[0] ?? null;
+      currentArtifacts = currentTask ? await getTaskArtifacts(currentTask.task_id).catch(() => null) : null;
+      if (currentTask && isTaskActive(currentTask)) {
+        schedulePoll(currentTask.task_id);
+      } else {
+        clearPoll();
+      }
     } catch (err) {
-      deleteError = errorMessage(err);
-      deleteLoading = false;
+      taskError = errorMessage(err);
+    } finally {
+      taskLoading = false;
+    }
+  }
+
+  async function refreshTask(taskId: string) {
+    const [task, artifacts] = await Promise.all([getTask(taskId), getTaskArtifacts(taskId).catch(() => null)]);
+    currentTask = task;
+    currentArtifacts = artifacts;
+
+    if (isTaskActive(task)) {
+      schedulePoll(task.task_id);
+    } else {
+      clearPoll();
+      await loadFiles();
+    }
+  }
+
+  async function startIndexRun() {
+    taskError = '';
+    try {
+      currentTask = await createIndexTask(collectionId, {
+        method,
+        isUpdateRun: indexMode === 'update',
+        verbose: false
+      });
+      currentArtifacts = await getTaskArtifacts(currentTask.task_id).catch(() => null);
+      schedulePoll(currentTask.task_id);
+    } catch (err) {
+      taskError = errorMessage(err);
     }
   }
 
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
+    clearPoll();
     loadFiles();
+    loadLatestTask();
   }
 
   async function submitUpload() {
     uploadError = '';
     uploadResult = null;
-    indexResult = null;
-    indexStatus = '';
 
     if (!selectedFiles.length) {
       uploadError = $t('documents.errorNoFiles');
@@ -180,20 +231,10 @@
     try {
       uploadResult = await uploadCollectionFiles(collectionId, selectedFiles);
       await loadFiles();
-      indexStatus = $t('documents.uploadDone');
       if (indexAfterUpload) {
-        indexStatus = $t('documents.indexing');
-        indexResult = await requestJson('/retrieval/index', {
-          method: 'POST',
-          body: JSON.stringify({
-            collection_id: collectionId,
-            method,
-            is_update_run: indexMode === 'update',
-            verbose: false
-          })
-        });
-        indexStatus = $t('documents.indexDone');
+        await startIndexRun();
       }
+      closeModal();
     } catch (err) {
       uploadError = errorMessage(err);
     } finally {
@@ -207,11 +248,81 @@
 </svelte:head>
 
 <section class="card fade-up">
-  <h2>{$t('documents.title')}</h2>
-  <p class="lead">{$t('documents.lead')}</p>
-  <button class="btn btn--primary" type="button" on:click={openModal}>
-    {$t('documents.addFiles')}
-  </button>
+  <div class="card-header-inline">
+    <div>
+      <h2>{$t('documents.title')}</h2>
+      <p class="lead">{$t('documents.lead')}</p>
+    </div>
+    <div class="table-actions">
+      <button class="btn btn--ghost" type="button" on:click={startIndexRun} disabled={!collectionFiles.length}>
+        {$t('documents.startIndex')}
+      </button>
+      <button class="btn btn--primary" type="button" on:click={openModal}>
+        {$t('documents.addFiles')}
+      </button>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h3>{$t('documents.processingTitle')}</h3>
+  {#if taskLoading}
+    <div class="status" role="status" aria-live="polite">{$t('documents.processingLoading')}</div>
+  {:else if taskError}
+    <div class="status status--error" role="alert">{taskError}</div>
+  {:else if currentTask}
+    <div class="result-grid">
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{currentTask.task_id}</div>
+          <div class="table-sub">{formatTaskStatus(currentTask.status)}</div>
+        </div>
+        <dl class="detail-list">
+          <div class="detail-row">
+            <dt>{$t('tasks.tableStage')}</dt>
+            <dd>{formatTaskStage(currentTask.current_stage)}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>{$t('tasks.tableProgress')}</dt>
+            <dd>{formatPercent(currentTask.progress_percent)}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>{$t('tasks.tableCreated')}</dt>
+            <dd>{formatDate(currentTask.created_at)}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>{$t('tasks.tableFinished')}</dt>
+            <dd>{formatDate(currentTask.finished_at)}</dd>
+          </div>
+        </dl>
+        {#if currentTask.errors.length}
+          <div class="status status--error" role="alert">{currentTask.errors.join(' | ')}</div>
+        {/if}
+        {#if currentTask.warnings.length}
+          <div class="status" role="status">{currentTask.warnings.join(' | ')}</div>
+        {/if}
+      </div>
+      <div class="result-card">
+        <h4>{$t('documents.artifactsTitle')}</h4>
+        <div class="detail-chips">
+          <span class={`detail-chip ${currentArtifacts?.documents_ready ? '' : 'detail-chip--muted'}`}>
+            {$t('overview.artifacts.documents')}
+          </span>
+          <span class={`detail-chip ${currentArtifacts?.graph_ready ? '' : 'detail-chip--muted'}`}>
+            {$t('overview.artifacts.graph')}
+          </span>
+          <span class={`detail-chip ${currentArtifacts?.graphml_ready ? '' : 'detail-chip--muted'}`}>
+            {$t('overview.artifacts.graphml')}
+          </span>
+          <span class={`detail-chip ${currentArtifacts?.protocol_steps_ready ? '' : 'detail-chip--muted'}`}>
+            {$t('overview.artifacts.protocolSteps')}
+          </span>
+        </div>
+      </div>
+    </div>
+  {:else}
+    <p class="note">{$t('documents.processingEmpty')}</p>
+  {/if}
 </section>
 
 <section class="card">
@@ -229,9 +340,9 @@
         <thead>
           <tr>
             <th>{$t('documents.tableName')}</th>
+            <th>{$t('documents.tableStatus')}</th>
             <th>{$t('documents.tableSize')}</th>
             <th>{$t('documents.tableCreated')}</th>
-            <th>{$t('documents.tableActions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -245,15 +356,9 @@
                   {/if}
                 </div>
               </td>
+              <td>{file.status}</td>
               <td>{formatBytes(file.size_bytes)}</td>
               <td>{formatDate(file.created_at)}</td>
-              <td>
-                <div class="table-actions">
-                  <button class="btn btn--ghost btn--small btn--danger" type="button" on:click={() => openDelete(file)}>
-                    {$t('documents.actionDelete')}
-                  </button>
-                </div>
-              </td>
             </tr>
           {/each}
         </tbody>
@@ -262,35 +367,15 @@
   {/if}
 </section>
 
-{#if uploadResult !== null || indexResult !== null || uploadError}
+{#if uploadResult}
   <section class="card">
-    <h3>{$t('documents.upload')}</h3>
-    {#if uploadError}
-      <div class="status status--error" role="alert">{uploadError}</div>
-    {/if}
-    {#if indexStatus}
-      <div class="status" role="status" aria-live="polite">{indexStatus}</div>
-    {/if}
-    {#if uploadResult !== null}
-      <pre class="code-block">{formatResult(uploadResult)}</pre>
-    {/if}
-    {#if indexResult !== null}
-      <pre class="code-block">{formatResult(indexResult)}</pre>
-    {/if}
-  </section>
-{/if}
-
-{#if indexResult}
-  <section class="card">
-    <h3>{$t('overview.nextActionsTitle')}</h3>
-    <div class="action-grid">
-      <a class="btn btn--primary" href={`/collections/${collectionId}/search`}>
-        {$t('overview.nextSearch')}
-      </a>
-      <a class="btn btn--ghost" href={`/collections/${collectionId}/graph`}>
-        {$t('overview.nextExport')}
-      </a>
-    </div>
+    <h3>{$t('documents.uploadResultTitle')}</h3>
+    <p class="meta-text">{$t('documents.uploadResultDesc', { count: uploadResult.count })}</p>
+    <ul class="result-list">
+      {#each uploadResult.items as item}
+        <li>{item.original_filename || item.stored_filename}</li>
+      {/each}
+    </ul>
   </section>
 {/if}
 
@@ -305,8 +390,10 @@
   >
     <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
-        <h3>{$t('documents.modalTitle')}</h3>
-        <p class="meta-text">{$t('documents.modalLead')}</p>
+        <div class="modal-title">
+          <h3>{$t('documents.modalTitle')}</h3>
+          <p class="meta-text">{$t('documents.modalLead')}</p>
+        </div>
       </div>
       <div
         class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
@@ -383,44 +470,6 @@
         </button>
         <button class="btn btn--primary" type="button" on:click={submitUpload} disabled={uploadLoading}>
           {uploadLoading ? $t('documents.uploading') : $t('documents.upload')}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if deleteTarget}
-  <div
-    class="modal-backdrop"
-    role="button"
-    tabindex="0"
-    aria-label={$t('documents.deleteCancel')}
-    on:click|self={closeDelete}
-    on:keydown={handleDeleteBackdropKeydown}
-  >
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
-      <div class="modal-header">
-        <div class="modal-title">
-          <h3>{$t('documents.deleteTitle')}</h3>
-          <p class="meta-text">
-            {$t('documents.deleteDesc', { name: getFileLabel(deleteTarget) })}
-          </p>
-        </div>
-        <button class="modal-close" type="button" on:click={closeDelete} aria-label={$t('documents.deleteCancel')}>
-          x
-        </button>
-      </div>
-
-      {#if deleteError}
-        <div class="status status--error" role="alert">{deleteError}</div>
-      {/if}
-
-      <div class="modal-actions">
-        <button class="btn btn--ghost" type="button" on:click={closeDelete}>
-          {$t('documents.deleteCancel')}
-        </button>
-        <button class="btn btn--danger" type="button" on:click={confirmDelete} disabled={deleteLoading}>
-          {deleteLoading ? $t('documents.deleting') : $t('documents.deleteConfirm')}
         </button>
       </div>
     </div>

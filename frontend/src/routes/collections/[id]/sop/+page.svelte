@@ -83,6 +83,7 @@
     <div>
       <h2>{$t('sop.title')}</h2>
       <p class="lead">{$t('sop.lead')}</p>
+      <p class="note">{$t('sop.purpose')}</p>
     </div>
     <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
       {$t('sop.backToWorkspace')}

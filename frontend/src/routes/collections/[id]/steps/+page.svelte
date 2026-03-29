@@ -130,6 +130,7 @@
     <div>
       <h2>{$t('steps.title')}</h2>
       <p class="lead">{$t('steps.lead')}</p>
+      <p class="note">{$t('steps.purpose')}</p>
     </div>
     {#if canViewProtocolSteps()}
       <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>

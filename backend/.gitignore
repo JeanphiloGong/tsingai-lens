@@ -217,3 +217,5 @@ data/collections/*/files.json
 data/collections/*/artifacts.json
 data/collections/*/input/
 data/collections/*/output/
+
+data/vector_store/

@@ -35,6 +35,44 @@ def _payload_list(value: Any, field_name: str) -> list[str] | None:
     return [str(item) for item in value]
 
 
+def _protocol_not_ready_detail(collection_id: str, artifacts: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = artifacts or {}
+    return {
+        "code": "protocol_artifacts_not_ready",
+        "message": "集合的 protocol 产物尚未就绪，请先完成索引任务并等待 protocol steps 生成。",
+        "collection_id": collection_id,
+        "artifacts": {
+            "documents_ready": bool(payload.get("documents_ready")),
+            "sections_ready": bool(payload.get("sections_ready")),
+            "procedure_blocks_ready": bool(payload.get("procedure_blocks_ready")),
+            "protocol_steps_ready": bool(payload.get("protocol_steps_ready")),
+        },
+    }
+
+
+def _ensure_collection_protocol_ready(collection_id: str) -> Path:
+    try:
+        collection_service.get_collection(collection_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        artifacts = artifact_registry_service.get(collection_id)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=409,
+            detail=_protocol_not_ready_detail(collection_id),
+        ) from None
+
+    if not artifacts.get("protocol_steps_ready"):
+        raise HTTPException(
+            status_code=409,
+            detail=_protocol_not_ready_detail(collection_id, artifacts),
+        )
+
+    return resolve_collection_output_dir(collection_id)
+
+
 @router.post("", response_model=CollectionResponse, summary="创建论文集合")
 async def create_collection(payload: CollectionCreateRequest) -> CollectionResponse:
     record = collection_service.create_collection(
@@ -158,7 +196,7 @@ async def list_collection_protocol_steps(
     limit: int = Query(default=50, ge=1, le=500, description="返回数量"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
 ) -> dict[str, Any]:
-    base_dir = resolve_collection_output_dir(collection_id)
+    base_dir = _ensure_collection_protocol_ready(collection_id)
     payload = protocol_sop_service.list_protocol_steps(
         base_dir=base_dir,
         paper_id=paper_id,
@@ -177,7 +215,7 @@ async def search_collection_protocol_steps(
     paper_id: str | None = Query(default=None, description="按论文 ID 过滤"),
     limit: int = Query(default=10, ge=1, le=100, description="返回数量"),
 ) -> dict[str, Any]:
-    base_dir = resolve_collection_output_dir(collection_id)
+    base_dir = _ensure_collection_protocol_ready(collection_id)
     payload = protocol_search_service.search_protocol_steps(
         base_dir=base_dir,
         query=q,
@@ -199,7 +237,7 @@ async def build_collection_protocol_sop(
     max_steps = int(payload.get("max_steps", 12))
     if max_steps < 1 or max_steps > 50:
         raise HTTPException(status_code=400, detail="max_steps 必须在 1-50 之间")
-    base_dir = resolve_collection_output_dir(collection_id)
+    base_dir = _ensure_collection_protocol_ready(collection_id)
     response = protocol_sop_service.build_sop_draft(
         base_dir=base_dir,
         goal=goal,

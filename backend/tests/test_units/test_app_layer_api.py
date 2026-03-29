@@ -255,3 +255,42 @@ def test_collection_task_and_query_flow(app_client):
     assert workspace_body["capabilities"]["can_view_graph"] is True
     assert workspace_body["capabilities"]["can_generate_sop"] is True
     assert workspace_body["latest_task"]["task_id"] == task_id
+
+
+def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_exist(app_client):
+    create_resp = app_client.post("/collections", json={"name": "Pending Collection"})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    workspace = app_client.get(f"/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    workspace_body = workspace.json()
+    assert workspace_body["artifacts"]["protocol_steps_ready"] is False
+    assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
+
+    steps = app_client.get(f"/collections/{collection_id}/protocol/steps")
+    assert steps.status_code == 409
+    steps_detail = steps.json()["detail"]
+    assert steps_detail["code"] == "protocol_artifacts_not_ready"
+    assert steps_detail["collection_id"] == collection_id
+    assert steps_detail["artifacts"]["protocol_steps_ready"] is False
+
+    search = app_client.get(
+        f"/collections/{collection_id}/protocol/search",
+        params={"q": "anneal", "limit": 5},
+    )
+    assert search.status_code == 409
+    assert search.json()["detail"]["code"] == "protocol_artifacts_not_ready"
+
+    sop = app_client.post(
+        f"/collections/{collection_id}/protocol/sop",
+        json={"goal": "Build a draft SOP"},
+    )
+    assert sop.status_code == 409
+    assert sop.json()["detail"]["code"] == "protocol_artifacts_not_ready"

@@ -176,6 +176,49 @@ def test_start_indexing_generates_protocol_artifacts(monkeypatch, tmp_path):
     _assert_protocol_artifacts(output_dir)
 
 
+def test_start_indexing_downgrades_first_update_run(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    _patch_parquet(monkeypatch)
+
+    from app.usecases import indexing as indexing_uc
+    from controllers.schemas import IndexRequest
+    from retrieval.config.enums import IndexingMethod
+
+    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "input"
+    config = _build_config(output_dir, input_dir)
+    captured: dict[str, object] = {}
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003, ARG001
+        captured.update(kwargs)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(
+        indexing_uc.collection_store,
+        "load_collection_config",
+        lambda collection_id: (config, collection_id or "default"),
+    )
+    monkeypatch.setattr(indexing_uc, "build_index", fake_build_index)
+
+    response = asyncio.run(
+        indexing_uc.start_indexing(
+            IndexRequest(
+                collection_id=None,
+                method=IndexingMethod.Standard,
+                is_update_run=True,
+                verbose=False,
+            )
+        )
+    )
+
+    assert response.status == "ok"
+    assert response.errors is None
+    assert response.warnings == ["未找到上一轮索引产物 documents.parquet，已自动降级为全量重建。"]
+    assert captured["is_update_run"] is False
+    _assert_protocol_artifacts(output_dir)
+
+
 def test_upload_and_index_generates_protocol_artifacts(monkeypatch, tmp_path):
     pytest.importorskip("fastapi")
     _patch_parquet(monkeypatch)
@@ -218,4 +261,52 @@ def test_upload_and_index_generates_protocol_artifacts(monkeypatch, tmp_path):
     assert response.errors is None
     assert response.stored_input_path is not None
     assert Path(response.output_path) == output_dir.resolve()
+    _assert_protocol_artifacts(output_dir)
+
+
+def test_upload_and_index_downgrades_first_update_run(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    _patch_parquet(monkeypatch)
+
+    from app.usecases import indexing as indexing_uc
+    from retrieval.config.enums import IndexingMethod
+
+    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "input"
+    config = _build_config(output_dir, input_dir)
+    captured: dict[str, object] = {}
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003, ARG001
+        captured.update(kwargs)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(
+        indexing_uc.collection_store,
+        "load_collection_config",
+        lambda collection_id: (config, collection_id or "default"),
+    )
+    monkeypatch.setattr(indexing_uc, "build_index", fake_build_index)
+    monkeypatch.setattr(
+        indexing_uc,
+        "create_storage_from_config",
+        lambda storage_config: DummyInputStorage(Path(storage_config.base_dir)),
+    )
+
+    upload = DummyUploadFile("paper.txt", b"Experimental Section\nPowders were mixed.")
+    response = asyncio.run(
+        indexing_uc.upload_and_index(
+            file=upload,
+            collection_id=None,
+            method=IndexingMethod.Standard,
+            is_update_run=True,
+            verbose=False,
+        )
+    )
+
+    assert response.status == "ok"
+    assert response.errors is None
+    assert response.warnings == ["未找到上一轮索引产物 documents.parquet，已自动降级为全量重建。"]
+    assert response.stored_input_path is not None
+    assert captured["is_update_run"] is False
     _assert_protocol_artifacts(output_dir)

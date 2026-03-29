@@ -14,6 +14,7 @@ from controllers.schemas import IndexRequest, IndexResponse
 from retrieval.api.index import build_index
 from retrieval.config.enums import IndexingMethod
 from retrieval.utils.api import create_storage_from_config
+from services.index_run_mode_service import resolve_update_run
 from services import protocol_pipeline_service
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,19 @@ def _run_protocol_postprocess(output_dir: Path) -> str | None:
 
 async def start_indexing(request: IndexRequest) -> IndexResponse:
     config, collection_id = collection_store.load_collection_config(request.collection_id)
+    output_dir = _resolve_output_dir(config)
+    effective_is_update_run, update_warning = resolve_update_run(
+        output_dir,
+        request.is_update_run,
+    )
+    warnings: list[str] = []
+    if update_warning:
+        logger.warning(
+            "Downgrading retrieval index request to full rebuild collection_id=%s output_dir=%s",
+            collection_id,
+            output_dir,
+        )
+        warnings.append(update_warning)
     logger.info(
         "Received indexing request collection_id=%s method=%s is_update_run=%s verbose=%s",
         collection_id,
@@ -81,7 +95,7 @@ async def start_indexing(request: IndexRequest) -> IndexResponse:
         outputs = await build_index(
             config=config,
             method=request.method or IndexingMethod.Standard,
-            is_update_run=request.is_update_run,
+            is_update_run=effective_is_update_run,
             additional_context=request.additional_context,
             verbose=request.verbose,
         )
@@ -90,7 +104,6 @@ async def start_indexing(request: IndexRequest) -> IndexResponse:
         raise HTTPException(status_code=500, detail=f"流程执行失败: {exc}") from exc
 
     errors = [err for o in outputs for err in (o.errors or [])]
-    output_dir = _resolve_output_dir(config)
     if not errors:
         protocol_error = _run_protocol_postprocess(output_dir)
         if protocol_error:
@@ -110,6 +123,7 @@ async def start_indexing(request: IndexRequest) -> IndexResponse:
         status=status,
         workflows=[o.workflow for o in outputs],
         errors=[str(e) for e in errors] or None,
+        warnings=warnings or None,
         output_path=str(output_dir),
         stored_input_path=None,
     )
@@ -124,6 +138,19 @@ async def upload_and_index(
 ) -> IndexResponse:
     """Upload a document to the configured input storage and run the pipeline."""
     config, resolved_collection_id = collection_store.load_collection_config(collection_id)
+    output_dir = _resolve_output_dir(config)
+    effective_is_update_run, update_warning = resolve_update_run(
+        output_dir,
+        is_update_run,
+    )
+    warnings: list[str] = []
+    if update_warning:
+        logger.warning(
+            "Downgrading retrieval upload-and-index request to full rebuild collection_id=%s output_dir=%s",
+            resolved_collection_id,
+            output_dir,
+        )
+        warnings.append(update_warning)
     logger.info(
         "Received upload for indexing collection_id=%s filename=%s method=%s is_update_run=%s verbose=%s",
         resolved_collection_id,
@@ -176,7 +203,7 @@ async def upload_and_index(
         outputs = await build_index(
             config=config,
             method=method or IndexingMethod.Standard,
-            is_update_run=is_update_run,
+            is_update_run=effective_is_update_run,
             additional_context=None,
             verbose=verbose,
         )
@@ -185,7 +212,6 @@ async def upload_and_index(
         raise HTTPException(status_code=500, detail=f"流程执行失败: {exc}") from exc
 
     errors = [err for o in outputs for err in (o.errors or [])]
-    output_dir = _resolve_output_dir(config)
     if not errors:
         protocol_error = _run_protocol_postprocess(output_dir)
         if protocol_error:
@@ -206,6 +232,7 @@ async def upload_and_index(
         status=status,
         workflows=[o.workflow for o in outputs],
         errors=[str(e) for e in errors] or None,
+        warnings=warnings or None,
         output_path=str(output_dir),
         stored_input_path=str(stored_path),
     )

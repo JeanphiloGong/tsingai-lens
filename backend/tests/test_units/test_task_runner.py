@@ -122,3 +122,46 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["sections_ready"] is True
     assert artifacts["procedure_blocks_ready"] is True
     assert artifacts["protocol_steps_ready"] is True
+
+
+def test_index_task_runner_downgrades_first_update_run(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    import services.index_task_runner as task_runner_module
+
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
+
+    collection = collection_service.create_collection("Composite Papers")
+    paths = collection_service.get_paths(collection["collection_id"])
+    collection_service.add_file(collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal.")
+
+    default_config = tmp_path / "configs" / "default.yaml"
+    default_config.parent.mkdir(parents=True, exist_ok=True)
+    default_config.write_text("dummy: true\n", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        _write_index_outputs(paths.output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
+    monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
+    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+
+    task = task_service.create_task(collection["collection_id"], "index")
+    result = asyncio.run(
+        runner.run_index_task(
+            task["task_id"],
+            collection["collection_id"],
+            is_update_run=True,
+        )
+    )
+
+    assert captured["is_update_run"] is False
+    assert result["status"] == "completed"
+    assert result["warnings"] == ["未找到上一轮索引产物 documents.parquet，已自动降级为全量重建。"]

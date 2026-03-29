@@ -259,7 +259,7 @@
     }
 
     if (latestTask && isTaskActive(latestTask)) {
-      location.hash = 'activity';
+      location.hash = 'status';
       return;
     }
 
@@ -396,20 +396,131 @@
         {actionStatus}
       </div>
     {/if}
+  </section>
 
-    <div class="detail-chips">
-      <span class={`detail-chip ${workspace.capabilities.can_view_protocol_steps ? '' : 'detail-chip--muted'}`}>
-        {$t('overview.capabilities.steps')}
-      </span>
-      <span class={`detail-chip ${workspace.capabilities.can_generate_sop ? '' : 'detail-chip--muted'}`}>
-        {$t('overview.capabilities.sop')}
-      </span>
-      <span class={`detail-chip ${workspace.capabilities.can_view_graph ? '' : 'detail-chip--muted'}`}>
-        {$t('overview.capabilities.graph')}
-      </span>
-      <span class={`detail-chip ${workspace.capabilities.can_search_protocol ? '' : 'detail-chip--muted'}`}>
-        {$t('overview.capabilities.search')}
-      </span>
+  <section id="status" class="card">
+    <div class="card-header-inline">
+      <div>
+        <h3>{$t('overview.statusTitle')}</h3>
+        <p class="meta-text">{$t('overview.statusLead')}</p>
+      </div>
+      {#if workspace.file_count > 0 && !(workspace.latest_task && isTaskActive(workspace.latest_task))}
+        <button class="btn btn--ghost btn--small" type="button" on:click={startIndexRun}>
+          {$t('overview.primaryActionProcess')}
+        </button>
+      {/if}
+    </div>
+
+    <div class="result-grid result-grid--tasks">
+      <div class="result-card">
+        <h4>{$t('overview.latestTaskTitle')}</h4>
+        <dl class="detail-list">
+          <div class="detail-row">
+            <dt>{$t('overview.statusFiles')}</dt>
+            <dd>{formatCount(workspace.file_count)}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>{$t('overview.statusUpdated')}</dt>
+            <dd>{formatDate(workspace.collection.updated_at || workspace.artifacts.updated_at)}</dd>
+          </div>
+          {#if workspace.latest_task}
+            <div class="detail-row">
+              <dt>{$t('overview.statusLatestTask')}</dt>
+              <dd>{formatTaskStatus(workspace.latest_task.status)}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>{$t('overview.statusStage')}</dt>
+              <dd>{formatTaskStage(workspace.latest_task.current_stage)}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>{$t('overview.statusProgress')}</dt>
+              <dd>{formatPercent(workspace.latest_task.progress_percent)}</dd>
+            </div>
+          {/if}
+        </dl>
+
+        {#if workspace.latest_task?.errors.length}
+          <div class="status status--error" role="alert">{workspace.latest_task.errors.join(' | ')}</div>
+        {:else if workspace.latest_task?.warnings.length}
+          <div class="status" role="status">{workspace.latest_task.warnings.join(' | ')}</div>
+        {:else if !workspace.latest_task}
+          <p class="note">{$t('overview.noTasks')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <h4>{$t('overview.statusArtifactsTitle')}</h4>
+        {#if artifactRows().length}
+          <div class="detail-chips">
+            {#each artifactRows() as [key, ready]}
+              <span class={`detail-chip ${ready ? '' : 'detail-chip--muted'}`}>
+                {$t(`overview.artifacts.${key}`)}: {ready ? $t('overview.ready') : $t('overview.pending')}
+              </span>
+            {/each}
+          </div>
+        {:else}
+          <p class="note">{$t('overview.statusArtifactsEmpty')}</p>
+        {/if}
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header-inline">
+      <div>
+        <h3>{$t('overview.resultsTitle')}</h3>
+        <p class="meta-text">{$t('overview.resultsLead')}</p>
+      </div>
+    </div>
+
+    <div class="result-grid result-grid--tasks">
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.steps')}</div>
+          <div class="table-sub">{$t('overview.resultStepsLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_view_protocol_steps}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/steps`}>
+              {$t('overview.nextSteps')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.sop')}</div>
+          <div class="table-sub">{$t('overview.resultSopLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_generate_sop}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
+              {$t('overview.nextSop')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.graph')}</div>
+          <div class="table-sub">{$t('overview.resultGraphLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_view_graph}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/graph`}>
+              {$t('overview.nextGraph')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
     </div>
   </section>
 
@@ -557,57 +668,14 @@
     </div>
   </section>
 
-  <section id="activity" class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('tasks.title')}</h3>
-        <p class="meta-text">{$t('overview.activityLead')}</p>
-      </div>
-      {#if workspace.file_count > 0 && !(workspace.latest_task && isTaskActive(workspace.latest_task))}
-        <button class="btn btn--ghost btn--small" type="button" on:click={startIndexRun}>
-          {$t('overview.primaryActionProcess')}
-        </button>
-      {/if}
-    </div>
+  <section class="card">
+    <details class="advanced" bind:open={advancedOpen}>
+      <summary>{$t('overview.advancedTitle')}</summary>
+      <p class="note">{$t('overview.advancedLead')}</p>
 
-    {#if workspace.latest_task}
       <div class="result-grid result-grid--tasks">
-        <div class="result-card">
-          <div class="table-main">
-            <div class="table-title">{formatTaskStatus(workspace.latest_task.status)}</div>
-            <div class="table-sub">{formatTaskStage(workspace.latest_task.current_stage)}</div>
-          </div>
-          <dl class="detail-list">
-            <div class="detail-row">
-              <dt>{$t('tasks.tableProgress')}</dt>
-              <dd>{formatPercent(workspace.latest_task.progress_percent)}</dd>
-            </div>
-            <div class="detail-row">
-              <dt>{$t('tasks.tableStarted')}</dt>
-              <dd>{formatDate(workspace.latest_task.started_at || workspace.latest_task.created_at)}</dd>
-            </div>
-            <div class="detail-row">
-              <dt>{$t('tasks.tableFinished')}</dt>
-              <dd>{formatDate(workspace.latest_task.finished_at)}</dd>
-            </div>
-          </dl>
-
-          {#if workspace.latest_task.errors.length}
-            <div class="status status--error" role="alert">{workspace.latest_task.errors.join(' | ')}</div>
-          {/if}
-          {#if workspace.latest_task.warnings.length}
-            <div class="status" role="status">{workspace.latest_task.warnings.join(' | ')}</div>
-          {/if}
-        </div>
-
-        <div class="result-card">
-          <div class="card-header-inline">
-            <div>
-              <h4>{$t('overview.recentActivityTitle')}</h4>
-              <p class="meta-text">{$t('tasks.resultTitle')}</p>
-            </div>
-          </div>
-
+        <section class="result-card">
+          <h4>{$t('tasks.title')}</h4>
           {#if workspace.recent_tasks.length}
             <div class="table-wrapper">
               <table class="data-table">
@@ -634,80 +702,8 @@
           {:else}
             <p class="note">{$t('overview.noTasks')}</p>
           {/if}
-        </div>
-      </div>
-    {:else}
-      <p class="note">{$t('overview.noTasks')}</p>
-    {/if}
-  </section>
+        </section>
 
-  <section class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('overview.artifactsTitle')}</h3>
-        <p class="meta-text">{$t('overview.artifactsLead')}</p>
-      </div>
-    </div>
-
-    <div class="detail-chips">
-      {#each artifactRows() as [key, ready]}
-        <span class={`detail-chip ${ready ? '' : 'detail-chip--muted'}`}>
-          {$t(`overview.artifacts.${key}`)}: {ready ? $t('overview.ready') : $t('overview.pending')}
-        </span>
-      {/each}
-    </div>
-
-    <div class="result-grid result-grid--tasks">
-      <div class="result-card">
-        <h4>{$t('overview.capabilitiesTitle')}</h4>
-        <div class="detail-chips">
-          <span class={`detail-chip ${workspace.capabilities.can_view_protocol_steps ? '' : 'detail-chip--muted'}`}>
-            {$t('overview.capabilities.steps')}
-          </span>
-          <span class={`detail-chip ${workspace.capabilities.can_search_protocol ? '' : 'detail-chip--muted'}`}>
-            {$t('overview.capabilities.search')}
-          </span>
-          <span class={`detail-chip ${workspace.capabilities.can_generate_sop ? '' : 'detail-chip--muted'}`}>
-            {$t('overview.capabilities.sop')}
-          </span>
-          <span class={`detail-chip ${workspace.capabilities.can_view_graph ? '' : 'detail-chip--muted'}`}>
-            {$t('overview.capabilities.graph')}
-          </span>
-        </div>
-      </div>
-
-      <div class="result-card">
-        <h4>{$t('overview.nextActionsTitle')}</h4>
-        <div class="action-grid">
-          <a class="btn btn--ghost btn--small" href="#files">{$t('overview.nextUpload')}</a>
-          <a class="btn btn--ghost btn--small" href="#activity">{$t('overview.nextTrack')}</a>
-          {#if workspace.capabilities.can_view_protocol_steps}
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/steps`}>
-              {$t('overview.nextSteps')}
-            </a>
-          {/if}
-          {#if workspace.capabilities.can_generate_sop}
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
-              {$t('overview.nextSop')}
-            </a>
-          {/if}
-          {#if workspace.capabilities.can_view_graph}
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/graph`}>
-              {$t('overview.nextGraph')}
-            </a>
-          {/if}
-          <a class="btn btn--ghost btn--small" href="#advanced-settings">{$t('overview.nextAdvanced')}</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="card">
-    <details class="advanced" bind:open={advancedOpen}>
-      <summary>{$t('overview.advancedTitle')}</summary>
-      <p class="note">{$t('overview.advancedLead')}</p>
-
-      <div class="result-grid result-grid--tasks">
         <section id="advanced-settings" class="result-card">
           <h4>{$t('settings.title')}</h4>
           <dl class="detail-list">

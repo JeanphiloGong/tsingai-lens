@@ -605,6 +605,7 @@
       <div>
         <h3>{$t('overview.resultsTitle')}</h3>
         <p class="meta-text">{$t('overview.resultsLead')}</p>
+        <p class="note">{$t('overview.resultsFlow')}</p>
       </div>
     </div>
 

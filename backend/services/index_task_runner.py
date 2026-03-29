@@ -105,6 +105,7 @@ class IndexTaskRunner:
         effective_is_update_run, update_warning = resolve_update_run(
             output_dir,
             is_update_run,
+            config=config,
         )
         if update_warning:
             logger.warning(

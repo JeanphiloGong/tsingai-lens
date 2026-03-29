@@ -41,6 +41,22 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
         output=SimpleNamespace(base_dir=str(output_dir)),
         input=SimpleNamespace(storage=SimpleNamespace(base_dir=str(input_dir))),
         root_dir=str(output_dir.parent),
+        embed_text=SimpleNamespace(
+            names=[
+                "entity.description",
+                "community.full_content",
+                "text_unit.text",
+            ],
+            vector_store_id="default_vector_store",
+        ),
+        vector_store={
+            "default_vector_store": {
+                "type": "lancedb",
+                "db_uri": str(output_dir.parent / "vector_store" / "lancedb"),
+                "container_name": "default",
+                "overwrite": True,
+            }
+        },
     )
 
 
@@ -215,6 +231,62 @@ def test_start_indexing_downgrades_first_update_run(monkeypatch, tmp_path):
     assert response.status == "ok"
     assert response.errors is None
     assert response.warnings == ["未找到上一轮索引产物 documents.parquet，已自动降级为全量重建。"]
+    assert captured["is_update_run"] is False
+    _assert_protocol_artifacts(output_dir)
+
+
+def test_start_indexing_downgrades_when_vector_store_baseline_missing(
+    monkeypatch, tmp_path
+):
+    pytest.importorskip("fastapi")
+    _patch_parquet(monkeypatch)
+
+    from app.usecases import indexing as indexing_uc
+    from controllers.schemas import IndexRequest
+    from retrieval.config.enums import IndexingMethod
+    import services.index_run_mode_service as run_mode_service
+
+    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "input"
+    config = _build_config(output_dir, input_dir)
+    captured: dict[str, object] = {}
+
+    _write_index_outputs(output_dir)
+    (output_dir.parent / "vector_store" / "lancedb").mkdir(parents=True, exist_ok=True)
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003, ARG001
+        captured.update(kwargs)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(
+        indexing_uc.collection_store,
+        "load_collection_config",
+        lambda collection_id: (config, collection_id or "default"),
+    )
+    monkeypatch.setattr(indexing_uc, "build_index", fake_build_index)
+    monkeypatch.setattr(
+        run_mode_service,
+        "_probe_lancedb_tables",
+        lambda db_uri, required_tables: (["default-entity-description"], "missing"),
+    )
+
+    response = asyncio.run(
+        indexing_uc.start_indexing(
+            IndexRequest(
+                collection_id=None,
+                method=IndexingMethod.Standard,
+                is_update_run=True,
+                verbose=False,
+            )
+        )
+    )
+
+    assert response.status == "ok"
+    assert response.errors is None
+    assert response.warnings == [
+        "未找到完整的向量索引基线，已自动降级为全量重建。 缺失或不可用的表: default-entity-description。 详情: missing"
+    ]
     assert captured["is_update_run"] is False
     _assert_protocol_artifacts(output_dir)
 

@@ -64,6 +64,7 @@ async def start_indexing(request: IndexRequest) -> IndexResponse:
     effective_is_update_run, update_warning = resolve_update_run(
         output_dir,
         request.is_update_run,
+        config=config,
     )
     warnings: list[str] = []
     if update_warning:
@@ -142,6 +143,7 @@ async def upload_and_index(
     effective_is_update_run, update_warning = resolve_update_run(
         output_dir,
         is_update_run,
+        config=config,
     )
     warnings: list[str] = []
     if update_warning:

@@ -8,6 +8,7 @@ from fastapi.responses import Response
 
 from controllers.schemas.collection import (
     CollectionCreateRequest,
+    CollectionDeleteResponse,
     CollectionFileListResponse,
     CollectionFileResponse,
     CollectionListResponse,
@@ -96,6 +97,21 @@ async def get_collection(collection_id: str) -> CollectionResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return CollectionResponse(**record)
+
+
+@router.delete(
+    "/{collection_id}",
+    response_model=CollectionDeleteResponse,
+    summary="删除论文集合",
+)
+async def delete_collection(collection_id: str) -> CollectionDeleteResponse:
+    try:
+        result = collection_service.delete_collection(collection_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CollectionDeleteResponse(**result)
 
 
 @router.post(

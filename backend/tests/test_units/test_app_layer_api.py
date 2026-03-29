@@ -21,6 +21,8 @@ except ImportError:  # pragma: no cover
 if not FASTAPI_AVAILABLE:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
+API_V1_PREFIX = "/api/v1"
+
 
 class DummyWorkflowOutput:
     def __init__(self, workflow: str = "index", errors: list[str] | None = None):
@@ -130,8 +132,15 @@ def app_client(monkeypatch, tmp_path):
 
     from fastapi import FastAPI
     from controllers import collections as collections_controller
+    from controllers import retrieval as retrieval_controller
     from controllers import tasks as tasks_controller
     from controllers import workspace as workspace_controller
+    from controllers.schemas import (
+        QueryResponse,
+        ReportCommunityDetailResponse,
+        ReportCommunityListResponse,
+        ReportPatternsResponse,
+    )
     from services.artifact_registry_service import ArtifactRegistryService
     from services.collection_service import CollectionService
     from services.index_task_runner import IndexTaskRunner
@@ -155,6 +164,61 @@ def app_client(monkeypatch, tmp_path):
         _write_index_outputs(output_dir)
         return [DummyWorkflowOutput()]
 
+    async def fake_query_index(payload):  # noqa: ANN001
+        return QueryResponse(
+            answer="stub-answer",
+            method=str(payload.method),
+            collection_id=payload.collection_id or "default",
+            output_path=str(tmp_path / "output"),
+            context_data=None,
+        )
+
+    def fake_list_community_reports(  # noqa: ANN001
+        collection_id, level, limit, offset, min_size, sort
+    ):
+        return ReportCommunityListResponse(
+            collection_id=collection_id,
+            level=level,
+            total=0,
+            count=0,
+            items=[],
+        )
+
+    def fake_get_community_report_detail(  # noqa: ANN001
+        collection_id, community_id, level, entity_limit, relationship_limit, document_limit
+    ):
+        parsed_community_id = int(community_id) if str(community_id).isdigit() else None
+        return ReportCommunityDetailResponse(
+            collection_id=collection_id,
+            community_id=parsed_community_id,
+            human_readable_id=parsed_community_id,
+            level=level,
+            parent=None,
+            children=None,
+            title=None,
+            summary=None,
+            findings=None,
+            rating=None,
+            size=None,
+            document_count=0,
+            text_unit_count=0,
+            entities=[],
+            relationships=[],
+            documents=[],
+        )
+
+    def fake_list_patterns(collection_id, level, limit, sort):  # noqa: ANN001
+        return ReportPatternsResponse(
+            collection_id=collection_id,
+            level=level,
+            total_communities=0,
+            total_entities=0,
+            total_relationships=0,
+            total_documents=0,
+            count=0,
+            items=[],
+        )
+
     monkeypatch.setattr(collections_controller, "collection_service", collection_service)
     monkeypatch.setattr(collections_controller, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
@@ -167,35 +231,47 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(collection_query_module, "collection_service", collection_service)
     monkeypatch.setattr(collection_query_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
+    monkeypatch.setattr(retrieval_controller.query_uc, "query_index", fake_query_index)
+    monkeypatch.setattr(
+        retrieval_controller.reports_uc, "list_community_reports", fake_list_community_reports
+    )
+    monkeypatch.setattr(
+        retrieval_controller.reports_uc,
+        "get_community_report_detail",
+        fake_get_community_report_detail,
+    )
+    monkeypatch.setattr(retrieval_controller.reports_uc, "list_patterns", fake_list_patterns)
 
     app = FastAPI()
-    app.include_router(collections_controller.router)
-    app.include_router(tasks_controller.router)
-    app.include_router(workspace_controller.router)
+    app.include_router(retrieval_controller.public_query_router, prefix=API_V1_PREFIX)
+    app.include_router(retrieval_controller.public_reports_router, prefix=API_V1_PREFIX)
+    app.include_router(collections_controller.router, prefix=API_V1_PREFIX)
+    app.include_router(tasks_controller.router, prefix=API_V1_PREFIX)
+    app.include_router(workspace_controller.router, prefix=API_V1_PREFIX)
     return TestClient(app)
 
 
 def test_collection_task_and_query_flow(app_client):
-    create_resp = app_client.post("/collections", json={"name": "Composite Set"})
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Composite Set"})
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
-        f"/collections/{collection_id}/files",
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
         files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
     )
     assert upload_resp.status_code == 200
 
-    task_resp = app_client.post(f"/collections/{collection_id}/tasks/index", json={})
+    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={})
     assert task_resp.status_code == 200
     task_id = task_resp.json()["task_id"]
 
-    task_status = app_client.get(f"/tasks/{task_id}")
+    task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
     assert task_status.status_code == 200
     assert task_status.json()["status"] == "completed"
     assert task_status.json()["current_stage"] == "artifacts_ready"
 
-    collection_tasks = app_client.get(f"/collections/{collection_id}/tasks")
+    collection_tasks = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/tasks")
     assert collection_tasks.status_code == 200
     tasks_body = collection_tasks.json()
     assert tasks_body["collection_id"] == collection_id
@@ -203,13 +279,13 @@ def test_collection_task_and_query_flow(app_client):
     assert tasks_body["items"][0]["task_id"] == task_id
 
     completed_tasks = app_client.get(
-        f"/collections/{collection_id}/tasks",
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks",
         params={"status": "completed", "limit": 5, "offset": 0},
     )
     assert completed_tasks.status_code == 200
     assert completed_tasks.json()["count"] >= 1
 
-    artifacts = app_client.get(f"/tasks/{task_id}/artifacts")
+    artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}/artifacts")
     assert artifacts.status_code == 200
     body = artifacts.json()
     assert body["documents_ready"] is True
@@ -217,23 +293,23 @@ def test_collection_task_and_query_flow(app_client):
     assert body["sections_ready"] is True
     assert body["protocol_steps_ready"] is True
 
-    graph = app_client.get(f"/collections/{collection_id}/graph")
+    graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
     assert graph.status_code == 200
     graph_body = graph.json()
     assert len(graph_body["nodes"]) == 2
     assert len(graph_body["edges"]) == 1
 
-    graphml = app_client.get(f"/collections/{collection_id}/graphml")
+    graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 200
     assert graphml.headers["content-type"].startswith("application/graphml+xml")
 
-    steps = app_client.get(f"/collections/{collection_id}/protocol/steps")
+    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
     assert steps.status_code == 200
     assert steps.json()["count"] >= 1
     assert steps.json()["items"][0]["paper_title"] == "Composite Paper"
 
     search = app_client.get(
-        f"/collections/{collection_id}/protocol/search",
+        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/search",
         params={"q": "anneal Ar", "limit": 5},
     )
     assert search.status_code == 200
@@ -241,7 +317,7 @@ def test_collection_task_and_query_flow(app_client):
     assert search.json()["items"][0]["paper_title"] == "Composite Paper"
 
     sop = app_client.post(
-        f"/collections/{collection_id}/protocol/sop",
+        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/sop",
         json={"goal": "Design a composite SOP", "target_properties": ["mechanical", "thermal"]},
     )
     assert sop.status_code == 200
@@ -250,7 +326,7 @@ def test_collection_task_and_query_flow(app_client):
     assert sop_body["sop_draft"]["objective"] == "Design a composite SOP"
     assert sop_body["sop_draft"]["steps"][0]["paper_title"] == "Composite Paper"
 
-    workspace = app_client.get(f"/collections/{collection_id}/workspace")
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()
     assert workspace_body["collection"]["collection_id"] == collection_id
@@ -261,21 +337,21 @@ def test_collection_task_and_query_flow(app_client):
 
 
 def test_delete_collection_removes_app_layer_collection(app_client):
-    create_resp = app_client.post("/collections", json={"name": "Delete Me"})
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Delete Me"})
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
-    get_resp = app_client.get(f"/collections/{collection_id}")
+    get_resp = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
     assert get_resp.status_code == 200
 
-    delete_resp = app_client.delete(f"/collections/{collection_id}")
+    delete_resp = app_client.delete(f"{API_V1_PREFIX}/collections/{collection_id}")
     assert delete_resp.status_code == 200
     assert delete_resp.json()["collection_id"] == collection_id
 
-    missing_resp = app_client.get(f"/collections/{collection_id}")
+    missing_resp = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
     assert missing_resp.status_code == 404
 
-    list_resp = app_client.get("/collections")
+    list_resp = app_client.get(f"{API_V1_PREFIX}/collections")
     assert list_resp.status_code == 200
     assert all(
         item["collection_id"] != collection_id for item in list_resp.json()["items"]
@@ -283,23 +359,23 @@ def test_delete_collection_removes_app_layer_collection(app_client):
 
 
 def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_exist(app_client):
-    create_resp = app_client.post("/collections", json={"name": "Pending Collection"})
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Pending Collection"})
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
-        f"/collections/{collection_id}/files",
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
         files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
     )
     assert upload_resp.status_code == 200
 
-    workspace = app_client.get(f"/collections/{collection_id}/workspace")
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()
     assert workspace_body["artifacts"]["protocol_steps_ready"] is False
     assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
 
-    steps = app_client.get(f"/collections/{collection_id}/protocol/steps")
+    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
     assert steps.status_code == 409
     steps_detail = steps.json()["detail"]
     assert steps_detail["code"] == "protocol_artifacts_not_ready"
@@ -307,15 +383,45 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     assert steps_detail["artifacts"]["protocol_steps_ready"] is False
 
     search = app_client.get(
-        f"/collections/{collection_id}/protocol/search",
+        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/search",
         params={"q": "anneal", "limit": 5},
     )
     assert search.status_code == 409
     assert search.json()["detail"]["code"] == "protocol_artifacts_not_ready"
 
     sop = app_client.post(
-        f"/collections/{collection_id}/protocol/sop",
+        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/sop",
         json={"goal": "Build a draft SOP"},
     )
     assert sop.status_code == 409
     assert sop.json()["detail"]["code"] == "protocol_artifacts_not_ready"
+
+
+def test_legacy_app_layer_routes_are_not_exposed(app_client):
+    assert app_client.get("/collections").status_code == 404
+    assert app_client.get("/tasks/test-task").status_code == 404
+    assert app_client.post("/retrieval/query", json={"query": "test"}).status_code == 404
+    assert (
+        app_client.post(f"{API_V1_PREFIX}/retrieval/query", json={"query": "test"}).status_code
+        == 404
+    )
+
+
+def test_public_query_and_reports_routes_are_exposed(app_client):
+    query_resp = app_client.post(f"{API_V1_PREFIX}/query", json={"query": "status"})
+    assert query_resp.status_code == 200
+    assert query_resp.json()["answer"] == "stub-answer"
+
+    reports_resp = app_client.get(f"{API_V1_PREFIX}/collections/demo/reports/communities")
+    assert reports_resp.status_code == 200
+    assert reports_resp.json()["collection_id"] == "demo"
+
+    detail_resp = app_client.get(
+        f"{API_V1_PREFIX}/collections/demo/reports/communities/42"
+    )
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["community_id"] == 42
+
+    patterns_resp = app_client.get(f"{API_V1_PREFIX}/collections/demo/reports/patterns")
+    assert patterns_resp.status_code == 200
+    assert patterns_resp.json()["collection_id"] == "demo"

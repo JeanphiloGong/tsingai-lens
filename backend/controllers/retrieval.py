@@ -35,6 +35,8 @@ from retrieval.config.enums import IndexingMethod
 from services import protocol_search_service, protocol_sop_service
 
 router = APIRouter(prefix="/retrieval", tags=["retrieval"])
+public_query_router = APIRouter(tags=["query"])
+public_reports_router = APIRouter(tags=["reports"])
 logger = logging.getLogger(__name__)
 
 
@@ -133,6 +135,11 @@ async def delete_collection_file(
     response_model=ReportCommunityListResponse,
     summary="列出社区报告",
 )
+@public_reports_router.get(
+    "/collections/{collection_id}/reports/communities",
+    response_model=ReportCommunityListResponse,
+    summary="列出社区报告",
+)
 async def list_community_reports(
     collection_id: str,
     level: int | None = Query(default=2, description="社区层级"),
@@ -153,6 +160,11 @@ async def list_community_reports(
 
 
 @router.get(
+    "/collections/{collection_id}/reports/communities/{community_id}",
+    response_model=ReportCommunityDetailResponse,
+    summary="社区报告详情",
+)
+@public_reports_router.get(
     "/collections/{collection_id}/reports/communities/{community_id}",
     response_model=ReportCommunityDetailResponse,
     summary="社区报告详情",
@@ -179,6 +191,11 @@ async def get_community_report_detail(
 
 
 @router.get(
+    "/collections/{collection_id}/reports/patterns",
+    response_model=ReportPatternsResponse,
+    summary="社区规律概览",
+)
+@public_reports_router.get(
     "/collections/{collection_id}/reports/patterns",
     response_model=ReportPatternsResponse,
     summary="社区规律概览",
@@ -234,6 +251,11 @@ async def upload_inputs(
 
 
 @router.post(
+    "/query",
+    response_model=QueryResponse,
+    summary="基于索引结果进行检索问答",
+)
+@public_query_router.post(
     "/query",
     response_model=QueryResponse,
     summary="基于索引结果进行检索问答",

@@ -30,6 +30,13 @@ class CollectionListResponse(BaseModel):
     items: list[CollectionResponse] = Field(default_factory=list, description="集合列表")
 
 
+class CollectionDeleteResponse(BaseModel):
+    """Collection deletion result."""
+
+    collection_id: str = Field(..., description="已删除的集合 ID")
+    deleted_at: str = Field(..., description="删除时间")
+
+
 class CollectionFileResponse(BaseModel):
     """Stored collection file metadata."""
 

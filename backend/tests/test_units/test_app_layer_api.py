@@ -257,6 +257,28 @@ def test_collection_task_and_query_flow(app_client):
     assert workspace_body["latest_task"]["task_id"] == task_id
 
 
+def test_delete_collection_removes_app_layer_collection(app_client):
+    create_resp = app_client.post("/collections", json={"name": "Delete Me"})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    get_resp = app_client.get(f"/collections/{collection_id}")
+    assert get_resp.status_code == 200
+
+    delete_resp = app_client.delete(f"/collections/{collection_id}")
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["collection_id"] == collection_id
+
+    missing_resp = app_client.get(f"/collections/{collection_id}")
+    assert missing_resp.status_code == 404
+
+    list_resp = app_client.get("/collections")
+    assert list_resp.status_code == 200
+    assert all(
+        item["collection_id"] != collection_id for item in list_resp.json()["items"]
+    )
+
+
 def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_exist(app_client):
     create_resp = app_client.post("/collections", json={"name": "Pending Collection"})
     assert create_resp.status_code == 200

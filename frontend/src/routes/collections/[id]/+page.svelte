@@ -228,11 +228,11 @@
   }
 
   function getFileLabel(file: CollectionFile) {
-    return file.original_filename || file.stored_filename || file.file_id || $t('documents.untitledFile');
+    return file.original_filename || $t('documents.untitledFile');
   }
 
   function getFileSub(file: CollectionFile) {
-    return file.stored_filename || file.stored_path || '';
+    return '';
   }
 
   function primaryActionLabel() {
@@ -722,23 +722,6 @@
           </dl>
         </section>
 
-        <section class="result-card">
-          <h4>{$t('overview.debugTitle')}</h4>
-          <dl class="detail-list">
-            <div class="detail-row">
-              <dt>{$t('overview.debugTaskId')}</dt>
-              <dd>{workspace.latest_task?.task_id || '--'}</dd>
-            </div>
-            <div class="detail-row">
-              <dt>{$t('tasks.tableOutput')}</dt>
-              <dd>{latestArtifacts?.output_path || workspace.artifacts.output_path || '--'}</dd>
-            </div>
-            <div class="detail-row">
-              <dt>{$t('overview.debugCollectionId')}</dt>
-              <dd>{collectionId}</dd>
-            </div>
-          </dl>
-        </section>
       </div>
 
       <section id="advanced-reports" class="result-grid result-grid--tasks">

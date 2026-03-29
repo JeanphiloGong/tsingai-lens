@@ -15,6 +15,12 @@ type CollectionRecord = {
   updated_at?: string;
 };
 
+type DeletedCollectionRecord = {
+  id?: string;
+  collection_id?: string;
+  deleted_at?: string;
+};
+
 export type Collection = {
   id: string;
   collection_id: string;
@@ -113,4 +119,20 @@ export async function createCollection(payload: {
   collections.update((items) => [collection, ...items.filter((item) => item.id !== collection.id)]);
 
   return collection;
+}
+
+export async function deleteCollection(collectionId: string) {
+  const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}`, {
+    method: 'DELETE'
+  });
+
+  const record = data && typeof data === 'object' ? (data as DeletedCollectionRecord) : null;
+  const deletedCollectionId = String(record?.collection_id ?? record?.id ?? collectionId).trim() || collectionId;
+
+  collections.update((items) => items.filter((item) => item.id !== deletedCollectionId));
+
+  return {
+    collection_id: deletedCollectionId,
+    deleted_at: record?.deleted_at
+  };
 }

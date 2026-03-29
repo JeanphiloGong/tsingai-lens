@@ -60,7 +60,7 @@
     selectedNode = {
       id: nodeId,
       label: String(attrs.label ?? nodeId),
-      type: typeof attrs.type === 'string' ? attrs.type : null,
+      type: typeof attrs.entityType === 'string' ? attrs.entityType : null,
       description: typeof attrs.description === 'string' ? attrs.description : null,
       degree: typeof attrs.degree === 'number' ? attrs.degree : null,
       frequency: typeof attrs.frequency === 'number' ? attrs.frequency : null,
@@ -128,7 +128,8 @@
     for (const node of nodes) {
       graph.addNode(node.id, {
         label: node.label,
-        type: node.type,
+        type: 'circle',
+        entityType: node.type,
         description: node.description,
         degree: node.degree ?? 0,
         frequency: node.frequency ?? 0,

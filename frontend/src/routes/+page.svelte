@@ -2,7 +2,13 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { errorMessage } from './_shared/api';
-  import { createCollection, collections, fetchCollections, type Collection } from './_shared/collections';
+  import {
+    createCollection,
+    collections,
+    deleteCollection,
+    fetchCollections,
+    type Collection
+  } from './_shared/collections';
   import { buildCollectionGraphmlUrl } from './_shared/graph';
   import { language, t } from './_shared/i18n';
   import { createIndexTask } from './_shared/tasks';
@@ -15,6 +21,8 @@
   let defaultMethod = 'standard';
   let createLoading = false;
   let createError = '';
+  let notice = '';
+  let deletingCollectionId = '';
   let rowMessages: Record<string, { message: string; type: 'info' | 'error' }> = {};
 
   $: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
@@ -33,6 +41,15 @@
     } finally {
       loading = false;
     }
+  }
+
+  function setNotice(message: string) {
+    notice = message;
+    window.setTimeout(() => {
+      if (notice === message) {
+        notice = '';
+      }
+    }, 3000);
   }
 
   function openCreate() {
@@ -162,9 +179,30 @@
         isUpdateRun: false,
         verbose: false
       });
-      setRowMessage(collection.id, $t('home.indexStarted', { taskId: task.task_id }));
+      setRowMessage(collection.id, $t('home.indexStarted'));
     } catch (err) {
       setRowMessage(collection.id, errorMessage(err), 'error');
+    }
+  }
+
+  async function removeCollection(collection: Collection) {
+    if (deletingCollectionId) return;
+
+    const name = collection.name?.trim() || $t('collection.unknownName');
+    if (!window.confirm($t('home.deleteConfirm', { name }))) {
+      return;
+    }
+
+    deletingCollectionId = collection.id;
+    setRowMessage(collection.id, $t('home.deleting'));
+
+    try {
+      await deleteCollection(collection.id);
+      setNotice($t('home.deleted', { name }));
+    } catch (err) {
+      setRowMessage(collection.id, errorMessage(err), 'error');
+    } finally {
+      deletingCollectionId = '';
     }
   }
 </script>
@@ -195,6 +233,10 @@
   <div class="status status--error" role="alert">{error}</div>
 {/if}
 
+{#if notice}
+  <div class="status" role="status" aria-live="polite">{notice}</div>
+{/if}
+
 {#if !$collections.length && !loading}
   <section class="card empty-state">
     <h3>{$t('home.emptyTitle')}</h3>
@@ -223,14 +265,13 @@
               class="data-row data-row--clickable"
               role="link"
               tabindex="0"
-              aria-label={$t('home.openRowLabel', { name: collection.name || collection.id })}
+              aria-label={$t('home.openRowLabel', { name: collection.name || $t('collection.unknownName') })}
               on:click={() => openCollection(collection.id)}
               on:keydown={(event) => handleRowKeydown(event, collection.id)}
             >
               <td>
                 <div class="table-main">
-                  <div class="table-title">{collection.name || collection.id}</div>
-                  <div class="table-sub">{collection.id}</div>
+                  <div class="table-title">{collection.name || $t('collection.unknownName')}</div>
                   {#if collection.description}
                     <div class="table-sub">{collection.description}</div>
                   {/if}
@@ -263,6 +304,14 @@
                   >
                     {$t('home.actionTasks')}
                   </a>
+                  <button
+                    class="btn btn--danger btn--small"
+                    type="button"
+                    disabled={deletingCollectionId === collection.id}
+                    on:click|stopPropagation={() => removeCollection(collection)}
+                  >
+                    {deletingCollectionId === collection.id ? $t('home.deleting') : $t('home.actionDelete')}
+                  </button>
                 </div>
                 {#if rowMessages[collection.id]}
                   <div

@@ -10,6 +10,8 @@ from uuid import uuid4
 import pandas as pd
 from fastapi import HTTPException
 
+from services.protocol_document_meta_service import load_document_title_map
+
 
 _SECTION_FILE = "sections.parquet"
 _BLOCK_FILE = "procedure_blocks.parquet"
@@ -103,15 +105,17 @@ def _contains_paper(row: pd.Series, paper_ids: set[str]) -> bool:
     return paper_id in paper_ids if paper_id else False
 
 
-def _normalize_step(row: pd.Series) -> dict[str, Any]:
+def _normalize_step(row: pd.Series, title_map: dict[str, str] | None = None) -> dict[str, Any]:
     conditions = _to_dict(row.get("conditions"))
     characterization = _to_list(row.get("characterization"))
     controls = _to_list(row.get("controls"))
     evidence_refs = _to_list(row.get("evidence_refs"))
     materials = _to_list(row.get("materials"))
+    paper_id = _resolve_paper_id(row)
     return {
         "step_id": str(row.get("step_id") or row.get("id") or ""),
-        "paper_id": _resolve_paper_id(row),
+        "paper_id": paper_id,
+        "paper_title": (title_map or {}).get(paper_id or ""),
         "section_id": _to_python(row.get("section_id")),
         "block_id": _to_python(row.get("block_id")),
         "block_type": _to_python(row.get("block_type")),
@@ -237,6 +241,7 @@ def load_protocol_artifacts(base_dir: Path, paper_ids: list[str] | None = None, 
     sections_df = _read_parquet_optional(base_dir / _SECTION_FILE)
     blocks_df = _read_parquet_optional(base_dir / _BLOCK_FILE)
     steps_df = _read_parquet_optional(base_dir / _STEP_FILE)
+    title_map = load_document_title_map(base_dir)
 
     if sections_df is None and blocks_df is None and steps_df is None:
         raise HTTPException(status_code=404, detail="未找到 protocol 产物，请先生成 sections/procedure_blocks/protocol_steps parquet")
@@ -251,7 +256,7 @@ def load_protocol_artifacts(base_dir: Path, paper_ids: list[str] | None = None, 
 
     sections = [] if sections_df is None else [_normalize_section(row) for _, row in sections_df.head(limit).iterrows()]
     blocks = [] if blocks_df is None else [_normalize_block(row) for _, row in blocks_df.head(limit).iterrows()]
-    steps = [] if steps_df is None else [_normalize_step(row) for _, row in steps_df.head(limit).iterrows()]
+    steps = [] if steps_df is None else [_normalize_step(row, title_map) for _, row in steps_df.head(limit).iterrows()]
 
     return {
         "output_path": str(base_dir),
@@ -277,13 +282,14 @@ def list_protocol_steps(
     steps_df = _read_parquet_optional(base_dir / _STEP_FILE)
     if steps_df is None:
         raise HTTPException(status_code=404, detail="protocol_steps.parquet 不存在")
+    title_map = load_document_title_map(base_dir)
 
     if paper_id:
         steps_df = steps_df[steps_df.apply(lambda row: _resolve_paper_id(row) == paper_id, axis=1)]
     if block_type and "block_type" in steps_df.columns:
         steps_df = steps_df[steps_df["block_type"].astype(str) == block_type]
 
-    normalized = [_normalize_step(row) for _, row in steps_df.iterrows()]
+    normalized = [_normalize_step(row, title_map) for _, row in steps_df.iterrows()]
     normalized.sort(key=lambda item: ((item.get("paper_id") or ""), item.get("order") or 0, item.get("step_id") or ""))
     items = normalized[offset : offset + limit]
     return {

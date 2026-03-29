@@ -9,6 +9,8 @@ from typing import Any
 import pandas as pd
 from fastapi import HTTPException
 
+from services.protocol_document_meta_service import load_document_title_map
+
 
 _STEP_FILE = "protocol_steps.parquet"
 
@@ -76,10 +78,12 @@ def _stringify(value: Any) -> str:
     return str(parsed)
 
 
-def _row_payload(row: pd.Series) -> dict[str, Any]:
+def _row_payload(row: pd.Series, title_map: dict[str, str] | None = None) -> dict[str, Any]:
+    paper_id = _resolve_paper_id(row)
     return {
         "step_id": str(row.get("step_id") or row.get("id") or ""),
-        "paper_id": _resolve_paper_id(row),
+        "paper_id": paper_id,
+        "paper_title": (title_map or {}).get(paper_id or ""),
         "order": _to_python(row.get("order")),
         "action": _stringify(row.get("action") or row.get("text")),
         "purpose": _to_python(row.get("purpose")),
@@ -97,12 +101,13 @@ def search_protocol_steps(base_dir: Path, query: str, limit: int = 10, paper_id:
         raise HTTPException(status_code=400, detail="q 不能为空")
 
     steps_df = _read_steps(base_dir / _STEP_FILE)
+    title_map = load_document_title_map(base_dir)
     if paper_id:
         steps_df = steps_df[steps_df.apply(lambda row: _resolve_paper_id(row) == paper_id, axis=1)]
 
     scored: list[dict[str, Any]] = []
     for _, row in steps_df.iterrows():
-        payload = _row_payload(row)
+        payload = _row_payload(row, title_map)
         haystack = " ".join(
             [
                 payload["action"],

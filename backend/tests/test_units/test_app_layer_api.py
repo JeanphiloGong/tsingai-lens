@@ -230,6 +230,7 @@ def test_collection_task_and_query_flow(app_client):
     steps = app_client.get(f"/collections/{collection_id}/protocol/steps")
     assert steps.status_code == 200
     assert steps.json()["count"] >= 1
+    assert steps.json()["items"][0]["paper_title"] == "Composite Paper"
 
     search = app_client.get(
         f"/collections/{collection_id}/protocol/search",
@@ -237,6 +238,7 @@ def test_collection_task_and_query_flow(app_client):
     )
     assert search.status_code == 200
     assert search.json()["count"] >= 1
+    assert search.json()["items"][0]["paper_title"] == "Composite Paper"
 
     sop = app_client.post(
         f"/collections/{collection_id}/protocol/sop",
@@ -246,6 +248,7 @@ def test_collection_task_and_query_flow(app_client):
     sop_body = sop.json()
     assert sop_body["collection_id"] == collection_id
     assert sop_body["sop_draft"]["objective"] == "Design a composite SOP"
+    assert sop_body["sop_draft"]["steps"][0]["paper_title"] == "Composite Paper"
 
     workspace = app_client.get(f"/collections/{collection_id}/workspace")
     assert workspace.status_code == 200

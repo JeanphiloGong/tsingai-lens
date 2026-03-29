@@ -357,6 +357,7 @@ class ProtocolStepItem(BaseModel):
 
     step_id: str = Field(..., description="步骤 ID")
     paper_id: str = Field(..., description="来源论文 ID")
+    paper_title: str | None = Field(default=None, description="来源论文标题")
     order: int = Field(..., description="步骤顺序")
     action: str = Field(..., description="核心动作")
     section_id: str | None = Field(default=None, description="section ID")
@@ -468,6 +469,7 @@ class ProtocolSearchHit(BaseModel):
 
     step_id: str = Field(..., description="步骤 ID")
     paper_id: str = Field(..., description="来源论文 ID")
+    paper_title: str | None = Field(default=None, description="来源论文标题")
     section_id: str | None = Field(default=None, description="section ID")
     block_id: str | None = Field(default=None, description="block ID")
     action: str = Field(..., description="命中动作")

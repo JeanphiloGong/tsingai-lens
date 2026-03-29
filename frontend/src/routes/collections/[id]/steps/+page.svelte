@@ -40,6 +40,14 @@
     return value.toFixed(3);
   }
 
+  function hasConfidence(value?: number | null) {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+
+  function paperLabel(paperTitle?: string | null, paperId?: string | null) {
+    return paperTitle?.trim() || paperId?.trim() || '--';
+  }
+
   function formatConditionValue(value?: NormalizedValueItem | null) {
     if (!value) return '';
     if (value.raw_value) return value.raw_value;
@@ -212,12 +220,16 @@
           <article class="result-card">
             <div class="table-main">
               <div class="table-title">{item.action}</div>
-              <div class="table-sub">{item.step_id}</div>
+              <div class="table-sub">{paperLabel(item.paper_title, item.paper_id)}</div>
             </div>
             <dl class="detail-list">
               <div class="detail-row">
-                <dt>{$t('search.paperIdLabel')}</dt>
-                <dd>{item.paper_id}</dd>
+                <dt>{$t('search.sourcePaperLabel')}</dt>
+                <dd>{paperLabel(item.paper_title, item.paper_id)}</dd>
+              </div>
+              <div class="detail-row">
+                <dt>{$t('search.internalIdLabel')}</dt>
+                <dd>{item.step_id}</dd>
               </div>
               <div class="detail-row">
                 <dt>{$t('search.matchFieldsLabel')}</dt>
@@ -274,22 +286,30 @@
             <div class="table-title">
               {step.order ? `${step.order}. ` : ''}{step.action}
             </div>
-            <div class="table-sub">{step.step_id}</div>
+            <div class="table-sub">{paperLabel(step.paper_title, step.paper_id)}</div>
           </div>
 
           <dl class="detail-list">
             <div class="detail-row">
-              <dt>{$t('steps.paperIdLabel')}</dt>
-              <dd>{step.paper_id}</dd>
+              <dt>{$t('steps.sourcePaperLabel')}</dt>
+              <dd>{paperLabel(step.paper_title, step.paper_id)}</dd>
             </div>
             <div class="detail-row">
-              <dt>{$t('steps.phaseLabel')}</dt>
-              <dd>{step.phase || '--'}</dd>
+              <dt>{$t('steps.stepIdLabel')}</dt>
+              <dd>{step.step_id}</dd>
             </div>
-            <div class="detail-row">
-              <dt>{$t('steps.confidenceLabel')}</dt>
-              <dd>{formatConfidence(step.confidence_score)}</dd>
-            </div>
+            {#if step.phase}
+              <div class="detail-row">
+                <dt>{$t('steps.phaseLabel')}</dt>
+                <dd>{step.phase}</dd>
+              </div>
+            {/if}
+            {#if hasConfidence(step.confidence_score)}
+              <div class="detail-row">
+                <dt>{$t('steps.confidenceLabel')}</dt>
+                <dd>{formatConfidence(step.confidence_score)}</dd>
+              </div>
+            {/if}
           </dl>
 
           {#if summarizeMaterials(step).length}

@@ -66,6 +66,7 @@ export type EvidenceRefItem = {
 export type ProtocolStepItem = {
   step_id: string;
   paper_id: string;
+  paper_title?: string | null;
   order?: number | null;
   action: string;
   section_id?: string | null;
@@ -91,6 +92,7 @@ export type ProtocolStepListResponse = {
 export type ProtocolSearchHit = {
   step_id: string;
   paper_id: string;
+  paper_title?: string | null;
   section_id?: string | null;
   block_id?: string | null;
   action: string;
@@ -140,6 +142,7 @@ function normalizeStep(item: unknown): ProtocolStepItem | null {
   return {
     step_id: stepId,
     paper_id: paperId,
+    paper_title: typeof record.paper_title === 'string' ? record.paper_title : null,
     order: typeof record.order === 'number' ? record.order : Number(record.order ?? 0),
     action,
     section_id: typeof record.section_id === 'string' ? record.section_id : null,
@@ -205,7 +208,27 @@ export async function searchProtocolSteps(
     query: String(data.query ?? options.query),
     output_path: typeof data.output_path === 'string' ? data.output_path : undefined,
     count: typeof data.count === 'number' ? data.count : 0,
-    items: Array.isArray(data.items) ? (data.items as ProtocolSearchHit[]) : []
+    items: Array.isArray(data.items)
+      ? data.items.map((item) => {
+          const record = item as Record<string, unknown>;
+          return {
+            step_id: String(record.step_id ?? ''),
+            paper_id: String(record.paper_id ?? ''),
+            paper_title: typeof record.paper_title === 'string' ? record.paper_title : null,
+            section_id: typeof record.section_id === 'string' ? record.section_id : null,
+            block_id: typeof record.block_id === 'string' ? record.block_id : null,
+            action: String(record.action ?? ''),
+            matched_fields: Array.isArray(record.matched_fields)
+              ? record.matched_fields.map((value) => String(value))
+              : Array.isArray(record.matched_terms)
+                ? record.matched_terms.map((value) => String(value))
+                : [],
+            excerpt: typeof record.excerpt === 'string' ? record.excerpt : null,
+            score:
+              typeof record.score === 'number' ? record.score : Number.isFinite(Number(record.score)) ? Number(record.score) : null
+          } satisfies ProtocolSearchHit;
+        })
+      : []
   } satisfies ProtocolSearchResponse;
 }
 

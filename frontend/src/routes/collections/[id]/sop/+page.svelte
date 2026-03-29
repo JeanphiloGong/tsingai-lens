@@ -33,6 +33,10 @@
       .filter(Boolean);
   }
 
+  function paperLabel(paperTitle?: string | null, paperId?: string | null) {
+    return paperTitle?.trim() || paperId?.trim() || '--';
+  }
+
   async function loadWorkspace() {
     error = '';
     try {
@@ -184,7 +188,7 @@
           {#each result.sop_draft.steps as step}
             <article class="result-card">
               <div class="table-title">{step.order ? `${step.order}. ` : ''}{step.action}</div>
-              <div class="table-sub">{step.paper_id}</div>
+              <div class="table-sub">{$t('sop.sourcePaperLabel')}: {paperLabel(step.paper_title, step.paper_id)}</div>
               {#if step.purpose}
                 <p class="result-text">{step.purpose}</p>
               {/if}

@@ -19,6 +19,12 @@ from main import app
 def protocol_client(tmp_path):
     output_dir = tmp_path / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
+    documents = pd.DataFrame(
+        [
+            {"id": "paper-1", "title": "Composite Annealing Study"},
+            {"id": "paper-2", "title": "Mechanical Validation Report"},
+        ]
+    )
 
     sections = pd.DataFrame(
         [
@@ -103,6 +109,7 @@ def protocol_client(tmp_path):
         ]
     )
 
+    documents.to_parquet(output_dir / "documents.parquet")
     sections.to_parquet(output_dir / "sections.parquet")
     blocks.to_parquet(output_dir / "procedure_blocks.parquet")
     steps.to_parquet(output_dir / "protocol_steps.parquet")
@@ -123,6 +130,7 @@ def test_protocol_extract_returns_summary(protocol_client):
     assert body["summary"]["procedure_blocks"] == 1
     assert body["summary"]["protocol_steps"] == 1
     assert body["protocol_steps"][0]["paper_id"] == "paper-1"
+    assert body["protocol_steps"][0]["paper_title"] == "Composite Annealing Study"
 
 
 def test_protocol_steps_filters_by_paper(protocol_client):
@@ -135,6 +143,7 @@ def test_protocol_steps_filters_by_paper(protocol_client):
     body = resp.json()
     assert body["count"] == 1
     assert body["items"][0]["step_id"] == "step-2"
+    assert body["items"][0]["paper_title"] == "Mechanical Validation Report"
 
 
 def test_protocol_search_returns_ranked_hits(protocol_client):
@@ -147,6 +156,7 @@ def test_protocol_search_returns_ranked_hits(protocol_client):
     body = resp.json()
     assert body["count"] >= 1
     assert body["items"][0]["step_id"] == "step-1"
+    assert body["items"][0]["paper_title"] == "Composite Annealing Study"
     assert "anneal" in body["items"][0]["matched_terms"]
 
 
@@ -168,5 +178,6 @@ def test_protocol_sop_returns_structured_draft(protocol_client):
     draft = body["sop_draft"]
     assert draft["objective"] == "Design a composite protocol for mechanical and thermal optimization"
     assert draft["steps"][0]["step_id"] == "step-1"
+    assert draft["steps"][0]["paper_title"] == "Composite Annealing Study"
     assert any(item["property"] == "mechanical" for item in draft["measurement_plan"])
     assert any(item["property"] == "thermal" for item in draft["measurement_plan"])

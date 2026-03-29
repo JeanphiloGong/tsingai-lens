@@ -9,9 +9,11 @@
     type ProtocolStepItem
   } from '../../../_shared/protocol';
   import { t } from '../../../_shared/i18n';
+  import { fetchWorkspaceOverview, type WorkspaceOverview } from '../../../_shared/workspace';
 
   $: collectionId = $page.params.id ?? '';
 
+  let workspace: WorkspaceOverview | null = null;
   let query = '';
   let paperId = '';
   let blockType = '';
@@ -23,6 +25,10 @@
   let steps: ProtocolStepItem[] = [];
   let searchResult: ProtocolSearchResponse | null = null;
   let loadedCollectionId = '';
+
+  function canViewProtocolSteps() {
+    return Boolean(workspace?.capabilities.can_view_protocol_steps || workspace?.artifacts.protocol_steps_ready);
+  }
 
   function formatConfidence(value?: number | null) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
@@ -66,6 +72,14 @@
     loading = true;
     error = '';
     try {
+      workspace = await fetchWorkspaceOverview(collectionId);
+      if (!canViewProtocolSteps()) {
+        steps = [];
+        total = 0;
+        searchResult = null;
+        return;
+      }
+
       const [stepResponse, stepSearchResponse] = await Promise.all([
         listProtocolSteps(collectionId, {
           paperId: paperId.trim(),
@@ -117,33 +131,57 @@
       <h2>{$t('steps.title')}</h2>
       <p class="lead">{$t('steps.lead')}</p>
     </div>
-    <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
-      {$t('steps.nextSop')}
-    </a>
+    {#if canViewProtocolSteps()}
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
+        {$t('steps.nextSop')}
+      </a>
+    {:else}
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+        {$t('steps.backToWorkspace')}
+      </a>
+    {/if}
   </div>
 
   <form on:submit={submit}>
     <div class="form-grid">
       <div class="field">
         <label for="query">{$t('search.inputLabel')}</label>
-        <input id="query" class="input" bind:value={query} placeholder={$t('search.placeholder')} />
+        <input
+          id="query"
+          class="input"
+          bind:value={query}
+          placeholder={$t('search.placeholder')}
+          disabled={!canViewProtocolSteps()}
+        />
         <span class="meta-text">{$t('steps.searchHelper')}</span>
       </div>
       <div class="field">
         <label for="paperId">{$t('steps.paperIdLabel')}</label>
-        <input id="paperId" class="input" bind:value={paperId} placeholder={$t('steps.paperIdPlaceholder')} />
+        <input
+          id="paperId"
+          class="input"
+          bind:value={paperId}
+          placeholder={$t('steps.paperIdPlaceholder')}
+          disabled={!canViewProtocolSteps()}
+        />
       </div>
       <div class="field">
         <label for="blockType">{$t('steps.blockTypeLabel')}</label>
-        <input id="blockType" class="input" bind:value={blockType} placeholder={$t('steps.blockTypePlaceholder')} />
+        <input
+          id="blockType"
+          class="input"
+          bind:value={blockType}
+          placeholder={$t('steps.blockTypePlaceholder')}
+          disabled={!canViewProtocolSteps()}
+        />
       </div>
       <div class="field">
         <label for="limit">{$t('steps.limitLabel')}</label>
-        <input id="limit" class="input" type="number" min="1" max="100" bind:value={limit} />
+        <input id="limit" class="input" type="number" min="1" max="100" bind:value={limit} disabled={!canViewProtocolSteps()} />
       </div>
     </div>
     <div class="table-actions">
-      <button class="btn btn--primary" type="submit" disabled={loading}>
+      <button class="btn btn--primary" type="submit" disabled={loading || !canViewProtocolSteps()}>
         {loading ? $t('steps.loading') : $t('steps.submit')}
       </button>
     </div>
@@ -151,10 +189,12 @@
 
   {#if error}
     <div class="status status--error" role="alert">{error}</div>
+  {:else if workspace && !canViewProtocolSteps()}
+    <div class="status" role="status">{$t('steps.notReadyBody')}</div>
   {/if}
 </section>
 
-{#if query.trim()}
+{#if canViewProtocolSteps() && query.trim()}
   <section class="card">
     <div class="card-header-inline">
       <div>
@@ -205,13 +245,24 @@
       <h3>{$t('steps.resultTitle')}</h3>
       <p class="meta-text">{$t('steps.resultCount', { count: total })}</p>
     </div>
-    <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
-      {$t('steps.nextSop')}
-    </a>
+    {#if canViewProtocolSteps()}
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
+        {$t('steps.nextSop')}
+      </a>
+    {:else}
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+        {$t('steps.backToWorkspace')}
+      </a>
+    {/if}
   </div>
 
   {#if loading}
     <div class="status" role="status" aria-live="polite">{$t('steps.loading')}</div>
+  {:else if workspace && !canViewProtocolSteps()}
+    <div class="detail-section">
+      <div class="detail-section__title">{$t('steps.notReadyTitle')}</div>
+      <p class="meta-text">{$t('steps.notReadyBody')}</p>
+    </div>
   {:else if !steps.length}
     <p class="note">{$t('steps.empty')}</p>
   {:else}

@@ -5,14 +5,6 @@
   import { listCollectionFiles, uploadCollectionFiles, type CollectionFile } from '../../_shared/files';
   import { t } from '../../_shared/i18n';
   import {
-    getCommunityReportDetail,
-    listCommunityReports,
-    listReportPatterns,
-    type ReportCommunityDetailResponse,
-    type ReportCommunitySummary,
-    type ReportPatternItem
-  } from '../../_shared/reports';
-  import {
     createIndexTask,
     getTask,
     getTaskArtifacts,
@@ -33,7 +25,7 @@
   let selectedFiles: File[] = [];
   let isDragging = false;
   let indexAfterUpload = true;
-  let indexMode: 'update' | 'rebuild' = 'update';
+  let indexMode: 'update' | 'rebuild' = 'rebuild';
   let method = 'standard';
   let uploadLoading = false;
   let uploadError = '';
@@ -44,24 +36,18 @@
   let filesError = '';
 
   let advancedOpen = false;
-  let reportsLoading = false;
-  let reportsLoaded = false;
-  let reportsError = '';
-  let detailLoading = false;
-  let patterns: ReportPatternItem[] = [];
-  let communities: ReportCommunitySummary[] = [];
-  let selectedCommunity: ReportCommunityDetailResponse | null = null;
+  let canUseIncrementalIndex = false;
 
   $: collectionId = $page.params.id ?? '';
   $: if ($page.url.hash.startsWith('#advanced')) {
     advancedOpen = true;
   }
-  $: if (advancedOpen && collectionId && !reportsLoaded && !reportsLoading) {
-    void loadReports();
+  $: canUseIncrementalIndex = Boolean(workspace?.artifacts.documents_ready);
+  $: if (!canUseIncrementalIndex && indexMode === 'update') {
+    indexMode = 'rebuild';
   }
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
-    resetReports();
     clearPoll();
     void Promise.all([loadWorkspace(), loadFiles()]);
   }
@@ -82,16 +68,6 @@
     pollTimer = setTimeout(() => {
       void refreshTask(taskId);
     }, 2500);
-  }
-
-  function resetReports() {
-    reportsLoading = false;
-    reportsLoaded = false;
-    reportsError = '';
-    detailLoading = false;
-    patterns = [];
-    communities = [];
-    selectedCommunity = null;
   }
 
   function mergeTask(task: Task) {
@@ -155,54 +131,6 @@
       collectionFiles = [];
     } finally {
       filesLoading = false;
-    }
-  }
-
-  async function loadReports(force = false) {
-    if (!force && (reportsLoading || reportsLoaded || !collectionId)) return;
-
-    reportsLoading = true;
-    reportsError = '';
-    try {
-      const [patternResponse, communityResponse] = await Promise.all([
-        listReportPatterns(collectionId, { level: 2, limit: 6, sort: 'rating' }),
-        listCommunityReports(collectionId, { level: 2, limit: 12, offset: 0, minSize: 0, sort: 'rating' })
-      ]);
-      patterns = patternResponse.items;
-      communities = communityResponse.items;
-      reportsLoaded = true;
-
-      const first = communityResponse.items[0];
-      if (first?.community_id !== undefined && first.community_id !== null) {
-        await selectCommunity(String(first.community_id));
-      } else {
-        selectedCommunity = null;
-      }
-    } catch (err) {
-      reportsError = errorMessage(err);
-      patterns = [];
-      communities = [];
-      selectedCommunity = null;
-    } finally {
-      reportsLoading = false;
-    }
-  }
-
-  async function selectCommunity(communityId: string) {
-    detailLoading = true;
-    reportsError = '';
-    try {
-      selectedCommunity = await getCommunityReportDetail(collectionId, communityId, {
-        level: 2,
-        entityLimit: 10,
-        relationshipLimit: 10,
-        documentLimit: 10
-      });
-    } catch (err) {
-      reportsError = errorMessage(err);
-      selectedCommunity = null;
-    } finally {
-      detailLoading = false;
     }
   }
 
@@ -336,7 +264,7 @@
     }
 
     if (latestTask && isTaskActive(latestTask)) {
-      location.hash = 'activity';
+      location.hash = 'status';
       return;
     }
 
@@ -363,7 +291,7 @@
     try {
       const task = await createIndexTask(collectionId, {
         method,
-        isUpdateRun: indexMode === 'update',
+        isUpdateRun: canUseIncrementalIndex && indexMode === 'update',
         verbose: false
       });
       mergeTask(task);
@@ -407,66 +335,55 @@
   <title>{$t('overview.title')}</title>
 </svelte:head>
 
-<section class="card fade-up">
-  <div class="card-header-inline">
-    <div>
-      <p class="lead">{$t('overview.lead')}</p>
-      {#if workspace}
+{#if loading}
+  <section class="card fade-up">
+    <div class="status" role="status" aria-live="polite">{$t('overview.loading')}</div>
+  </section>
+{:else if error}
+  <section class="card fade-up">
+    <div class="status status--error" role="alert">{error}</div>
+  </section>
+{:else if workspace}
+  <section id="files" class="card fade-up">
+    <div class="card-header-inline">
+      <div>
+        <h3>{$t('overview.uploadTitle')}</h3>
+        <p class="meta-text">{$t('overview.uploadLead')}</p>
         <div class="status-row">
           <span class="label">{$t('overview.statusLabel')}</span>
           <span class="status status--neutral">{formatStatus(workspace.status_summary)}</span>
-          <span class="meta-text">{$t('overview.updatedAt', { time: formatDate(workspace.artifacts.updated_at) })}</span>
+          <span class="meta-text">{$t('overview.filesCount', { count: workspace.file_count })}</span>
         </div>
-      {/if}
-    </div>
-    <button class="btn btn--ghost btn--small" type="button" on:click={() => Promise.all([loadWorkspace(), loadFiles()])}>
-      {$t('overview.refresh')}
-    </button>
-  </div>
-
-  {#if loading}
-    <div class="status" role="status" aria-live="polite">{$t('overview.loading')}</div>
-  {:else if error}
-    <div class="status status--error" role="alert">{error}</div>
-  {:else if workspace}
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-value">{formatCount(workspace.collection.paper_count)}</div>
-        <div class="stat-label">{$t('overview.metricPapers')}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value">{formatCount(workspace.file_count)}</div>
-        <div class="stat-label">{$t('overview.metricFiles')}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{workspace.recent_tasks.length}</div>
-        <div class="stat-label">{$t('overview.metricTasks')}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{workspace.collection.default_method || 'standard'}</div>
-        <div class="stat-label">{$t('overview.metricMethod')}</div>
+      <div class="table-actions">
+        <button class="btn btn--ghost btn--small" type="button" on:click={() => Promise.all([loadWorkspace(), loadFiles()])}>
+          {$t('overview.refresh')}
+        </button>
+        <button class="btn btn--primary" type="button" on:click={browseFiles}>
+          {$t('overview.uploadCta')}
+        </button>
       </div>
     </div>
 
-    {#if workspace.collection.description}
-      <p class="note">{workspace.collection.description}</p>
-    {/if}
-  {/if}
-</section>
-
-{#if workspace}
-  <section class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('overview.controlTitle')}</h3>
-        <p class="meta-text">{$t('overview.controlLead')}</p>
+    <div class="result-grid result-grid--tasks">
+      <div class="result-card">
+        <div class="detail-section__title">{$t('overview.uploadWhyTitle')}</div>
+        <p class="result-text">{$t('overview.uploadWhyBody')}</p>
+        {#if workspace.collection.description}
+          <p class="note">{workspace.collection.description}</p>
+        {/if}
       </div>
-      <button class="btn btn--primary" type="button" on:click={openPrimaryAction}>
-        {primaryActionLabel()}
-      </button>
-    </div>
 
-    <p class="note">{primaryActionHelper()}</p>
+      <div class="result-card">
+        <div class="detail-section__title">{$t('overview.uploadAfterTitle')}</div>
+        <p class="result-text">{$t('overview.uploadAfterBody')}</p>
+        <ul class="result-list">
+          <li>{$t('overview.uploadAfterSteps')}</li>
+          <li>{$t('overview.uploadAfterSop')}</li>
+          <li>{$t('overview.uploadAfterGraph')}</li>
+        </ul>
+      </div>
+    </div>
 
     {#if actionStatus}
       <div class={`status ${actionStatus.startsWith('4') || actionStatus.startsWith('5') ? 'status--error' : ''}`} role="status">
@@ -474,37 +391,10 @@
       </div>
     {/if}
 
-    <div class="detail-chips">
-      <span class={`detail-chip ${workspace.capabilities.can_view_protocol_steps ? '' : 'detail-chip--muted'}`}>
-        {$t('overview.capabilities.steps')}
-      </span>
-      <span class={`detail-chip ${workspace.capabilities.can_generate_sop ? '' : 'detail-chip--muted'}`}>
-        {$t('overview.capabilities.sop')}
-      </span>
-      <span class={`detail-chip ${workspace.capabilities.can_view_graph ? '' : 'detail-chip--muted'}`}>
-        {$t('overview.capabilities.graph')}
-      </span>
-      <span class={`detail-chip ${workspace.capabilities.can_search_protocol ? '' : 'detail-chip--muted'}`}>
-        {$t('overview.capabilities.search')}
-      </span>
-    </div>
-  </section>
-
-  <section id="files" class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('documents.title')}</h3>
-        <p class="meta-text">{$t('overview.filesLead')}</p>
-      </div>
-      {#if collectionFiles.length}
-        <button class="btn btn--ghost btn--small" type="button" on:click={startIndexRun}>
-          {$t('documents.startIndex')}
-        </button>
-      {/if}
-    </div>
-
     <div class="result-grid result-grid--tasks">
       <div class="result-card">
+        <h4>{$t('overview.uploadFormTitle')}</h4>
+        <p class="meta-text">{$t('overview.uploadFormLead')}</p>
         <div
           class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
           on:drop={handleDrop}
@@ -540,7 +430,13 @@
           <legend>{$t('documents.indexModeLabel')}</legend>
           <div class="radio-group">
             <label>
-              <input type="radio" name="index-mode" value="update" bind:group={indexMode} disabled={!indexAfterUpload} />
+              <input
+                type="radio"
+                name="index-mode"
+                value="update"
+                bind:group={indexMode}
+                disabled={!indexAfterUpload || !canUseIncrementalIndex}
+              />
               {$t('documents.indexModeUpdate')}
             </label>
             <label>
@@ -548,6 +444,9 @@
               {$t('documents.indexModeRebuild')}
             </label>
           </div>
+          {#if !canUseIncrementalIndex}
+            <p class="meta-text">{$t('documents.indexModeNoBaseline')}</p>
+          {/if}
         </fieldset>
 
         <div class="field">
@@ -634,57 +533,140 @@
     </div>
   </section>
 
-  <section id="activity" class="card">
+  <section id="status" class="card">
     <div class="card-header-inline">
       <div>
-        <h3>{$t('tasks.title')}</h3>
-        <p class="meta-text">{$t('overview.activityLead')}</p>
+        <h3>{$t('overview.statusTitle')}</h3>
+        <p class="meta-text">{$t('overview.statusLead')}</p>
       </div>
-      {#if workspace.file_count > 0 && !(workspace.latest_task && isTaskActive(workspace.latest_task))}
-        <button class="btn btn--ghost btn--small" type="button" on:click={startIndexRun}>
-          {$t('overview.primaryActionProcess')}
-        </button>
-      {/if}
+      <button class="btn btn--primary" type="button" on:click={openPrimaryAction}>
+        {primaryActionLabel()}
+      </button>
     </div>
 
-    {#if workspace.latest_task}
-      <div class="result-grid result-grid--tasks">
-        <div class="result-card">
-          <div class="table-main">
-            <div class="table-title">{formatTaskStatus(workspace.latest_task.status)}</div>
-            <div class="table-sub">{formatTaskStage(workspace.latest_task.current_stage)}</div>
+    <p class="note">{primaryActionHelper()}</p>
+
+    <div class="result-grid result-grid--tasks">
+      <div class="result-card">
+        <h4>{$t('overview.latestTaskTitle')}</h4>
+        <dl class="detail-list">
+          <div class="detail-row">
+            <dt>{$t('overview.statusFiles')}</dt>
+            <dd>{formatCount(workspace.file_count)}</dd>
           </div>
-          <dl class="detail-list">
+          <div class="detail-row">
+            <dt>{$t('overview.statusUpdated')}</dt>
+            <dd>{formatDate(workspace.collection.updated_at || workspace.artifacts.updated_at)}</dd>
+          </div>
+          {#if workspace.latest_task}
             <div class="detail-row">
-              <dt>{$t('tasks.tableProgress')}</dt>
+              <dt>{$t('overview.statusLatestTask')}</dt>
+              <dd>{formatTaskStatus(workspace.latest_task.status)}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>{$t('overview.statusStage')}</dt>
+              <dd>{formatTaskStage(workspace.latest_task.current_stage)}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>{$t('overview.statusProgress')}</dt>
               <dd>{formatPercent(workspace.latest_task.progress_percent)}</dd>
             </div>
-            <div class="detail-row">
-              <dt>{$t('tasks.tableStarted')}</dt>
-              <dd>{formatDate(workspace.latest_task.started_at || workspace.latest_task.created_at)}</dd>
-            </div>
-            <div class="detail-row">
-              <dt>{$t('tasks.tableFinished')}</dt>
-              <dd>{formatDate(workspace.latest_task.finished_at)}</dd>
-            </div>
-          </dl>
-
-          {#if workspace.latest_task.errors.length}
-            <div class="status status--error" role="alert">{workspace.latest_task.errors.join(' | ')}</div>
           {/if}
-          {#if workspace.latest_task.warnings.length}
-            <div class="status" role="status">{workspace.latest_task.warnings.join(' | ')}</div>
-          {/if}
-        </div>
+        </dl>
 
-        <div class="result-card">
-          <div class="card-header-inline">
-            <div>
-              <h4>{$t('overview.recentActivityTitle')}</h4>
-              <p class="meta-text">{$t('tasks.resultTitle')}</p>
-            </div>
+        {#if workspace.latest_task?.errors.length}
+          <div class="status status--error" role="alert">{workspace.latest_task.errors.join(' | ')}</div>
+        {:else if workspace.latest_task?.warnings.length}
+          <div class="status" role="status">{workspace.latest_task.warnings.join(' | ')}</div>
+        {:else if !workspace.latest_task}
+          <p class="note">{$t('overview.noTasks')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <h4>{$t('overview.statusArtifactsTitle')}</h4>
+        {#if artifactRows().length}
+          <div class="detail-chips">
+            {#each artifactRows() as [key, ready]}
+              <span class={`detail-chip ${ready ? '' : 'detail-chip--muted'}`}>
+                {$t(`overview.artifacts.${key}`)}: {ready ? $t('overview.ready') : $t('overview.pending')}
+              </span>
+            {/each}
           </div>
+        {:else}
+          <p class="note">{$t('overview.statusArtifactsEmpty')}</p>
+        {/if}
+      </div>
+    </div>
+  </section>
 
+  <section class="card">
+    <div class="card-header-inline">
+      <div>
+        <h3>{$t('overview.resultsTitle')}</h3>
+        <p class="meta-text">{$t('overview.resultsLead')}</p>
+      </div>
+    </div>
+
+    <div class="result-grid result-grid--tasks">
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.steps')}</div>
+          <div class="table-sub">{$t('overview.resultStepsLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_view_protocol_steps}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/steps`}>
+              {$t('overview.nextSteps')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.sop')}</div>
+          <div class="table-sub">{$t('overview.resultSopLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_generate_sop}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
+              {$t('overview.nextSop')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.graph')}</div>
+          <div class="table-sub">{$t('overview.resultGraphLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_view_graph}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/graph`}>
+              {$t('overview.nextGraph')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <details class="advanced" bind:open={advancedOpen}>
+      <summary>{$t('overview.advancedTitle')}</summary>
+      <p class="note">{$t('overview.advancedLead')}</p>
+
+      <div class="result-grid result-grid--tasks">
+        <section class="result-card">
+          <h4>{$t('tasks.title')}</h4>
           {#if workspace.recent_tasks.length}
             <div class="table-wrapper">
               <table class="data-table">
@@ -711,80 +693,8 @@
           {:else}
             <p class="note">{$t('overview.noTasks')}</p>
           {/if}
-        </div>
-      </div>
-    {:else}
-      <p class="note">{$t('overview.noTasks')}</p>
-    {/if}
-  </section>
+        </section>
 
-  <section class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('overview.artifactsTitle')}</h3>
-        <p class="meta-text">{$t('overview.artifactsLead')}</p>
-      </div>
-    </div>
-
-    <div class="detail-chips">
-      {#each artifactRows() as [key, ready]}
-        <span class={`detail-chip ${ready ? '' : 'detail-chip--muted'}`}>
-          {$t(`overview.artifacts.${key}`)}: {ready ? $t('overview.ready') : $t('overview.pending')}
-        </span>
-      {/each}
-    </div>
-
-    <div class="result-grid result-grid--tasks">
-      <div class="result-card">
-        <h4>{$t('overview.capabilitiesTitle')}</h4>
-        <div class="detail-chips">
-          <span class={`detail-chip ${workspace.capabilities.can_view_protocol_steps ? '' : 'detail-chip--muted'}`}>
-            {$t('overview.capabilities.steps')}
-          </span>
-          <span class={`detail-chip ${workspace.capabilities.can_search_protocol ? '' : 'detail-chip--muted'}`}>
-            {$t('overview.capabilities.search')}
-          </span>
-          <span class={`detail-chip ${workspace.capabilities.can_generate_sop ? '' : 'detail-chip--muted'}`}>
-            {$t('overview.capabilities.sop')}
-          </span>
-          <span class={`detail-chip ${workspace.capabilities.can_view_graph ? '' : 'detail-chip--muted'}`}>
-            {$t('overview.capabilities.graph')}
-          </span>
-        </div>
-      </div>
-
-      <div class="result-card">
-        <h4>{$t('overview.nextActionsTitle')}</h4>
-        <div class="action-grid">
-          <a class="btn btn--ghost btn--small" href="#files">{$t('overview.nextUpload')}</a>
-          <a class="btn btn--ghost btn--small" href="#activity">{$t('overview.nextTrack')}</a>
-          {#if workspace.capabilities.can_view_protocol_steps}
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/steps`}>
-              {$t('overview.nextSteps')}
-            </a>
-          {/if}
-          {#if workspace.capabilities.can_generate_sop}
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
-              {$t('overview.nextSop')}
-            </a>
-          {/if}
-          {#if workspace.capabilities.can_view_graph}
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/graph`}>
-              {$t('overview.nextGraph')}
-            </a>
-          {/if}
-          <a class="btn btn--ghost btn--small" href="#advanced-settings">{$t('overview.nextAdvanced')}</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="card">
-    <details class="advanced" bind:open={advancedOpen}>
-      <summary>{$t('overview.advancedTitle')}</summary>
-      <p class="note">{$t('overview.advancedLead')}</p>
-
-      <div class="result-grid result-grid--tasks">
         <section id="advanced-settings" class="result-card">
           <h4>{$t('settings.title')}</h4>
           <dl class="detail-list">
@@ -832,84 +742,16 @@
 
       <section id="advanced-reports" class="result-grid result-grid--tasks">
         <div class="result-card">
-          <div class="card-header-inline">
-            <div>
-              <h4>{$t('reports.title')}</h4>
-              <p class="meta-text">{$t('reports.lead')}</p>
-            </div>
-            <button class="btn btn--ghost btn--small" type="button" on:click={() => loadReports(true)}>
-              {$t('reports.submit')}
-            </button>
-          </div>
-
-          {#if reportsLoading}
-            <div class="status" role="status" aria-live="polite">{$t('reports.loading')}</div>
-          {:else if reportsError}
-            <div class="status status--error" role="alert">{reportsError}</div>
-          {:else if !patterns.length && !communities.length}
-            <p class="note">{$t('reports.emptyCommunities')}</p>
-          {:else}
-            <div class="detail-section">
-              <div class="detail-section__title">{$t('reports.patternsTitle')}</div>
-              <div class="result-grid">
-                {#each patterns as item}
-                  <article class="result-card">
-                    <div class="table-title">{item.title || `${$t('reports.communityLabel')} ${item.community_id ?? '--'}`}</div>
-                    <div class="table-sub">rating: {item.rating ?? '--'} · size: {item.size ?? '--'}</div>
-                    <p class="result-text">{item.summary || '--'}</p>
-                  </article>
-                {/each}
-              </div>
-            </div>
-
-            <div class="detail-section">
-              <div class="detail-section__title">{$t('reports.communitiesTitle')}</div>
-              <div class="table-wrapper">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>{$t('reports.communityLabel')}</th>
-                      <th>{$t('reports.ratingLabel')}</th>
-                      <th>{$t('reports.sizeLabel')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {#each communities as item}
-                      <tr
-                        class:selected-row={selectedCommunity?.community_id === item.community_id}
-                        on:click={() => item.community_id !== undefined && item.community_id !== null && selectCommunity(String(item.community_id))}
-                      >
-                        <td>{item.title || item.community_id || '--'}</td>
-                        <td>{item.rating ?? '--'}</td>
-                        <td>{item.size ?? '--'}</td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          {/if}
+          <h4>{$t('reports.title')}</h4>
+          <p class="meta-text">{$t('reports.degradedLead')}</p>
+          <p class="note">{$t('reports.degradedNote')}</p>
         </div>
 
         <div class="result-card">
-          {#if detailLoading}
-            <div class="status" role="status" aria-live="polite">{$t('reports.detailLoading')}</div>
-          {:else if selectedCommunity}
-            <div class="table-main">
-              <div class="table-title">{selectedCommunity.title || selectedCommunity.community_id}</div>
-              <div class="table-sub">
-                {$t('reports.ratingLabel')}: {selectedCommunity.rating ?? '--'} · {$t('reports.sizeLabel')}: {selectedCommunity.size ?? '--'}
-              </div>
-            </div>
-            <p class="result-text">{selectedCommunity.summary || '--'}</p>
-            <div class="detail-chips">
-              <span class="detail-chip">{$t('reports.entitiesLabel')}: {selectedCommunity.entities.length}</span>
-              <span class="detail-chip">{$t('reports.relationshipsLabel')}: {selectedCommunity.relationships.length}</span>
-              <span class="detail-chip">{$t('reports.documentsLabel')}: {selectedCommunity.documents.length}</span>
-            </div>
-          {:else}
-            <p class="note">{$t('reports.emptyDetail')}</p>
-          {/if}
+          <div class="detail-section">
+            <div class="detail-section__title">{$t('reports.degradedTitle')}</div>
+            <p class="result-text">{$t('reports.degradedBody')}</p>
+          </div>
         </div>
       </section>
     </details>

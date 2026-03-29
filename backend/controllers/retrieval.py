@@ -1,8 +1,13 @@
 """API endpoints to trigger retrieval pipelines and manage collections."""
 
-from fastapi import APIRouter, File, Form, Query, UploadFile
+import logging
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
+from app.services import collection_store
 from app.usecases import collections as collections_uc
 from app.usecases import files as files_uc
 from app.usecases import graphml as graphml_uc
@@ -27,8 +32,28 @@ from controllers.schemas import (
     ReportPatternsResponse,
 )
 from retrieval.config.enums import IndexingMethod
+from services import protocol_search_service, protocol_sop_service
 
 router = APIRouter(prefix="/retrieval", tags=["retrieval"])
+logger = logging.getLogger(__name__)
+
+
+def _resolve_output_dir(output_path: str | None) -> Path:
+    """Resolve a protocol artifact directory from explicit path or default collection."""
+    if output_path:
+        base_dir = Path(output_path).expanduser().resolve()
+    else:
+        config, _ = collection_store.load_collection_config(None)
+        base_dir = Path(
+            getattr(config.output, "base_dir", getattr(config, "root_dir", "."))
+        )
+        if not base_dir.is_absolute():
+            root_dir = Path(getattr(config, "root_dir", ".")).expanduser().resolve()
+            base_dir = (root_dir / base_dir).resolve()
+
+    if not base_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"输出目录不存在: {base_dir}")
+    return base_dir
 
 
 @router.post("/index", response_model=IndexResponse, summary="启动标准索引流程")
@@ -257,4 +282,124 @@ async def export_graphml(
         content=result.content,
         media_type="application/graphml+xml",
         headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+    )
+
+
+def _payload_list(value: Any, field_name: str) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise HTTPException(status_code=400, detail=f"{field_name} 必须是数组")
+    return [str(item) for item in value]
+
+
+@router.post(
+    "/protocol/extract",
+    summary="读取并汇总 protocol 产物",
+)
+async def extract_protocol(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read protocol artifacts produced by upstream parsing/extraction stages."""
+    output_path = payload.get("output_path")
+    paper_ids = _payload_list(payload.get("paper_ids"), "paper_ids")
+    limit = int(payload.get("limit", 50))
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit 必须在 1-500 之间")
+    base_dir = _resolve_output_dir(output_path)
+    logger.info(
+        "Loading protocol artifacts base_dir=%s paper_ids=%s limit=%s",
+        base_dir,
+        paper_ids,
+        limit,
+    )
+    return protocol_sop_service.load_protocol_artifacts(
+        base_dir=base_dir,
+        paper_ids=paper_ids,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/protocol/steps",
+    summary="列出 protocol steps",
+)
+async def list_protocol_steps(
+    output_path: str | None = Query(default=None, description="GraphRAG 输出目录"),
+    paper_id: str | None = Query(default=None, description="按论文 ID 过滤"),
+    block_type: str | None = Query(default=None, description="按 block 类型过滤"),
+    limit: int = Query(default=50, ge=1, le=500, description="返回数量"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+) -> dict[str, Any]:
+    base_dir = _resolve_output_dir(output_path)
+    logger.info(
+        "Listing protocol steps base_dir=%s paper_id=%s block_type=%s limit=%s offset=%s",
+        base_dir,
+        paper_id,
+        block_type,
+        limit,
+        offset,
+    )
+    return protocol_sop_service.list_protocol_steps(
+        base_dir=base_dir,
+        paper_id=paper_id,
+        block_type=block_type,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/protocol/search",
+    summary="检索 protocol steps",
+)
+async def search_protocol_steps(
+    q: str = Query(..., description="检索词"),
+    output_path: str | None = Query(default=None, description="GraphRAG 输出目录"),
+    paper_id: str | None = Query(default=None, description="按论文 ID 过滤"),
+    limit: int = Query(default=10, ge=1, le=100, description="返回数量"),
+) -> dict[str, Any]:
+    base_dir = _resolve_output_dir(output_path)
+    logger.info(
+        "Searching protocol steps base_dir=%s paper_id=%s q=%s limit=%s",
+        base_dir,
+        paper_id,
+        q,
+        limit,
+    )
+    return protocol_search_service.search_protocol_steps(
+        base_dir=base_dir,
+        query=q,
+        limit=limit,
+        paper_id=paper_id,
+    )
+
+
+@router.post(
+    "/protocol/sop",
+    summary="基于 protocol steps 生成 SOP 草案",
+)
+async def build_protocol_sop(payload: dict[str, Any]) -> dict[str, Any]:
+    output_path = payload.get("output_path")
+    goal = str(payload.get("goal") or "").strip()
+    paper_ids = _payload_list(payload.get("paper_ids"), "paper_ids")
+    target_properties = (
+        _payload_list(payload.get("target_properties"), "target_properties") or []
+    )
+    max_steps = int(payload.get("max_steps", 12))
+    if max_steps < 1 or max_steps > 50:
+        raise HTTPException(status_code=400, detail="max_steps 必须在 1-50 之间")
+    base_dir = _resolve_output_dir(output_path)
+    logger.info(
+        "Building SOP draft base_dir=%s goal=%s paper_ids=%s target_properties=%s max_steps=%s",
+        base_dir,
+        goal,
+        paper_ids,
+        target_properties,
+        max_steps,
+    )
+    return protocol_sop_service.build_sop_draft(
+        base_dir=base_dir,
+        goal=goal,
+        target_properties=target_properties,
+        paper_ids=paper_ids,
+        max_steps=max_steps,
     )

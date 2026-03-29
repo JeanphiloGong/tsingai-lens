@@ -4,6 +4,7 @@
 """The LanceDB vector storage implementation package."""
 
 import json  # noqa: I001
+import logging
 from typing import Any
 import pyarrow as pa
 import numpy as np
@@ -16,6 +17,8 @@ from retrieval.vector_stores.base import (
     VectorStoreSearchResult,
 )
 import lancedb
+
+logger = logging.getLogger(__name__)
 
 
 class LanceDBVectorStore(BaseVectorStore):
@@ -33,7 +36,27 @@ class LanceDBVectorStore(BaseVectorStore):
         self.db_connection = lancedb.connect(kwargs["db_uri"])
 
         if self.index_name and self.index_name in self.db_connection.table_names():
-            self.document_collection = self.db_connection.open_table(self.index_name)
+            try:
+                self.document_collection = self.db_connection.open_table(self.index_name)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to open LanceDB table %s at %s; removing stale table reference and continuing with rebuild path: %s",
+                    self.index_name,
+                    kwargs["db_uri"],
+                    exc,
+                )
+                try:
+                    self.db_connection.drop_table(
+                        self.index_name,
+                        ignore_missing=True,
+                    )
+                except Exception as drop_exc:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to drop stale LanceDB table %s after open failure: %s",
+                        self.index_name,
+                        drop_exc,
+                    )
+                self.document_collection = None
 
     def load_documents(
         self, documents: list[VectorStoreDocument], overwrite: bool = True

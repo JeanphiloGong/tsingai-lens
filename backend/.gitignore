@@ -205,17 +205,17 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-=======
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
 
-# Virtual environments
-.venv
-*data/logs/*
+# Project local runtime data
 AGENTS.md
-*data/collections/*
+data/logs/
+data/tasks/
+data/update_output/
+data/collections/cache/
+data/collections/*/meta.json
+data/collections/*/files.json
+data/collections/*/artifacts.json
+data/collections/*/input/
+data/collections/*/output/
+
+data/vector_store/

@@ -628,6 +628,20 @@ textarea {
   gap: 12px;
 }
 
+.card-header-inline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
 .status-row {
   display: flex;
   align-items: center;
@@ -702,6 +716,10 @@ textarea {
   display: grid;
   gap: 16px;
   margin-top: 12px;
+}
+
+.result-grid--tasks {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
 }
 
 .result-card {
@@ -901,6 +919,10 @@ textarea {
 .detail-chip--muted {
   background: rgba(15, 27, 45, 0.08);
   color: var(--color-subtle);
+}
+
+.selected-row {
+  background: rgba(43, 111, 247, 0.1);
 }
 
 .connection-bar {
@@ -1345,7 +1367,20 @@ textarea {
   margin-top: 24px;
   color: var(--color-subtle);
   font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
   text-align: center;
+}
+
+.site-footer a {
+  color: var(--color-muted);
+}
+
+.site-footer a:hover {
+  color: var(--color-ink);
 }
 
 .fade-up {
@@ -1408,6 +1443,10 @@ textarea {
   }
 
   .graph-preview-body {
+    grid-template-columns: 1fr;
+  }
+
+  .result-grid--tasks {
     grid-template-columns: 1fr;
   }
 }

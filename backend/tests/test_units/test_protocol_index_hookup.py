@@ -1,0 +1,384 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pandas as pd
+import pytest
+
+from services import protocol_pipeline_service
+
+
+class DummyWorkflowOutput:
+    def __init__(self, workflow: str = "index", errors: list[str] | None = None):
+        self.workflow = workflow
+        self.errors = errors
+
+
+class DummyInputStorage:
+    def __init__(self, base_dir: Path):
+        self.base_dir = base_dir
+
+    async def set(self, key: str, value: bytes) -> None:
+        path = self.base_dir / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(value)
+
+
+class DummyUploadFile:
+    def __init__(self, filename: str, content: bytes):
+        self.filename = filename
+        self._content = content
+
+    async def read(self) -> bytes:
+        return self._content
+
+
+def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        output=SimpleNamespace(base_dir=str(output_dir)),
+        input=SimpleNamespace(storage=SimpleNamespace(base_dir=str(input_dir))),
+        root_dir=str(output_dir.parent),
+        embed_text=SimpleNamespace(
+            names=[
+                "entity.description",
+                "community.full_content",
+                "text_unit.text",
+            ],
+            vector_store_id="default_vector_store",
+        ),
+        vector_store={
+            "default_vector_store": {
+                "type": "lancedb",
+                "db_uri": str(output_dir.parent / "vector_store" / "lancedb"),
+                "container_name": "default",
+                "overwrite": True,
+            }
+        },
+    )
+
+
+def _write_index_outputs(output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Composite Paper",
+                "text": "\n".join(
+                    [
+                        "Introduction",
+                        "Composite performance was evaluated.",
+                        "Experimental Section",
+                        "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                        "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
+                        "Characterization",
+                        "XRD and SEM were used to characterize the powders.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                "document_ids": ["paper-1"],
+            },
+            {
+                "id": "tu-2",
+                "text": "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
+                "document_ids": ["paper-1"],
+            },
+            {
+                "id": "tu-3",
+                "text": "XRD and SEM were used to characterize the powders.",
+                "document_ids": ["paper-1"],
+            },
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+
+
+def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
+    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
+        frame = self.reset_index(drop=True) if index else self
+        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
+
+    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        return pd.DataFrame(payload)
+
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
+    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _assert_protocol_artifacts(output_dir: Path) -> None:
+    sections_path = output_dir / "sections.parquet"
+    blocks_path = output_dir / "procedure_blocks.parquet"
+    steps_path = output_dir / "protocol_steps.parquet"
+
+    assert sections_path.exists()
+    assert blocks_path.exists()
+    assert steps_path.exists()
+
+    sections = pd.read_parquet(sections_path)
+    blocks = pd.read_parquet(blocks_path)
+    steps = pd.read_parquet(steps_path)
+
+    assert not sections.empty
+    assert not blocks.empty
+    assert not steps.empty
+    assert set(sections["section_type"]) >= {"methods", "characterization"}
+    assert "synthesis" in set(blocks["block_type"])
+    assert "anneal" in set(steps["action"])
+
+
+def test_build_protocol_artifacts_generates_all_parquet(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+    output_dir = tmp_path / "output"
+    _write_index_outputs(output_dir)
+
+    result = protocol_pipeline_service.build_protocol_artifacts(output_dir)
+
+    assert result.output_dir == output_dir.resolve()
+    assert result.section_count >= 2
+    assert result.procedure_block_count >= 3
+    assert result.protocol_step_count >= 3
+    _assert_protocol_artifacts(output_dir)
+
+
+def test_start_indexing_generates_protocol_artifacts(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    _patch_parquet(monkeypatch)
+
+    from app.usecases import indexing as indexing_uc
+    from controllers.schemas import IndexRequest
+    from retrieval.config.enums import IndexingMethod
+
+    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "input"
+    config = _build_config(output_dir, input_dir)
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003, ARG001
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(
+        indexing_uc.collection_store,
+        "load_collection_config",
+        lambda collection_id: (config, collection_id or "default"),
+    )
+    monkeypatch.setattr(indexing_uc, "build_index", fake_build_index)
+
+    response = asyncio.run(
+        indexing_uc.start_indexing(
+            IndexRequest(
+                collection_id=None,
+                method=IndexingMethod.Standard,
+                is_update_run=False,
+                verbose=False,
+            )
+        )
+    )
+
+    assert response.status == "ok"
+    assert response.errors is None
+    assert Path(response.output_path) == output_dir.resolve()
+    _assert_protocol_artifacts(output_dir)
+
+
+def test_start_indexing_downgrades_first_update_run(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    _patch_parquet(monkeypatch)
+
+    from app.usecases import indexing as indexing_uc
+    from controllers.schemas import IndexRequest
+    from retrieval.config.enums import IndexingMethod
+
+    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "input"
+    config = _build_config(output_dir, input_dir)
+    captured: dict[str, object] = {}
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003, ARG001
+        captured.update(kwargs)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(
+        indexing_uc.collection_store,
+        "load_collection_config",
+        lambda collection_id: (config, collection_id or "default"),
+    )
+    monkeypatch.setattr(indexing_uc, "build_index", fake_build_index)
+
+    response = asyncio.run(
+        indexing_uc.start_indexing(
+            IndexRequest(
+                collection_id=None,
+                method=IndexingMethod.Standard,
+                is_update_run=True,
+                verbose=False,
+            )
+        )
+    )
+
+    assert response.status == "ok"
+    assert response.errors is None
+    assert response.warnings == ["未找到上一轮索引产物 documents.parquet，已自动降级为全量重建。"]
+    assert captured["is_update_run"] is False
+    _assert_protocol_artifacts(output_dir)
+
+
+def test_start_indexing_downgrades_when_vector_store_baseline_missing(
+    monkeypatch, tmp_path
+):
+    pytest.importorskip("fastapi")
+    _patch_parquet(monkeypatch)
+
+    from app.usecases import indexing as indexing_uc
+    from controllers.schemas import IndexRequest
+    from retrieval.config.enums import IndexingMethod
+    import services.index_run_mode_service as run_mode_service
+
+    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "input"
+    config = _build_config(output_dir, input_dir)
+    captured: dict[str, object] = {}
+
+    _write_index_outputs(output_dir)
+    (output_dir.parent / "vector_store" / "lancedb").mkdir(parents=True, exist_ok=True)
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003, ARG001
+        captured.update(kwargs)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(
+        indexing_uc.collection_store,
+        "load_collection_config",
+        lambda collection_id: (config, collection_id or "default"),
+    )
+    monkeypatch.setattr(indexing_uc, "build_index", fake_build_index)
+    monkeypatch.setattr(
+        run_mode_service,
+        "_probe_lancedb_tables",
+        lambda db_uri, required_tables: (["default-entity-description"], "missing"),
+    )
+
+    response = asyncio.run(
+        indexing_uc.start_indexing(
+            IndexRequest(
+                collection_id=None,
+                method=IndexingMethod.Standard,
+                is_update_run=True,
+                verbose=False,
+            )
+        )
+    )
+
+    assert response.status == "ok"
+    assert response.errors is None
+    assert response.warnings == [
+        "未找到完整的向量索引基线，已自动降级为全量重建。 缺失或不可用的表: default-entity-description。 详情: missing"
+    ]
+    assert captured["is_update_run"] is False
+    _assert_protocol_artifacts(output_dir)
+
+
+def test_upload_and_index_generates_protocol_artifacts(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    _patch_parquet(monkeypatch)
+
+    from app.usecases import indexing as indexing_uc
+    from retrieval.config.enums import IndexingMethod
+
+    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "input"
+    config = _build_config(output_dir, input_dir)
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003, ARG001
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(
+        indexing_uc.collection_store,
+        "load_collection_config",
+        lambda collection_id: (config, collection_id or "default"),
+    )
+    monkeypatch.setattr(indexing_uc, "build_index", fake_build_index)
+    monkeypatch.setattr(
+        indexing_uc,
+        "create_storage_from_config",
+        lambda storage_config: DummyInputStorage(Path(storage_config.base_dir)),
+    )
+
+    upload = DummyUploadFile("paper.txt", b"Experimental Section\nPowders were mixed.")
+    response = asyncio.run(
+        indexing_uc.upload_and_index(
+            file=upload,
+            collection_id=None,
+            method=IndexingMethod.Standard,
+            is_update_run=False,
+            verbose=False,
+        )
+    )
+
+    assert response.status == "ok"
+    assert response.errors is None
+    assert response.stored_input_path is not None
+    assert Path(response.output_path) == output_dir.resolve()
+    _assert_protocol_artifacts(output_dir)
+
+
+def test_upload_and_index_downgrades_first_update_run(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    _patch_parquet(monkeypatch)
+
+    from app.usecases import indexing as indexing_uc
+    from retrieval.config.enums import IndexingMethod
+
+    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "input"
+    config = _build_config(output_dir, input_dir)
+    captured: dict[str, object] = {}
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003, ARG001
+        captured.update(kwargs)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(
+        indexing_uc.collection_store,
+        "load_collection_config",
+        lambda collection_id: (config, collection_id or "default"),
+    )
+    monkeypatch.setattr(indexing_uc, "build_index", fake_build_index)
+    monkeypatch.setattr(
+        indexing_uc,
+        "create_storage_from_config",
+        lambda storage_config: DummyInputStorage(Path(storage_config.base_dir)),
+    )
+
+    upload = DummyUploadFile("paper.txt", b"Experimental Section\nPowders were mixed.")
+    response = asyncio.run(
+        indexing_uc.upload_and_index(
+            file=upload,
+            collection_id=None,
+            method=IndexingMethod.Standard,
+            is_update_run=True,
+            verbose=False,
+        )
+    )
+
+    assert response.status == "ok"
+    assert response.errors is None
+    assert response.warnings == ["未找到上一轮索引产物 documents.parquet，已自动降级为全量重建。"]
+    assert response.stored_input_path is not None
+    assert captured["is_update_run"] is False
+    _assert_protocol_artifacts(output_dir)

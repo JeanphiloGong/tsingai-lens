@@ -110,6 +110,13 @@
   curl http://localhost:8010/collections/<collection_id>
   ```
 
+- **DELETE** `/collections/{collection_id}` — 删除论文集合
+  - 返回：`collection_id`、`deleted_at`
+  - 说明：删除集合目录及其 app-layer 元数据、输入文件、输出产物
+  ```bash
+  curl -X DELETE http://localhost:8010/collections/<collection_id>
+  ```
+
 - **POST** `/collections/{collection_id}/files` — 上传论文到集合
   - 表单字段：`file`
   - 说明：当前是单文件上传接口；PDF 会自动转为文本后写入集合输入目录

@@ -35,3 +35,32 @@ def test_collection_service_normalizes_legacy_meta(tmp_path):
     saved = json.loads(paths.meta_path.read_text(encoding="utf-8"))
     assert saved["collection_id"] == "default"
     assert "id" not in saved
+
+
+def test_delete_collection_removes_collection_directory(tmp_path):
+    service = CollectionService(tmp_path / "collections")
+    record = service.create_collection("Delete Me")
+    collection_id = record["collection_id"]
+    paths = service.get_paths(collection_id)
+
+    service.add_file(collection_id, "paper.txt", b"Experimental Section\nMix.")
+
+    assert paths.collection_dir.exists()
+    assert paths.meta_path.exists()
+    assert paths.files_path.exists()
+
+    result = service.delete_collection(collection_id)
+
+    assert result["collection_id"] == collection_id
+    assert not paths.collection_dir.exists()
+
+
+def test_delete_collection_raises_for_missing_collection(tmp_path):
+    service = CollectionService(tmp_path / "collections")
+
+    try:
+        service.delete_collection("col_missing")
+    except FileNotFoundError as exc:
+        assert "collection not found" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected FileNotFoundError")

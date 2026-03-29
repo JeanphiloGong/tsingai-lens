@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -152,6 +153,27 @@ class CollectionService:
         record["updated_at"] = _now_iso()
         self._write_json(paths.meta_path, record)
         return record
+
+    def delete_collection(self, collection_id: str) -> dict:
+        paths = self.get_paths(collection_id)
+        target_dir = paths.collection_dir
+        if not paths.meta_path.exists():
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+
+        resolved_root = self.root_dir.resolve()
+        resolved_target = target_dir.resolve()
+        try:
+            resolved_target.relative_to(resolved_root)
+        except ValueError as exc:
+            raise ValueError("invalid collection path") from exc
+        if target_dir.is_symlink():
+            raise ValueError("collection path cannot be a symlink")
+
+        shutil.rmtree(target_dir)
+        return {
+            "collection_id": collection_id,
+            "deleted_at": _now_iso(),
+        }
 
     def list_files(self, collection_id: str) -> list[dict]:
         paths = self.get_paths(collection_id)

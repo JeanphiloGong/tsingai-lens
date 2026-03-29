@@ -25,7 +25,7 @@
   let selectedFiles: File[] = [];
   let isDragging = false;
   let indexAfterUpload = true;
-  let indexMode: 'update' | 'rebuild' = 'update';
+  let indexMode: 'update' | 'rebuild' = 'rebuild';
   let method = 'standard';
   let uploadLoading = false;
   let uploadError = '';
@@ -36,10 +36,15 @@
   let filesError = '';
 
   let advancedOpen = false;
+  let canUseIncrementalIndex = false;
 
   $: collectionId = $page.params.id ?? '';
   $: if ($page.url.hash.startsWith('#advanced')) {
     advancedOpen = true;
+  }
+  $: canUseIncrementalIndex = Boolean(workspace?.artifacts.documents_ready);
+  $: if (!canUseIncrementalIndex && indexMode === 'update') {
+    indexMode = 'rebuild';
   }
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
@@ -286,7 +291,7 @@
     try {
       const task = await createIndexTask(collectionId, {
         method,
-        isUpdateRun: indexMode === 'update',
+        isUpdateRun: canUseIncrementalIndex && indexMode === 'update',
         verbose: false
       });
       mergeTask(task);
@@ -425,7 +430,13 @@
           <legend>{$t('documents.indexModeLabel')}</legend>
           <div class="radio-group">
             <label>
-              <input type="radio" name="index-mode" value="update" bind:group={indexMode} disabled={!indexAfterUpload} />
+              <input
+                type="radio"
+                name="index-mode"
+                value="update"
+                bind:group={indexMode}
+                disabled={!indexAfterUpload || !canUseIncrementalIndex}
+              />
               {$t('documents.indexModeUpdate')}
             </label>
             <label>
@@ -433,6 +444,9 @@
               {$t('documents.indexModeRebuild')}
             </label>
           </div>
+          {#if !canUseIncrementalIndex}
+            <p class="meta-text">{$t('documents.indexModeNoBaseline')}</p>
+          {/if}
         </fieldset>
 
         <div class="field">

@@ -3,9 +3,11 @@
   import { errorMessage } from '../../../_shared/api';
   import { generateProtocolSop, type SOPDraftResponse } from '../../../_shared/protocol';
   import { t } from '../../../_shared/i18n';
+  import { fetchWorkspaceOverview, type WorkspaceOverview } from '../../../_shared/workspace';
 
   $: collectionId = $page.params.id ?? '';
 
+  let workspace: WorkspaceOverview | null = null;
   let goal = '';
   let targetProperties = '';
   let paperIds = '';
@@ -13,6 +15,16 @@
   let loading = false;
   let error = '';
   let result: SOPDraftResponse | null = null;
+  let loadedCollectionId = '';
+
+  $: if (collectionId && collectionId !== loadedCollectionId) {
+    loadedCollectionId = collectionId;
+    void loadWorkspace();
+  }
+
+  function canGenerateSop() {
+    return Boolean(workspace?.capabilities.can_generate_sop || workspace?.artifacts.protocol_steps_ready);
+  }
 
   function toList(value: string) {
     return value
@@ -21,10 +33,25 @@
       .filter(Boolean);
   }
 
+  async function loadWorkspace() {
+    error = '';
+    try {
+      workspace = await fetchWorkspaceOverview(collectionId);
+    } catch (err) {
+      workspace = null;
+      error = errorMessage(err);
+    }
+  }
+
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     error = '';
     result = null;
+
+    if (!canGenerateSop()) {
+      error = $t('sop.notReadyError');
+      return;
+    }
 
     if (!goal.trim()) {
       error = $t('sop.errorGoal');
@@ -52,8 +79,20 @@
 </svelte:head>
 
 <section class="card fade-up">
-  <h2>{$t('sop.title')}</h2>
-  <p class="lead">{$t('sop.lead')}</p>
+  <div class="card-header-inline">
+    <div>
+      <h2>{$t('sop.title')}</h2>
+      <p class="lead">{$t('sop.lead')}</p>
+    </div>
+    <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+      {$t('sop.backToWorkspace')}
+    </a>
+  </div>
+
+  {#if workspace && !canGenerateSop()}
+    <div class="status" role="status">{$t('sop.notReadyBody')}</div>
+  {/if}
+
   <form on:submit={submit}>
     <div class="field">
       <label for="goal">{$t('sop.goalLabel')}</label>
@@ -84,7 +123,7 @@
         <input id="maxSteps" class="input" type="number" min="1" max="50" bind:value={maxSteps} />
       </div>
     </div>
-    <button class="btn btn--primary" type="submit" disabled={loading}>
+    <button class="btn btn--primary" type="submit" disabled={loading || !canGenerateSop()}>
       {loading ? $t('sop.generating') : $t('sop.submit')}
     </button>
   </form>

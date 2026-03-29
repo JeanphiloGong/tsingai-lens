@@ -10,7 +10,6 @@
   let workspace: WorkspaceOverview | null = null;
   let goal = '';
   let targetProperties = '';
-  let paperIds = '';
   let maxSteps = 8;
   let workspaceLoading = false;
   let loading = false;
@@ -37,7 +36,6 @@
   function loadExampleGoal() {
     goal = $t('sop.goalPlaceholder');
     targetProperties = $t('sop.targetPropertiesPlaceholder');
-    paperIds = '';
     maxSteps = 8;
     error = '';
   }
@@ -79,7 +77,7 @@
       result = await generateProtocolSop(collectionId, {
         goal: goal.trim(),
         targetProperties: toList(targetProperties),
-        paperIds: toList(paperIds),
+        paperIds: [],
         maxSteps
       });
     } catch (err) {
@@ -120,25 +118,26 @@
           placeholder={$t('sop.goalPlaceholder')}
         ></textarea>
       </div>
-      <div class="form-grid">
-        <div class="field">
-          <label for="targetProperties">{$t('sop.targetPropertiesLabel')}</label>
-          <input
-            id="targetProperties"
-            class="input"
-            bind:value={targetProperties}
-            placeholder={$t('sop.targetPropertiesPlaceholder')}
-          />
+      <p class="meta-text">{$t('sop.collectionScopeNote')}</p>
+      <details class="advanced">
+        <summary>{$t('sop.advancedTitle')}</summary>
+        <p class="meta-text">{$t('sop.advancedLead')}</p>
+        <div class="form-grid">
+          <div class="field">
+            <label for="targetProperties">{$t('sop.targetPropertiesLabel')}</label>
+            <input
+              id="targetProperties"
+              class="input"
+              bind:value={targetProperties}
+              placeholder={$t('sop.targetPropertiesPlaceholder')}
+            />
+          </div>
+          <div class="field">
+            <label for="maxSteps">{$t('sop.maxStepsLabel')}</label>
+            <input id="maxSteps" class="input" type="number" min="1" max="50" bind:value={maxSteps} />
+          </div>
         </div>
-        <div class="field">
-          <label for="paperIds">{$t('sop.paperIdsLabel')}</label>
-          <input id="paperIds" class="input" bind:value={paperIds} placeholder={$t('sop.paperIdsPlaceholder')} />
-        </div>
-        <div class="field">
-          <label for="maxSteps">{$t('sop.maxStepsLabel')}</label>
-          <input id="maxSteps" class="input" type="number" min="1" max="50" bind:value={maxSteps} />
-        </div>
-      </div>
+      </details>
       <div class="table-actions">
         <button class="btn btn--primary" type="submit" disabled={loading}>
           {loading ? $t('sop.generating') : $t('sop.submit')}

@@ -31,16 +31,6 @@ const translations: Record<Language, Translations> = {
     footer: {
       pdfNote: 'PDFs must contain selectable text. Scanned PDFs are not supported.'
     },
-    connection: {
-      title: 'Base URL',
-      helper: 'Set the base URL used for all requests.',
-      baseUrlLabel: 'Base URL',
-      save: 'Save',
-      close: 'Close',
-      reset: 'Reset',
-      saved: 'Saved',
-      resetStatus: 'Reset to default'
-    },
     home: {
       eyebrow: 'Workspace',
       title: 'Collections',
@@ -553,8 +543,6 @@ const translations: Record<Language, Translations> = {
       tutorialStep10Desc2: 'Your graph is ready for analysis.'
     },
     error: {
-      baseUrlRequired: 'Base URL is required.',
-      baseUrlInvalid: 'Base URL must be a valid URL.',
       unexpected: 'Unexpected error.'
     }
   },
@@ -578,16 +566,6 @@ const translations: Record<Language, Translations> = {
     },
     footer: {
       pdfNote: 'PDF 需可复制文本，扫描版暂不支持。'
-    },
-    connection: {
-      title: 'Base URL',
-      helper: '设置所有请求使用的 Base URL。',
-      baseUrlLabel: 'Base URL',
-      save: '保存',
-      close: '关闭',
-      reset: '重置',
-      saved: '已保存',
-      resetStatus: '已重置为默认'
     },
     home: {
       eyebrow: '工作区',
@@ -1085,8 +1063,6 @@ const translations: Record<Language, Translations> = {
       tutorialStep10Desc2: '图谱即可用于分析。'
     },
     error: {
-      baseUrlRequired: 'Base URL 不能为空。',
-      baseUrlInvalid: 'Base URL 格式不正确。',
       unexpected: '发生未知错误。'
     }
   }

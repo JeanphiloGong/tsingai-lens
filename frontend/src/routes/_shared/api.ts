@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { getBaseUrlValue, validateBaseUrl } from './base';
+import { API_PREFIX } from './base';
 import { language, translateKey } from './i18n';
 
 export function errorMessage(error: unknown) {
@@ -23,9 +23,16 @@ function parseMaybeJson(value: string) {
   }
 }
 
+function normalizePath(path: string) {
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
 function buildUrl(path: string) {
-  const base = validateBaseUrl(getBaseUrlValue());
-  return `${base}${path}`;
+  const normalized = normalizePath(path);
+  if (normalized.startsWith('/api/')) {
+    return normalized;
+  }
+  return `${API_PREFIX}${normalized}`;
 }
 
 export function buildApiUrl(path: string) {

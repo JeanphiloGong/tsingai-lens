@@ -64,7 +64,7 @@ export async function listCommunityReports(
   });
 
   return (await requestJson(
-    `/retrieval/collections/${encodeURIComponent(collectionId)}/reports/communities?${params.toString()}`,
+    `/collections/${encodeURIComponent(collectionId)}/reports/communities?${params.toString()}`,
     { method: 'GET' }
   )) as ReportCommunityListResponse;
 }
@@ -81,7 +81,7 @@ export async function getCommunityReportDetail(
   params.set('document_limit', String(options.documentLimit ?? 12));
 
   return (await requestJson(
-    `/retrieval/collections/${encodeURIComponent(collectionId)}/reports/communities/${encodeURIComponent(
+    `/collections/${encodeURIComponent(collectionId)}/reports/communities/${encodeURIComponent(
       communityId
     )}?${params.toString()}`,
     { method: 'GET' }
@@ -99,7 +99,7 @@ export async function listReportPatterns(
   });
 
   return (await requestJson(
-    `/retrieval/collections/${encodeURIComponent(collectionId)}/reports/patterns?${params.toString()}`,
+    `/collections/${encodeURIComponent(collectionId)}/reports/patterns?${params.toString()}`,
     { method: 'GET' }
   )) as ReportPatternsResponse;
 }

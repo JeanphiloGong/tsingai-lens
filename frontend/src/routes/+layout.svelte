@@ -2,7 +2,7 @@
   import './layout.css';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
-  import ConnectionBar from './_shared/ConnectionBar.svelte';
+  import { API_DOCS_PATH } from './_shared/base';
   import { language, t } from './_shared/i18n';
   import { themePreference } from './_shared/theme';
   import type { ThemePreference } from './_shared/theme';
@@ -95,7 +95,6 @@
       >
         {$t('nav.home')}
       </a>
-      <ConnectionBar />
       <div
         class="theme-menu"
         bind:this={themeMenu}
@@ -172,7 +171,7 @@
   </main>
 
   <footer class="site-footer">
-    <a href="/docs">{$t('nav.docs')}</a>
+    <a href={API_DOCS_PATH}>{$t('nav.docs')}</a>
     <span>·</span>
     <span>{$t('footer.pdfNote')}</span>
   </footer>

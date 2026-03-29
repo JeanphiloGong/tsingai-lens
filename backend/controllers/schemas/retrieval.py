@@ -28,6 +28,7 @@ class IndexResponse(BaseModel):
     status: str
     workflows: list[str]
     errors: list[str] | None = None
+    warnings: list[str] | None = None
     output_path: str | None = None
     stored_input_path: str | None = None
 

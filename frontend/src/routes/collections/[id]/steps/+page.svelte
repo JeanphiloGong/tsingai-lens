@@ -15,7 +15,6 @@
 
   let workspace: WorkspaceOverview | null = null;
   let query = '';
-  let paperId = '';
   let blockType = '';
   let limit = 20;
   let offset = 0;
@@ -44,8 +43,8 @@
     return typeof value === 'number' && Number.isFinite(value);
   }
 
-  function paperLabel(paperTitle?: string | null, paperId?: string | null) {
-    return paperTitle?.trim() || paperId?.trim() || '--';
+  function paperLabel(paperTitle?: string | null) {
+    return paperTitle?.trim() || $t('steps.unknownPaper');
   }
 
   function formatConditionValue(value?: NormalizedValueItem | null) {
@@ -90,7 +89,6 @@
 
       const [stepResponse, stepSearchResponse] = await Promise.all([
         listProtocolSteps(collectionId, {
-          paperId: paperId.trim(),
           blockType: blockType.trim(),
           limit,
           offset
@@ -98,7 +96,6 @@
         query.trim()
           ? searchProtocolSteps(collectionId, {
               query: query.trim(),
-              paperId: paperId.trim(),
               limit: Math.min(limit, 10)
             })
           : Promise.resolve(null)
@@ -165,16 +162,6 @@
         <span class="meta-text">{$t('steps.searchHelper')}</span>
       </div>
       <div class="field">
-        <label for="paperId">{$t('steps.paperIdLabel')}</label>
-        <input
-          id="paperId"
-          class="input"
-          bind:value={paperId}
-          placeholder={$t('steps.paperIdPlaceholder')}
-          disabled={!canViewProtocolSteps()}
-        />
-      </div>
-      <div class="field">
         <label for="blockType">{$t('steps.blockTypeLabel')}</label>
         <input
           id="blockType"
@@ -220,16 +207,12 @@
           <article class="result-card">
             <div class="table-main">
               <div class="table-title">{item.action}</div>
-              <div class="table-sub">{paperLabel(item.paper_title, item.paper_id)}</div>
+              <div class="table-sub">{paperLabel(item.paper_title)}</div>
             </div>
             <dl class="detail-list">
               <div class="detail-row">
                 <dt>{$t('search.sourcePaperLabel')}</dt>
-                <dd>{paperLabel(item.paper_title, item.paper_id)}</dd>
-              </div>
-              <div class="detail-row">
-                <dt>{$t('search.internalIdLabel')}</dt>
-                <dd>{item.step_id}</dd>
+                <dd>{paperLabel(item.paper_title)}</dd>
               </div>
               <div class="detail-row">
                 <dt>{$t('search.matchFieldsLabel')}</dt>
@@ -286,17 +269,13 @@
             <div class="table-title">
               {step.order ? `${step.order}. ` : ''}{step.action}
             </div>
-            <div class="table-sub">{paperLabel(step.paper_title, step.paper_id)}</div>
+            <div class="table-sub">{paperLabel(step.paper_title)}</div>
           </div>
 
           <dl class="detail-list">
             <div class="detail-row">
               <dt>{$t('steps.sourcePaperLabel')}</dt>
-              <dd>{paperLabel(step.paper_title, step.paper_id)}</dd>
-            </div>
-            <div class="detail-row">
-              <dt>{$t('steps.stepIdLabel')}</dt>
-              <dd>{step.step_id}</dd>
+              <dd>{paperLabel(step.paper_title)}</dd>
             </div>
             {#if step.phase}
               <div class="detail-row">

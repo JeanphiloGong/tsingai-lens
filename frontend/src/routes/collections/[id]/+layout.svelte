@@ -22,7 +22,7 @@
   });
 
   async function removeCurrentCollection() {
-    const name = collectionName || collectionId;
+    const name = collectionName || $t('collection.unknownName');
     if (!window.confirm($t('collection.deleteConfirm', { name }))) {
       return;
     }
@@ -45,9 +45,6 @@
   <div>
     <p class="eyebrow">{$t('collection.eyebrow')}</p>
     <h1>{collectionName || $t('collection.unknownName')}</h1>
-    <div class="collection-meta">
-      <span class="pill">{$t('collection.idLabel')}: {collectionId}</span>
-    </div>
   </div>
   <div class="collection-actions">
     <a class="btn btn--ghost" href="/">{$t('collection.backToCollections')}</a>

@@ -179,7 +179,7 @@
         isUpdateRun: false,
         verbose: false
       });
-      setRowMessage(collection.id, $t('home.indexStarted', { taskId: task.task_id }));
+      setRowMessage(collection.id, $t('home.indexStarted'));
     } catch (err) {
       setRowMessage(collection.id, errorMessage(err), 'error');
     }
@@ -188,7 +188,7 @@
   async function removeCollection(collection: Collection) {
     if (deletingCollectionId) return;
 
-    const name = collection.name?.trim() || collection.id;
+    const name = collection.name?.trim() || $t('collection.unknownName');
     if (!window.confirm($t('home.deleteConfirm', { name }))) {
       return;
     }
@@ -265,14 +265,13 @@
               class="data-row data-row--clickable"
               role="link"
               tabindex="0"
-              aria-label={$t('home.openRowLabel', { name: collection.name || collection.id })}
+              aria-label={$t('home.openRowLabel', { name: collection.name || $t('collection.unknownName') })}
               on:click={() => openCollection(collection.id)}
               on:keydown={(event) => handleRowKeydown(event, collection.id)}
             >
               <td>
                 <div class="table-main">
-                  <div class="table-title">{collection.name || collection.id}</div>
-                  <div class="table-sub">{collection.id}</div>
+                  <div class="table-title">{collection.name || $t('collection.unknownName')}</div>
                   {#if collection.description}
                     <div class="table-sub">{collection.description}</div>
                   {/if}

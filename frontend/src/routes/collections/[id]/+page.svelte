@@ -330,215 +330,66 @@
   <title>{$t('overview.title')}</title>
 </svelte:head>
 
-<section class="card fade-up">
-  <div class="card-header-inline">
-    <div>
-      <p class="lead">{$t('overview.lead')}</p>
-      {#if workspace}
+{#if loading}
+  <section class="card fade-up">
+    <div class="status" role="status" aria-live="polite">{$t('overview.loading')}</div>
+  </section>
+{:else if error}
+  <section class="card fade-up">
+    <div class="status status--error" role="alert">{error}</div>
+  </section>
+{:else if workspace}
+  <section id="files" class="card fade-up">
+    <div class="card-header-inline">
+      <div>
+        <h3>{$t('overview.uploadTitle')}</h3>
+        <p class="meta-text">{$t('overview.uploadLead')}</p>
         <div class="status-row">
           <span class="label">{$t('overview.statusLabel')}</span>
           <span class="status status--neutral">{formatStatus(workspace.status_summary)}</span>
-          <span class="meta-text">{$t('overview.updatedAt', { time: formatDate(workspace.artifacts.updated_at) })}</span>
+          <span class="meta-text">{$t('overview.filesCount', { count: workspace.file_count })}</span>
         </div>
-      {/if}
-    </div>
-    <button class="btn btn--ghost btn--small" type="button" on:click={() => Promise.all([loadWorkspace(), loadFiles()])}>
-      {$t('overview.refresh')}
-    </button>
-  </div>
-
-  {#if loading}
-    <div class="status" role="status" aria-live="polite">{$t('overview.loading')}</div>
-  {:else if error}
-    <div class="status status--error" role="alert">{error}</div>
-  {:else if workspace}
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-value">{formatCount(workspace.collection.paper_count)}</div>
-        <div class="stat-label">{$t('overview.metricPapers')}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value">{formatCount(workspace.file_count)}</div>
-        <div class="stat-label">{$t('overview.metricFiles')}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{workspace.recent_tasks.length}</div>
-        <div class="stat-label">{$t('overview.metricTasks')}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{workspace.collection.default_method || 'standard'}</div>
-        <div class="stat-label">{$t('overview.metricMethod')}</div>
+      <div class="table-actions">
+        <button class="btn btn--ghost btn--small" type="button" on:click={() => Promise.all([loadWorkspace(), loadFiles()])}>
+          {$t('overview.refresh')}
+        </button>
+        <button class="btn btn--primary" type="button" on:click={browseFiles}>
+          {$t('overview.uploadCta')}
+        </button>
       </div>
     </div>
 
-    {#if workspace.collection.description}
-      <p class="note">{workspace.collection.description}</p>
-    {/if}
-  {/if}
-</section>
-
-{#if workspace}
-  <section class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('overview.controlTitle')}</h3>
-        <p class="meta-text">{$t('overview.controlLead')}</p>
+    <div class="result-grid result-grid--tasks">
+      <div class="result-card">
+        <div class="detail-section__title">{$t('overview.uploadWhyTitle')}</div>
+        <p class="result-text">{$t('overview.uploadWhyBody')}</p>
+        {#if workspace.collection.description}
+          <p class="note">{workspace.collection.description}</p>
+        {/if}
       </div>
-      <button class="btn btn--primary" type="button" on:click={openPrimaryAction}>
-        {primaryActionLabel()}
-      </button>
-    </div>
 
-    <p class="note">{primaryActionHelper()}</p>
+      <div class="result-card">
+        <div class="detail-section__title">{$t('overview.uploadAfterTitle')}</div>
+        <p class="result-text">{$t('overview.uploadAfterBody')}</p>
+        <ul class="result-list">
+          <li>{$t('overview.uploadAfterSteps')}</li>
+          <li>{$t('overview.uploadAfterSop')}</li>
+          <li>{$t('overview.uploadAfterGraph')}</li>
+        </ul>
+      </div>
+    </div>
 
     {#if actionStatus}
       <div class={`status ${actionStatus.startsWith('4') || actionStatus.startsWith('5') ? 'status--error' : ''}`} role="status">
         {actionStatus}
       </div>
     {/if}
-  </section>
-
-  <section id="status" class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('overview.statusTitle')}</h3>
-        <p class="meta-text">{$t('overview.statusLead')}</p>
-      </div>
-      {#if workspace.file_count > 0 && !(workspace.latest_task && isTaskActive(workspace.latest_task))}
-        <button class="btn btn--ghost btn--small" type="button" on:click={startIndexRun}>
-          {$t('overview.primaryActionProcess')}
-        </button>
-      {/if}
-    </div>
 
     <div class="result-grid result-grid--tasks">
       <div class="result-card">
-        <h4>{$t('overview.latestTaskTitle')}</h4>
-        <dl class="detail-list">
-          <div class="detail-row">
-            <dt>{$t('overview.statusFiles')}</dt>
-            <dd>{formatCount(workspace.file_count)}</dd>
-          </div>
-          <div class="detail-row">
-            <dt>{$t('overview.statusUpdated')}</dt>
-            <dd>{formatDate(workspace.collection.updated_at || workspace.artifacts.updated_at)}</dd>
-          </div>
-          {#if workspace.latest_task}
-            <div class="detail-row">
-              <dt>{$t('overview.statusLatestTask')}</dt>
-              <dd>{formatTaskStatus(workspace.latest_task.status)}</dd>
-            </div>
-            <div class="detail-row">
-              <dt>{$t('overview.statusStage')}</dt>
-              <dd>{formatTaskStage(workspace.latest_task.current_stage)}</dd>
-            </div>
-            <div class="detail-row">
-              <dt>{$t('overview.statusProgress')}</dt>
-              <dd>{formatPercent(workspace.latest_task.progress_percent)}</dd>
-            </div>
-          {/if}
-        </dl>
-
-        {#if workspace.latest_task?.errors.length}
-          <div class="status status--error" role="alert">{workspace.latest_task.errors.join(' | ')}</div>
-        {:else if workspace.latest_task?.warnings.length}
-          <div class="status" role="status">{workspace.latest_task.warnings.join(' | ')}</div>
-        {:else if !workspace.latest_task}
-          <p class="note">{$t('overview.noTasks')}</p>
-        {/if}
-      </div>
-
-      <div class="result-card">
-        <h4>{$t('overview.statusArtifactsTitle')}</h4>
-        {#if artifactRows().length}
-          <div class="detail-chips">
-            {#each artifactRows() as [key, ready]}
-              <span class={`detail-chip ${ready ? '' : 'detail-chip--muted'}`}>
-                {$t(`overview.artifacts.${key}`)}: {ready ? $t('overview.ready') : $t('overview.pending')}
-              </span>
-            {/each}
-          </div>
-        {:else}
-          <p class="note">{$t('overview.statusArtifactsEmpty')}</p>
-        {/if}
-      </div>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('overview.resultsTitle')}</h3>
-        <p class="meta-text">{$t('overview.resultsLead')}</p>
-      </div>
-    </div>
-
-    <div class="result-grid result-grid--tasks">
-      <div class="result-card">
-        <div class="table-main">
-          <div class="table-title">{$t('overview.capabilities.steps')}</div>
-          <div class="table-sub">{$t('overview.resultStepsLead')}</div>
-        </div>
-        {#if workspace.capabilities.can_view_protocol_steps}
-          <div class="table-actions">
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/steps`}>
-              {$t('overview.nextSteps')}
-            </a>
-          </div>
-        {:else}
-          <p class="note">{$t('overview.resultLocked')}</p>
-        {/if}
-      </div>
-
-      <div class="result-card">
-        <div class="table-main">
-          <div class="table-title">{$t('overview.capabilities.sop')}</div>
-          <div class="table-sub">{$t('overview.resultSopLead')}</div>
-        </div>
-        {#if workspace.capabilities.can_generate_sop}
-          <div class="table-actions">
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
-              {$t('overview.nextSop')}
-            </a>
-          </div>
-        {:else}
-          <p class="note">{$t('overview.resultLocked')}</p>
-        {/if}
-      </div>
-
-      <div class="result-card">
-        <div class="table-main">
-          <div class="table-title">{$t('overview.capabilities.graph')}</div>
-          <div class="table-sub">{$t('overview.resultGraphLead')}</div>
-        </div>
-        {#if workspace.capabilities.can_view_graph}
-          <div class="table-actions">
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/graph`}>
-              {$t('overview.nextGraph')}
-            </a>
-          </div>
-        {:else}
-          <p class="note">{$t('overview.resultLocked')}</p>
-        {/if}
-      </div>
-    </div>
-  </section>
-
-  <section id="files" class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('documents.title')}</h3>
-        <p class="meta-text">{$t('overview.filesLead')}</p>
-      </div>
-      {#if collectionFiles.length}
-        <button class="btn btn--ghost btn--small" type="button" on:click={startIndexRun}>
-          {$t('documents.startIndex')}
-        </button>
-      {/if}
-    </div>
-
-    <div class="result-grid result-grid--tasks">
-      <div class="result-card">
+        <h4>{$t('overview.uploadFormTitle')}</h4>
+        <p class="meta-text">{$t('overview.uploadFormLead')}</p>
         <div
           class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
           on:drop={handleDrop}
@@ -663,6 +514,132 @@
               </tbody>
             </table>
           </div>
+        {/if}
+      </div>
+    </div>
+  </section>
+
+  <section id="status" class="card">
+    <div class="card-header-inline">
+      <div>
+        <h3>{$t('overview.statusTitle')}</h3>
+        <p class="meta-text">{$t('overview.statusLead')}</p>
+      </div>
+      <button class="btn btn--primary" type="button" on:click={openPrimaryAction}>
+        {primaryActionLabel()}
+      </button>
+    </div>
+
+    <p class="note">{primaryActionHelper()}</p>
+
+    <div class="result-grid result-grid--tasks">
+      <div class="result-card">
+        <h4>{$t('overview.latestTaskTitle')}</h4>
+        <dl class="detail-list">
+          <div class="detail-row">
+            <dt>{$t('overview.statusFiles')}</dt>
+            <dd>{formatCount(workspace.file_count)}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>{$t('overview.statusUpdated')}</dt>
+            <dd>{formatDate(workspace.collection.updated_at || workspace.artifacts.updated_at)}</dd>
+          </div>
+          {#if workspace.latest_task}
+            <div class="detail-row">
+              <dt>{$t('overview.statusLatestTask')}</dt>
+              <dd>{formatTaskStatus(workspace.latest_task.status)}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>{$t('overview.statusStage')}</dt>
+              <dd>{formatTaskStage(workspace.latest_task.current_stage)}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>{$t('overview.statusProgress')}</dt>
+              <dd>{formatPercent(workspace.latest_task.progress_percent)}</dd>
+            </div>
+          {/if}
+        </dl>
+
+        {#if workspace.latest_task?.errors.length}
+          <div class="status status--error" role="alert">{workspace.latest_task.errors.join(' | ')}</div>
+        {:else if workspace.latest_task?.warnings.length}
+          <div class="status" role="status">{workspace.latest_task.warnings.join(' | ')}</div>
+        {:else if !workspace.latest_task}
+          <p class="note">{$t('overview.noTasks')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <h4>{$t('overview.statusArtifactsTitle')}</h4>
+        {#if artifactRows().length}
+          <div class="detail-chips">
+            {#each artifactRows() as [key, ready]}
+              <span class={`detail-chip ${ready ? '' : 'detail-chip--muted'}`}>
+                {$t(`overview.artifacts.${key}`)}: {ready ? $t('overview.ready') : $t('overview.pending')}
+              </span>
+            {/each}
+          </div>
+        {:else}
+          <p class="note">{$t('overview.statusArtifactsEmpty')}</p>
+        {/if}
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header-inline">
+      <div>
+        <h3>{$t('overview.resultsTitle')}</h3>
+        <p class="meta-text">{$t('overview.resultsLead')}</p>
+      </div>
+    </div>
+
+    <div class="result-grid result-grid--tasks">
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.steps')}</div>
+          <div class="table-sub">{$t('overview.resultStepsLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_view_protocol_steps}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/steps`}>
+              {$t('overview.nextSteps')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.sop')}</div>
+          <div class="table-sub">{$t('overview.resultSopLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_generate_sop}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
+              {$t('overview.nextSop')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.graph')}</div>
+          <div class="table-sub">{$t('overview.resultGraphLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_view_graph}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/graph`}>
+              {$t('overview.nextGraph')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
         {/if}
       </div>
     </div>

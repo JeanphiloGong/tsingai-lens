@@ -2,7 +2,13 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { errorMessage } from './_shared/api';
-  import { createCollection, collections, fetchCollections, type Collection } from './_shared/collections';
+  import {
+    createCollection,
+    collections,
+    deleteCollection,
+    fetchCollections,
+    type Collection
+  } from './_shared/collections';
   import { buildCollectionGraphmlUrl } from './_shared/graph';
   import { language, t } from './_shared/i18n';
   import { createIndexTask } from './_shared/tasks';
@@ -15,6 +21,8 @@
   let defaultMethod = 'standard';
   let createLoading = false;
   let createError = '';
+  let notice = '';
+  let deletingCollectionId = '';
   let rowMessages: Record<string, { message: string; type: 'info' | 'error' }> = {};
 
   $: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
@@ -33,6 +41,15 @@
     } finally {
       loading = false;
     }
+  }
+
+  function setNotice(message: string) {
+    notice = message;
+    window.setTimeout(() => {
+      if (notice === message) {
+        notice = '';
+      }
+    }, 3000);
   }
 
   function openCreate() {
@@ -167,6 +184,27 @@
       setRowMessage(collection.id, errorMessage(err), 'error');
     }
   }
+
+  async function removeCollection(collection: Collection) {
+    if (deletingCollectionId) return;
+
+    const name = collection.name?.trim() || collection.id;
+    if (!window.confirm($t('home.deleteConfirm', { name }))) {
+      return;
+    }
+
+    deletingCollectionId = collection.id;
+    setRowMessage(collection.id, $t('home.deleting'));
+
+    try {
+      await deleteCollection(collection.id);
+      setNotice($t('home.deleted', { name }));
+    } catch (err) {
+      setRowMessage(collection.id, errorMessage(err), 'error');
+    } finally {
+      deletingCollectionId = '';
+    }
+  }
 </script>
 
 <svelte:head>
@@ -193,6 +231,10 @@
 
 {#if error}
   <div class="status status--error" role="alert">{error}</div>
+{/if}
+
+{#if notice}
+  <div class="status" role="status" aria-live="polite">{notice}</div>
 {/if}
 
 {#if !$collections.length && !loading}
@@ -263,6 +305,14 @@
                   >
                     {$t('home.actionTasks')}
                   </a>
+                  <button
+                    class="btn btn--danger btn--small"
+                    type="button"
+                    disabled={deletingCollectionId === collection.id}
+                    on:click|stopPropagation={() => removeCollection(collection)}
+                  >
+                    {deletingCollectionId === collection.id ? $t('home.deleting') : $t('home.actionDelete')}
+                  </button>
                 </div>
                 {#if rowMessages[collection.id]}
                   <div

@@ -73,11 +73,16 @@ const translations: Record<Language, Translations> = {
       actionExport: 'Export',
       actionIndex: 'Index',
       actionTasks: 'Workspace',
+      actionDelete: 'Delete',
       exporting: 'Preparing export...',
       exported: 'Export ready',
       indexing: 'Starting index task...',
       indexStarted: 'Task started: {taskId}',
       indexNoFiles: 'Upload files before starting an index task.',
+      deleting: 'Deleting collection...',
+      deleted: 'Deleted collection: {name}',
+      deleteConfirm:
+        'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.',
       openRowLabel: 'Open collection {name}',
       noteStats: '',
       noteUpdated: ''
@@ -110,7 +115,11 @@ const translations: Record<Language, Translations> = {
         reports: 'Reports',
         settings: 'Settings'
       },
-      backToCollections: 'Back to collections'
+      backToCollections: 'Back to collections',
+      delete: 'Delete collection',
+      deleting: 'Deleting...',
+      deleteConfirm:
+        'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.'
     },
     overview: {
       title: 'Collection workspace',
@@ -588,11 +597,15 @@ const translations: Record<Language, Translations> = {
       actionExport: '导出',
       actionIndex: '索引',
       actionTasks: '工作区',
+      actionDelete: '删除',
       exporting: '准备导出...',
       exported: '已完成导出',
       indexing: '正在启动索引任务...',
       indexStarted: '任务已启动：{taskId}',
       indexNoFiles: '请先上传文件再启动索引任务。',
+      deleting: '正在删除集合...',
+      deleted: '已删除集合：{name}',
+      deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。',
       openRowLabel: '打开集合 {name}',
       noteStats: '',
       noteUpdated: ''
@@ -625,7 +638,10 @@ const translations: Record<Language, Translations> = {
         reports: '报告',
         settings: '设置'
       },
-      backToCollections: '返回集合列表'
+      backToCollections: '返回集合列表',
+      delete: '删除集合',
+      deleting: '删除中...',
+      deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。'
     },
     overview: {
       title: '集合工作区',

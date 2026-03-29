@@ -1,10 +1,15 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
-  import { collections, fetchCollection, fetchCollections } from '../../_shared/collections';
+  import { errorMessage } from '../../_shared/api';
+  import { collections, deleteCollection, fetchCollection, fetchCollections } from '../../_shared/collections';
   import { t } from '../../_shared/i18n';
 
-  $: collectionId = $page.params.id;
+  let deleteLoading = false;
+  let deleteError = '';
+
+  $: collectionId = $page.params.id ?? '';
   $: collectionName = $collections.find((item) => item.id === collectionId)?.name;
 
   onMount(() => {
@@ -15,6 +20,25 @@
       fetchCollection(collectionId).catch(() => null);
     }
   });
+
+  async function removeCurrentCollection() {
+    const name = collectionName || collectionId;
+    if (!window.confirm($t('collection.deleteConfirm', { name }))) {
+      return;
+    }
+
+    deleteLoading = true;
+    deleteError = '';
+
+    try {
+      await deleteCollection(collectionId);
+      await goto('/');
+    } catch (err) {
+      deleteError = errorMessage(err);
+    } finally {
+      deleteLoading = false;
+    }
+  }
 </script>
 
 <section class="collection-header">
@@ -27,8 +51,15 @@
   </div>
   <div class="collection-actions">
     <a class="btn btn--ghost" href="/">{$t('collection.backToCollections')}</a>
+    <button class="btn btn--danger" type="button" disabled={deleteLoading} on:click={removeCurrentCollection}>
+      {deleteLoading ? $t('collection.deleting') : $t('collection.delete')}
+    </button>
   </div>
 </section>
+
+{#if deleteError}
+  <div class="status status--error" role="alert">{deleteError}</div>
+{/if}
 
 <nav class="subnav">
   <a

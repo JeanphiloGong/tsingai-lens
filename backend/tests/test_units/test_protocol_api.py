@@ -69,7 +69,8 @@ def test_cors_default_is_not_wildcard_with_credentials():
         None,
     )
     assert cors is not None
+    options = cors.kwargs
     assert not (
-        cors.options.get("allow_origins") == ["*"]
-        and cors.options.get("allow_credentials") is True
+        options.get("allow_origins") == ["*"]
+        and options.get("allow_credentials") is True
     )

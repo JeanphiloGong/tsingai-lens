@@ -58,7 +58,7 @@ uvicorn main:app --reload --port 8010
 
 ## Notes
 
-- The `controllers/retrieval.py` file still contains legacy/engine-facing handlers.
+- Public query and reports routes now live under `api/routes/*`; `controllers/retrieval.py` keeps the legacy engine-facing handlers only.
 - The main FastAPI app no longer mounts legacy `/retrieval/*` as public browser routes.
 - Public protocol browsing is collection-scoped under `/api/v1/collections/{collection_id}/protocol/*`; raw retrieval protocol endpoints stay non-public.
 - See `backend/docs/api.md` for detailed contract notes.

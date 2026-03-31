@@ -132,7 +132,6 @@ def app_client(monkeypatch, tmp_path):
 
     from fastapi import FastAPI
     from controllers import collections as collections_controller
-    from controllers import retrieval as retrieval_controller
     from controllers import tasks as tasks_controller
     from controllers import workspace as workspace_controller
     from controllers.schemas import (
@@ -141,6 +140,10 @@ def app_client(monkeypatch, tmp_path):
         ReportCommunityListResponse,
         ReportPatternsResponse,
     )
+    from api.routes import query as query_routes
+    from api.routes import reports as reports_routes
+    import application.query as query_application
+    import application.reports as reports_application
     from services.artifact_registry_service import ArtifactRegistryService
     from services.collection_service import CollectionService
     from services.index_task_runner import IndexTaskRunner
@@ -231,20 +234,18 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(collection_query_module, "collection_service", collection_service)
     monkeypatch.setattr(collection_query_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
-    monkeypatch.setattr(retrieval_controller.query_uc, "query_index", fake_query_index)
+    monkeypatch.setattr(query_application, "query_index", fake_query_index)
+    monkeypatch.setattr(reports_application, "list_community_reports", fake_list_community_reports)
     monkeypatch.setattr(
-        retrieval_controller.reports_uc, "list_community_reports", fake_list_community_reports
-    )
-    monkeypatch.setattr(
-        retrieval_controller.reports_uc,
+        reports_application,
         "get_community_report_detail",
         fake_get_community_report_detail,
     )
-    monkeypatch.setattr(retrieval_controller.reports_uc, "list_patterns", fake_list_patterns)
+    monkeypatch.setattr(reports_application, "list_patterns", fake_list_patterns)
 
     app = FastAPI()
-    app.include_router(retrieval_controller.public_query_router, prefix=API_V1_PREFIX)
-    app.include_router(retrieval_controller.public_reports_router, prefix=API_V1_PREFIX)
+    app.include_router(query_routes.router, prefix=API_V1_PREFIX)
+    app.include_router(reports_routes.router, prefix=API_V1_PREFIX)
     app.include_router(collections_controller.router, prefix=API_V1_PREFIX)
     app.include_router(tasks_controller.router, prefix=API_V1_PREFIX)
     app.include_router(workspace_controller.router, prefix=API_V1_PREFIX)

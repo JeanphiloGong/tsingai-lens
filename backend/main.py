@@ -1,10 +1,12 @@
 import os
 
+from api.routes import query as query_routes
+from api.routes import reports as reports_routes
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from config import DATA_DIR
-from controllers import collections, retrieval, tasks, workspace
+from controllers import collections, tasks, workspace
 from utils.logger import setup_logger
 
 # 初始化全局日志，确保 controllers/services 的日志能输出
@@ -44,8 +46,8 @@ def create_app() -> FastAPI:
     app.mount(f"{PUBLIC_API_PREFIX}/static", StaticFiles(directory=DATA_DIR), name="static")
     # Only the flattened browser-visible retrieval surfaces stay public here.
     # Engine-only `/retrieval/*` handlers, including raw protocol endpoints, are not mounted.
-    app.include_router(retrieval.public_query_router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(retrieval.public_reports_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(query_routes.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(reports_routes.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)

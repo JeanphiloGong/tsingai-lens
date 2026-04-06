@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
+from copy import deepcopy
 from pathlib import Path
 
 from config import DATA_DIR
 from domain.ports import CollectionPaths
-from infra.persistence.file._json import read_json, write_json
 
 
-class FileCollectionRepository:
-    """File-backed persistence for collection metadata and uploaded files."""
+class MemoryCollectionRepository:
+    """Memory-backed persistence for collection metadata and uploaded files."""
 
-    backend_name = "file"
+    backend_name = "memory"
 
     def __init__(self, root_dir: Path | None = None) -> None:
+        self._temp_dir: tempfile.TemporaryDirectory[str] | None = None
+        if root_dir is None:
+            self._temp_dir = tempfile.TemporaryDirectory(prefix="lens-collections-")
+            root_dir = Path(self._temp_dir.name)
         self.root_dir = Path(root_dir or (DATA_DIR / "collections")).resolve()
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self._collections: dict[str, dict] = {}
+        self._files: dict[str, list[dict]] = {}
 
     def get_paths(self, collection_id: str) -> CollectionPaths:
         collection_dir = self.root_dir / collection_id
@@ -36,35 +43,40 @@ class FileCollectionRepository:
         return paths
 
     def collection_exists(self, collection_id: str) -> bool:
-        return self.get_paths(collection_id).meta_path.exists()
+        return collection_id in self._collections
 
     def list_collection_records(self) -> list[tuple[str, dict]]:
-        items: list[tuple[str, dict]] = []
-        for meta_path in sorted(self.root_dir.glob("*/meta.json")):
-            items.append((meta_path.parent.name, read_json(meta_path, {})))
-        return items
+        return [
+            (collection_id, deepcopy(record))
+            for collection_id, record in sorted(self._collections.items())
+        ]
 
     def read_collection(self, collection_id: str) -> dict | None:
-        return read_json(self.get_paths(collection_id).meta_path, None)
+        record = self._collections.get(collection_id)
+        return deepcopy(record) if record is not None else None
 
     def write_collection(self, collection_id: str, payload: dict) -> None:
-        write_json(self.get_paths(collection_id).meta_path, payload)
+        self.create_collection_dirs(collection_id)
+        self._collections[collection_id] = deepcopy(payload)
 
     def delete_collection_dir(self, collection_id: str) -> None:
-        shutil.rmtree(self.get_paths(collection_id).collection_dir)
+        self._collections.pop(collection_id, None)
+        self._files.pop(collection_id, None)
+        shutil.rmtree(self.get_paths(collection_id).collection_dir, ignore_errors=True)
 
     def read_files(self, collection_id: str) -> list[dict] | None:
-        paths = self.get_paths(collection_id)
-        if not paths.files_path.exists():
+        if collection_id not in self._collections and collection_id not in self._files:
             return None
-        return read_json(paths.files_path, [])
+        return deepcopy(self._files.get(collection_id, []))
 
     def write_files(self, collection_id: str, payload: list[dict]) -> None:
-        write_json(self.get_paths(collection_id).files_path, payload)
+        self.create_collection_dirs(collection_id)
+        self._files[collection_id] = deepcopy(payload)
 
-    def write_input_file(self, collection_id: str, stored_filename: str, payload: bytes) -> Path:
-        paths = self.get_paths(collection_id)
+    def write_input_file(
+        self, collection_id: str, stored_filename: str, payload: bytes
+    ) -> Path:
+        paths = self.create_collection_dirs(collection_id)
         stored_path = paths.input_dir / stored_filename
-        stored_path.parent.mkdir(parents=True, exist_ok=True)
         stored_path.write_bytes(payload)
         return stored_path

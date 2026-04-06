@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from infra.persistence.file import FileTaskRepository
+from bootstrap.persistence import build_task_repository
+from domain.ports import TaskRepository
 
 
 def _now_iso() -> str:
@@ -17,9 +18,9 @@ class TaskService:
     def __init__(
         self,
         root_dir: Path | None = None,
-        repository: FileTaskRepository | None = None,
+        repository: TaskRepository | None = None,
     ) -> None:
-        self.repository = repository or FileTaskRepository(root_dir)
+        self.repository = repository or build_task_repository(root_dir)
         self.root_dir = self.repository.root_dir
 
     def create_task(self, collection_id: str, task_type: str = "index") -> dict:

@@ -9,6 +9,8 @@ from infra.persistence.file._json import read_json, write_json
 class FileArtifactRepository:
     """File-backed persistence for collection artifact readiness."""
 
+    backend_name = "file"
+
     def __init__(self, root_dir: Path | None = None) -> None:
         self.root_dir = Path(root_dir or (DATA_DIR / "collections")).resolve()
         self.root_dir.mkdir(parents=True, exist_ok=True)

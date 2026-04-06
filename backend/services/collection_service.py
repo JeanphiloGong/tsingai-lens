@@ -4,16 +4,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from bootstrap.persistence import build_artifact_repository, build_collection_repository
+from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
+
 try:
     import fitz
 except ImportError:  # pragma: no cover
     fitz = None
-
-from infra.persistence.file import (
-    CollectionPaths,
-    FileArtifactRepository,
-    FileCollectionRepository,
-)
 
 
 def _now_iso() -> str:
@@ -26,12 +23,16 @@ class CollectionService:
     def __init__(
         self,
         root_dir: Path | None = None,
-        repository: FileCollectionRepository | None = None,
-        artifact_repository: FileArtifactRepository | None = None,
+        repository: CollectionRepository | None = None,
+        artifact_repository: ArtifactRepository | None = None,
     ) -> None:
-        self.repository = repository or FileCollectionRepository(root_dir)
+        self.repository = repository or build_collection_repository(root_dir)
         self.artifact_repository = (
-            artifact_repository or FileArtifactRepository(self.repository.root_dir)
+            artifact_repository
+            or build_artifact_repository(
+                self.repository.root_dir,
+                backend=self.repository.backend_name,
+            )
         )
         self.root_dir = self.repository.root_dir
 

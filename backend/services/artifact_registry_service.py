@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from infra.persistence.file import FileArtifactRepository
+from bootstrap.persistence import build_artifact_repository
+from domain.ports import ArtifactRepository
 
 
 def _now_iso() -> str:
@@ -16,9 +17,9 @@ class ArtifactRegistryService:
     def __init__(
         self,
         root_dir: Path | None = None,
-        repository: FileArtifactRepository | None = None,
+        repository: ArtifactRepository | None = None,
     ) -> None:
-        self.repository = repository or FileArtifactRepository(root_dir)
+        self.repository = repository or build_artifact_repository(root_dir)
         self.root_dir = self.repository.root_dir
 
     def build_registry(self, collection_id: str, output_dir: str | Path) -> dict:

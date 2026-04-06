@@ -1,5 +1,5 @@
-ARG APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG APT_MIRROR=http://deb.debian.org
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 FROM python:3.11-slim AS builder
 
@@ -10,6 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_INDEX_URL=${PIP_INDEX_URL} \
+    UV_INDEX_URL=${PIP_INDEX_URL} \
+    UV_DEFAULT_INDEX=${PIP_INDEX_URL} \
     UV_PYTHON=python3.11 \
     UV_SYSTEM_PYTHON=1 \
     UV_NO_MANAGED_PYTHON=1 \

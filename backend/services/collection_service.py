@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-import shutil
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -12,55 +9,34 @@ try:
 except ImportError:  # pragma: no cover
     fitz = None
 
-from config import DATA_DIR
+from infra.persistence.file import (
+    CollectionPaths,
+    FileArtifactRepository,
+    FileCollectionRepository,
+)
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-@dataclass(frozen=True)
-class CollectionPaths:
-    collection_dir: Path
-    input_dir: Path
-    output_dir: Path
-    meta_path: Path
-    files_path: Path
-    artifacts_path: Path
-
-
 class CollectionService:
     """File-backed collection registry for the app layer."""
 
-    def __init__(self, root_dir: Path | None = None) -> None:
-        self.root_dir = Path(root_dir or (DATA_DIR / "collections")).resolve()
-        self.root_dir.mkdir(parents=True, exist_ok=True)
-
-    def _collection_dir(self, collection_id: str) -> Path:
-        return self.root_dir / collection_id
+    def __init__(
+        self,
+        root_dir: Path | None = None,
+        repository: FileCollectionRepository | None = None,
+        artifact_repository: FileArtifactRepository | None = None,
+    ) -> None:
+        self.repository = repository or FileCollectionRepository(root_dir)
+        self.artifact_repository = (
+            artifact_repository or FileArtifactRepository(self.repository.root_dir)
+        )
+        self.root_dir = self.repository.root_dir
 
     def get_paths(self, collection_id: str) -> CollectionPaths:
-        base_dir = self._collection_dir(collection_id)
-        return CollectionPaths(
-            collection_dir=base_dir,
-            input_dir=base_dir / "input",
-            output_dir=base_dir / "output",
-            meta_path=base_dir / "meta.json",
-            files_path=base_dir / "files.json",
-            artifacts_path=base_dir / "artifacts.json",
-        )
-
-    def _read_json(self, path: Path, default):
-        if not path.exists():
-            return default
-        return json.loads(path.read_text(encoding="utf-8"))
-
-    def _write_json(self, path: Path, payload: object) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(payload, ensure_ascii=True, indent=2),
-            encoding="utf-8",
-        )
+        return self.repository.get_paths(collection_id)
 
     def _normalize_collection_record(
         self,
@@ -103,14 +79,11 @@ class CollectionService:
             "created_at": now,
             "updated_at": now,
         }
-        paths = self.get_paths(collection_id)
-        paths.collection_dir.mkdir(parents=True, exist_ok=True)
-        paths.input_dir.mkdir(parents=True, exist_ok=True)
-        paths.output_dir.mkdir(parents=True, exist_ok=True)
-        self._write_json(paths.meta_path, record)
-        self._write_json(paths.files_path, [])
-        self._write_json(
-            paths.artifacts_path,
+        paths = self.repository.create_collection_dirs(collection_id)
+        self.repository.write_collection(collection_id, record)
+        self.repository.write_files(collection_id, [])
+        self.artifact_repository.write(
+            collection_id,
             {
                 "collection_id": collection_id,
                 "output_path": str(paths.output_dir),
@@ -127,37 +100,34 @@ class CollectionService:
 
     def list_collections(self) -> list[dict]:
         items: list[dict] = []
-        for meta_path in sorted(self.root_dir.glob("*/meta.json")):
-            collection_id = meta_path.parent.name
+        for collection_id, record in self.repository.list_collection_records():
             record = self._normalize_collection_record(
-                self._read_json(meta_path, {}),
+                record,
                 collection_id,
             )
             items.append(record)
         return items
 
     def get_collection(self, collection_id: str) -> dict:
-        paths = self.get_paths(collection_id)
-        record = self._read_json(paths.meta_path, None)
+        record = self.repository.read_collection(collection_id)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         normalized = self._normalize_collection_record(record, collection_id)
         if normalized != record:
-            self._write_json(paths.meta_path, normalized)
+            self.repository.write_collection(collection_id, normalized)
         return normalized
 
     def update_collection(self, collection_id: str, **fields) -> dict:
-        paths = self.get_paths(collection_id)
         record = self.get_collection(collection_id)
         record.update(fields)
         record["updated_at"] = _now_iso()
-        self._write_json(paths.meta_path, record)
+        self.repository.write_collection(collection_id, record)
         return record
 
     def delete_collection(self, collection_id: str) -> dict:
         paths = self.get_paths(collection_id)
         target_dir = paths.collection_dir
-        if not paths.meta_path.exists():
+        if not self.repository.collection_exists(collection_id):
             raise FileNotFoundError(f"collection not found: {collection_id}")
 
         resolved_root = self.root_dir.resolve()
@@ -169,17 +139,17 @@ class CollectionService:
         if target_dir.is_symlink():
             raise ValueError("collection path cannot be a symlink")
 
-        shutil.rmtree(target_dir)
+        self.repository.delete_collection_dir(collection_id)
         return {
             "collection_id": collection_id,
             "deleted_at": _now_iso(),
         }
 
     def list_files(self, collection_id: str) -> list[dict]:
-        paths = self.get_paths(collection_id)
-        if not paths.files_path.exists():
+        files = self.repository.read_files(collection_id)
+        if files is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return self._read_json(paths.files_path, [])
+        return files
 
     def _pdf_to_text(self, content: bytes) -> str:
         if fitz is None:
@@ -195,8 +165,7 @@ class CollectionService:
         content: bytes,
         media_type: str | None = None,
     ) -> dict:
-        paths = self.get_paths(collection_id)
-        if not paths.meta_path.exists():
+        if not self.repository.collection_exists(collection_id):
             raise FileNotFoundError(f"collection not found: {collection_id}")
 
         suffix = Path(filename or "").suffix.lower()
@@ -207,9 +176,11 @@ class CollectionService:
             payload = content
             stored_filename = f"{uuid4().hex}_{Path(filename).name}"
 
-        stored_path = paths.input_dir / stored_filename
-        stored_path.parent.mkdir(parents=True, exist_ok=True)
-        stored_path.write_bytes(payload)
+        stored_path = self.repository.write_input_file(
+            collection_id,
+            stored_filename,
+            payload,
+        )
 
         file_record = {
             "file_id": f"file_{uuid4().hex[:12]}",
@@ -223,8 +194,8 @@ class CollectionService:
             "created_at": _now_iso(),
         }
 
-        files = self._read_json(paths.files_path, [])
+        files = self.repository.read_files(collection_id) or []
         files.append(file_record)
-        self._write_json(paths.files_path, files)
+        self.repository.write_files(collection_id, files)
         self.update_collection(collection_id, paper_count=len(files), status="ready")
         return file_record

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from config import DATA_DIR
+from infra.persistence.file import FileTaskRepository
 
 
 def _now_iso() -> str:
@@ -15,24 +14,13 @@ def _now_iso() -> str:
 class TaskService:
     """File-backed task registry for collection processing tasks."""
 
-    def __init__(self, root_dir: Path | None = None) -> None:
-        self.root_dir = Path(root_dir or (DATA_DIR / "tasks")).resolve()
-        self.root_dir.mkdir(parents=True, exist_ok=True)
-
-    def _task_path(self, task_id: str) -> Path:
-        return self.root_dir / f"{task_id}.json"
-
-    def _read(self, path: Path, default):
-        if not path.exists():
-            return default
-        return json.loads(path.read_text(encoding="utf-8"))
-
-    def _write(self, path: Path, payload: object) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(payload, ensure_ascii=True, indent=2),
-            encoding="utf-8",
-        )
+    def __init__(
+        self,
+        root_dir: Path | None = None,
+        repository: FileTaskRepository | None = None,
+    ) -> None:
+        self.repository = repository or FileTaskRepository(root_dir)
+        self.root_dir = self.repository.root_dir
 
     def create_task(self, collection_id: str, task_type: str = "index") -> dict:
         task_id = f"task_{uuid4().hex[:12]}"
@@ -52,11 +40,11 @@ class TaskService:
             "started_at": None,
             "finished_at": None,
         }
-        self._write(self._task_path(task_id), record)
+        self.repository.write_task(task_id, record)
         return record
 
     def get_task(self, task_id: str) -> dict:
-        record = self._read(self._task_path(task_id), None)
+        record = self.repository.read_task(task_id)
         if record is None:
             raise FileNotFoundError(f"task not found: {task_id}")
         return record
@@ -69,10 +57,7 @@ class TaskService:
         offset: int = 0,
     ) -> list[dict]:
         tasks: list[dict] = []
-        for task_path in sorted(self.root_dir.glob("task_*.json")):
-            record = self._read(task_path, None)
-            if record is None:
-                continue
+        for record in self.repository.list_tasks():
             if collection_id and record.get("collection_id") != collection_id:
                 continue
             if status and record.get("status") != status:
@@ -89,12 +74,12 @@ class TaskService:
         record = self.get_task(task_id)
         record.update(fields)
         record["updated_at"] = _now_iso()
-        self._write(self._task_path(task_id), record)
+        self.repository.write_task(task_id, record)
         return record
 
     def append_error(self, task_id: str, error: str) -> dict:
         record = self.get_task(task_id)
         record.setdefault("errors", []).append(error)
         record["updated_at"] = _now_iso()
-        self._write(self._task_path(task_id), record)
+        self.repository.write_task(task_id, record)
         return record

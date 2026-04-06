@@ -80,17 +80,17 @@ Use the release compose file when you publish `backend` and `frontend` as separa
 Build and push:
 
 ```bash
-docker build -t jeanphilo/tsingai-lens-backend:v0.2.1 ./backend
-docker build -t jeanphilo/tsingai-lens-frontend:v0.2.1 ./frontend
+docker build -t jeanphilo/tsingai-lens-backend:v0.2.2 ./backend
+docker build -t jeanphilo/tsingai-lens-frontend:v0.2.2 ./frontend
 
-docker push jeanphilo/tsingai-lens-backend:v0.2.1
-docker push jeanphilo/tsingai-lens-frontend:v0.2.1
+docker push jeanphilo/tsingai-lens-backend:v0.2.2
+docker push jeanphilo/tsingai-lens-frontend:v0.2.2
 ```
 
 ```bash
 cp backend/.env.example backend/.env
 
-export LENS_VERSION=v0.2.1
+export LENS_VERSION=v0.2.2
 export LENS_HTTP_PORT=8080
 
 docker compose -f docker-compose.release.yml up -d
@@ -109,7 +109,7 @@ Release notes:
 
 GitHub Actions automation:
 - Add repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`.
-- Push a tag such as `v0.2.1` to trigger `.github/workflows/release-images.yml`.
+- Push a tag such as `v0.2.2` to trigger `.github/workflows/release-images.yml`.
 - The workflow publishes both images automatically and also updates `latest` for non-prerelease tags.
 
 ---
@@ -196,17 +196,17 @@ docker compose up --build
 构建并推送：
 
 ```bash
-docker build -t jeanphilo/tsingai-lens-backend:v0.2.1 ./backend
-docker build -t jeanphilo/tsingai-lens-frontend:v0.2.1 ./frontend
+docker build -t jeanphilo/tsingai-lens-backend:v0.2.2 ./backend
+docker build -t jeanphilo/tsingai-lens-frontend:v0.2.2 ./frontend
 
-docker push jeanphilo/tsingai-lens-backend:v0.2.1
-docker push jeanphilo/tsingai-lens-frontend:v0.2.1
+docker push jeanphilo/tsingai-lens-backend:v0.2.2
+docker push jeanphilo/tsingai-lens-frontend:v0.2.2
 ```
 
 ```bash
 cp backend/.env.example backend/.env
 
-export LENS_VERSION=v0.2.1
+export LENS_VERSION=v0.2.2
 export LENS_HTTP_PORT=8080
 
 docker compose -f docker-compose.release.yml up -d
@@ -225,5 +225,5 @@ docker compose -f docker-compose.release.yml up -d
 
 GitHub Actions 自动发布：
 - 在仓库 Secrets 中配置 `DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`。
-- 推送 `v0.2.1` 这类版本 tag 后，会自动触发 `.github/workflows/release-images.yml`。
+- 推送 `v0.2.2` 这类版本 tag 后，会自动触发 `.github/workflows/release-images.yml`。
 - 对正式版本 tag，workflow 会同时发布版本标签和 `latest`。

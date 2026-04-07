@@ -2,7 +2,7 @@
 
 This directory holds backend-owned durable documentation.
 
-Follow [`../../docs/file-management-system.md`](../../docs/file-management-system.md)
+Follow [`../../docs/05-policies/documentation-governance.md`](../../docs/05-policies/documentation-governance.md)
 when adding new formal backend docs.
 
 ## Current Docs

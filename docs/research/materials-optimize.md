@@ -1,3 +1,28 @@
+---
+id: RESEARCH-2026-001
+title: Materials Research Mentor Requirements
+type: research-note
+level: domain
+domain: research
+status: active
+owner: repo-maintainers
+created_at: 2026-04-07
+updated_at: 2026-04-07
+last_verified_at: 2026-04-07
+review_by: 2026-07-07
+version: v1
+source_of_truth: false
+related_issues: [62]
+related_docs:
+  - docs/05-policies/documentation-governance.md
+supersedes: []
+superseded_by: []
+tags:
+  - research
+  - materials
+  - requirements
+---
+
 # 材料学视角优化建议与功能需求（Materials Research Mentor）
 
 ## 适用范围与目标

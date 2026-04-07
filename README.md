@@ -52,7 +52,7 @@ tsingai-lens/
 ## Documentation
 
 - `docs/README.md` — project documentation index and placement guide.
-- `docs/file-management-system.md` — repository documentation governance and file management policy.
+- `docs/05-policies/documentation-governance.md` — repository documentation governance and file management policy.
 - `backend/docs/README.md` — backend documentation index.
 - `frontend/docs/README.md` — frontend documentation index.
 - `backend/README.md` — backend setup and usage.
@@ -172,7 +172,7 @@ tsingai-lens/
 ## 文档入口
 
 - `docs/README.md` — 项目级文档索引与存放规则。
-- `docs/file-management-system.md` — 仓库文档治理与文件管理规则。
+- `docs/05-policies/documentation-governance.md` — 仓库文档治理与文件管理规则。
 - `backend/docs/README.md` — 后端文档索引。
 - `frontend/docs/README.md` — 前端文档索引。
 - `backend/README.md` — 后端部署与使用说明。

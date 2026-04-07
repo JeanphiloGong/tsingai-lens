@@ -1,6 +1,6 @@
 ---
 id: POLICY-2026-001
-title: Project Documentation and File Management System
+title: Repository Documentation Governance
 type: policy
 level: system
 domain: shared
@@ -23,7 +23,7 @@ tags:
   - file-management
 ---
 
-# Project Documentation and File Management System
+# Repository Documentation Governance
 
 ## Governance Goal
 
@@ -40,13 +40,14 @@ possible project artifact.
 
 ## Current State
 
-Classification: `partial-governance`
+Classification: `existing-governance`
 
 What already works:
 
 - the repository has clear high-level entrypoints in the root README
 - backend and frontend already have their own `docs/` roots
-- the repository now has a shared docs index and module-local docs indexes
+- the repository now has a typed root docs structure plus module-local docs
+  indexes
 - backend and frontend both contain at least one active, classified contract or
   guide doc
 - GitHub issue templates already define some structure for incoming work
@@ -135,7 +136,7 @@ Allowed lightweight exceptions:
 
 Current governed baseline:
 
-- `docs/file-management-system.md`
+- `docs/05-policies/documentation-governance.md`
 - active source-of-truth docs in `backend/docs/` and `frontend/docs/`
 - any new project-level `policy`, `architecture`, `spec`, `guide`, `runbook`,
   `rfc`, or `adr`
@@ -221,14 +222,32 @@ Replacement rule:
 
 | Path | Allowed content | Notes |
 | --- | --- | --- |
-| `docs/` | shared policy, cross-cutting architecture, shared guides, research notes | top-level shared docs only |
+| `docs/05-policies/` | shared governance and policy docs | project-level policy source of truth |
+| `docs/10-rfcs/` | project-level RFCs | proposed cross-module changes |
+| `docs/20-adrs/` | project-level ADRs | durable decision records |
+| `docs/30-architecture/` | shared architecture docs | current cross-module design |
+| `docs/40-specs/` | shared specs and contracts | stable shared source of truth |
+| `docs/50-guides/` | shared contributor and operator guides | current usage and extension guidance |
+| `docs/60-runbooks/` | shared operational runbooks | repeatable procedures |
+| `docs/70-postmortems/` | durable incident learnings | historical analysis |
+| `docs/90-archive/` | superseded or archived shared docs | retained history |
 | `backend/docs/` | backend specs, backend architecture, backend runbooks, backend RFCs and ADRs | backend source of truth |
 | `frontend/docs/` | frontend guides, specs, architecture, RFCs and ADRs | frontend source of truth |
 | `docs/research/` | external research notes and curated references | not authoritative for implementation |
+| `docs/paper/` | supporting research binaries | asset storage only, never source of truth |
 
 ### File placement rules
 
-- New project-level docs belong in `docs/`.
+- New project-level policy docs belong in `docs/05-policies/`.
+- New project-level RFCs belong in `docs/10-rfcs/`.
+- New project-level ADRs belong in `docs/20-adrs/`.
+- New shared architecture docs belong in `docs/30-architecture/`.
+- New shared specs belong in `docs/40-specs/`.
+- New shared guides belong in `docs/50-guides/`.
+- New shared runbooks belong in `docs/60-runbooks/`.
+- New shared postmortems belong in `docs/70-postmortems/`.
+- Superseded shared docs move to `docs/90-archive/` unless a lighter pointer is
+  sufficient.
 - New backend-only docs belong in `backend/docs/`.
 - New frontend-only docs belong in `frontend/docs/`.
 - New external domain notes belong in `docs/research/`.
@@ -308,7 +327,7 @@ Recommended automation after adoption stabilizes:
 
 ## Rollout Plan
 
-1. Adopt this policy and [`docs/README.md`](README.md) immediately.
+1. Adopt this policy and [`docs/README.md`](../README.md) immediately.
 2. Require front matter for all new formal docs and for currently active
    source-of-truth docs in `backend/docs/` and `frontend/docs/`.
 3. Add or maintain a lightweight `README.md` index in each docs root that owns

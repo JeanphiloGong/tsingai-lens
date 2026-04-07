@@ -14,7 +14,7 @@ version: v1
 source_of_truth: true
 related_issues: [56, 62]
 related_docs:
-  - docs/file-management-system.md
+  - docs/05-policies/documentation-governance.md
   - backend/docs/api.md
 supersedes: []
 superseded_by: []

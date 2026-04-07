@@ -1,3 +1,29 @@
+---
+id: GUIDE-2026-001
+title: Frontend Same-Origin API Integration Guide
+type: guide
+level: domain
+domain: frontend
+status: active
+owner: frontend-maintainers
+created_at: 2026-03-31
+updated_at: 2026-04-07
+last_verified_at: 2026-04-07
+review_by: 2026-07-07
+version: v1
+source_of_truth: true
+related_issues: [56, 62]
+related_docs:
+  - docs/file-management-system.md
+  - backend/docs/api.md
+supersedes: []
+superseded_by: []
+tags:
+  - frontend
+  - api
+  - same-origin
+---
+
 # 前端同源 API 说明
 
 本文档描述当前前端的浏览器公开合同，目标是让产品流程始终通过同源入口访问后端。

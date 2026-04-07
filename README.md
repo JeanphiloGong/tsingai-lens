@@ -51,6 +51,10 @@ tsingai-lens/
 
 ## Documentation
 
+- `docs/README.md` — project documentation index and placement guide.
+- `docs/file-management-system.md` — repository documentation governance and file management policy.
+- `backend/docs/README.md` — backend documentation index.
+- `frontend/docs/README.md` — frontend documentation index.
 - `backend/README.md` — backend setup and usage.
 - `backend/docs/api.md` — API reference and curl examples.
 
@@ -66,7 +70,7 @@ docker compose up --build
 
 Access:
 - Frontend: http://localhost:8080
-- Backend API: http://localhost:8010/api/docs
+- Backend API docs: http://localhost:8010/api/docs
 - Proxied API docs from frontend: http://localhost:8080/api/docs
 
 Notes:
@@ -167,6 +171,10 @@ tsingai-lens/
 
 ## 文档入口
 
+- `docs/README.md` — 项目级文档索引与存放规则。
+- `docs/file-management-system.md` — 仓库文档治理与文件管理规则。
+- `backend/docs/README.md` — 后端文档索引。
+- `frontend/docs/README.md` — 前端文档索引。
 - `backend/README.md` — 后端部署与使用说明。
 - `backend/docs/api.md` — API 参考与示例。
 
@@ -182,7 +190,7 @@ docker compose up --build
 
 访问入口：
 - 前端：http://localhost:8080
-- 后端 API：http://localhost:8010/api/docs
+- 后端 API 文档：http://localhost:8010/api/docs
 - 通过前端反代访问 API 文档：http://localhost:8080/api/docs
 
 说明：

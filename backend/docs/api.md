@@ -1,3 +1,29 @@
+---
+id: SPEC-2026-001
+title: Backend Public API Contract
+type: spec
+level: domain
+domain: backend
+status: active
+owner: backend-maintainers
+created_at: 2026-03-31
+updated_at: 2026-04-07
+last_verified_at: 2026-04-07
+review_by: 2026-07-07
+version: v1
+source_of_truth: true
+related_issues: [56, 62]
+related_docs:
+  - docs/file-management-system.md
+  - frontend/docs/frontend-plan.md
+supersedes: []
+superseded_by: []
+tags:
+  - api
+  - backend
+  - contract
+---
+
 # API 接口文档
 
 默认 Base URL：`http://localhost:8010`。当前接口未启用鉴权。

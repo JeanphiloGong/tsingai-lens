@@ -15,8 +15,8 @@ from app.usecases import files as files_uc
 from app.usecases import graphml as graphml_uc
 from app.usecases import indexing as indexing_uc
 from app.usecases import inputs as inputs_uc
-from app.usecases import query as query_uc
-from app.usecases import reports as reports_uc
+import application.query as query_uc
+import application.reports as reports_uc
 from controllers.schemas import (
     CollectionCreateRequest,
     CollectionDeleteResponse,

@@ -44,8 +44,6 @@ def create_app() -> FastAPI:
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.mount(f"{PUBLIC_API_PREFIX}/static", StaticFiles(directory=DATA_DIR), name="static")
-    # Only the flattened browser-visible retrieval surfaces stay public here.
-    # Engine-only `/retrieval/*` handlers, including raw protocol endpoints, are not mounted.
     app.include_router(query_routes.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(reports_routes.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)

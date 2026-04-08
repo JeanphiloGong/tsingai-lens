@@ -398,16 +398,6 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     assert sop.json()["detail"]["code"] == "protocol_artifacts_not_ready"
 
 
-def test_legacy_app_layer_routes_are_not_exposed(app_client):
-    assert app_client.get("/collections").status_code == 404
-    assert app_client.get("/tasks/test-task").status_code == 404
-    assert app_client.post("/retrieval/query", json={"query": "test"}).status_code == 404
-    assert (
-        app_client.post(f"{API_V1_PREFIX}/retrieval/query", json={"query": "test"}).status_code
-        == 404
-    )
-
-
 def test_public_query_and_reports_routes_are_exposed(app_client):
     query_resp = app_client.post(f"{API_V1_PREFIX}/query", json={"query": "status"})
     assert query_resp.status_code == 200

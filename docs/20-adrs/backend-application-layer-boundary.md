@@ -7,8 +7,8 @@ domain: backend
 status: active
 owner: backend-maintainers
 created_at: 2026-04-07
-updated_at: 2026-04-07
-last_verified_at: 2026-04-07
+updated_at: 2026-04-08
+last_verified_at: 2026-04-08
 review_by: 2026-07-07
 version: v1
 source_of_truth: true
@@ -32,11 +32,10 @@ Active
 
 ## Context
 
-The backend currently contains multiple overlapping layers and migration seams:
+The backend contains multiple layers with explicit ownership boundaries:
 
 - `api/` holds the new public route entrypoints
-- `application/` exists, but some modules still act as forwarding shims
-- legacy logic still lives in `app/usecases/`
+- `application/` owns use-case orchestration for query and reporting flows
 - `controllers/` and `services/` still coexist with the newer package layout
 - `retrieval/` remains the large engine and infrastructure surface
 
@@ -52,7 +51,7 @@ The repository adopts the following backend ownership boundary:
    translation only.
 2. `application/` owns use-case orchestration.
    It coordinates domain logic, repositories, and infrastructure adapters, and
-   must stop being a forwarding-only facade over `app/usecases/`.
+   should remain the main dependency target for HTTP-facing route code.
 3. `domain/` owns domain models, invariants, and domain-level rules.
 4. `infra/` and adapter packages own external integrations such as persistence,
    retrieval, vector stores, and other runtime dependencies.
@@ -64,17 +63,14 @@ The repository adopts the following backend ownership boundary:
 
 ### Accepted consequences
 
-- `api/` should depend on `application/`, not on legacy `app/usecases/`
-  directly.
-- `application/` should contain real orchestration logic over time, not
-  permanent re-export modules.
+- `api/` should depend on `application/` rather than bypassing it with
+  ad hoc orchestration in route modules.
+- application-owned orchestration should stay explicit and testable.
 - backend-specific implementation docs can stay in `backend/docs/`, while this
   ADR remains the durable repo-level decision record for the layering rule.
 
 ### Follow-up implications
 
-- migration work tracked by #61 should move logic out of forwarding shims and
-  into `application/`
 - new backend refactors should preserve `api -> application -> domain/infra`
   as the intended dependency direction
 - future docs that explain local backend implementation details should prefer
@@ -86,8 +82,3 @@ The repository adopts the following backend ownership boundary:
 
 Rejected because it would preserve the legacy implementation layout and weaken
 the intended boundary between HTTP concerns and use-case orchestration.
-
-### Keep `application/` as a permanent forwarding facade
-
-Rejected because it adds indirection without ownership and makes the layer look
-more complete than it actually is.

@@ -7,8 +7,8 @@ domain: backend
 status: active
 owner: backend-maintainers
 created_at: 2026-03-31
-updated_at: 2026-04-07
-last_verified_at: 2026-04-07
+updated_at: 2026-04-08
+last_verified_at: 2026-04-08
 review_by: 2026-07-07
 version: v1
 source_of_truth: true
@@ -32,7 +32,6 @@ tags:
 
 - 业务接口统一位于：`/api/v1/*`
 - 文档与静态资源统一位于：`/api/*`
-- 旧公开入口 `/collections/*`、`/tasks/*`、`/retrieval/*`、`/docs`、`/redoc`、`/openapi.json`、`/static/*` 不再暴露
 
 ### 文档与静态资源
 
@@ -76,8 +75,7 @@ tags:
 5. 使用 `GET /api/v1/collections/{collection_id}/workspace` 驱动状态展示
 6. 按页面调用 graph / protocol / sop 相关 collection 维度接口
 
-## 迁移提示
+## 前端集成约束
 
-- 浏览器与前端代码只能假设 `/api/v1/*` 与 `/api/*` 两类前缀。
-- 旧 `/retrieval/*` 不属于主应用公开浏览器接口，不应作为前端集成入口。
-- protocol 公共入口只保留 collection 维度 `/api/v1/collections/{collection_id}/protocol/*`。
+- 浏览器与前端代码只应依赖 `/api/v1/*` 与 `/api/*` 两类前缀。
+- protocol 公共入口统一使用 collection 维度 `/api/v1/collections/{collection_id}/protocol/*`。

@@ -11,14 +11,6 @@ FastAPI backend for collection ingestion, indexing, graph/report browsing, proto
   - `/api/openapi.json`
   - `/api/static/*`
 
-Legacy public routes are removed from the main app surface:
-
-- `/collections/*`
-- `/tasks/*`
-- `/retrieval/*`
-- `/docs`, `/redoc`, `/openapi.json`
-- `/static/*`
-
 ## Core Endpoints
 
 - `POST /api/v1/collections`
@@ -58,7 +50,6 @@ uvicorn main:app --reload --port 8010
 
 ## Notes
 
-- Public query and reports routes now live under `api/routes/*`; `controllers/retrieval.py` keeps the legacy engine-facing handlers only.
-- The main FastAPI app no longer mounts legacy `/retrieval/*` as public browser routes.
-- Public protocol browsing is collection-scoped under `/api/v1/collections/{collection_id}/protocol/*`; raw retrieval protocol endpoints stay non-public.
+- Public query and reports routes live under `api/routes/*`.
+- Public protocol browsing is collection-scoped under `/api/v1/collections/{collection_id}/protocol/*`.
 - See `backend/docs/api.md` for detailed contract notes.

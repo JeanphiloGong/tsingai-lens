@@ -5,32 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from retrieval.config.enums import IndexingMethod, SearchMethod
-
-
-class IndexRequest(BaseModel):
-    """Request payload to start indexing."""
-
-    collection_id: str | None = Field(default=None, description="集合 ID")
-    method: IndexingMethod | str = Field(
-        default=IndexingMethod.Standard, description="索引模式"
-    )
-    is_update_run: bool = Field(default=False, description="是否执行增量更新")
-    verbose: bool = Field(default=False, description="是否输出详细日志")
-    additional_context: dict | None = Field(
-        default=None, description="透传到 pipeline state 的附加上下文"
-    )
-
-
-class IndexResponse(BaseModel):
-    """Response payload summarizing pipeline execution."""
-
-    status: str
-    workflows: list[str]
-    errors: list[str] | None = None
-    warnings: list[str] | None = None
-    output_path: str | None = None
-    stored_input_path: str | None = None
+from retrieval.config.enums import SearchMethod
 
 
 class QueryRequest(BaseModel):
@@ -64,50 +39,6 @@ class QueryResponse(BaseModel):
     collection_id: str
     output_path: str
     context_data: dict | list | None = None
-
-
-class InputUploadItem(BaseModel):
-    """Uploaded input file metadata."""
-
-    original_filename: str
-    stored_name: str
-    stored_path: str
-    converted_to_text: bool = False
-    size_bytes: int
-
-
-class InputUploadResponse(BaseModel):
-    """Response for input file uploads without indexing."""
-
-    count: int
-    items: list[InputUploadItem]
-
-
-class CollectionFileRecord(BaseModel):
-    """Metadata for a collection input file."""
-
-    key: str
-    original_filename: str | None = None
-    stored_path: str | None = None
-    size_bytes: int | None = None
-    created_at: str | None = None
-
-
-class CollectionFileListResponse(BaseModel):
-    """Response containing collection input files."""
-
-    collection_id: str
-    count: int
-    items: list[CollectionFileRecord]
-
-
-class CollectionFileDeleteResponse(BaseModel):
-    """Response payload for collection file deletion."""
-
-    collection_id: str
-    key: str
-    deleted_at: str | None = None
-    status: str = "deleted"
 
 
 class ReportCommunitySummary(BaseModel):
@@ -211,38 +142,6 @@ class ReportPatternsResponse(BaseModel):
     total_documents: int | None = None
     count: int
     items: list[ReportPatternItem]
-
-
-class CollectionCreateRequest(BaseModel):
-    """Request payload to create a collection."""
-
-    name: str | None = Field(default=None, description="集合名称")
-
-
-class CollectionRecord(BaseModel):
-    """Collection metadata."""
-
-    id: str
-    name: str | None = None
-    created_at: str
-    updated_at: str | None = None
-    status: str | None = None
-    document_count: int | None = None
-    entity_count: int | None = None
-
-
-class CollectionListResponse(BaseModel):
-    """Response containing available collections."""
-
-    items: list[CollectionRecord]
-
-
-class CollectionDeleteResponse(BaseModel):
-    """Response payload for collection deletion."""
-
-    id: str
-    deleted_at: str
-    status: str = "deleted"
 
 
 class NormalizedValueItem(BaseModel):

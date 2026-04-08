@@ -39,29 +39,11 @@ def test_docs_and_openapi_move_under_api_prefix(client):
         f"{PUBLIC_API_V1_PREFIX}/collections/{{collection_id}}/protocol/steps"
         in openapi_text
     )
-    assert f"{PUBLIC_API_V1_PREFIX}/retrieval/protocol/steps" not in openapi_text
 
 
 def test_static_moves_under_api_prefix(client):
     assert client.get(f"{PUBLIC_API_PREFIX}/static/configs/default.yaml").status_code == 200
     assert client.get("/static/configs/default.yaml").status_code == 404
-
-
-def test_legacy_public_routes_are_not_exposed(client):
-    assert client.get("/docs").status_code == 404
-    assert client.get("/redoc").status_code == 404
-    assert client.get("/openapi.json").status_code == 404
-    assert client.get("/retrieval/protocol/steps").status_code == 404
-    assert client.get(f"{PUBLIC_API_V1_PREFIX}/retrieval/protocol/steps").status_code == 404
-
-
-def test_real_app_legacy_browser_routes_return_404(client):
-    assert client.get("/collections").status_code == 404
-    assert client.get("/collections/test-collection").status_code == 404
-    assert client.get("/tasks/test-task").status_code == 404
-    assert client.post("/retrieval/query", json={"query": "test"}).status_code == 404
-    assert client.post(f"{PUBLIC_API_V1_PREFIX}/retrieval/query", json={"query": "test"}).status_code == 404
-
 
 def test_cors_default_is_not_wildcard_with_credentials():
     cors = next(

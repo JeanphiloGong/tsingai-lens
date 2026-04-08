@@ -54,8 +54,7 @@ What already works:
 
 Current failure modes:
 
-- root-level docs mix durable project docs with research material and other
-  operationally sensitive or low-governance content
+- root-level docs still include some low-governance legacy research assets
 - legacy docs and research assets still do not all follow the metadata and
   placement rules
 - legacy PDFs, research references, and notes still live in pre-governance
@@ -286,6 +285,8 @@ Replacement rule:
 - No secrets under `docs/`, `backend/docs/`, or `frontend/docs/`.
 - Operational credentials belong in a password manager, secret manager, or
   local-only environment file that is not committed.
+- CI should fail if a suspicious docs-path filename such as `password`,
+  `secret`, or `credential` is introduced.
 
 ### Ownership rule
 
@@ -317,13 +318,19 @@ Short-term manual checks:
 - docs do not duplicate the same source-of-truth scope
 - PRs do not add secrets or opaque random files into docs roots
 
+Implemented automation baseline:
+
+- `scripts/check_docs_governance.py` validates front matter on governed docs
+- `scripts/check_docs_governance.py` validates local markdown links
+- `scripts/check_docs_governance.py` blocks suspicious docs filenames and
+  several high-signal secret patterns
+- `.github/workflows/docs-governance.yml` runs the docs governance check in CI
+
 Recommended automation after adoption stabilizes:
 
-- front matter validation for new formal docs
-- broken-link checks
 - `review_by` expiry checks
 - duplicate `source_of_truth` detection within the same scope
-- secret scanning on docs paths as part of repository-wide security checks
+- broader repository secret scanning beyond docs paths
 
 ## Rollout Plan
 
@@ -340,8 +347,7 @@ Recommended automation after adoption stabilizes:
    `docs/research/` or external storage.
 6. Remove any sensitive operational notes from documentation roots and move
    them to a proper secret-management path.
-7. Add automated checks only after at least a few high-value docs follow the
-   new contract.
+7. Keep the docs governance automation green when new governed docs are added.
 
 ## Open Questions
 

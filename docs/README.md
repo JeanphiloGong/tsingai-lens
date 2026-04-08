@@ -64,6 +64,8 @@ roots.
 
 - [`docs/05-policies/documentation-governance.md`](05-policies/documentation-governance.md)
   Active repository documentation governance policy
+- [`docs/20-adrs/backend-application-layer-boundary.md`](20-adrs/backend-application-layer-boundary.md)
+  Active ADR for the backend layering and application-boundary direction
 - [`backend/docs/api.md`](../backend/docs/api.md)
   Active backend API spec and current source of truth for the public API surface
 - [`frontend/docs/frontend-plan.md`](../frontend/docs/frontend-plan.md)
@@ -75,8 +77,6 @@ roots.
 
 - Legacy research PDFs still live under `docs/paper/`; keep them non-authoritative
   and move new research notes to `docs/research/`.
-- A sensitive operational note still exists under the root docs tree; it should
-  be removed from repository docs and moved to proper secret storage.
 
 ## Placement Rules
 
@@ -97,3 +97,5 @@ roots.
 - Apply the governance rules to all new formal docs now.
 - Keep docs-root indexes current when a governed doc root changes.
 - Upgrade touched high-value docs incrementally during normal work.
+- Run `python3 scripts/check_docs_governance.py` when changing governed docs or
+  docs-related workflow files.

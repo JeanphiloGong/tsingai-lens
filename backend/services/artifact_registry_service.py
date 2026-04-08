@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bootstrap.persistence import build_artifact_repository
 from domain.ports import ArtifactRepository
+from infra.persistence.factory import build_artifact_repository
 
 
 def _now_iso() -> str:

@@ -4,8 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from bootstrap.persistence import build_artifact_repository, build_collection_repository
 from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
+from infra.persistence.factory import (
+    build_artifact_repository,
+    build_collection_repository,
+)
 
 try:
     import fitz

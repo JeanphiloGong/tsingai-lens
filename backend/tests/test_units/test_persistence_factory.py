@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bootstrap.persistence import build_persistence_bundle
+from infra.persistence.factory import build_persistence_bundle
 from services.collection_service import CollectionService
 
 

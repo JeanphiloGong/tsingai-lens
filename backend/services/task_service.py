@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from bootstrap.persistence import build_task_repository
 from domain.ports import TaskRepository
+from infra.persistence.factory import build_task_repository
 
 
 def _now_iso() -> str:

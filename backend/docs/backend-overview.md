@@ -17,6 +17,7 @@ related_docs:
   - docs/30-architecture/system-overview.md
   - backend/docs/api.md
   - backend/docs/backend-application-layer-boundary.md
+  - backend/docs/backend-evidence-first-parsing-plan.md
 supersedes: []
 superseded_by: []
 tags:
@@ -73,6 +74,8 @@ The backend is in a transition state:
   Public API contract
 - [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)
   Boundary ADR
+- [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)
+  Draft backend-local implementation plan for evidence-first parsing
 - [`backend-ops.md`](backend-ops.md)
   Local development and operations runbook
 - [`../api/README.md`](../api/README.md)

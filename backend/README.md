@@ -44,6 +44,9 @@ next to code.
   Authoritative backend public API contract
 - [`docs/backend-overview.md`](docs/backend-overview.md)
   Backend architecture overview and ownership seams
+- [`docs/backend-evidence-first-parsing-plan.md`](docs/backend-evidence-first-parsing-plan.md)
+  Draft backend-local implementation plan for evidence-first parsing and
+  conditional protocol generation
 - [`docs/backend-ops.md`](docs/backend-ops.md)
   Local development and operations runbook
 - [`docs/backend-application-layer-boundary.md`](docs/backend-application-layer-boundary.md)

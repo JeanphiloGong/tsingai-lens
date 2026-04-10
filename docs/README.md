@@ -66,6 +66,9 @@ owned and frontend-owned detail should stay with the owning module.
 
 ## Current Classified Docs
 
+- [`docs/10-rfcs/evidence-first-literature-parsing.md`](10-rfcs/evidence-first-literature-parsing.md)
+  Draft RFC for shifting literature parsing toward evidence-first outputs and
+  conditional protocol generation
 - [`docs/30-architecture/system-overview.md`](30-architecture/system-overview.md)
   Active shared system overview
 - [`docs/05-policies/documentation-governance.md`](05-policies/documentation-governance.md)

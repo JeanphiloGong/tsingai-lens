@@ -33,12 +33,11 @@ Non-goals:
 
 ## Repository Layout
 
-```
+```text
 tsingai-lens/
-├── backend/      # Backend service and retrieval workflows
-├── frontend/     # Optional frontend assets
-├── docs/         # Project-level documentation
-└── backend/docs/ # Backend API documentation
+├── backend/   # Backend service, retrieval engine, and backend-owned docs
+├── frontend/  # Browser application and frontend-owned docs
+└── docs/      # Shared project architecture, policy, and research notes
 ```
 
 ## Typical User Journey (High-Level)
@@ -51,12 +50,13 @@ tsingai-lens/
 
 ## Documentation
 
-- `docs/README.md` — project documentation index and placement guide.
-- `docs/05-policies/documentation-governance.md` — repository documentation governance and file management policy.
-- `backend/docs/README.md` — backend documentation index.
-- `frontend/docs/README.md` — frontend documentation index.
-- `backend/README.md` — backend setup and usage.
-- `backend/docs/api.md` — API reference and curl examples.
+- `docs/README.md` — shared documentation index and placement guide.
+- `docs/30-architecture/system-overview.md` — shared system overview.
+- `docs/05-policies/documentation-governance.md` — repository documentation governance and placement policy.
+- `backend/README.md` — backend module entry, boundaries, and local docs map.
+- `backend/docs/api.md` — backend public API contract.
+- `frontend/README.md` — frontend module entry, boundaries, and local docs map.
+- `frontend/docs/frontend-plan.md` — frontend same-origin integration guide.
 
 ## Docker Compose From Source
 
@@ -171,12 +171,13 @@ tsingai-lens/
 
 ## 文档入口
 
-- `docs/README.md` — 项目级文档索引与存放规则。
-- `docs/05-policies/documentation-governance.md` — 仓库文档治理与文件管理规则。
-- `backend/docs/README.md` — 后端文档索引。
-- `frontend/docs/README.md` — 前端文档索引。
-- `backend/README.md` — 后端部署与使用说明。
-- `backend/docs/api.md` — API 参考与示例。
+- `docs/README.md` — 共享文档索引与存放规则。
+- `docs/30-architecture/system-overview.md` — 当前系统总览。
+- `docs/05-policies/documentation-governance.md` — 仓库文档治理与存放规则。
+- `backend/README.md` — 后端模块入口、边界与本地文档导航。
+- `backend/docs/api.md` — 后端 API 合同。
+- `frontend/README.md` — 前端模块入口、边界与本地文档导航。
+- `frontend/docs/frontend-plan.md` — 前端同源集成说明。
 
 ## Docker Compose（源码构建）
 

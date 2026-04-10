@@ -1,0 +1,21 @@
+# Collection Routes
+
+This node owns the collection workspace route family in the frontend.
+
+## Scope
+
+- `collections/[id]/+layout.svelte`
+- `collections/[id]/+page.svelte`
+
+## Responsibilities
+
+- render the collection workspace
+- coordinate file upload and task-start actions
+- poll task status and artifact readiness
+- surface graph, protocol, and report capabilities to the user
+
+## Dependency Rule
+
+Route components here should use shared helpers from `../_shared/` for API
+access, formatting, and cross-route support rather than re-implementing those
+concerns locally.

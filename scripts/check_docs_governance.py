@@ -26,6 +26,20 @@ DOCS_PATHS = [
     REPO_ROOT / "backend" / "docs",
     REPO_ROOT / "frontend" / "docs",
 ]
+NODE_LOCAL_DOC_FILES = [
+    REPO_ROOT / "README.md",
+    REPO_ROOT / "backend" / "README.md",
+    REPO_ROOT / "frontend" / "README.md",
+    REPO_ROOT / "backend" / "api" / "README.md",
+    REPO_ROOT / "backend" / "application" / "README.md",
+    REPO_ROOT / "backend" / "retrieval" / "README.md",
+    REPO_ROOT / "backend" / "retrieval" / "index" / "README.md",
+    REPO_ROOT / "backend" / "retrieval" / "query" / "README.md",
+    REPO_ROOT / "backend" / "infra" / "persistence" / "README.md",
+    REPO_ROOT / "backend" / "tests" / "README.md",
+    REPO_ROOT / "frontend" / "src" / "routes" / "_shared" / "README.md",
+    REPO_ROOT / "frontend" / "src" / "routes" / "collections" / "README.md",
+]
 REQUIRED_FIELDS = [
     "id",
     "title",
@@ -89,6 +103,9 @@ def iter_all_docs_markdown() -> list[Path]:
         if not doc_dir.exists():
             continue
         docs.update(doc_dir.rglob("*.md"))
+    for path in NODE_LOCAL_DOC_FILES:
+        if path.exists():
+            docs.add(path)
     return sorted(docs)
 
 

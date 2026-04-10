@@ -7,9 +7,9 @@ domain: shared
 status: active
 owner: repo-maintainers
 created_at: 2026-04-07
-updated_at: 2026-04-07
-last_verified_at: 2026-04-07
-review_by: 2026-07-07
+updated_at: 2026-04-10
+last_verified_at: 2026-04-10
+review_by: 2026-07-10
 version: v1
 source_of_truth: true
 related_issues: [62]
@@ -45,9 +45,9 @@ Classification: `existing-governance`
 What already works:
 
 - the repository has clear high-level entrypoints in the root README
-- backend and frontend already have their own `docs/` roots
-- the repository now has a typed root docs structure plus module-local docs
-  indexes
+- backend and frontend now have explicit module entry pages
+- the repository now has a typed shared docs structure plus module-local formal
+  docs containers
 - backend and frontend both contain at least one active, classified contract or
   guide doc
 - GitHub issue templates already define some structure for incoming work
@@ -230,8 +230,11 @@ Replacement rule:
 | `docs/60-runbooks/` | shared operational runbooks | repeatable procedures |
 | `docs/70-postmortems/` | durable incident learnings | historical analysis |
 | `docs/90-archive/` | superseded or archived shared docs | retained history |
-| `backend/docs/` | backend specs, backend architecture, backend runbooks, backend RFCs and ADRs | backend source of truth |
-| `frontend/docs/` | frontend guides, specs, architecture, RFCs and ADRs | frontend source of truth |
+| `backend/README.md` | backend module purpose, boundary, and navigation | primary backend entry page |
+| `frontend/README.md` | frontend module purpose, boundary, and navigation | primary frontend entry page |
+| `<owned-node>/README.md` | local node purpose, boundary, and navigation | only for real code-owned seams |
+| `backend/docs/` | backend formal specs, backend architecture, backend runbooks, backend ADRs | backend formal-doc source of truth |
+| `frontend/docs/` | frontend formal guides, specs, architecture, frontend ADRs | frontend formal-doc source of truth |
 | `docs/research/` | external research notes and curated references | not authoritative for implementation |
 | `docs/paper/` | supporting research binaries | asset storage only, never source of truth |
 
@@ -247,8 +250,11 @@ Replacement rule:
 - New shared postmortems belong in `docs/70-postmortems/`.
 - Superseded shared docs move to `docs/90-archive/` unless a lighter pointer is
   sufficient.
-- New backend-only docs belong in `backend/docs/`.
-- New frontend-only docs belong in `frontend/docs/`.
+- Backend module purpose and navigation belong in `backend/README.md`.
+- Frontend module purpose and navigation belong in `frontend/README.md`.
+- Node-local purpose and navigation belong in `<node>/README.md`.
+- New backend-only formal docs belong in `backend/docs/`.
+- New frontend-only formal docs belong in `frontend/docs/`.
 - New external domain notes belong in `docs/research/`.
 - New files should not be added to ad hoc root-level buckets without first
   updating this policy.
@@ -259,10 +265,13 @@ Replacement rule:
 - Prefer ASCII filenames unless a local module already standardizes on another
   language.
 - Use stable topic-based names rather than generic names like `spec-1.md`.
-- Each active docs root should have a lightweight `README.md` index when the
-  folder contains source-of-truth docs.
-- Root and module indexes should link only to current or intentionally retained
-  legacy docs.
+- Root `docs/` should keep a lightweight `README.md` index.
+- `backend/README.md` and `frontend/README.md` are the primary module entry
+  pages.
+- Local `docs/README.md` is optional and should only be added when that local
+  docs subtree needs a real secondary index.
+- Root and module entry pages should link only to current or intentionally
+  retained legacy docs.
 
 ### Promotion rule
 
@@ -322,6 +331,8 @@ Implemented automation baseline:
 
 - `scripts/check_docs_governance.py` validates front matter on governed docs
 - `scripts/check_docs_governance.py` validates local markdown links
+- `scripts/check_docs_governance.py` validates selected node-local `README.md`
+  entry pages
 - `scripts/check_docs_governance.py` blocks suspicious docs filenames and
   several high-signal secret patterns
 - `.github/workflows/docs-governance.yml` runs the docs governance check in CI
@@ -337,8 +348,8 @@ Recommended automation after adoption stabilizes:
 1. Adopt this policy and [`docs/README.md`](../README.md) immediately.
 2. Require front matter for all new formal docs and for currently active
    source-of-truth docs in `backend/docs/` and `frontend/docs/`.
-3. Add or maintain a lightweight `README.md` index in each docs root that owns
-   active governed docs.
+3. Keep `docs/README.md` as the shared docs index and use module root
+   `README.md` files as the primary backend and frontend entry pages.
 4. Reclassify existing docs when they are touched:
    - `backend/docs/api.md` -> backend `spec`
    - `frontend/docs/frontend-plan.md` -> frontend `guide` or `spec`

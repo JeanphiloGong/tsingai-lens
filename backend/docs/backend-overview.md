@@ -1,0 +1,85 @@
+---
+id: ARCH-2026-002
+title: Backend Module Overview
+type: architecture
+level: domain
+domain: backend
+status: active
+owner: backend-maintainers
+created_at: 2026-04-10
+updated_at: 2026-04-10
+last_verified_at: 2026-04-10
+review_by: 2026-07-10
+version: v1
+source_of_truth: true
+related_issues: [61, 62]
+related_docs:
+  - docs/30-architecture/system-overview.md
+  - backend/docs/api.md
+  - backend/docs/backend-application-layer-boundary.md
+supersedes: []
+superseded_by: []
+tags:
+  - backend
+  - architecture
+  - overview
+---
+
+# Backend Module Overview
+
+## Purpose
+
+The backend turns uploaded collection files into queryable graph, report, and
+protocol artifacts and exposes those results through the public HTTP contract.
+
+## Current Ownership Seams
+
+- `api/`
+  Public HTTP route boundary for query and reports.
+- `controllers/`
+  App-layer HTTP routes for collections, tasks, graph, protocol, and workspace.
+- `application/`
+  Query and report orchestration layer.
+- `services/`
+  Collection, task, protocol, and workspace services used by the app layer.
+- `domain/`
+  Domain models and port definitions.
+- `infra/persistence/`
+  Repository and persistence backends.
+- `retrieval/`
+  Index and query engine package.
+
+## Current Architectural Shape
+
+The backend is in a transition state:
+
+- public query and report flows already have an `api -> application` shape
+- collection, task, workspace, graph, and protocol flows still route through
+  `controllers/` and `services/`
+- `retrieval/` remains the largest engine surface and should be reached
+  through clearer application or infrastructure boundaries over time
+
+## Key Runtime Flows
+
+- collection creation and file upload
+- indexing task orchestration
+- artifact readiness tracking
+- graph export and report browsing
+- protocol step listing, search, and SOP draft generation
+
+## Local Navigation
+
+- [`api.md`](api.md)
+  Public API contract
+- [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)
+  Boundary ADR
+- [`backend-ops.md`](backend-ops.md)
+  Local development and operations runbook
+- [`../api/README.md`](../api/README.md)
+  Public route boundary
+- [`../application/README.md`](../application/README.md)
+  Use-case orchestration boundary
+- [`../retrieval/README.md`](../retrieval/README.md)
+  Retrieval engine boundary
+- [`../infra/persistence/README.md`](../infra/persistence/README.md)
+  Persistence adapter boundary

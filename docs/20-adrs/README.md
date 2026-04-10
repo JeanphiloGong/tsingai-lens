@@ -5,5 +5,6 @@ has been accepted and needs durable history.
 
 ## Current Docs
 
-- [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)
-  Active ADR for backend layering and application ownership boundaries
+- No active shared ADRs are currently stored here.
+- Backend-only ADRs now live with the owning module in
+  [`../../backend/docs/`](../../backend/docs/).

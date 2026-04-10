@@ -7,9 +7,9 @@ domain: backend
 status: active
 owner: backend-maintainers
 created_at: 2026-04-07
-updated_at: 2026-04-08
-last_verified_at: 2026-04-08
-review_by: 2026-07-07
+updated_at: 2026-04-10
+last_verified_at: 2026-04-10
+review_by: 2026-07-10
 version: v1
 source_of_truth: true
 related_issues: [61]
@@ -66,15 +66,16 @@ The repository adopts the following backend ownership boundary:
 - `api/` should depend on `application/` rather than bypassing it with
   ad hoc orchestration in route modules.
 - application-owned orchestration should stay explicit and testable.
-- backend-specific implementation docs can stay in `backend/docs/`, while this
-  ADR remains the durable repo-level decision record for the layering rule.
+- backend-specific implementation docs stay in backend-owned locations rather
+  than in root shared docs.
 
 ### Follow-up implications
 
 - new backend refactors should preserve `api -> application -> domain/infra`
   as the intended dependency direction
 - future docs that explain local backend implementation details should prefer
-  `backend/docs/`, not root `docs/`, unless they become cross-module authority
+  backend-owned locations rather than root shared docs unless they become
+  cross-module authority
 
 ## Alternatives Considered
 

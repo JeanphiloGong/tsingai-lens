@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pyarrow")
+pytest.importorskip("lancedb")
+
 from retrieval.config.models.vector_store_schema_config import VectorStoreSchemaConfig
 from retrieval.vector_stores.base import VectorStoreDocument
 from retrieval.vector_stores.lancedb import LanceDBVectorStore

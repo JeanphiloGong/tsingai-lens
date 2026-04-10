@@ -44,3 +44,14 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "yake>=0.4.8",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+log_auto_indent = true
+filterwarnings = ["ignore::DeprecationWarning"]
+log_level = "WARNING"
+log_file_level = "INFO"

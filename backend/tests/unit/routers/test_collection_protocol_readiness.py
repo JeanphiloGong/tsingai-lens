@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
+
+try:
+    from fastapi import HTTPException
+except ImportError:  # pragma: no cover
+    pytest.skip("fastapi not installed", allow_module_level=True)
 
 from controllers import collections as collections_controller
 from services.artifact_registry_service import ArtifactRegistryService

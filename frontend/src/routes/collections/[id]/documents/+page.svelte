@@ -123,7 +123,7 @@
     if (sourceFilename && sourceFilename !== displayTitle(profile)) {
       return sourceFilename;
     }
-    return profile.document_id;
+    return null;
   }
 
   function stateCardTitle() {
@@ -274,7 +274,9 @@
                 <td>
                   <div class="table-main">
                     <div class="table-title">{displayTitle(item)}</div>
-                    <div class="table-sub">{displaySubtitle(item)}</div>
+                    {#if displaySubtitle(item)}
+                      <div class="table-sub">{displaySubtitle(item)}</div>
+                    {/if}
                   </div>
                 </td>
                 <td>{docTypeLabel(item.doc_type)}</td>

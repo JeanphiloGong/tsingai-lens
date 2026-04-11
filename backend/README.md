@@ -40,10 +40,9 @@ next to code.
 ## Formal Backend Docs
 
 - [`docs/api.md`](docs/api.md)
-  Authoritative backend public API contract
+  Authoritative backend API contract for frontend integration
 - [`docs/backend-v1-api-contract.md`](docs/backend-v1-api-contract.md)
-  Target Lens v1 frontend/backend contract for the collection comparison
-  workflow
+  Backend-local notes for implementing the agreed Lens v1 API contract
 - [`docs/backend-domain-architecture.md`](docs/backend-domain-architecture.md)
   Target backend-local business-domain seams and package direction
 - [`docs/backend-overview.md`](docs/backend-overview.md)

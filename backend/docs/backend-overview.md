@@ -52,10 +52,9 @@ larger flat service bag.
 ## Local Navigation
 
 - [`api.md`](api.md)
-  Public route boundary and HTTP contract
+  Authoritative frontend/backend API contract
 - [`backend-v1-api-contract.md`](backend-v1-api-contract.md)
-  Target frontend/backend contract for the Lens v1 collection comparison
-  workflow
+  Backend-local implementation notes behind the agreed API contract
 - [`backend-domain-architecture.md`](backend-domain-architecture.md)
   Target backend-local domain seams and packaging direction
 - [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)

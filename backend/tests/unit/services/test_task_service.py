@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from services.task_service import TaskService
+from application.task_service import TaskService
 
 
 def test_task_service_lists_collection_tasks_with_status_and_offset(tmp_path):

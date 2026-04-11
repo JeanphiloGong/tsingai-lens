@@ -1,2 +1,1 @@
-"""Application service facades."""
-
+"""Application-layer services and workflows."""

@@ -1,12 +1,10 @@
 import os
 
-from api.routes import query as query_routes
-from api.routes import reports as reports_routes
+from controllers import collections, graph, protocol, query, reports, tasks, workspace
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from config import DATA_DIR
-from controllers import collections, tasks, workspace
 from utils.logger import setup_logger
 
 # 初始化全局日志，确保 controllers/services 的日志能输出
@@ -44,9 +42,11 @@ def create_app() -> FastAPI:
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.mount(f"{PUBLIC_API_PREFIX}/static", StaticFiles(directory=DATA_DIR), name="static")
-    app.include_router(query_routes.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(reports_routes.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(query.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(graph.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(protocol.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     return app

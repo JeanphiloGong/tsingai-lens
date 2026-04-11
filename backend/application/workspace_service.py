@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from services.artifact_registry_service import ArtifactRegistryService
-from services.collection_service import CollectionService
-from services.task_service import TaskService
+from application.artifact_registry_service import ArtifactRegistryService
+from application.collection_service import CollectionService
+from application.task_service import TaskService
 
 
 class WorkspaceService:

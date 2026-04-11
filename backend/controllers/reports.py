@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-import application.reports as reports_uc
-from api.schemas import (
+from application import report_service
+from controllers.schemas.report import (
     ReportCommunityDetailResponse,
     ReportCommunityListResponse,
     ReportPatternsResponse,
@@ -25,7 +25,7 @@ async def list_community_reports(
     min_size: int = Query(default=0, ge=0, description="最小社区规模过滤"),
     sort: str | None = Query(default="rating", description="排序字段（rating/size）"),
 ) -> ReportCommunityListResponse:
-    return reports_uc.list_community_reports(
+    return report_service.list_community_reports(
         collection_id=collection_id,
         level=level,
         limit=limit,
@@ -50,7 +50,7 @@ async def get_community_report_detail(
     ),
     document_limit: int = Query(default=20, ge=1, le=200, description="文档返回数量"),
 ) -> ReportCommunityDetailResponse:
-    return reports_uc.get_community_report_detail(
+    return report_service.get_community_report_detail(
         collection_id=collection_id,
         community_id=community_id,
         level=level,
@@ -71,10 +71,9 @@ async def list_patterns(
     limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
     sort: str | None = Query(default="rating", description="排序字段（rating/size）"),
 ) -> ReportPatternsResponse:
-    return reports_uc.list_patterns(
+    return report_service.list_patterns(
         collection_id=collection_id,
         level=level,
         limit=limit,
         sort=sort,
     )
-

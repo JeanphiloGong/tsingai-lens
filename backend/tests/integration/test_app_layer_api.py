@@ -132,6 +132,10 @@ def app_client(monkeypatch, tmp_path):
 
     from fastapi import FastAPI
     from controllers import collections as collections_controller
+    from controllers import graph as graph_controller
+    from controllers import protocol as protocol_controller
+    from controllers import query as query_controller
+    from controllers import reports as reports_controller
     from controllers import tasks as tasks_controller
     from controllers import workspace as workspace_controller
     from controllers.schemas import (
@@ -140,17 +144,15 @@ def app_client(monkeypatch, tmp_path):
         ReportCommunityListResponse,
         ReportPatternsResponse,
     )
-    from api.routes import query as query_routes
-    from api.routes import reports as reports_routes
-    import application.query as query_application
-    import application.reports as reports_application
-    from services.artifact_registry_service import ArtifactRegistryService
-    from services.collection_service import CollectionService
-    from services.index_task_runner import IndexTaskRunner
-    from services.task_service import TaskService
-    from services.workspace_service import WorkspaceService
-    import services.index_task_runner as task_runner_module
-    import services.collection_query_service as collection_query_module
+    import application.graph_service as graph_service_module
+    import application.index_task_runner as task_runner_module
+    import application.query_service as query_service_module
+    import application.report_service as report_service_module
+    from application.artifact_registry_service import ArtifactRegistryService
+    from application.collection_service import CollectionService
+    from application.index_task_runner import IndexTaskRunner
+    from application.task_service import TaskService
+    from application.workspace_service import WorkspaceService
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -223,7 +225,10 @@ def app_client(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(collections_controller, "collection_service", collection_service)
-    monkeypatch.setattr(collections_controller, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(graph_controller.graph_service, "collection_service", collection_service)
+    monkeypatch.setattr(graph_controller.graph_service, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(protocol_controller, "collection_service", collection_service)
+    monkeypatch.setattr(protocol_controller, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
@@ -231,22 +236,28 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(Path("placeholder-output"), Path("placeholder-input")))
     monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
-    monkeypatch.setattr(collection_query_module, "collection_service", collection_service)
-    monkeypatch.setattr(collection_query_module, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(graph_service_module, "collection_service", collection_service)
+    monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
-    monkeypatch.setattr(query_application, "query_index", fake_query_index)
-    monkeypatch.setattr(reports_application, "list_community_reports", fake_list_community_reports)
+    monkeypatch.setattr(query_service_module, "query_index", fake_query_index)
     monkeypatch.setattr(
-        reports_application,
+        report_service_module,
+        "list_community_reports",
+        fake_list_community_reports,
+    )
+    monkeypatch.setattr(
+        report_service_module,
         "get_community_report_detail",
         fake_get_community_report_detail,
     )
-    monkeypatch.setattr(reports_application, "list_patterns", fake_list_patterns)
+    monkeypatch.setattr(report_service_module, "list_patterns", fake_list_patterns)
 
     app = FastAPI()
-    app.include_router(query_routes.router, prefix=API_V1_PREFIX)
-    app.include_router(reports_routes.router, prefix=API_V1_PREFIX)
+    app.include_router(query_controller.router, prefix=API_V1_PREFIX)
+    app.include_router(reports_controller.router, prefix=API_V1_PREFIX)
     app.include_router(collections_controller.router, prefix=API_V1_PREFIX)
+    app.include_router(graph_controller.router, prefix=API_V1_PREFIX)
+    app.include_router(protocol_controller.router, prefix=API_V1_PREFIX)
     app.include_router(tasks_controller.router, prefix=API_V1_PREFIX)
     app.include_router(workspace_controller.router, prefix=API_V1_PREFIX)
     return TestClient(app)

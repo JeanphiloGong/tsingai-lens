@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 from fastapi import HTTPException
 
-from api.schemas import (
+from controllers.schemas.report import (
     ReportCommunityDetailResponse,
     ReportCommunityListResponse,
     ReportCommunitySummary,
@@ -17,7 +17,7 @@ from api.schemas import (
     ReportPatternsResponse,
     ReportRelationshipItem,
 )
-from app.services import collection_store, graphml_export
+from infra.graphrag import collection_store, graphml_export
 
 logger = logging.getLogger(__name__)
 

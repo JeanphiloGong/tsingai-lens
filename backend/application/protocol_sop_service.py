@@ -10,7 +10,7 @@ from uuid import uuid4
 import pandas as pd
 from fastapi import HTTPException
 
-from services.protocol_document_meta_service import load_document_title_map
+from application.protocol_document_meta_service import load_document_title_map
 
 
 _SECTION_FILE = "sections.parquet"

@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from controllers.schemas.workspace import WorkspaceOverviewResponse
-from services.artifact_registry_service import ArtifactRegistryService
-from services.collection_service import CollectionService
-from services.task_service import TaskService
-from services.workspace_service import WorkspaceService
+from application.artifact_registry_service import ArtifactRegistryService
+from application.collection_service import CollectionService
+from application.task_service import TaskService
+from application.workspace_service import WorkspaceService
 
 router = APIRouter(prefix="/collections", tags=["workspace"])
 collection_service = CollectionService()

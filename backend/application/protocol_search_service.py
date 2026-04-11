@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 from fastapi import HTTPException
 
-from services.protocol_document_meta_service import load_document_title_map
+from application.protocol_document_meta_service import load_document_title_map
 
 
 _STEP_FILE = "protocol_steps.parquet"

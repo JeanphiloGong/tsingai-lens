@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from services.protocol_source_service import build_document_records
+from application.protocol_source_service import build_document_records
 
 _METHOD_HEADING_PATTERNS = (
     re.compile(r"^(?:\d+(?:\.\d+)*)?\s*(materials?\s+and\s+methods?)$", re.IGNORECASE),

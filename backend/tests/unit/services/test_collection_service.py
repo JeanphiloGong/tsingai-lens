@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from services.collection_service import CollectionService
+from application.collection_service import CollectionService
 
 
 def test_collection_service_normalizes_legacy_meta(tmp_path):

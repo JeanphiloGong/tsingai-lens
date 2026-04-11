@@ -5,15 +5,11 @@ from pathlib import Path
 from uuid import uuid4
 
 from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
+from infra.ingestion.pdf_ingest import pdf_to_text
 from infra.persistence.factory import (
     build_artifact_repository,
     build_collection_repository,
 )
-
-try:
-    import fitz
-except ImportError:  # pragma: no cover
-    fitz = None
 
 
 def _now_iso() -> str:
@@ -21,7 +17,7 @@ def _now_iso() -> str:
 
 
 class CollectionService:
-    """File-backed collection registry for the app layer."""
+    """File-backed collection registry for the application layer."""
 
     def __init__(
         self,
@@ -155,13 +151,6 @@ class CollectionService:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return files
 
-    def _pdf_to_text(self, content: bytes) -> str:
-        if fitz is None:
-            raise RuntimeError("PyMuPDF 未安装，无法处理 PDF")
-        with fitz.open(stream=content, filetype="pdf") as doc:
-            texts = [page.get_text("text") for page in doc]
-        return "\n".join(texts)
-
     def add_file(
         self,
         collection_id: str,
@@ -174,7 +163,7 @@ class CollectionService:
 
         suffix = Path(filename or "").suffix.lower()
         if suffix == ".pdf":
-            payload = self._pdf_to_text(content).encode("utf-8")
+            payload = pdf_to_text(content).encode("utf-8")
             stored_filename = f"{uuid4().hex}_{Path(filename).stem}.txt"
         else:
             payload = content

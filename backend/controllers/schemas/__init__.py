@@ -6,7 +6,7 @@ from .collection import (
     CollectionListResponse,
     CollectionResponse,
 )
-from .retrieval import (
+from .protocol import (
     ConditionItem,
     ControlSpecItem,
     EvidenceRefItem,
@@ -19,8 +19,12 @@ from .retrieval import (
     ProtocolSearchResponse,
     ProtocolStepItem,
     ProtocolStepListResponse,
-    QueryRequest,
-    QueryResponse,
+    SOPDraftItem,
+    SOPDraftRequest,
+    SOPDraftResponse,
+)
+from .query import QueryRequest, QueryResponse
+from .report import (
     ReportCommunityDetailResponse,
     ReportCommunityListResponse,
     ReportCommunitySummary,
@@ -29,9 +33,6 @@ from .retrieval import (
     ReportPatternItem,
     ReportPatternsResponse,
     ReportRelationshipItem,
-    SOPDraftItem,
-    SOPDraftRequest,
-    SOPDraftResponse,
 )
 from .task import ArtifactStatusResponse, IndexTaskCreateRequest, TaskListResponse, TaskResponse
 from .workspace import (

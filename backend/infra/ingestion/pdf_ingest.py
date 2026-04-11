@@ -2,14 +2,18 @@
 
 import logging
 
-import fitz
-from fastapi import HTTPException
+try:
+    import fitz
+except ImportError:  # pragma: no cover
+    fitz = None
 
 logger = logging.getLogger(__name__)
 
 
 def pdf_to_text(content: bytes) -> str:
     """Extract text from PDF bytes using PyMuPDF (fitz)."""
+    if fitz is None:
+        raise RuntimeError("PyMuPDF 未安装，无法处理 PDF")
     try:
         with fitz.open(stream=content, filetype="pdf") as doc:
             texts = []
@@ -18,4 +22,4 @@ def pdf_to_text(content: bytes) -> str:
         return "\n".join(texts)
     except Exception as exc:
         logger.exception("PDF parsing failed")
-        raise HTTPException(status_code=400, detail=f"PDF解析失败: {exc}") from exc
+        raise ValueError(f"PDF解析失败: {exc}") from exc

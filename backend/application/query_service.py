@@ -5,8 +5,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from api.schemas import QueryRequest, QueryResponse
-from app.services import collection_store
+from controllers.schemas.query import QueryRequest, QueryResponse
+from infra.graphrag import collection_store
 from retrieval.api import query as query_api
 from retrieval.config.enums import SearchMethod
 from retrieval.utils.api import create_storage_from_config, reformat_context_data

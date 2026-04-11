@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from services.protocol_block_service import build_procedure_blocks
-from services.protocol_extract_service import ProtocolExtractService
-from services.protocol_section_service import build_sections
-from services.protocol_source_service import (
+from application.protocol_block_service import build_procedure_blocks
+from application.protocol_extract_service import ProtocolExtractService
+from application.protocol_section_service import build_sections
+from application.protocol_source_service import (
     load_protocol_inputs,
     persist_procedure_blocks,
     persist_sections,

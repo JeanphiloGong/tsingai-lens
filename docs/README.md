@@ -45,6 +45,28 @@ owned and frontend-owned detail should stay with the owning module.
 - [`frontend/README.md`](../frontend/README.md)
   Frontend purpose, boundaries, local doc map, and submodule entry links
 
+## Reading Paths By Intent
+
+- Product direction and Lens identity:
+  start at the repo root `README.md`, then read
+  [`50-guides/lens-mission-positioning.md`](50-guides/lens-mission-positioning.md),
+  [`40-specs/lens-v1-definition.md`](40-specs/lens-v1-definition.md), and
+  [`30-architecture/lens-v1-architecture-boundary.md`](30-architecture/lens-v1-architecture-boundary.md)
+- Shared system understanding:
+  start with [`30-architecture/system-overview.md`](30-architecture/system-overview.md),
+  then move to the relevant module entry page
+- Backend implementation and API:
+  start with [`../backend/README.md`](../backend/README.md), then
+  [`../backend/docs/README.md`](../backend/docs/README.md), then the owning
+  backend submodule `README.md`
+- Frontend workspace behavior:
+  start with [`../frontend/README.md`](../frontend/README.md), then
+  [`../frontend/docs/frontend-plan.md`](../frontend/docs/frontend-plan.md), then
+  route-family docs under `frontend/src/routes/`
+- Research context only:
+  use [`research/README.md`](research/README.md) and treat that subtree as
+  non-authoritative background material
+
 ## What Goes Where
 
 | Location | Scope | Allowed content | Notes |

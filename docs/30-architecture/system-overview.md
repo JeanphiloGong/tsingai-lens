@@ -2,10 +2,10 @@
 
 ## Purpose
 
-TsingAI-Lens is a collection-oriented literature system for ingesting papers,
-building graph, report, evidence, comparison, and conditional protocol
-artifacts, and exposing those results through a browser-facing API and
-frontend.
+TsingAI-Lens is a collection-oriented literature intelligence system for
+ingesting papers, producing document profiles, evidence cards, comparison
+rows, retained graph/report artifacts, and conditional protocol outputs, and
+exposing those results through a browser-facing API and frontend.
 
 ## Primary Modules
 
@@ -23,9 +23,9 @@ frontend.
 1. Create a collection.
 2. Upload PDF or TXT files into the collection.
 3. Start an index task.
-4. Wait for graph, report, evidence, comparison, and conditional protocol
-   artifacts.
-5. Browse workspace, graph, evidence, comparison, protocol, and report outputs
+4. Wait for document profiling, evidence, comparison, and retained downstream
+   artifacts to be generated.
+5. Browse workspace, evidence, comparison, graph, protocol, and report outputs
    through the frontend or API.
 
 ## Current Product Direction
@@ -44,14 +44,15 @@ for the shared boundary and object model.
 
 ## Backend Ownership Seams
 
-- `backend/api/`
-  Public query and report route boundary.
 - `backend/controllers/`
-  Current app-layer HTTP routes for collections, tasks, and workspace.
+  Current HTTP route surface for collections, tasks, workspace, graph,
+  protocol, query, and reports.
 - `backend/application/`
-  Query and report use-case orchestration.
-- `backend/services/`
-  Collection, task, workspace, and protocol services.
+  Use-case orchestration layer with active business-domain packages for
+  collections, indexing, workspace, documents, evidence, comparisons, and
+  protocol, plus some remaining legacy flat services.
+- `backend/domain/`
+  Domain models and port definitions.
 - `backend/retrieval/`
   Indexing and query engine package.
 - `backend/infra/persistence/`

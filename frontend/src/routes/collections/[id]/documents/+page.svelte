@@ -46,8 +46,26 @@
     return value.toFixed(2);
   }
 
+  function docTypeLabel(value: DocumentProfile['doc_type']) {
+    if (value === 'experimental') return $t('profiles.docTypeExperimental');
+    if (value === 'review') return $t('profiles.docTypeReview');
+    if (value === 'mixed') return $t('profiles.docTypeMixed');
+    return $t('profiles.docTypeUncertain');
+  }
+
+  function extractableLabel(value: DocumentProfile['protocol_extractable']) {
+    if (value === 'yes') return $t('profiles.extractableYes');
+    if (value === 'partial') return $t('profiles.extractablePartial');
+    if (value === 'no') return $t('profiles.extractableNo');
+    return $t('profiles.extractableUncertain');
+  }
+
   function warningsFor(profile: DocumentProfile) {
     return profile.parsing_warnings.join(' | ') || '--';
+  }
+
+  function signalsFor(profile: DocumentProfile) {
+    return profile.protocol_extractability_signals.join(' | ') || '--';
   }
 </script>
 
@@ -70,21 +88,21 @@
     <div class="field">
       <label for="docType">{$t('profiles.filterDocType')}</label>
       <select id="docType" class="select" bind:value={docType}>
-        <option value="">All</option>
-        <option value="experimental">experimental</option>
-        <option value="review">review</option>
-        <option value="mixed">mixed</option>
-        <option value="uncertain">uncertain</option>
+        <option value="">{$t('profiles.allOption')}</option>
+        <option value="experimental">{$t('profiles.docTypeExperimental')}</option>
+        <option value="review">{$t('profiles.docTypeReview')}</option>
+        <option value="mixed">{$t('profiles.docTypeMixed')}</option>
+        <option value="uncertain">{$t('profiles.docTypeUncertain')}</option>
       </select>
     </div>
     <div class="field">
       <label for="extractable">{$t('profiles.filterExtractable')}</label>
       <select id="extractable" class="select" bind:value={extractable}>
-        <option value="">All</option>
-        <option value="yes">yes</option>
-        <option value="partial">partial</option>
-        <option value="no">no</option>
-        <option value="uncertain">uncertain</option>
+        <option value="">{$t('profiles.allOption')}</option>
+        <option value="yes">{$t('profiles.extractableYes')}</option>
+        <option value="partial">{$t('profiles.extractablePartial')}</option>
+        <option value="no">{$t('profiles.extractableNo')}</option>
+        <option value="uncertain">{$t('profiles.extractableUncertain')}</option>
       </select>
     </div>
   </div>
@@ -99,23 +117,23 @@
         <h3>{$t('profiles.summaryTitle')}</h3>
         <dl class="detail-list">
           <div class="detail-row">
-            <dt>Total</dt>
+            <dt>{$t('profiles.totalLabel')}</dt>
             <dd>{response.summary.total_documents}</dd>
           </div>
           <div class="detail-row">
-            <dt>experimental</dt>
+            <dt>{$t('profiles.docTypeExperimental')}</dt>
             <dd>{response.summary.doc_type_counts.experimental}</dd>
           </div>
           <div class="detail-row">
-            <dt>review</dt>
+            <dt>{$t('profiles.docTypeReview')}</dt>
             <dd>{response.summary.doc_type_counts.review}</dd>
           </div>
           <div class="detail-row">
-            <dt>mixed</dt>
+            <dt>{$t('profiles.docTypeMixed')}</dt>
             <dd>{response.summary.doc_type_counts.mixed}</dd>
           </div>
           <div class="detail-row">
-            <dt>uncertain</dt>
+            <dt>{$t('profiles.docTypeUncertain')}</dt>
             <dd>{response.summary.doc_type_counts.uncertain}</dd>
           </div>
         </dl>
@@ -125,19 +143,19 @@
         <h3>{$t('profiles.filterExtractable')}</h3>
         <dl class="detail-list">
           <div class="detail-row">
-            <dt>yes</dt>
+            <dt>{$t('profiles.extractableYes')}</dt>
             <dd>{response.summary.protocol_extractable_counts.yes}</dd>
           </div>
           <div class="detail-row">
-            <dt>partial</dt>
+            <dt>{$t('profiles.extractablePartial')}</dt>
             <dd>{response.summary.protocol_extractable_counts.partial}</dd>
           </div>
           <div class="detail-row">
-            <dt>no</dt>
+            <dt>{$t('profiles.extractableNo')}</dt>
             <dd>{response.summary.protocol_extractable_counts.no}</dd>
           </div>
           <div class="detail-row">
-            <dt>uncertain</dt>
+            <dt>{$t('profiles.extractableUncertain')}</dt>
             <dd>{response.summary.protocol_extractable_counts.uncertain}</dd>
           </div>
         </dl>
@@ -162,12 +180,12 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>Document</th>
-              <th>Type</th>
-              <th>Protocol</th>
-              <th>Confidence</th>
-              <th>Warnings</th>
-              <th>Actions</th>
+              <th>{$t('profiles.tableDocument')}</th>
+              <th>{$t('profiles.tableType')}</th>
+              <th>{$t('profiles.tableProtocol')}</th>
+              <th>{$t('profiles.tableConfidence')}</th>
+              <th>{$t('profiles.tableWarnings')}</th>
+              <th>{$t('profiles.tableActions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -179,8 +197,13 @@
                     <div class="table-sub">{item.document_id}</div>
                   </div>
                 </td>
-                <td>{item.doc_type}</td>
-                <td>{item.protocol_extractable}</td>
+                <td>{docTypeLabel(item.doc_type)}</td>
+                <td>
+                  <div class="table-main">
+                    <div class="table-title">{extractableLabel(item.protocol_extractable)}</div>
+                    <div class="table-sub">{$t('profiles.signalsLabel')}: {signalsFor(item)}</div>
+                  </div>
+                </td>
                 <td>{formatConfidence(item.confidence)}</td>
                 <td>{warningsFor(item)}</td>
                 <td>

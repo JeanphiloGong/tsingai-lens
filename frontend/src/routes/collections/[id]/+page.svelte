@@ -615,11 +615,10 @@
   </section>
 
   <section id="files" class="card">
-    <div class="card-header-inline">
-      <div>
-        <h3>{$t('overview.uploadTitle')}</h3>
-        <p class="meta-text">{$t('overview.uploadLead')}</p>
-      </div>
+    <details class="advanced" open={!workspace.file_count}>
+      <summary>{$t('overview.uploadTitle')}</summary>
+      <p class="note">{$t('overview.uploadLead')}</p>
+
       <div class="table-actions">
         <button class="btn btn--ghost btn--small" type="button" on:click={() => Promise.all([loadWorkspace(), loadFiles()])}>
           {$t('overview.refresh')}
@@ -628,154 +627,154 @@
           {$t('overview.uploadCta')}
         </button>
       </div>
-    </div>
 
-    {#if actionStatus}
-      <div class={`status ${actionStatus.startsWith('4') || actionStatus.startsWith('5') ? 'status--error' : ''}`} role="status">
-        {actionStatus}
-      </div>
-    {/if}
-
-    <div class="result-grid result-grid--tasks">
-      <div class="result-card">
-        <h4>{$t('overview.uploadFormTitle')}</h4>
-        <p class="meta-text">{$t('overview.uploadFormLead')}</p>
-        <div
-          class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
-          on:drop={handleDrop}
-          on:dragover={handleDragOver}
-          on:dragleave={handleDragLeave}
-          on:click={browseFiles}
-          on:keydown={handleDropzoneKeydown}
-          role="button"
-          tabindex="0"
-        >
-          <input
-            class="dropzone-input"
-            bind:this={fileInput}
-            type="file"
-            multiple
-            on:change={(event) => handleFiles((event.currentTarget as HTMLInputElement).files)}
-          />
-          <div class="dropzone-title">{$t('documents.dropHint')}</div>
-          <div class="dropzone-sub">{$t('documents.browse')}</div>
-          {#if selectedFiles.length}
-            <div class="dropzone-files">{$t('documents.selectedCount', { count: selectedFiles.length })}</div>
-          {/if}
+      {#if actionStatus}
+        <div class={`status ${actionStatus.startsWith('4') || actionStatus.startsWith('5') ? 'status--error' : ''}`} role="status">
+          {actionStatus}
         </div>
+      {/if}
 
-        <div class="toggle-row">
-          <label>
-            <input type="checkbox" bind:checked={indexAfterUpload} />
-            {$t('documents.indexAfterLabel')}
-          </label>
-        </div>
+      <div class="result-grid result-grid--tasks">
+        <div class="result-card">
+          <h4>{$t('overview.uploadFormTitle')}</h4>
+          <p class="meta-text">{$t('overview.uploadFormLead')}</p>
+          <div
+            class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
+            on:drop={handleDrop}
+            on:dragover={handleDragOver}
+            on:dragleave={handleDragLeave}
+            on:click={browseFiles}
+            on:keydown={handleDropzoneKeydown}
+            role="button"
+            tabindex="0"
+          >
+            <input
+              class="dropzone-input"
+              bind:this={fileInput}
+              type="file"
+              multiple
+              on:change={(event) => handleFiles((event.currentTarget as HTMLInputElement).files)}
+            />
+            <div class="dropzone-title">{$t('documents.dropHint')}</div>
+            <div class="dropzone-sub">{$t('documents.browse')}</div>
+            {#if selectedFiles.length}
+              <div class="dropzone-files">{$t('documents.selectedCount', { count: selectedFiles.length })}</div>
+            {/if}
+          </div>
 
-        <fieldset class="field fieldset">
-          <legend>{$t('documents.indexModeLabel')}</legend>
-          <div class="radio-group">
+          <div class="toggle-row">
             <label>
-              <input
-                type="radio"
-                name="index-mode"
-                value="update"
-                bind:group={indexMode}
-                disabled={!indexAfterUpload || !canUseIncrementalIndex}
-              />
-              {$t('documents.indexModeUpdate')}
-            </label>
-            <label>
-              <input type="radio" name="index-mode" value="rebuild" bind:group={indexMode} disabled={!indexAfterUpload} />
-              {$t('documents.indexModeRebuild')}
+              <input type="checkbox" bind:checked={indexAfterUpload} />
+              {$t('documents.indexAfterLabel')}
             </label>
           </div>
-          {#if !canUseIncrementalIndex}
-            <p class="meta-text">{$t('documents.indexModeNoBaseline')}</p>
+
+          <fieldset class="field fieldset">
+            <legend>{$t('documents.indexModeLabel')}</legend>
+            <div class="radio-group">
+              <label>
+                <input
+                  type="radio"
+                  name="index-mode"
+                  value="update"
+                  bind:group={indexMode}
+                  disabled={!indexAfterUpload || !canUseIncrementalIndex}
+                />
+                {$t('documents.indexModeUpdate')}
+              </label>
+              <label>
+                <input type="radio" name="index-mode" value="rebuild" bind:group={indexMode} disabled={!indexAfterUpload} />
+                {$t('documents.indexModeRebuild')}
+              </label>
+            </div>
+            {#if !canUseIncrementalIndex}
+              <p class="meta-text">{$t('documents.indexModeNoBaseline')}</p>
+            {/if}
+          </fieldset>
+
+          <div class="field">
+            <label for="index-method">{$t('documents.methodLabel')}</label>
+            <select id="index-method" class="select" bind:value={method} disabled={!indexAfterUpload}>
+              <option value="standard">{$t('documents.methodStandard')}</option>
+              <option value="fast">{$t('documents.methodFast')}</option>
+            </select>
+          </div>
+
+          {#if uploadError}
+            <div class="status status--error" role="alert">{uploadError}</div>
           {/if}
-        </fieldset>
 
-        <div class="field">
-          <label for="index-method">{$t('documents.methodLabel')}</label>
-          <select id="index-method" class="select" bind:value={method} disabled={!indexAfterUpload}>
-            <option value="standard">{$t('documents.methodStandard')}</option>
-            <option value="fast">{$t('documents.methodFast')}</option>
-          </select>
-        </div>
-
-        {#if uploadError}
-          <div class="status status--error" role="alert">{uploadError}</div>
-        {/if}
-
-        <div class="table-actions">
-          <button class="btn btn--primary" type="button" on:click={submitUpload} disabled={uploadLoading}>
-            {uploadLoading ? $t('documents.uploading') : $t('documents.upload')}
-          </button>
-          <button class="btn btn--ghost" type="button" on:click={() => Promise.all([loadFiles(), loadWorkspace()])}>
-            {$t('documents.listTitle')}
-          </button>
-        </div>
-
-        {#if uploadResult}
-          <div class="detail-section">
-            <div class="detail-section__title">{$t('documents.uploadResultTitle')}</div>
-            <p class="meta-text">{$t('documents.uploadResultDesc', { count: uploadResult.count })}</p>
-            <ul class="result-list">
-              {#each uploadResult.items as item}
-                <li>{item.original_filename || item.stored_filename}</li>
-              {/each}
-            </ul>
+          <div class="table-actions">
+            <button class="btn btn--primary" type="button" on:click={submitUpload} disabled={uploadLoading}>
+              {uploadLoading ? $t('documents.uploading') : $t('documents.upload')}
+            </button>
+            <button class="btn btn--ghost" type="button" on:click={() => Promise.all([loadFiles(), loadWorkspace()])}>
+              {$t('documents.listTitle')}
+            </button>
           </div>
-        {/if}
-      </div>
 
-      <div class="result-card">
-        <div class="card-header-inline">
-          <div>
-            <h4>{$t('documents.listTitle')}</h4>
-            <p class="meta-text">{$t('overview.filesCount', { count: collectionFiles.length })}</p>
-          </div>
-        </div>
-
-        {#if filesLoading}
-          <div class="status" role="status" aria-live="polite">{$t('documents.listLoading')}</div>
-        {:else if filesError}
-          <div class="status status--error" role="alert">{filesError}</div>
-        {:else if !collectionFiles.length}
-          <p class="note">{$t('documents.listEmptyTitle')}</p>
-          <p class="meta-text">{$t('documents.listEmptyDesc')}</p>
-        {:else}
-          <div class="table-wrapper">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>{$t('documents.tableName')}</th>
-                  <th>{$t('documents.tableStatus')}</th>
-                  <th>{$t('documents.tableSize')}</th>
-                  <th>{$t('documents.tableCreated')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each collectionFiles as file}
-                  <tr>
-                    <td>
-                      <div class="table-main">
-                        <div class="table-title">{getFileLabel(file)}</div>
-                        {#if getFileSub(file)}
-                          <div class="table-sub file-meta">{getFileSub(file)}</div>
-                        {/if}
-                      </div>
-                    </td>
-                    <td>{file.status}</td>
-                    <td>{formatBytes(file.size_bytes)}</td>
-                    <td>{formatDate(file.created_at)}</td>
-                  </tr>
+          {#if uploadResult}
+            <div class="detail-section">
+              <div class="detail-section__title">{$t('documents.uploadResultTitle')}</div>
+              <p class="meta-text">{$t('documents.uploadResultDesc', { count: uploadResult.count })}</p>
+              <ul class="result-list">
+                {#each uploadResult.items as item}
+                  <li>{item.original_filename || item.stored_filename}</li>
                 {/each}
-              </tbody>
-            </table>
+              </ul>
+            </div>
+          {/if}
+        </div>
+
+        <div class="result-card">
+          <div class="card-header-inline">
+            <div>
+              <h4>{$t('documents.listTitle')}</h4>
+              <p class="meta-text">{$t('overview.filesCount', { count: collectionFiles.length })}</p>
+            </div>
           </div>
-        {/if}
+
+          {#if filesLoading}
+            <div class="status" role="status" aria-live="polite">{$t('documents.listLoading')}</div>
+          {:else if filesError}
+            <div class="status status--error" role="alert">{filesError}</div>
+          {:else if !collectionFiles.length}
+            <p class="note">{$t('documents.listEmptyTitle')}</p>
+            <p class="meta-text">{$t('documents.listEmptyDesc')}</p>
+          {:else}
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>{$t('documents.tableName')}</th>
+                    <th>{$t('documents.tableStatus')}</th>
+                    <th>{$t('documents.tableSize')}</th>
+                    <th>{$t('documents.tableCreated')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each collectionFiles as file}
+                    <tr>
+                      <td>
+                        <div class="table-main">
+                          <div class="table-title">{getFileLabel(file)}</div>
+                          {#if getFileSub(file)}
+                            <div class="table-sub file-meta">{getFileSub(file)}</div>
+                          {/if}
+                        </div>
+                      </td>
+                      <td>{file.status}</td>
+                      <td>{formatBytes(file.size_bytes)}</td>
+                      <td>{formatDate(file.created_at)}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        </div>
       </div>
-    </div>
+    </details>
   </section>
 
   <section class="card">

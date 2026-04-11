@@ -66,6 +66,13 @@
   function evidenceCount(row: ComparisonRow) {
     return row.supporting_evidence_ids.length;
   }
+
+  function comparabilityLabel(status: ComparisonRow['comparability_status']) {
+    if (status === 'comparable') return $t('comparisons.comparable');
+    if (status === 'limited') return $t('comparisons.limited');
+    if (status === 'not_comparable') return $t('comparisons.notComparable');
+    return $t('comparisons.insufficient');
+  }
 </script>
 
 <svelte:head>
@@ -111,17 +118,17 @@
     <div class="field">
       <label for="statusFilter">{$t('comparisons.filterStatus')}</label>
       <select id="statusFilter" class="select" bind:value={statusFilter}>
-        <option value="">All</option>
-        <option value="comparable">comparable</option>
-        <option value="limited">limited</option>
-        <option value="not_comparable">not_comparable</option>
-        <option value="insufficient">insufficient</option>
+        <option value="">{$t('comparisons.allOption')}</option>
+        <option value="comparable">{$t('comparisons.comparable')}</option>
+        <option value="limited">{$t('comparisons.limited')}</option>
+        <option value="not_comparable">{$t('comparisons.notComparable')}</option>
+        <option value="insufficient">{$t('comparisons.insufficient')}</option>
       </select>
     </div>
     <div class="field">
       <label for="materialFilter">{$t('comparisons.filterMaterial')}</label>
       <select id="materialFilter" class="select" bind:value={materialFilter}>
-        <option value="">All</option>
+        <option value="">{$t('comparisons.allOption')}</option>
         {#each materials as item}
           <option value={item}>{item}</option>
         {/each}
@@ -130,7 +137,7 @@
     <div class="field">
       <label for="propertyFilter">{$t('comparisons.filterProperty')}</label>
       <select id="propertyFilter" class="select" bind:value={propertyFilter}>
-        <option value="">All</option>
+        <option value="">{$t('comparisons.allOption')}</option>
         {#each properties as item}
           <option value={item}>{item}</option>
         {/each}
@@ -147,14 +154,14 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>Material</th>
-            <th>Process</th>
-            <th>Property</th>
-            <th>Baseline</th>
-            <th>Test</th>
-            <th>Status</th>
+            <th>{$t('comparisons.tableMaterial')}</th>
+            <th>{$t('comparisons.tableProcess')}</th>
+            <th>{$t('comparisons.tableProperty')}</th>
+            <th>{$t('comparisons.tableBaseline')}</th>
+            <th>{$t('comparisons.tableTest')}</th>
+            <th>{$t('comparisons.tableStatus')}</th>
             <th>{$t('comparisons.warningsLabel')}</th>
-            <th>Actions</th>
+            <th>{$t('comparisons.tableActions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -165,7 +172,7 @@
               <td>{item.property_normalized}</td>
               <td>{item.baseline_normalized}</td>
               <td>{item.test_condition_normalized}</td>
-              <td>{item.comparability_status}</td>
+              <td>{comparabilityLabel(item.comparability_status)}</td>
               <td>{warningText(item)}</td>
               <td>
                 <div class="table-actions">

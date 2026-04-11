@@ -46,11 +46,24 @@
     return value.toFixed(2);
   }
 
+  function traceabilityLabel(value: EvidenceCard['traceability_status']) {
+    if (value === 'direct') return $t('evidence.traceabilityDirect');
+    if (value === 'partial') return $t('evidence.traceabilityPartial');
+    return $t('evidence.traceabilityMissing');
+  }
+
+  function sourceTypeLabel(value: EvidenceCard['evidence_source_type']) {
+    if (value === 'figure') return $t('evidence.sourceFigure');
+    if (value === 'table') return $t('evidence.sourceTable');
+    if (value === 'method') return $t('evidence.sourceMethod');
+    return $t('evidence.sourceText');
+  }
+
   function contextRows(card: EvidenceCard): Array<[string, string[]]> {
     const rows: Array<[string, string[]]> = [
-      ['process', card.condition_context.process],
-      ['baseline', card.condition_context.baseline],
-      ['test', card.condition_context.test]
+      [$t('evidence.contextProcess'), card.condition_context.process],
+      [$t('evidence.contextBaseline'), card.condition_context.baseline],
+      [$t('evidence.contextTest'), card.condition_context.test]
     ];
 
     return rows.filter(([, values]) => values.length > 0);
@@ -76,7 +89,7 @@
     <div class="field">
       <label for="claimType">{$t('evidence.filterClaimType')}</label>
       <select id="claimType" class="select" bind:value={claimType}>
-        <option value="">All</option>
+        <option value="">{$t('evidence.allOption')}</option>
         {#each claimTypes as item}
           <option value={item}>{item}</option>
         {/each}
@@ -85,20 +98,20 @@
     <div class="field">
       <label for="traceability">{$t('evidence.filterTraceability')}</label>
       <select id="traceability" class="select" bind:value={traceability}>
-        <option value="">All</option>
-        <option value="direct">direct</option>
-        <option value="partial">partial</option>
-        <option value="missing">missing</option>
+        <option value="">{$t('evidence.allOption')}</option>
+        <option value="direct">{$t('evidence.traceabilityDirect')}</option>
+        <option value="partial">{$t('evidence.traceabilityPartial')}</option>
+        <option value="missing">{$t('evidence.traceabilityMissing')}</option>
       </select>
     </div>
     <div class="field">
       <label for="sourceType">{$t('evidence.filterSourceType')}</label>
       <select id="sourceType" class="select" bind:value={sourceType}>
-        <option value="">All</option>
-        <option value="figure">figure</option>
-        <option value="table">table</option>
-        <option value="method">method</option>
-        <option value="text">text</option>
+        <option value="">{$t('evidence.allOption')}</option>
+        <option value="figure">{$t('evidence.sourceFigure')}</option>
+        <option value="table">{$t('evidence.sourceTable')}</option>
+        <option value="method">{$t('evidence.sourceMethod')}</option>
+        <option value="text">{$t('evidence.sourceText')}</option>
       </select>
     </div>
   </div>
@@ -118,19 +131,19 @@
 
           <dl class="detail-list">
             <div class="detail-row">
-              <dt>claim type</dt>
+              <dt>{$t('evidence.fieldClaimType')}</dt>
               <dd>{item.claim_type}</dd>
             </div>
             <div class="detail-row">
-              <dt>source</dt>
-              <dd>{item.evidence_source_type}</dd>
+              <dt>{$t('evidence.fieldSource')}</dt>
+              <dd>{sourceTypeLabel(item.evidence_source_type)}</dd>
             </div>
             <div class="detail-row">
-              <dt>traceability</dt>
-              <dd>{item.traceability_status}</dd>
+              <dt>{$t('evidence.fieldTraceability')}</dt>
+              <dd>{traceabilityLabel(item.traceability_status)}</dd>
             </div>
             <div class="detail-row">
-              <dt>confidence</dt>
+              <dt>{$t('evidence.fieldConfidence')}</dt>
               <dd>{formatConfidence(item.confidence)}</dd>
             </div>
           </dl>
@@ -157,6 +170,15 @@
               </dl>
             </section>
           {/if}
+
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/comparisons`}>
+              {$t('overview.nextComparisons')}
+            </a>
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/documents`}>
+              {$t('overview.nextDocuments')}
+            </a>
+          </div>
         </article>
       {/each}
     </div>

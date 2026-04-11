@@ -35,6 +35,8 @@ right architecture, spec, plan, or runbook document.
   Backend-local migration notes behind the agreed public API contract
 - [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
   Current backend migration state and next execution order for API surfaces
+- [`plans/graph-surface-plan.md`](plans/graph-surface-plan.md)
+  Execution plan for keeping graph stable as a retained secondary surface
 - [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
   Local development and operations runbook
 

@@ -186,5 +186,6 @@ center for this migration stage.
 - [`../specs/api.md`](../specs/api.md)
 - [`../architecture/overview.md`](../architecture/overview.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+- [`graph-surface-plan.md`](graph-surface-plan.md)
 - [`v1-api-migration-notes.md`](v1-api-migration-notes.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)

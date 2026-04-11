@@ -235,15 +235,17 @@ def load_graph_payload(
         {
             "id": str(row.id),
             "label": str(row.title),
-            "type": row.type if not pd.isna(row.type) else None,
-            "description": row.description if not pd.isna(row.description) else None,
-            "degree": safe_int(row.degree),
-            "frequency": safe_int(row.frequency),
-            "x": safe_float(row.x),
-            "y": safe_float(row.y),
+            "type": row.get("type") if not pd.isna(row.get("type")) else None,
+            "description": row.get("description")
+            if not pd.isna(row.get("description"))
+            else None,
+            "degree": safe_int(row.get("degree")),
+            "frequency": safe_int(row.get("frequency")),
+            "x": safe_float(row.get("x")),
+            "y": safe_float(row.get("y")),
             "community": community_map.get(str(row.id)),
             **build_source_fields(
-                row.text_unit_ids, text_unit_to_docs, doc_id_to_title, "node"
+                row.get("text_unit_ids"), text_unit_to_docs, doc_id_to_title, "node"
             ),
         }
         for _, row in entities.iterrows()
@@ -254,12 +256,12 @@ def load_graph_payload(
             "id": str(row.id),
             "source": map_entity(row.source),
             "target": map_entity(row.target),
-            "weight": safe_float(row.weight),
-            "edge_description": row.description
-            if not pd.isna(row.description)
+            "weight": safe_float(row.get("weight")),
+            "edge_description": row.get("description")
+            if not pd.isna(row.get("description"))
             else None,
             **build_source_fields(
-                row.text_unit_ids, text_unit_to_docs, doc_id_to_title, "edge"
+                row.get("text_unit_ids"), text_unit_to_docs, doc_id_to_title, "edge"
             ),
         }
         for _, row in relationships.iterrows()

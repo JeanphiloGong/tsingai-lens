@@ -126,6 +126,39 @@ def _write_index_outputs(output_dir: Path) -> None:
     relationships.to_parquet(output_dir / "relationships.parquet", index=False)
 
 
+def _write_community_outputs(output_dir: Path) -> None:
+    communities = pd.DataFrame(
+        [
+            {
+                "id": "community-1",
+                "human_readable_id": 1,
+                "community": 1,
+                "level": 1,
+                "title": "Community 1",
+                "entity_ids": ["ent-1", "ent-2"],
+            }
+        ]
+    )
+    communities.to_parquet(output_dir / "communities.parquet", index=False)
+
+
+def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": name})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={})
+    assert task_resp.status_code == 200
+    task_id = task_resp.json()["task_id"]
+    return collection_id, task_id
+
+
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
@@ -300,19 +333,7 @@ def app_client(monkeypatch, tmp_path):
 
 
 def test_collection_task_and_query_flow(app_client):
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Composite Set"})
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
-        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
-    )
-    assert upload_resp.status_code == 200
-
-    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={})
-    assert task_resp.status_code == 200
-    task_id = task_resp.json()["task_id"]
+    collection_id, task_id = _create_indexed_collection(app_client)
 
     task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
     assert task_status.status_code == 200
@@ -347,6 +368,7 @@ def test_collection_task_and_query_flow(app_client):
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
     assert graph.status_code == 200
     graph_body = graph.json()
+    assert graph_body["collection_id"] == collection_id
     assert len(graph_body["nodes"]) == 2
     assert len(graph_body["edges"]) == 1
 
@@ -383,6 +405,53 @@ def test_collection_task_and_query_flow(app_client):
         "not_comparable",
         "insufficient",
     }
+
+
+def test_graph_endpoint_returns_collection_not_found_error(app_client):
+    graph = app_client.get(f"{API_V1_PREFIX}/collections/col_missing/graph")
+    assert graph.status_code == 404
+    detail = graph.json()["detail"]
+    assert detail["code"] == "collection_not_found"
+    assert detail["collection_id"] == "col_missing"
+
+
+def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client):
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Pending Graph"})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
+    assert graph.status_code == 409
+    graph_detail = graph.json()["detail"]
+    assert graph_detail["code"] == "graph_not_ready"
+    assert graph_detail["collection_id"] == collection_id
+    assert "entities.parquet" in graph_detail["missing_artifacts"]
+    assert "relationships.parquet" in graph_detail["missing_artifacts"]
+
+    graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
+    assert graphml.status_code == 409
+    graphml_detail = graphml.json()["detail"]
+    assert graphml_detail["code"] == "graph_not_ready"
+    assert graphml_detail["collection_id"] == collection_id
+
+
+def test_graph_endpoint_returns_community_not_found_error(app_client):
+    collection_id, task_id = _create_indexed_collection(app_client, name="Community Graph")
+
+    artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}/artifacts")
+    assert artifacts.status_code == 200
+    output_dir = Path(artifacts.json()["output_path"])
+    _write_community_outputs(output_dir)
+
+    graph = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/graph",
+        params={"community_id": "999"},
+    )
+    assert graph.status_code == 404
+    detail = graph.json()["detail"]
+    assert detail["code"] == "community_not_found"
+    assert detail["collection_id"] == collection_id
+    assert detail["community_id"] == "999"
 
 
 def test_mock_collection_resources_are_available_for_frontend_integration(app_client):

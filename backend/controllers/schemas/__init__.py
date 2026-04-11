@@ -18,6 +18,7 @@ from .evidence import (
     EvidenceCardItemResponse,
     EvidenceCardListResponse,
 )
+from .graph import CollectionGraphResponse, GraphEdgeResponse, GraphNodeResponse
 from .protocol import (
     ConditionItem,
     ControlSpecItem,
@@ -74,6 +75,9 @@ __all__ = [
     "ConditionContextResponse",
     "EvidenceCardItemResponse",
     "EvidenceCardListResponse",
+    "GraphNodeResponse",
+    "GraphEdgeResponse",
+    "CollectionGraphResponse",
     "QueryRequest",
     "QueryResponse",
     "ReportCommunityDetailResponse",

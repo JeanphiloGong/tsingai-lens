@@ -1,27 +1,40 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { errorMessage } from '../../../_shared/api';
+  import { errorMessage, isHttpStatusError } from '../../../_shared/api';
   import {
     fetchDocumentProfiles,
     type DocumentProfile,
     type DocumentProfilesResponse
   } from '../../../_shared/documents';
   import { t } from '../../../_shared/i18n';
+  import {
+    fetchWorkspaceOverview,
+    getWorkspaceSurfaceState,
+    type WorkspaceOverview
+  } from '../../../_shared/workspace';
 
   $: collectionId = $page.params.id ?? '';
 
   let response: DocumentProfilesResponse | null = null;
+  let workspace: WorkspaceOverview | null = null;
   let loading = false;
   let error = '';
   let docType = '';
   let extractable = '';
   let loadedCollectionId = '';
+  let notFound = false;
 
   $: items = (response?.items ?? []).filter((item) => {
     if (docType && item.doc_type !== docType) return false;
     if (extractable && item.protocol_extractable !== extractable) return false;
     return true;
   });
+  $: surfaceState = getWorkspaceSurfaceState(workspace, 'documents');
+  $: showFallbackState =
+    Boolean(workspace) &&
+    !loading &&
+    !items.length &&
+    (surfaceState !== 'ready' || notFound);
 
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
@@ -31,14 +44,25 @@
   async function loadProfiles() {
     loading = true;
     error = '';
-    try {
-      response = await fetchDocumentProfiles(collectionId);
-    } catch (err) {
-      error = errorMessage(err);
-      response = null;
-    } finally {
+    notFound = false;
+
+    const [profilesResult, workspaceResult] = await Promise.allSettled([
+      fetchDocumentProfiles(collectionId),
+      fetchWorkspaceOverview(collectionId)
+    ]);
+
+    workspace = workspaceResult.status === 'fulfilled' ? workspaceResult.value : null;
+
+    if (profilesResult.status === 'fulfilled') {
+      response = profilesResult.value;
       loading = false;
+      return;
     }
+
+    response = null;
+    notFound = isHttpStatusError(profilesResult.reason, 404);
+    error = errorMessage(profilesResult.reason);
+    loading = false;
   }
 
   function formatConfidence(value?: number | null) {
@@ -66,6 +90,14 @@
 
   function signalsFor(profile: DocumentProfile) {
     return profile.protocol_extractability_signals.join(' | ') || '--';
+  }
+
+  function stateCardTitle() {
+    return $t(`overview.surfaceStateCards.${surfaceState}.title`);
+  }
+
+  function stateCardBody() {
+    return $t(`overview.surfaceStateCards.${surfaceState}.body`);
   }
 </script>
 
@@ -107,10 +139,24 @@
     </div>
   </div>
 
-  {#if error}
+  {#if workspace && (surfaceState === 'limited' || surfaceState === 'processing') && items.length}
+    <div class="status" role="status">{stateCardBody()}</div>
+  {/if}
+
+  {#if error && !showFallbackState}
     <div class="status status--error" role="alert">{error}</div>
   {:else if loading}
     <div class="status" role="status">{$t('profiles.loading')}</div>
+  {:else if showFallbackState}
+    <article class="result-card">
+      <h3>{stateCardTitle()}</h3>
+      <p class="result-text">{stateCardBody()}</p>
+      <div class="table-actions">
+        <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+          {$t('overview.goToWorkspace')}
+        </a>
+      </div>
+    </article>
   {:else if response}
     <div class="result-grid result-grid--tasks">
       <article class="result-card">

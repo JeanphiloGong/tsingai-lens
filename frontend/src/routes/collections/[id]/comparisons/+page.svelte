@@ -1,22 +1,29 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { errorMessage } from '../../../_shared/api';
+  import { errorMessage, isHttpStatusError } from '../../../_shared/api';
   import {
     fetchComparisons,
     type ComparisonRow,
     type ComparisonsResponse
   } from '../../../_shared/comparisons';
   import { t } from '../../../_shared/i18n';
+  import {
+    fetchWorkspaceOverview,
+    getWorkspaceSurfaceState,
+    type WorkspaceOverview
+  } from '../../../_shared/workspace';
 
   $: collectionId = $page.params.id ?? '';
 
   let response: ComparisonsResponse | null = null;
+  let workspace: WorkspaceOverview | null = null;
   let loading = false;
   let error = '';
   let statusFilter = '';
   let materialFilter = '';
   let propertyFilter = '';
   let loadedCollectionId = '';
+  let notFound = false;
 
   $: materials = Array.from(
     new Set((response?.items ?? []).map((item) => item.material_system_normalized))
@@ -40,6 +47,12 @@
   $: insufficientCount = (response?.items ?? []).filter(
     (item) => item.comparability_status === 'insufficient'
   ).length;
+  $: surfaceState = getWorkspaceSurfaceState(workspace, 'comparisons');
+  $: showFallbackState =
+    Boolean(workspace) &&
+    !loading &&
+    !items.length &&
+    (surfaceState !== 'ready' || notFound);
 
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
@@ -49,14 +62,25 @@
   async function loadComparisons() {
     loading = true;
     error = '';
-    try {
-      response = await fetchComparisons(collectionId);
-    } catch (err) {
-      error = errorMessage(err);
-      response = null;
-    } finally {
+    notFound = false;
+
+    const [comparisonsResult, workspaceResult] = await Promise.allSettled([
+      fetchComparisons(collectionId),
+      fetchWorkspaceOverview(collectionId)
+    ]);
+
+    workspace = workspaceResult.status === 'fulfilled' ? workspaceResult.value : null;
+
+    if (comparisonsResult.status === 'fulfilled') {
+      response = comparisonsResult.value;
       loading = false;
+      return;
     }
+
+    response = null;
+    notFound = isHttpStatusError(comparisonsResult.reason, 404);
+    error = errorMessage(comparisonsResult.reason);
+    loading = false;
   }
 
   function warningText(row: ComparisonRow) {
@@ -72,6 +96,14 @@
     if (status === 'limited') return $t('comparisons.limited');
     if (status === 'not_comparable') return $t('comparisons.notComparable');
     return $t('comparisons.insufficient');
+  }
+
+  function stateCardTitle() {
+    return $t(`overview.surfaceStateCards.${surfaceState}.title`);
+  }
+
+  function stateCardBody() {
+    return $t(`overview.surfaceStateCards.${surfaceState}.body`);
   }
 </script>
 
@@ -114,6 +146,10 @@
     </article>
   </div>
 
+  {#if workspace && (surfaceState === 'limited' || surfaceState === 'processing') && items.length}
+    <div class="status" role="status">{stateCardBody()}</div>
+  {/if}
+
   <div class="form-grid">
     <div class="field">
       <label for="statusFilter">{$t('comparisons.filterStatus')}</label>
@@ -145,10 +181,20 @@
     </div>
   </div>
 
-  {#if error}
+  {#if error && !showFallbackState}
     <div class="status status--error" role="alert">{error}</div>
   {:else if loading}
     <div class="status" role="status">{$t('comparisons.loading')}</div>
+  {:else if showFallbackState}
+    <article class="result-card">
+      <h3>{stateCardTitle()}</h3>
+      <p class="result-text">{stateCardBody()}</p>
+      <div class="table-actions">
+        <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+          {$t('overview.goToWorkspace')}
+        </a>
+      </div>
+    </article>
   {:else if items.length}
     <div class="table-wrapper">
       <table class="data-table">

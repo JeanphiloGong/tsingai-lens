@@ -1,18 +1,25 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { errorMessage } from '../../../_shared/api';
+  import { errorMessage, isHttpStatusError } from '../../../_shared/api';
   import { fetchEvidenceCards, type EvidenceCard, type EvidenceCardsResponse } from '../../../_shared/evidence';
   import { t } from '../../../_shared/i18n';
+  import {
+    fetchWorkspaceOverview,
+    getWorkspaceSurfaceState,
+    type WorkspaceOverview
+  } from '../../../_shared/workspace';
 
   $: collectionId = $page.params.id ?? '';
 
   let response: EvidenceCardsResponse | null = null;
+  let workspace: WorkspaceOverview | null = null;
   let loading = false;
   let error = '';
   let claimType = '';
   let traceability = '';
   let sourceType = '';
   let loadedCollectionId = '';
+  let notFound = false;
 
   $: items = (response?.items ?? []).filter((item) => {
     if (claimType && item.claim_type !== claimType) return false;
@@ -22,6 +29,12 @@
   });
 
   $: claimTypes = Array.from(new Set((response?.items ?? []).map((item) => item.claim_type))).sort();
+  $: surfaceState = getWorkspaceSurfaceState(workspace, 'evidence');
+  $: showFallbackState =
+    Boolean(workspace) &&
+    !loading &&
+    !items.length &&
+    (surfaceState !== 'ready' || notFound);
 
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
@@ -31,14 +44,25 @@
   async function loadEvidence() {
     loading = true;
     error = '';
-    try {
-      response = await fetchEvidenceCards(collectionId);
-    } catch (err) {
-      error = errorMessage(err);
-      response = null;
-    } finally {
+    notFound = false;
+
+    const [evidenceResult, workspaceResult] = await Promise.allSettled([
+      fetchEvidenceCards(collectionId),
+      fetchWorkspaceOverview(collectionId)
+    ]);
+
+    workspace = workspaceResult.status === 'fulfilled' ? workspaceResult.value : null;
+
+    if (evidenceResult.status === 'fulfilled') {
+      response = evidenceResult.value;
       loading = false;
+      return;
     }
+
+    response = null;
+    notFound = isHttpStatusError(evidenceResult.reason, 404);
+    error = errorMessage(evidenceResult.reason);
+    loading = false;
   }
 
   function formatConfidence(value?: number | null) {
@@ -67,6 +91,14 @@
     ];
 
     return rows.filter(([, values]) => values.length > 0);
+  }
+
+  function stateCardTitle() {
+    return $t(`overview.surfaceStateCards.${surfaceState}.title`);
+  }
+
+  function stateCardBody() {
+    return $t(`overview.surfaceStateCards.${surfaceState}.body`);
   }
 </script>
 
@@ -116,10 +148,24 @@
     </div>
   </div>
 
-  {#if error}
+  {#if workspace && (surfaceState === 'limited' || surfaceState === 'processing') && items.length}
+    <div class="status" role="status">{stateCardBody()}</div>
+  {/if}
+
+  {#if error && !showFallbackState}
     <div class="status status--error" role="alert">{error}</div>
   {:else if loading}
     <div class="status" role="status">{$t('evidence.loading')}</div>
+  {:else if showFallbackState}
+    <article class="result-card">
+      <h3>{stateCardTitle()}</h3>
+      <p class="result-text">{stateCardBody()}</p>
+      <div class="table-actions">
+        <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+          {$t('overview.goToWorkspace')}
+        </a>
+      </div>
+    </article>
   {:else if items.length}
     <div class="result-grid">
       {#each items as item}

@@ -94,6 +94,7 @@ const translations: Record<Language, Translations> = {
       eyebrow: 'Collection',
       idLabel: 'ID',
       unknownName: 'Untitled collection',
+      moreLabel: 'More',
       tabs: {
         overview: 'Workspace',
         comparisons: 'Comparisons',
@@ -118,6 +119,38 @@ const translations: Record<Language, Translations> = {
       title: 'Collection workspace',
       lead: 'Start here to see what this paper set says, which papers are usable, and where to read next.',
       loading: 'Loading workspace...',
+      collectionStates: {
+        empty: {
+          label: 'Empty',
+          title: 'Upload papers to start this collection',
+          body: 'This collection has no source papers yet. Add files here before anything else can happen.'
+        },
+        ready_to_process: {
+          label: 'Ready to process',
+          title: 'Files are here; processing is the next step',
+          body: 'The collection has papers, but the main research views are not prepared until processing runs.'
+        },
+        processing: {
+          label: 'Processing',
+          title: 'The collection is being prepared',
+          body: 'Stay here if you want to watch progress, then move into comparisons, evidence, or screening once the run finishes.'
+        },
+        ready: {
+          label: 'Ready',
+          title: 'The main collection views are ready',
+          body: 'Start with the collection-level analysis views below. Protocol and graph remain secondary branches.'
+        },
+        ready_with_limits: {
+          label: 'Ready with limits',
+          title: 'The collection is usable, but not everything is equally strong',
+          body: 'Use the main views first, and read the warnings and readiness states before trusting every downstream branch.'
+        },
+        failed: {
+          label: 'Needs attention',
+          title: 'The latest run did not finish cleanly',
+          body: 'Check the task state and warnings before relying on this collection. You may need to rerun processing.'
+        }
+      },
       statusLabel: 'Status',
       statusUnknown: 'Unknown',
       status: {
@@ -148,6 +181,24 @@ const translations: Record<Language, Translations> = {
       uploadTitle: 'Source papers',
       uploadLead:
         'Upload the papers for this collection. Processing turns them into comparisons, evidence, and document screening views.',
+      setupEmptyTitle: 'Add papers to this collection',
+      setupEmptyLead: 'Upload PDF or TXT files first. The workspace stays focused on that one step until source material exists.',
+      setupEmptyHint: 'After upload, Lens prepares comparisons, evidence, and document screening views from the same paper set.',
+      setupReadyTitle: 'Files are ready. Start analysis next.',
+      setupReadyLead: 'This collection already has source papers. Run processing now to prepare the main research views.',
+      setupReadyHint: 'Use one processing run to unlock comparisons, evidence, and paper screening. Add more papers only if the collection is still incomplete.',
+      processingTitle: 'Processing is running',
+      processingLead: 'Track progress here. Once the run finishes, the main collection views will become the next step.',
+      addPapersCta: 'Add papers',
+      addMorePapersCta: 'Add more papers',
+      startUploadCta: 'Start upload',
+      startAnalysisCta: 'Start analysis',
+      afterUploadTitle: 'After upload, you can use',
+      afterUploadLead: 'These pages appear after the collection has enough source material and processing finishes.',
+      previewComparisonsLead: 'Judge which results can really be compared side by side.',
+      previewEvidenceLead: 'Trace claims back to the figure, table, or text that supports them.',
+      previewDocumentsLead: 'Separate experimental papers from reviews and mixed documents.',
+      previewProtocolLead: 'Use only when the collection really contains usable procedural detail.',
       uploadCta: 'Choose papers',
       uploadWhyTitle: 'Why upload first',
       uploadWhyBody:
@@ -185,8 +236,11 @@ const translations: Record<Language, Translations> = {
         'Protocol is available, but only as a follow-on branch after the main collection views.',
       primaryActionHelperResults:
         'Main outputs are ready. Start from the collection-level views instead of jumping straight into protocol or graph.',
+      readyViewsCount: '{count} primary view(s) ready',
       filesLead: 'Upload source papers here. They remain attached to this collection as the base material.',
       filesCount: '{count} file(s) in this collection',
+      processingOptionsTitle: 'Processing options',
+      processingOptionsLead: 'Only change these if you need a different indexing run than the default.',
       latestTaskTitle: 'Latest task',
       statusTitle: 'Current state',
       statusLead:
@@ -221,6 +275,54 @@ const translations: Record<Language, Translations> = {
         not_applicable: 'Not Applicable',
         failed: 'Failed'
       },
+      surfaceStates: {
+        empty: 'Empty',
+        ready_to_process: 'Ready to process',
+        processing: 'Processing',
+        ready: 'Ready',
+        limited: 'Limited',
+        not_applicable: 'Not applicable',
+        failed: 'Failed'
+      },
+      surfaceStateNotes: {
+        empty: 'Upload papers before expecting anything on this page.',
+        ready_to_process: 'Run processing from the workspace to prepare this page.',
+        processing: 'This page is being prepared by the active processing run.',
+        ready: 'Ready to inspect.',
+        limited: 'Use what is here carefully. Some rows may still be partial, weak, or unsuitable.',
+        not_applicable: 'This page is not a meaningful default view for the current collection.',
+        failed: 'The latest run failed before this page was prepared.'
+      },
+      surfaceStateCards: {
+        empty: {
+          title: 'Upload papers before opening this view',
+          body: 'This collection has no source papers yet, so this page has nothing to show.'
+        },
+        ready_to_process: {
+          title: 'Run processing before opening this view',
+          body: 'Files exist, but this page is not generated until the collection finishes processing.'
+        },
+        processing: {
+          title: 'This view is still being prepared',
+          body: 'Processing is running. Return after the collection finishes and the main outputs are ready.'
+        },
+        ready: {
+          title: 'This view is ready',
+          body: 'The collection has prepared data for this page.'
+        },
+        limited: {
+          title: 'This view is only partially ready',
+          body: 'The collection exposes some output for this page, but it should be read with caution.'
+        },
+        not_applicable: {
+          title: 'This view is not appropriate for the current collection',
+          body: 'The collection does not currently support this page as a primary research surface.'
+        },
+        failed: {
+          title: 'This view could not be prepared',
+          body: 'The latest run failed or stopped before this page was produced.'
+        }
+      },
       startIndex: 'Start Index',
       indexNoFiles: 'Upload at least one file before starting an index task.',
       indexStarted: 'Task started',
@@ -244,11 +346,13 @@ const translations: Record<Language, Translations> = {
       nextSteps: 'Review paper steps',
       nextSop: 'Open draft plan',
       nextGraph: 'Open graph',
-      resultsTitle: 'Main views',
-      resultsLead:
-        'These are the main views for understanding a collection. Most users should start here.',
+      primaryViewsTitle: 'Primary analysis views',
+      primaryViewsLead:
+        'These are the first pages to use for understanding a collection and deciding what to trust.',
       resultsFlow:
         'Use comparisons to judge the collection, evidence to verify support, and documents to screen what is worth trusting.',
+      viewStatusTitle: 'Readiness',
+      goToWorkspace: 'Go to workspace',
       resultComparisonsLead:
         'See which results across papers are really comparable, and which ones only look similar.',
       resultEvidenceLead:
@@ -261,8 +365,9 @@ const translations: Record<Language, Translations> = {
       resultSopLead: 'Then move here to review a generated experiment draft built from those extracted steps.',
       resultGraphLead: 'Use graph view only if you want a secondary relationship view after reading the main pages.',
       resultLocked: 'Available after processing',
-      secondaryViewsTitle: 'Secondary views',
-      secondaryViewsLead: 'These are useful later, but they are not the first place to understand a collection.',
+      additionalViewsTitle: 'Additional branches and tools',
+      additionalViewsLead:
+        'These views can still help, but they should follow the main collection analysis rather than replace it.',
       advancedTitle: 'Advanced analysis and settings',
       advancedLead: 'Reports, read-only settings, and raw identifiers live here so the core workflow stays clean.',
       debugTitle: 'Debug metadata',
@@ -311,10 +416,10 @@ const translations: Record<Language, Translations> = {
       uploadResultDesc: '{count} file(s) uploaded into this collection.'
     },
     profiles: {
-      title: 'Document profiles',
-      lead: 'Use this page to separate experimental papers from reviews and spot papers that are unsafe to use downstream.',
-      loading: 'Loading document profiles...',
-      empty: 'No document profiles are available yet.',
+      title: 'Paper screening',
+      lead: 'Use this page to separate experimental papers from reviews and spot papers that should not drive downstream decisions.',
+      loading: 'Loading paper screening...',
+      empty: 'No paper screening results are available yet.',
       summaryTitle: 'Collection document summary',
       warningsTitle: 'Profile warnings',
       emptyWarnings: 'No collection-level profile warnings.',
@@ -339,10 +444,10 @@ const translations: Record<Language, Translations> = {
       signalsLabel: 'Why'
     },
     evidence: {
-      title: 'Evidence cards',
+      title: 'Evidence',
       lead: 'Use this page to check what evidence actually supports a conclusion and under what conditions.',
-      loading: 'Loading evidence cards...',
-      empty: 'No evidence cards are available yet.',
+      loading: 'Loading evidence...',
+      empty: 'No evidence is available yet.',
       filterClaimType: 'Conclusion type',
       filterTraceability: 'How well traced',
       filterSourceType: 'Evidence comes from',
@@ -367,8 +472,8 @@ const translations: Record<Language, Translations> = {
     comparisons: {
       title: 'Comparisons',
       lead: 'Use this page to see which results across the collection can actually be compared.',
-      loading: 'Loading comparison rows...',
-      empty: 'No comparison rows are available yet.',
+      loading: 'Loading comparisons...',
+      empty: 'No comparison results are available yet.',
       summaryTitle: 'Comparison status summary',
       comparable: 'Comparable',
       limited: 'Limited',
@@ -544,7 +649,7 @@ const translations: Record<Language, Translations> = {
     },
     graph: {
       title: 'Graph',
-      lead: 'Load the collection graph as JSON for preview, then export GraphML when needed.',
+      lead: 'Use this as a secondary relationship view after you have already read the main collection pages.',
       previewLoad: 'Refresh preview',
       previewLoading: 'Loading preview...',
       previewLoaded: 'Preview loaded',
@@ -781,6 +886,7 @@ const translations: Record<Language, Translations> = {
       eyebrow: '集合',
       idLabel: 'ID',
       unknownName: '未命名集合',
+      moreLabel: '更多',
       tabs: {
         overview: '工作区',
         comparisons: '比较',
@@ -804,6 +910,38 @@ const translations: Record<Language, Translations> = {
       title: '集合工作区',
       lead: '先在这里判断这批论文能说明什么、哪些论文可用、下一步该看哪里。',
       loading: '工作区加载中...',
+      collectionStates: {
+        empty: {
+          label: '空集合',
+          title: '先把论文放进这个集合',
+          body: '当前还没有源论文。只有先把材料放进来，后面的比较、证据和筛选页面才有意义。'
+        },
+        ready_to_process: {
+          label: '待处理',
+          title: '文件已经齐了，下一步该处理',
+          body: '集合里已经有文件，但主要研究页面还没有准备好，必须先跑处理。'
+        },
+        processing: {
+          label: '处理中',
+          title: '系统正在整理这个集合',
+          body: '如果你要盯进度，可以先停在这里；处理完成后再进入比较、证据或文档筛选。'
+        },
+        ready: {
+          label: '已就绪',
+          title: '主要集合视图已经可用',
+          body: '先从下面的集合级分析页面开始，Protocol 和图谱仍然属于次级分支。'
+        },
+        ready_with_limits: {
+          label: '部分就绪',
+          title: '这个集合已经可用，但不是每个结果都同样可靠',
+          body: '先看主要页面，再结合提醒和就绪状态判断哪些结果可以继续信任。'
+        },
+        failed: {
+          label: '需要关注',
+          title: '最近一次处理没有完整结束',
+          body: '先看任务状态和提醒，再决定是否重跑，不要直接相信当前集合结果。'
+        }
+      },
       statusLabel: '状态',
       statusUnknown: '未知',
       status: {
@@ -833,6 +971,24 @@ const translations: Record<Language, Translations> = {
       refresh: '刷新',
       uploadTitle: '源论文',
       uploadLead: '把这批论文放进集合后，系统会把它们整理成比较、证据和文档筛选几个主要视图。',
+      setupEmptyTitle: '先把论文加入这个集合',
+      setupEmptyLead: '先上传 PDF 或 TXT 文件。在没有源材料之前，工作区只应该服务这一个动作。',
+      setupEmptyHint: '上传后，Lens 会基于同一组论文准备比较、证据和文档筛选几个主要视图。',
+      setupReadyTitle: '文件已经齐了，下一步开始分析',
+      setupReadyLead: '这个集合已经有源论文，现在先跑处理，把主要研究页面准备出来。',
+      setupReadyHint: '先跑一次处理，解锁比较、证据和文档筛选；只有集合还没补全时，才继续加论文。',
+      processingTitle: '系统正在处理',
+      processingLead: '先在这里看进度。处理完成后，下一步才是进入主要集合页面。',
+      addPapersCta: '添加论文',
+      addMorePapersCta: '继续添加论文',
+      startUploadCta: '开始上传',
+      startAnalysisCta: '开始分析',
+      afterUploadTitle: '上传完成后可以做什么',
+      afterUploadLead: '当集合有足够源论文并完成处理后，下面这些页面才会成为真正的下一步。',
+      previewComparisonsLead: '先判断哪些结果真的能并排比较。',
+      previewEvidenceLead: '回到原文确认一个结论到底由什么支撑。',
+      previewDocumentsLead: '先把实验论文、综述和混合内容分开。',
+      previewProtocolLead: '只有在集合确实包含可复用过程时才进入这个分支。',
       uploadCta: '选择论文',
       uploadWhyTitle: '为什么要先上传',
       uploadWhyBody: '论文就是这个集合的原始材料。没有源论文，系统就无法抽取步骤、生成 SOP 或构建图谱。',
@@ -863,8 +1019,11 @@ const translations: Record<Language, Translations> = {
       primaryActionHelperDocuments: '先看文档筛选，分清哪些是实验论文，哪些是综述或混合内容。',
       primaryActionHelperProtocol: '如果还要整理实验步骤，再进入 Protocol 分支。',
       primaryActionHelperResults: '主结果已经就绪，先从集合级页面理解这批论文，再决定是否进入次级视图。',
+      readyViewsCount: '已就绪主页面 {count} 个',
       statusTitle: '当前状态',
       statusLead: '这里告诉你这个集合现在到了哪一步，以及下一步最值得做什么。',
+      processingOptionsTitle: '处理选项',
+      processingOptionsLead: '只有在你需要偏离默认处理方式时，才展开修改这些参数。',
       statusFiles: '已上传文件',
       statusLatestTask: '最近任务',
       statusStage: '当前阶段',
@@ -895,9 +1054,59 @@ const translations: Record<Language, Translations> = {
         not_applicable: '不适用',
         failed: '失败'
       },
-      resultsTitle: '主要入口',
-      resultsLead: '理解这批论文时，大多数人应该先从这几个页面开始。',
+      surfaceStates: {
+        empty: '空',
+        ready_to_process: '待处理',
+        processing: '处理中',
+        ready: '已就绪',
+        limited: '受限',
+        not_applicable: '不适用',
+        failed: '失败'
+      },
+      surfaceStateNotes: {
+        empty: '没有上传材料前，这个页面不会有内容。',
+        ready_to_process: '先回到工作区启动处理，这个页面才会准备好。',
+        processing: '当前处理任务正在为这个页面准备内容。',
+        ready: '可以开始查看。',
+        limited: '页面已经有部分结果，但其中一些内容仍然需要谨慎解读。',
+        not_applicable: '对于当前集合，这个页面不是默认应该使用的研究入口。',
+        failed: '最近一次处理在准备这个页面之前就失败了。'
+      },
+      surfaceStateCards: {
+        empty: {
+          title: '先上传论文，再打开这个页面',
+          body: '当前集合还没有源论文，所以这个页面没有可展示的内容。'
+        },
+        ready_to_process: {
+          title: '先完成处理，再打开这个页面',
+          body: '文件已经存在，但这个页面只有在集合处理完成后才会生成。'
+        },
+        processing: {
+          title: '这个页面还在生成中',
+          body: '系统正在处理集合。等主结果准备好之后，再回来查看。'
+        },
+        ready: {
+          title: '这个页面已经可用',
+          body: '集合已经为这个页面准备好了数据。'
+        },
+        limited: {
+          title: '这个页面目前只有部分可用',
+          body: '当前集合已经暴露出一些结果，但使用时应结合限制信息一起判断。'
+        },
+        not_applicable: {
+          title: '这个页面不适合作为当前集合的默认入口',
+          body: '基于当前集合状态，这不是一个优先应该使用的研究页面。'
+        },
+        failed: {
+          title: '这个页面未能成功生成',
+          body: '最近一次处理失败，或在生成这个页面之前中断了。'
+        }
+      },
+      primaryViewsTitle: '主要分析页面',
+      primaryViewsLead: '理解一个集合、判断哪些结果能信时，应当先从这几页开始。',
       resultsFlow: '先用比较做集合级判断，再用证据和文档筛选回看支撑和边界。',
+      viewStatusTitle: '就绪状态',
+      goToWorkspace: '返回工作区',
       resultComparisonsLead: '看这批论文里哪些结果真的能放在一起比较，哪些只是表面相似。',
       resultEvidenceLead: '回到原文，看一个结论到底是由哪张图、哪段文字、什么条件支撑的。',
       resultDocumentsLead: '先分清哪些是实验论文，哪些是综述，避免把不适合的材料继续往下用。',
@@ -906,8 +1115,8 @@ const translations: Record<Language, Translations> = {
       resultSopLead: '再看这里，把已有步骤整理成一份可审阅的实验方案草案。',
       resultGraphLead: '如果需要次级关系视图，再来这里看图谱。',
       resultLocked: '处理完成后可查看',
-      secondaryViewsTitle: '次级入口',
-      secondaryViewsLead: '这些页面有用，但不应该是理解一个 collection 的第一站。',
+      additionalViewsTitle: '附加分支与工具',
+      additionalViewsLead: '这些页面仍然有用，但应当跟在主集合分析之后，而不是取代主线。',
       filesLead: '在这里上传源论文。上传后文件会继续挂在这个集合下面。',
       filesCount: '当前集合共有 {count} 个文件',
       latestTaskTitle: '最近任务',
@@ -1008,10 +1217,10 @@ const translations: Record<Language, Translations> = {
       signalsLabel: '原因'
     },
     evidence: {
-      title: 'Evidence cards',
+      title: '证据',
       lead: '用这个页面确认一个结论到底由什么证据支撑，以及这些证据是在什么条件下成立的。',
-      loading: '正在加载 evidence cards...',
-      empty: '当前还没有 evidence cards。',
+      loading: '正在加载证据...',
+      empty: '当前还没有证据结果。',
       filterClaimType: '结论类型',
       filterTraceability: '追溯程度',
       filterSourceType: '证据来源',
@@ -1036,8 +1245,8 @@ const translations: Record<Language, Translations> = {
     comparisons: {
       title: '比较',
       lead: '用这个页面先判断这批论文里哪些结果真的可以比较。',
-      loading: '正在加载 comparison rows...',
-      empty: '当前还没有 comparison rows。',
+      loading: '正在加载比较结果...',
+      empty: '当前还没有比较结果。',
       summaryTitle: '比较状态概览',
       comparable: '可比',
       limited: '受限',
@@ -1205,7 +1414,7 @@ const translations: Record<Language, Translations> = {
     },
     graph: {
       title: '图谱',
-      lead: '使用 JSON 结果预览图谱，需要导出时再下载 GraphML。',
+      lead: '把图谱当成主要页面之后的次级关系视图，而不是集合理解的第一入口。',
       previewLoad: '刷新预览',
       previewLoading: '预览加载中...',
       previewLoaded: '预览已加载',

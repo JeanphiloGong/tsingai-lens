@@ -598,6 +598,30 @@ textarea {
   box-shadow: 0 8px 20px rgba(15, 40, 90, 0.12);
 }
 
+.subnav--secondary {
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.subnav__label {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 6px 8px 2px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-subtle);
+}
+
+.subnav--secondary a {
+  padding: 6px 12px;
+  font-size: 0.82rem;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -727,6 +751,39 @@ textarea {
   border-radius: 14px;
   border: 1px solid var(--color-line);
   background: rgba(255, 255, 255, 0.7);
+}
+
+.workspace-setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
+  gap: 16px;
+}
+
+.workspace-setup__hero {
+  display: grid;
+  gap: 14px;
+}
+
+.workspace-setup__sidebar {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.workspace-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.workspace-preview-card {
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-file-list {
+  margin: 0;
 }
 
 .result-text {
@@ -1447,6 +1504,10 @@ textarea {
   }
 
   .result-grid--tasks {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-setup {
     grid-template-columns: 1fr;
   }
 }

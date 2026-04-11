@@ -1,7 +1,12 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { errorMessage } from '../../../_shared/api';
-  import { fetchWorkspaceOverview, stageIsActionable, type WorkspaceOverview } from '../../../_shared/workspace';
+  import {
+    fetchWorkspaceOverview,
+    getWorkspaceSurfaceState,
+    stageIsActionable,
+    type WorkspaceOverview
+  } from '../../../_shared/workspace';
   import { t } from '../../../_shared/i18n';
 
   $: collectionId = $page.params.id ?? '';
@@ -30,6 +35,19 @@
   }
 
   $: protocolReady = stageIsActionable(workspace?.workflow.protocol);
+  $: protocolState = getWorkspaceSurfaceState(workspace, 'protocol');
+
+  function stateCardTitle() {
+    return protocolReady
+      ? $t('protocolHub.readyTitle')
+      : $t(`overview.surfaceStateCards.${protocolState}.title`);
+  }
+
+  function stateCardBody() {
+    return protocolReady
+      ? $t('protocolHub.readyBody')
+      : $t(`overview.surfaceStateCards.${protocolState}.body`);
+  }
 </script>
 
 <svelte:head>
@@ -54,10 +72,8 @@
   {:else if workspace}
     <div class="result-grid result-grid--tasks">
       <article class="result-card">
-        <h3>{protocolReady ? $t('protocolHub.readyTitle') : $t('protocolHub.limitedTitle')}</h3>
-        <p class="result-text">
-          {protocolReady ? $t('protocolHub.readyBody') : $t('protocolHub.limitedBody')}
-        </p>
+        <h3>{stateCardTitle()}</h3>
+        <p class="result-text">{stateCardBody()}</p>
       </article>
 
       <article class="result-card">
@@ -72,13 +88,18 @@
           <a class="btn btn--ghost btn--small" href={workspace.links.documents}>
             {$t('overview.nextDocuments')}
           </a>
-          <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol/steps`}>
-            {$t('protocolHub.stepsCta')}
-          </a>
-          <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol/sop`}>
-            {$t('protocolHub.sopCta')}
-          </a>
+          {#if protocolReady}
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol/steps`}>
+              {$t('protocolHub.stepsCta')}
+            </a>
+            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol/sop`}>
+              {$t('protocolHub.sopCta')}
+            </a>
+          {/if}
         </div>
+        {#if !protocolReady}
+          <p class="note">{$t('protocolHub.limitedBody')}</p>
+        {/if}
       </article>
     </div>
   {/if}

@@ -4,9 +4,14 @@
   import Graph from 'graphology';
   import forceAtlas2 from 'graphology-layout-forceatlas2';
   import Sigma from 'sigma';
-  import { errorMessage } from '../../../_shared/api';
+  import { errorMessage, isHttpStatusError } from '../../../_shared/api';
   import { buildCollectionGraphmlUrl, fetchCollectionGraph, type GraphEdge, type GraphNode } from '../../../_shared/graph';
   import { t } from '../../../_shared/i18n';
+  import {
+    fetchWorkspaceOverview,
+    getWorkspaceSurfaceState,
+    type WorkspaceOverview
+  } from '../../../_shared/workspace';
 
   const palette = ['#2b6ff7', '#3cc9f5', '#31d0aa', '#f2b646', '#f55f8d', '#8c7bff'];
 
@@ -24,6 +29,8 @@
   let loading = false;
   let error = '';
   let status = '';
+  let workspace: WorkspaceOverview | null = null;
+  let notFound = false;
   let visibleNodes = 0;
   let visibleEdges = 0;
   let graphContainer: HTMLDivElement | null = null;
@@ -33,6 +40,12 @@
   let selectedNode: NodeDetail | null = null;
   let selectedEdge: EdgeDetail | null = null;
   let loadedCollectionId = '';
+  $: surfaceState = getWorkspaceSurfaceState(workspace, 'graph');
+  $: showFallbackState =
+    Boolean(workspace) &&
+    !loading &&
+    !visibleNodes &&
+    (surfaceState !== 'ready' || notFound);
 
   function disposeRenderer() {
     if (renderer) {
@@ -173,12 +186,25 @@
     loading = true;
     error = '';
     status = '';
-    try {
-      const response = await fetchCollectionGraph(collectionId, {
+    notFound = false;
+
+    const [graphResult, workspaceResult] = await Promise.allSettled([
+      fetchCollectionGraph(collectionId, {
         maxNodes,
         minWeight,
         communityId: communityId.trim()
-      });
+      }),
+      fetchWorkspaceOverview(collectionId)
+    ]);
+
+    workspace = workspaceResult.status === 'fulfilled' ? workspaceResult.value : null;
+
+    try {
+      if (graphResult.status !== 'fulfilled') {
+        throw graphResult.reason;
+      }
+
+      const response = graphResult.value;
       graphMeta = {
         truncated: response.truncated,
         community: response.community
@@ -187,6 +213,7 @@
       status = response.truncated ? $t('graph.previewLoadedTruncated') : $t('graph.previewLoaded');
     } catch (err) {
       error = errorMessage(err);
+      notFound = isHttpStatusError(err, 404);
       graphMeta = null;
       disposeRenderer();
       graph = null;
@@ -244,6 +271,14 @@
     updateVisibility();
   }
 
+  function stateCardTitle() {
+    return $t(`overview.surfaceStateCards.${surfaceState}.title`);
+  }
+
+  function stateCardBody() {
+    return $t(`overview.surfaceStateCards.${surfaceState}.body`);
+  }
+
   $: if (graph) {
     updateVisibility();
   }
@@ -283,124 +318,138 @@
   </div>
 </section>
 
-<section class="card">
-  <div class="graph-preview-body">
-    <div class="graph-controls">
-      <div class="field">
-        <label for="maxNodes">{$t('graph.maxNodesLabel')}</label>
-        <input id="maxNodes" class="input" type="number" min="1" max="2000" bind:value={maxNodes} />
-      </div>
-      <div class="field">
-        <label for="minWeight">{$t('graph.minWeightLabel')}</label>
-        <input id="minWeight" class="input" type="number" min="0" step="0.1" bind:value={minWeight} />
-      </div>
-      <div class="field">
-        <label for="communityId">{$t('graph.communityLabel')}</label>
-        <input
-          id="communityId"
-          class="input"
-          bind:value={communityId}
-          placeholder={$t('graph.communityPlaceholder')}
-        />
-      </div>
-      <div class="field">
-        <label for="previewQuery">{$t('graph.searchLabel')}</label>
-        <input
-          id="previewQuery"
-          class="input"
-          bind:value={previewQuery}
-          placeholder={$t('graph.searchPlaceholder')}
-        />
-      </div>
+{#if showFallbackState}
+  <section class="card">
+    <article class="result-card">
+      <h3>{stateCardTitle()}</h3>
+      <p class="result-text">{stateCardBody()}</p>
       <div class="table-actions">
-        <button class="btn btn--ghost btn--small" type="button" on:click={resetFilters}>
-          {$t('graph.resetFilters')}
-        </button>
+        <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+          {$t('overview.goToWorkspace')}
+        </a>
       </div>
-      <div class="graph-stats">
-        <span>{$t('graph.visibleNodes')}: {visibleNodes}</span>
-        <span>{$t('graph.visibleEdges')}: {visibleEdges}</span>
-        {#if graphMeta?.community}
-          <span>{$t('graph.communityScope')}: {graphMeta.community}</span>
+    </article>
+  </section>
+{:else}
+  <section class="card">
+    <div class="graph-preview-body">
+      <div class="graph-controls">
+        <div class="field">
+          <label for="maxNodes">{$t('graph.maxNodesLabel')}</label>
+          <input id="maxNodes" class="input" type="number" min="1" max="2000" bind:value={maxNodes} />
+        </div>
+        <div class="field">
+          <label for="minWeight">{$t('graph.minWeightLabel')}</label>
+          <input id="minWeight" class="input" type="number" min="0" step="0.1" bind:value={minWeight} />
+        </div>
+        <div class="field">
+          <label for="communityId">{$t('graph.communityLabel')}</label>
+          <input
+            id="communityId"
+            class="input"
+            bind:value={communityId}
+            placeholder={$t('graph.communityPlaceholder')}
+          />
+        </div>
+        <div class="field">
+          <label for="previewQuery">{$t('graph.searchLabel')}</label>
+          <input
+            id="previewQuery"
+            class="input"
+            bind:value={previewQuery}
+            placeholder={$t('graph.searchPlaceholder')}
+          />
+        </div>
+        <div class="table-actions">
+          <button class="btn btn--ghost btn--small" type="button" on:click={resetFilters}>
+            {$t('graph.resetFilters')}
+          </button>
+        </div>
+        <div class="graph-stats">
+          <span>{$t('graph.visibleNodes')}: {visibleNodes}</span>
+          <span>{$t('graph.visibleEdges')}: {visibleEdges}</span>
+          {#if graphMeta?.community}
+            <span>{$t('graph.communityScope')}: {graphMeta.community}</span>
+          {/if}
+          {#if graphMeta?.truncated}
+            <span>{$t('graph.truncated')}</span>
+          {/if}
+        </div>
+        {#if status}
+          <div class="status" role="status">{status}</div>
         {/if}
-        {#if graphMeta?.truncated}
-          <span>{$t('graph.truncated')}</span>
+        {#if error}
+          <div class="status status--error" role="alert">{error}</div>
         {/if}
       </div>
-      {#if status}
-        <div class="status" role="status">{status}</div>
-      {/if}
-      {#if error}
-        <div class="status status--error" role="alert">{error}</div>
+
+      <div class="graph-canvas" bind:this={graphContainer} aria-label={$t('graph.previewCanvasLabel')}>
+        {#if loading}
+          <div class="graph-empty">{$t('graph.previewLoading')}</div>
+        {:else if !visibleNodes}
+          <div class="graph-empty">{$t('graph.previewEmpty')}</div>
+        {/if}
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>{$t('graph.detailsTitle')}</h3>
+    <div class="graph-details">
+      {#if selectedNode}
+        <div class="graph-details__header">
+          <span>{$t('graph.detailsNode')}</span>
+          <button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
+            {$t('graph.detailsClear')}
+          </button>
+        </div>
+        <div class="detail-primary">
+          <span class="detail-name">{selectedNode.label}</span>
+          {#if selectedNode.type}
+            <span class="detail-tag">{selectedNode.type}</span>
+          {/if}
+        </div>
+        <dl class="detail-list">
+          <div class="detail-row">
+            <dt>{$t('graph.detailDegree')}</dt>
+            <dd>{selectedNode.degree ?? '--'}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>{$t('graph.detailFrequency')}</dt>
+            <dd>{selectedNode.frequency ?? '--'}</dd>
+          </div>
+          <div class="detail-row detail-row--wide">
+            <dt>{$t('graph.detailDescription')}</dt>
+            <dd>{selectedNode.description || '--'}</dd>
+          </div>
+        </dl>
+      {:else if selectedEdge}
+        <div class="graph-details__header">
+          <span>{$t('graph.detailsEdge')}</span>
+          <button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
+            {$t('graph.detailsClear')}
+          </button>
+        </div>
+        <div class="detail-primary">
+          <span class="detail-name">{selectedEdge.sourceLabel} -> {selectedEdge.targetLabel}</span>
+        </div>
+        <dl class="detail-list">
+          <div class="detail-row">
+            <dt>{$t('graph.detailWeight')}</dt>
+            <dd>{selectedEdge.weight ?? '--'}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>{$t('graph.detailRank')}</dt>
+            <dd>{selectedEdge.rank ?? '--'}</dd>
+          </div>
+          <div class="detail-row detail-row--wide">
+            <dt>{$t('graph.detailDescription')}</dt>
+            <dd>{selectedEdge.description || '--'}</dd>
+          </div>
+        </dl>
+      {:else}
+        <div class="graph-empty">{$t('graph.detailsEmpty')}</div>
       {/if}
     </div>
-
-    <div class="graph-canvas" bind:this={graphContainer} aria-label={$t('graph.previewCanvasLabel')}>
-      {#if loading}
-        <div class="graph-empty">{$t('graph.previewLoading')}</div>
-      {:else if !visibleNodes}
-        <div class="graph-empty">{$t('graph.previewEmpty')}</div>
-      {/if}
-    </div>
-  </div>
-</section>
-
-<section class="card">
-  <h3>{$t('graph.detailsTitle')}</h3>
-  <div class="graph-details">
-    {#if selectedNode}
-      <div class="graph-details__header">
-        <span>{$t('graph.detailsNode')}</span>
-        <button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
-          {$t('graph.detailsClear')}
-        </button>
-      </div>
-      <div class="detail-primary">
-        <span class="detail-name">{selectedNode.label}</span>
-        {#if selectedNode.type}
-          <span class="detail-tag">{selectedNode.type}</span>
-        {/if}
-      </div>
-      <dl class="detail-list">
-        <div class="detail-row">
-          <dt>{$t('graph.detailDegree')}</dt>
-          <dd>{selectedNode.degree ?? '--'}</dd>
-        </div>
-        <div class="detail-row">
-          <dt>{$t('graph.detailFrequency')}</dt>
-          <dd>{selectedNode.frequency ?? '--'}</dd>
-        </div>
-        <div class="detail-row detail-row--wide">
-          <dt>{$t('graph.detailDescription')}</dt>
-          <dd>{selectedNode.description || '--'}</dd>
-        </div>
-      </dl>
-    {:else if selectedEdge}
-      <div class="graph-details__header">
-        <span>{$t('graph.detailsEdge')}</span>
-        <button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
-          {$t('graph.detailsClear')}
-        </button>
-      </div>
-      <div class="detail-primary">
-        <span class="detail-name">{selectedEdge.sourceLabel} -> {selectedEdge.targetLabel}</span>
-      </div>
-      <dl class="detail-list">
-        <div class="detail-row">
-          <dt>{$t('graph.detailWeight')}</dt>
-          <dd>{selectedEdge.weight ?? '--'}</dd>
-        </div>
-        <div class="detail-row">
-          <dt>{$t('graph.detailRank')}</dt>
-          <dd>{selectedEdge.rank ?? '--'}</dd>
-        </div>
-        <div class="detail-row detail-row--wide">
-          <dt>{$t('graph.detailDescription')}</dt>
-          <dd>{selectedEdge.description || '--'}</dd>
-        </div>
-      </dl>
-    {:else}
-      <div class="graph-empty">{$t('graph.detailsEmpty')}</div>
-    {/if}
-  </div>
-</section>
+  </section>
+{/if}

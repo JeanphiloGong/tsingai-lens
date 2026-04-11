@@ -1,7 +1,7 @@
 import type { Collection } from './collections';
 import { requestJson } from './api';
 import { USE_API_FIXTURES } from './base';
-import type { Task } from './tasks';
+import { isTaskActive, type Task } from './tasks';
 
 export type WorkspaceArtifactStatus = {
   output_path: string;
@@ -69,6 +69,27 @@ export type WorkspaceOverview = {
   capabilities: WorkspaceCapabilities;
   links: WorkspaceLinks;
 };
+
+export type CollectionWorkspaceState =
+  | 'empty'
+  | 'ready_to_process'
+  | 'processing'
+  | 'ready'
+  | 'ready_with_limits'
+  | 'failed';
+
+export type WorkspaceSurfaceState =
+  | 'empty'
+  | 'ready_to_process'
+  | 'processing'
+  | 'ready'
+  | 'limited'
+  | 'not_applicable'
+  | 'failed';
+
+export type WorkspaceSurfaceKey = keyof WorkspaceWorkflow | 'graph';
+
+const PRIMARY_WORKFLOW_KEYS = ['documents', 'evidence', 'comparisons'] as const;
 
 const DEFAULT_DOC_TYPE_COUNTS = {
   experimental: 0,
@@ -151,6 +172,76 @@ export function stageIsActionable(status: WorkflowStageStatus | null | undefined
   return status === 'ready' || status === 'limited';
 }
 
+export function countActionablePrimaryViews(workspace: WorkspaceOverview | null | undefined) {
+  if (!workspace) return 0;
+  return PRIMARY_WORKFLOW_KEYS.filter((key) => stageIsActionable(workspace.workflow[key])).length;
+}
+
+export function getCollectionWorkspaceState(
+  workspace: WorkspaceOverview | null | undefined
+): CollectionWorkspaceState {
+  if (!workspace || workspace.file_count < 1) {
+    return 'empty';
+  }
+
+  if (isTaskActive(workspace.latest_task)) {
+    return 'processing';
+  }
+
+  const actionablePrimaryViews = countActionablePrimaryViews(workspace);
+  const failedPrimaryViews = PRIMARY_WORKFLOW_KEYS.filter((key) => workspace.workflow[key] === 'failed').length;
+
+  if (actionablePrimaryViews === 0) {
+    return failedPrimaryViews > 0 || workspace.latest_task?.status === 'failed'
+      ? 'failed'
+      : 'ready_to_process';
+  }
+
+  const hasLimits =
+    Object.values(workspace.workflow).some((status) =>
+      ['limited', 'not_applicable', 'failed'].includes(status)
+    ) || workspace.warnings.length > 0;
+
+  return hasLimits ? 'ready_with_limits' : 'ready';
+}
+
+export function getWorkspaceSurfaceState(
+  workspace: WorkspaceOverview | null | undefined,
+  surface: WorkspaceSurfaceKey
+): WorkspaceSurfaceState {
+  if (!workspace || workspace.file_count < 1) {
+    return 'empty';
+  }
+
+  if (surface === 'graph') {
+    if (
+      workspace.capabilities.can_view_graph ||
+      workspace.capabilities.can_download_graphml ||
+      workspace.artifacts.graph_ready ||
+      workspace.artifacts.graphml_ready
+    ) {
+      return 'ready';
+    }
+
+    if (isTaskActive(workspace.latest_task)) {
+      return 'processing';
+    }
+
+    if (workspace.latest_task?.status === 'failed') {
+      return 'failed';
+    }
+
+    return countActionablePrimaryViews(workspace) > 0 ? 'not_applicable' : 'ready_to_process';
+  }
+
+  const stage = workspace.workflow[surface];
+  if (stage === 'not_started') {
+    return isTaskActive(workspace.latest_task) ? 'processing' : 'ready_to_process';
+  }
+
+  return stage;
+}
+
 function normalizeCollection(item: unknown): Collection | null {
   if (!item || typeof item !== 'object') return null;
   const record = item as Record<string, unknown>;
@@ -206,8 +297,7 @@ function deriveLegacyWorkflow(
   latestTask: Task | null,
   artifacts: WorkspaceArtifactStatus
 ): WorkspaceWorkflow {
-  const activeTask =
-    latestTask?.status === 'queued' || latestTask?.status === 'running' ? latestTask : null;
+  const activeTask = isTaskActive(latestTask) ? latestTask : null;
   const failedTask = latestTask?.status === 'failed';
 
   const documents =

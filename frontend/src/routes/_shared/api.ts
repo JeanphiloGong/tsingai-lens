@@ -10,6 +10,11 @@ export function errorMessage(error: unknown) {
   return message;
 }
 
+export function isHttpStatusError(error: unknown, status: number) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.startsWith(`${status} `);
+}
+
 export function formatResult(data: unknown) {
   if (data === null || data === undefined) return '';
   return typeof data === 'string' ? data : JSON.stringify(data, null, 2);

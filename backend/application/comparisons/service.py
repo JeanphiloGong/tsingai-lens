@@ -388,6 +388,10 @@ class ComparisonService:
             return value
         if isinstance(value, tuple):
             return list(value)
+        if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
+            converted = value.tolist()
+            if converted is not value:
+                return self._normalize_object(converted)
         if isinstance(value, str):
             text = value.strip()
             if not text:
@@ -400,7 +404,7 @@ class ComparisonService:
                 except (ValueError, SyntaxError):
                     return text
             return text
-        if pd.isna(value):
+        if isinstance(value, float) and pd.isna(value):
             return None
         return value
 

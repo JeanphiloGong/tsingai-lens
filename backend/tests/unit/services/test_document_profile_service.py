@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from application.documents.service import DocumentProfileService
@@ -114,3 +115,29 @@ def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_p
         "yes": 1,
     }
     assert output_dir.joinpath("document_profiles.parquet").exists()
+
+
+def test_document_profile_service_normalizes_numpy_array_columns():
+    profile_service = DocumentProfileService()
+
+    profiles = pd.DataFrame(
+        [
+            {
+                "document_id": "doc-1",
+                "collection_id": "col-1",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": np.array(["methods density", "condition completeness"]),
+                "parsing_warnings": np.array(["condition_context_weak"]),
+                "confidence": 0.91,
+            }
+        ]
+    )
+
+    normalized = profile_service._normalize_profiles_table(profiles, "col-1")
+
+    assert normalized.iloc[0]["protocol_extractability_signals"] == [
+        "methods density",
+        "condition completeness",
+    ]
+    assert normalized.iloc[0]["parsing_warnings"] == ["condition_context_weak"]

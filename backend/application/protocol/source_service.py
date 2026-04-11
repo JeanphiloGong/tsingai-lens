@@ -112,6 +112,10 @@ def _listify(value: Any) -> list[Any]:
         return value
     if isinstance(value, (tuple, set)):
         return list(value)
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
+        converted = value.tolist()
+        if converted is not value:
+            return _listify(converted)
     if isinstance(value, str):
         text = value.strip()
         if not text:
@@ -124,6 +128,6 @@ def _listify(value: Any) -> list[Any]:
             if isinstance(parsed, list):
                 return parsed
         return [text]
-    if pd.isna(value):
+    if isinstance(value, float) and pd.isna(value):
         return []
     return [value]

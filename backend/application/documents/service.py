@@ -463,6 +463,10 @@ class DocumentProfileService:
             return [str(item) for item in value if str(item).strip()]
         if isinstance(value, tuple):
             return [str(item) for item in value if str(item).strip()]
+        if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
+            converted = value.tolist()
+            if converted is not value:
+                return self._normalize_string_list(converted)
         if isinstance(value, str):
             text = value.strip()
             if not text:
@@ -475,6 +479,6 @@ class DocumentProfileService:
                 if isinstance(parsed, list):
                     return [str(item) for item in parsed if str(item).strip()]
             return [text]
-        if pd.isna(value):
+        if isinstance(value, float) and pd.isna(value):
             return []
         return [str(value)]

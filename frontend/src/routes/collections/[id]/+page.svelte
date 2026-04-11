@@ -12,7 +12,11 @@
     type ArtifactStatus,
     type Task
   } from '../../_shared/tasks';
-  import { fetchWorkspaceOverview, type WorkspaceOverview } from '../../_shared/workspace';
+  import {
+    fetchWorkspaceOverview,
+    stageIsActionable,
+    type WorkspaceOverview
+  } from '../../_shared/workspace';
 
   let workspace: WorkspaceOverview | null = null;
   let loading = false;
@@ -213,18 +217,21 @@
     return `${(mb / 1024).toFixed(1)} GB`;
   }
 
-  function artifactRows() {
-    const artifacts = latestArtifacts ?? workspace?.artifacts;
-    if (!artifacts) return [];
-
+  function workflowRows() {
+    if (!workspace) return [];
     return [
-      ['documents', artifacts.documents_ready],
-      ['graph', artifacts.graph_ready],
-      ['graphml', artifacts.graphml_ready],
-      ['sections', artifacts.sections_ready],
-      ['procedureBlocks', artifacts.procedure_blocks_ready],
-      ['protocolSteps', artifacts.protocol_steps_ready]
-    ] as Array<[string, boolean]>;
+      ['documents', workspace.workflow.documents],
+      ['evidence', workspace.workflow.evidence],
+      ['comparisons', workspace.workflow.comparisons],
+      ['protocol', workspace.workflow.protocol]
+    ] as Array<[string, string]>;
+  }
+
+  function formatWorkflowStatus(status?: string | null) {
+    if (!status) return $t('overview.statusUnknown');
+    const key = `overview.workflowStates.${status}`;
+    const translated = $t(key);
+    return translated === key ? status : translated;
   }
 
   function getFileLabel(file: CollectionFile) {
@@ -239,8 +246,12 @@
     if (!workspace) return $t('overview.primaryActionUpload');
     if (!workspace.file_count) return $t('overview.primaryActionUpload');
     if (workspace.latest_task && isTaskActive(workspace.latest_task)) return $t('overview.primaryActionTrack');
-    if (workspace.capabilities.can_generate_sop) return $t('overview.primaryActionSop');
-    if (workspace.capabilities.can_view_protocol_steps) return $t('overview.primaryActionSteps');
+    if (workspace.capabilities.can_view_comparisons) return $t('overview.primaryActionComparisons');
+    if (workspace.capabilities.can_view_evidence) return $t('overview.primaryActionEvidence');
+    if (workspace.capabilities.can_view_documents) return $t('overview.primaryActionDocuments');
+    if (workspace.capabilities.can_generate_sop || workspace.capabilities.can_view_protocol_steps) {
+      return $t('overview.primaryActionProtocol');
+    }
     return $t('overview.primaryActionProcess');
   }
 
@@ -248,9 +259,11 @@
     if (!workspace) return $t('overview.primaryActionHelperUpload');
     if (!workspace.file_count) return $t('overview.primaryActionHelperUpload');
     if (workspace.latest_task && isTaskActive(workspace.latest_task)) return $t('overview.primaryActionHelperTrack');
-    if (workspace.capabilities.can_generate_sop || workspace.capabilities.can_view_protocol_steps) {
-      return $t('overview.primaryActionHelperResults');
-    }
+    if (workspace.capabilities.can_view_comparisons) return $t('overview.primaryActionHelperComparisons');
+    if (workspace.capabilities.can_view_evidence) return $t('overview.primaryActionHelperEvidence');
+    if (workspace.capabilities.can_view_documents) return $t('overview.primaryActionHelperDocuments');
+    if (workspace.capabilities.can_generate_sop || workspace.capabilities.can_view_protocol_steps)
+      return $t('overview.primaryActionHelperProtocol');
     return $t('overview.primaryActionHelperProcess');
   }
 
@@ -268,13 +281,23 @@
       return;
     }
 
-    if (workspace.capabilities.can_generate_sop) {
-      location.href = `/collections/${collectionId}/sop`;
+    if (workspace.capabilities.can_view_comparisons) {
+      location.href = workspace.links.comparisons;
       return;
     }
 
-    if (workspace.capabilities.can_view_protocol_steps) {
-      location.href = `/collections/${collectionId}/steps`;
+    if (workspace.capabilities.can_view_evidence) {
+      location.href = workspace.links.evidence;
+      return;
+    }
+
+    if (workspace.capabilities.can_view_documents) {
+      location.href = workspace.links.documents;
+      return;
+    }
+
+    if (workspace.capabilities.can_generate_sop || workspace.capabilities.can_view_protocol_steps) {
+      location.href = workspace.links.protocol;
       return;
     }
 
@@ -378,9 +401,10 @@
         <div class="detail-section__title">{$t('overview.uploadAfterTitle')}</div>
         <p class="result-text">{$t('overview.uploadAfterBody')}</p>
         <ul class="result-list">
-          <li>{$t('overview.uploadAfterSteps')}</li>
-          <li>{$t('overview.uploadAfterSop')}</li>
-          <li>{$t('overview.uploadAfterGraph')}</li>
+          <li>{$t('overview.uploadAfterComparisons')}</li>
+          <li>{$t('overview.uploadAfterEvidence')}</li>
+          <li>{$t('overview.uploadAfterDocuments')}</li>
+          <li>{$t('overview.uploadAfterProtocol')}</li>
         </ul>
       </div>
     </div>
@@ -584,21 +608,38 @@
       </div>
 
       <div class="result-card">
-        <h4>{$t('overview.statusArtifactsTitle')}</h4>
-        {#if artifactRows().length}
+        <h4>{$t('overview.statusWorkflowTitle')}</h4>
+        <p class="meta-text">{$t('overview.statusWorkflowLead')}</p>
+        {#if workflowRows().length}
           <div class="detail-chips">
-            {#each artifactRows() as [key, ready]}
-              <span class={`detail-chip ${ready ? '' : 'detail-chip--muted'}`}>
-                {$t(`overview.artifacts.${key}`)}: {ready ? $t('overview.ready') : $t('overview.pending')}
+            {#each workflowRows() as [key, status]}
+              <span class={`detail-chip ${stageIsActionable(status as any) ? '' : 'detail-chip--muted'}`}>
+                {$t(`collection.tabs.${key}`)}: {formatWorkflowStatus(status)}
               </span>
             {/each}
           </div>
         {:else}
-          <p class="note">{$t('overview.statusArtifactsEmpty')}</p>
+          <p class="note">{$t('overview.statusWorkflowEmpty')}</p>
         {/if}
       </div>
     </div>
   </section>
+
+  {#if workspace.warnings.length}
+    <section class="card">
+      <div class="card-header-inline">
+        <div>
+          <h3>{$t('overview.warningsTitle')}</h3>
+          <p class="meta-text">{$t('overview.warningsLead')}</p>
+        </div>
+      </div>
+      <ul class="result-list">
+        {#each workspace.warnings as item}
+          <li>{item}</li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   <section class="card">
     <div class="card-header-inline">
@@ -612,13 +653,13 @@
     <div class="result-grid result-grid--tasks">
       <div class="result-card">
         <div class="table-main">
-          <div class="table-title">{$t('overview.capabilities.steps')}</div>
-          <div class="table-sub">{$t('overview.resultStepsLead')}</div>
+          <div class="table-title">{$t('overview.capabilities.comparisons')}</div>
+          <div class="table-sub">{$t('overview.resultComparisonsLead')}</div>
         </div>
-        {#if workspace.capabilities.can_view_protocol_steps}
+        {#if workspace.capabilities.can_view_comparisons}
           <div class="table-actions">
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/steps`}>
-              {$t('overview.nextSteps')}
+            <a class="btn btn--ghost btn--small" href={workspace.links.comparisons}>
+              {$t('overview.nextComparisons')}
             </a>
           </div>
         {:else}
@@ -628,13 +669,45 @@
 
       <div class="result-card">
         <div class="table-main">
-          <div class="table-title">{$t('overview.capabilities.sop')}</div>
-          <div class="table-sub">{$t('overview.resultSopLead')}</div>
+          <div class="table-title">{$t('overview.capabilities.evidence')}</div>
+          <div class="table-sub">{$t('overview.resultEvidenceLead')}</div>
         </div>
-        {#if workspace.capabilities.can_generate_sop}
+        {#if workspace.capabilities.can_view_evidence}
           <div class="table-actions">
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
-              {$t('overview.nextSop')}
+            <a class="btn btn--ghost btn--small" href={workspace.links.evidence}>
+              {$t('overview.nextEvidence')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.documents')}</div>
+          <div class="table-sub">{$t('overview.resultDocumentsLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_view_documents}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={workspace.links.documents}>
+              {$t('overview.nextDocuments')}
+            </a>
+          </div>
+        {:else}
+          <p class="note">{$t('overview.resultLocked')}</p>
+        {/if}
+      </div>
+
+      <div class="result-card">
+        <div class="table-main">
+          <div class="table-title">{$t('overview.capabilities.protocol')}</div>
+          <div class="table-sub">{$t('overview.resultProtocolLead')}</div>
+        </div>
+        {#if workspace.capabilities.can_generate_sop || workspace.capabilities.can_view_protocol_steps}
+          <div class="table-actions">
+            <a class="btn btn--ghost btn--small" href={workspace.links.protocol}>
+              {$t('overview.nextProtocol')}
             </a>
           </div>
         {:else}

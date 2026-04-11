@@ -25,6 +25,9 @@ to code.
 
 - [`docs/frontend-plan.md`](docs/frontend-plan.md)
   Frontend same-origin API integration guide
+- [`docs/lens-v1-interface-spec.md`](docs/lens-v1-interface-spec.md)
+  Lens v1 collection UI migration spec for workspace, comparisons, evidence,
+  documents, protocol, and graph surfaces
 - [`src/routes/_shared/README.md`](src/routes/_shared/README.md)
   Shared route helper ownership and boundaries
 - [`src/routes/collections/README.md`](src/routes/collections/README.md)

@@ -137,15 +137,20 @@
       <p class="lead">{$t('steps.lead')}</p>
       <p class="note">{$t('steps.purpose')}</p>
     </div>
-    {#if canViewProtocolSteps()}
-      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
-        {$t('steps.nextSop')}
+    <div class="table-actions">
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol`}>
+        {$t('protocolHub.title')}
       </a>
-    {:else}
-      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
-        {$t('steps.backToWorkspace')}
-      </a>
-    {/if}
+      {#if canViewProtocolSteps()}
+        <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol/sop`}>
+          {$t('steps.nextSop')}
+        </a>
+      {:else}
+        <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+          {$t('steps.backToWorkspace')}
+        </a>
+      {/if}
+    </div>
   </div>
 
   <form on:submit={submit}>
@@ -173,7 +178,15 @@
       </div>
       <div class="field">
         <label for="limit">{$t('steps.limitLabel')}</label>
-        <input id="limit" class="input" type="number" min="1" max="100" bind:value={limit} disabled={!canViewProtocolSteps()} />
+        <input
+          id="limit"
+          class="input"
+          type="number"
+          min="1"
+          max="100"
+          bind:value={limit}
+          disabled={!canViewProtocolSteps()}
+        />
       </div>
     </div>
     <div class="table-actions">
@@ -241,15 +254,20 @@
       <h3>{$t('steps.resultTitle')}</h3>
       <p class="meta-text">{$t('steps.resultCount', { count: total })}</p>
     </div>
-    {#if canViewProtocolSteps()}
-      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/sop`}>
-        {$t('steps.nextSop')}
+    <div class="table-actions">
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol`}>
+        {$t('protocolHub.title')}
       </a>
-    {:else}
-      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
-        {$t('steps.backToWorkspace')}
-      </a>
-    {/if}
+      {#if canViewProtocolSteps()}
+        <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol/sop`}>
+          {$t('steps.nextSop')}
+        </a>
+      {:else}
+        <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
+          {$t('steps.backToWorkspace')}
+        </a>
+      {/if}
+    </div>
   </div>
 
   {#if loading}

@@ -66,16 +66,28 @@
     {$t('collection.tabs.overview')}
   </a>
   <a
-    href={`/collections/${collectionId}/steps`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/steps`)}
+    href={`/collections/${collectionId}/comparisons`}
+    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`)}
   >
-    {$t('collection.tabs.steps')}
+    {$t('collection.tabs.comparisons')}
   </a>
   <a
-    href={`/collections/${collectionId}/sop`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/sop`)}
+    href={`/collections/${collectionId}/evidence`}
+    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`)}
   >
-    {$t('collection.tabs.sop')}
+    {$t('collection.tabs.evidence')}
+  </a>
+  <a
+    href={`/collections/${collectionId}/documents`}
+    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/documents`)}
+  >
+    {$t('collection.tabs.documents')}
+  </a>
+  <a
+    href={`/collections/${collectionId}/protocol`}
+    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`)}
+  >
+    {$t('collection.tabs.protocol')}
   </a>
   <a
     href={`/collections/${collectionId}/graph`}

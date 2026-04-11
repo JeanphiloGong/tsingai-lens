@@ -99,9 +99,14 @@
       <p class="lead">{$t('sop.lead')}</p>
       <p class="note">{$t('sop.purpose')}</p>
     </div>
-    <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
-      {$t('sop.backToWorkspace')}
-    </a>
+    <div class="table-actions">
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol`}>
+        {$t('protocolHub.title')}
+      </a>
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol/steps`}>
+        {$t('sop.viewSteps')}
+      </a>
+    </div>
   </div>
 
   {#if workspaceLoading}
@@ -159,8 +164,11 @@
           <li>{$t('sop.notReadyStepThree')}</li>
         </ul>
         <div class="table-actions">
-          <a class="btn btn--primary" href={`/collections/${collectionId}`}>
-            {$t('sop.goProcess')}
+          <a class="btn btn--primary" href={`/collections/${collectionId}/protocol`}>
+            {$t('protocolHub.title')}
+          </a>
+          <a class="btn btn--ghost" href={`/collections/${collectionId}`}>
+            {$t('sop.backToWorkspace')}
           </a>
         </div>
       </article>
@@ -218,7 +226,7 @@
         <h3>{$t('sop.resultTitle')}</h3>
         <p class="meta-text">{result.sop_draft.review_status || 'draft'}</p>
       </div>
-      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/steps`}>
+      <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/protocol/steps`}>
         {$t('sop.viewSteps')}
       </a>
     </div>

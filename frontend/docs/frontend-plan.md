@@ -2,6 +2,9 @@
 
 本文档描述当前前端的浏览器公开合同，目标是让产品流程始终通过同源入口访问后端。
 
+如果要看下一阶段 collection UI 的页面结构、路由迁移和 fixture 策略，请同时参考
+[`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)。
+
 ## 当前合同
 - 浏览器公开业务 API 统一走 `/api/v1/*`
 - 文档与 OpenAPI 入口统一走 `/api/*`

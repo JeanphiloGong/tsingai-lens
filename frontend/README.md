@@ -28,6 +28,9 @@ to code.
 - [`docs/lens-v1-interface-spec.md`](docs/lens-v1-interface-spec.md)
   Lens v1 collection UI migration spec for workspace, comparisons, evidence,
   documents, protocol, and graph surfaces
+- [`docs/collection-ui-restructure-proposal.md`](docs/collection-ui-restructure-proposal.md)
+  Narrow proposal for collection UI information architecture, state machine,
+  and page hierarchy cleanup after the first Lens v1 frontend wave
 - [`src/routes/_shared/README.md`](src/routes/_shared/README.md)
   Shared route helper ownership and boundaries
 - [`src/routes/collections/README.md`](src/routes/collections/README.md)

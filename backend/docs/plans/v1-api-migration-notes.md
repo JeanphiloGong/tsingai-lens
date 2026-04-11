@@ -1,9 +1,9 @@
-# Backend V1 API Contract Notes
+# Backend V1 API Migration Notes
 
 ## Purpose
 
 The authoritative frontend/backend API contract now lives in
-[`api.md`](api.md).
+[`../specs/api.md`](../specs/api.md).
 
 This document remains only as a backend-local companion note for implementation
 sequencing and migration decisions behind that contract.
@@ -31,7 +31,7 @@ The recommended backend order remains:
 
 ## Related Docs
 
-- [`api.md`](api.md)
-- [`backend-domain-architecture.md`](backend-domain-architecture.md)
-- [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)
-- [`../../docs/40-specs/lens-v1-definition.md`](../../docs/40-specs/lens-v1-definition.md)
+- [`../specs/api.md`](../specs/api.md)
+- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+- [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
+- [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)

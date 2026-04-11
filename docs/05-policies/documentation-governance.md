@@ -275,7 +275,7 @@ Recommended automation after adoption stabilizes:
 3. Keep `docs/README.md` as the shared docs index and use module root
    `README.md` files as the primary backend and frontend entry pages.
 4. Reclassify existing docs when they are touched:
-   - `backend/docs/api.md` -> backend `spec`
+   - `backend/docs/specs/api.md` -> backend `spec`
    - `frontend/docs/frontend-plan.md` -> frontend `guide` or `spec`
    - legacy research notes -> `research-note`
 5. Migrate legacy research material out of root-level catch-all locations into

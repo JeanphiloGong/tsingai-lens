@@ -25,10 +25,10 @@ to code.
 
 - [`docs/frontend-plan.md`](docs/frontend-plan.md)
   Frontend same-origin API integration guide
-- [`docs/lens-v1-interface-spec.md`](docs/lens-v1-interface-spec.md)
+- [`src/routes/collections/lens-v1-interface-spec.md`](src/routes/collections/lens-v1-interface-spec.md)
   Lens v1 collection UI migration spec for workspace, comparisons, evidence,
   documents, protocol, and graph surfaces
-- [`docs/collection-ui-restructure-proposal.md`](docs/collection-ui-restructure-proposal.md)
+- [`src/routes/collections/collection-ui-restructure-proposal.md`](src/routes/collections/collection-ui-restructure-proposal.md)
   Narrow proposal for collection UI information architecture, state machine,
   and page hierarchy cleanup after the first Lens v1 frontend wave
 - [`src/routes/_shared/README.md`](src/routes/_shared/README.md)

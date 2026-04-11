@@ -245,7 +245,7 @@ readiness 类错误至少应包含：
 
 ## 相关文档
 
-- [`backend-domain-architecture.md`](backend-domain-architecture.md)
-- [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)
-- [`../../docs/40-specs/lens-v1-definition.md`](../../docs/40-specs/lens-v1-definition.md)
-- [`../../docs/40-specs/lens-core-artifact-contracts.md`](../../docs/40-specs/lens-core-artifact-contracts.md)
+- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+- [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
+- [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)
+- [`../../../docs/40-specs/lens-core-artifact-contracts.md`](../../../docs/40-specs/lens-core-artifact-contracts.md)

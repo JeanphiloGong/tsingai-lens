@@ -51,27 +51,27 @@ larger flat service bag.
 
 ## Local Navigation
 
-- [`api.md`](api.md)
+- [`../specs/api.md`](../specs/api.md)
   Authoritative frontend/backend API contract
-- [`backend-v1-api-contract.md`](backend-v1-api-contract.md)
+- [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)
   Backend-local implementation notes behind the agreed API contract
-- [`backend-domain-architecture.md`](backend-domain-architecture.md)
+- [`domain-architecture.md`](domain-architecture.md)
   Target backend-local domain seams and packaging direction
-- [`backend-goal-core-source-layering.md`](backend-goal-core-source-layering.md)
+- [`goal-core-source-layering.md`](goal-core-source-layering.md)
   Backend-local proposal for goal-driven entry, collection intelligence core,
   and source acquisition seams
-- [`backend-goal-core-source-implementation-plan.md`](backend-goal-core-source-implementation-plan.md)
+- [`../plans/goal-core-source-implementation-plan.md`](../plans/goal-core-source-implementation-plan.md)
   Backend-local execution plan for Core hardening, protocol decoupling, goal
   contracts, and source expansion
-- [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)
+- [`application-layer-boundary.md`](application-layer-boundary.md)
   Boundary ADR
-- [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)
+- [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
   Draft backend-local implementation plan for Lens v1 evidence-first parsing
-- [`backend-ops.md`](backend-ops.md)
+- [`../runbooks/backend-ops.md`](../runbooks/backend-ops.md)
   Local development and operations runbook
-- [`../application/README.md`](../application/README.md)
+- [`../../application/README.md`](../../application/README.md)
   Use-case orchestration boundary
-- [`../retrieval/README.md`](../retrieval/README.md)
+- [`../../retrieval/README.md`](../../retrieval/README.md)
   Retrieval engine boundary
-- [`../infra/persistence/README.md`](../infra/persistence/README.md)
+- [`../../infra/persistence/README.md`](../../infra/persistence/README.md)
   Persistence adapter boundary

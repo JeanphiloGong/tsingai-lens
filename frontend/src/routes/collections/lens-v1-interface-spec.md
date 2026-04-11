@@ -457,6 +457,6 @@ Fixture-backed E2E is acceptable for not-yet-landed APIs.
 
 ## Related Docs
 
-- [`frontend-plan.md`](frontend-plan.md)
-- [`../../backend/docs/api.md`](../../backend/docs/api.md)
-- [`../../backend/docs/backend-domain-architecture.md`](../../backend/docs/backend-domain-architecture.md)
+- [`../../../docs/frontend-plan.md`](../../../docs/frontend-plan.md)
+- [`../../../../backend/docs/specs/api.md`](../../../../backend/docs/specs/api.md)
+- [`../../../../backend/docs/architecture/domain-architecture.md`](../../../../backend/docs/architecture/domain-architecture.md)

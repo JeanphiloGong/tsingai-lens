@@ -13,6 +13,8 @@ This repository uses an ownership-first documentation model:
 - `backend/README.md` is the backend module entry page
 - `frontend/README.md` is the frontend module entry page
 - `backend/docs/` and `frontend/docs/` hold formal module-owned docs
+- narrower node-owned docs may live near the owning route or package when the
+  knowledge is not module-wide
 - node-local `README.md` files near code own submodule purpose and navigation
 - `docs/research/` remains non-authoritative research context
 
@@ -84,16 +86,22 @@ owned and frontend-owned detail should stay with the owning module.
   Active shared Lens mission and long-lived product positioning
 - [`docs/05-policies/documentation-governance.md`](05-policies/documentation-governance.md)
   Active repository documentation governance policy
-- [`backend/docs/backend-application-layer-boundary.md`](../backend/docs/backend-application-layer-boundary.md)
+- [`backend/docs/README.md`](../backend/docs/README.md)
+  Active backend docs index for architecture, specs, plans, and runbooks
+- [`backend/docs/architecture/application-layer-boundary.md`](../backend/docs/architecture/application-layer-boundary.md)
   Active backend ADR for application-boundary direction
-- [`backend/docs/backend-overview.md`](../backend/docs/backend-overview.md)
+- [`backend/docs/architecture/overview.md`](../backend/docs/architecture/overview.md)
   Active backend module architecture overview
-- [`backend/docs/api.md`](../backend/docs/api.md)
+- [`backend/docs/specs/api.md`](../backend/docs/specs/api.md)
   Active backend API spec and current source of truth for the public API surface
-- [`backend/docs/backend-ops.md`](../backend/docs/backend-ops.md)
+- [`backend/docs/runbooks/backend-ops.md`](../backend/docs/runbooks/backend-ops.md)
   Active backend local development and operations runbook
 - [`frontend/docs/frontend-plan.md`](../frontend/docs/frontend-plan.md)
   Active frontend same-origin integration guide
+- [`frontend/src/routes/collections/lens-v1-interface-spec.md`](../frontend/src/routes/collections/lens-v1-interface-spec.md)
+  Active collection-route interface spec owned by the collection workspace route family
+- [`frontend/src/routes/collections/collection-ui-restructure-proposal.md`](../frontend/src/routes/collections/collection-ui-restructure-proposal.md)
+  Active collection-route restructuring proposal owned by the collection workspace route family
 - [`docs/research/materials-optimize.md`](research/materials-optimize.md)
   Active research note retained as non-authoritative background material
 

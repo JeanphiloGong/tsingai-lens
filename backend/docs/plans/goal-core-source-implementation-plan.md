@@ -13,7 +13,7 @@ evidence/comparison backbone.
 ## Context
 
 The layering proposal in
-[`backend-goal-core-source-layering.md`](backend-goal-core-source-layering.md)
+[`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
 defines three layers:
 
 - Goal Layer
@@ -292,7 +292,7 @@ Exit criteria:
 
 ## Related Docs
 
-- [`backend-goal-core-source-layering.md`](backend-goal-core-source-layering.md)
-- [`backend-domain-architecture.md`](backend-domain-architecture.md)
-- [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)
-- [`backend-v1-api-contract.md`](backend-v1-api-contract.md)
+- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
+- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+- [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
+- [`v1-api-migration-notes.md`](v1-api-migration-notes.md)

@@ -7,7 +7,7 @@ entrypoints and lower-level services or engine packages.
 
 - current flat application services under `application/*.py`
 - the target domain-packaged application layout described in
-  [`../docs/backend-domain-architecture.md`](../docs/backend-domain-architecture.md)
+  [`../docs/architecture/domain-architecture.md`](../docs/architecture/domain-architecture.md)
 
 ## Responsibilities
 
@@ -42,6 +42,24 @@ example:
 - `application/evidence/`
 - `application/comparisons/`
 - `application/protocol/`
+
+## Local Navigation
+
+- [`collections/README.md`](collections/README.md)
+  Collection lifecycle, file membership, and collection input preparation
+- [`indexing/README.md`](indexing/README.md)
+  Index task orchestration and backbone execution order
+- [`workspace/README.md`](workspace/README.md)
+  Collection-facing workspace read model and artifact readiness summary
+- [`documents/README.md`](documents/README.md)
+  Document profiling, protocol suitability, and collection-level summaries
+- [`evidence/README.md`](evidence/README.md)
+  Claim-centered evidence-card generation and retrieval
+- [`comparisons/README.md`](comparisons/README.md)
+  Collection-facing comparison-row generation and comparability semantics
+- [`protocol/README.md`](protocol/README.md)
+  Conditional protocol branch for sections, blocks, protocol steps, search,
+  and SOP drafting
 
 ## Non-Goals
 

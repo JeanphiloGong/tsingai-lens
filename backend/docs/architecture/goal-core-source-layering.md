@@ -233,9 +233,9 @@ Controller implications:
 
 ## Related Docs
 
-- [`backend-goal-core-source-implementation-plan.md`](backend-goal-core-source-implementation-plan.md)
-- [`backend-overview.md`](backend-overview.md)
-- [`backend-domain-architecture.md`](backend-domain-architecture.md)
-- [`backend-v1-api-contract.md`](backend-v1-api-contract.md)
-- [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)
-- [`api.md`](api.md)
+- [`../plans/goal-core-source-implementation-plan.md`](../plans/goal-core-source-implementation-plan.md)
+- [`overview.md`](overview.md)
+- [`domain-architecture.md`](domain-architecture.md)
+- [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)
+- [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
+- [`../specs/api.md`](../specs/api.md)

@@ -177,4 +177,4 @@ execution detail to module-owned plans.
 - [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](../10-rfcs/evidence-first-literature-parsing.md)
 - [System Overview](system-overview.md)
-- [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/backend-evidence-first-parsing-plan.md)
+- [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/evidence-first-parsing-plan.md)

@@ -54,7 +54,8 @@ tsingai-lens/
 - `docs/30-architecture/system-overview.md` — shared system overview.
 - `docs/05-policies/documentation-governance.md` — repository documentation governance and placement policy.
 - `backend/README.md` — backend module entry, boundaries, and local docs map.
-- `backend/docs/api.md` — backend public API contract.
+- `backend/docs/README.md` — backend docs index for architecture, specs, plans, and runbooks.
+- `backend/docs/specs/api.md` — backend public API contract.
 - `frontend/README.md` — frontend module entry, boundaries, and local docs map.
 - `frontend/docs/frontend-plan.md` — frontend same-origin integration guide.
 
@@ -175,7 +176,8 @@ tsingai-lens/
 - `docs/30-architecture/system-overview.md` — 当前系统总览。
 - `docs/05-policies/documentation-governance.md` — 仓库文档治理与存放规则。
 - `backend/README.md` — 后端模块入口、边界与本地文档导航。
-- `backend/docs/api.md` — 后端 API 合同。
+- `backend/docs/README.md` — 后端文档索引，按 architecture、specs、plans、runbooks 分层。
+- `backend/docs/specs/api.md` — 后端 API 合同。
 - `frontend/README.md` — 前端模块入口、边界与本地文档导航。
 - `frontend/docs/frontend-plan.md` — 前端同源集成说明。
 

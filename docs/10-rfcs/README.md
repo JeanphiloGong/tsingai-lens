@@ -3,11 +3,14 @@
 Store project-level RFCs here when a proposed change affects shared direction,
 multiple modules, or a cross-module contract.
 
-## Active RFCs
+## Current V1 Lineage RFCs
 
 - [`evidence-first-literature-parsing.md`](evidence-first-literature-parsing.md)
-  Proposed Lens v1 north star around evidence-grounded comparison, with
-  materials as the first vertical and conditional protocol generation
+  Originating RFC for the evidence-first parsing shift; current v1 definitions
+  now live in shared guide, spec, architecture, and backend plan docs
+
+## Future-Facing RFCs
+
 - [`lens-agent-era-positioning.md`](lens-agent-era-positioning.md)
-  Proposed positioning for Lens as the evidence, judgment, and memory layer for
-  agents and researchers
+  Future-facing RFC for Lens as the evidence, judgment, and memory layer for
+  agents and researchers beyond the current v1 boundary

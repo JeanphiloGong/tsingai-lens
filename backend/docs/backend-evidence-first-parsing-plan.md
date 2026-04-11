@@ -16,10 +16,19 @@ The shared direction is defined by the following shared docs:
 This backend plan narrows that shared direction into module-owned execution
 slices, artifact changes, API adjustments, and verification targets.
 
+Its first delivery goal is narrow:
+
+prove the collection comparison workspace with evidence traceback as the
+primary Lens v1 workflow.
+
+This is a target implementation plan, not a description of already-implemented
+backend current-state behavior.
+
 ## Scope
 
 This plan covers backend-owned work only:
 
+- the first collection comparison workflow needed by Lens v1
 - parsing artifact shape
 - application and service responsibilities
 - backend service responsibilities
@@ -32,10 +41,32 @@ This plan does not cover:
 - frontend redesign beyond API consumption implications
 - OCR or scanned PDF support
 - model provider selection
-- graph export removal or replacement
+- graph as a primary acceptance surface
 - long-term product positioning or the v1 product boundary itself
 
+This plan should not try to prove every surface at once.
+
+After the first evidence-backbone implementation wave lands, the preferred next
+step is to split narrower backend current-state docs such as artifact flow,
+workspace semantics, and API additions rather than continuing to grow this plan
+as the only backend parsing document.
+
 ## Proposed Change
+
+### Primary execution focus
+
+The first backend execution target is the collection comparison workspace.
+
+That means the backend should prioritize:
+
+- document profiling
+- evidence cards
+- comparison rows
+- traceback-capable evidence access
+- workspace readiness and warning states for the comparison workflow
+
+Chat, graph, SOP, and protocol browsing may continue to exist, but they are not
+the primary acceptance center for this implementation wave.
 
 ### Phase 0: Repair current protocol payload fidelity
 
@@ -67,12 +98,13 @@ Proposed artifact:
 
 Suggested fields:
 
-- `paper_id`
+- `document_id`
+- `collection_id`
 - `doc_type`
-- `methods_density`
-- `evidence_density`
 - `protocol_extractable`
-- `warnings`
+- `protocol_extractability_signals`
+- `parsing_warnings`
+- `confidence`
 
 Expected effect:
 
@@ -92,6 +124,7 @@ Primary artifact targets:
 
 Evidence-oriented units should cover:
 
+- claim-bearing text
 - material system or composition
 - process or treatment conditions
 - microstructure observations
@@ -166,6 +199,9 @@ The backend should converge toward the following artifact shape:
 Not every phase must land at once, but implementation should move in this
 direction rather than continue deepening the old steps-first backbone.
 
+The shared minimum field contract for these artifacts is defined in
+[`../../docs/40-specs/lens-core-artifact-contracts.md`](../../docs/40-specs/lens-core-artifact-contracts.md).
+
 ## File Change Plan
 
 ### Keep
@@ -219,9 +255,10 @@ Their future role should be one of:
 3. surface profile readiness and warnings in workspace responses
 4. introduce evidence extraction artifacts
 5. introduce comparison normalization artifacts
-6. split protocol extraction into candidates versus final steps
-7. update SOP generation to depend on filtered final protocol steps
-8. add collection-level APIs for profiles, evidence, and comparisons
+6. add collection-level APIs for profiles, evidence, and comparisons
+7. only after the evidence backbone is stable, split protocol extraction into
+   candidates versus final steps
+8. update SOP generation to depend on filtered final protocol steps
 
 This order is meant to preserve a usable backend while the parsing model
 changes underneath it.
@@ -239,6 +276,8 @@ This backend plan is successful when:
 - evidence and comparison artifacts become usable first-class backend outputs
 - protocol remains supported for methods-heavy documents without dictating the
   entire parsing backbone
+- graph remains a derived or secondary surface rather than a competing
+  extraction backbone
 
 ## Verification
 
@@ -280,6 +319,8 @@ This backend plan is successful when:
   Shared long-lived Lens mission and positioning
 - [`../../docs/40-specs/lens-v1-definition.md`](../../docs/40-specs/lens-v1-definition.md)
   Shared Lens v1 boundary
+- [`../../docs/40-specs/lens-core-artifact-contracts.md`](../../docs/40-specs/lens-core-artifact-contracts.md)
+  Shared minimum artifact contracts for the evidence backbone
 - [`../../docs/30-architecture/lens-v1-architecture-boundary.md`](../../docs/30-architecture/lens-v1-architecture-boundary.md)
   Shared Lens v1 architecture boundary
 - [`../../docs/10-rfcs/evidence-first-literature-parsing.md`](../../docs/10-rfcs/evidence-first-literature-parsing.md)

@@ -23,6 +23,24 @@ The proposed direction is:
 4. run protocol extraction only when a document or collection is suitable for
    protocol generation
 
+## Relationship To Current Docs
+
+This RFC should now be read as the originating proposal and decision record for
+the evidence-first shift.
+
+The current shared definitions promoted out of this RFC now live in:
+
+- [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
+- [Lens V1 Definition](../40-specs/lens-v1-definition.md)
+- [Lens V1 Architecture Boundary](../30-architecture/lens-v1-architecture-boundary.md)
+- [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
+- [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/backend-evidence-first-parsing-plan.md)
+
+This RFC should keep the why, tradeoff, and transition rationale for the shift
+away from protocol-first parsing. It should not keep absorbing new current-state
+definitions once those definitions have been promoted into the shared guide,
+spec, architecture, and backend plan layers.
+
 ## North Star
 
 Lens v1 should let a researcher complete in about one hour the kind of

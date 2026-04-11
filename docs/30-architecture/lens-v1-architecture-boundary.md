@@ -2,15 +2,10 @@
 
 ## Purpose
 
-This document defines the shared system boundary for Lens v1.
+This document defines the shared object model and system boundary required to
+support the Lens v1 product contract.
 
-It translates the product mission and v1 definition into a concrete shared
-architecture shape without dropping into backend-only implementation detail.
-
-The main architectural rule is:
-
-Lens v1 is evidence-first and comparison-first. Protocol generation remains a
-conditional downstream branch.
+It does not define user-facing value, success criteria, or backend sequencing.
 
 ## Scope
 
@@ -78,8 +73,26 @@ Conditional branch artifacts:
 - `protocol_candidates`
 - `protocol_steps`
 
-The backbone artifacts define the product's core value. The protocol artifacts
-extend the system for methods-heavy collections.
+## Artifact Roles
+
+The artifacts above do not have equal architectural weight.
+
+- `document_profiles`
+  Determines document type, protocol suitability, and collection-level gating.
+- `evidence_cards`
+  Serves as the primary carrier for claim, evidence, and condition/context.
+- `comparison_rows`
+  Serves as the primary collection-facing comparison view derived from the
+  evidence backbone.
+- `protocol_candidates`
+  Holds provisional procedural candidates derived from document profiling and
+  evidence-oriented artifacts.
+- `protocol_steps`
+  Holds filtered procedural outputs that survive the protocol branch quality
+  bar.
+
+Protocol derivation should depend on document profiling and evidence-oriented
+artifacts, rather than bypassing the evidence backbone.
 
 ## Shared API Boundary
 
@@ -118,7 +131,7 @@ For Lens v1, the workspace should be able to tell the user:
 This prevents the product from implying that "no protocol steps" means "no
 value".
 
-## Protocol Boundary
+## Protocol And Graph Boundary
 
 Protocol extraction remains in Lens v1, but only as a narrower branch.
 
@@ -133,6 +146,10 @@ Protocol output should not be:
 - the required result of every upload
 - the default interpretation of review-heavy literature
 - the product's primary definition of success
+
+Graph outputs in v1 should be derived views over evidence and comparison
+artifacts, not an independent extraction backbone or primary acceptance
+surface.
 
 ## Shared Module Responsibilities
 
@@ -152,6 +169,7 @@ execution detail to module-owned plans.
 
 - [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
 - [Lens V1 Definition](../40-specs/lens-v1-definition.md)
+- [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](../10-rfcs/evidence-first-literature-parsing.md)
 - [System Overview](system-overview.md)
 - [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/backend-evidence-first-parsing-plan.md)

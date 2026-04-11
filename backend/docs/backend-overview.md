@@ -5,9 +5,9 @@
 The backend turns uploaded collection files into queryable graph, report, and
 protocol artifacts and exposes those results through the public HTTP contract.
 
-The active Lens v1 direction is evidence-first and comparison-first, with
-protocol extraction retained as a conditional branch rather than the only
-useful output shape.
+The backend implements the shared Lens v1 evidence-first architecture defined
+in root docs. This document describes backend ownership seams and local
+navigation rather than redefining shared product or architecture decisions.
 
 ## Current Ownership Seams
 

@@ -2,9 +2,12 @@
 
 ## Purpose
 
+This document defines the long-lived identity of Lens and should remain stable
+across implementation phases.
+
 Lens exists to help researchers and research agents make better literature
-judgments by organizing evidence, conditions, and comparisons into durable
-research objects.
+judgments by organizing scientific work around evidence, comparison, and
+traceable reasoning rather than around fluent summary text alone.
 
 The system should reduce common research mistakes such as:
 
@@ -24,29 +27,22 @@ boundaries, and future agent integration.
 
 It does not define:
 
-- the current implementation plan
 - the v1 feature boundary
+- the shared object model
 - the backend artifact or API design
+- the current implementation plan
 
-Those belong in the v1 spec, shared architecture docs, and backend-local
+Those belong in the v1 spec, shared architecture docs, and module-local
 implementation plans.
 
-## Responsibilities
+## Core Principles
 
-Lens is responsible for:
+Lens should stay grounded in four durable principles:
 
-- turning literature collections into evidence-backed research objects
-- preserving provenance from outputs back to spans, sections, figures, tables,
-  and paper context
-- making cross-paper comparison explicit rather than implicit
-- recording the conditions, baselines, and scope that constrain each claim
-- surfacing `insufficient`, `not_comparable`, or `not_extractable` outcomes
-  when the literature does not support a stronger conclusion
-- accumulating collection memory so work compounds over time instead of
-  resetting on every run
-
-Lens should become a stable evidence and judgment layer that both researchers
-and agents can rely on.
+- evidence before fluent generation
+- comparability before isolated summary
+- traceability before opaque convenience
+- judgment support before automation theater
 
 ## Positioning
 
@@ -92,18 +88,10 @@ Materials should shape the first schema and workflow, but Lens should remain a
 broader literature intelligence system rather than a materials-only protocol
 tool.
 
-## Related Areas
-
-This mission should drive:
-
-- the evidence-first parsing direction
-- the v1 comparison-first workflow
-- future agent-callable tools that operate on evidence and judgment objects
-- collection memory and provenance design
-
 ## Related Docs
 
 - [Lens V1 Definition](../40-specs/lens-v1-definition.md)
+- [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](../10-rfcs/evidence-first-literature-parsing.md)
 - [Lens Agent-Era Positioning and Evidence Layer Direction](../10-rfcs/lens-agent-era-positioning.md)
 - [System Overview](../30-architecture/system-overview.md)

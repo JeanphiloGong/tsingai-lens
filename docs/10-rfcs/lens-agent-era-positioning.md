@@ -19,6 +19,21 @@ This RFC complements
 that RFC defines the parsing direction, while this RFC defines Lens's product
 position in an agent-heavy stack.
 
+## Relationship To Current Docs
+
+This RFC is intentionally future-facing.
+
+The current Lens identity and v1 boundary are defined in:
+
+- [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
+- [Lens V1 Definition](../40-specs/lens-v1-definition.md)
+- [Lens V1 Architecture Boundary](../30-architecture/lens-v1-architecture-boundary.md)
+- [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
+
+This RFC should guide later work on agent-callable tools, collection memory,
+and post-v1 evidence-runtime behavior. It should not become the source of truth
+for the current v1 product boundary.
+
 ## Context
 
 ### Why this matters in the agent era
@@ -229,3 +244,7 @@ This RFC should feed the next layer of work:
 - collection-memory rules for incremental agent runs
 - confidence and refusal contracts across ingestion, parsing, comparison, and
   protocol generation
+
+Those follow-on surfaces should be split into narrower future docs when the
+agent/runtime work becomes active rather than being added indefinitely to this
+RFC.

@@ -78,6 +78,8 @@ owned and frontend-owned detail should stay with the owning module.
   Active shared Lens v1 evidence-first and comparison-first architecture boundary
 - [`docs/40-specs/lens-v1-definition.md`](40-specs/lens-v1-definition.md)
   Active shared Lens v1 product boundary for evidence-grounded comparison
+- [`docs/40-specs/lens-core-artifact-contracts.md`](40-specs/lens-core-artifact-contracts.md)
+  Active shared minimum contracts for document profiles, evidence cards, and comparison rows
 - [`docs/50-guides/lens-mission-positioning.md`](50-guides/lens-mission-positioning.md)
   Active shared Lens mission and long-lived product positioning
 - [`docs/05-policies/documentation-governance.md`](05-policies/documentation-governance.md)

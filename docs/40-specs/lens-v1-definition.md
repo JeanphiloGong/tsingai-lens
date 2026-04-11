@@ -5,6 +5,10 @@
 This document defines the Lens v1 product boundary for the current delivery
 phase.
 
+It defines the user-facing value, acceptance scope, and success bar of Lens
+v1. It does not define shared system object relationships or backend
+implementation sequencing.
+
 It answers:
 
 - who v1 is for
@@ -14,9 +18,9 @@ It answers:
 
 It does not define:
 
+- the shared object model or artifact dependency graph
 - the detailed backend implementation plan
 - the final API schema
-- the future post-v1 agent platform surface
 
 ## Target User and Primary Job
 
@@ -46,17 +50,18 @@ For the first vertical, the clearest value statement is:
 > comparable results, spot weak-evidence claims and conflict sources, and trace
 > each decision back to original paper evidence and conditions.
 
-## Core Workflow
+## Primary Surface
 
-The smallest valuable Lens v1 loop is:
+The primary Lens v1 surface is the collection comparison workspace.
 
-1. create a collection and ingest papers
-2. profile each document
-3. extract claim, evidence, and condition/context units
-4. normalize cross-paper comparison rows
-5. let the user trace an output back to source evidence
+That surface should let a user inspect:
 
-This loop is the acceptance center for v1.
+- document type distribution and suitability warnings
+- collection-facing comparison rows
+- weak-evidence and conflict flags
+- direct traceback from a surfaced result to source evidence and conditions
+
+Other surfaces may exist in v1, but they are not the acceptance center.
 
 ## Core V1 Outputs
 
@@ -64,9 +69,9 @@ The outputs that define v1 value are:
 
 - document profiling that distinguishes `experimental`, `review`, `mixed`, and
   `uncertain` papers
+- comparison-ready rows as the primary collection-facing view for material,
+  process, structure, property, and baseline inspection
 - evidence-backed units such as claim, evidence, and condition/context
-- comparison-ready rows for material, process, structure, property, and
-  baseline inspection
 - source traceback into original spans or equivalent evidence anchors
 - explicit warnings when a collection or paper is not suitable for protocol
   extraction or direct comparison
@@ -93,6 +98,7 @@ Lens v1 is explicitly out of scope for:
 - turning every uploaded paper into final protocol steps
 - auto-generating trustworthy SOPs from arbitrary corpora
 - acting as a generic paper chat interface
+- treating graph exploration as the primary acceptance surface
 - positioning the product as an autonomous research agent
 - promising full scientific understanding of every paper type
 - prioritizing graph presentation over evidence quality
@@ -108,6 +114,8 @@ Lens v1 is successful when:
   fake protocol steps
 - the system can say `not_comparable`, `insufficient`, or `not_extractable`
   when the evidence does not support a stronger result
+- the rate at which non-comparable results are surfaced as directly comparable
+  outputs decreases versus unstructured manual review
 - materials users can identify likely comparison candidates, weak claims, and
   conflict sources faster than with manual reading alone
 
@@ -128,13 +136,15 @@ It should not redefine the whole product as a materials-only protocol system.
 
 This document is the v1 product boundary.
 
+- shared object relationships and artifact roles belong in architecture docs
+- minimum artifact contracts belong in shared specs
 - implementation sequencing belongs in backend-local plans
-- shared system object boundaries belong in architecture docs
 - long-term product identity belongs in the mission and positioning guide
 
 ## Related Docs
 
 - [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
+- [Lens Core Artifact Contracts](lens-core-artifact-contracts.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](../10-rfcs/evidence-first-literature-parsing.md)
 - [Lens Agent-Era Positioning and Evidence Layer Direction](../10-rfcs/lens-agent-era-positioning.md)
 - [System Overview](../30-architecture/system-overview.md)

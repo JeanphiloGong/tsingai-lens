@@ -1,3 +1,4 @@
+from .comparisons import ComparisonRowItemResponse, ComparisonRowListResponse
 from .collection import (
     CollectionCreateRequest,
     CollectionDeleteResponse,
@@ -5,6 +6,17 @@ from .collection import (
     CollectionFileResponse,
     CollectionListResponse,
     CollectionResponse,
+)
+from .documents import (
+    DocumentProfileItemResponse,
+    DocumentProfileListResponse,
+    DocumentProfileSummaryResponse,
+)
+from .evidence import (
+    ConditionContextResponse,
+    EvidenceAnchorResponse,
+    EvidenceCardItemResponse,
+    EvidenceCardListResponse,
 )
 from .protocol import (
     ConditionItem,
@@ -38,16 +50,30 @@ from .task import ArtifactStatusResponse, IndexTaskCreateRequest, TaskListRespon
 from .workspace import (
     WorkspaceArtifactStatusResponse,
     WorkspaceCapabilitiesResponse,
+    WorkspaceDocumentSummaryResponse,
+    WorkspaceLinksResponse,
     WorkspaceOverviewResponse,
+    WorkspaceStageResponse,
+    WorkspaceWarningResponse,
+    WorkspaceWorkflowResponse,
 )
 
 __all__ = [
+    "ComparisonRowItemResponse",
+    "ComparisonRowListResponse",
     "CollectionCreateRequest",
     "CollectionResponse",
     "CollectionListResponse",
     "CollectionDeleteResponse",
     "CollectionFileResponse",
     "CollectionFileListResponse",
+    "DocumentProfileItemResponse",
+    "DocumentProfileListResponse",
+    "DocumentProfileSummaryResponse",
+    "EvidenceAnchorResponse",
+    "ConditionContextResponse",
+    "EvidenceCardItemResponse",
+    "EvidenceCardListResponse",
     "QueryRequest",
     "QueryResponse",
     "ReportCommunityDetailResponse",
@@ -79,5 +105,10 @@ __all__ = [
     "ArtifactStatusResponse",
     "WorkspaceArtifactStatusResponse",
     "WorkspaceCapabilitiesResponse",
+    "WorkspaceDocumentSummaryResponse",
+    "WorkspaceLinksResponse",
     "WorkspaceOverviewResponse",
+    "WorkspaceStageResponse",
+    "WorkspaceWarningResponse",
+    "WorkspaceWorkflowResponse",
 ]

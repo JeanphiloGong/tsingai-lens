@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
+from application.mock.lens_v1_service import lens_v1_mock_service
 from controllers.schemas.collection import (
     CollectionCreateRequest,
     CollectionDeleteResponse,
@@ -29,11 +30,18 @@ async def create_collection(payload: CollectionCreateRequest) -> CollectionRespo
 @router.get("", response_model=CollectionListResponse, summary="列出论文集合")
 async def list_collections() -> CollectionListResponse:
     items = [CollectionResponse(**record) for record in collection_service.list_collections()]
+    if lens_v1_mock_service.is_enabled():
+        items.extend(
+            CollectionResponse(**record)
+            for record in lens_v1_mock_service.list_collections()
+        )
     return CollectionListResponse(items=items)
 
 
 @router.get("/{collection_id}", response_model=CollectionResponse, summary="获取集合详情")
 async def get_collection(collection_id: str) -> CollectionResponse:
+    if lens_v1_mock_service.is_enabled() and lens_v1_mock_service.is_mock_collection(collection_id):
+        return CollectionResponse(**lens_v1_mock_service.get_collection(collection_id))
     try:
         record = collection_service.get_collection(collection_id)
     except FileNotFoundError as exc:
@@ -86,6 +94,12 @@ async def upload_collection_file(
     summary="列出集合文件",
 )
 async def list_collection_files(collection_id: str) -> CollectionFileListResponse:
+    if lens_v1_mock_service.is_enabled() and lens_v1_mock_service.is_mock_collection(collection_id):
+        items = [
+            CollectionFileResponse(**record)
+            for record in lens_v1_mock_service.list_files(collection_id)
+        ]
+        return CollectionFileListResponse(items=items)
     try:
         items = [
             CollectionFileResponse(**record)

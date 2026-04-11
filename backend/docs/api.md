@@ -6,6 +6,21 @@
 
 默认 Base URL：`http://localhost:8010`。当前接口未启用鉴权。
 
+## Mock 联调模式
+
+前端如果要先按正式路径联调，可以开启：
+
+- `LENS_ENABLE_MOCK_API=1`
+
+开启后，正式接口路径下会额外暴露 4 个 mock collection 场景：
+
+- `col_mock_empty`
+- `col_mock_processing`
+- `col_mock_ready`
+- `col_mock_limited`
+
+这些 mock 走的仍然是正式业务路径，不会新增 `/mock/*` 前缀。
+
 ## 总体约定
 
 - 业务接口统一位于：`/api/v1/*`

@@ -1,6 +1,17 @@
 import os
 
-from controllers import collections, graph, protocol, query, reports, tasks, workspace
+from controllers import (
+    collections,
+    comparisons,
+    documents,
+    evidence,
+    graph,
+    protocol,
+    query,
+    reports,
+    tasks,
+    workspace,
+)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -49,6 +60,9 @@ def create_app() -> FastAPI:
     app.include_router(protocol.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(comparisons.router, prefix=PUBLIC_API_V1_PREFIX)
     return app
 
 

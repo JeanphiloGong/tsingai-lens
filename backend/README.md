@@ -52,9 +52,10 @@ next to code.
 - [`docs/backend-application-layer-boundary.md`](docs/backend-application-layer-boundary.md)
   Backend ADR for the intended application-boundary direction
 
-## Submodule Entry Pages
+## Code-Owned Entry Pages
 
-- [`api/README.md`](api/README.md)
+- [`docs/api.md`](docs/api.md)
+  Public HTTP contract reference
 - [`application/README.md`](application/README.md)
 - [`retrieval/README.md`](retrieval/README.md)
 - [`infra/persistence/README.md`](infra/persistence/README.md)

@@ -67,8 +67,11 @@ owned and frontend-owned detail should stay with the owning module.
 ## Current Classified Docs
 
 - [`docs/10-rfcs/evidence-first-literature-parsing.md`](10-rfcs/evidence-first-literature-parsing.md)
-  Draft RFC for shifting literature parsing toward evidence-first outputs and
-  conditional protocol generation
+  Draft RFC for Lens v1 north star around evidence-grounded comparison, with
+  materials as the first vertical and conditional protocol generation
+- [`docs/10-rfcs/lens-agent-era-positioning.md`](10-rfcs/lens-agent-era-positioning.md)
+  Draft RFC for Lens's agent-era position as a research evidence, judgment, and
+  collection-memory layer rather than another generic research agent
 - [`docs/30-architecture/system-overview.md`](30-architecture/system-overview.md)
   Active shared system overview
 - [`docs/05-policies/documentation-governance.md`](05-policies/documentation-governance.md)

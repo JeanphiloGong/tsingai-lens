@@ -7,8 +7,8 @@ domain: backend
 status: active
 owner: backend-maintainers
 created_at: 2026-04-10
-updated_at: 2026-04-10
-last_verified_at: 2026-04-10
+updated_at: 2026-04-11
+last_verified_at: 2026-04-11
 review_by: 2026-07-10
 version: v1
 source_of_truth: true
@@ -71,15 +71,13 @@ The backend is in a transition state:
 ## Local Navigation
 
 - [`api.md`](api.md)
-  Public API contract
+  Public route boundary and HTTP contract
 - [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)
   Boundary ADR
 - [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)
   Draft backend-local implementation plan for evidence-first parsing
 - [`backend-ops.md`](backend-ops.md)
   Local development and operations runbook
-- [`../api/README.md`](../api/README.md)
-  Public route boundary
 - [`../application/README.md`](../application/README.md)
   Use-case orchestration boundary
 - [`../retrieval/README.md`](../retrieval/README.md)

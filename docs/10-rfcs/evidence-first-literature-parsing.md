@@ -1,32 +1,3 @@
----
-id: RFC-2026-001
-title: Lens Evidence-First Direction and Conditional Protocol Generation
-type: rfc
-level: system
-domain: shared
-status: draft
-owner: repo-maintainers
-created_at: 2026-04-11
-updated_at: 2026-04-11
-last_verified_at: 2026-04-11
-review_by: 2026-07-11
-version: v1
-source_of_truth: false
-related_issues: [63]
-related_docs:
-  - docs/30-architecture/system-overview.md
-  - backend/docs/backend-overview.md
-  - backend/docs/api.md
-  - docs/research/materials-optimize.md
-supersedes: []
-superseded_by: []
-tags:
-  - rfc
-  - parsing
-  - evidence
-  - protocol
----
-
 # Lens Evidence-First Direction and Conditional Protocol Generation
 
 ## Summary

@@ -1,31 +1,3 @@
----
-id: RUNBOOK-2026-001
-title: Backend Local Development and Operations
-type: runbook
-level: domain
-domain: backend
-status: active
-owner: backend-maintainers
-created_at: 2026-04-10
-updated_at: 2026-04-10
-last_verified_at: 2026-04-10
-review_by: 2026-07-10
-version: v1
-source_of_truth: true
-related_issues: [62]
-related_docs:
-  - backend/README.md
-  - backend/docs/api.md
-  - docs/05-policies/documentation-governance.md
-supersedes: []
-superseded_by: []
-tags:
-  - backend
-  - runbook
-  - development
-  - operations
----
-
 # Backend Local Development and Operations
 
 ## Environment Setup

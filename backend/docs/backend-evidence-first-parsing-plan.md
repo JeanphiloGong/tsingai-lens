@@ -1,33 +1,3 @@
----
-id: RFC-2026-002
-title: Backend Evidence-First Parsing Refactor Plan
-type: rfc
-level: domain
-domain: backend
-status: draft
-owner: backend-maintainers
-created_at: 2026-04-11
-updated_at: 2026-04-11
-last_verified_at: 2026-04-11
-review_by: 2026-07-11
-version: v1
-source_of_truth: false
-related_issues: [63]
-related_docs:
-  - docs/10-rfcs/evidence-first-literature-parsing.md
-  - backend/docs/backend-overview.md
-  - backend/docs/api.md
-  - docs/research/materials-optimize.md
-supersedes: []
-superseded_by: []
-tags:
-  - backend
-  - rfc
-  - parsing
-  - evidence
-  - delivery-plan
----
-
 # Backend Evidence-First Parsing Refactor Plan
 
 ## Summary

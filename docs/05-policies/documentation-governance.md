@@ -1,28 +1,3 @@
----
-id: POLICY-2026-001
-title: Repository Documentation Governance
-type: policy
-level: system
-domain: shared
-status: active
-owner: repo-maintainers
-created_at: 2026-04-07
-updated_at: 2026-04-10
-last_verified_at: 2026-04-10
-review_by: 2026-07-10
-version: v1
-source_of_truth: true
-related_issues: [62]
-related_docs:
-  - docs/README.md
-supersedes: []
-superseded_by: []
-tags:
-  - docs
-  - governance
-  - file-management
----
-
 # Repository Documentation Governance
 
 ## Governance Goal
@@ -55,7 +30,7 @@ What already works:
 Current failure modes:
 
 - root-level docs still include some low-governance legacy research assets
-- legacy docs and research assets still do not all follow the metadata and
+- legacy docs and research assets still do not all follow the format and
   placement rules
 - legacy PDFs, research references, and notes still live in pre-governance
   locations that need gradual cleanup
@@ -92,46 +67,20 @@ Approved domains for now:
 - `ops`
 - `research`
 
-## Metadata Standard
+## Document Header Rule
 
-Apply YAML front matter to all new formal docs in:
+Do not add YAML front matter to repository docs by default.
 
-- `docs/`
-- `backend/docs/`
-- `frontend/docs/`
+For this repository, formal docs should usually:
 
-Required fields:
+- start directly with an H1
+- use intent-appropriate sections in the body
+- keep status, ownership, and source-of-truth notes in prose only when they
+  help the reader or an operational workflow
 
-- `id`
-- `title`
-- `type`
-- `level`
-- `domain`
-- `status`
-- `owner`
-- `created_at`
-- `updated_at`
-
-Strongly recommended fields:
-
-- `last_verified_at`
-- `review_by`
-- `version`
-- `reviewers`
-- `source_of_truth`
-- `related_issues`
-- `related_docs`
-- `system`
-- `module`
-- `supersedes`
-- `superseded_by`
-- `tags`
-
-Allowed lightweight exceptions:
-
-- `README.md` index files
-- short folder guide files
-- untouched legacy docs during migration
+Front matter is only acceptable when a specific renderer, generator, or
+automation workflow actually consumes it. The current repository docs workflow
+and governance check do not require YAML metadata blocks.
 
 Current governed baseline:
 
@@ -139,31 +88,6 @@ Current governed baseline:
 - active source-of-truth docs in `backend/docs/` and `frontend/docs/`
 - any new project-level `policy`, `architecture`, `spec`, `guide`, `runbook`,
   `rfc`, or `adr`
-
-Front matter example:
-
-```yaml
----
-id: SPEC-2026-001
-title: Example Spec
-type: spec
-level: module
-domain: backend
-status: active
-owner: repo-maintainers
-created_at: 2026-04-07
-updated_at: 2026-04-07
-last_verified_at: 2026-04-07
-review_by: 2026-07-07
-version: v1
-source_of_truth: true
-related_issues: [61]
-related_docs: []
-supersedes: []
-superseded_by: []
-tags: [example]
----
-```
 
 ## Lifecycle Model
 
@@ -322,14 +246,14 @@ Replacement rule:
 Short-term manual checks:
 
 - new formal docs are placed in the correct doc root
-- new formal docs include required front matter
+- new formal docs start with a clear H1 and use an intent-appropriate body
+  structure without YAML front matter unless a workflow explicitly requires it
 - doc indexes are updated when a new governed doc root or active doc is added
 - docs do not duplicate the same source-of-truth scope
 - PRs do not add secrets or opaque random files into docs roots
 
 Implemented automation baseline:
 
-- `scripts/check_docs_governance.py` validates front matter on governed docs
 - `scripts/check_docs_governance.py` validates local markdown links
 - `scripts/check_docs_governance.py` validates selected node-local `README.md`
   entry pages
@@ -346,8 +270,8 @@ Recommended automation after adoption stabilizes:
 ## Rollout Plan
 
 1. Adopt this policy and [`docs/README.md`](../README.md) immediately.
-2. Require front matter for all new formal docs and for currently active
-   source-of-truth docs in `backend/docs/` and `frontend/docs/`.
+2. Remove YAML front matter from current formal docs and keep future docs
+   header-free unless a specific workflow truly consumes metadata.
 3. Keep `docs/README.md` as the shared docs index and use module root
    `README.md` files as the primary backend and frontend entry pages.
 4. Reclassify existing docs when they are touched:

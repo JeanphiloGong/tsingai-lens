@@ -1,31 +1,3 @@
----
-id: ARCH-2026-002
-title: Backend Module Overview
-type: architecture
-level: domain
-domain: backend
-status: active
-owner: backend-maintainers
-created_at: 2026-04-10
-updated_at: 2026-04-11
-last_verified_at: 2026-04-11
-review_by: 2026-07-10
-version: v1
-source_of_truth: true
-related_issues: [61, 62]
-related_docs:
-  - docs/30-architecture/system-overview.md
-  - backend/docs/api.md
-  - backend/docs/backend-application-layer-boundary.md
-  - backend/docs/backend-evidence-first-parsing-plan.md
-supersedes: []
-superseded_by: []
-tags:
-  - backend
-  - architecture
-  - overview
----
-
 # Backend Module Overview
 
 ## Purpose

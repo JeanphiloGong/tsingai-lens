@@ -1,30 +1,3 @@
----
-id: ARCH-2026-001
-title: System Overview
-type: architecture
-level: system
-domain: shared
-status: active
-owner: repo-maintainers
-created_at: 2026-04-10
-updated_at: 2026-04-10
-last_verified_at: 2026-04-10
-review_by: 2026-07-10
-version: v1
-source_of_truth: true
-related_issues: [62]
-related_docs:
-  - docs/README.md
-  - backend/README.md
-  - frontend/README.md
-supersedes: []
-superseded_by: []
-tags:
-  - architecture
-  - overview
-  - ownership
----
-
 # System Overview
 
 ## Purpose

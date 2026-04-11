@@ -1,29 +1,3 @@
----
-id: ADR-2026-001
-title: Backend Application Layer Ownership Boundary
-type: adr
-level: domain
-domain: backend
-status: active
-owner: backend-maintainers
-created_at: 2026-04-07
-updated_at: 2026-04-10
-last_verified_at: 2026-04-10
-review_by: 2026-07-10
-version: v1
-source_of_truth: true
-related_issues: [61]
-related_docs:
-  - docs/05-policies/documentation-governance.md
-  - backend/docs/api.md
-supersedes: []
-superseded_by: []
-tags:
-  - backend
-  - architecture
-  - application-layer
----
-
 # Backend Application Layer Ownership Boundary
 
 ## Status

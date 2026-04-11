@@ -4,9 +4,9 @@ This directory is for external domain context, literature summaries, and other
 research-facing notes that inform the project but do not define implementation
 truth.
 
-Use lowercase kebab-case filenames for new notes. Add front matter when a
-research note is actively maintained or intentionally retained as part of the
-project context.
+Use lowercase kebab-case filenames for new notes. Keep research notes
+header-free by default. If lifecycle or maintenance context matters, write it
+in the body instead of a YAML metadata block.
 
 ## Allowed Content
 

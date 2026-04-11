@@ -1,32 +1,3 @@
----
-id: RFC-2026-002
-title: Lens Agent-Era Positioning and Evidence Layer Direction
-type: rfc
-level: system
-domain: shared
-status: draft
-owner: repo-maintainers
-created_at: 2026-04-11
-updated_at: 2026-04-11
-last_verified_at: 2026-04-11
-review_by: 2026-07-11
-version: v1
-source_of_truth: false
-related_issues: [63]
-related_docs:
-  - docs/10-rfcs/evidence-first-literature-parsing.md
-  - docs/30-architecture/system-overview.md
-  - backend/docs/api.md
-supersedes: []
-superseded_by: []
-tags:
-  - rfc
-  - agents
-  - positioning
-  - evidence
-  - comparison
----
-
 # Lens Agent-Era Positioning and Evidence Layer Direction
 
 ## Summary

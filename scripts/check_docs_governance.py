@@ -40,42 +40,6 @@ NODE_LOCAL_DOC_FILES = [
     REPO_ROOT / "frontend" / "src" / "routes" / "_shared" / "README.md",
     REPO_ROOT / "frontend" / "src" / "routes" / "collections" / "README.md",
 ]
-REQUIRED_FIELDS = [
-    "id",
-    "title",
-    "type",
-    "level",
-    "domain",
-    "status",
-    "owner",
-    "created_at",
-    "updated_at",
-]
-ALLOWED_TYPES = {
-    "policy",
-    "architecture",
-    "spec",
-    "guide",
-    "runbook",
-    "rfc",
-    "adr",
-    "postmortem",
-    "research-note",
-}
-ALLOWED_LEVELS = {"system", "domain", "module", "component"}
-ALLOWED_STATUSES = {
-    "draft",
-    "review",
-    "accepted",
-    "implemented",
-    "active",
-    "deprecated",
-    "superseded",
-    "archived",
-}
-ALLOWED_DOMAINS = {"shared", "backend", "frontend", "ai", "ops", "research"}
-DATE_KEYS = {"created_at", "updated_at", "last_verified_at", "review_by"}
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 SUSPICIOUS_NAME_RE = re.compile(r"(password|secret|credential)", re.IGNORECASE)
 HIGH_SIGNAL_SECRET_PATTERNS = [
@@ -107,69 +71,6 @@ def iter_all_docs_markdown() -> list[Path]:
         if path.exists():
             docs.add(path)
     return sorted(docs)
-
-
-def parse_front_matter(path: Path) -> tuple[dict[str, str], list[str]]:
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    if len(lines) < 3 or lines[0].strip() != "---":
-        return {}, ["missing front matter block"]
-
-    metadata: dict[str, str] = {}
-    errors: list[str] = []
-    in_block = True
-    for idx, line in enumerate(lines[1:], start=2):
-        stripped = line.strip()
-        if stripped == "---":
-            in_block = False
-            break
-        if not line or line.startswith("  - ") or line.startswith("- "):
-            continue
-        if line.startswith(" "):
-            continue
-        if ":" not in line:
-            errors.append(f"invalid front matter line {idx}: {line}")
-            continue
-        key, value = line.split(":", 1)
-        metadata[key.strip()] = value.strip()
-
-    if in_block:
-        errors.append("front matter block is not closed")
-    return metadata, errors
-
-
-def validate_front_matter(path: Path) -> list[str]:
-    metadata, errors = parse_front_matter(path)
-    if errors:
-        return [f"{path.relative_to(REPO_ROOT)}: {error}" for error in errors]
-
-    problems: list[str] = []
-    for field in REQUIRED_FIELDS:
-        if not metadata.get(field):
-            problems.append(f"missing required field `{field}`")
-
-    doc_type = metadata.get("type", "")
-    if doc_type and doc_type not in ALLOWED_TYPES:
-        problems.append(f"invalid `type`: {doc_type}")
-
-    level = metadata.get("level", "")
-    if level and level not in ALLOWED_LEVELS:
-        problems.append(f"invalid `level`: {level}")
-
-    status = metadata.get("status", "")
-    if status and status not in ALLOWED_STATUSES:
-        problems.append(f"invalid `status`: {status}")
-
-    domain = metadata.get("domain", "")
-    if domain and domain not in ALLOWED_DOMAINS:
-        problems.append(f"invalid `domain`: {domain}")
-
-    for key in DATE_KEYS:
-        value = metadata.get(key)
-        if value and not DATE_RE.fullmatch(value):
-            problems.append(f"`{key}` must use YYYY-MM-DD: {value}")
-
-    return [f"{path.relative_to(REPO_ROOT)}: {problem}" for problem in problems]
 
 
 def validate_links(path: Path) -> list[str]:
@@ -225,9 +126,6 @@ def main() -> int:
 
     governed_docs = iter_governed_markdown()
     all_docs = iter_all_docs_markdown()
-
-    for path in governed_docs:
-        errors.extend(validate_front_matter(path))
 
     for path in all_docs:
         errors.extend(validate_links(path))

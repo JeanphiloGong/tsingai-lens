@@ -97,7 +97,7 @@ owned and frontend-owned detail should stay with the owning module.
 ## Placement Rules
 
 - New durable docs must have a clear home before they are added.
-- New formal docs should follow the metadata rules in [documentation governance](05-policies/documentation-governance.md).
+- New formal docs should follow the authoring rules in [documentation governance](05-policies/documentation-governance.md) and stay header-free unless a workflow actually consumes metadata.
 - Use the lowest common ancestor of the behavior or code ownership seam.
 - Use `<node>/README.md` for node purpose and navigation before adding a local `docs/README.md`.
 - Add `<node>/docs/README.md` only when that subtree needs a real secondary index.

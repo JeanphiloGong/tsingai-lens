@@ -101,6 +101,34 @@ def _write_index_outputs(output_dir: Path) -> None:
     relationships.to_parquet(output_dir / "relationships.parquet", index=False)
 
 
+def _write_review_only_outputs(output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "A Review of Composite Fillers",
+                "text": "This review summarizes recent advances in composite fillers and processing routes.",
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "This review summarizes recent advances in composite fillers.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    entities = pd.DataFrame([{"id": "ent-1", "title": "epoxy"}])
+    relationships = pd.DataFrame([{"source": "epoxy", "target": "SiO2", "weight": 1.0}])
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    entities.to_parquet(output_dir / "entities.parquet", index=False)
+    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
+
+
 def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
@@ -138,6 +166,7 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["sections_ready"] is True
     assert artifacts["procedure_blocks_ready"] is True
     assert artifacts["protocol_steps_ready"] is True
+    assert paths.output_dir.joinpath("document_profiles.parquet").exists()
 
 
 def test_index_task_runner_downgrades_first_update_run(monkeypatch, tmp_path):
@@ -242,3 +271,51 @@ def test_index_task_runner_downgrades_when_vector_store_baseline_missing(
     assert result["warnings"] == [
         "未找到完整的向量索引基线，已自动降级为全量重建。 缺失或不可用的表: default-entity-description。 详情: missing"
     ]
+
+
+def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
+    monkeypatch, tmp_path
+):
+    _patch_parquet(monkeypatch)
+
+    import application.index_task_runner as task_runner_module
+
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
+
+    collection = collection_service.create_collection("Review Papers")
+    paths = collection_service.get_paths(collection["collection_id"])
+    collection_service.add_file(
+        collection["collection_id"],
+        "paper.txt",
+        b"This review summarizes recent advances in composite fillers.",
+    )
+
+    default_config = tmp_path / "configs" / "default.yaml"
+    default_config.parent.mkdir(parents=True, exist_ok=True)
+    default_config.write_text("dummy: true\n", encoding="utf-8")
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003
+        _write_review_only_outputs(paths.output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
+    monkeypatch.setattr(
+        task_runner_module,
+        "load_config",
+        lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
+    )
+    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+
+    task = task_service.create_task(collection["collection_id"], "index")
+    result = asyncio.run(runner.run_index_task(task["task_id"], collection["collection_id"]))
+
+    assert result["status"] == "completed"
+    assert "未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。" in result["warnings"]
+    artifacts = artifact_registry.get(collection["collection_id"])
+    assert artifacts["documents_ready"] is True
+    assert artifacts["graph_ready"] is True
+    assert artifacts["protocol_steps_ready"] is False
+    assert paths.output_dir.joinpath("document_profiles.parquet").exists()

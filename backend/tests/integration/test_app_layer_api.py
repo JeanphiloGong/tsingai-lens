@@ -154,6 +154,7 @@ def app_client(monkeypatch, tmp_path):
     import application.report_service as report_service_module
     from application.artifact_registry_service import ArtifactRegistryService
     from application.collection_service import CollectionService
+    from application.documents.service import DocumentProfileService
     from application.index_task_runner import IndexTaskRunner
     from application.task_service import TaskService
     from application.workspace_service import WorkspaceService
@@ -162,6 +163,7 @@ def app_client(monkeypatch, tmp_path):
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
     workspace_service = WorkspaceService(collection_service, task_service, artifact_registry)
 
     default_config = tmp_path / "configs" / "default.yaml"
@@ -243,6 +245,7 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(graph_service_module, "collection_service", collection_service)
     monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
+    monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
     monkeypatch.setattr(query_service_module, "query_index", fake_query_index)
     monkeypatch.setattr(
         report_service_module,
@@ -325,6 +328,13 @@ def test_collection_task_and_query_flow(app_client):
     steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
     assert steps.status_code == 200
     assert steps.json()["count"] >= 1
+
+    profiles = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/documents/profiles")
+    assert profiles.status_code == 200
+    profiles_body = profiles.json()
+    assert profiles_body["count"] == 1
+    assert profiles_body["items"][0]["doc_type"] == "experimental"
+    assert profiles_body["items"][0]["protocol_extractable"] == "yes"
 
 
 def test_mock_collection_resources_are_available_for_frontend_integration(app_client):

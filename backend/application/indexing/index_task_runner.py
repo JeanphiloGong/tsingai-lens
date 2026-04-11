@@ -8,6 +8,7 @@ from config import CONFIG_DIR
 from retrieval.config.enums import IndexingMethod
 
 from application.collections.service import CollectionService
+from application.documents.service import DocumentProfileService
 from application.indexing.run_mode_service import resolve_update_run
 from application.indexing.task_service import TaskService
 from application.protocol.pipeline_service import build_protocol_artifacts
@@ -34,11 +35,16 @@ class IndexTaskRunner:
         collection_service: CollectionService | None = None,
         task_service: TaskService | None = None,
         artifact_registry_service: ArtifactRegistryService | None = None,
+        document_profile_service: DocumentProfileService | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
         self.artifact_registry_service = (
             artifact_registry_service or ArtifactRegistryService()
+        )
+        self.document_profile_service = document_profile_service or DocumentProfileService(
+            collection_service=self.collection_service,
+            artifact_registry_service=self.artifact_registry_service,
         )
 
     def _resolve_load_config(self):
@@ -148,10 +154,29 @@ class IndexTaskRunner:
             if not errors:
                 self.task_service.update_task(
                     task_id,
+                    current_stage="document_profiles_started",
+                    progress_percent=70,
+                )
+                document_profiles = self.document_profile_service.build_document_profiles(
+                    collection_id,
+                    output_dir,
+                )
+                protocol_candidate_count = self.document_profile_service.count_protocol_suitable(
+                    document_profiles
+                )
+
+                self.task_service.update_task(
+                    task_id,
                     current_stage="protocol_artifacts_started",
                     progress_percent=75,
                 )
-                build_protocol_artifacts(output_dir)
+                if protocol_candidate_count > 0:
+                    build_protocol_artifacts(output_dir)
+                else:
+                    record = self.task_service.get_task(task_id)
+                    warnings = list(record.get("warnings", []))
+                    warnings.append("未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。")
+                    self.task_service.update_task(task_id, warnings=warnings)
 
             artifacts = self.artifact_registry_service.upsert(collection_id, output_dir)
             final_errors = list(self.task_service.get_task(task_id).get("errors", []))

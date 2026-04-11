@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import re
 from pathlib import Path
 from typing import Any
@@ -8,12 +7,21 @@ from uuid import uuid4
 
 import pandas as pd
 
+from application.backbone_codec import (
+    normalize_backbone_value,
+    prepare_frame_for_storage,
+    restore_frame_from_storage,
+)
 from application.collections.service import CollectionService
 from application.evidence.service import EvidenceCardService, EvidenceCardsNotReadyError
 from application.workspace.artifact_registry_service import ArtifactRegistryService
 
 
 _COMPARISON_ROWS_FILE = "comparison_rows.parquet"
+_COMPARISON_JSON_COLUMNS = (
+    "supporting_evidence_ids",
+    "comparability_warnings",
+)
 _VALUE_PATTERN = re.compile(
     r"(\d+(?:\.\d+)?)\s*(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b",
     re.IGNORECASE,
@@ -81,7 +89,10 @@ class ComparisonService:
         output_dir = self._resolve_output_dir(collection_id)
         path = output_dir / _COMPARISON_ROWS_FILE
         if path.is_file():
-            rows = pd.read_parquet(path)
+            rows = restore_frame_from_storage(
+                pd.read_parquet(path),
+                _COMPARISON_JSON_COLUMNS,
+            )
         else:
             rows = self.build_comparison_rows(collection_id, output_dir)
         return self._normalize_rows_table(rows, collection_id)
@@ -124,7 +135,10 @@ class ComparisonService:
         table = self._normalize_rows_table(table, collection_id)
         if not table.empty:
             base_dir.mkdir(parents=True, exist_ok=True)
-            table.to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
+            prepare_frame_for_storage(
+                table,
+                _COMPARISON_JSON_COLUMNS,
+            ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
             self.artifact_registry_service.upsert(collection_id, base_dir)
         return table
 
@@ -389,36 +403,7 @@ class ComparisonService:
         }
 
     def _normalize_object(self, value: Any) -> Any:
-        if value is None:
-            return None
-        if isinstance(value, dict):
-            return {
-                key: self._normalize_object(item)
-                for key, item in value.items()
-            }
-        if isinstance(value, list):
-            return [self._normalize_object(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._normalize_object(item) for item in value]
-        if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
-            converted = value.tolist()
-            if converted is not value:
-                return self._normalize_object(converted)
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                return None
-            if (text.startswith("{") and text.endswith("}")) or (
-                text.startswith("[") and text.endswith("]")
-            ):
-                try:
-                    return ast.literal_eval(text)
-                except (ValueError, SyntaxError):
-                    return text
-            return text
-        if isinstance(value, float) and pd.isna(value):
-            return None
-        return value
+        return normalize_backbone_value(value)
 
     def _normalize_list(self, value: Any) -> list[str]:
         payload = self._normalize_object(value)

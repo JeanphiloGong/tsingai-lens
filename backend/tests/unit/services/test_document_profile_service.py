@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from application.documents.service import DocumentProfileService
 
@@ -280,3 +281,58 @@ def test_document_profile_service_normalizes_numpy_array_columns():
         "condition completeness",
     ]
     assert normalized.iloc[0]["parsing_warnings"] == ["condition_context_weak"]
+
+
+def test_document_profile_service_round_trips_json_storage_fields(tmp_path):
+    pytest.importorskip("pyarrow")
+
+    from application.collections.service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    profile_service = DocumentProfileService(collection_service, artifact_registry)
+
+    collection = collection_service.create_collection("Round Trip Profiles")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Composite Experimental Study",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Powders were mixed in ethanol and stirred for 2 h.",
+                        "The slurry was dried at 80 C and annealed at 600 C under Ar.",
+                        "Characterization",
+                        "XRD and SEM were used to characterize the powders.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Powders were mixed in ethanol and stirred for 2 h.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    profile_service.build_document_profiles(collection_id, output_dir)
+
+    stored = pd.read_parquet(output_dir / "document_profiles.parquet")
+    assert isinstance(stored.iloc[0]["protocol_extractability_signals"], str)
+    assert isinstance(stored.iloc[0]["parsing_warnings"], str)
+
+    restored = profile_service.read_document_profiles(collection_id)
+    assert isinstance(restored.iloc[0]["protocol_extractability_signals"], list)
+    assert isinstance(restored.iloc[0]["parsing_warnings"], list)

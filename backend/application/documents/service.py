@@ -9,6 +9,11 @@ from typing import Any
 
 import pandas as pd
 
+from application.backbone_codec import (
+    normalize_backbone_value,
+    prepare_frame_for_storage,
+    restore_frame_from_storage,
+)
 from application.collections.service import CollectionService
 from application.protocol.section_service import build_sections
 from application.protocol.source_service import build_document_records, load_protocol_inputs
@@ -16,6 +21,10 @@ from application.workspace.artifact_registry_service import ArtifactRegistryServ
 
 
 _DOCUMENT_PROFILES_FILE = "document_profiles.parquet"
+_DOCUMENT_PROFILE_JSON_COLUMNS = (
+    "protocol_extractability_signals",
+    "parsing_warnings",
+)
 
 _REVIEW_TITLE_PATTERNS = (
     re.compile(r"\breview\b", re.IGNORECASE),
@@ -150,7 +159,10 @@ class DocumentProfileService:
         output_dir = self._resolve_output_dir(collection_id)
         path = output_dir / _DOCUMENT_PROFILES_FILE
         if path.is_file():
-            profiles = pd.read_parquet(path)
+            profiles = restore_frame_from_storage(
+                pd.read_parquet(path),
+                _DOCUMENT_PROFILE_JSON_COLUMNS,
+            )
             if self._profile_rebuild_required(profiles) and (output_dir / "documents.parquet").is_file():
                 profiles = self.build_document_profiles(collection_id, output_dir)
         else:
@@ -202,7 +214,10 @@ class DocumentProfileService:
         )
         profiles = self._normalize_profiles_table(profiles, collection_id)
         base_dir.mkdir(parents=True, exist_ok=True)
-        profiles.to_parquet(base_dir / _DOCUMENT_PROFILES_FILE, index=False)
+        prepare_frame_for_storage(
+            profiles,
+            _DOCUMENT_PROFILE_JSON_COLUMNS,
+        ).to_parquet(base_dir / _DOCUMENT_PROFILES_FILE, index=False)
         self.artifact_registry_service.upsert(collection_id, base_dir)
         return profiles
 
@@ -512,31 +527,12 @@ class DocumentProfileService:
         return round(max(0.5, min(0.98, base + strength - noise)), 2)
 
     def _normalize_string_list(self, value: Any) -> list[str]:
-        if value is None:
+        normalized = normalize_backbone_value(value)
+        if normalized is None:
             return []
-        if isinstance(value, list):
-            return [str(item) for item in value if str(item).strip()]
-        if isinstance(value, tuple):
-            return [str(item) for item in value if str(item).strip()]
-        if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
-            converted = value.tolist()
-            if converted is not value:
-                return self._normalize_string_list(converted)
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                return []
-            if text.startswith("[") and text.endswith("]"):
-                try:
-                    parsed = ast.literal_eval(text)
-                except (ValueError, SyntaxError):
-                    return [text]
-                if isinstance(parsed, list):
-                    return [str(item) for item in parsed if str(item).strip()]
-            return [text]
-        if isinstance(value, float) and pd.isna(value):
-            return []
-        return [str(value)]
+        if isinstance(normalized, list):
+            return [str(item) for item in normalized if str(item).strip()]
+        return [str(normalized)]
 
     def _normalize_optional_text(self, value: Any) -> str | None:
         if value is None:

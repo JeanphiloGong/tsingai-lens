@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import re
 from pathlib import Path
 from typing import Any
@@ -8,6 +7,11 @@ from uuid import uuid4
 
 import pandas as pd
 
+from application.backbone_codec import (
+    normalize_backbone_value,
+    prepare_frame_for_storage,
+    restore_frame_from_storage,
+)
 from application.collections.service import CollectionService
 from application.documents.service import (
     DocumentProfileService,
@@ -19,6 +23,11 @@ from application.workspace.artifact_registry_service import ArtifactRegistryServ
 
 
 _EVIDENCE_CARDS_FILE = "evidence_cards.parquet"
+_EVIDENCE_JSON_COLUMNS = (
+    "evidence_anchors",
+    "material_system",
+    "condition_context",
+)
 
 _CHARACTERIZATION_METHODS = (
     "XRD",
@@ -123,7 +132,10 @@ class EvidenceCardService:
         output_dir = self._resolve_output_dir(collection_id)
         path = output_dir / _EVIDENCE_CARDS_FILE
         if path.is_file():
-            cards = pd.read_parquet(path)
+            cards = restore_frame_from_storage(
+                pd.read_parquet(path),
+                _EVIDENCE_JSON_COLUMNS,
+            )
         else:
             cards = self.build_evidence_cards(collection_id, output_dir)
         return self._normalize_cards_table(cards, collection_id)
@@ -198,7 +210,10 @@ class EvidenceCardService:
 
         if not cards_table.empty:
             base_dir.mkdir(parents=True, exist_ok=True)
-            cards_table.to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
+            prepare_frame_for_storage(
+                cards_table,
+                _EVIDENCE_JSON_COLUMNS,
+            ).to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
             self.artifact_registry_service.upsert(collection_id, base_dir)
 
         return cards_table
@@ -593,36 +608,7 @@ class EvidenceCardService:
         }
 
     def _normalize_object(self, value: Any) -> Any:
-        if value is None:
-            return None
-        if isinstance(value, dict):
-            return {
-                key: self._normalize_object(item)
-                for key, item in value.items()
-            }
-        if isinstance(value, list):
-            return [self._normalize_object(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._normalize_object(item) for item in value]
-        if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
-            converted = value.tolist()
-            if converted is not value:
-                return self._normalize_object(converted)
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                return None
-            if (text.startswith("{") and text.endswith("}")) or (
-                text.startswith("[") and text.endswith("]")
-            ):
-                try:
-                    return ast.literal_eval(text)
-                except (ValueError, SyntaxError):
-                    return text
-            return text
-        if isinstance(value, float) and pd.isna(value):
-            return None
-        return value
+        return normalize_backbone_value(value)
 
     def _normalize_list(self, value: Any) -> list[str]:
         normalized = self._normalize_object(value)

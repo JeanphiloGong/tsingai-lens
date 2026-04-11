@@ -57,10 +57,12 @@
   $: if (!canUseIncrementalIndex && indexMode === 'update') {
     indexMode = 'rebuild';
   }
-  $: workspaceState = getCollectionWorkspaceState(workspace);
-  $: actionablePrimaryViews = countActionablePrimaryViews(workspace);
-  $: protocolState = getWorkspaceSurfaceState(workspace, 'protocol');
-  $: graphState = getWorkspaceSurfaceState(workspace, 'graph');
+  $: effectiveFileCount = Math.max(workspace?.file_count ?? 0, collectionFiles.length);
+  $: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
+  $: workspaceState = getCollectionWorkspaceState(stateWorkspace);
+  $: actionablePrimaryViews = countActionablePrimaryViews(stateWorkspace);
+  $: protocolState = getWorkspaceSurfaceState(stateWorkspace, 'protocol');
+  $: graphState = getWorkspaceSurfaceState(stateWorkspace, 'graph');
   $: isEmptyState = workspaceState === 'empty';
   $: isReadyToProcessState = workspaceState === 'ready_to_process';
   $: isProcessingState = workspaceState === 'processing';
@@ -283,7 +285,7 @@
 
   function primaryActionLabel() {
     if (!workspace) return $t('overview.primaryActionUpload');
-    if (!workspace.file_count) return $t('overview.primaryActionUpload');
+    if (!effectiveFileCount) return $t('overview.primaryActionUpload');
     if (workspace.latest_task && isTaskActive(workspace.latest_task)) return $t('overview.primaryActionTrack');
     if (workspace.capabilities.can_view_comparisons) return $t('overview.primaryActionComparisons');
     if (workspace.capabilities.can_view_evidence) return $t('overview.primaryActionEvidence');
@@ -298,7 +300,7 @@
     const latestTask = workspace?.latest_task;
     if (!workspace) return;
 
-    if (!workspace.file_count) {
+    if (!effectiveFileCount) {
       location.hash = 'files';
       return;
     }
@@ -332,7 +334,7 @@
   }
 
   async function startIndexRun() {
-    if (!workspace?.file_count) {
+    if (!effectiveFileCount) {
       actionStatus = $t('overview.indexNoFiles');
       return;
     }
@@ -415,7 +417,7 @@
   function viewState(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
     if (key === 'graph') return graphState;
     if (key === 'protocol') return protocolState;
-    return workspace ? getWorkspaceSurfaceState(workspace, key) : 'empty';
+    return stateWorkspace ? getWorkspaceSurfaceState(stateWorkspace, key) : 'empty';
   }
 
   function showViewAction(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
@@ -506,7 +508,7 @@
         <div class="detail-chips">
           <span class="detail-chip">{collectionStateLabel(workspaceState)}</span>
           <span class="detail-chip detail-chip--muted">{formatStatus(workspace.status_summary)}</span>
-          <span class="detail-chip detail-chip--muted">{$t('overview.filesCount', { count: workspace.file_count })}</span>
+          <span class="detail-chip detail-chip--muted">{$t('overview.filesCount', { count: effectiveFileCount })}</span>
           <span class="detail-chip detail-chip--muted">
             {$t('overview.readyViewsCount', { count: actionablePrimaryViews })}
           </span>
@@ -655,7 +657,7 @@
             </div>
             <div class="detail-row">
               <dt>{$t('overview.statusFiles')}</dt>
-              <dd>{formatCount(workspace.file_count)}</dd>
+              <dd>{formatCount(effectiveFileCount)}</dd>
             </div>
             <div class="detail-row">
               <dt>{$t('overview.statusUpdated')}</dt>
@@ -802,7 +804,7 @@
             </div>
             <div class="detail-row">
               <dt>{$t('overview.statusFiles')}</dt>
-              <dd>{formatCount(workspace.file_count)}</dd>
+              <dd>{formatCount(effectiveFileCount)}</dd>
             </div>
             <div class="detail-row">
               <dt>{$t('overview.statusUpdated')}</dt>

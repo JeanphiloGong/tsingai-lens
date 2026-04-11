@@ -57,6 +57,12 @@ larger flat service bag.
   Backend-local implementation notes behind the agreed API contract
 - [`backend-domain-architecture.md`](backend-domain-architecture.md)
   Target backend-local domain seams and packaging direction
+- [`backend-goal-core-source-layering.md`](backend-goal-core-source-layering.md)
+  Backend-local proposal for goal-driven entry, collection intelligence core,
+  and source acquisition seams
+- [`backend-goal-core-source-implementation-plan.md`](backend-goal-core-source-implementation-plan.md)
+  Backend-local execution plan for Core hardening, protocol decoupling, goal
+  contracts, and source expansion
 - [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)
   Boundary ADR
 - [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)

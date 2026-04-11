@@ -45,6 +45,12 @@ next to code.
   Backend-local notes for implementing the agreed Lens v1 API contract
 - [`docs/backend-domain-architecture.md`](docs/backend-domain-architecture.md)
   Target backend-local business-domain seams and package direction
+- [`docs/backend-goal-core-source-layering.md`](docs/backend-goal-core-source-layering.md)
+  Backend-local proposal for goal-driven entry, collection intelligence core,
+  and source acquisition seams
+- [`docs/backend-goal-core-source-implementation-plan.md`](docs/backend-goal-core-source-implementation-plan.md)
+  Backend-local execution plan for Core hardening, protocol decoupling, goal
+  contracts, and source expansion
 - [`docs/backend-overview.md`](docs/backend-overview.md)
   Backend architecture overview and ownership seams
 - [`docs/backend-evidence-first-parsing-plan.md`](docs/backend-evidence-first-parsing-plan.md)

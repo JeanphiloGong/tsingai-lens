@@ -2,10 +2,23 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from application.evidence.service import (
+    EvidenceCardService,
+    EvidenceCardsNotReadyError,
+)
 from application.mock.lens_v1_service import lens_v1_mock_service
 from controllers.schemas.evidence import EvidenceCardListResponse
 
 router = APIRouter(prefix="/collections", tags=["evidence"])
+evidence_card_service = EvidenceCardService()
+
+
+def _evidence_cards_not_ready_detail(collection_id: str) -> dict[str, str]:
+    return {
+        "code": "evidence_cards_not_ready",
+        "message": "The collection does not have evidence cards yet. Finish indexing first.",
+        "collection_id": collection_id,
+    }
 
 
 @router.get(
@@ -18,14 +31,24 @@ async def list_collection_evidence_cards(
     limit: int = Query(default=50, ge=1, le=500, description="返回数量"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
 ) -> EvidenceCardListResponse:
-    if not lens_v1_mock_service.is_enabled() or not lens_v1_mock_service.is_mock_collection(collection_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"evidence cards not found for collection: {collection_id}",
+    if lens_v1_mock_service.is_enabled() and lens_v1_mock_service.is_mock_collection(collection_id):
+        payload = lens_v1_mock_service.list_evidence_cards(
+            collection_id,
+            offset=offset,
+            limit=limit,
         )
-    payload = lens_v1_mock_service.list_evidence_cards(
-        collection_id,
-        offset=offset,
-        limit=limit,
-    )
+        return EvidenceCardListResponse(**payload)
+    try:
+        payload = evidence_card_service.list_evidence_cards(
+            collection_id,
+            offset=offset,
+            limit=limit,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EvidenceCardsNotReadyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_evidence_cards_not_ready_detail(exc.collection_id),
+        ) from exc
     return EvidenceCardListResponse(**payload)

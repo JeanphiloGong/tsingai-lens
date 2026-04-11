@@ -109,9 +109,12 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
-    assert overview["status_summary"] == "ready"
+    assert overview["status_summary"] == "document_profiled"
     assert overview["workflow"]["documents"]["status"] == "ready"
     assert overview["workflow"]["protocol"]["status"] == "limited"
+    assert overview["artifacts"]["document_profiles_ready"] is True
+    assert overview["artifacts"]["evidence_cards_ready"] is False
+    assert overview["artifacts"]["comparison_rows_ready"] is False
     assert overview["document_summary"]["total_documents"] == 1
     assert overview["document_summary"]["by_doc_type"]["experimental"] == 1
     assert overview["links"]["documents_profiles"] == f"/api/v1/collections/{collection_id}/documents/profiles"

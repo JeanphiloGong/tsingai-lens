@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
+
 from domain.ports import ArtifactRepository
 from infra.persistence.factory import build_artifact_repository
 
@@ -28,6 +30,15 @@ class ArtifactRegistryService:
             "collection_id": collection_id,
             "output_path": str(base_dir),
             "documents_ready": (base_dir / "documents.parquet").exists(),
+            "document_profiles_ready": self._parquet_has_rows(
+                base_dir / "document_profiles.parquet"
+            ),
+            "evidence_cards_ready": self._parquet_has_rows(
+                base_dir / "evidence_cards.parquet"
+            ),
+            "comparison_rows_ready": self._parquet_has_rows(
+                base_dir / "comparison_rows.parquet"
+            ),
             "graph_ready": (base_dir / "entities.parquet").exists()
             and (base_dir / "relationships.parquet").exists(),
             "sections_ready": (base_dir / "sections.parquet").exists(),
@@ -36,6 +47,15 @@ class ArtifactRegistryService:
             "graphml_ready": (base_dir / "graph.graphml").exists(),
             "updated_at": _now_iso(),
         }
+
+    def _parquet_has_rows(self, path: Path) -> bool:
+        if not path.exists():
+            return False
+        try:
+            frame = pd.read_parquet(path)
+        except Exception:  # noqa: BLE001
+            return False
+        return not frame.empty
 
     def upsert(self, collection_id: str, output_dir: str | Path) -> dict:
         payload = self.build_registry(collection_id, output_dir)

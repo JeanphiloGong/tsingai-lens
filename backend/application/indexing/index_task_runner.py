@@ -7,8 +7,10 @@ from typing import Any
 from config import CONFIG_DIR
 from retrieval.config.enums import IndexingMethod
 
+from application.comparisons.service import ComparisonService
 from application.collections.service import CollectionService
 from application.documents.service import DocumentProfileService
+from application.evidence.service import EvidenceCardService
 from application.indexing.run_mode_service import resolve_update_run
 from application.indexing.task_service import TaskService
 from application.protocol.pipeline_service import build_protocol_artifacts
@@ -36,6 +38,8 @@ class IndexTaskRunner:
         task_service: TaskService | None = None,
         artifact_registry_service: ArtifactRegistryService | None = None,
         document_profile_service: DocumentProfileService | None = None,
+        evidence_card_service: EvidenceCardService | None = None,
+        comparison_service: ComparisonService | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
@@ -45,6 +49,16 @@ class IndexTaskRunner:
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
+        )
+        self.evidence_card_service = evidence_card_service or EvidenceCardService(
+            collection_service=self.collection_service,
+            artifact_registry_service=self.artifact_registry_service,
+            document_profile_service=self.document_profile_service,
+        )
+        self.comparison_service = comparison_service or ComparisonService(
+            collection_service=self.collection_service,
+            artifact_registry_service=self.artifact_registry_service,
+            evidence_card_service=self.evidence_card_service,
         )
 
     def _resolve_load_config(self):
@@ -164,11 +178,40 @@ class IndexTaskRunner:
                 protocol_candidate_count = self.document_profile_service.count_protocol_suitable(
                     document_profiles
                 )
+                self.task_service.update_task(
+                    task_id,
+                    current_stage="evidence_cards_started",
+                    progress_percent=76,
+                )
+                evidence_cards = self.evidence_card_service.build_evidence_cards(
+                    collection_id,
+                    output_dir,
+                )
+                if evidence_cards.empty:
+                    record = self.task_service.get_task(task_id)
+                    warnings = list(record.get("warnings", []))
+                    warnings.append("未抽取到 evidence cards，collection 暂时只能依赖 document profiles。")
+                    self.task_service.update_task(task_id, warnings=warnings)
+
+                self.task_service.update_task(
+                    task_id,
+                    current_stage="comparison_rows_started",
+                    progress_percent=82,
+                )
+                comparison_rows = self.comparison_service.build_comparison_rows(
+                    collection_id,
+                    output_dir,
+                )
+                if comparison_rows.empty:
+                    record = self.task_service.get_task(task_id)
+                    warnings = list(record.get("warnings", []))
+                    warnings.append("未生成 comparison rows，当前 collection 还不能直接做结构化比较。")
+                    self.task_service.update_task(task_id, warnings=warnings)
 
                 self.task_service.update_task(
                     task_id,
                     current_stage="protocol_artifacts_started",
-                    progress_percent=75,
+                    progress_percent=88,
                 )
                 if protocol_candidate_count > 0:
                     build_protocol_artifacts(output_dir)

@@ -37,6 +37,9 @@ class WorkspaceService:
             "collection_id": collection_id,
             "output_path": str(paths.output_dir),
             "documents_ready": False,
+            "document_profiles_ready": False,
+            "evidence_cards_ready": False,
+            "comparison_rows_ready": False,
             "graph_ready": False,
             "sections_ready": False,
             "procedure_blocks_ready": False,
@@ -77,10 +80,12 @@ class WorkspaceService:
                 return "attention_required"
             if status == "partial_success":
                 return "partial_ready"
-        if self._artifact_path_exists(artifacts, "comparison_rows.parquet"):
+        if artifacts.get("comparison_rows_ready"):
             return "ready"
-        if document_summary.get("total_documents", 0) > 0:
-            return "ready"
+        if artifacts.get("evidence_cards_ready"):
+            return "comparison_pending"
+        if artifacts.get("document_profiles_ready"):
+            return "document_profiled"
         if artifacts.get("protocol_steps_ready"):
             return "ready"
         if artifacts.get("graph_ready"):
@@ -109,9 +114,11 @@ class WorkspaceService:
         document_summary: dict,
     ) -> dict:
         task_status = str((latest_task or {}).get("status") or "")
-        documents_ready = document_summary.get("total_documents", 0) > 0
-        evidence_ready = self._artifact_path_exists(artifacts, "evidence_cards.parquet")
-        comparison_ready = self._artifact_path_exists(artifacts, "comparison_rows.parquet")
+        documents_ready = bool(artifacts.get("document_profiles_ready")) or document_summary.get(
+            "total_documents", 0
+        ) > 0
+        evidence_ready = bool(artifacts.get("evidence_cards_ready"))
+        comparison_ready = bool(artifacts.get("comparison_rows_ready"))
         protocol_ready = bool(artifacts.get("protocol_steps_ready"))
         protocol_candidates = document_summary.get("by_protocol_extractable", {}).get("yes", 0) + document_summary.get("by_protocol_extractable", {}).get("partial", 0)
 
@@ -134,13 +141,35 @@ class WorkspaceService:
             "status": "ready" if documents_ready else "not_started",
             "detail": "Document profiles are available." if documents_ready else "Document profiles are not ready yet.",
         }
+        evidence_stage_status = "ready" if evidence_ready else ("limited" if documents_ready else "not_started")
         evidence_stage = {
-            "status": "ready" if evidence_ready else "not_started",
-            "detail": "Evidence cards are available." if evidence_ready else "Evidence cards are not generated yet.",
+            "status": evidence_stage_status,
+            "detail": (
+                "Evidence cards are available."
+                if evidence_ready
+                else (
+                    "No evidence cards were extracted from this collection yet."
+                    if documents_ready
+                    else "Evidence cards are not generated yet."
+                )
+            ),
         }
+        comparisons_stage_status = (
+            "ready"
+            if comparison_ready
+            else ("limited" if evidence_ready or documents_ready else "not_started")
+        )
         comparisons_stage = {
-            "status": "ready" if comparison_ready else "not_started",
-            "detail": "Comparison rows are available." if comparison_ready else "Comparison rows are not generated yet.",
+            "status": comparisons_stage_status,
+            "detail": (
+                "Comparison rows are available."
+                if comparison_ready
+                else (
+                    "Comparison rows are not yet available for direct collection-level comparison."
+                    if evidence_ready or documents_ready
+                    else "Comparison rows are not generated yet."
+                )
+            ),
         }
 
         if protocol_ready:
@@ -229,6 +258,10 @@ class WorkspaceService:
         except FileNotFoundError:
             artifacts = self._build_default_artifacts(collection_id)
         document_summary = self._build_document_summary(collection_id)
+        try:
+            artifacts = self.artifact_registry_service.get(collection_id)
+        except FileNotFoundError:
+            pass
         return {
             "collection": collection,
             "file_count": len(files),
@@ -241,6 +274,9 @@ class WorkspaceService:
             "artifacts": {
                 "output_path": artifacts["output_path"],
                 "documents_ready": bool(artifacts.get("documents_ready")),
+                "document_profiles_ready": bool(artifacts.get("document_profiles_ready")),
+                "evidence_cards_ready": bool(artifacts.get("evidence_cards_ready")),
+                "comparison_rows_ready": bool(artifacts.get("comparison_rows_ready")),
                 "graph_ready": bool(artifacts.get("graph_ready")),
                 "sections_ready": bool(artifacts.get("sections_ready")),
                 "procedure_blocks_ready": bool(artifacts.get("procedure_blocks_ready")),

@@ -162,11 +162,16 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert result["current_stage"] == "artifacts_ready"
     artifacts = artifact_registry.get(collection["collection_id"])
     assert artifacts["documents_ready"] is True
+    assert artifacts["document_profiles_ready"] is True
+    assert artifacts["evidence_cards_ready"] is True
+    assert artifacts["comparison_rows_ready"] is True
     assert artifacts["graph_ready"] is True
     assert artifacts["sections_ready"] is True
     assert artifacts["procedure_blocks_ready"] is True
     assert artifacts["protocol_steps_ready"] is True
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
+    assert paths.output_dir.joinpath("evidence_cards.parquet").exists()
+    assert paths.output_dir.joinpath("comparison_rows.parquet").exists()
 
 
 def test_index_task_runner_downgrades_first_update_run(monkeypatch, tmp_path):
@@ -316,6 +321,9 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert "未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。" in result["warnings"]
     artifacts = artifact_registry.get(collection["collection_id"])
     assert artifacts["documents_ready"] is True
+    assert artifacts["document_profiles_ready"] is True
     assert artifacts["graph_ready"] is True
+    assert artifacts["evidence_cards_ready"] is False
+    assert artifacts["comparison_rows_ready"] is False
     assert artifacts["protocol_steps_ready"] is False
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()

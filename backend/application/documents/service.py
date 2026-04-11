@@ -173,6 +173,7 @@ class DocumentProfileService:
         profiles = self._normalize_profiles_table(profiles, collection_id)
         base_dir.mkdir(parents=True, exist_ok=True)
         profiles.to_parquet(base_dir / _DOCUMENT_PROFILES_FILE, index=False)
+        self.artifact_registry_service.upsert(collection_id, base_dir)
         return profiles
 
     def count_protocol_suitable(self, profiles: pd.DataFrame) -> int:

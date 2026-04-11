@@ -23,6 +23,9 @@ class WorkspaceArtifactStatusResponse(BaseModel):
 
     output_path: str = Field(..., description="集合输出目录")
     documents_ready: bool = Field(default=False, description="documents.parquet 是否存在")
+    document_profiles_ready: bool = Field(default=False, description="document_profiles.parquet 是否存在且非空")
+    evidence_cards_ready: bool = Field(default=False, description="evidence_cards.parquet 是否存在且非空")
+    comparison_rows_ready: bool = Field(default=False, description="comparison_rows.parquet 是否存在且非空")
     graph_ready: bool = Field(default=False, description="图谱 parquet 是否就绪")
     sections_ready: bool = Field(default=False, description="sections.parquet 是否存在")
     procedure_blocks_ready: bool = Field(

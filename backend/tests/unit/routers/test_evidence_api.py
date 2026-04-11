@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+try:
+    from fastapi import HTTPException
+except ImportError:  # pragma: no cover
+    pytest.skip("fastapi not installed", allow_module_level=True)
+
+from application.artifact_registry_service import ArtifactRegistryService
+from application.collection_service import CollectionService
+from application.documents.service import DocumentProfileService
+from application.evidence.service import EvidenceCardService
+from controllers import evidence as evidence_controller
+
+
+@pytest.fixture()
+def evidence_services(monkeypatch, tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+
+    monkeypatch.setattr(evidence_controller, "evidence_card_service", evidence_card_service)
+    monkeypatch.setattr(evidence_controller.lens_v1_mock_service, "is_enabled", lambda: False)
+
+    return collection_service, artifact_registry, evidence_card_service
+
+
+def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
+    collection_service, _artifact_registry, _evidence_card_service = evidence_services
+    record = collection_service.create_collection(name="Pending Collection")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(evidence_controller.list_collection_evidence_cards(record["collection_id"]))
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.detail["code"] == "evidence_cards_not_ready"
+    assert exc.detail["collection_id"] == record["collection_id"]
+
+
+def test_evidence_route_returns_404_for_missing_collection(evidence_services):
+    _collection_service, _artifact_registry, _evidence_card_service = evidence_services
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(evidence_controller.list_collection_evidence_cards("col_missing"))
+
+    exc = exc_info.value
+    assert exc.status_code == 404
+    assert "collection not found" in str(exc.detail)

@@ -18,6 +18,33 @@ This document does not define:
 - final API payload shapes
 - every optional derived field
 
+## Business Flow Interpretation
+
+These artifact contracts describe the main Lens v1 business flow rather than a
+protocol-first extraction flow.
+
+In business terms, the system should work like this:
+
+1. papers enter a collection
+2. `document_profiles` decides how each paper should be treated
+3. `evidence_cards` stores the core research judgment units for each paper
+4. `comparison_rows` turns those evidence units into collection-facing
+   comparison rows
+5. `protocol_candidates` and `protocol_steps` are optional downstream outputs
+   used only when the source material is suitable
+
+In that flow:
+
+- `document_profiles` is the gating layer
+- `evidence_cards` is the core research object layer
+- `comparison_rows` is the primary collection-facing workspace layer
+- `protocol_*` artifacts are downstream branches rather than the business
+  backbone
+
+Lens v1 therefore organizes papers into research objects that are comparable,
+traceable, and reviewable before it decides whether any protocol-like output
+should exist.
+
 ## Contract Rules
 
 The following rules apply across all three artifacts:

@@ -34,6 +34,10 @@ The following rules apply across all three artifacts:
 `document_profiles` decides document type, protocol suitability, and early
 collection-level gating.
 
+Collection-level suitability states should be derived from
+`document_profiles` rather than introduced as an unrelated parallel source of
+truth.
+
 ### Minimum Required Fields
 
 - `document_id`
@@ -116,8 +120,14 @@ collection-level gating.
 
 `evidence_cards` is the primary claim-centered evidence artifact in Lens v1.
 
-Each card represents one claim-bearing unit with one or more supporting
-evidence anchors and its associated condition context.
+Each card has one primary claim-bearing unit and one or more supporting
+evidence anchors plus its associated condition context.
+
+An evidence card is therefore a claim object with evidence attached, not an
+evidence cluster with claims attached.
+
+The same evidence anchor may support more than one evidence card when multiple
+distinct claims depend on the same figure, table, method, or text span.
 
 ### Minimum Required Fields
 
@@ -146,9 +156,20 @@ evidence anchors and its associated condition context.
 | `evidence_source_type` | Stores what kind of source supports the claim | Important for judging evidence strength and UI presentation |
 | `evidence_anchors` | Points back to spans, figures, tables, or methods sections | This is the main traceback hook |
 | `material_system` | Records the material system or composition discussed by the claim | Needed for later normalization and comparison |
-| `condition_context` | Records the process, baseline, and test context that constrain the claim | Prevents the claim from floating free of its conditions |
+| `condition_context` | Records the process, baseline, and test context that constrain the claim | Prevents the claim from floating free of its conditions; should not collapse into one opaque blob |
 | `confidence` | Stores the system's confidence in the card | Helps downstream ranking and review |
 | `traceability_status` | States whether the card has usable evidence anchors | Keeps downstream consumers from assuming all cards are equally grounded |
+
+### Condition Context Structure
+
+`condition_context` may be stored as a structured object, but it should
+preserve distinct subfields rather than becoming one opaque JSON blob.
+
+When available, it should separately retain:
+
+- process or treatment context
+- baseline or control context
+- test or measurement context
 
 ### Evidence Source Type Semantics
 
@@ -251,6 +272,17 @@ collection-level inspection. It is not a pairwise comparison object.
 - `insufficient`
   The source material does not provide enough information to judge
   comparability reliably.
+
+### Comparability Judgment Provenance
+
+Comparability judgments may be:
+
+- rule-derived
+- model-derived
+- hybrid
+
+That provenance should remain inspectable so the system can explain whether a
+row was limited by explicit normalization rules, model judgment, or both.
 
 ### Recommended Value Fields
 

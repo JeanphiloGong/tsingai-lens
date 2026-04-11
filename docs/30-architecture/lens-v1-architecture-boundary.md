@@ -56,6 +56,10 @@ The shared Lens v1 workflow should be:
 This means a collection can be useful even when it produces zero final protocol
 steps.
 
+Collection-level suitability states should be derived from
+`document_profiles` rather than introduced as an unrelated parallel source of
+truth.
+
 ## Shared Artifact Boundary
 
 The shared artifact model for Lens v1 should separate the evidence backbone
@@ -80,7 +84,8 @@ The artifacts above do not have equal architectural weight.
 - `document_profiles`
   Determines document type, protocol suitability, and collection-level gating.
 - `evidence_cards`
-  Serves as the primary carrier for claim, evidence, and condition/context.
+  Serves as the primary claim-centered carrier for one primary claim plus its
+  supporting evidence anchors and condition/context.
 - `comparison_rows`
   Serves as the primary collection-facing comparison view derived from the
   evidence backbone.
@@ -147,9 +152,9 @@ Protocol output should not be:
 - the default interpretation of review-heavy literature
 - the product's primary definition of success
 
-Graph outputs in v1 should be derived views over evidence and comparison
-artifacts, not an independent extraction backbone or primary acceptance
-surface.
+Graph and report views in v1 should be derived views over evidence and
+comparison artifacts, not independent extraction backbones or primary
+acceptance surfaces.
 
 ## Shared Module Responsibilities
 

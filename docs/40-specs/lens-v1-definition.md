@@ -52,7 +52,8 @@ For the first vertical, the clearest value statement is:
 
 ## Primary Surface
 
-The primary Lens v1 surface is the collection comparison workspace.
+The collection comparison workspace is the primary Lens v1 surface and the
+primary acceptance surface.
 
 That surface should let a user inspect:
 

@@ -10,7 +10,7 @@ from controllers.schemas.collection import (
     CollectionListResponse,
     CollectionResponse,
 )
-from application.collection_service import CollectionService
+from application.collections.service import CollectionService
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 collection_service = CollectionService()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from application import report_service
+from application.reports import service as report_service
 from controllers.schemas.report import (
     ReportCommunityDetailResponse,
     ReportCommunityListResponse,

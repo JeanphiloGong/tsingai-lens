@@ -8,10 +8,10 @@ from controllers.schemas.task import (
     TaskListResponse,
     TaskResponse,
 )
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
-from application.index_task_runner import IndexTaskRunner
-from application.task_service import TaskService
+from application.collections.service import CollectionService
+from application.indexing.index_task_runner import IndexTaskRunner
+from application.indexing.task_service import TaskService
+from application.workspace.artifact_registry_service import ArtifactRegistryService
 
 router = APIRouter(tags=["tasks"])
 collection_service = CollectionService()

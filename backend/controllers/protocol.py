@@ -5,9 +5,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
-from application import graph_service, protocol_search_service, protocol_sop_service
+from application.collections.service import CollectionService
+from application.graph import service as graph_service
+from application.protocol import (
+    search_service as protocol_search_service,
+    sop_service as protocol_sop_service,
+)
+from application.workspace.artifact_registry_service import ArtifactRegistryService
 
 router = APIRouter(prefix="/collections", tags=["protocol"])
 collection_service = CollectionService()

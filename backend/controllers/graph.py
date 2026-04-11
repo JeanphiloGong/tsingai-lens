@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
-from application import graph_service
+from application.graph import service as graph_service
 
 router = APIRouter(prefix="/collections", tags=["graph"])
 

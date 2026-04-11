@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from application import query_service
+from application.query import service as query_service
 from controllers.schemas.query import QueryRequest, QueryResponse
 
 router = APIRouter(tags=["query"])

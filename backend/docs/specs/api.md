@@ -116,6 +116,8 @@
 
 - `document_id`
 - `collection_id`
+- `title`
+- `source_filename`
 - `doc_type`
 - `protocol_extractable`
 - `protocol_extractability_signals`
@@ -124,10 +126,42 @@
 
 语义要求：
 
+- `document_id` 是内部稳定标识，用于追踪和关联，不是主展示名称
+- `title` 是文档/论文标题
+  - 如果无法可靠获得，返回 `null`
+  - 不要用 `document_id` 回填
+  - 不要用 `source_filename` 冒充
+- `source_filename` 是用户上传的原始文件名，或系统能稳定追溯到的源文件名
+  - 如果当前链路拿不到，返回 `null`
+  - 不要用 `title` 或 `document_id` 冒充
+- 空字符串不应返回给前端，应统一归一化为 `null`
 - `doc_type` 使用
   `experimental | review | mixed | uncertain`
 - `protocol_extractable` 使用
   `yes | partial | no | uncertain`
+- 这是增量字段扩展，不改变 endpoint，也不破坏旧字段
+
+前端消费约定：
+
+- 主标题优先级：`title ?? source_filename ?? short(document_id)`
+- 副标题优先级：`source_filename ?? document_id`
+- 后端不需要额外生成 `display_name`，只需要保证字段语义真实
+
+示例 item：
+
+```json
+{
+  "document_id": "c48b...",
+  "collection_id": "col_xxx",
+  "title": "High-Rate Performance of Layered Oxide Cathodes",
+  "source_filename": "wang_2024_battery.pdf",
+  "doc_type": "experimental",
+  "protocol_extractable": "yes",
+  "protocol_extractability_signals": ["methods_section_detected"],
+  "parsing_warnings": [],
+  "confidence": 0.91
+}
+```
 
 ### Evidence Cards
 

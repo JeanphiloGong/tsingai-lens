@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 from collections import Counter
 from pathlib import Path
@@ -75,6 +76,29 @@ _CONDITION_PATTERNS = (
     re.compile(r"\b(?:under|in)\s+(?:air|argon|ar|nitrogen|n2|vacuum)\b", re.IGNORECASE),
 )
 
+_TITLE_FIELD_CANDIDATES = (
+    "parsed_title",
+    "document_title",
+    "paper_title",
+    "title",
+)
+
+_SOURCE_FILENAME_FIELD_CANDIDATES = (
+    "source_filename",
+    "original_filename",
+)
+
+_SOURCE_PATH_FIELD_CANDIDATES = (
+    "source_path",
+    "source_file",
+    "file_path",
+    "filepath",
+    "path",
+    "filename",
+    "file_name",
+    "name",
+)
+
 
 class DocumentProfilesNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve document profile outputs."""
@@ -127,6 +151,8 @@ class DocumentProfileService:
         path = output_dir / _DOCUMENT_PROFILES_FILE
         if path.is_file():
             profiles = pd.read_parquet(path)
+            if self._profile_rebuild_required(profiles) and (output_dir / "documents.parquet").is_file():
+                profiles = self.build_document_profiles(collection_id, output_dir)
         else:
             profiles = self.build_document_profiles(collection_id, output_dir)
         return self._normalize_profiles_table(profiles, collection_id)
@@ -149,12 +175,14 @@ class DocumentProfileService:
         document_records = build_document_records(documents, text_units)
         sections = build_sections(documents, text_units)
         sections_by_doc = self._group_sections_by_document(sections)
+        file_lookup = self._build_collection_file_lookup(collection_id)
 
         rows = [
             self._profile_document_row(
                 collection_id=collection_id,
                 row=row,
                 sections=sections_by_doc.get(str(row.get("paper_id")), []),
+                file_lookup=file_lookup,
             )
             for _, row in document_records.iterrows()
         ]
@@ -163,6 +191,8 @@ class DocumentProfileService:
             columns=[
                 "document_id",
                 "collection_id",
+                "title",
+                "source_filename",
                 "doc_type",
                 "protocol_extractable",
                 "protocol_extractability_signals",
@@ -199,11 +229,23 @@ class DocumentProfileService:
         collection_id: str,
         row: pd.Series,
         sections: list[dict[str, Any]],
+        file_lookup: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         document_id = str(row.get("paper_id") or row.get("document_id") or "")
-        title = str(row.get("title") or document_id)
+        source_filename = self._resolve_source_filename(
+            row=row,
+            document_id=document_id,
+            file_lookup=file_lookup or {},
+        )
+        title = self._resolve_document_title(
+            row=row,
+            document_id=document_id,
+            source_filename=source_filename,
+            file_lookup=file_lookup or {},
+        )
+        analysis_title = str(row.get("title") or document_id)
         text = str(row.get("text") or "")
-        lowered_title = title.lower()
+        lowered_title = analysis_title.lower()
         lowered_text = text.lower()
 
         method_sections = [
@@ -217,7 +259,7 @@ class DocumentProfileService:
         method_text = "\n".join(str(section.get("text") or "") for section in method_sections)
 
         review_title_hits = sum(
-            1 for pattern in _REVIEW_TITLE_PATTERNS if pattern.search(title)
+            1 for pattern in _REVIEW_TITLE_PATTERNS if pattern.search(analysis_title)
         )
         review_text_hits = sum(1 for hint in _REVIEW_TEXT_HINTS if hint in lowered_text)
         procedural_hits = self._count_keyword_hits(
@@ -310,6 +352,8 @@ class DocumentProfileService:
         return {
             "document_id": document_id,
             "collection_id": collection_id,
+            "title": title,
+            "source_filename": source_filename,
             "doc_type": doc_type,
             "protocol_extractable": protocol_extractable,
             "protocol_extractability_signals": sorted(set(signals)),
@@ -361,6 +405,8 @@ class DocumentProfileService:
                 columns=[
                     "document_id",
                     "collection_id",
+                    "title",
+                    "source_filename",
                     "doc_type",
                     "protocol_extractable",
                     "protocol_extractability_signals",
@@ -370,8 +416,13 @@ class DocumentProfileService:
             )
 
         normalized = profiles.copy()
+        for column in ("title", "source_filename"):
+            if column not in normalized.columns:
+                normalized[column] = None
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
+        for column in ("title", "source_filename"):
+            normalized[column] = normalized[column].apply(self._normalize_optional_text)
         if "protocol_extractability_signals" in normalized.columns:
             normalized["protocol_extractability_signals"] = normalized[
                 "protocol_extractability_signals"
@@ -388,6 +439,8 @@ class DocumentProfileService:
             [
                 "document_id",
                 "collection_id",
+                "title",
+                "source_filename",
                 "doc_type",
                 "protocol_extractable",
                 "protocol_extractability_signals",
@@ -400,6 +453,8 @@ class DocumentProfileService:
         return {
             "document_id": str(row.get("document_id") or ""),
             "collection_id": str(row.get("collection_id") or ""),
+            "title": self._normalize_optional_text(row.get("title")),
+            "source_filename": self._normalize_optional_text(row.get("source_filename")),
             "doc_type": str(row.get("doc_type") or "uncertain"),
             "protocol_extractable": str(row.get("protocol_extractable") or "uncertain"),
             "protocol_extractability_signals": self._normalize_string_list(
@@ -482,3 +537,141 @@ class DocumentProfileService:
         if isinstance(value, float) and pd.isna(value):
             return []
         return [str(value)]
+
+    def _normalize_optional_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, float) and pd.isna(value):
+            return None
+        text = str(value).strip()
+        return text or None
+
+    def _profile_rebuild_required(self, profiles: pd.DataFrame) -> bool:
+        return not {"title", "source_filename"}.issubset(set(profiles.columns))
+
+    def _build_collection_file_lookup(self, collection_id: str) -> dict[str, Any]:
+        try:
+            files = self.collection_service.list_files(collection_id)
+        except FileNotFoundError:
+            files = []
+
+        stored_to_source: dict[str, str] = {}
+        resolved_sources: list[str] = []
+        for record in files:
+            original = self._normalize_optional_text(record.get("original_filename"))
+            stored = self._normalize_optional_text(record.get("stored_filename"))
+            if original:
+                resolved_sources.append(original)
+            if original and stored:
+                stored_to_source[stored] = original
+
+        single_source_filename = (
+            resolved_sources[0]
+            if len(resolved_sources) == 1
+            else None
+        )
+
+        return {
+            "stored_to_source": stored_to_source,
+            "source_filenames": set(resolved_sources),
+            "single_source_filename": single_source_filename,
+        }
+
+    def _resolve_document_title(
+        self,
+        row: pd.Series,
+        document_id: str,
+        source_filename: str | None,
+        file_lookup: dict[str, Any],
+    ) -> str | None:
+        for candidate in self._iter_document_title_candidates(row):
+            if candidate == document_id:
+                continue
+            if source_filename and candidate == source_filename:
+                continue
+            if candidate in file_lookup.get("stored_to_source", {}):
+                continue
+            if candidate in file_lookup.get("source_filenames", set()):
+                continue
+            return candidate
+        return None
+
+    def _resolve_source_filename(
+        self,
+        row: pd.Series,
+        document_id: str,
+        file_lookup: dict[str, Any],
+    ) -> str | None:
+        stored_to_source = file_lookup.get("stored_to_source", {})
+
+        for key in _SOURCE_FILENAME_FIELD_CANDIDATES:
+            candidate = self._extract_row_or_metadata_value(row, key)
+            normalized = self._normalize_filename_value(candidate)
+            if normalized and normalized != document_id:
+                return stored_to_source.get(normalized, normalized)
+
+        for key in _SOURCE_PATH_FIELD_CANDIDATES:
+            candidate = self._extract_row_or_metadata_value(row, key)
+            normalized = self._normalize_filename_value(candidate)
+            if normalized and normalized != document_id:
+                return stored_to_source.get(normalized, normalized)
+
+        title_value = self._normalize_optional_text(row.get("title"))
+        if title_value and title_value in stored_to_source:
+            return stored_to_source[title_value]
+
+        return file_lookup.get("single_source_filename")
+
+    def _iter_document_title_candidates(self, row: pd.Series) -> list[str]:
+        seen: set[str] = set()
+        values: list[str] = []
+        for key in _TITLE_FIELD_CANDIDATES:
+            candidate = self._extract_row_or_metadata_value(row, key)
+            normalized = self._normalize_optional_text(candidate)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                values.append(normalized)
+        return values
+
+    def _extract_row_or_metadata_value(self, row: pd.Series, key: str) -> Any:
+        if key in row.index:
+            value = row.get(key)
+            normalized = self._normalize_optional_text(value)
+            if normalized is not None:
+                return normalized
+
+        metadata = self._coerce_mapping(row.get("metadata"))
+        value = metadata.get(key)
+        normalized = self._normalize_optional_text(value)
+        if normalized is not None:
+            return normalized
+        return None
+
+    def _coerce_mapping(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if value is None:
+            return {}
+        if isinstance(value, float) and pd.isna(value):
+            return {}
+        if not isinstance(value, str):
+            return {}
+
+        text = value.strip()
+        if not text:
+            return {}
+
+        for loader in (json.loads, ast.literal_eval):
+            try:
+                parsed = loader(text)
+            except (TypeError, ValueError, SyntaxError, json.JSONDecodeError):
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return {}
+
+    def _normalize_filename_value(self, value: Any) -> str | None:
+        normalized = self._normalize_optional_text(value)
+        if normalized is None:
+            return None
+        return Path(normalized).name or None

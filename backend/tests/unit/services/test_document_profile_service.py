@@ -98,10 +98,14 @@ def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_p
 
     assert payload["count"] == 3
     items = {item["document_id"]: item for item in payload["items"]}
+    assert items["exp-1"]["title"] == "Composite Experimental Study"
+    assert items["exp-1"]["source_filename"] is None
     assert items["exp-1"]["doc_type"] == "experimental"
     assert items["exp-1"]["protocol_extractable"] == "yes"
+    assert items["rev-1"]["title"] == "A Review of Composite Fillers"
     assert items["rev-1"]["doc_type"] == "review"
     assert items["rev-1"]["protocol_extractable"] == "no"
+    assert items["mix-1"]["title"] == "Review and Experimental Notes on Ceramic Coatings"
     assert items["mix-1"]["doc_type"] == "mixed"
     assert items["mix-1"]["protocol_extractable"] == "partial"
     assert payload["summary"]["by_doc_type"] == {
@@ -115,6 +119,141 @@ def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_p
         "yes": 1,
     }
     assert output_dir.joinpath("document_profiles.parquet").exists()
+
+
+def test_document_profile_service_returns_null_title_and_source_filename_from_file_mapping(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.artifact_registry_service import ArtifactRegistryService
+    from application.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    profile_service = DocumentProfileService(collection_service, artifact_registry)
+
+    collection = collection_service.create_collection("Profiled Collection")
+    collection_id = collection["collection_id"]
+    file_record = collection_service.add_file(
+        collection_id,
+        "wang_2024_battery.txt",
+        b"Experimental Section\nThe slurry was stirred for 2 h at 80 C.",
+    )
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "doc-1",
+                "title": file_record["stored_filename"],
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "The slurry was stirred for 2 h at 80 C.",
+                        "Characterization",
+                        "XRD was used to characterize the powders.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "The slurry was stirred for 2 h at 80 C.",
+                "document_ids": ["doc-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = profile_service.list_document_profiles(collection_id)
+
+    item = payload["items"][0]
+    assert item["document_id"] == "doc-1"
+    assert item["title"] is None
+    assert item["source_filename"] == "wang_2024_battery.txt"
+    assert item["doc_type"] == "experimental"
+    assert item["protocol_extractable"] == "partial"
+
+
+def test_document_profile_service_rebuilds_legacy_profiles_with_identity_fields(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.artifact_registry_service import ArtifactRegistryService
+    from application.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    profile_service = DocumentProfileService(collection_service, artifact_registry)
+
+    collection = collection_service.create_collection("Legacy Profiled Collection")
+    collection_id = collection["collection_id"]
+    collection_service.add_file(
+        collection_id,
+        "paper.txt",
+        b"Experimental Section\nPowders were mixed in ethanol and dried at 80 C.",
+    )
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Composite Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Powders were mixed in ethanol and dried at 80 C.",
+                        "Characterization",
+                        "SEM was used to inspect the powders.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Powders were mixed in ethanol and dried at 80 C.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    legacy_profiles = pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "doc_type": "experimental",
+                "protocol_extractable": "partial",
+                "protocol_extractability_signals": ["methods_section_detected"],
+                "parsing_warnings": [],
+                "confidence": 0.81,
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    legacy_profiles.to_parquet(output_dir / "document_profiles.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = profile_service.list_document_profiles(collection_id)
+
+    item = payload["items"][0]
+    assert item["title"] == "Composite Paper"
+    assert item["source_filename"] == "paper.txt"
+    assert item["doc_type"] == "experimental"
+    assert item["protocol_extractable"] == "partial"
 
 
 def test_document_profile_service_normalizes_numpy_array_columns():

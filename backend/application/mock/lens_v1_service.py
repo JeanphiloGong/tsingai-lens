@@ -317,6 +317,8 @@ class LensV1MockService:
             {
                 "document_id": "doc_mock_ready_1",
                 "collection_id": collection_id,
+                "title": "High-Rate Performance of Layered Oxide Cathodes",
+                "source_filename": "ready-paper-1.pdf",
                 "doc_type": "experimental",
                 "protocol_extractable": "yes",
                 "protocol_extractability_signals": [
@@ -330,6 +332,8 @@ class LensV1MockService:
             {
                 "document_id": "doc_mock_ready_2",
                 "collection_id": collection_id,
+                "title": "Interfacial Densification During 600 C Annealing",
+                "source_filename": "ready-paper-2.pdf",
                 "doc_type": "experimental",
                 "protocol_extractable": "partial",
                 "protocol_extractability_signals": [
@@ -342,6 +346,8 @@ class LensV1MockService:
             {
                 "document_id": "doc_mock_ready_3",
                 "collection_id": collection_id,
+                "title": "A Review of Filler Dispersion in Epoxy Systems",
+                "source_filename": "ready-review-1.pdf",
                 "doc_type": "review",
                 "protocol_extractable": "no",
                 "protocol_extractability_signals": [
@@ -560,6 +566,8 @@ class LensV1MockService:
             {
                 "document_id": "doc_mock_limited_1",
                 "collection_id": collection_id,
+                "title": "Perspective on Fatigue Failure in Carbon Fiber Laminates",
+                "source_filename": "limited-review-1.pdf",
                 "doc_type": "review",
                 "protocol_extractable": "no",
                 "protocol_extractability_signals": ["review contamination", "missing procedural continuity"],
@@ -569,6 +577,8 @@ class LensV1MockService:
             {
                 "document_id": "doc_mock_limited_2",
                 "collection_id": collection_id,
+                "title": None,
+                "source_filename": "limited-mixed-1.pdf",
                 "doc_type": "mixed",
                 "protocol_extractable": "partial",
                 "protocol_extractability_signals": ["partial methods density", "missing critical parameters"],
@@ -578,6 +588,8 @@ class LensV1MockService:
             {
                 "document_id": "doc_mock_limited_3",
                 "collection_id": collection_id,
+                "title": None,
+                "source_filename": None,
                 "doc_type": "experimental",
                 "protocol_extractable": "uncertain",
                 "protocol_extractability_signals": ["procedural signal present", "step continuity uncertain"],

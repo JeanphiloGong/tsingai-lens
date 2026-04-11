@@ -26,6 +26,11 @@ class DocumentProfileItemResponse(BaseModel):
 
     document_id: str = Field(..., description="文档 ID")
     collection_id: str = Field(..., description="集合 ID")
+    title: str | None = Field(default=None, description="文档/论文标题；缺失时为 null")
+    source_filename: str | None = Field(
+        default=None,
+        description="源文件名；缺失时为 null",
+    )
     doc_type: DocumentType = Field(..., description="文档类型")
     protocol_extractable: ProtocolExtractableStatus = Field(
         ...,

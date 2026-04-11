@@ -362,6 +362,8 @@ def test_collection_task_and_query_flow(app_client):
     assert profiles.status_code == 200
     profiles_body = profiles.json()
     assert profiles_body["count"] == 1
+    assert profiles_body["items"][0]["title"] == "Composite Paper"
+    assert profiles_body["items"][0]["source_filename"] == "paper.txt"
     assert profiles_body["items"][0]["doc_type"] == "experimental"
     assert profiles_body["items"][0]["protocol_extractable"] == "yes"
 
@@ -403,6 +405,8 @@ def test_mock_collection_resources_are_available_for_frontend_integration(app_cl
     assert profiles.status_code == 200
     profiles_body = profiles.json()
     assert profiles_body["count"] == 3
+    assert profiles_body["items"][0]["title"] == "High-Rate Performance of Layered Oxide Cathodes"
+    assert profiles_body["items"][0]["source_filename"] == "ready-paper-1.pdf"
     assert profiles_body["summary"]["by_doc_type"]["experimental"] == 2
 
     evidence = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/evidence/cards")

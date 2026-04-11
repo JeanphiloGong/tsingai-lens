@@ -23,6 +23,8 @@ def test_mock_service_returns_ready_workspace_and_backbone_resources(monkeypatch
 
     profiles = lens_v1_mock_service.list_document_profiles("col_mock_ready")
     assert profiles["total"] == 3
+    assert profiles["items"][0]["title"] == "High-Rate Performance of Layered Oxide Cathodes"
+    assert profiles["items"][0]["source_filename"] == "ready-paper-1.pdf"
     assert profiles["summary"]["by_doc_type"]["experimental"] == 2
 
     evidence = lens_v1_mock_service.list_evidence_cards("col_mock_ready")

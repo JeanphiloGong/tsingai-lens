@@ -53,22 +53,38 @@ def build_document_records(
             for doc_id in _listify(row.get("document_ids")):
                 text_unit_ids_by_doc.setdefault(str(doc_id), []).append(text_unit_id)
 
+    passthrough_columns = [
+        column
+        for column in (
+            "creation_date",
+            "metadata",
+            "source_filename",
+            "original_filename",
+            "stored_filename",
+        )
+        if column in documents.columns
+    ]
+
     rows: list[dict[str, Any]] = []
     for _, row in documents.iterrows():
         paper_id = str(row.get("id"))
         text = str(row.get("text") or "").strip()
         if not text and text_units is not None:
             text = _join_text_units_for_document(text_units, paper_id)
-        rows.append(
-            {
-                "paper_id": paper_id,
-                "title": _coerce_optional_text(row.get("title")) or paper_id,
-                "text": text,
-                "text_unit_ids": text_unit_ids_by_doc.get(paper_id, []),
-            }
-        )
+        payload = {
+            "paper_id": paper_id,
+            "title": _coerce_optional_text(row.get("title")) or paper_id,
+            "text": text,
+            "text_unit_ids": text_unit_ids_by_doc.get(paper_id, []),
+        }
+        for column in passthrough_columns:
+            payload[column] = row.get(column)
+        rows.append(payload)
 
-    return pd.DataFrame(rows, columns=["paper_id", "title", "text", "text_unit_ids"])
+    return pd.DataFrame(
+        rows,
+        columns=["paper_id", "title", "text", "text_unit_ids", *passthrough_columns],
+    )
 
 
 def persist_sections(base_dir: str | Path, sections: pd.DataFrame) -> Path:

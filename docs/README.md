@@ -74,6 +74,12 @@ owned and frontend-owned detail should stay with the owning module.
   collection-memory layer rather than another generic research agent
 - [`docs/30-architecture/system-overview.md`](30-architecture/system-overview.md)
   Active shared system overview
+- [`docs/30-architecture/lens-v1-architecture-boundary.md`](30-architecture/lens-v1-architecture-boundary.md)
+  Active shared Lens v1 evidence-first and comparison-first architecture boundary
+- [`docs/40-specs/lens-v1-definition.md`](40-specs/lens-v1-definition.md)
+  Active shared Lens v1 product boundary for evidence-grounded comparison
+- [`docs/50-guides/lens-mission-positioning.md`](50-guides/lens-mission-positioning.md)
+  Active shared Lens mission and long-lived product positioning
 - [`docs/05-policies/documentation-governance.md`](05-policies/documentation-governance.md)
   Active repository documentation governance policy
 - [`backend/docs/backend-application-layer-boundary.md`](../backend/docs/backend-application-layer-boundary.md)

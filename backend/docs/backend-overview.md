@@ -5,6 +5,10 @@
 The backend turns uploaded collection files into queryable graph, report, and
 protocol artifacts and exposes those results through the public HTTP contract.
 
+The active Lens v1 direction is evidence-first and comparison-first, with
+protocol extraction retained as a conditional branch rather than the only
+useful output shape.
+
 ## Current Ownership Seams
 
 - `api/`
@@ -38,7 +42,8 @@ The backend is in a transition state:
 - indexing task orchestration
 - artifact readiness tracking
 - graph export and report browsing
-- protocol step listing, search, and SOP draft generation
+- evidence and comparison artifact generation
+- protocol step listing, search, and SOP draft generation for suitable corpora
 
 ## Local Navigation
 
@@ -47,7 +52,7 @@ The backend is in a transition state:
 - [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)
   Boundary ADR
 - [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)
-  Draft backend-local implementation plan for evidence-first parsing
+  Draft backend-local implementation plan for Lens v1 evidence-first parsing
 - [`backend-ops.md`](backend-ops.md)
   Local development and operations runbook
 - [`../application/README.md`](../application/README.md)

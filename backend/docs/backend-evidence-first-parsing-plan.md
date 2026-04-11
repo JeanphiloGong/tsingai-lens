@@ -6,16 +6,22 @@ This document records the backend-local implementation plan for shifting
 literature parsing away from a protocol-first pipeline and toward an
 evidence-first pipeline with conditional protocol generation.
 
-The shared direction is defined in the project RFC
-[`docs/10-rfcs/evidence-first-literature-parsing.md`](../../docs/10-rfcs/evidence-first-literature-parsing.md).
-This backend plan narrows that direction into module-owned execution slices,
-artifact changes, and verification targets.
+The shared direction is defined by the following shared docs:
+
+- [`../../docs/50-guides/lens-mission-positioning.md`](../../docs/50-guides/lens-mission-positioning.md)
+- [`../../docs/40-specs/lens-v1-definition.md`](../../docs/40-specs/lens-v1-definition.md)
+- [`../../docs/30-architecture/lens-v1-architecture-boundary.md`](../../docs/30-architecture/lens-v1-architecture-boundary.md)
+- [`../../docs/10-rfcs/evidence-first-literature-parsing.md`](../../docs/10-rfcs/evidence-first-literature-parsing.md)
+
+This backend plan narrows that shared direction into module-owned execution
+slices, artifact changes, API adjustments, and verification targets.
 
 ## Scope
 
 This plan covers backend-owned work only:
 
 - parsing artifact shape
+- application and service responsibilities
 - backend service responsibilities
 - collection workspace semantics
 - backend API additions and adjustments
@@ -27,6 +33,7 @@ This plan does not cover:
 - OCR or scanned PDF support
 - model provider selection
 - graph export removal or replacement
+- long-term product positioning or the v1 product boundary itself
 
 ## Proposed Change
 
@@ -41,8 +48,13 @@ Goals:
 - expose source-bearing fields such as raw evidence spans where available
 - ensure current protocol APIs are not hiding structured data already present in
   artifact storage
+- preserve collection-level context so the frontend can judge whether a step is
+  usable
 
 This keeps the existing system observable while larger parsing changes land.
+
+This phase directly addresses the current tracked defect around misleading
+protocol step outputs and missing structured response fields.
 
 ### Phase 1: Add document profiling as a backend artifact
 
@@ -66,6 +78,7 @@ Expected effect:
 
 - review-heavy collections stop defaulting into final protocol step generation
 - workspace can surface parsing suitability instead of only artifact existence
+- downstream protocol extraction becomes explicitly gated rather than assumed
 
 ### Phase 2: Add evidence-first extraction outputs
 
@@ -91,6 +104,7 @@ Expected effect:
 
 - structured retrieval becomes more useful for research analysis
 - the backend exposes outputs closer to the actual materials-research workflow
+- the system gains first-class outputs even when protocol extraction is skipped
 
 ### Phase 3: Reposition protocol extraction behind candidate filtering
 
@@ -114,6 +128,8 @@ Expected effect:
 
 - returning zero final steps becomes acceptable for unsuitable collections
 - SOP draft generation depends on stronger protocol inputs
+- protocol browsing becomes a supported branch rather than the implied center of
+  the backend
 
 ### Phase 4: Expand workspace and API semantics
 
@@ -135,6 +151,20 @@ Suggested API additions:
 
 The current protocol APIs remain, but should no longer imply that every indexed
 collection is expected to produce final protocol steps.
+
+## Artifact Model
+
+The backend should converge toward the following artifact shape:
+
+- `documents_raw.parquet`
+- `document_profiles.parquet`
+- `evidence_cards.parquet`
+- `comparison_rows.parquet`
+- `protocol_candidates.parquet`
+- `protocol_steps.parquet`
+
+Not every phase must land at once, but implementation should move in this
+direction rather than continue deepening the old steps-first backbone.
 
 ## File Change Plan
 
@@ -180,6 +210,7 @@ Their future role should be one of:
 - `backend/controllers/schemas/retrieval.py`
 - `backend/controllers/schemas/workspace.py`
 - `backend/services/workspace_service.py`
+- protocol response serializers that currently flatten or omit structured fields
 
 ## Execution Order
 
@@ -194,6 +225,20 @@ Their future role should be one of:
 
 This order is meant to preserve a usable backend while the parsing model
 changes underneath it.
+
+## Acceptance Focus
+
+This backend plan is successful when:
+
+- current protocol responses stop hiding structured data that already exists in
+  storage
+- backend readiness and workspace responses can distinguish evidence-ready
+  collections from protocol-ready collections
+- review-heavy corpora can complete indexing without producing misleading final
+  protocol steps
+- evidence and comparison artifacts become usable first-class backend outputs
+- protocol remains supported for methods-heavy documents without dictating the
+  entire parsing backbone
 
 ## Verification
 
@@ -231,6 +276,12 @@ changes underneath it.
 
 ## Related Docs
 
+- [`../../docs/50-guides/lens-mission-positioning.md`](../../docs/50-guides/lens-mission-positioning.md)
+  Shared long-lived Lens mission and positioning
+- [`../../docs/40-specs/lens-v1-definition.md`](../../docs/40-specs/lens-v1-definition.md)
+  Shared Lens v1 boundary
+- [`../../docs/30-architecture/lens-v1-architecture-boundary.md`](../../docs/30-architecture/lens-v1-architecture-boundary.md)
+  Shared Lens v1 architecture boundary
 - [`../../docs/10-rfcs/evidence-first-literature-parsing.md`](../../docs/10-rfcs/evidence-first-literature-parsing.md)
   Shared parsing direction RFC
 - [`backend-overview.md`](backend-overview.md)

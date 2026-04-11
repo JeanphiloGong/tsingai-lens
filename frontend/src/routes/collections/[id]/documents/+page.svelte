@@ -92,6 +92,40 @@
     return profile.protocol_extractability_signals.join(' | ') || '--';
   }
 
+  function nonEmptyText(value?: string | null) {
+    if (typeof value !== 'string') return null;
+    const text = value.trim();
+    return text ? text : null;
+  }
+
+  function shortDocumentId(documentId: string) {
+    const trimmed = documentId.trim();
+    if (trimmed.length <= 18) return trimmed;
+    return `${trimmed.slice(0, 8)}...${trimmed.slice(-8)}`;
+  }
+
+  function readableDisplayText(value: string | null | undefined, documentId: string) {
+    const text = nonEmptyText(value);
+    if (!text || text === documentId) return null;
+    return text;
+  }
+
+  function displayTitle(profile: DocumentProfile) {
+    return (
+      readableDisplayText(profile.title, profile.document_id) ??
+      readableDisplayText(profile.source_filename, profile.document_id) ??
+      shortDocumentId(profile.document_id)
+    );
+  }
+
+  function displaySubtitle(profile: DocumentProfile) {
+    const sourceFilename = readableDisplayText(profile.source_filename, profile.document_id);
+    if (sourceFilename && sourceFilename !== displayTitle(profile)) {
+      return sourceFilename;
+    }
+    return profile.document_id;
+  }
+
   function stateCardTitle() {
     return $t(`overview.surfaceStateCards.${surfaceState}.title`);
   }
@@ -239,8 +273,8 @@
               <tr>
                 <td>
                   <div class="table-main">
-                    <div class="table-title">{item.title || item.document_id}</div>
-                    <div class="table-sub">{item.document_id}</div>
+                    <div class="table-title">{displayTitle(item)}</div>
+                    <div class="table-sub">{displaySubtitle(item)}</div>
                   </div>
                 </td>
                 <td>{docTypeLabel(item.doc_type)}</td>

@@ -8,6 +8,7 @@ export type DocumentProfile = {
   document_id: string;
   collection_id: string;
   title: string | null;
+  source_filename: string | null;
   doc_type: DocumentType;
   protocol_extractable: ProtocolExtractable;
   protocol_extractability_signals: string[];
@@ -62,6 +63,12 @@ function toNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : Number(value ?? NaN);
 }
 
+function toOptionalText(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text ? text : null;
+}
+
 function normalizeProfile(value: unknown, collectionId: string): DocumentProfile | null {
   const record = asRecord(value);
   if (!record) return null;
@@ -76,12 +83,11 @@ function normalizeProfile(value: unknown, collectionId: string): DocumentProfile
   return {
     document_id,
     collection_id: String(record.collection_id ?? collectionId).trim() || collectionId,
-    title:
-      typeof record.title === 'string'
-        ? record.title
-        : typeof record.document_title === 'string'
-          ? record.document_title
-          : null,
+    title: toOptionalText(record.title) ?? toOptionalText(record.document_title),
+    source_filename:
+      toOptionalText(record.source_filename) ??
+      toOptionalText(record.original_filename) ??
+      toOptionalText(record.source_file_name),
     doc_type: ['experimental', 'review', 'mixed', 'uncertain'].includes(doc_type) ? doc_type : 'uncertain',
     protocol_extractable: ['yes', 'partial', 'no', 'uncertain'].includes(protocol_extractable)
       ? protocol_extractable
@@ -98,6 +104,7 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
       document_id: 'doc_a',
       collection_id: collectionId,
       title: 'High-entropy oxide cycling study',
+      source_filename: 'high-entropy-oxide-cycling-study.pdf',
       doc_type: 'experimental',
       protocol_extractable: 'partial',
       protocol_extractability_signals: ['methods density', 'condition completeness'],
@@ -108,6 +115,7 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
       document_id: 'doc_b',
       collection_id: collectionId,
       title: 'Review of interface engineering strategies',
+      source_filename: 'interface-engineering-review.pdf',
       doc_type: 'review',
       protocol_extractable: 'no',
       protocol_extractability_signals: ['review contamination'],
@@ -117,7 +125,8 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
     {
       document_id: 'doc_c',
       collection_id: collectionId,
-      title: 'Mixed experimental and survey benchmark',
+      title: null,
+      source_filename: 'mixed-experimental-survey-benchmark.txt',
       doc_type: 'mixed',
       protocol_extractable: 'uncertain',
       protocol_extractability_signals: ['critical parameter missingness'],

@@ -16,9 +16,8 @@ navigation rather than redefining shared product or architecture decisions.
 - `controllers/`
   App-layer HTTP routes for collections, tasks, graph, protocol, and workspace.
 - `application/`
-  Query and report orchestration layer.
-- `services/`
-  Collection, task, protocol, and workspace services used by the app layer.
+  Current use-case orchestration layer. It is still too flat and should be
+  reorganized by business domain.
 - `domain/`
   Domain models and port definitions.
 - `infra/persistence/`
@@ -32,9 +31,14 @@ The backend is in a transition state:
 
 - public query and report flows already have an `api -> application` shape
 - collection, task, workspace, graph, and protocol flows still route through
-  `controllers/` and `services/`
+  `controllers/` and a flat `application/` layer
+- `application/` currently mixes multiple business domains in one flat
+  namespace
 - `retrieval/` remains the largest engine surface and should be reached
   through clearer application or infrastructure boundaries over time
+
+The target direction is a business-domain-oriented backend shape rather than a
+larger flat service bag.
 
 ## Key Runtime Flows
 
@@ -49,6 +53,11 @@ The backend is in a transition state:
 
 - [`api.md`](api.md)
   Public route boundary and HTTP contract
+- [`backend-v1-api-contract.md`](backend-v1-api-contract.md)
+  Target frontend/backend contract for the Lens v1 collection comparison
+  workflow
+- [`backend-domain-architecture.md`](backend-domain-architecture.md)
+  Target backend-local domain seams and packaging direction
 - [`backend-application-layer-boundary.md`](backend-application-layer-boundary.md)
   Boundary ADR
 - [`backend-evidence-first-parsing-plan.md`](backend-evidence-first-parsing-plan.md)

@@ -19,9 +19,8 @@ next to code.
   App-layer HTTP surface for collections, tasks, and workspace routes during
   the current migration.
 - `application/`
-  Use-case orchestration for query and report flows.
-- `services/`
-  Collection, task, workspace, and protocol services used by the app layer.
+  Use-case orchestration layer. It is currently flat and should move toward
+  business-domain packaging.
 - `retrieval/`
   Indexing and query engine package.
 - `infra/persistence/`
@@ -42,6 +41,11 @@ next to code.
 
 - [`docs/api.md`](docs/api.md)
   Authoritative backend public API contract
+- [`docs/backend-v1-api-contract.md`](docs/backend-v1-api-contract.md)
+  Target Lens v1 frontend/backend contract for the collection comparison
+  workflow
+- [`docs/backend-domain-architecture.md`](docs/backend-domain-architecture.md)
+  Target backend-local business-domain seams and package direction
 - [`docs/backend-overview.md`](docs/backend-overview.md)
   Backend architecture overview and ownership seams
 - [`docs/backend-evidence-first-parsing-plan.md`](docs/backend-evidence-first-parsing-plan.md)
@@ -80,6 +84,9 @@ uvicorn main:app --reload --port 8010
 - Public query and reports routes live under `api/routes/*`.
 - Collection, task, workspace, graph, and protocol routes are currently exposed
   through `controllers/*`.
+- The next backend-local architecture step is to freeze the collection
+  comparison API contract and then reorganize `application/` by business
+  domain.
 - Public protocol browsing is collection-scoped under
   `/api/v1/collections/{collection_id}/protocol/*`.
 - Use `python3 ../scripts/check_docs_governance.py` when changing governed docs

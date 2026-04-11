@@ -2,6 +2,11 @@
 
 默认 Base URL：`http://localhost:8010`。当前接口未启用鉴权。
 
+当前文件是“已公开接口清单”。
+
+如果要看 Lens v1 下一阶段前后端对齐的主契约，请同时参考
+[`backend-v1-api-contract.md`](backend-v1-api-contract.md)。
+
 ## 公开合同
 
 - 业务接口统一位于：`/api/v1/*`

@@ -5,8 +5,12 @@
 The authoritative frontend/backend API contract now lives in
 [`../specs/api.md`](../specs/api.md).
 
-This document remains only as a backend-local companion note for implementation
-sequencing and migration decisions behind that contract.
+The current backend migration state now lives in
+[`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md).
+
+This document remains only as a historical backend-local bridge note for
+earlier implementation sequencing and migration decisions behind that contract.
+It should not be used as the current execution entry point.
 
 ## Backend Implications
 
@@ -18,7 +22,7 @@ The agreed API contract implies the following backend direction:
 4. `comparisons` is the third new backbone resource
 5. `protocol/*` remains a conditional downstream branch
 
-## Implementation Order
+## Original Implementation Order
 
 The recommended backend order remains:
 
@@ -32,6 +36,7 @@ The recommended backend order remains:
 ## Related Docs
 
 - [`../specs/api.md`](../specs/api.md)
+- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
 - [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)

@@ -2,13 +2,17 @@
 
 ## Summary
 
-This document records the backend-local implementation plan for turning the
-Goal/Core/Source layering proposal into executable backend waves.
+This document records the backend-local parent implementation plan for turning
+the Goal/Core/Source layering proposal into executable backend waves.
 
 The plan keeps one requirement fixed:
 
 all research-facing outputs must continue to converge on one collection-backed
 evidence/comparison backbone.
+
+This is the broader multi-wave roadmap above the current Core stabilization
+work. It is not the near-term execution entry point for the current backend
+slice.
 
 ## Context
 
@@ -28,6 +32,11 @@ Current backend-local work has already moved part of the Core forward:
 - indexing orchestration already runs Core stages before the protocol branch
 - workspace and artifact registry are already growing Core-specific readiness
   states
+
+The near-term execution reference for this in-flight Core work is
+[`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md).
+This parent plan should be used when deciding what follows after that child
+plan is complete.
 
 The main implementation gaps are now narrower:
 
@@ -292,6 +301,8 @@ Exit criteria:
 
 ## Related Docs
 
+- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
+- [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)

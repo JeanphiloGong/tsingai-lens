@@ -26,7 +26,10 @@ replace:
 
 - [`../specs/api.md`](../specs/api.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
-- [`v1-api-migration-notes.md`](v1-api-migration-notes.md)
+
+It supersedes [`v1-api-migration-notes.md`](v1-api-migration-notes.md) as the
+current migration entry point while that note is retained as historical bridge
+context.
 
 ## Status Summary
 
@@ -186,6 +189,8 @@ center for this migration stage.
 - [`../specs/api.md`](../specs/api.md)
 - [`../architecture/overview.md`](../architecture/overview.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+- [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
 - [`graph-surface-plan.md`](graph-surface-plan.md)
 - [`v1-api-migration-notes.md`](v1-api-migration-notes.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)

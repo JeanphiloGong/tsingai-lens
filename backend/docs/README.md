@@ -19,24 +19,41 @@ right architecture, spec, plan, or runbook document.
 
 ## Key Docs
 
+Start here:
+
 - [`specs/api.md`](specs/api.md)
   Authoritative frontend/backend public API contract
 - [`architecture/overview.md`](architecture/overview.md)
   Backend ownership seams and local navigation
+
+Current state and active plans:
+
+- [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
+  Canonical current-state page for backend API migration and reading order
+- [`plans/core-stabilization-and-seam-extraction-plan.md`](plans/core-stabilization-and-seam-extraction-plan.md)
+  Active near-term child plan for Core stabilization and parsing seam
+  extraction
+- [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md)
+  Broader parent roadmap for later Core, Goal, and Source waves
+- [`plans/graph-surface-plan.md`](plans/graph-surface-plan.md)
+  Active retained-secondary-surface plan for graph hardening
+
+Architecture background:
+
 - [`architecture/domain-architecture.md`](architecture/domain-architecture.md)
   Target backend business-domain packaging and controller boundaries
 - [`architecture/application-layer-boundary.md`](architecture/application-layer-boundary.md)
   Backend ADR for HTTP/application ownership separation
+
+Historical background:
+
 - [`plans/evidence-first-parsing-plan.md`](plans/evidence-first-parsing-plan.md)
-  Execution plan for the evidence-first parsing backbone
-- [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md)
-  Execution plan for the Goal/Core/Source layering direction
+  Origin plan for the evidence-first parsing transition, kept for lineage
 - [`plans/v1-api-migration-notes.md`](plans/v1-api-migration-notes.md)
-  Backend-local migration notes behind the agreed public API contract
-- [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
-  Current backend migration state and next execution order for API surfaces
-- [`plans/graph-surface-plan.md`](plans/graph-surface-plan.md)
-  Execution plan for keeping graph stable as a retained secondary surface
+  Historical bridge note behind the current API migration checklist
+
+Operations:
+
 - [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
   Local development and operations runbook
 

@@ -2,8 +2,9 @@
 
 ## Purpose
 
-The backend turns uploaded collection files into queryable graph, report, and
-protocol artifacts and exposes those results through the public HTTP contract.
+The backend turns uploaded collection files into document profile, evidence,
+comparison, retained graph/report, and conditional protocol artifacts and
+exposes those results through the public HTTP contract.
 
 The backend implements the shared Lens v1 evidence-first architecture defined
 in root docs. This document describes backend ownership seams and local
@@ -11,13 +12,12 @@ navigation rather than redefining shared product or architecture decisions.
 
 ## Current Ownership Seams
 
-- `api/`
-  Public HTTP route boundary for query and reports.
 - `controllers/`
-  App-layer HTTP routes for collections, tasks, graph, protocol, and workspace.
+  Current HTTP route surface for collections, tasks, workspace, graph,
+  protocol, query, and reports.
 - `application/`
-  Current use-case orchestration layer. It is still too flat and should be
-  reorganized by business domain.
+  Use-case orchestration layer with active domain packages plus some remaining
+  legacy flat services.
 - `domain/`
   Domain models and port definitions.
 - `infra/persistence/`
@@ -29,11 +29,12 @@ navigation rather than redefining shared product or architecture decisions.
 
 The backend is in a transition state:
 
-- public query and report flows already have an `api -> application` shape
-- collection, task, workspace, graph, and protocol flows still route through
-  `controllers/` and a flat `application/` layer
-- `application/` currently mixes multiple business domains in one flat
-  namespace
+- all public HTTP flows currently enter through `controllers/`
+- `application/` already contains domain packages for collections, indexing,
+  workspace, documents, evidence, comparisons, and protocol
+- some legacy flat orchestration seams still remain and should not be deepened
+- the Lens v1 collection backbone is now
+  `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`
 - `retrieval/` remains the largest engine surface and should be reached
   through clearer application or infrastructure boundaries over time
 
@@ -45,28 +46,48 @@ larger flat service bag.
 - collection creation and file upload
 - indexing task orchestration
 - artifact readiness tracking
+- document profile, evidence, and comparison artifact generation
 - graph export and report browsing
-- evidence and comparison artifact generation
 - protocol step listing, search, and SOP draft generation for suitable corpora
 
 ## Local Navigation
 
+Start with:
+
 - [`../specs/api.md`](../specs/api.md)
   Authoritative frontend/backend API contract
-- [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)
-  Backend-local implementation notes behind the agreed API contract
+- [`../plans/current-api-surface-migration-checklist.md`](../plans/current-api-surface-migration-checklist.md)
+  Canonical current-state page for the active backend migration
+
+Active execution plans:
+
+- [`../plans/core-stabilization-and-seam-extraction-plan.md`](../plans/core-stabilization-and-seam-extraction-plan.md)
+  Active near-term child plan for Core stabilization and parsing seam
+  extraction
+- [`../plans/goal-core-source-implementation-plan.md`](../plans/goal-core-source-implementation-plan.md)
+  Broader parent roadmap for later Core, Goal, and Source waves
+- [`../plans/graph-surface-plan.md`](../plans/graph-surface-plan.md)
+  Active retained-secondary-surface plan for graph hardening
+
+Architecture background:
+
 - [`domain-architecture.md`](domain-architecture.md)
   Target backend-local domain seams and packaging direction
 - [`goal-core-source-layering.md`](goal-core-source-layering.md)
   Backend-local proposal for goal-driven entry, collection intelligence core,
   and source acquisition seams
-- [`../plans/goal-core-source-implementation-plan.md`](../plans/goal-core-source-implementation-plan.md)
-  Backend-local execution plan for Core hardening, protocol decoupling, goal
-  contracts, and source expansion
 - [`application-layer-boundary.md`](application-layer-boundary.md)
   Boundary ADR
+
+Historical background:
+
 - [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
-  Draft backend-local implementation plan for Lens v1 evidence-first parsing
+  Origin plan for the evidence-first parsing transition
+- [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)
+  Historical bridge note behind the current API migration checklist
+
+Code-owned neighbors:
+
 - [`../runbooks/backend-ops.md`](../runbooks/backend-ops.md)
   Local development and operations runbook
 - [`../../application/README.md`](../../application/README.md)

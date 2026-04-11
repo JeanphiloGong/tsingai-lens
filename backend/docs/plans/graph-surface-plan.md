@@ -47,11 +47,15 @@ primary Lens v1 backbone resource.
 
 However, the surface is not yet fully hardened as a stable retained interface:
 
-- the graph routes do not use dedicated response schemas
-- graph-specific error handling is still shaped by lower-level exceptions rather
-  than a stable app-layer contract
-- mock mode parity is incomplete compared with `workspace`,
-  `documents/profiles`, `evidence/cards`, and `comparisons`
+- dedicated response schemas already exist in `controllers/schemas/graph.py`,
+  but the GraphML binary contract is still only implicit
+- controller-level stable error payloads already exist for collection missing,
+  graph not ready, and community not found cases, but
+  `application/graph/service.py` still translates some lower-level
+  `HTTPException` cases instead of owning the boundary completely
+- mock-mode readiness flags exist, but mock route parity is still incomplete
+  compared with `workspace`, `documents/profiles`, `evidence/cards`, and
+  `comparisons`
 - boundary and packaging cleanup is unfinished, and the compatibility shim
   `application/graph_service.py` still exists
 
@@ -92,11 +96,12 @@ artifact or a comparison-driven derived view yet.
 
 ### Contract Hardening
 
-Add explicit controller schemas for the graph endpoints.
+Keep the graph controller contract explicit and finish the remaining binary and
+documentation hardening work.
 
 Recommended deliverables:
 
-- `controllers/schemas/graph.py`
+- `controllers/schemas/graph.py` as the stable response-model home
 - response models for graph node, edge, and collection graph payloads
 - explicit response model or documented binary contract for graphml export
 
@@ -117,7 +122,7 @@ reflected into `docs/specs/api.md` if the contract is made formal.
 
 ### Application-Layer Error Ownership
 
-Move graph-specific availability and filtering decisions into
+Finish moving graph-specific availability and filtering decisions into
 `application/graph/service.py` rather than relying on lower-level
 `HTTPException` shaping from `infra/graphrag/graphml_export.py`.
 
@@ -147,7 +152,7 @@ explicitly. Silent inconsistency is the worst outcome here.
 
 ### Verification and Tests
 
-Expand test coverage beyond the existing happy path.
+Preserve the existing route coverage and fill the remaining gaps.
 
 Required coverage:
 

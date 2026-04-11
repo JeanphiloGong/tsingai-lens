@@ -2,9 +2,13 @@
 
 ## Summary
 
-This document records the backend-local implementation plan for shifting
-literature parsing away from a protocol-first pipeline and toward an
+This document records the originating backend-local implementation plan for
+shifting literature parsing away from a protocol-first pipeline and toward an
 evidence-first pipeline with conditional protocol generation.
+
+Parts of that transition have since landed in the backend codebase. This
+document now remains as historical origin context for the shift rather than the
+current execution entry point.
 
 The shared direction is defined by the following shared docs:
 
@@ -23,6 +27,13 @@ primary Lens v1 workflow.
 
 This is a target implementation plan, not a description of already-implemented
 backend current-state behavior.
+
+For the current backend migration state, read
+[`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md).
+For the active near-term execution plan, read
+[`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md).
+For the broader parent roadmap, read
+[`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md).
 
 ## Scope
 
@@ -49,7 +60,7 @@ This plan should not try to prove every surface at once.
 After the first evidence-backbone implementation wave lands, the preferred next
 step is to split narrower backend current-state docs such as artifact flow,
 workspace semantics, and API additions rather than continuing to grow this plan
-as the only backend parsing document.
+as the only backend parsing document. That split has now started.
 
 ## Proposed Change
 
@@ -315,6 +326,12 @@ This backend plan is successful when:
 
 ## Related Docs
 
+- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
+  Current backend migration state and reading order
+- [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+  Active near-term child execution plan for the Core slice
+- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
+  Broader parent roadmap for later Core, Goal, and Source waves
 - [`../../../docs/50-guides/lens-mission-positioning.md`](../../../docs/50-guides/lens-mission-positioning.md)
   Shared long-lived Lens mission and positioning
 - [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)

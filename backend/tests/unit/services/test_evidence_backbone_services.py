@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -164,3 +165,106 @@ def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
     assert output_dir.joinpath("evidence_cards.parquet").exists()
     reloaded = pd.read_parquet(output_dir / "evidence_cards.parquet")
     assert not reloaded.empty
+
+
+def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
+    from application.collections.service import CollectionService
+    from application.documents.service import DocumentProfileService
+    from application.evidence.service import EvidenceCardService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+
+    normalized = evidence_card_service._normalize_condition_context_payload(
+        {
+            "process": {
+                "temperatures_c": np.array([80.0, 600.0]),
+                "durations": np.array(["2 h", "4 h"], dtype=object),
+                "atmosphere": "Ar",
+            },
+            "baseline": {
+                "control": None,
+            },
+            "test": {
+                "methods": np.array(["XRD", "SEM"], dtype=object),
+                "method": None,
+            },
+        }
+    )
+
+    assert normalized == {
+        "process": {
+            "temperatures_c": [80.0, 600.0],
+            "durations": ["2 h", "4 h"],
+            "atmosphere": "Ar",
+        },
+        "baseline": {
+            "control": None,
+        },
+        "test": {
+            "methods": ["XRD", "SEM"],
+            "method": None,
+        },
+    }
+
+
+def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_path):
+    from application.collections.service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        DocumentProfileService(collection_service, artifact_registry),
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        artifact_registry,
+        evidence_card_service,
+    )
+
+    row = comparison_service._build_row_from_card(
+        pd.Series(
+            {
+                "evidence_id": "evi-1",
+                "collection_id": "col-1",
+                "document_id": "paper-1",
+                "claim_text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                "claim_type": "property",
+                "condition_context": {
+                    "process": {
+                        "temperatures_c": np.array([80.0]),
+                        "durations": np.array(["2 h"], dtype=object),
+                        "atmosphere": "Ar",
+                    },
+                    "baseline": {
+                        "control": "untreated baseline",
+                    },
+                    "test": {
+                        "methods": np.array(["SEM"], dtype=object),
+                        "method": None,
+                    },
+                },
+                "material_system": {
+                    "family": "epoxy composite",
+                    "composition": None,
+                },
+                "evidence_anchors": [],
+                "traceability_status": "direct",
+            }
+        )
+    )
+
+    assert row["process_normalized"] == "80 C, 2 h, under Ar"
+    assert row["baseline_normalized"] == "untreated baseline"
+    assert row["test_condition_normalized"] == "SEM"
+    assert row["comparability_status"] == "comparable"

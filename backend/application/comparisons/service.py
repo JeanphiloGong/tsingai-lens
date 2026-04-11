@@ -391,10 +391,15 @@ class ComparisonService:
     def _normalize_object(self, value: Any) -> Any:
         if value is None:
             return None
-        if isinstance(value, (dict, list)):
-            return value
+        if isinstance(value, dict):
+            return {
+                key: self._normalize_object(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._normalize_object(item) for item in value]
         if isinstance(value, tuple):
-            return list(value)
+            return [self._normalize_object(item) for item in value]
         if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
             converted = value.tolist()
             if converted is not value:

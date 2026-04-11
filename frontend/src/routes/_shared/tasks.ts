@@ -7,6 +7,9 @@ export type TaskStage =
   | 'files_registered'
   | 'graphrag_index_started'
   | 'graphrag_index_completed'
+  | 'document_profiles_started'
+  | 'evidence_cards_started'
+  | 'comparison_rows_started'
   | 'protocol_artifacts_started'
   | 'artifacts_ready'
   | 'failed';
@@ -32,6 +35,9 @@ export type ArtifactStatus = {
   collection_id: string;
   output_path: string;
   documents_ready: boolean;
+  document_profiles_ready: boolean;
+  evidence_cards_ready: boolean;
+  comparison_rows_ready: boolean;
   graph_ready: boolean;
   sections_ready: boolean;
   procedure_blocks_ready: boolean;
@@ -94,6 +100,9 @@ function normalizeArtifactStatus(item: unknown): ArtifactStatus | null {
     collection_id: collectionId,
     output_path: outputPath,
     documents_ready: Boolean(record.documents_ready),
+    document_profiles_ready: Boolean(record.document_profiles_ready),
+    evidence_cards_ready: Boolean(record.evidence_cards_ready),
+    comparison_rows_ready: Boolean(record.comparison_rows_ready),
     graph_ready: Boolean(record.graph_ready),
     sections_ready: Boolean(record.sections_ready),
     procedure_blocks_ready: Boolean(record.procedure_blocks_ready),

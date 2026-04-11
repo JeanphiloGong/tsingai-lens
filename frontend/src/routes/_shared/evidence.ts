@@ -73,16 +73,67 @@ function normalizeAnchors(value: unknown): EvidenceAnchor[] {
           : null;
       }
 
-      const label = String(record.label ?? record.value ?? record.anchor ?? '').trim();
+      const label = String(
+        record.label ??
+          record.figure_or_table ??
+          record.quote_span ??
+          record.section_id ??
+          record.snippet_id ??
+          record.value ??
+          record.anchor ??
+          record.source_type ??
+          ''
+      ).trim();
       if (!label) return null;
 
       return {
         anchor_id: String(record.anchor_id ?? record.id ?? `anchor_${index + 1}`),
-        anchor_type: String(record.anchor_type ?? record.type ?? 'text'),
+        anchor_type: String(record.anchor_type ?? record.type ?? record.source_type ?? 'text'),
         label
       };
     })
     .filter((item): item is EvidenceAnchor => item !== null);
+}
+
+function flattenContextValues(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(value.flatMap((item) => flattenContextValues(item)).filter((item) => item !== ''))
+    );
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized ? [normalized] : [];
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return [String(value)];
+  }
+
+  const record = asRecord(value);
+  if (!record) return [];
+
+  return Array.from(
+    new Set(
+      Object.values(record)
+        .flatMap((item) => flattenContextValues(item))
+        .filter((item) => item !== '')
+    )
+  );
+}
+
+function normalizeMaterialSystem(value: unknown): string {
+  const record = asRecord(value);
+  if (!record) {
+    return String(value ?? '--').trim() || '--';
+  }
+
+  const family = String(record.family ?? '').trim();
+  const composition = String(record.composition ?? '').trim();
+  if (family && composition && family !== composition) {
+    return `${family} (${composition})`;
+  }
+  return family || composition || '--';
 }
 
 function normalizeConditionContext(value: unknown): ConditionContext {
@@ -96,9 +147,9 @@ function normalizeConditionContext(value: unknown): ConditionContext {
   }
 
   return {
-    process: toStringList(record.process),
-    baseline: toStringList(record.baseline),
-    test: toStringList(record.test)
+    process: flattenContextValues(record.process),
+    baseline: flattenContextValues(record.baseline),
+    test: flattenContextValues(record.test)
   };
 }
 
@@ -123,7 +174,7 @@ function normalizeCard(value: unknown, collectionId: string): EvidenceCard | nul
       ? evidence_source_type
       : 'text',
     evidence_anchors: normalizeAnchors(record.evidence_anchors),
-    material_system: String(record.material_system ?? '--').trim() || '--',
+    material_system: normalizeMaterialSystem(record.material_system),
     condition_context: normalizeConditionContext(record.condition_context),
     confidence: Number.isFinite(confidence) ? confidence : null,
     traceability_status: ['direct', 'partial', 'missing'].includes(traceability_status)

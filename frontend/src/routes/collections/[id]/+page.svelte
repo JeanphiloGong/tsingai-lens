@@ -51,7 +51,9 @@
   $: if ($page.url.hash.startsWith('#advanced')) {
     advancedOpen = true;
   }
-  $: canUseIncrementalIndex = Boolean(workspace?.artifacts.documents_ready);
+  $: canUseIncrementalIndex = Boolean(
+    workspace?.artifacts.documents_ready || workspace?.artifacts.document_profiles_ready
+  );
   $: if (!canUseIncrementalIndex && indexMode === 'update') {
     indexMode = 'rebuild';
   }

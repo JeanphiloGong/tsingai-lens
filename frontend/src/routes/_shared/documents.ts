@@ -175,11 +175,15 @@ function normalizeResponse(value: unknown, collectionId: string): DocumentProfil
             : items.length,
       doc_type_counts: {
         ...DEFAULT_DOC_TYPE_COUNTS,
-        ...(summaryRecord?.doc_type_counts as Record<DocumentType, number> | undefined)
+        ...((summaryRecord?.doc_type_counts ?? summaryRecord?.by_doc_type) as
+          | Record<DocumentType, number>
+          | undefined)
       },
       protocol_extractable_counts: {
         ...DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS,
-        ...(summaryRecord?.protocol_extractable_counts as Record<ProtocolExtractable, number> | undefined)
+        ...((summaryRecord?.protocol_extractable_counts ?? summaryRecord?.by_protocol_extractable) as
+          | Record<ProtocolExtractable, number>
+          | undefined)
       },
       warnings: toStringList(summaryRecord?.warnings)
     },

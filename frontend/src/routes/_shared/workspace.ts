@@ -6,6 +6,9 @@ import { isTaskActive, type Task } from './tasks';
 export type WorkspaceArtifactStatus = {
   output_path: string;
   documents_ready: boolean;
+  document_profiles_ready: boolean;
+  evidence_cards_ready: boolean;
+  comparison_rows_ready: boolean;
   graph_ready: boolean;
   sections_ready: boolean;
   procedure_blocks_ready: boolean;
@@ -141,6 +144,11 @@ function normalizeStageStatus(value: unknown, fallback: WorkflowStageStatus): Wo
     : fallback;
 }
 
+function normalizeStageEntry(value: unknown, fallback: WorkflowStageStatus): WorkflowStageStatus {
+  const record = asRecord(value);
+  return normalizeStageStatus(record?.status ?? value, fallback);
+}
+
 function defaultLinks(collectionId: string): WorkspaceLinks {
   const encoded = encodeURIComponent(collectionId);
   return {
@@ -153,18 +161,79 @@ function defaultLinks(collectionId: string): WorkspaceLinks {
   };
 }
 
+function normalizeWorkspaceRoute(
+  value: unknown,
+  fallback: string,
+  collectionId: string,
+  surface: 'workspace' | 'documents' | 'evidence' | 'comparisons' | 'protocol' | 'graph'
+) {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+
+  const normalized = value.trim();
+  if (!normalized.startsWith('/api/')) {
+    return normalized;
+  }
+
+  const encoded = encodeURIComponent(collectionId);
+  const apiPrefix = `/api/v1/collections/${encoded}`;
+  const routeMap = {
+    workspace: `/collections/${encoded}`,
+    documents: `/collections/${encoded}/documents`,
+    evidence: `/collections/${encoded}/evidence`,
+    comparisons: `/collections/${encoded}/comparisons`,
+    protocol: `/collections/${encoded}/protocol`,
+    graph: `/collections/${encoded}/graph`
+  } as const;
+
+  if (surface === 'workspace' && normalized === `${apiPrefix}/workspace`) {
+    return routeMap.workspace;
+  }
+  if (surface === 'documents' && normalized === `${apiPrefix}/documents/profiles`) {
+    return routeMap.documents;
+  }
+  if (surface === 'evidence' && normalized === `${apiPrefix}/evidence/cards`) {
+    return routeMap.evidence;
+  }
+  if (surface === 'comparisons' && normalized === `${apiPrefix}/comparisons`) {
+    return routeMap.comparisons;
+  }
+  if (surface === 'protocol' && normalized.startsWith(`${apiPrefix}/protocol/`)) {
+    return routeMap.protocol;
+  }
+  if (surface === 'graph' && normalized.startsWith(`${apiPrefix}/graph`)) {
+    return routeMap.graph;
+  }
+
+  return fallback;
+}
+
 function normalizeLinks(value: unknown, collectionId: string): WorkspaceLinks {
   const defaults = defaultLinks(collectionId);
   const record = asRecord(value);
   if (!record) return defaults;
 
   return {
-    workspace: typeof record.workspace === 'string' ? record.workspace : defaults.workspace,
-    documents: typeof record.documents === 'string' ? record.documents : defaults.documents,
-    evidence: typeof record.evidence === 'string' ? record.evidence : defaults.evidence,
-    comparisons: typeof record.comparisons === 'string' ? record.comparisons : defaults.comparisons,
-    protocol: typeof record.protocol === 'string' ? record.protocol : defaults.protocol,
-    graph: typeof record.graph === 'string' ? record.graph : defaults.graph
+    workspace: normalizeWorkspaceRoute(record.workspace, defaults.workspace, collectionId, 'workspace'),
+    documents: normalizeWorkspaceRoute(
+      record.documents ?? record.documents_profiles,
+      defaults.documents,
+      collectionId,
+      'documents'
+    ),
+    evidence: normalizeWorkspaceRoute(
+      record.evidence ?? record.evidence_cards,
+      defaults.evidence,
+      collectionId,
+      'evidence'
+    ),
+    comparisons: normalizeWorkspaceRoute(record.comparisons, defaults.comparisons, collectionId, 'comparisons'),
+    protocol: normalizeWorkspaceRoute(
+      record.protocol ?? record.protocol_steps,
+      defaults.protocol,
+      collectionId,
+      'protocol'
+    ),
+    graph: normalizeWorkspaceRoute(record.graph, defaults.graph, collectionId, 'graph')
   };
 }
 
@@ -303,7 +372,7 @@ function deriveLegacyWorkflow(
   const documents =
     fileCount < 1
       ? 'not_started'
-      : artifacts.documents_ready
+      : artifacts.document_profiles_ready || artifacts.documents_ready
         ? 'ready'
         : activeTask
           ? 'processing'
@@ -311,12 +380,10 @@ function deriveLegacyWorkflow(
             ? 'failed'
             : 'not_started';
 
-  const fixtureBackboneReady = USE_API_FIXTURES && documents === 'ready';
-
   return {
     documents,
     evidence:
-      fixtureBackboneReady || artifacts.protocol_steps_ready
+      artifacts.evidence_cards_ready || (USE_API_FIXTURES && documents === 'ready')
         ? 'ready'
         : activeTask
           ? 'processing'
@@ -324,7 +391,7 @@ function deriveLegacyWorkflow(
             ? 'failed'
             : 'not_started',
     comparisons:
-      fixtureBackboneReady || artifacts.protocol_steps_ready
+      artifacts.comparison_rows_ready || (USE_API_FIXTURES && documents === 'ready')
         ? 'ready'
         : activeTask
           ? 'processing'
@@ -353,10 +420,10 @@ function normalizeWorkflow(
   if (!record) return fallback;
 
   return {
-    documents: normalizeStageStatus(record.documents, fallback.documents),
-    evidence: normalizeStageStatus(record.evidence, fallback.evidence),
-    comparisons: normalizeStageStatus(record.comparisons, fallback.comparisons),
-    protocol: normalizeStageStatus(record.protocol, fallback.protocol)
+    documents: normalizeStageEntry(record.documents, fallback.documents),
+    evidence: normalizeStageEntry(record.evidence, fallback.evidence),
+    comparisons: normalizeStageEntry(record.comparisons, fallback.comparisons),
+    protocol: normalizeStageEntry(record.protocol, fallback.protocol)
   };
 }
 
@@ -387,9 +454,9 @@ function normalizeDocumentSummary(value: unknown, fileCount: number): WorkspaceD
 
   return {
     total_documents: toNumber(record.total_documents ?? record.total, fileCount),
-    doc_type_counts: normalizeCountRecord(record.doc_type_counts, DEFAULT_DOC_TYPE_COUNTS),
+    doc_type_counts: normalizeCountRecord(record.doc_type_counts ?? record.by_doc_type, DEFAULT_DOC_TYPE_COUNTS),
     protocol_extractable_counts: normalizeCountRecord(
-      record.protocol_extractable_counts,
+      record.protocol_extractable_counts ?? record.by_protocol_extractable,
       DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS
     ),
     warnings: toStringList(record.warnings)
@@ -410,6 +477,11 @@ export async function fetchWorkspaceOverview(collectionId: string) {
   const artifacts: WorkspaceArtifactStatus = {
     output_path: String((data.artifacts as Record<string, unknown> | undefined)?.output_path ?? ''),
     documents_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.documents_ready),
+    document_profiles_ready: Boolean(
+      (data.artifacts as Record<string, unknown> | undefined)?.document_profiles_ready
+    ),
+    evidence_cards_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.evidence_cards_ready),
+    comparison_rows_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.comparison_rows_ready),
     graph_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.graph_ready),
     sections_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.sections_ready),
     procedure_blocks_ready: Boolean(

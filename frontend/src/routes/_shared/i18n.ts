@@ -54,6 +54,8 @@ const translations: Record<Language, Translations> = {
         ready: 'Ready',
         processing: 'Processing',
         uploaded: 'Uploaded',
+        document_profiled: 'Documents Profiled',
+        comparison_pending: 'Comparison Pending',
         graph_ready: 'Graph Ready',
         partial_ready: 'Partial Ready',
         attention_required: 'Attention Required'
@@ -156,6 +158,8 @@ const translations: Record<Language, Translations> = {
       status: {
         empty: 'Empty',
         uploaded: 'Uploaded',
+        document_profiled: 'Documents Profiled',
+        comparison_pending: 'Comparison Pending',
         graph_ready: 'Graph Ready',
         ready: 'Ready',
         processing: 'Processing',
@@ -642,6 +646,9 @@ const translations: Record<Language, Translations> = {
         files_registered: 'Files Registered',
         graphrag_index_started: 'GraphRAG Started',
         graphrag_index_completed: 'GraphRAG Completed',
+        document_profiles_started: 'Document Profiles Started',
+        evidence_cards_started: 'Evidence Cards Started',
+        comparison_rows_started: 'Comparison Rows Started',
         protocol_artifacts_started: 'Protocol Artifacts Started',
         artifacts_ready: 'Artifacts Ready',
         failed: 'Failed'
@@ -847,6 +854,8 @@ const translations: Record<Language, Translations> = {
         ready: '可用',
         processing: '处理中',
         uploaded: '已上传',
+        document_profiled: '文档已画像',
+        comparison_pending: '比较结果待生成',
         graph_ready: '图谱可用',
         partial_ready: '部分可用',
         attention_required: '需要关注'
@@ -947,6 +956,8 @@ const translations: Record<Language, Translations> = {
       status: {
         empty: '空',
         uploaded: '已上传',
+        document_profiled: '文档已画像',
+        comparison_pending: '比较结果待生成',
         graph_ready: '图谱可用',
         ready: '可用',
         processing: '处理中',
@@ -1407,6 +1418,9 @@ const translations: Record<Language, Translations> = {
         files_registered: '文件已登记',
         graphrag_index_started: 'GraphRAG 已启动',
         graphrag_index_completed: 'GraphRAG 已完成',
+        document_profiles_started: '文档画像生成中',
+        evidence_cards_started: '证据卡生成中',
+        comparison_rows_started: '比较行生成中',
         protocol_artifacts_started: 'Protocol 产物生成中',
         artifacts_ready: '产物已就绪',
         failed: '失败'

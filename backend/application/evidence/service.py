@@ -316,12 +316,12 @@ class EvidenceCardService:
             "claim_type": claim_type,
             "evidence_source_type": "method",
             "evidence_anchors": evidence_anchors,
-            "material_system": material_system,
-            "condition_context": {
+            "material_system": self._normalize_material_system_payload(material_system),
+            "condition_context": self._normalize_condition_context_payload({
                 "process": self._extract_process_context(section_text),
                 "baseline": {},
                 "test": self._extract_test_context(section_text),
-            },
+            }),
             "confidence": round(confidence, 2),
             "traceability_status": "direct",
         }
@@ -358,12 +358,12 @@ class EvidenceCardService:
             "claim_type": claim_type,
             "evidence_source_type": "text",
             "evidence_anchors": evidence_anchors,
-            "material_system": material_system,
-            "condition_context": {
+            "material_system": self._normalize_material_system_payload(material_system),
+            "condition_context": self._normalize_condition_context_payload({
                 "process": self._extract_process_context(full_text),
                 "baseline": baseline,
                 "test": test_context,
-            },
+            }),
             "confidence": 0.74 if traceability_status == "direct" else 0.66,
             "traceability_status": traceability_status,
         }
@@ -489,9 +489,16 @@ class EvidenceCardService:
         normalized = cards.copy()
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
-        for column in ("evidence_anchors", "material_system", "condition_context"):
-            if column in normalized.columns:
-                normalized[column] = normalized[column].apply(self._normalize_object)
+        if "evidence_anchors" in normalized.columns:
+            normalized["evidence_anchors"] = normalized["evidence_anchors"].apply(self._normalize_object)
+        if "material_system" in normalized.columns:
+            normalized["material_system"] = normalized["material_system"].apply(
+                self._normalize_material_system_payload
+            )
+        if "condition_context" in normalized.columns:
+            normalized["condition_context"] = normalized["condition_context"].apply(
+                self._normalize_condition_context_payload
+            )
         if "confidence" in normalized.columns:
             normalized["confidence"] = normalized["confidence"].apply(
                 lambda value: round(float(value or 0.0), 2)
@@ -521,14 +528,68 @@ class EvidenceCardService:
             "claim_type": str(row.get("claim_type") or "qualitative"),
             "evidence_source_type": str(row.get("evidence_source_type") or "text"),
             "evidence_anchors": self._normalize_object(row.get("evidence_anchors")) or [],
-            "material_system": self._normalize_object(row.get("material_system")) or {},
-            "condition_context": self._normalize_object(row.get("condition_context")) or {
-                "process": {},
-                "baseline": {},
-                "test": {},
-            },
+            "material_system": self._normalize_material_system_payload(row.get("material_system")),
+            "condition_context": self._normalize_condition_context_payload(row.get("condition_context")),
             "confidence": round(float(row.get("confidence") or 0.0), 2),
             "traceability_status": str(row.get("traceability_status") or "missing"),
+        }
+
+    def _normalize_material_system_payload(self, value: Any) -> dict[str, Any]:
+        payload = self._normalize_object(value) or {}
+        if not isinstance(payload, dict):
+            text = str(payload).strip()
+            return {
+                "family": text or "unspecified material system",
+                "composition": None,
+            }
+        family = str(payload.get("family") or "").strip() or "unspecified material system"
+        composition = str(payload.get("composition") or "").strip() or None
+        return {
+            "family": family,
+            "composition": composition,
+        }
+
+    def _normalize_condition_context_payload(self, value: Any) -> dict[str, Any]:
+        payload = self._normalize_object(value) or {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        process = self._normalize_object(payload.get("process")) or {}
+        baseline = self._normalize_object(payload.get("baseline")) or {}
+        test = self._normalize_object(payload.get("test")) or {}
+
+        if not isinstance(process, dict):
+            process = {}
+        if not isinstance(baseline, dict):
+            baseline = {}
+        if not isinstance(test, dict):
+            test = {}
+
+        temperatures = process.get("temperatures_c") or []
+        if not isinstance(temperatures, list):
+            temperatures = [temperatures]
+        durations = process.get("durations") or []
+        if not isinstance(durations, list):
+            durations = [durations]
+        methods = test.get("methods") or []
+        if not isinstance(methods, list):
+            methods = [methods]
+
+        return {
+            "process": {
+                "temperatures_c": [
+                    float(item) for item in temperatures if str(item).strip()
+                ],
+                "durations": [str(item) for item in durations if str(item).strip()],
+                "atmosphere": str(process.get("atmosphere") or "").strip() or None,
+            },
+            "baseline": {
+                "control": str(baseline.get("control") or "").strip() or None,
+            },
+            "test": {
+                "methods": [str(item) for item in methods if str(item).strip()],
+                "method": str(test.get("method") or "").strip() or None,
+            },
         }
 
     def _normalize_object(self, value: Any) -> Any:

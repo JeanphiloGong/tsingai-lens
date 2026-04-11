@@ -245,7 +245,14 @@ class ComparisonService:
         if payload.get("atmosphere"):
             parts.append(f"under {payload['atmosphere']}")
         if not parts:
-            parts.extend(f"{key}={value}" for key, value in payload.items())
+            fallback_parts = [
+                f"{key}={value}"
+                for key, value in payload.items()
+                if value not in (None, "", [], {})
+            ]
+            if not fallback_parts:
+                return "unspecified process"
+            parts.extend(fallback_parts)
         return ", ".join(str(part) for part in parts)
 
     def _normalize_property(

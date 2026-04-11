@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from application.comparisons.service import ComparisonService
 from application.documents.service import DocumentProfileService
@@ -104,3 +105,62 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     assert artifacts["document_profiles_ready"] is True
     assert artifacts["evidence_cards_ready"] is True
     assert artifacts["comparison_rows_ready"] is True
+
+
+def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
+    pytest.importorskip("pyarrow")
+
+    from application.collections.service import CollectionService
+    from application.documents.service import DocumentProfileService
+    from application.evidence.service import EvidenceCardService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+
+    collection = collection_service.create_collection("Process Only Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Process Only Study",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "The slurry was stirred for 2 h and dried at 80 C under Ar.",
+                        "Characterization",
+                        "SEM was used to inspect the coating.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "The slurry was stirred for 2 h and dried at 80 C under Ar.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    evidence = evidence_card_service.build_evidence_cards(collection_id, output_dir)
+
+    assert not evidence.empty
+    assert output_dir.joinpath("evidence_cards.parquet").exists()
+    reloaded = pd.read_parquet(output_dir / "evidence_cards.parquet")
+    assert not reloaded.empty

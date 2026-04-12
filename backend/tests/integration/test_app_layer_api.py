@@ -357,12 +357,19 @@ def test_collection_task_and_query_flow(app_client):
     artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}/artifacts")
     assert artifacts.status_code == 200
     body = artifacts.json()
+    assert body["documents_generated"] is True
     assert body["documents_ready"] is True
+    assert body["document_profiles_generated"] is True
     assert body["document_profiles_ready"] is True
+    assert body["evidence_cards_generated"] is True
     assert body["evidence_cards_ready"] is True
+    assert body["comparison_rows_generated"] is True
     assert body["comparison_rows_ready"] is True
+    assert body["graph_generated"] is True
     assert body["graph_ready"] is True
+    assert body["sections_generated"] is True
     assert body["sections_ready"] is True
+    assert body["protocol_steps_generated"] is True
     assert body["protocol_steps_ready"] is True
 
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
@@ -572,6 +579,7 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()
+    assert workspace_body["artifacts"]["protocol_steps_generated"] is False
     assert workspace_body["artifacts"]["protocol_steps_ready"] is False
     assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
 
@@ -580,6 +588,7 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     steps_detail = steps.json()["detail"]
     assert steps_detail["code"] == "protocol_artifacts_not_ready"
     assert steps_detail["collection_id"] == collection_id
+    assert steps_detail["artifacts"]["protocol_steps_generated"] is False
     assert steps_detail["artifacts"]["protocol_steps_ready"] is False
 
     search = app_client.get(
@@ -595,6 +604,42 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     )
     assert sop.status_code == 409
     assert sop.json()["detail"]["code"] == "protocol_artifacts_not_ready"
+
+
+def test_collection_protocol_steps_returns_empty_list_when_generated_but_not_ready(
+    app_client,
+):
+    from controllers import protocol as protocol_controller
+
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Generated But Empty Protocol"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    output_dir = Path(workspace.json()["artifacts"]["output_path"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame().to_parquet(output_dir / "protocol_steps.parquet", index=False)
+    protocol_controller.artifact_registry_service.upsert(collection_id, output_dir)
+
+    workspace_after = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/workspace"
+    )
+    assert workspace_after.status_code == 200
+    artifacts = workspace_after.json()["artifacts"]
+    assert artifacts["protocol_steps_generated"] is True
+    assert artifacts["protocol_steps_ready"] is False
+    assert workspace_after.json()["capabilities"]["can_view_protocol_steps"] is True
+
+    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
+    assert steps.status_code == 200
+    payload = steps.json()
+    assert payload["total"] == 0
+    assert payload["count"] == 0
+    assert payload["items"] == []
 
 
 def test_public_query_and_reports_routes_are_exposed(app_client):

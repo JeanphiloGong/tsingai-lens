@@ -36,9 +36,13 @@ def _protocol_not_ready_detail(
         "message": "集合的 protocol 产物尚未就绪，请先完成索引任务并等待 protocol steps 生成。",
         "collection_id": collection_id,
         "artifacts": {
+            "documents_generated": bool(payload.get("documents_generated")),
             "documents_ready": bool(payload.get("documents_ready")),
+            "sections_generated": bool(payload.get("sections_generated")),
             "sections_ready": bool(payload.get("sections_ready")),
+            "procedure_blocks_generated": bool(payload.get("procedure_blocks_generated")),
             "procedure_blocks_ready": bool(payload.get("procedure_blocks_ready")),
+            "protocol_steps_generated": bool(payload.get("protocol_steps_generated")),
             "protocol_steps_ready": bool(payload.get("protocol_steps_ready")),
         },
     }
@@ -58,7 +62,7 @@ def _ensure_collection_protocol_ready(collection_id: str) -> Path:
             detail=_protocol_not_ready_detail(collection_id),
         ) from None
 
-    if not artifacts.get("protocol_steps_ready"):
+    if not artifacts.get("protocol_steps_generated"):
         raise HTTPException(
             status_code=409,
             detail=_protocol_not_ready_detail(collection_id, artifacts),

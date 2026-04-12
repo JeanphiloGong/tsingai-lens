@@ -97,6 +97,10 @@
 - `warnings` 应表达 review-heavy、protocol-limited、comparison-limited、
   traceability-limited 等 collection 风险
 - `links` 应指向主资源页面，而不是让前端自己拼内部跳转语义
+- `artifacts` 对每类产物应同时提供
+  `*_generated` 与 `*_ready` 两类布尔值：
+  - `generated` 表示该阶段产物文件已生成（可能为空）
+  - `ready` 表示该阶段产物可直接用于主界面消费（通常要求非空）
 
 ### Document Profiles
 
@@ -269,6 +273,16 @@ readiness 类错误至少应包含：
 - 可读的 `message`
 - 对应的 `collection_id` 或 `task_id`
 - 当前被阻塞的 workflow stage 或相关资源信息
+
+核心资源的阶段语义约定：
+
+- `documents/profiles`、`evidence/cards`、`comparisons`
+  - 对应 `*_generated=false`：返回 `409`
+  - 对应 `*_generated=true` 且结果为空：返回 `200`，`count=0`
+  - 对应 `*_ready=true`：返回 `200`，可直接用于主界面
+- `protocol/*`
+  - 入口基于 `protocol_steps_generated` 判断是否可访问
+  - `protocol_steps_generated=true` 且 `protocol_steps_ready=false` 时允许返回空列表或空结果
 
 ## 前端集成约束
 

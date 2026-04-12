@@ -26,25 +26,50 @@ class ArtifactRegistryService:
 
     def build_registry(self, collection_id: str, output_dir: str | Path) -> dict:
         base_dir = Path(output_dir).expanduser().resolve()
+        documents_path = base_dir / "documents.parquet"
+        document_profiles_path = base_dir / "document_profiles.parquet"
+        evidence_cards_path = base_dir / "evidence_cards.parquet"
+        comparison_rows_path = base_dir / "comparison_rows.parquet"
+        entities_path = base_dir / "entities.parquet"
+        relationships_path = base_dir / "relationships.parquet"
+        sections_path = base_dir / "sections.parquet"
+        procedure_blocks_path = base_dir / "procedure_blocks.parquet"
+        protocol_steps_path = base_dir / "protocol_steps.parquet"
+        graphml_path = base_dir / "graph.graphml"
+
+        documents_generated = documents_path.exists()
+        document_profiles_generated = document_profiles_path.exists()
+        evidence_cards_generated = evidence_cards_path.exists()
+        comparison_rows_generated = comparison_rows_path.exists()
+        graph_generated = entities_path.exists() and relationships_path.exists()
+        sections_generated = sections_path.exists()
+        procedure_blocks_generated = procedure_blocks_path.exists()
+        protocol_steps_generated = protocol_steps_path.exists()
+        graphml_generated = graphml_path.exists()
+
         return {
             "collection_id": collection_id,
             "output_path": str(base_dir),
-            "documents_ready": (base_dir / "documents.parquet").exists(),
-            "document_profiles_ready": self._parquet_has_rows(
-                base_dir / "document_profiles.parquet"
-            ),
-            "evidence_cards_ready": self._parquet_has_rows(
-                base_dir / "evidence_cards.parquet"
-            ),
-            "comparison_rows_ready": self._parquet_has_rows(
-                base_dir / "comparison_rows.parquet"
-            ),
-            "graph_ready": (base_dir / "entities.parquet").exists()
-            and (base_dir / "relationships.parquet").exists(),
-            "sections_ready": (base_dir / "sections.parquet").exists(),
-            "procedure_blocks_ready": (base_dir / "procedure_blocks.parquet").exists(),
-            "protocol_steps_ready": (base_dir / "protocol_steps.parquet").exists(),
-            "graphml_ready": (base_dir / "graph.graphml").exists(),
+            "documents_generated": documents_generated,
+            "documents_ready": self._parquet_has_rows(documents_path),
+            "document_profiles_generated": document_profiles_generated,
+            "document_profiles_ready": self._parquet_has_rows(document_profiles_path),
+            "evidence_cards_generated": evidence_cards_generated,
+            "evidence_cards_ready": self._parquet_has_rows(evidence_cards_path),
+            "comparison_rows_generated": comparison_rows_generated,
+            "comparison_rows_ready": self._parquet_has_rows(comparison_rows_path),
+            "graph_generated": graph_generated,
+            "graph_ready": graph_generated
+            and self._parquet_has_rows(entities_path)
+            and self._parquet_has_rows(relationships_path),
+            "sections_generated": sections_generated,
+            "sections_ready": self._parquet_has_rows(sections_path),
+            "procedure_blocks_generated": procedure_blocks_generated,
+            "procedure_blocks_ready": self._parquet_has_rows(procedure_blocks_path),
+            "protocol_steps_generated": protocol_steps_generated,
+            "protocol_steps_ready": self._parquet_has_rows(protocol_steps_path),
+            "graphml_generated": graphml_generated,
+            "graphml_ready": graphml_generated,
             "updated_at": _now_iso(),
         }
 

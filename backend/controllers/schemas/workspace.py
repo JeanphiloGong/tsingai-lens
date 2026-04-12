@@ -22,20 +22,29 @@ class WorkspaceArtifactStatusResponse(BaseModel):
     """Collection-scoped artifact readiness summary."""
 
     output_path: str = Field(..., description="集合输出目录")
-    documents_ready: bool = Field(default=False, description="documents.parquet 是否存在")
+    documents_generated: bool = Field(default=False, description="documents.parquet 是否存在")
+    documents_ready: bool = Field(default=False, description="documents.parquet 是否存在且非空")
+    document_profiles_generated: bool = Field(default=False, description="document_profiles.parquet 是否存在")
     document_profiles_ready: bool = Field(default=False, description="document_profiles.parquet 是否存在且非空")
+    evidence_cards_generated: bool = Field(default=False, description="evidence_cards.parquet 是否存在")
     evidence_cards_ready: bool = Field(default=False, description="evidence_cards.parquet 是否存在且非空")
+    comparison_rows_generated: bool = Field(default=False, description="comparison_rows.parquet 是否存在")
     comparison_rows_ready: bool = Field(default=False, description="comparison_rows.parquet 是否存在且非空")
+    graph_generated: bool = Field(default=False, description="图谱 parquet 是否存在")
     graph_ready: bool = Field(default=False, description="图谱 parquet 是否就绪")
-    sections_ready: bool = Field(default=False, description="sections.parquet 是否存在")
+    sections_generated: bool = Field(default=False, description="sections.parquet 是否存在")
+    sections_ready: bool = Field(default=False, description="sections.parquet 是否存在且非空")
+    procedure_blocks_generated: bool = Field(default=False, description="procedure_blocks.parquet 是否存在")
     procedure_blocks_ready: bool = Field(
         default=False,
-        description="procedure_blocks.parquet 是否存在",
+        description="procedure_blocks.parquet 是否存在且非空",
     )
+    protocol_steps_generated: bool = Field(default=False, description="protocol_steps.parquet 是否存在")
     protocol_steps_ready: bool = Field(
         default=False,
-        description="protocol_steps.parquet 是否存在",
+        description="protocol_steps.parquet 是否存在且非空",
     )
+    graphml_generated: bool = Field(default=False, description="graph.graphml 是否存在")
     graphml_ready: bool = Field(default=False, description="graph.graphml 是否存在")
     updated_at: str = Field(..., description="更新时间")
 

@@ -111,10 +111,14 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
 
     assert overview["status_summary"] == "document_profiled"
     assert overview["workflow"]["documents"]["status"] == "ready"
-    assert overview["workflow"]["protocol"]["status"] == "limited"
+    assert overview["workflow"]["protocol"]["status"] == "not_started"
+    assert overview["artifacts"]["document_profiles_generated"] is True
     assert overview["artifacts"]["document_profiles_ready"] is True
+    assert overview["artifacts"]["evidence_cards_generated"] is False
     assert overview["artifacts"]["evidence_cards_ready"] is False
+    assert overview["artifacts"]["comparison_rows_generated"] is False
     assert overview["artifacts"]["comparison_rows_ready"] is False
+    assert overview["artifacts"]["protocol_steps_generated"] is False
     assert overview["document_summary"]["total_documents"] == 1
     assert overview["document_summary"]["by_doc_type"]["experimental"] == 1
     assert overview["links"]["documents_profiles"] == f"/api/v1/collections/{collection_id}/documents/profiles"

@@ -19,6 +19,8 @@ def test_mock_service_returns_ready_workspace_and_backbone_resources(monkeypatch
     workspace = lens_v1_mock_service.get_workspace("col_mock_ready")
     assert workspace["workflow"]["documents"]["status"] == "ready"
     assert workspace["workflow"]["comparisons"]["status"] == "ready"
+    assert workspace["artifacts"]["comparison_rows_generated"] is True
+    assert workspace["artifacts"]["comparison_rows_ready"] is True
     assert workspace["links"]["comparisons"] == "/api/v1/collections/col_mock_ready/comparisons"
 
     profiles = lens_v1_mock_service.list_document_profiles("col_mock_ready")
@@ -49,4 +51,5 @@ def test_mock_service_returns_limited_collection_signals(monkeypatch):
     assert task["status"] == "partial_success"
 
     artifacts = lens_v1_mock_service.get_task_artifacts("task_mock_limited_index")
+    assert artifacts["protocol_steps_generated"] is False
     assert artifacts["protocol_steps_ready"] is False

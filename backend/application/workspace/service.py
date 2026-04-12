@@ -36,14 +36,23 @@ class WorkspaceService:
         return {
             "collection_id": collection_id,
             "output_path": str(paths.output_dir),
+            "documents_generated": False,
             "documents_ready": False,
+            "document_profiles_generated": False,
             "document_profiles_ready": False,
+            "evidence_cards_generated": False,
             "evidence_cards_ready": False,
+            "comparison_rows_generated": False,
             "comparison_rows_ready": False,
+            "graph_generated": False,
             "graph_ready": False,
+            "sections_generated": False,
             "sections_ready": False,
+            "procedure_blocks_generated": False,
             "procedure_blocks_ready": False,
+            "protocol_steps_generated": False,
             "protocol_steps_ready": False,
+            "graphml_generated": False,
             "graphml_ready": False,
             "updated_at": self.collection_service.get_collection(collection_id)["updated_at"],
         }
@@ -54,15 +63,36 @@ class WorkspaceService:
             return False
         return (Path(str(output_path)).expanduser().resolve() / filename).exists()
 
+    def _artifact_generated(
+        self,
+        artifacts: dict,
+        generated_key: str,
+        filename: str,
+    ) -> bool:
+        if generated_key in artifacts:
+            return bool(artifacts.get(generated_key))
+        return self._artifact_path_exists(artifacts, filename)
+
+    def _artifact_ready(
+        self,
+        artifacts: dict,
+        ready_key: str,
+    ) -> bool:
+        return bool(artifacts.get(ready_key))
+
     def _build_capabilities(self, artifacts: dict) -> dict:
-        graph_ready = bool(artifacts.get("graph_ready"))
-        protocol_ready = bool(artifacts.get("protocol_steps_ready"))
+        graph_ready = self._artifact_ready(artifacts, "graph_ready")
+        protocol_generated = self._artifact_generated(
+            artifacts,
+            "protocol_steps_generated",
+            "protocol_steps.parquet",
+        )
         return {
             "can_view_graph": graph_ready,
             "can_download_graphml": graph_ready,
-            "can_view_protocol_steps": protocol_ready,
-            "can_search_protocol": protocol_ready,
-            "can_generate_sop": protocol_ready,
+            "can_view_protocol_steps": protocol_generated,
+            "can_search_protocol": protocol_generated,
+            "can_generate_sop": protocol_generated,
         }
 
     def _build_status_summary(
@@ -72,8 +102,9 @@ class WorkspaceService:
         artifacts: dict,
         document_summary: dict,
     ) -> str:
-        document_profiles_generated = self._artifact_path_exists(
+        document_profiles_generated = self._artifact_generated(
             artifacts,
+            "document_profiles_generated",
             "document_profiles.parquet",
         )
         if latest_task:
@@ -84,13 +115,13 @@ class WorkspaceService:
                 return "attention_required"
             if status == "partial_success":
                 return "partial_ready"
-        if artifacts.get("comparison_rows_ready"):
+        if self._artifact_ready(artifacts, "comparison_rows_ready"):
             return "ready"
-        if artifacts.get("evidence_cards_ready"):
+        if self._artifact_ready(artifacts, "evidence_cards_ready"):
             return "comparison_pending"
-        if artifacts.get("document_profiles_ready") or document_profiles_generated:
+        if self._artifact_ready(artifacts, "document_profiles_ready") or document_profiles_generated:
             return "document_profiled"
-        if artifacts.get("graph_ready"):
+        if self._artifact_ready(artifacts, "graph_ready"):
             return "graph_ready"
         if file_count > 0:
             return "uploaded"
@@ -116,23 +147,37 @@ class WorkspaceService:
         document_summary: dict,
     ) -> dict:
         task_status = str((latest_task or {}).get("status") or "")
-        documents_generated = self._artifact_path_exists(
+        documents_generated = self._artifact_generated(
             artifacts,
+            "document_profiles_generated",
             "document_profiles.parquet",
         )
-        evidence_generated = self._artifact_path_exists(
+        evidence_generated = self._artifact_generated(
             artifacts,
+            "evidence_cards_generated",
             "evidence_cards.parquet",
         )
-        comparisons_generated = self._artifact_path_exists(
+        comparisons_generated = self._artifact_generated(
             artifacts,
+            "comparison_rows_generated",
             "comparison_rows.parquet",
         )
-        documents_ready = bool(artifacts.get("document_profiles_ready")) or document_summary.get("total_documents", 0) > 0
-        evidence_ready = bool(artifacts.get("evidence_cards_ready"))
-        comparison_ready = bool(artifacts.get("comparison_rows_ready"))
-        protocol_ready = bool(artifacts.get("protocol_steps_ready"))
-        protocol_candidates = document_summary.get("by_protocol_extractable", {}).get("yes", 0) + document_summary.get("by_protocol_extractable", {}).get("partial", 0)
+        protocol_generated = self._artifact_generated(
+            artifacts,
+            "protocol_steps_generated",
+            "protocol_steps.parquet",
+        )
+        documents_ready = self._artifact_ready(
+            artifacts,
+            "document_profiles_ready",
+        ) or document_summary.get("total_documents", 0) > 0
+        evidence_ready = self._artifact_ready(artifacts, "evidence_cards_ready")
+        comparison_ready = self._artifact_ready(artifacts, "comparison_rows_ready")
+        protocol_ready = self._artifact_ready(artifacts, "protocol_steps_ready")
+        protocol_candidates = (
+            document_summary.get("by_protocol_extractable", {}).get("yes", 0)
+            + document_summary.get("by_protocol_extractable", {}).get("partial", 0)
+        )
 
         if file_count == 0:
             return {
@@ -209,6 +254,11 @@ class WorkspaceService:
 
         if protocol_ready:
             protocol_stage = {"status": "ready", "detail": "Protocol artifacts are available."}
+        elif protocol_generated:
+            protocol_stage = {
+                "status": "limited",
+                "detail": "Protocol artifacts were generated but no usable protocol steps are currently available.",
+            }
         elif (documents_ready or documents_generated) and protocol_candidates == 0:
             protocol_stage = {
                 "status": "not_applicable",
@@ -216,8 +266,8 @@ class WorkspaceService:
             }
         elif documents_ready or documents_generated:
             protocol_stage = {
-                "status": "limited",
-                "detail": "Protocol branch is not ready yet or remains partial for this collection.",
+                "status": "not_started",
+                "detail": "Protocol branch has not generated artifacts yet.",
             }
         else:
             protocol_stage = {
@@ -272,7 +322,11 @@ class WorkspaceService:
             "comparisons": f"/api/v1/collections/{collection_id}/comparisons",
             "protocol_steps": None,
         }
-        if artifacts.get("protocol_steps_ready"):
+        if self._artifact_generated(
+            artifacts,
+            "protocol_steps_generated",
+            "protocol_steps.parquet",
+        ):
             payload["protocol_steps"] = f"/api/v1/collections/{collection_id}/protocol/steps"
         return payload
 
@@ -308,14 +362,23 @@ class WorkspaceService:
             ),
             "artifacts": {
                 "output_path": artifacts["output_path"],
+                "documents_generated": bool(artifacts.get("documents_generated")),
                 "documents_ready": bool(artifacts.get("documents_ready")),
+                "document_profiles_generated": bool(artifacts.get("document_profiles_generated")),
                 "document_profiles_ready": bool(artifacts.get("document_profiles_ready")),
+                "evidence_cards_generated": bool(artifacts.get("evidence_cards_generated")),
                 "evidence_cards_ready": bool(artifacts.get("evidence_cards_ready")),
+                "comparison_rows_generated": bool(artifacts.get("comparison_rows_generated")),
                 "comparison_rows_ready": bool(artifacts.get("comparison_rows_ready")),
+                "graph_generated": bool(artifacts.get("graph_generated")),
                 "graph_ready": bool(artifacts.get("graph_ready")),
+                "sections_generated": bool(artifacts.get("sections_generated")),
                 "sections_ready": bool(artifacts.get("sections_ready")),
+                "procedure_blocks_generated": bool(artifacts.get("procedure_blocks_generated")),
                 "procedure_blocks_ready": bool(artifacts.get("procedure_blocks_ready")),
+                "protocol_steps_generated": bool(artifacts.get("protocol_steps_generated")),
                 "protocol_steps_ready": bool(artifacts.get("protocol_steps_ready")),
+                "graphml_generated": bool(artifacts.get("graphml_generated")),
                 "graphml_ready": bool(artifacts.get("graphml_ready")),
                 "updated_at": artifacts["updated_at"],
             },

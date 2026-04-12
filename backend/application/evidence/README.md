@@ -25,8 +25,8 @@ It may depend on:
 - `application/documents/`
 - `application/collections/`
 - `application/workspace/`
-- `application/protocol/section_service.py`
-- `application/protocol/source_service.py`
+- `application/documents/section_service.py`
+- `application/documents/source_service.py`
 
 It should not own:
 

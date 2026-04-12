@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from application.documents.section_service import build_sections
+from application.documents.source_service import load_collection_inputs
 from application.protocol.block_service import build_procedure_blocks
 from application.protocol.extract_service import ProtocolExtractService
-from application.protocol.section_service import build_sections
 from application.protocol.source_service import (
-    load_protocol_inputs,
     persist_procedure_blocks,
     persist_sections,
 )
@@ -30,7 +30,7 @@ def build_protocol_artifacts(
 ) -> ProtocolPipelineResult:
     output_dir = Path(base_dir).expanduser().resolve()
     extractor = extractor or ProtocolExtractService()
-    documents, text_units = load_protocol_inputs(output_dir)
+    documents, text_units = load_collection_inputs(output_dir)
 
     sections = build_sections(documents, text_units)
     sections_path = persist_sections(output_dir, sections)

@@ -14,12 +14,15 @@ from application.backbone_codec import (
     restore_frame_from_storage,
 )
 from application.collections.service import CollectionService
+from application.documents.section_service import build_sections
+from application.documents.source_service import (
+    build_document_records,
+    load_collection_inputs,
+)
 from application.documents.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.protocol.section_service import build_sections
-from application.protocol.source_service import build_document_records, load_protocol_inputs
 from application.workspace.artifact_registry_service import ArtifactRegistryService
 
 
@@ -162,7 +165,7 @@ class EvidenceCardService:
         except DocumentProfilesNotReadyError as exc:
             raise EvidenceCardsNotReadyError(collection_id, exc.output_dir) from exc
 
-        documents, text_units = load_protocol_inputs(base_dir)
+        documents, text_units = load_collection_inputs(base_dir)
         document_records = build_document_records(documents, text_units)
         sections = build_sections(documents, text_units)
         sections_by_doc = self._group_sections_by_document(sections)
@@ -211,13 +214,12 @@ class EvidenceCardService:
         )
         cards_table = self._normalize_cards_table(cards_table, collection_id)
 
-        if not cards_table.empty:
-            base_dir.mkdir(parents=True, exist_ok=True)
-            prepare_frame_for_storage(
-                cards_table,
-                _EVIDENCE_JSON_COLUMNS,
-            ).to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
-            self.artifact_registry_service.upsert(collection_id, base_dir)
+        base_dir.mkdir(parents=True, exist_ok=True)
+        prepare_frame_for_storage(
+            cards_table,
+            _EVIDENCE_JSON_COLUMNS,
+        ).to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
+        self.artifact_registry_service.upsert(collection_id, base_dir)
 
         return cards_table
 

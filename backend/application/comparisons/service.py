@@ -113,7 +113,18 @@ class ComparisonService:
         except EvidenceCardsNotReadyError as exc:
             raise ComparisonRowsNotReadyError(collection_id, exc.output_dir) from exc
 
-        rows = [self._build_row_from_card(row) for _, row in cards.iterrows()]
+        rows: list[dict[str, Any]] = []
+        if cards is not None and not cards.empty:
+            grouped = cards.groupby(cards["document_id"].astype(str), sort=False)
+            for _, card_group in grouped:
+                has_benchmark_claim = any(
+                    str(item.get("claim_type") or "") in {"property", "mechanism"}
+                    for _, item in card_group.iterrows()
+                )
+                for _, card in card_group.iterrows():
+                    if not self._is_card_comparison_eligible(card, has_benchmark_claim):
+                        continue
+                    rows.append(self._build_row_from_card(card))
         table = pd.DataFrame(
             rows,
             columns=[
@@ -133,14 +144,25 @@ class ComparisonService:
             ],
         )
         table = self._normalize_rows_table(table, collection_id)
-        if not table.empty:
-            base_dir.mkdir(parents=True, exist_ok=True)
-            prepare_frame_for_storage(
-                table,
-                _COMPARISON_JSON_COLUMNS,
-            ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
-            self.artifact_registry_service.upsert(collection_id, base_dir)
+        base_dir.mkdir(parents=True, exist_ok=True)
+        prepare_frame_for_storage(
+            table,
+            _COMPARISON_JSON_COLUMNS,
+        ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
+        self.artifact_registry_service.upsert(collection_id, base_dir)
         return table
+
+    def _is_card_comparison_eligible(
+        self,
+        card: pd.Series,
+        has_benchmark_claim: bool,
+    ) -> bool:
+        claim_type = str(card.get("claim_type") or "qualitative")
+        if claim_type in {"property", "mechanism"}:
+            return True
+        if claim_type in {"process", "characterization"}:
+            return not has_benchmark_claim
+        return not has_benchmark_claim
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)

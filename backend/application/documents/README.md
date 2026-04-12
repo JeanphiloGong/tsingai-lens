@@ -23,8 +23,8 @@ It may depend on:
 
 - `application/collections/`
 - `application/workspace/`
-- `application/protocol/section_service.py`
-- `application/protocol/source_service.py`
+- `application/documents/section_service.py`
+- `application/documents/source_service.py`
 
 It should not own:
 
@@ -37,6 +37,10 @@ It should not own:
 - `service.py`
   Reads source protocol inputs, profiles documents, persists
   `document_profiles.parquet`, and produces collection-level summaries
+- `source_service.py`
+  Owns shared collection-input loading and document-record assembly
+- `section_service.py`
+  Owns shared section derivation used by documents, evidence, and protocol
 
 ## Upstream / Downstream
 

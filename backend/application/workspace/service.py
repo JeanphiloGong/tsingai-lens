@@ -72,6 +72,10 @@ class WorkspaceService:
         artifacts: dict,
         document_summary: dict,
     ) -> str:
+        document_profiles_generated = self._artifact_path_exists(
+            artifacts,
+            "document_profiles.parquet",
+        )
         if latest_task:
             status = str(latest_task.get("status") or "")
             if status == "running":
@@ -84,10 +88,8 @@ class WorkspaceService:
             return "ready"
         if artifacts.get("evidence_cards_ready"):
             return "comparison_pending"
-        if artifacts.get("document_profiles_ready"):
+        if artifacts.get("document_profiles_ready") or document_profiles_generated:
             return "document_profiled"
-        if artifacts.get("protocol_steps_ready"):
-            return "ready"
         if artifacts.get("graph_ready"):
             return "graph_ready"
         if file_count > 0:
@@ -114,9 +116,19 @@ class WorkspaceService:
         document_summary: dict,
     ) -> dict:
         task_status = str((latest_task or {}).get("status") or "")
-        documents_ready = bool(artifacts.get("document_profiles_ready")) or document_summary.get(
-            "total_documents", 0
-        ) > 0
+        documents_generated = self._artifact_path_exists(
+            artifacts,
+            "document_profiles.parquet",
+        )
+        evidence_generated = self._artifact_path_exists(
+            artifacts,
+            "evidence_cards.parquet",
+        )
+        comparisons_generated = self._artifact_path_exists(
+            artifacts,
+            "comparison_rows.parquet",
+        )
+        documents_ready = bool(artifacts.get("document_profiles_ready")) or document_summary.get("total_documents", 0) > 0
         evidence_ready = bool(artifacts.get("evidence_cards_ready"))
         comparison_ready = bool(artifacts.get("comparison_rows_ready"))
         protocol_ready = bool(artifacts.get("protocol_steps_ready"))
@@ -137,49 +149,72 @@ class WorkspaceService:
                 "protocol": {"status": "not_started", "detail": "Protocol branch has not started yet."},
             }
 
-        documents_stage = {
-            "status": "ready" if documents_ready else "not_started",
-            "detail": "Document profiles are available." if documents_ready else "Document profiles are not ready yet.",
-        }
-        evidence_stage_status = "ready" if evidence_ready else ("limited" if documents_ready else "not_started")
-        evidence_stage = {
-            "status": evidence_stage_status,
-            "detail": (
-                "Evidence cards are available."
-                if evidence_ready
-                else (
-                    "No evidence cards were extracted from this collection yet."
-                    if documents_ready
-                    else "Evidence cards are not generated yet."
-                )
-            ),
-        }
-        comparisons_stage_status = (
-            "ready"
-            if comparison_ready
-            else ("limited" if evidence_ready or documents_ready else "not_started")
-        )
-        comparisons_stage = {
-            "status": comparisons_stage_status,
-            "detail": (
-                "Comparison rows are available."
-                if comparison_ready
-                else (
-                    "Comparison rows are not yet available for direct collection-level comparison."
-                    if evidence_ready or documents_ready
-                    else "Comparison rows are not generated yet."
-                )
-            ),
-        }
+        if documents_ready:
+            documents_stage = {
+                "status": "ready",
+                "detail": "Document profiles are available.",
+            }
+        elif documents_generated:
+            documents_stage = {
+                "status": "limited",
+                "detail": "Document profiling completed, but no profile rows were produced from this collection.",
+            }
+        else:
+            documents_stage = {
+                "status": "not_started",
+                "detail": "Document profiles are not ready yet.",
+            }
+
+        if evidence_ready:
+            evidence_stage = {
+                "status": "ready",
+                "detail": "Evidence cards are available.",
+            }
+        elif evidence_generated:
+            evidence_stage = {
+                "status": "limited",
+                "detail": "Evidence extraction completed, but no evidence cards were extracted from this collection.",
+            }
+        elif documents_ready or documents_generated:
+            evidence_stage = {
+                "status": "not_started",
+                "detail": "Evidence cards are not generated yet.",
+            }
+        else:
+            evidence_stage = {
+                "status": "not_started",
+                "detail": "Evidence cards are not generated yet.",
+            }
+
+        if comparison_ready:
+            comparisons_stage = {
+                "status": "ready",
+                "detail": "Comparison rows are available.",
+            }
+        elif comparisons_generated:
+            comparisons_stage = {
+                "status": "limited",
+                "detail": "Comparison generation completed, but no rows were suitable for structured comparison.",
+            }
+        elif evidence_ready or evidence_generated or documents_ready or documents_generated:
+            comparisons_stage = {
+                "status": "not_started",
+                "detail": "Comparison rows are not generated yet.",
+            }
+        else:
+            comparisons_stage = {
+                "status": "not_started",
+                "detail": "Comparison rows are not generated yet.",
+            }
 
         if protocol_ready:
             protocol_stage = {"status": "ready", "detail": "Protocol artifacts are available."}
-        elif documents_ready and protocol_candidates == 0:
+        elif (documents_ready or documents_generated) and protocol_candidates == 0:
             protocol_stage = {
                 "status": "not_applicable",
                 "detail": "No protocol-suitable documents were detected in this collection.",
             }
-        elif documents_ready:
+        elif documents_ready or documents_generated:
             protocol_stage = {
                 "status": "limited",
                 "detail": "Protocol branch is not ready yet or remains partial for this collection.",

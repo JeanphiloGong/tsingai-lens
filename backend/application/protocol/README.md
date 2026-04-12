@@ -48,9 +48,9 @@ It should not redefine:
 - `pipeline_service.py`
   Builds protocol artifacts from indexed collection inputs
 - `source_service.py`
-  Loads and reshapes protocol-oriented source inputs from collection outputs
+  Persists protocol branch artifacts and re-exports shared source helpers
 - `section_service.py`
-  Builds sections used by both document profiling and protocol parsing
+  Re-exports shared section parsing from `application/documents/section_service.py`
 - `block_service.py`
   Builds procedure blocks from sections
 - `extract_service.py`
@@ -63,7 +63,8 @@ It should not redefine:
 ## Upstream / Downstream
 
 - upstream inputs:
-  indexed collection documents, text units, document suitability gating
+  indexed collection documents, text units, shared Core parsing seam, and
+  document suitability gating
 - downstream artifacts:
   `sections.parquet`, `procedure_blocks.parquet`, `protocol_steps.parquet`
 - downstream consumers:

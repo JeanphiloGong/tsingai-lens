@@ -15,8 +15,11 @@ from application.backbone_codec import (
     restore_frame_from_storage,
 )
 from application.collections.service import CollectionService
-from application.protocol.section_service import build_sections
-from application.protocol.source_service import build_document_records, load_protocol_inputs
+from application.documents.section_service import build_sections
+from application.documents.source_service import (
+    build_document_records,
+    load_collection_inputs,
+)
 from application.workspace.artifact_registry_service import ArtifactRegistryService
 
 
@@ -183,7 +186,7 @@ class DocumentProfileService:
         if not documents_path.is_file():
             raise DocumentProfilesNotReadyError(collection_id, base_dir)
 
-        documents, text_units = load_protocol_inputs(base_dir)
+        documents, text_units = load_collection_inputs(base_dir)
         document_records = build_document_records(documents, text_units)
         sections = build_sections(documents, text_units)
         sections_by_doc = self._group_sections_by_document(sections)

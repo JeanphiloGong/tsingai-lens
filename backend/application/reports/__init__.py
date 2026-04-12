@@ -1,0 +1,1 @@
+"""Reports-domain application package."""

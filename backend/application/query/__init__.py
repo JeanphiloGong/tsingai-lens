@@ -1,0 +1,1 @@
+"""Query-domain application package."""

@@ -1,0 +1,1 @@
+"""Indexing-domain application package."""

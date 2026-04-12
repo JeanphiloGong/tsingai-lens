@@ -1,0 +1,1 @@
+"""GraphRAG-facing infrastructure adapters."""

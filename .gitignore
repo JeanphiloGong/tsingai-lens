@@ -1,2 +1,10 @@
 graphrag*
+!backend/infra/graphrag/
+!backend/infra/graphrag/**
 agent.log
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!.env.test

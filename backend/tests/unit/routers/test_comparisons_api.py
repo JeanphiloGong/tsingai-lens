@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+try:
+    from fastapi import HTTPException
+except ImportError:  # pragma: no cover
+    pytest.skip("fastapi not installed", allow_module_level=True)
+
+from application.artifact_registry_service import ArtifactRegistryService
+from application.collection_service import CollectionService
+from application.comparisons.service import ComparisonService
+from application.documents.service import DocumentProfileService
+from application.evidence.service import EvidenceCardService
+from controllers import comparisons as comparisons_controller
+
+
+@pytest.fixture()
+def comparison_services(monkeypatch, tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        artifact_registry,
+        evidence_card_service,
+    )
+
+    monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
+    monkeypatch.setattr(comparisons_controller.lens_v1_mock_service, "is_enabled", lambda: False)
+
+    return collection_service, artifact_registry, comparison_service
+
+
+def test_comparisons_route_returns_409_when_rows_are_not_ready(comparison_services):
+    collection_service, _artifact_registry, _comparison_service = comparison_services
+    record = collection_service.create_collection(name="Pending Collection")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(comparisons_controller.list_collection_comparisons(record["collection_id"]))
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.detail["code"] == "comparison_rows_not_ready"
+    assert exc.detail["collection_id"] == record["collection_id"]
+
+
+def test_comparisons_route_returns_404_for_missing_collection(comparison_services):
+    _collection_service, _artifact_registry, _comparison_service = comparison_services
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(comparisons_controller.list_collection_comparisons("col_missing"))
+
+    exc = exc_info.value
+    assert exc.status_code == 404
+    assert "collection not found" in str(exc.detail)

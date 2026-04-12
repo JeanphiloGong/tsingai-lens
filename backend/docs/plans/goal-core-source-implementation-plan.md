@@ -303,6 +303,7 @@ Exit criteria:
 
 - [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
 - [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+- [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)

@@ -210,6 +210,7 @@ Expected output of Phase 2:
 
 - either an explicit decision to retain the current independent graph path
 - or a follow-up migration plan that redesigns graph as a derived surface
+  (`core-derived-graph-follow-up-plan.md`)
 
 ## Recommended Execution Order
 
@@ -250,3 +251,4 @@ Expected output of Phase 2:
 - [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
 - [`v1-api-migration-notes.md`](v1-api-migration-notes.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
+- [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)

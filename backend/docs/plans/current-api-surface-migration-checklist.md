@@ -114,12 +114,6 @@ older graph/report/query/protocol surfaces in the same application. The system
 therefore remains in a mixed migration state rather than a fully converged
 backend.
 
-### Mock mode can still short-circuit real flows
-
-If `LENS_ENABLE_MOCK_API=1`, selected formal paths may still return
-mock-backed payloads for mock collections. This is useful for frontend
-iteration, but it must not be confused with full real-backend acceptance.
-
 ### Task detail is task-scoped, not collection-scoped
 
 `GET /api/v1/tasks/{task_id}` accepts a real `task_id`, not a `collection_id`.
@@ -141,10 +135,9 @@ Collection pages that need task history should use
 
 - complete frontend integration against:
   `workspace -> documents/profiles -> evidence/cards -> comparisons`
-- verify one real end-to-end path using a non-mock collection
+- verify one real end-to-end path using a real collection
 - run real app-layer route verification in an environment with FastAPI
   available
-- keep mock mode as a development aid, not the default acceptance path
 
 ### Later
 

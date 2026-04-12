@@ -6,7 +6,6 @@ from application.evidence.service import (
     EvidenceCardService,
     EvidenceCardsNotReadyError,
 )
-from application.mock.lens_v1_service import lens_v1_mock_service
 from controllers.schemas.evidence import EvidenceCardListResponse
 
 router = APIRouter(prefix="/collections", tags=["evidence"])
@@ -31,13 +30,6 @@ async def list_collection_evidence_cards(
     limit: int = Query(default=50, ge=1, le=500, description="返回数量"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
 ) -> EvidenceCardListResponse:
-    if lens_v1_mock_service.is_enabled() and lens_v1_mock_service.is_mock_collection(collection_id):
-        payload = lens_v1_mock_service.list_evidence_cards(
-            collection_id,
-            offset=offset,
-            limit=limit,
-        )
-        return EvidenceCardListResponse(**payload)
     try:
         payload = evidence_card_service.list_evidence_cards(
             collection_id,

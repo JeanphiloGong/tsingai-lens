@@ -38,7 +38,6 @@ def document_services(monkeypatch, tmp_path):
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
 
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
-    monkeypatch.setattr(documents_controller.lens_v1_mock_service, "is_enabled", lambda: False)
 
     return collection_service, artifact_registry, document_profile_service
 

@@ -44,7 +44,6 @@ def evidence_services(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(evidence_controller, "evidence_card_service", evidence_card_service)
-    monkeypatch.setattr(evidence_controller.lens_v1_mock_service, "is_enabled", lambda: False)
 
     return collection_service, artifact_registry, evidence_card_service
 

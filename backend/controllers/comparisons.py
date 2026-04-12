@@ -6,7 +6,6 @@ from application.comparisons.service import (
     ComparisonRowsNotReadyError,
     ComparisonService,
 )
-from application.mock.lens_v1_service import lens_v1_mock_service
 from controllers.schemas.comparisons import ComparisonRowListResponse
 
 router = APIRouter(prefix="/collections", tags=["comparisons"])
@@ -31,13 +30,6 @@ async def list_collection_comparisons(
     limit: int = Query(default=50, ge=1, le=500, description="返回数量"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
 ) -> ComparisonRowListResponse:
-    if lens_v1_mock_service.is_enabled() and lens_v1_mock_service.is_mock_collection(collection_id):
-        payload = lens_v1_mock_service.list_comparisons(
-            collection_id,
-            offset=offset,
-            limit=limit,
-        )
-        return ComparisonRowListResponse(**payload)
     try:
         payload = comparison_service.list_comparison_rows(
             collection_id,

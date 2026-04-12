@@ -50,7 +50,6 @@ def comparison_services(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(comparisons_controller.lens_v1_mock_service, "is_enabled", lambda: False)
 
     return collection_service, artifact_registry, comparison_service
 

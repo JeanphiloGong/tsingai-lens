@@ -162,7 +162,6 @@ def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
-    monkeypatch.setenv("LENS_ENABLE_MOCK_API", "1")
 
     from fastapi import FastAPI
     from controllers import collections as collections_controller
@@ -459,88 +458,6 @@ def test_graph_endpoint_returns_community_not_found_error(app_client):
     assert detail["code"] == "community_not_found"
     assert detail["collection_id"] == collection_id
     assert detail["community_id"] == "999"
-
-
-def test_mock_collection_resources_are_available_for_frontend_integration(app_client):
-    collections = app_client.get(f"{API_V1_PREFIX}/collections")
-    assert collections.status_code == 200
-    collection_ids = {item["collection_id"] for item in collections.json()["items"]}
-    assert "col_mock_empty" in collection_ids
-    assert "col_mock_processing" in collection_ids
-    assert "col_mock_ready" in collection_ids
-    assert "col_mock_limited" in collection_ids
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/workspace")
-    assert workspace.status_code == 200
-    workspace_body = workspace.json()
-    assert workspace_body["workflow"]["documents"]["status"] == "ready"
-    assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
-    assert workspace_body["links"]["comparisons"] == "/api/v1/collections/col_mock_ready/comparisons"
-
-    profiles = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/documents/profiles")
-    assert profiles.status_code == 200
-    profiles_body = profiles.json()
-    assert profiles_body["count"] == 3
-    assert profiles_body["items"][0]["title"] == "High-Rate Performance of Layered Oxide Cathodes"
-    assert profiles_body["items"][0]["source_filename"] == "ready-paper-1.pdf"
-    assert profiles_body["summary"]["by_doc_type"]["experimental"] == 2
-
-    evidence = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/evidence/cards")
-    assert evidence.status_code == 200
-    evidence_body = evidence.json()
-    assert evidence_body["count"] == 3
-    assert evidence_body["items"][0]["traceability_status"] == "direct"
-
-    comparisons = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/comparisons")
-    assert comparisons.status_code == 200
-    comparisons_body = comparisons.json()
-    assert comparisons_body["count"] == 2
-    assert comparisons_body["items"][0]["comparability_status"] == "comparable"
-
-    tasks = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_processing/tasks")
-    assert tasks.status_code == 200
-    tasks_body = tasks.json()
-    assert tasks_body["count"] == 1
-    assert tasks_body["items"][0]["status"] == "running"
-
-    task_detail = app_client.get(f"{API_V1_PREFIX}/tasks/task_mock_limited_index")
-    assert task_detail.status_code == 200
-    assert task_detail.json()["status"] == "partial_success"
-
-    task_artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/task_mock_ready_index/artifacts")
-    assert task_artifacts.status_code == 200
-    assert task_artifacts.json()["documents_ready"] is True
-    assert steps.json()["items"][0]["paper_title"] == "Composite Paper"
-
-    search = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/search",
-        params={"q": "anneal Ar", "limit": 5},
-    )
-    assert search.status_code == 200
-    assert search.json()["count"] >= 1
-    assert search.json()["items"][0]["paper_title"] == "Composite Paper"
-
-    sop = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/sop",
-        json={"goal": "Design a composite SOP", "target_properties": ["mechanical", "thermal"]},
-    )
-    assert sop.status_code == 200
-    sop_body = sop.json()
-    assert sop_body["collection_id"] == collection_id
-    assert sop_body["sop_draft"]["objective"] == "Design a composite SOP"
-    assert sop_body["sop_draft"]["steps"][0]["paper_title"] == "Composite Paper"
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    workspace_body = workspace.json()
-    assert workspace_body["collection"]["collection_id"] == collection_id
-    assert workspace_body["status_summary"] == "ready"
-    assert workspace_body["workflow"]["documents"]["status"] == "ready"
-    assert workspace_body["workflow"]["evidence"]["status"] == "ready"
-    assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
-    assert workspace_body["capabilities"]["can_view_graph"] is True
-    assert workspace_body["capabilities"]["can_generate_sop"] is True
-    assert workspace_body["latest_task"]["task_id"] == task_id
 
 
 def test_delete_collection_removes_app_layer_collection(app_client):

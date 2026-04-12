@@ -100,6 +100,9 @@ owned and frontend-owned detail should stay with the owning module.
   Active shared system overview
 - [`docs/30-architecture/lens-v1-architecture-boundary.md`](30-architecture/lens-v1-architecture-boundary.md)
   Active shared Lens v1 evidence-first and comparison-first architecture boundary
+- [`docs/30-architecture/graph-surface-current-state.md`](30-architecture/graph-surface-current-state.md)
+  Active shared current-state decision for graph as a secondary derived surface
+  and the next stabilization wave
 - [`docs/40-specs/lens-v1-definition.md`](40-specs/lens-v1-definition.md)
   Active shared Lens v1 product boundary for evidence-grounded comparison
 - [`docs/40-specs/lens-core-artifact-contracts.md`](40-specs/lens-core-artifact-contracts.md)

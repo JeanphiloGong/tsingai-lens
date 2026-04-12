@@ -21,6 +21,9 @@ This node owns the collection workspace route family in the frontend.
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)
   Follow-on collection UI restructuring proposal for state hierarchy and page
   information architecture
+- [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md)
+  Claim-to-source navigation contract for comparison/evidence to document
+  traceback behavior
 
 ## Dependency Rule
 

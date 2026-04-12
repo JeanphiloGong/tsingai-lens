@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,8 @@ _CHARACTERIZATION_METHODS = (
     "TGA",
     "DMA",
 )
+
+_EVIDENCE_SOURCE_TYPES = {"figure", "table", "method", "text"}
 
 _PROPERTY_HINTS = {
     "strength": "strength",
@@ -542,12 +545,62 @@ class EvidenceCardService:
             "claim_text": str(row.get("claim_text") or ""),
             "claim_type": str(row.get("claim_type") or "qualitative"),
             "evidence_source_type": str(row.get("evidence_source_type") or "text"),
-            "evidence_anchors": self._normalize_object(row.get("evidence_anchors")) or [],
+            "evidence_anchors": self._normalize_evidence_anchors_payload(
+                row.get("evidence_anchors")
+            ),
             "material_system": self._normalize_material_system_payload(row.get("material_system")),
             "condition_context": self._normalize_condition_context_payload(row.get("condition_context")),
             "confidence": round(float(row.get("confidence") or 0.0), 2),
             "traceability_status": str(row.get("traceability_status") or "missing"),
         }
+
+    def _normalize_evidence_anchors_payload(self, value: Any) -> list[dict[str, Any]]:
+        normalized = self._normalize_object(value)
+        if normalized is None:
+            return []
+        if isinstance(normalized, dict):
+            anchors = [normalized]
+        elif isinstance(normalized, list):
+            anchors = normalized
+        else:
+            return []
+
+        payload: list[dict[str, Any]] = []
+        for index, anchor in enumerate(anchors):
+            if not isinstance(anchor, dict):
+                continue
+
+            source_type = self._normalize_scalar_text(anchor.get("source_type")) or "text"
+            if source_type not in _EVIDENCE_SOURCE_TYPES:
+                source_type = "text"
+
+            payload.append(
+                {
+                    "anchor_id": self._normalize_scalar_text(anchor.get("anchor_id"))
+                    or f"anchor_{index + 1}",
+                    "source_type": source_type,
+                    "section_id": self._normalize_scalar_text(anchor.get("section_id")),
+                    "block_id": self._normalize_scalar_text(anchor.get("block_id")),
+                    "snippet_id": self._normalize_scalar_text(anchor.get("snippet_id")),
+                    "figure_or_table": self._normalize_scalar_text(anchor.get("figure_or_table")),
+                    "quote_span": self._normalize_scalar_text(anchor.get("quote_span")),
+                }
+            )
+        return payload
+
+    def _normalize_scalar_text(self, value: Any) -> str | None:
+        normalized = self._normalize_object(value)
+        if normalized is None:
+            return None
+        if isinstance(normalized, str):
+            text = normalized.strip()
+            return text or None
+        if isinstance(normalized, (list, dict)):
+            text = json.dumps(normalized, ensure_ascii=False)
+            text = text.strip()
+            return text or None
+        text = str(normalized).strip()
+        return text or None
 
     def _normalize_material_system_payload(self, value: Any) -> dict[str, Any]:
         payload = self._normalize_object(value) or {}

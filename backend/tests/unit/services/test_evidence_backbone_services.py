@@ -355,3 +355,70 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert isinstance(restored_evidence.iloc[0]["condition_context"], dict)
     assert isinstance(restored_comparisons.iloc[0]["supporting_evidence_ids"], list)
     assert isinstance(restored_comparisons.iloc[0]["comparability_warnings"], list)
+
+
+def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.artifact_registry_service import ArtifactRegistryService
+    from application.collection_service import CollectionService
+    from controllers.schemas.evidence import EvidenceCardListResponse
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+
+    collection = collection_service.create_collection("Evidence Quote Span Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cards = pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-1",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "The document reports process evidence.",
+                "claim_type": "process",
+                "evidence_source_type": "method",
+                "evidence_anchors": json.dumps(
+                    [
+                        {
+                            "anchor_id": "anchor-1",
+                            "source_type": "method",
+                            "section_id": "sec-1",
+                            "block_id": None,
+                            "snippet_id": "tu-1",
+                            "figure_or_table": None,
+                            "quote_span": "[31]",
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                "material_system": json.dumps(
+                    {"family": "composite", "composition": None},
+                    ensure_ascii=False,
+                ),
+                "condition_context": json.dumps(
+                    {"process": {}, "baseline": {}, "test": {}},
+                    ensure_ascii=False,
+                ),
+                "confidence": 0.8,
+                "traceability_status": "direct",
+            }
+        ]
+    )
+    cards.to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = evidence_card_service.list_evidence_cards(collection_id)
+    assert payload["items"][0]["evidence_anchors"][0]["quote_span"] == "[31]"
+
+    response = EvidenceCardListResponse(**payload)
+    assert response.items[0].evidence_anchors[0].quote_span == "[31]"

@@ -31,6 +31,7 @@
 5. 打开 `GET /api/v1/collections/{collection_id}/workspace`
 6. 从 workspace 跳转到 document profiles、evidence cards、comparison rows
 7. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
+8. 在 comparison/evidence 中点击“查看原文证据”时，调用 traceback 接口并跳转文档查看器
 
 ## 资源与接口
 
@@ -186,6 +187,79 @@
 - `condition_context` 不能退化成不可解释的黑盒，至少应保留
   process、baseline、test 三类上下文
 
+### Claim Traceback 与 PDF 定位合同
+
+这是 comparison/evidence 到原文证据回溯的统一合同。
+
+前端主展示仍是结构化结果（comparison rows、evidence cards），PDF 是证据回溯层，不是默认首页主视图。
+
+推荐入口接口：
+
+- `GET /api/v1/collections/{collection_id}/evidence/{evidence_id}/traceback`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
+
+最小返回结构（traceback）：
+
+- `collection_id`
+- `evidence_id`
+- `traceback_status`
+  - `ready | partial | unavailable`
+- `anchors`
+
+每个 anchor 至少应包含：
+
+- `anchor_id`
+- `document_id`
+- `locator_type`
+  - `char_range | bbox | section`
+- `locator_confidence`
+  - `high | medium | low`
+- `page`
+- `quote`
+- `section_id`
+- `char_range`
+- `bbox`
+- `deep_link`
+
+语义要求：
+
+- `locator_type=char_range`
+  - 适用于可提取文本层的 PDF，按页面内字符范围高亮
+- `locator_type=bbox`
+  - 适用于 OCR 或版面定位结果，按页面坐标框高亮
+- `locator_type=section`
+  - 无法提供精确范围时的降级定位；前端应跳转 section 并提示“定位精度低”
+- `char_range`、`bbox` 为可选字段；不可用时必须返回 `null`，不能返回空字符串
+- `deep_link` 由后端生成，前端不应依赖内部拼接规则推断
+
+前端降级顺序（固定）：
+
+1. `char_range`
+2. `bbox`
+3. `section`
+
+comparison 对 traceback 的依赖约定：
+
+- comparison row 通过 `supporting_evidence_ids` 关联 evidence card
+- 前端从 `supporting_evidence_ids` 打到 evidence traceback 接口，不直接绕过 evidence 资源
+
+示例（traceback item）：
+
+```json
+{
+  "anchor_id": "anc_01",
+  "document_id": "doc_01",
+  "locator_type": "char_range",
+  "locator_confidence": "high",
+  "page": 12,
+  "quote": "capacity retention improved after annealing...",
+  "section_id": "sec_results_2",
+  "char_range": { "start": 1880, "end": 1962 },
+  "bbox": null,
+  "deep_link": "/collections/col_xxx/documents/doc_01?page=12&anchor_id=anc_01"
+}
+```
+
 ### Comparisons
 
 - `GET /api/v1/collections/{collection_id}/comparisons`
@@ -282,3 +356,4 @@ readiness 类错误至少应包含：
 - [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
 - [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)
 - [`../../../docs/40-specs/lens-core-artifact-contracts.md`](../../../docs/40-specs/lens-core-artifact-contracts.md)
+- [`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)

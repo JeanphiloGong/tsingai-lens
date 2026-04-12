@@ -18,6 +18,14 @@ from .evidence import (
     EvidenceCardItemResponse,
     EvidenceCardListResponse,
 )
+from .goals import (
+    CoverageAssessmentResponse,
+    EntryRecommendationResponse,
+    GoalIntakeRequest,
+    GoalIntakeResponse,
+    ResearchBriefResponse,
+    SeedCollectionResponse,
+)
 from .graph import CollectionGraphResponse, GraphEdgeResponse, GraphNodeResponse
 from .protocol import (
     ConditionItem,
@@ -75,6 +83,12 @@ __all__ = [
     "ConditionContextResponse",
     "EvidenceCardItemResponse",
     "EvidenceCardListResponse",
+    "GoalIntakeRequest",
+    "ResearchBriefResponse",
+    "CoverageAssessmentResponse",
+    "SeedCollectionResponse",
+    "EntryRecommendationResponse",
+    "GoalIntakeResponse",
     "GraphNodeResponse",
     "GraphEdgeResponse",
     "CollectionGraphResponse",

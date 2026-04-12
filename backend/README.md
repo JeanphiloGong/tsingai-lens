@@ -62,6 +62,8 @@ Current state and active plans:
   the shared parsing seam from the protocol branch
 - [`docs/plans/goal-core-source-implementation-plan.md`](docs/plans/goal-core-source-implementation-plan.md)
   Broader parent roadmap for later Core, Goal, and Source waves
+- [`docs/plans/goal-core-source-contract-follow-up-plan.md`](docs/plans/goal-core-source-contract-follow-up-plan.md)
+  Active child plan for Goal/Core/Source contract freeze and boundary guards
 - [`docs/plans/graph-surface-plan.md`](docs/plans/graph-surface-plan.md)
   Active retained-secondary-surface plan for graph hardening
 

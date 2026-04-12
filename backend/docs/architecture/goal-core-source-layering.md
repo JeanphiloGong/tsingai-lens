@@ -145,6 +145,28 @@ Indexing is a pipeline orchestrator, not a user-facing product layer. Its role
 is to coordinate artifact build from collection inputs into Core outputs and an
 optional protocol branch.
 
+### Frozen Contract Surface (Wave A)
+
+Current freeze target for Goal/Core/Source contract alignment:
+
+- Goal response contract is restricted to:
+  `research_brief`, `coverage_assessment`, `seed_collection`,
+  `entry_recommendation`
+- Source handoff contract is restricted to normalized import units:
+  `documents`, `text_units`, `source_metadata`
+- Core remains the only layer that can emit:
+  `document_profiles`, `evidence_cards`, `comparison_rows`, and downstream
+  protocol artifacts
+
+Readiness semantics remain Core-owned:
+
+- `*_generated`: stage generation attempt completed and artifact file exists
+- `*_ready`: artifact is consumable by collection-facing primary surfaces
+
+This freeze is tracked as the active child execution plan:
+
+- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/goal-core-source-contract-follow-up-plan.md)
+
 ## Current Backend Mapping
 
 ### Already Aligned With The Core
@@ -234,6 +256,7 @@ Controller implications:
 ## Related Docs
 
 - [`../plans/goal-core-source-implementation-plan.md`](../plans/goal-core-source-implementation-plan.md)
+- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/goal-core-source-contract-follow-up-plan.md)
 - [`overview.md`](overview.md)
 - [`domain-architecture.md`](domain-architecture.md)
 - [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)

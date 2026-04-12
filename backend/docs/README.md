@@ -35,6 +35,8 @@ Current state and active plans:
   extraction
 - [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md)
   Broader parent roadmap for later Core, Goal, and Source waves
+- [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md)
+  Active contract-freeze child plan for Goal/Core/Source boundary guardrails
 - [`plans/core-derived-graph-follow-up-plan.md`](plans/core-derived-graph-follow-up-plan.md)
   Follow-up migration plan for moving graph semantics to Core-derived
   claim/evidence/condition/comparability projections

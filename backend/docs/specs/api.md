@@ -14,6 +14,7 @@
 - `workspace` 是 Lens v1 的主入口界面
 - `documents/profiles`、`evidence/cards`、`comparisons` 是主业务资源
 - `protocol/*` 是条件分支，不是所有 collection 的默认主产物
+- `goals/*` 只负责 goal-first 入口编排，不直接返回 Core 研究产物
 
 ## 文档与静态资源
 
@@ -33,7 +34,40 @@
 7. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
 8. 在 comparison/evidence 中点击“查看原文证据”时，调用 traceback 接口并跳转文档查看器
 
+可选 goal-first 流程（契约冻结，接口可分波次落地）：
+
+1. `POST /api/v1/goals/intake`
+2. 从响应读取 `seed_collection.collection_id`
+3. 打开 `GET /api/v1/collections/{collection_id}/workspace`
+4. 后续统一进入 `documents/profiles`、`evidence/cards`、`comparisons`
+
 ## 资源与接口
+
+### Goal Layer 入口（契约冻结）
+
+- `POST /api/v1/goals/intake`
+
+最小请求结构：
+
+- `material_system`
+- `target_property`
+- `intent`
+- `constraints`
+- `context`
+- `max_seed_documents`
+
+最小返回结构：
+
+- `research_brief`
+- `coverage_assessment`
+- `seed_collection`
+- `entry_recommendation`
+
+语义约束：
+
+- `goals/intake` 是入口层，不是研究结论层
+- 返回中不得直接内嵌 `document_profiles`、`evidence_cards`、`comparison_rows`
+- 返回必须提供 `seed_collection.collection_id`，并收敛到统一 collection 路由
 
 ### Collection 与任务入口
 
@@ -349,11 +383,14 @@ readiness 类错误至少应包含：
 - collection 详情页的主状态来源是 `workspace`
 - 前端不应把 `sections_ready`、`procedure_blocks_ready` 这类内部产物状态当成长期主合同
 - protocol 页面不是默认首页，comparison workspace 才是
+- goal-first 响应只用于入口编排，主展示仍必须消费 Core 资源
 
 ## 相关文档
 
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
 - [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
+- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/goal-core-source-contract-follow-up-plan.md)
 - [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)
 - [`../../../docs/40-specs/lens-core-artifact-contracts.md`](../../../docs/40-specs/lens-core-artifact-contracts.md)
 - [`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)

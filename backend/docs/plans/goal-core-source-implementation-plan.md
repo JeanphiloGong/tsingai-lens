@@ -165,6 +165,10 @@ Goal:
 - add a first-class goal-driven entry surface without creating a second fact
   model
 
+Current child execution entrypoint:
+
+- [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
+
 Primary changes:
 
 - add `application/goals/` for backend-local goal orchestration
@@ -303,6 +307,7 @@ Exit criteria:
 
 - [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
 - [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+- [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
 - [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)

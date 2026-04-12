@@ -66,6 +66,8 @@ Active execution plans:
   extraction
 - [`../plans/goal-core-source-implementation-plan.md`](../plans/goal-core-source-implementation-plan.md)
   Broader parent roadmap for later Core, Goal, and Source waves
+- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/goal-core-source-contract-follow-up-plan.md)
+  Active child plan for freezing Goal/Core/Source contracts before layer growth
 - [`../plans/graph-surface-plan.md`](../plans/graph-surface-plan.md)
   Active retained-secondary-surface plan for graph hardening
 

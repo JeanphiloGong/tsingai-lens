@@ -1,54 +1,55 @@
-# Backend Goal/Core/Source Implementation Plan
+# Backend Five-Layer Research Flow Implementation Plan
+
+This document keeps its historical path for continuity, but the plan now
+tracks the five-layer architecture rather than the earlier three-layer
+shorthand.
 
 ## Summary
 
-This document records the backend-local parent implementation plan for turning
-the Goal/Core/Source layering proposal into executable backend waves.
+This is the backend-local parent roadmap for executing the five-layer Lens
+research flow:
 
-The plan keeps one requirement fixed:
+- Goal Brief Layer
+- Source & Collection Builder
+- Research Intelligence Core
+- Goal Consumer / Decision Layer
+- Derived Views / Downstream
+
+One requirement stays fixed across all waves:
 
 all research-facing outputs must continue to converge on one collection-backed
-evidence/comparison backbone.
-
-This is the broader multi-wave roadmap above the current Core stabilization
-work. It is not the near-term execution entry point for the current backend
-slice.
+Core backbone.
 
 ## Context
 
-The layering proposal in
+The architecture proposal in
 [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-defines three layers:
+now defines five layers rather than a single pre-Core Goal layer.
 
-- Goal Layer
-- Research Intelligence Core
-- Source / Acquisition Layer
+The most important correction is:
+
+- Goal Brief defines the problem
+- Core produces the facts
+- Goal Consumer interprets those facts
 
 Current backend-local work has already moved part of the Core forward:
 
 - `document_profiles` is a real artifact
-- `application/evidence/` and `application/comparisons/` now exist as real
-  backend packages in the local codebase
-- indexing orchestration already runs Core stages before the protocol branch
-- workspace and artifact registry are already growing Core-specific readiness
-  states
+- `application/evidence/` and `application/comparisons/` exist as real backend
+  packages
+- indexing already runs Core stages before the protocol branch
+- workspace and artifact registry already expose Core-oriented readiness states
+- `application/goals/` exists, but should currently be interpreted as Goal
+  Brief / Intake only
 
-The near-term execution reference for this in-flight Core work is
-[`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md).
-This parent plan should be used when deciding what follows after that child
-plan is complete.
+The main implementation gaps are now clearer:
 
-The main implementation gaps are now narrower:
-
-- Core parsing helpers still live under `application/protocol/`
-- protocol remains too close to the shared parsing seam
-- Goal Layer does not exist yet as a first-class backend surface
-- Source / Acquisition is still mostly upload plus PDF extraction
-- route and artifact contracts need to be stabilized around the new Core
-
-This plan therefore does not restart the evidence-first work. It takes the
-current Core rollout as the baseline and defines how to harden it, decouple it,
-and then add Goal and Source layers on top.
+- Source & Collection Builder does not yet expose one explicit normalized
+  import seam
+- Goal Brief / Intake exists but can be mistaken for the full Goal layer
+- Goal Consumer / Decision logic over Core outputs does not exist yet
+- derived surfaces such as protocol, graph, and reports still need clearer
+  dependency language in some places
 
 ## Scope
 
@@ -56,9 +57,10 @@ This plan covers backend-owned implementation waves for:
 
 - Core artifact completion
 - Core versus Protocol boundary repair
-- indexing and readiness orchestration
-- minimal Goal Layer contracts
-- Source / Acquisition expansion seams
+- Goal Brief / Intake contract clarification
+- Source & Collection Builder expansion seams
+- Goal Consumer / Decision-layer introduction
+- downstream derived-view alignment
 
 This plan does not cover:
 
@@ -71,14 +73,16 @@ This plan does not cover:
 
 ### Execution Rules
 
-- keep one collection-backed artifact model for paper-first and goal-first
+- keep one collection-backed Core artifact model for paper-first and goal-first
   entry
-- do not allow Goal Layer logic to generate research judgments without Core
-  artifacts
-- do not allow Source adapters to bypass collection creation or Core pipelines
-- keep protocol behind Core suitability and Core readiness
-- prefer boundary refactors that preserve current behavior before adding new
-  product entrypoints
+- do not allow Goal Brief logic to generate research judgments
+- do not allow Source & Collection Builder logic to bypass collection creation
+  or Core pipelines
+- do not allow Goal Consumer logic to create a second fact model parallel to
+  the Core
+- keep protocol, graph, and reports downstream of Core artifacts
+- prefer boundary refactors that preserve current behavior before adding richer
+  decision surfaces
 
 ### Wave 1: Complete And Stabilize The Current Core Rollout
 
@@ -109,16 +113,15 @@ Exit criteria:
 
 Goal:
 
-- remove the current reverse dependency where Core services import protocol-
-  owned parsing helpers
+- remove the reverse dependency where Core services import protocol-owned
+  parsing helpers
 
 Primary changes:
 
 - move shared helpers such as document-record assembly, text-unit joining, and
   section derivation out of `application/protocol/`
 - place those helpers under a Core-owned seam, preferably under
-  `application/documents/` or a narrowly scoped Core parsing package owned by
-  the same collection-analysis path
+  `application/documents/` or a narrowly scoped Core parsing package
 - make `documents`, `evidence`, `comparisons`, and `protocol` all depend on
   that shared seam rather than on protocol packages
 
@@ -149,8 +152,8 @@ Primary changes:
   than on raw document presence alone
 - introduce `protocol_candidates` when protocol filtering needs a separate
   intermediate artifact
-- make SOP generation depend on filtered protocol outputs, not on raw protocol-
-  like text hits
+- make SOP generation depend on filtered protocol outputs, not on raw
+  protocol-like text hits
 
 Exit criteria:
 
@@ -158,12 +161,12 @@ Exit criteria:
 - protocol-limited collections still complete indexing successfully
 - protocol branch failures do not redefine the Core contract
 
-### Wave 4: Add The Minimal Goal Layer Contract
+### Wave 4: Normalize Goal Brief / Intake
 
 Goal:
 
-- add a first-class goal-driven entry surface without creating a second fact
-  model
+- keep the current goal-first entry surface thin, explicit, and correctly
+  placed before the Core
 
 Current child execution entrypoint:
 
@@ -171,28 +174,29 @@ Current child execution entrypoint:
 
 Primary changes:
 
-- add `application/goals/` for backend-local goal orchestration
-- define the smallest durable objects:
-  `research_brief`, `coverage_assessment`, `seed_collection`, and
+- treat `application/goals/` and `controllers/goals.py` as Goal Brief / Intake
+  rather than as the full Goal layer
+- keep the current durable intake objects intentionally narrow:
+  `research_brief`, `coverage_assessment`, `seed_collection`,
   `entry_recommendation`
-- add a goal-facing controller surface only after the contract is clear
-- make the Goal Layer call collection and acquisition services to produce or
-  enrich a collection, then hand off to the Core
+- document that current `coverage_assessment` is intake-side and provisional,
+  not the final Goal Consumer coverage view
+- keep goal-first entry converging on a collection handoff into the Core
 
 Non-goals:
 
-- no direct comparison generation inside the Goal Layer
-- no direct SOP generation from the Goal Layer
+- no direct comparison generation inside Goal Brief / Intake
+- no direct SOP generation from Goal Brief / Intake
 - no monolithic goal agent that bypasses traceability
 
 Exit criteria:
 
 - a goal-first path results in a collection that lands in the same workspace
   and Core artifact endpoints as a paper-first path
-- Goal responses can recommend next steps without claiming final research
-  judgments
+- current goal responses are understood as brief-and-handoff responses, not as
+  research conclusions
 
-### Wave 5: Expand The Source / Acquisition Layer
+### Wave 5: Harden Source & Collection Builder
 
 Goal:
 
@@ -204,7 +208,9 @@ Primary changes:
 - expand `infra/ingestion/` with search adapters, connectors, and crawler-style
   acquisition seams
 - keep source normalization, metadata capture, and import mechanics in
-  infrastructure-owned packages
+  infrastructure-owned or collection-builder-owned packages
+- align upload, search, crawler, and goal-seeding flows around one normalized
+  handoff shape
 - let acquisition flows populate collections or collection drafts, but not Core
   artifacts directly
 
@@ -212,7 +218,52 @@ Exit criteria:
 
 - upload, external search, and connector-driven inputs all end at collection
   boundaries
-- acquisition adapters remain replaceable without changing Core contracts
+- Source & Collection Builder adapters remain replaceable without changing Core
+  contracts
+
+### Wave 6: Add Goal Consumer / Decision Layer
+
+Goal:
+
+- add a post-Core goal-oriented consumer that organizes judgment support around
+  user intent
+
+Primary changes:
+
+- add Goal Consumer services that read `document_profiles`, `evidence_cards`,
+  and `comparison_rows`
+- define consumer-owned outputs such as grounded coverage assessment, gap
+  detection, ranked clues, and next-step support
+- keep those outputs traceable to Core artifacts and compatible with workspace
+  navigation
+
+Non-goals:
+
+- no alternate fact model beside the Core
+- no goal-only evidence objects with no Core traceback
+
+Exit criteria:
+
+- goal-oriented views consume Core outputs rather than replacing them
+- coverage and recommendation semantics are grounded in Core artifacts
+
+### Wave 7: Align Derived Views / Downstream
+
+Goal:
+
+- keep downstream surfaces explicitly dependent on the Core rather than on
+  independent semantic pipelines
+
+Primary changes:
+
+- document and harden protocol as a Core-gated downstream branch
+- continue the graph transition toward Core-derived semantics
+- keep report and export surfaces positioned as downstream consumers
+
+Exit criteria:
+
+- downstream routes are documented and implemented as derived surfaces
+- no derived view reclaims ownership of primary research facts
 
 ## File Change Plan
 
@@ -240,25 +291,31 @@ Exit criteria:
 - import sites in `application/comparisons/service.py`
 - import sites in `application/protocol/*`
 
-### Pipeline And Protocol Branch Hardening
+### Goal Brief / Intake
 
-- `application/indexing/index_task_runner.py`
-- `application/protocol/pipeline_service.py`
-- `application/protocol/extract_service.py`
-- `application/protocol/search_service.py`
-- `application/protocol/sop_service.py`
+- `application/goals/`
+- `controllers/goals.py`
+- `controllers/schemas/goals.py`
+- contract references in `docs/specs/api.md`
 
-### Goal Layer Introduction
+### Source & Collection Builder
 
-- new `application/goals/`
-- future `controllers/goals.py` or equivalent goal-facing route package
-- collection handoff integration in `application/collections/`
-
-### Source / Acquisition Expansion
-
+- `application/collections/`
 - `infra/ingestion/`
 - future adapter-specific subpackages under `infra/ingestion/`
-- collection seeding handoff into `application/collections/`
+- collection-builder handoff integration into `application/collections/`
+
+### Goal Consumer / Decision Layer
+
+- future consumer logic under `application/goals/` or a closely related
+  goal-oriented package
+- future goal-oriented read models or route surfaces that consume Core outputs
+
+### Derived Views / Downstream
+
+- `application/protocol/`
+- `application/graph/`
+- `application/reports/`
 
 ## Verification
 
@@ -274,12 +331,12 @@ Exit criteria:
 
 - real collections can serve `document_profiles`, `evidence_cards`, and
   `comparison_rows`
-- document, evidence, and comparison services no longer import shared parsing
-  helpers from protocol-owned modules
-- task stages reflect the Core-first sequence before protocol
-- goal-first collection seeding lands in the same workspace and URLs as
-  paper-first entry
-- source adapters can seed collections but cannot write Core artifacts directly
+- Goal Brief / Intake converges on collection handoff rather than bypassing
+  the Core
+- Source & Collection Builder adapters can seed collections but cannot write
+  Core artifacts directly
+- Goal Consumer views read Core outputs instead of inventing parallel facts
+- derived routes remain downstream of Core readiness and Core suitability
 
 ### Test Slices
 
@@ -287,21 +344,19 @@ Exit criteria:
 - unit tests for evidence extraction and comparison normalization
 - integration tests for real collection document, evidence, and comparison
   endpoints
-- integration tests for task-stage progression across Core and protocol phases
-- app-layer tests for Goal Layer contract objects once introduced
+- app-layer tests for Goal Brief / Intake contract objects
+- contract tests for Source & Collection Builder non-bypass rules
+- future tests for Goal Consumer views over Core artifacts
 
 ## Risks
 
-- in-flight Core rollout work may still be changing locally, so this plan must
-  absorb current implementation rather than fight it
-- extracting shared parsing helpers can temporarily duplicate logic across Core
-  and protocol modules
-- readiness fields can churn unless task, workspace, and controller schemas
-  move together
-- Goal Layer scope can sprawl into agent behavior if its contract is not kept
-  intentionally small
-- Source expansion can become a crawler project unless collection handoff stays
-  the explicit boundary
+- the old file path and historical plan names can cause readers to project the
+  earlier three-layer shorthand onto the newer five-layer model
+- Goal Brief / Intake can sprawl if it is allowed to act like Goal Consumer
+- Source & Collection Builder expansion can become a crawler project unless
+  collection handoff stays explicit
+- Goal Consumer can create semantic duplication if it is not kept strictly
+  downstream of the Core
 
 ## Related Docs
 

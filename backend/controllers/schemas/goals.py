@@ -27,7 +27,7 @@ class GoalIntakeRequest(BaseModel):
 
 
 class ResearchBriefResponse(BaseModel):
-    """Structured goal brief produced by the Goal Layer."""
+    """Structured goal brief produced by Goal Brief / Intake."""
 
     material_system: str | None = Field(default=None, description="目标材料体系")
     target_property: str | None = Field(default=None, description="目标性质")
@@ -38,7 +38,7 @@ class ResearchBriefResponse(BaseModel):
 
 
 class CoverageAssessmentResponse(BaseModel):
-    """Goal-layer coverage signal before entering Core artifacts."""
+    """Coarse intake-side coverage hint before entering Core artifacts."""
 
     level: CoverageLevel = Field(..., description="证据覆盖等级")
     rationale: str | None = Field(default=None, description="覆盖判断理由")
@@ -48,7 +48,7 @@ class CoverageAssessmentResponse(BaseModel):
 
 
 class SeedCollectionResponse(BaseModel):
-    """Collection handoff result from Goal/Source into Core."""
+    """Collection-builder handoff result into Core."""
 
     collection_id: str = Field(..., description="目标集合 ID")
     name: str = Field(..., description="集合名称")
@@ -67,7 +67,7 @@ class EntryRecommendationResponse(BaseModel):
 
 
 class GoalIntakeResponse(BaseModel):
-    """Goal intake response contract without Core artifact payloads."""
+    """Goal Brief / Intake response contract without Core artifact payloads."""
 
     research_brief: ResearchBriefResponse = Field(..., description="研究摘要")
     coverage_assessment: CoverageAssessmentResponse = Field(..., description="覆盖评估")

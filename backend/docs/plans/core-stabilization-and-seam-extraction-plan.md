@@ -3,7 +3,7 @@
 ## Summary
 
 This document records the next child execution plan under the broader
-Goal/Core/Source backend direction.
+five-layer backend direction.
 
 Its job is narrower:
 
@@ -60,7 +60,7 @@ This plan covers:
 
 This plan does not cover:
 
-- Goal Layer contracts or controllers
+- Goal Brief / Intake or Goal Consumer contracts
 - external search, crawler, or connector implementation
 - major package-tree reshuffles outside the affected seam
 - broader protocol sophistication beyond the required branch boundary repair
@@ -97,7 +97,8 @@ Primary changes:
 
 Expected result:
 
-- the backend has one stable Core slice before any Goal Layer entry work starts
+- the backend has one stable Core slice before broader Goal Brief or Goal
+  Consumer work starts
 
 ### Phase 2: Align Readiness And Route Semantics
 

@@ -61,9 +61,10 @@ Current state and active plans:
   Active near-term child plan for stabilizing the Core slice and extracting
   the shared parsing seam from the protocol branch
 - [`docs/plans/goal-core-source-implementation-plan.md`](docs/plans/goal-core-source-implementation-plan.md)
-  Broader parent roadmap for later Core, Goal, and Source waves
+  Broader parent roadmap for the five-layer backend rollout
 - [`docs/plans/goal-core-source-contract-follow-up-plan.md`](docs/plans/goal-core-source-contract-follow-up-plan.md)
-  Active child plan for Goal/Core/Source contract freeze and boundary guards
+  Active child plan for Goal Brief, Source Builder, Core, Goal Consumer, and
+  downstream contract freeze
 - [`docs/plans/graph-surface-plan.md`](docs/plans/graph-surface-plan.md)
   Active retained-secondary-surface plan for graph hardening
 
@@ -72,8 +73,7 @@ Architecture background:
 - [`docs/architecture/domain-architecture.md`](docs/architecture/domain-architecture.md)
   Target backend-local business-domain seams and package direction
 - [`docs/architecture/goal-core-source-layering.md`](docs/architecture/goal-core-source-layering.md)
-  Backend-local proposal for goal-driven entry, collection intelligence core,
-  and source acquisition seams
+  Backend-local five-layer research architecture centered on the Core backbone
 - [`docs/architecture/application-layer-boundary.md`](docs/architecture/application-layer-boundary.md)
   Backend ADR for the intended application-boundary direction
 

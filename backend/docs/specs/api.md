@@ -14,7 +14,7 @@
 - `workspace` 是 Lens v1 的主入口界面
 - `documents/profiles`、`evidence/cards`、`comparisons` 是主业务资源
 - `protocol/*` 是条件分支，不是所有 collection 的默认主产物
-- `goals/*` 只负责 goal-first 入口编排，不直接返回 Core 研究产物
+- `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
 
 ## 文档与静态资源
 
@@ -34,7 +34,7 @@
 7. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
 8. 在 comparison/evidence 中点击“查看原文证据”时，调用 traceback 接口并跳转文档查看器
 
-可选 goal-first 流程（契约冻结，接口可分波次落地）：
+可选 goal-first 流程（当前只覆盖 Goal Brief / Intake）：
 
 1. `POST /api/v1/goals/intake`
 2. 从响应读取 `seed_collection.collection_id`
@@ -43,7 +43,7 @@
 
 ## 资源与接口
 
-### Goal Layer 入口（契约冻结）
+### Goal Brief / Intake（当前公开入口）
 
 - `POST /api/v1/goals/intake`
 
@@ -65,7 +65,10 @@
 
 语义约束：
 
-- `goals/intake` 是入口层，不是研究结论层
+- `goals/intake` 是问题定义与 collection handoff 入口，不是研究结论层
+- `seed_collection` 是 collection-builder handoff，不是 Core artifact
+- 当前返回里的 `coverage_assessment` 只是 intake-side 的粗粒度提示，用于帮助 collection
+  build，不应被当成 Goal Consumer 的最终 coverage 判断
 - 返回中不得直接内嵌 `document_profiles`、`evidence_cards`、`comparison_rows`
 - 返回必须提供 `seed_collection.collection_id`，并收敛到统一 collection 路由
 
@@ -383,7 +386,7 @@ readiness 类错误至少应包含：
 - collection 详情页的主状态来源是 `workspace`
 - 前端不应把 `sections_ready`、`procedure_blocks_ready` 这类内部产物状态当成长期主合同
 - protocol 页面不是默认首页，comparison workspace 才是
-- goal-first 响应只用于入口编排，主展示仍必须消费 Core 资源
+- goal-first 响应只用于 Goal Brief / Intake 与 collection handoff，主展示仍必须消费 Core 资源
 
 ## 相关文档
 

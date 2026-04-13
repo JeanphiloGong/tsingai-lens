@@ -5,6 +5,7 @@ from controllers import (
     comparisons,
     documents,
     evidence,
+    goals,
     graph,
     protocol,
     query,
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(query.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(graph.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(protocol.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)

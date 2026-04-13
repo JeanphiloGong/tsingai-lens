@@ -36,6 +36,7 @@ The target direction is domain-local packaging inside `application/`, for
 example:
 
 - `application/collections/`
+- `application/goals/`
 - `application/indexing/`
 - `application/workspace/`
 - `application/documents/`
@@ -47,6 +48,8 @@ example:
 
 - [`collections/README.md`](collections/README.md)
   Collection lifecycle, file membership, and collection input preparation
+- [`goals/README.md`](goals/README.md)
+  Goal Brief / Intake today, with future Goal Consumer logic kept explicit
 - [`indexing/README.md`](indexing/README.md)
   Index task orchestration and backbone execution order
 - [`workspace/README.md`](workspace/README.md)

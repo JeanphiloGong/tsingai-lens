@@ -168,6 +168,7 @@ def app_client(monkeypatch, tmp_path):
     from controllers import comparisons as comparisons_controller
     from controllers import documents as documents_controller
     from controllers import evidence as evidence_controller
+    from controllers import goals as goals_controller
     from controllers import graph as graph_controller
     from controllers import protocol as protocol_controller
     from controllers import query as query_controller
@@ -189,6 +190,7 @@ def app_client(monkeypatch, tmp_path):
     from application.comparisons.service import ComparisonService
     from application.documents.service import DocumentProfileService
     from application.evidence.service import EvidenceCardService
+    from application.goals.service import GoalService
     from application.index_task_runner import IndexTaskRunner
     from application.task_service import TaskService
     from application.workspace_service import WorkspaceService
@@ -221,6 +223,7 @@ def app_client(monkeypatch, tmp_path):
         artifact_registry,
         document_profile_service,
     )
+    goal_service = GoalService(collection_service)
 
     default_config = tmp_path / "configs" / "default.yaml"
     default_config.parent.mkdir(parents=True, exist_ok=True)
@@ -287,6 +290,7 @@ def app_client(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(collections_controller, "collection_service", collection_service)
+    monkeypatch.setattr(goals_controller, "goal_service", goal_service)
     monkeypatch.setattr(graph_controller.graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_controller.graph_service, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(protocol_controller, "collection_service", collection_service)
@@ -321,6 +325,7 @@ def app_client(monkeypatch, tmp_path):
     app.include_router(query_controller.router, prefix=API_V1_PREFIX)
     app.include_router(reports_controller.router, prefix=API_V1_PREFIX)
     app.include_router(collections_controller.router, prefix=API_V1_PREFIX)
+    app.include_router(goals_controller.router, prefix=API_V1_PREFIX)
     app.include_router(graph_controller.router, prefix=API_V1_PREFIX)
     app.include_router(protocol_controller.router, prefix=API_V1_PREFIX)
     app.include_router(tasks_controller.router, prefix=API_V1_PREFIX)
@@ -411,6 +416,32 @@ def test_collection_task_and_query_flow(app_client):
         "not_comparable",
         "insufficient",
     }
+
+
+def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):
+    response = app_client.post(
+        f"{API_V1_PREFIX}/goals/intake",
+        json={
+            "material_system": "Li metal",
+            "target_property": "cycling stability",
+            "intent": "compare",
+            "constraints": {"electrolyte": "carbonate"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    collection_id = payload["seed_collection"]["collection_id"]
+
+    assert payload["coverage_assessment"]["level"] == "direct"
+    assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    workspace_body = workspace.json()
+    assert workspace_body["collection"]["collection_id"] == collection_id
+    assert workspace_body["file_count"] == 0
+    assert workspace_body["status_summary"] == "empty"
 
 
 def test_graph_endpoint_returns_collection_not_found_error(app_client):

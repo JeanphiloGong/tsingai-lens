@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
-from infra.ingestion.pdf_ingest import pdf_to_text
+from infra.ingestion import NormalizedImportBatch, normalize_upload
 from infra.persistence.factory import (
     build_artifact_repository,
     build_collection_repository,
@@ -163,6 +163,50 @@ class CollectionService:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return files
 
+    def import_normalized_batch(
+        self,
+        collection_id: str,
+        batch: NormalizedImportBatch,
+    ) -> list[dict]:
+        if not self.repository.collection_exists(collection_id):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+        if not batch.documents:
+            raise ValueError("normalized import batch must include at least one document")
+
+        files = self.repository.read_files(collection_id) or []
+        text_by_source_document = self._group_text_units(batch)
+        created_records: list[dict] = []
+
+        for document in batch.documents:
+            stored_filename = document.stored_filename or f"{uuid4().hex}_{Path(document.original_filename).name}"
+            payload = self._build_import_payload(
+                source_document_id=document.source_document_id,
+                text_by_source_document=text_by_source_document,
+            )
+            stored_path = self.repository.write_input_file(
+                collection_id,
+                stored_filename,
+                payload,
+            )
+            created_records.append(
+                {
+                    "file_id": f"file_{uuid4().hex[:12]}",
+                    "collection_id": collection_id,
+                    "original_filename": document.original_filename,
+                    "stored_filename": stored_filename,
+                    "stored_path": str(stored_path),
+                    "media_type": document.media_type,
+                    "status": "stored",
+                    "size_bytes": len(payload),
+                    "created_at": _now_iso(),
+                }
+            )
+
+        files.extend(created_records)
+        self.repository.write_files(collection_id, files)
+        self.update_collection(collection_id, paper_count=len(files), status="ready")
+        return created_records
+
     def add_file(
         self,
         collection_id: str,
@@ -170,37 +214,45 @@ class CollectionService:
         content: bytes,
         media_type: str | None = None,
     ) -> dict:
-        if not self.repository.collection_exists(collection_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-
-        suffix = Path(filename or "").suffix.lower()
-        if suffix == ".pdf":
-            payload = pdf_to_text(content).encode("utf-8")
-            stored_filename = f"{uuid4().hex}_{Path(filename).stem}.txt"
-        else:
-            payload = content
-            stored_filename = f"{uuid4().hex}_{Path(filename).name}"
-
-        stored_path = self.repository.write_input_file(
-            collection_id,
-            stored_filename,
-            payload,
+        batch = normalize_upload(
+            filename=filename,
+            content=content,
+            media_type=media_type,
         )
+        imported = self.import_normalized_batch(collection_id, batch)
+        if not imported:
+            raise ValueError("normalized upload produced no importable documents")
+        return imported[0]
 
-        file_record = {
-            "file_id": f"file_{uuid4().hex[:12]}",
-            "collection_id": collection_id,
-            "original_filename": filename,
-            "stored_filename": stored_filename,
-            "stored_path": str(stored_path),
-            "media_type": media_type,
-            "status": "stored",
-            "size_bytes": len(payload),
-            "created_at": _now_iso(),
+    def _group_text_units(
+        self,
+        batch: NormalizedImportBatch,
+    ) -> dict[str, list[str]]:
+        grouped: dict[str, list[tuple[int, str]]] = {}
+        for text_unit in batch.text_units:
+            grouped.setdefault(text_unit.source_document_id, []).append(
+                (int(text_unit.sequence), text_unit.text)
+            )
+        return {
+            source_document_id: [
+                text
+                for _, text in sorted(items, key=lambda item: item[0])
+            ]
+            for source_document_id, items in grouped.items()
         }
 
-        files = self.repository.read_files(collection_id) or []
-        files.append(file_record)
-        self.repository.write_files(collection_id, files)
-        self.update_collection(collection_id, paper_count=len(files), status="ready")
-        return file_record
+    def _build_import_payload(
+        self,
+        source_document_id: str,
+        text_by_source_document: dict[str, list[str]],
+    ) -> bytes:
+        parts = [
+            text.strip()
+            for text in text_by_source_document.get(source_document_id, [])
+            if text and text.strip()
+        ]
+        if not parts:
+            raise ValueError(
+                f"normalized import missing text payload for source document: {source_document_id}"
+            )
+        return "\n".join(parts).encode("utf-8")

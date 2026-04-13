@@ -14,7 +14,9 @@ application layer.
 - list, read, update, and delete collections
 - manage collection file membership
 - persist collection-scoped artifact readiness defaults at creation time
-- convert uploaded PDFs into stored text inputs for downstream indexing
+- consume normalized pre-Core import batches and persist collection input files
+- keep upload-driven PDF parsing behind ingestion adapters rather than inline in
+  collection logic
 
 ## Boundary
 
@@ -24,7 +26,7 @@ analysis artifacts.
 It may depend on:
 
 - collection and artifact repositories
-- ingestion adapters such as PDF-to-text conversion
+- ingestion adapters that normalize uploads into pre-Core import batches
 
 It should not own:
 

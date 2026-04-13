@@ -38,6 +38,9 @@ Current state and active plans:
 - [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md)
   Active contract-freeze child plan for Goal Brief, Source Builder, Core,
   Goal Consumer, and downstream boundary guardrails
+- [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
+  Active child plan for standardizing Source & Collection Builder handoff
+  before Core execution
 - [`plans/core-derived-graph-follow-up-plan.md`](plans/core-derived-graph-follow-up-plan.md)
   Follow-up migration plan for moving graph semantics to Core-derived
   claim/evidence/condition/comparability projections

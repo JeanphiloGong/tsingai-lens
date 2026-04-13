@@ -188,6 +188,10 @@ Goal:
 
 - standardize import outputs from upload and future adapters
 
+Current child execution entrypoint:
+
+- [`source-collection-builder-normalization-plan.md`](source-collection-builder-normalization-plan.md)
+
 Primary changes:
 
 - define one normalized handoff seam under collection-builder or ingestion-owned

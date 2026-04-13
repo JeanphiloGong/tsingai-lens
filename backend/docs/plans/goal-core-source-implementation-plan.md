@@ -203,6 +203,10 @@ Goal:
 - support more ways to form or enrich collections without leaking acquisition
   logic into research semantics
 
+Current child execution entrypoint:
+
+- [`source-collection-builder-normalization-plan.md`](source-collection-builder-normalization-plan.md)
+
 Primary changes:
 
 - expand `infra/ingestion/` with search adapters, connectors, and crawler-style

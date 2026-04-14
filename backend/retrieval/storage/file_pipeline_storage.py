@@ -31,7 +31,7 @@ class FilePipelineStorage(PipelineStorage):
         """Create a file based storage."""
         self._root_dir = kwargs.get("base_dir", "")
         self._encoding = kwargs.get("encoding", "utf-8")
-        logger.info("Creating file storage at %s", self._root_dir)
+        logger.debug("Creating file storage at %s", self._root_dir)
         Path(self._root_dir).mkdir(parents=True, exist_ok=True)
 
     def find(
@@ -85,7 +85,7 @@ class FilePipelineStorage(PipelineStorage):
         self, key: str, as_bytes: bool | None = False, encoding: str | None = None
     ) -> Any:
         """Get method definition."""
-        logger.info("[retrieval.storage] processing get")
+        logger.debug("[retrieval.storage] processing get: %s", key)
         file_path = join_path(self._root_dir, key)
 
         if await self.has(key):

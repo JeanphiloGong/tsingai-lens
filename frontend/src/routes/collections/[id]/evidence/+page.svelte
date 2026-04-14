@@ -3,6 +3,7 @@
   import { errorMessage, isHttpStatusError } from '../../../_shared/api';
   import { fetchEvidenceCards, type EvidenceCard, type EvidenceCardsResponse } from '../../../_shared/evidence';
   import { t } from '../../../_shared/i18n';
+  import { buildDocumentViewerHref } from '../../../_shared/traceback';
   import {
     fetchWorkspaceOverview,
     getWorkspaceSurfaceState,
@@ -99,6 +100,17 @@
 
   function stateCardBody() {
     return $t(`overview.surfaceStateCards.${surfaceState}.body`);
+  }
+
+  function canViewSource(card: EvidenceCard) {
+    return Boolean(card.document_id);
+  }
+
+  function viewSourceHref(card: EvidenceCard) {
+    return buildDocumentViewerHref(collectionId, card.document_id, {
+      evidenceId: card.evidence_id,
+      returnTo: $page.url.pathname
+    });
   }
 </script>
 
@@ -218,11 +230,13 @@
           {/if}
 
           <div class="table-actions">
+            {#if canViewSource(item)}
+              <a class="btn btn--ghost btn--small" href={viewSourceHref(item)}>
+                {$t('traceback.viewSource')}
+              </a>
+            {/if}
             <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/comparisons`}>
               {$t('overview.nextComparisons')}
-            </a>
-            <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/documents`}>
-              {$t('overview.nextDocuments')}
             </a>
           </div>
         </article>

@@ -7,6 +7,7 @@
     type ComparisonsResponse
   } from '../../../_shared/comparisons';
   import { t } from '../../../_shared/i18n';
+  import { buildDocumentViewerHref } from '../../../_shared/traceback';
   import {
     fetchWorkspaceOverview,
     getWorkspaceSurfaceState,
@@ -89,6 +90,17 @@
 
   function evidenceCount(row: ComparisonRow) {
     return row.supporting_evidence_ids.length;
+  }
+
+  function canViewSource(row: ComparisonRow) {
+    return Boolean(row.source_document_id && row.supporting_evidence_ids.length);
+  }
+
+  function viewSourceHref(row: ComparisonRow) {
+    return buildDocumentViewerHref(collectionId, row.source_document_id, {
+      evidenceId: row.supporting_evidence_ids[0] ?? null,
+      returnTo: $page.url.pathname
+    });
   }
 
   function comparabilityLabel(status: ComparisonRow['comparability_status']) {
@@ -222,11 +234,13 @@
               <td>{warningText(item)}</td>
               <td>
                 <div class="table-actions">
+                  {#if canViewSource(item)}
+                    <a class="btn btn--ghost btn--small" href={viewSourceHref(item)}>
+                      {$t('traceback.viewSource')}
+                    </a>
+                  {/if}
                   <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/evidence`}>
                     {$t('overview.nextEvidence')} ({evidenceCount(item)})
-                  </a>
-                  <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/documents`}>
-                    {$t('overview.nextDocuments')}
                   </a>
                 </div>
               </td>

@@ -53,41 +53,16 @@ Start here:
 - [`docs/architecture/overview.md`](docs/architecture/overview.md)
   Backend architecture overview and ownership seams
 
-Current state and active plans:
-
-- [`docs/plans/current-api-surface-migration-checklist.md`](docs/plans/current-api-surface-migration-checklist.md)
-  Canonical current-state page for the active Lens v1 backend migration
-- [`docs/plans/core-stabilization-and-seam-extraction-plan.md`](docs/plans/core-stabilization-and-seam-extraction-plan.md)
-  Active near-term child plan for stabilizing the Core slice and extracting
-  the shared parsing seam from the protocol branch
-- [`docs/plans/goal-core-source-implementation-plan.md`](docs/plans/goal-core-source-implementation-plan.md)
-  Broader parent roadmap for the five-layer backend rollout
-- [`docs/plans/goal-core-source-contract-follow-up-plan.md`](docs/plans/goal-core-source-contract-follow-up-plan.md)
-  Active child plan for Goal Brief, Source Builder, Core, Goal Consumer, and
-  downstream contract freeze
-- [`docs/plans/graph-surface-plan.md`](docs/plans/graph-surface-plan.md)
-  Active retained-secondary-surface plan for graph hardening
-
-Architecture background:
-
-- [`docs/architecture/domain-architecture.md`](docs/architecture/domain-architecture.md)
-  Target backend-local business-domain seams and package direction
-- [`docs/architecture/goal-core-source-layering.md`](docs/architecture/goal-core-source-layering.md)
-  Backend-local five-layer research architecture centered on the Core backbone
-- [`docs/architecture/application-layer-boundary.md`](docs/architecture/application-layer-boundary.md)
-  Backend ADR for the intended application-boundary direction
-
-Historical background:
-
-- [`docs/plans/evidence-first-parsing-plan.md`](docs/plans/evidence-first-parsing-plan.md)
-  Origin plan for the evidence-first parsing transition, kept for lineage
-- [`docs/plans/v1-api-migration-notes.md`](docs/plans/v1-api-migration-notes.md)
-  Historical bridge note behind the current API migration checklist
-
 Operations:
 
 - [`docs/runbooks/backend-ops.md`](docs/runbooks/backend-ops.md)
   Local development and operations runbook
+
+If you are already inside an active backend change wave, use
+[`docs/plans/current-api-surface-migration-checklist.md`](docs/plans/current-api-surface-migration-checklist.md)
+as the current-state page, then choose the owning plan family from
+[`docs/README.md`](docs/README.md) rather than starting from a long plan list
+here.
 
 ## Code-Owned Entry Pages
 

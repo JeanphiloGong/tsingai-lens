@@ -12,10 +12,10 @@ current execution entry point.
 
 The shared direction is defined by the following shared docs:
 
-- [`../../../docs/50-guides/lens-mission-positioning.md`](../../../docs/50-guides/lens-mission-positioning.md)
-- [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)
-- [`../../../docs/30-architecture/lens-v1-architecture-boundary.md`](../../../docs/30-architecture/lens-v1-architecture-boundary.md)
-- [`../../../docs/10-rfcs/evidence-first-literature-parsing.md`](../../../docs/10-rfcs/evidence-first-literature-parsing.md)
+- [`../../../docs/overview/lens-mission-positioning.md`](../../../docs/overview/lens-mission-positioning.md)
+- [`../../../docs/contracts/lens-v1-definition.md`](../../../docs/contracts/lens-v1-definition.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/decisions/rfc-evidence-first-literature-parsing.md`](../../../docs/decisions/rfc-evidence-first-literature-parsing.md)
 
 This backend plan narrows that shared direction into module-owned execution
 slices, artifact changes, API adjustments, and verification targets.
@@ -211,7 +211,7 @@ Not every phase must land at once, but implementation should move in this
 direction rather than continue deepening the old steps-first backbone.
 
 The shared minimum field contract for these artifacts is defined in
-[`../../../docs/40-specs/lens-core-artifact-contracts.md`](../../../docs/40-specs/lens-core-artifact-contracts.md).
+[`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md).
 
 ## File Change Plan
 
@@ -332,15 +332,15 @@ This backend plan is successful when:
   Active near-term child execution plan for the Core slice
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
   Broader parent roadmap for later Core, Goal, and Source waves
-- [`../../../docs/50-guides/lens-mission-positioning.md`](../../../docs/50-guides/lens-mission-positioning.md)
+- [`../../../docs/overview/lens-mission-positioning.md`](../../../docs/overview/lens-mission-positioning.md)
   Shared long-lived Lens mission and positioning
-- [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)
+- [`../../../docs/contracts/lens-v1-definition.md`](../../../docs/contracts/lens-v1-definition.md)
   Shared Lens v1 boundary
-- [`../../../docs/40-specs/lens-core-artifact-contracts.md`](../../../docs/40-specs/lens-core-artifact-contracts.md)
+- [`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md)
   Shared minimum artifact contracts for the evidence backbone
-- [`../../../docs/30-architecture/lens-v1-architecture-boundary.md`](../../../docs/30-architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
   Shared Lens v1 architecture boundary
-- [`../../../docs/10-rfcs/evidence-first-literature-parsing.md`](../../../docs/10-rfcs/evidence-first-literature-parsing.md)
+- [`../../../docs/decisions/rfc-evidence-first-literature-parsing.md`](../../../docs/decisions/rfc-evidence-first-literature-parsing.md)
   Shared parsing direction RFC
 - [`../architecture/overview.md`](../architecture/overview.md)
   Current backend architecture overview

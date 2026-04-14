@@ -85,7 +85,7 @@ of these questions directly:
 
 ## Related Docs
 
-- [System Overview](system-overview.md)
+- [System Overview](../overview/system-overview.md)
 - [Lens V1 Architecture Boundary](lens-v1-architecture-boundary.md)
-- [Lens V1 Definition](../40-specs/lens-v1-definition.md)
+- [Lens V1 Definition](../contracts/lens-v1-definition.md)
 - [Lens V1 Frontend Interface Spec](../../frontend/src/routes/collections/lens-v1-interface-spec.md)

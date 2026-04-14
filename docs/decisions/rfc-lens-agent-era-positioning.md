@@ -15,7 +15,7 @@ The core idea is simple:
   resetting on every run
 
 This RFC complements
-[`evidence-first-literature-parsing.md`](evidence-first-literature-parsing.md):
+[`rfc-evidence-first-literature-parsing.md`](rfc-evidence-first-literature-parsing.md):
 that RFC defines the parsing direction, while this RFC defines Lens's product
 position in an agent-heavy stack.
 
@@ -25,10 +25,10 @@ This RFC is intentionally future-facing.
 
 The current Lens identity and v1 boundary are defined in:
 
-- [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
-- [Lens V1 Definition](../40-specs/lens-v1-definition.md)
-- [Lens V1 Architecture Boundary](../30-architecture/lens-v1-architecture-boundary.md)
-- [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
+- [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
+- [Lens V1 Definition](../contracts/lens-v1-definition.md)
+- [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
+- [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
 
 This RFC should guide later work on agent-callable tools, collection memory,
 and post-v1 evidence-runtime behavior. It should not become the source of truth

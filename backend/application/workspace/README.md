@@ -56,5 +56,5 @@ It should not own:
 
 - [`../../docs/specs/api.md`](../../docs/specs/api.md)
 - [`../../docs/architecture/overview.md`](../../docs/architecture/overview.md)
-- [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)
+- [`../../../docs/contracts/lens-v1-definition.md`](../../../docs/contracts/lens-v1-definition.md)
 - [`../README.md`](../README.md)

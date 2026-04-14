@@ -39,7 +39,7 @@ comparison-first:
   no final protocol steps are emitted
 
 See
-[`lens-v1-architecture-boundary.md`](lens-v1-architecture-boundary.md)
+[`../architecture/lens-v1-architecture-boundary.md`](../architecture/lens-v1-architecture-boundary.md)
 for the shared boundary and object model.
 
 ## Backend Ownership Seams

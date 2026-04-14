@@ -144,8 +144,8 @@ This document is the v1 product boundary.
 
 ## Related Docs
 
-- [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
+- [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
 - [Lens Core Artifact Contracts](lens-core-artifact-contracts.md)
-- [Lens Evidence-First Direction and Conditional Protocol Generation](../10-rfcs/evidence-first-literature-parsing.md)
-- [Lens Agent-Era Positioning and Evidence Layer Direction](../10-rfcs/lens-agent-era-positioning.md)
-- [System Overview](../30-architecture/system-overview.md)
+- [Lens Evidence-First Direction and Conditional Protocol Generation](../decisions/rfc-evidence-first-literature-parsing.md)
+- [Lens Agent-Era Positioning and Evidence Layer Direction](../decisions/rfc-lens-agent-era-positioning.md)
+- [System Overview](../overview/system-overview.md)

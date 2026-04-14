@@ -172,9 +172,9 @@ execution detail to module-owned plans.
 
 ## Related Docs
 
-- [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
-- [Lens V1 Definition](../40-specs/lens-v1-definition.md)
-- [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
-- [Lens Evidence-First Direction and Conditional Protocol Generation](../10-rfcs/evidence-first-literature-parsing.md)
-- [System Overview](system-overview.md)
+- [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
+- [Lens V1 Definition](../contracts/lens-v1-definition.md)
+- [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
+- [Lens Evidence-First Direction and Conditional Protocol Generation](../decisions/rfc-evidence-first-literature-parsing.md)
+- [System Overview](../overview/system-overview.md)
 - [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/evidence-first-parsing-plan.md)

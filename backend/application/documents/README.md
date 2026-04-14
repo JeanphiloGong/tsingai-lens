@@ -54,5 +54,5 @@ It should not own:
 ## Related Docs
 
 - [`../../docs/specs/api.md`](../../docs/specs/api.md)
-- [`../../../docs/40-specs/lens-core-artifact-contracts.md`](../../../docs/40-specs/lens-core-artifact-contracts.md)
+- [`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md)
 - [`../README.md`](../README.md)

@@ -30,10 +30,10 @@ the evidence-first shift.
 
 The current shared definitions promoted out of this RFC now live in:
 
-- [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
-- [Lens V1 Definition](../40-specs/lens-v1-definition.md)
-- [Lens V1 Architecture Boundary](../30-architecture/lens-v1-architecture-boundary.md)
-- [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
+- [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
+- [Lens V1 Definition](../contracts/lens-v1-definition.md)
+- [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
+- [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
 - [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/evidence-first-parsing-plan.md)
 
 This RFC should keep the why, tradeoff, and transition rationale for the shift

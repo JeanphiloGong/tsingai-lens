@@ -343,7 +343,7 @@ not bypass this backbone.
 
 ## Related Docs
 
-- [Lens Mission and Positioning](../50-guides/lens-mission-positioning.md)
+- [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
 - [Lens V1 Definition](lens-v1-definition.md)
-- [Lens V1 Architecture Boundary](../30-architecture/lens-v1-architecture-boundary.md)
+- [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
 - [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/evidence-first-parsing-plan.md)

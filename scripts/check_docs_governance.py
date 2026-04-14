@@ -8,18 +8,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GOVERNED_DIRS = [
-    REPO_ROOT / "docs" / "05-policies",
-    REPO_ROOT / "docs" / "10-rfcs",
-    REPO_ROOT / "docs" / "20-adrs",
-    REPO_ROOT / "docs" / "30-architecture",
-    REPO_ROOT / "docs" / "40-specs",
-    REPO_ROOT / "docs" / "50-guides",
-    REPO_ROOT / "docs" / "60-runbooks",
-    REPO_ROOT / "docs" / "70-postmortems",
-    REPO_ROOT / "docs" / "90-archive",
+    REPO_ROOT / "docs" / "overview",
+    REPO_ROOT / "docs" / "architecture",
+    REPO_ROOT / "docs" / "contracts",
+    REPO_ROOT / "docs" / "decisions",
     REPO_ROOT / "docs" / "research",
     REPO_ROOT / "backend" / "docs",
     REPO_ROOT / "frontend" / "docs",
+]
+GOVERNED_FILES = [
+    REPO_ROOT / "docs" / "governance.md",
 ]
 DOCS_PATHS = [
     REPO_ROOT / "docs",
@@ -51,6 +49,9 @@ HIGH_SIGNAL_SECRET_PATTERNS = [
 
 def iter_governed_markdown() -> list[Path]:
     docs: list[Path] = []
+    for path in GOVERNED_FILES:
+        if path.exists():
+            docs.append(path)
     for doc_dir in GOVERNED_DIRS:
         if not doc_dir.exists():
             continue

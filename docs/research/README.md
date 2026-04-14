@@ -26,5 +26,5 @@ in the body instead of a YAML metadata block.
 When touched, legacy research material from root-level `docs/` should move here
 or be replaced with an external link plus a short summary.
 
-Legacy PDFs that still live under `docs/paper/` should be treated as supporting
-assets only, not implementation source of truth.
+Legacy PDFs that still live under `docs/research/assets/` should be treated as
+supporting assets only, not implementation source of truth.

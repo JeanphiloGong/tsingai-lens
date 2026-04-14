@@ -20,10 +20,10 @@ surfaces rather than the primary product center.
 
 The shared product and architecture authority lives in:
 
-- [`docs/50-guides/lens-mission-positioning.md`](docs/50-guides/lens-mission-positioning.md)
-- [`docs/40-specs/lens-v1-definition.md`](docs/40-specs/lens-v1-definition.md)
-- [`docs/30-architecture/lens-v1-architecture-boundary.md`](docs/30-architecture/lens-v1-architecture-boundary.md)
-- [`docs/40-specs/lens-core-artifact-contracts.md`](docs/40-specs/lens-core-artifact-contracts.md)
+- [`docs/overview/lens-mission-positioning.md`](docs/overview/lens-mission-positioning.md)
+- [`docs/contracts/lens-v1-definition.md`](docs/contracts/lens-v1-definition.md)
+- [`docs/architecture/lens-v1-architecture-boundary.md`](docs/architecture/lens-v1-architecture-boundary.md)
+- [`docs/contracts/lens-core-artifact-contracts.md`](docs/contracts/lens-core-artifact-contracts.md)
 
 ## Typical User Flow
 
@@ -46,11 +46,11 @@ tsingai-lens/
 
 - [`docs/README.md`](docs/README.md)
   Shared docs index, placement rules, and cross-module reading path
-- [`docs/50-guides/lens-mission-positioning.md`](docs/50-guides/lens-mission-positioning.md)
+- [`docs/overview/lens-mission-positioning.md`](docs/overview/lens-mission-positioning.md)
   Long-lived Lens identity and positioning
-- [`docs/40-specs/lens-v1-definition.md`](docs/40-specs/lens-v1-definition.md)
+- [`docs/contracts/lens-v1-definition.md`](docs/contracts/lens-v1-definition.md)
   Lens v1 product boundary and primary acceptance surface
-- [`docs/30-architecture/system-overview.md`](docs/30-architecture/system-overview.md)
+- [`docs/overview/system-overview.md`](docs/overview/system-overview.md)
   Shared system overview and ownership map
 - [`backend/README.md`](backend/README.md)
   Backend module entry page
@@ -116,7 +116,7 @@ Lens v1 的主方向不是“把论文聊出来”，而是把论文组织成可
 建议阅读顺序：
 
 - [`docs/README.md`](docs/README.md)
-- [`docs/50-guides/lens-mission-positioning.md`](docs/50-guides/lens-mission-positioning.md)
-- [`docs/40-specs/lens-v1-definition.md`](docs/40-specs/lens-v1-definition.md)
+- [`docs/overview/lens-mission-positioning.md`](docs/overview/lens-mission-positioning.md)
+- [`docs/contracts/lens-v1-definition.md`](docs/contracts/lens-v1-definition.md)
 - [`backend/README.md`](backend/README.md)
 - [`frontend/README.md`](frontend/README.md)

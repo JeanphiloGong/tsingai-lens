@@ -39,4 +39,4 @@ The recommended backend order remains:
 - [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
-- [`../../../docs/40-specs/lens-v1-definition.md`](../../../docs/40-specs/lens-v1-definition.md)
+- [`../../../docs/contracts/lens-v1-definition.md`](../../../docs/contracts/lens-v1-definition.md)

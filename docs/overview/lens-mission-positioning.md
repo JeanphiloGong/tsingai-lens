@@ -90,8 +90,8 @@ tool.
 
 ## Related Docs
 
-- [Lens V1 Definition](../40-specs/lens-v1-definition.md)
-- [Lens Core Artifact Contracts](../40-specs/lens-core-artifact-contracts.md)
-- [Lens Evidence-First Direction and Conditional Protocol Generation](../10-rfcs/evidence-first-literature-parsing.md)
-- [Lens Agent-Era Positioning and Evidence Layer Direction](../10-rfcs/lens-agent-era-positioning.md)
-- [System Overview](../30-architecture/system-overview.md)
+- [Lens V1 Definition](../contracts/lens-v1-definition.md)
+- [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
+- [Lens Evidence-First Direction and Conditional Protocol Generation](../decisions/rfc-evidence-first-literature-parsing.md)
+- [Lens Agent-Era Positioning and Evidence Layer Direction](../decisions/rfc-lens-agent-era-positioning.md)
+- [System Overview](system-overview.md)

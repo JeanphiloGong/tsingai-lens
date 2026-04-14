@@ -75,5 +75,5 @@ It should not redefine:
 
 - [`../../docs/plans/evidence-first-parsing-plan.md`](../../docs/plans/evidence-first-parsing-plan.md)
 - [`../../docs/architecture/domain-architecture.md`](../../docs/architecture/domain-architecture.md)
-- [`../../../docs/30-architecture/lens-v1-architecture-boundary.md`](../../../docs/30-architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
 - [`../README.md`](../README.md)

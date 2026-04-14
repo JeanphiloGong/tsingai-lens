@@ -1,79 +1,92 @@
-# Backend Docs Index
+# Backend Docs
 
-This directory is the secondary index for backend-owned formal docs.
+This directory is the documentation landing page for backend-wide formal docs.
 
 Use [../README.md](../README.md) for the backend module entry page. Use this
-directory when you already know the question is backend-local and need the
-right architecture, spec, plan, or runbook document.
+directory when the question is already backend-local and you need the right
+authority page, current-state page, or implementation lineage.
 
-## Layout
+## Docs Layout
 
 - `architecture/`
-  Backend-local architecture and ownership-boundary docs
+  Backend-wide architecture, ownership-boundary docs, and local ADRs
 - `specs/`
-  Backend-local formal contracts, including the authoritative public API spec
-- `plans/`
-  Backend-local migration and implementation plans
+  Backend-wide contracts, including the public API contract
 - `runbooks/`
   Backend-local operational guidance
+- `plans/`
+  Backend implementation current-state, active delivery waves, and retained
+  lineage; this is not the default start surface unless you are already inside
+  backend change work
 
-## Key Docs
+## Start Paths
 
-Start here:
+- Public API contract:
+  [`specs/api.md`](specs/api.md)
+- Backend architecture and ownership seams:
+  [`architecture/overview.md`](architecture/overview.md)
+- Local development and operations:
+  [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
+- Current backend migration and execution state:
+  [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
+
+## Backend-Wide Authority
 
 - [`specs/api.md`](specs/api.md)
   Authoritative frontend/backend public API contract
 - [`architecture/overview.md`](architecture/overview.md)
-  Backend ownership seams and local navigation
-
-Current state and active plans:
-
-- [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
-  Canonical current-state page for backend API migration and reading order
-- [`plans/core-parsing-quality-hardening-plan.md`](plans/core-parsing-quality-hardening-plan.md)
-  Current near-term child plan for improving Core parsing, evidence, and
-  comparison quality before new adapters or Goal Consumer work
-- [`plans/core-stabilization-and-seam-extraction-plan.md`](plans/core-stabilization-and-seam-extraction-plan.md)
-  Earlier child plan for Core stabilization and parsing seam extraction
-- [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md)
-  Broader parent roadmap for the five-layer backend rollout
-- [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md)
-  Active contract-freeze child plan for Goal Brief, Source Builder, Core,
-  Goal Consumer, and downstream boundary guardrails
-- [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
-  Active child plan for standardizing Source & Collection Builder handoff
-  before Core execution
-- [`plans/core-derived-graph-follow-up-plan.md`](plans/core-derived-graph-follow-up-plan.md)
-  Follow-up migration plan for moving graph semantics to Core-derived
-  claim/evidence/condition/comparability projections
-- [`plans/graph-surface-plan.md`](plans/graph-surface-plan.md)
-  Active retained-secondary-surface plan for graph hardening
-
-Architecture background:
-
+  Backend module overview, ownership seams, and local navigation
 - [`architecture/domain-architecture.md`](architecture/domain-architecture.md)
   Target backend business-domain packaging and controller boundaries
 - [`architecture/goal-core-source-layering.md`](architecture/goal-core-source-layering.md)
   Backend-local five-layer research architecture centered on the Core backbone
 - [`architecture/application-layer-boundary.md`](architecture/application-layer-boundary.md)
-  Backend ADR for HTTP/application ownership separation
-
-Historical background:
-
-- [`plans/evidence-first-parsing-plan.md`](plans/evidence-first-parsing-plan.md)
-  Origin plan for the evidence-first parsing transition, kept for lineage
-- [`plans/v1-api-migration-notes.md`](plans/v1-api-migration-notes.md)
-  Historical bridge note behind the current API migration checklist
-
-Operations:
-
+  Backend ADR for HTTP and application ownership separation
 - [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
   Local development and operations runbook
 
-## Placement Rule
+## Current State And Plan Families
 
-- keep backend-wide formal docs in this subtree
-- keep route- or package-local docs near the owning code node when the
-  knowledge is narrower than the backend module
-- keep shared product, system, and cross-module docs in the root `docs/`
-  tree
+Start with:
+
+- [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
+  Canonical current-state page for backend API migration and local reading
+  order
+
+Then move to the owning plan family only when you are already inside that wave:
+
+- Core quality:
+  [`plans/core-parsing-quality-hardening-plan.md`](plans/core-parsing-quality-hardening-plan.md)
+- Core stabilization and parsing seam extraction:
+  [`plans/core-stabilization-and-seam-extraction-plan.md`](plans/core-stabilization-and-seam-extraction-plan.md)
+- Five-layer rollout and contract freeze:
+  [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md),
+  [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md)
+- Source and collection-builder normalization:
+  [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
+- Graph retained surface and Core-derived cutover:
+  [`plans/graph-surface-plan.md`](plans/graph-surface-plan.md),
+  [`plans/core-derived-graph-follow-up-plan.md`](plans/core-derived-graph-follow-up-plan.md),
+  [`plans/core-derived-graph-cutover-implementation-plan.md`](plans/core-derived-graph-cutover-implementation-plan.md)
+
+Historical lineage:
+
+- [`plans/evidence-first-parsing-plan.md`](plans/evidence-first-parsing-plan.md)
+  Origin plan for the evidence-first parsing transition
+- [`plans/v1-api-migration-notes.md`](plans/v1-api-migration-notes.md)
+  Historical bridge note behind the current API migration checklist
+
+## What Does Not Belong Here
+
+- package-local purpose and boundary docs for `application/*`, `retrieval/*`,
+  `infra/*`, and `tests/*`
+- route-family or package-family docs that belong at a narrower code-owned node
+- shared product, system, or cross-module docs that belong in root `docs/`
+
+## Placement Rules
+
+- Keep backend-wide formal docs in this subtree.
+- Keep narrower route- or package-local docs near the owning code node.
+- Use `plans/` for backend implementation current-state and retained lineage,
+  not as the primary reader start page.
+- Keep shared product, system, and cross-module docs in root `docs/`.

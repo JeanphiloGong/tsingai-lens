@@ -63,10 +63,22 @@
 - `seed_collection`
 - `entry_recommendation`
 
+其中 `seed_collection` 当前至少包含：
+
+- `collection_id`
+- `name`
+- `created`
+- `seeded_document_count`
+- `source_channels`
+- `handoff_id`
+- `handoff_status`
+
 语义约束：
 
 - `goals/intake` 是问题定义与 collection handoff 入口，不是研究结论层
 - `seed_collection` 是 collection-builder handoff，不是 Core artifact
+- `seed_collection.handoff_id` 应稳定指向 collection-builder handoff 记录
+- `seed_collection.handoff_status` 当前表示该 collection 正等待 source material 接入
 - 当前返回里的 `coverage_assessment` 只是 intake-side 的粗粒度提示，用于帮助 collection
   build，不应被当成 Goal Consumer 的最终 coverage 判断
 - 返回中不得直接内嵌 `document_profiles`、`evidence_cards`、`comparison_rows`

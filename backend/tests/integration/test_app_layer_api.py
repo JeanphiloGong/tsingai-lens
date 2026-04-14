@@ -435,6 +435,9 @@ def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):
 
     assert payload["coverage_assessment"]["level"] == "direct"
     assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
+    assert payload["seed_collection"]["source_channels"] == ["upload"]
+    assert payload["seed_collection"]["handoff_id"].startswith("handoff_")
+    assert payload["seed_collection"]["handoff_status"] == "awaiting_source_material"
 
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200

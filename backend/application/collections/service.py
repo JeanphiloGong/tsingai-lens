@@ -6,7 +6,12 @@ from typing import Any
 from uuid import uuid4
 
 from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
-from infra.ingestion import NormalizedImportBatch, normalize_upload
+from infra.ingestion import (
+    NormalizedImportBatch,
+    SourceAdapter,
+    SourceAdapterRequest,
+    normalize_upload,
+)
 from infra.persistence.factory import (
     build_artifact_repository,
     build_collection_repository,
@@ -171,6 +176,55 @@ class CollectionService:
             return self._empty_import_manifest(collection_id)
         return manifest
 
+    def register_goal_brief_handoff(
+        self,
+        collection_id: str,
+        research_brief: dict[str, Any],
+        coverage_assessment: dict[str, Any],
+        *,
+        source_channels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self.get_collection(collection_id)
+        manifest = self.get_import_manifest(collection_id)
+        handoff = {
+            "handoff_id": f"handoff_{uuid4().hex[:12]}",
+            "kind": "goal_brief",
+            "status": "awaiting_source_material",
+            "created_at": _now_iso(),
+            "source_channels": list(source_channels or ["upload"]),
+            "goal_context": {
+                "research_brief": dict(research_brief),
+                "coverage_assessment": dict(coverage_assessment),
+            },
+        }
+        manifest["handoffs"].append(handoff)
+        self.repository.write_import_manifest(collection_id, manifest)
+        return handoff
+
+    def import_from_adapter(
+        self,
+        collection_id: str,
+        adapter: SourceAdapter,
+        raw_locator: str,
+        *,
+        goal_context: dict[str, Any] | None = None,
+        max_documents: int | None = None,
+        constraints: dict[str, Any] | None = None,
+    ) -> list[dict]:
+        if not self.repository.collection_exists(collection_id):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+
+        request = SourceAdapterRequest(
+            collection_id=collection_id,
+            raw_locator=raw_locator,
+            goal_context=dict(goal_context) if goal_context else None,
+            max_documents=max_documents,
+            constraints=dict(constraints or {}),
+        )
+        batch = adapter.fetch(request)
+        self._validate_adapter_batch(adapter, batch)
+        return self.import_normalized_batch(collection_id, batch)
+
     def import_normalized_batch(
         self,
         collection_id: str,
@@ -277,10 +331,32 @@ class CollectionService:
             )
         return "\n".join(parts).encode("utf-8")
 
+    def _validate_adapter_batch(
+        self,
+        adapter: SourceAdapter,
+        batch: NormalizedImportBatch,
+    ) -> None:
+        if not isinstance(batch, NormalizedImportBatch):
+            raise TypeError("source adapter must return NormalizedImportBatch")
+
+        expected_channel = str(getattr(adapter, "channel", "") or "").strip()
+        expected_adapter_name = str(getattr(adapter, "adapter_name", "") or "").strip()
+        expected_adapter_version = getattr(adapter, "adapter_version", None)
+
+        if expected_channel and batch.source_metadata.channel != expected_channel:
+            raise ValueError("source adapter batch channel does not match adapter contract")
+        if expected_adapter_name and batch.source_metadata.adapter_name != expected_adapter_name:
+            raise ValueError("source adapter batch adapter_name does not match adapter contract")
+        if expected_adapter_version is not None and (
+            batch.source_metadata.adapter_version != expected_adapter_version
+        ):
+            raise ValueError("source adapter batch adapter_version does not match adapter contract")
+
     def _empty_import_manifest(self, collection_id: str) -> dict[str, Any]:
         return {
             "schema_version": 1,
             "collection_id": collection_id,
+            "handoffs": [],
             "imports": [],
         }
 

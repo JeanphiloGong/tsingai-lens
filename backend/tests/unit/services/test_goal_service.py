@@ -27,8 +27,18 @@ def test_goal_service_creates_seed_collection_and_contract(tmp_path):
     assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
     assert payload["seed_collection"]["created"] is True
     assert payload["seed_collection"]["seeded_document_count"] == 0
+    assert payload["seed_collection"]["source_channels"] == ["upload"]
+    assert payload["seed_collection"]["handoff_id"].startswith("handoff_")
+    assert payload["seed_collection"]["handoff_status"] == "awaiting_source_material"
     assert collection["collection_id"] == collection_id
     assert collection["description"] == "Assess rate capability for LiFePO4."
+    manifest = collection_service.get_import_manifest(collection_id)
+    assert manifest["handoffs"][0]["handoff_id"] == payload["seed_collection"]["handoff_id"]
+    assert manifest["handoffs"][0]["kind"] == "goal_brief"
+    assert manifest["handoffs"][0]["status"] == "awaiting_source_material"
+    assert manifest["handoffs"][0]["source_channels"] == ["upload"]
+    assert manifest["handoffs"][0]["goal_context"]["research_brief"]["material_system"] == "LiFePO4"
+    assert manifest["handoffs"][0]["goal_context"]["coverage_assessment"]["level"] == "direct"
 
 
 def test_goal_service_rejects_empty_goal_signal(tmp_path):

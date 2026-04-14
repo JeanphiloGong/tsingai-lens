@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 GoalIntent = Literal["explore", "compare", "design_experiment"]
 CoverageLevel = Literal["direct", "indirect", "sparse", "absent"]
 EntryMode = Literal["comparison", "exploratory"]
+GoalSeedHandoffStatus = Literal["awaiting_source_material"]
 
 
 class GoalIntakeRequest(BaseModel):
@@ -55,6 +56,8 @@ class SeedCollectionResponse(BaseModel):
     created: bool = Field(default=True, description="是否新建集合")
     seeded_document_count: int = Field(default=0, ge=0, description="已注入候选文献数")
     source_channels: list[str] = Field(default_factory=list, description="候选来源通道")
+    handoff_id: str = Field(..., description="collection-builder handoff ID")
+    handoff_status: GoalSeedHandoffStatus = Field(..., description="handoff 当前状态")
 
 
 class EntryRecommendationResponse(BaseModel):

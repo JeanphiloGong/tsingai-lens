@@ -15,7 +15,10 @@ application layer.
 - manage collection file membership
 - persist collection-scoped artifact readiness defaults at creation time
 - consume normalized pre-Core import batches and persist collection input files
-- persist collection-side import provenance in `import_manifest.json`
+- persist collection-builder handoffs and import provenance in
+  `import_manifest.json`
+- provide one adapter-facing collection-builder seam for future search, crawler,
+  and connector channels
 - keep upload-driven PDF parsing behind ingestion adapters rather than inline in
   collection logic
 
@@ -28,6 +31,8 @@ It may depend on:
 
 - collection and artifact repositories
 - ingestion adapters that normalize uploads into pre-Core import batches
+- source adapters that resolve external material into the same normalized import
+  contract
 
 It should not own:
 
@@ -51,7 +56,8 @@ It should not own:
 - downstream outputs:
   collection records, collection file lists, collection directory structure,
   default artifact registry entries, normalized text inputs for indexing, and
-  import provenance manifests at the collection boundary
+  collection-builder handoff plus import provenance manifests at the collection
+  boundary
 - downstream consumers:
   indexing, workspace, documents, evidence, comparisons, and protocol flows
 

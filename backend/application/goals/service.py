@@ -4,7 +4,7 @@ from application.collections.service import CollectionService
 
 
 class GoalService:
-    """Minimal Goal Brief / Intake orchestration that seeds collections only."""
+    """Minimal Goal Brief / Intake orchestration that registers collection-builder handoffs."""
 
     def __init__(
         self,
@@ -101,6 +101,11 @@ class GoalService:
             ],
         }
 
+    def _build_source_channels(self) -> list[str]:
+        # Goal Brief can only hand off into the currently supported collection
+        # builder channels; it does not import papers itself.
+        return ["upload"]
+
     def intake_goal(
         self,
         material_system: str | None,
@@ -153,12 +158,20 @@ class GoalService:
             description=objective,
         )
         collection_id = collection["collection_id"]
+        handoff = self.collection_service.register_goal_brief_handoff(
+            collection_id,
+            research_brief,
+            coverage_assessment,
+            source_channels=self._build_source_channels(),
+        )
         seed_collection = {
             "collection_id": collection_id,
             "name": collection["name"],
             "created": True,
             "seeded_document_count": 0,
-            "source_channels": ["goal_brief"],
+            "source_channels": handoff["source_channels"],
+            "handoff_id": handoff["handoff_id"],
+            "handoff_status": handoff["status"],
         }
         entry_recommendation = self._build_entry_recommendation(
             collection_id,

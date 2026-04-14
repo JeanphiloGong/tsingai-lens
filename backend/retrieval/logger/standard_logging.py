@@ -37,9 +37,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from retrieval.logger.factory import (
-    LoggerFactory,
-)
+from utils.logger import setup_logger
 
 if TYPE_CHECKING:
     from retrieval.config.models.graph_rag_config import GraphRagConfig
@@ -52,32 +50,26 @@ def init_loggers(
     verbose: bool = False,
     filename: str = DEFAULT_LOG_FILENAME,
 ) -> None:
-    """Initialize logging handlers for graphrag based on configuration.
+    """Route retrieval logging into the application logging system.
 
     Parameters
     ----------
     config : GraphRagConfig | None, default=None
-        The GraphRAG configuration. If None, defaults to file-based reporting.
+        The GraphRAG configuration. Kept for API compatibility.
     verbose : bool, default=False
-        Whether to enable verbose (DEBUG) logging.
+        Whether to enable verbose (DEBUG) logging for retrieval namespaces.
     filename : Optional[str]
-        Log filename on disk. If unset, will use a default name.
+        Kept for API compatibility. Retrieval no longer manages a separate file.
     """
-    logger = logging.getLogger("graphrag")
     log_level = logging.DEBUG if verbose else logging.INFO
-    logger.setLevel(log_level)
+    setup_logger("retrieval")
 
-    # clear any existing handlers to avoid duplicate logs
-    if logger.hasHandlers():
-        # Close file handlers properly before removing them
-        for handler in logger.handlers:
-            if isinstance(handler, logging.FileHandler):
-                handler.close()
-        logger.handlers.clear()
-
-    reporting_config = config.reporting
-    config_dict = reporting_config.model_dump()
-    args = {**config_dict, "root_dir": config.root_dir, "filename": filename}
-
-    handler = LoggerFactory.create_logger(reporting_config.type, args)
-    logger.addHandler(handler)
+    for logger_name in ("retrieval", "graphrag"):
+        namespace_logger = logging.getLogger(logger_name)
+        if namespace_logger.hasHandlers():
+            for handler in list(namespace_logger.handlers):
+                if isinstance(handler, logging.FileHandler):
+                    handler.close()
+            namespace_logger.handlers.clear()
+        namespace_logger.setLevel(log_level)
+        namespace_logger.propagate = True

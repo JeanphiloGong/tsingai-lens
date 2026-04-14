@@ -23,6 +23,17 @@ from retrieval.logger.standard_logging import init_loggers
 logger = logging.getLogger(__name__)
 
 
+def _summarize_workflow_result(result: Any) -> str:
+    if isinstance(result, dict):
+        keys = sorted(str(key) for key in result.keys())
+        preview = ", ".join(keys[:6])
+        suffix = "" if len(keys) <= 6 else ", ..."
+        return f"dict[{len(keys)}]: {preview}{suffix}"
+    if isinstance(result, list):
+        return f"list[{len(result)}]"
+    return type(result).__name__
+
+
 async def build_index(
     config: GraphRagConfig,
     method: IndexingMethod | str = IndexingMethod.Standard,
@@ -87,7 +98,11 @@ async def build_index(
             logger.error("Workflow %s completed with errors", output.workflow)
         else:
             logger.info("Workflow %s completed successfully", output.workflow)
-        logger.debug(str(output.result))
+        logger.debug(
+            "Workflow %s result summary: %s",
+            output.workflow,
+            _summarize_workflow_result(output.result),
+        )
 
     workflow_callbacks.pipeline_end(outputs)
     return outputs

@@ -9,6 +9,19 @@ from config import LOG_DIR
 # 创建目录
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+_QUIET_LIBRARY_LOGGERS = (
+    "LiteLLM",
+    "litellm",
+    "openai",
+    "httpx",
+    "httpcore",
+)
+
+
+def _configure_library_loggers() -> None:
+    for logger_name in _QUIET_LIBRARY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
 def setup_logger(name=__name__):
     """
     创建并配置日志记录器，每天生成新的日志文件
@@ -20,7 +33,7 @@ def setup_logger(name=__name__):
         logging.Logger: 配置好的日志记录器
     """
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)  # 捕获所有级别日志
+    logger.setLevel(logging.INFO)
 
     # 日志格式
     formatter = logging.Formatter(
@@ -56,7 +69,7 @@ def setup_logger(name=__name__):
 
     # 将处理器挂到 root，保证所有子 logger（如 controllers.*）的日志都能输出
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(logging.INFO)
 
     def _handler_exists(candidate: logging.Handler) -> bool:
         for existing in root_logger.handlers:
@@ -74,6 +87,7 @@ def setup_logger(name=__name__):
         if not _handler_exists(handler):
             root_logger.addHandler(handler)
 
+    _configure_library_loggers()
     logging.captureWarnings(True)
 
     return logger

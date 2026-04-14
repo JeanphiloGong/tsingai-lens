@@ -44,9 +44,11 @@ Current backend-local work has already moved part of the Core forward:
 
 The main implementation gaps are now clearer:
 
-- Source & Collection Builder does not yet expose one explicit normalized
-  import seam
-- Goal Brief / Intake exists but can be mistaken for the full Goal layer
+- Core parsing and evidence/comparison quality still limit downstream value on
+  real collections
+- Goal Brief / Intake exists but can still be mistaken for the full Goal layer
+- Source & Collection Builder now has a normalized seam, but first real
+  adapters are intentionally deferred until Core quality improves
 - Goal Consumer / Decision logic over Core outputs does not exist yet
 - derived surfaces such as protocol, graph, and reports still need clearer
   dependency language in some places
@@ -91,6 +93,10 @@ Goal:
 - finish the current in-flight rollout of `document_profiles`,
   `evidence_cards`, and `comparison_rows` for real collections
 
+Current child execution entrypoint:
+
+- [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
+
 Primary changes:
 
 - finish real collection support for `/documents/profiles`,
@@ -108,6 +114,8 @@ Exit criteria:
 - non-mock collections can serve all three Core resources
 - workspace treats comparison readiness as the primary ready state
 - protocol can be absent without making the collection look broken
+- Core quality is strong enough that new adapters or Goal Consumer work would
+  amplify useful facts rather than weak ones
 
 ### Wave 2: Extract A Core-Owned Parsing Seam
 

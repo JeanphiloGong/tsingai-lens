@@ -30,9 +30,11 @@ Current state and active plans:
 
 - [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
   Canonical current-state page for backend API migration and reading order
+- [`plans/core-parsing-quality-hardening-plan.md`](plans/core-parsing-quality-hardening-plan.md)
+  Current near-term child plan for improving Core parsing, evidence, and
+  comparison quality before new adapters or Goal Consumer work
 - [`plans/core-stabilization-and-seam-extraction-plan.md`](plans/core-stabilization-and-seam-extraction-plan.md)
-  Active near-term child plan for Core stabilization and parsing seam
-  extraction
+  Earlier child plan for Core stabilization and parsing seam extraction
 - [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md)
   Broader parent roadmap for the five-layer backend rollout
 - [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md)

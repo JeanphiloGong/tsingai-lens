@@ -13,8 +13,11 @@ parsing seam that still sits under the protocol branch.
 This plan intentionally remains a single backend-wide child plan under
 `docs/plans/`. It does not justify a deeper documentation subtree yet.
 
-This is the current near-term backend execution plan for the Core slice. For
-the current HTTP and route migration state, read
+This plan remains an earlier Core child plan focused on stabilization and seam
+extraction. The current near-term Core quality priority is now recorded in
+[`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md).
+
+For the current HTTP and route migration state, read
 [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md).
 For the broader future-wave roadmap, read
 [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md).

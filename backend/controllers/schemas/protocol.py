@@ -188,7 +188,7 @@ class ProtocolExtractRequest(BaseModel):
     """Request payload to generate structured protocol artifacts."""
 
     output_path: str | None = Field(
-        default=None, description="GraphRAG 输出目录；为空时走默认配置"
+        default=None, description="集合输出目录；为空时走默认配置"
     )
     paper_ids: list[str] = Field(
         default_factory=list, description="限定论文 ID 范围"
@@ -253,7 +253,7 @@ class SOPDraftRequest(BaseModel):
     """Request payload to generate an SOP draft."""
 
     output_path: str | None = Field(
-        default=None, description="GraphRAG 输出目录；为空时走默认配置"
+        default=None, description="集合输出目录；为空时走默认配置"
     )
     goal: str = Field(..., description="实验目标")
     paper_ids: list[str] = Field(default_factory=list, description="限定论文 ID")

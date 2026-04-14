@@ -11,8 +11,8 @@ TaskStatus = Literal["queued", "running", "completed", "partial_success", "faile
 TaskStage = Literal[
     "queued",
     "files_registered",
-    "graphrag_index_started",
-    "graphrag_index_completed",
+    "source_index_started",
+    "source_index_completed",
     "document_profiles_started",
     "evidence_cards_started",
     "comparison_rows_started",
@@ -69,8 +69,8 @@ class ArtifactStatusResponse(BaseModel):
     evidence_cards_ready: bool = Field(default=False, description="evidence_cards.parquet 是否存在且非空")
     comparison_rows_generated: bool = Field(default=False, description="comparison_rows.parquet 是否存在")
     comparison_rows_ready: bool = Field(default=False, description="comparison_rows.parquet 是否存在且非空")
-    graph_generated: bool = Field(default=False, description="图谱 parquet 是否存在")
-    graph_ready: bool = Field(default=False, description="图谱 parquet 是否就绪")
+    graph_generated: bool = Field(default=False, description="Core graph 投影输入是否已生成")
+    graph_ready: bool = Field(default=False, description="Core graph 视图是否可用")
     sections_generated: bool = Field(default=False, description="sections.parquet 是否存在")
     sections_ready: bool = Field(default=False, description="sections.parquet 是否存在且非空")
     procedure_blocks_generated: bool = Field(default=False, description="procedure_blocks.parquet 是否存在")

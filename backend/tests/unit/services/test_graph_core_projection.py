@@ -132,7 +132,7 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
     ) == ["tu-1"]
 
 
-def test_graph_service_falls_back_to_core_projection_when_legacy_is_missing(
+def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
     monkeypatch,
     tmp_path,
 ):
@@ -255,3 +255,102 @@ def test_graph_service_falls_back_to_core_projection_when_legacy_is_missing(
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
+
+
+def test_graph_service_rejects_legacy_community_filter(monkeypatch, tmp_path):
+    try:
+        import fastapi  # noqa: F401
+    except ImportError:
+        class _HTTPException(Exception):
+            def __init__(self, status_code: int, detail):  # noqa: ANN001
+                self.status_code = status_code
+                self.detail = detail
+                super().__init__(detail)
+
+        monkeypatch.setitem(
+            sys.modules,
+            "fastapi",
+            SimpleNamespace(HTTPException=_HTTPException),
+        )
+
+    from application.graph import service as graph_service
+
+    _patch_parquet(monkeypatch)
+
+    from application.collections.service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    monkeypatch.setattr(graph_service, "collection_service", collection_service)
+    monkeypatch.setattr(graph_service, "artifact_registry_service", artifact_registry)
+
+    collection = collection_service.create_collection("Filtered Graph Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Core Route Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-1",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
+                "claim_type": "property",
+                "evidence_source_type": "text",
+                "evidence_anchors": [],
+                "material_system": {"family": "oxide cathode", "composition": None},
+                "condition_context": {"process": {}, "baseline": {}, "test": {}},
+                "confidence": 0.83,
+                "traceability_status": "direct",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "row_id": "cmp-1",
+                "collection_id": collection_id,
+                "source_document_id": "paper-1",
+                "supporting_evidence_ids": ["ev-1"],
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "property_normalized": "conductivity",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+                "comparability_status": "comparable",
+                "comparability_warnings": [],
+                "value": 12.0,
+                "unit": "mS/cm",
+            }
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    try:
+        graph_service.get_collection_graph(
+            collection_id=collection_id,
+            max_nodes=20,
+            min_weight=0.0,
+            community_id="1",
+        )
+    except graph_service.GraphFilterNotSupportedError as exc:
+        assert exc.collection_id == collection_id
+        assert exc.filter_name == "community_id"
+    else:  # pragma: no cover
+        raise AssertionError("expected GraphFilterNotSupportedError")

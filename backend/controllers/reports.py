@@ -15,7 +15,7 @@ router = APIRouter(tags=["reports"])
 @router.get(
     "/collections/{collection_id}/reports/communities",
     response_model=ReportCommunityListResponse,
-    summary="列出社区报告",
+    summary="列出 Core pattern 报表",
 )
 async def list_community_reports(
     collection_id: str,
@@ -38,7 +38,7 @@ async def list_community_reports(
 @router.get(
     "/collections/{collection_id}/reports/communities/{community_id}",
     response_model=ReportCommunityDetailResponse,
-    summary="社区报告详情",
+    summary="Core pattern 报表详情",
 )
 async def get_community_report_detail(
     collection_id: str,
@@ -63,7 +63,7 @@ async def get_community_report_detail(
 @router.get(
     "/collections/{collection_id}/reports/patterns",
     response_model=ReportPatternsResponse,
-    summary="社区规律概览",
+    summary="Core pattern 概览",
 )
 async def list_patterns(
     collection_id: str,

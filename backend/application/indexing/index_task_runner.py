@@ -30,7 +30,7 @@ except Exception:  # noqa: BLE001
 
 
 class IndexTaskRunner:
-    """App-layer task runner that orchestrates GraphRAG and protocol postprocess."""
+    """App-layer task runner that orchestrates source indexing and Core postprocess."""
 
     def __init__(
         self,
@@ -144,7 +144,7 @@ class IndexTaskRunner:
         try:
             self.task_service.update_task(
                 task_id,
-                current_stage="graphrag_index_started",
+                current_stage="source_index_started",
                 progress_percent=25,
                 output_path=str(output_dir),
             )
@@ -159,7 +159,7 @@ class IndexTaskRunner:
             errors = [str(err) for o in outputs for err in (o.errors or [])]
             self.task_service.update_task(
                 task_id,
-                current_stage="graphrag_index_completed",
+                current_stage="source_index_completed",
                 progress_percent=60,
                 output_path=str(output_dir),
                 errors=errors,

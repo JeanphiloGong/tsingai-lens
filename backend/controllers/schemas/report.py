@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class ReportCommunitySummary(BaseModel):
-    """Summary for a community report."""
+    """Summary for a Core-derived pattern group report."""
 
     report_id: str | None = None
     community_id: int | None = None
@@ -22,7 +22,7 @@ class ReportCommunitySummary(BaseModel):
 
 
 class ReportCommunityListResponse(BaseModel):
-    """Response containing community report summaries."""
+    """Response containing Core-derived pattern group summaries."""
 
     collection_id: str
     level: int | None = None
@@ -32,7 +32,7 @@ class ReportCommunityListResponse(BaseModel):
 
 
 class ReportEntityItem(BaseModel):
-    """Entity item for community report details."""
+    """Node-like item for a Core-derived pattern group detail."""
 
     id: str
     title: str
@@ -43,7 +43,7 @@ class ReportEntityItem(BaseModel):
 
 
 class ReportRelationshipItem(BaseModel):
-    """Relationship item for community report details."""
+    """Edge-like item for a Core-derived pattern group detail."""
 
     id: str
     source: str
@@ -63,7 +63,7 @@ class ReportDocumentItem(BaseModel):
 
 
 class ReportCommunityDetailResponse(BaseModel):
-    """Community report detail response."""
+    """Core-derived pattern group detail response."""
 
     collection_id: str
     community_id: int | None = None
@@ -84,7 +84,7 @@ class ReportCommunityDetailResponse(BaseModel):
 
 
 class ReportPatternItem(BaseModel):
-    """Pattern summary item."""
+    """Core-derived pattern summary item."""
 
     community_id: int | None = None
     title: str | None = None

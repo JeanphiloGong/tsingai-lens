@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import HTTPException
 
+from application.source.query_runtime_service import (
+    execute_source_query,
+    load_query_runtime,
+)
 from controllers.schemas.query import QueryRequest, QueryResponse
-from infra.graphrag import collection_store
-from retrieval.api import query as query_api
 from retrieval.config.enums import SearchMethod
 from retrieval.utils.api import create_storage_from_config, reformat_context_data
-from retrieval.utils.storage import load_table_from_storage, storage_has_table
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,10 @@ async def query_index(payload: QueryRequest) -> QueryResponse:
     if not payload.query:
         raise HTTPException(status_code=400, detail="query 不能为空")
 
-    config, collection_id = collection_store.load_collection_config(payload.collection_id)
-    base_dir = Path(getattr(config.output, "base_dir", config.root_dir))
-    output_storage = create_storage_from_config(config.output)
+    config, collection_id, base_dir, source_output_config = await load_query_runtime(
+        payload.collection_id
+    )
+    output_storage = create_storage_from_config(source_output_config)
 
     try:
         method = (
@@ -35,77 +36,16 @@ async def query_index(payload: QueryRequest) -> QueryResponse:
     community_level = payload.community_level if payload.community_level is not None else 2
 
     try:
-        if method == SearchMethod.GLOBAL:
-            entities = await load_table_from_storage("entities", output_storage)
-            communities = await load_table_from_storage("communities", output_storage)
-            community_reports = await load_table_from_storage(
-                "community_reports", output_storage
-            )
-            response, context_data = await query_api.global_search(
-                config=config,
-                entities=entities,
-                communities=communities,
-                community_reports=community_reports,
-                community_level=payload.community_level,
-                dynamic_community_selection=payload.dynamic_community_selection,
-                response_type=payload.response_type,
-                query=payload.query,
-                verbose=payload.verbose,
-            )
-        elif method == SearchMethod.LOCAL:
-            entities = await load_table_from_storage("entities", output_storage)
-            communities = await load_table_from_storage("communities", output_storage)
-            community_reports = await load_table_from_storage(
-                "community_reports", output_storage
-            )
-            text_units = await load_table_from_storage("text_units", output_storage)
-            relationships = await load_table_from_storage("relationships", output_storage)
-            covariates = None
-            if await storage_has_table("covariates", output_storage):
-                covariates = await load_table_from_storage("covariates", output_storage)
-            response, context_data = await query_api.local_search(
-                config=config,
-                entities=entities,
-                communities=communities,
-                community_reports=community_reports,
-                text_units=text_units,
-                relationships=relationships,
-                covariates=covariates,
-                community_level=community_level,
-                response_type=payload.response_type,
-                query=payload.query,
-                verbose=payload.verbose,
-            )
-        elif method == SearchMethod.DRIFT:
-            entities = await load_table_from_storage("entities", output_storage)
-            communities = await load_table_from_storage("communities", output_storage)
-            community_reports = await load_table_from_storage(
-                "community_reports", output_storage
-            )
-            text_units = await load_table_from_storage("text_units", output_storage)
-            relationships = await load_table_from_storage("relationships", output_storage)
-            response, context_data = await query_api.drift_search(
-                config=config,
-                entities=entities,
-                communities=communities,
-                community_reports=community_reports,
-                text_units=text_units,
-                relationships=relationships,
-                community_level=community_level,
-                response_type=payload.response_type,
-                query=payload.query,
-                verbose=payload.verbose,
-            )
-        elif method == SearchMethod.BASIC:
-            text_units = await load_table_from_storage("text_units", output_storage)
-            response, context_data = await query_api.basic_search(
-                config=config,
-                text_units=text_units,
-                query=payload.query,
-                verbose=payload.verbose,
-            )
-        else:
-            raise HTTPException(status_code=400, detail="不支持的检索方法")
+        response, context_data = await execute_source_query(
+            config=config,
+            output_storage=output_storage,
+            method=method,
+            query=payload.query,
+            response_type=payload.response_type,
+            verbose=payload.verbose,
+            community_level=community_level,
+            dynamic_community_selection=payload.dynamic_community_selection,
+        )
     except HTTPException:
         raise
     except Exception as exc:

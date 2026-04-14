@@ -30,8 +30,6 @@ class ArtifactRegistryService:
         document_profiles_path = base_dir / "document_profiles.parquet"
         evidence_cards_path = base_dir / "evidence_cards.parquet"
         comparison_rows_path = base_dir / "comparison_rows.parquet"
-        entities_path = base_dir / "entities.parquet"
-        relationships_path = base_dir / "relationships.parquet"
         sections_path = base_dir / "sections.parquet"
         procedure_blocks_path = base_dir / "procedure_blocks.parquet"
         protocol_steps_path = base_dir / "protocol_steps.parquet"
@@ -41,7 +39,17 @@ class ArtifactRegistryService:
         document_profiles_generated = document_profiles_path.exists()
         evidence_cards_generated = evidence_cards_path.exists()
         comparison_rows_generated = comparison_rows_path.exists()
-        graph_generated = entities_path.exists() and relationships_path.exists()
+        document_profiles_ready = self._parquet_has_rows(document_profiles_path)
+        evidence_cards_ready = self._parquet_has_rows(evidence_cards_path)
+        comparison_rows_ready = self._parquet_has_rows(comparison_rows_path)
+        graph_generated = (
+            document_profiles_generated
+            and evidence_cards_generated
+            and comparison_rows_generated
+        )
+        graph_ready = graph_generated and (
+            document_profiles_ready or evidence_cards_ready or comparison_rows_ready
+        )
         sections_generated = sections_path.exists()
         procedure_blocks_generated = procedure_blocks_path.exists()
         protocol_steps_generated = protocol_steps_path.exists()
@@ -53,15 +61,13 @@ class ArtifactRegistryService:
             "documents_generated": documents_generated,
             "documents_ready": self._parquet_has_rows(documents_path),
             "document_profiles_generated": document_profiles_generated,
-            "document_profiles_ready": self._parquet_has_rows(document_profiles_path),
+            "document_profiles_ready": document_profiles_ready,
             "evidence_cards_generated": evidence_cards_generated,
-            "evidence_cards_ready": self._parquet_has_rows(evidence_cards_path),
+            "evidence_cards_ready": evidence_cards_ready,
             "comparison_rows_generated": comparison_rows_generated,
-            "comparison_rows_ready": self._parquet_has_rows(comparison_rows_path),
+            "comparison_rows_ready": comparison_rows_ready,
             "graph_generated": graph_generated,
-            "graph_ready": graph_generated
-            and self._parquet_has_rows(entities_path)
-            and self._parquet_has_rows(relationships_path),
+            "graph_ready": graph_ready,
             "sections_generated": sections_generated,
             "sections_ready": self._parquet_has_rows(sections_path),
             "procedure_blocks_generated": procedure_blocks_generated,

@@ -38,7 +38,7 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     task_service.update_task(
         task_service.list_tasks(collection_id=collection_id, limit=1)[0]["task_id"],
         status="running",
-        current_stage="graphrag_index_started",
+        current_stage="source_index_started",
         progress_percent=35,
     )
     artifact_registry.upsert(collection_id, collection_service.get_paths(collection_id).output_dir)
@@ -48,7 +48,7 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     assert overview["collection"]["collection_id"] == collection_id
     assert overview["file_count"] == 1
     assert overview["status_summary"] == "processing"
-    assert overview["latest_task"]["current_stage"] == "graphrag_index_started"
+    assert overview["latest_task"]["current_stage"] == "source_index_started"
     assert overview["capabilities"]["can_view_graph"] is False
     assert overview["capabilities"]["can_generate_sop"] is False
 
@@ -99,12 +99,8 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
             },
         ]
     )
-    entities = pd.DataFrame([{"id": "ent-1", "title": "epoxy"}])
-    relationships = pd.DataFrame([{"source": "epoxy", "target": "SiO2", "weight": 1.0}])
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    entities.to_parquet(output_dir / "entities.parquet", index=False)
-    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
     overview = workspace_service.get_workspace_overview(collection_id)

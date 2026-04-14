@@ -31,12 +31,15 @@ def _graph_not_ready_detail(
     }
 
 
-def _community_not_found_detail(collection_id: str, community_id: str) -> dict[str, str]:
+def _graph_filter_not_supported_detail(
+    collection_id: str,
+    filter_name: str,
+) -> dict[str, str]:
     return {
-        "code": "community_not_found",
-        "message": "The requested community filter could not be resolved for this collection.",
+        "code": "graph_filter_not_supported",
+        "message": "The requested graph filter is not supported on the Core-derived graph.",
         "collection_id": collection_id,
-        "community_id": community_id,
+        "filter_name": filter_name,
     }
 
 
@@ -72,12 +75,12 @@ async def get_collection_graph(
                 missing_artifacts=exc.missing_artifacts,
             ),
         ) from exc
-    except graph_service.GraphCommunityNotFoundError as exc:
+    except graph_service.GraphFilterNotSupportedError as exc:
         raise HTTPException(
-            status_code=404,
-            detail=_community_not_found_detail(
+            status_code=400,
+            detail=_graph_filter_not_supported_detail(
                 collection_id=exc.collection_id,
-                community_id=exc.community_id,
+                filter_name=exc.filter_name,
             ),
         ) from exc
     return CollectionGraphResponse(**payload)
@@ -111,12 +114,12 @@ async def export_collection_graphml(
                 missing_artifacts=exc.missing_artifacts,
             ),
         ) from exc
-    except graph_service.GraphCommunityNotFoundError as exc:
+    except graph_service.GraphFilterNotSupportedError as exc:
         raise HTTPException(
-            status_code=404,
-            detail=_community_not_found_detail(
+            status_code=400,
+            detail=_graph_filter_not_supported_detail(
                 collection_id=exc.collection_id,
-                community_id=exc.community_id,
+                filter_name=exc.filter_name,
             ),
         ) from exc
     return Response(

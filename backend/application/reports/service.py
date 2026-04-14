@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from fastapi import HTTPException
 
+from application.backbone_codec import restore_frame_from_storage
+from application.collections.service import CollectionService
+from application.workspace.artifact_registry_service import ArtifactRegistryService
 from controllers.schemas.report import (
     ReportCommunityDetailResponse,
     ReportCommunityListResponse,
@@ -17,22 +20,114 @@ from controllers.schemas.report import (
     ReportPatternsResponse,
     ReportRelationshipItem,
 )
-from infra.graphrag import collection_store, graphml_export
-
-logger = logging.getLogger(__name__)
 
 
-def _safe_value(value: Any) -> Any:
+_DOCUMENT_PROFILE_JSON_COLUMNS = (
+    "protocol_extractability_signals",
+    "parsing_warnings",
+)
+_EVIDENCE_CARD_JSON_COLUMNS = (
+    "evidence_anchors",
+    "material_system",
+    "condition_context",
+)
+_COMPARISON_ROW_JSON_COLUMNS = (
+    "supporting_evidence_ids",
+    "comparability_warnings",
+)
+
+collection_service = CollectionService()
+artifact_registry_service = ArtifactRegistryService()
+
+
+@dataclass(frozen=True)
+class _PatternGroup:
+    community_id: int
+    title: str
+    summary: str
+    findings: list[str]
+    rating: float | None
+    size: int
+    level: int
+    row_ids: list[str]
+    evidence_ids: list[str]
+    document_ids: list[str]
+    text_unit_ids: list[str]
+
+
+@dataclass(frozen=True)
+class _CoreReportProjection:
+    collection_id: str
+    groups: list[_PatternGroup]
+    document_profiles: dict[str, dict[str, Any]]
+    evidence_cards: dict[str, dict[str, Any]]
+    comparison_rows: dict[str, dict[str, Any]]
+
+
+def _resolve_output_dir(collection_id: str | None) -> tuple[Path, str]:
+    if not collection_id:
+        raise HTTPException(status_code=400, detail="collection_id 不能为空")
+
+    collection_service.get_collection(collection_id)
+    try:
+        artifacts = artifact_registry_service.get(collection_id)
+        output_path = artifacts.get("output_path")
+        if output_path:
+            base_dir = Path(str(output_path)).expanduser().resolve()
+            if base_dir.exists():
+                return base_dir, collection_id
+    except FileNotFoundError:
+        pass
+
+    paths = collection_service.get_paths(collection_id)
+    base_dir = paths.output_dir.expanduser().resolve()
+    if not base_dir.exists():
+        raise HTTPException(status_code=404, detail="collection 输出目录不存在")
+    return base_dir, collection_id
+
+
+def _read_profiles(base_dir: Path) -> pd.DataFrame:
+    path = base_dir / "document_profiles.parquet"
+    if not path.is_file():
+        return pd.DataFrame()
+    return restore_frame_from_storage(
+        pd.read_parquet(path),
+        _DOCUMENT_PROFILE_JSON_COLUMNS,
+    )
+
+
+def _read_evidence_cards(base_dir: Path) -> pd.DataFrame:
+    path = base_dir / "evidence_cards.parquet"
+    if not path.is_file():
+        return pd.DataFrame()
+    return restore_frame_from_storage(
+        pd.read_parquet(path),
+        _EVIDENCE_CARD_JSON_COLUMNS,
+    )
+
+
+def _read_comparison_rows(base_dir: Path) -> pd.DataFrame:
+    path = base_dir / "comparison_rows.parquet"
+    if not path.is_file():
+        return pd.DataFrame()
+    return restore_frame_from_storage(
+        pd.read_parquet(path),
+        _COMPARISON_ROW_JSON_COLUMNS,
+    )
+
+
+def _safe_text(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, float) and pd.isna(value):
         return None
-    return value
+    text = str(value).strip()
+    return text or None
 
 
 def _safe_int(value: Any) -> int | None:
     try:
-        if pd.isna(value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
             return None
         return int(value)
     except Exception:
@@ -41,115 +136,415 @@ def _safe_int(value: Any) -> int | None:
 
 def _safe_float(value: Any) -> float | None:
     try:
-        if pd.isna(value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
             return None
         return float(value)
     except Exception:
         return None
 
 
-def _listify(value: Any) -> list[str]:
+def _string_list(value: Any) -> list[str]:
     if value is None:
+        return []
+    if isinstance(value, float) and pd.isna(value):
         return []
     if isinstance(value, (list, tuple, set)):
         items: list[str] = []
         for item in value:
-            if item is None:
-                continue
-            if isinstance(item, float) and pd.isna(item):
-                continue
-            items.append(str(item))
+            text = _safe_text(item)
+            if text:
+                items.append(text)
         return items
-    if isinstance(value, float) and pd.isna(value):
-        return []
-    return [str(value)]
+    text = _safe_text(value)
+    return [text] if text else []
 
 
-def _sort_reports(df: pd.DataFrame, sort: str | None) -> pd.DataFrame:
-    if df.empty:
-        return df
+def _extract_snippet_ids(anchors: Any) -> list[str]:
+    payload = anchors if isinstance(anchors, list) else []
+    snippet_ids: list[str] = []
+    for anchor in payload:
+        if not isinstance(anchor, dict):
+            continue
+        snippet_id = _safe_text(anchor.get("snippet_id"))
+        if snippet_id and snippet_id not in snippet_ids:
+            snippet_ids.append(snippet_id)
+    return snippet_ids
+
+
+def _build_group_title(material_name: str | None, property_name: str | None) -> str:
+    parts = [part for part in (material_name, property_name) if part]
+    if parts:
+        return " | ".join(parts)
+    return "Unspecified comparison pattern"
+
+
+def _build_group_summary(size: int, document_count: int, evidence_count: int) -> str:
+    return (
+        f"{size} comparison rows, {evidence_count} evidence cards, "
+        f"{document_count} documents."
+    )
+
+
+def _build_group_findings(
+    rows: list[dict[str, Any]],
+    comparable_count: int,
+    limited_count: int,
+    insufficient_count: int,
+    not_comparable_count: int,
+) -> list[str]:
+    findings: list[str] = []
+    if comparable_count > 0:
+        findings.append(f"{comparable_count} rows are fully comparable.")
+    if limited_count > 0:
+        findings.append(f"{limited_count} rows remain limited by missing controls or conditions.")
+    if insufficient_count > 0:
+        findings.append(f"{insufficient_count} rows remain insufficient for direct judgment.")
+    if not_comparable_count > 0:
+        findings.append(f"{not_comparable_count} rows are not directly comparable.")
+
+    values = [
+        _safe_float(row.get("value"))
+        for row in rows
+        if _safe_float(row.get("value")) is not None
+    ]
+    if values:
+        findings.append(
+            f"Observed numeric values span {min(values):.2f} to {max(values):.2f}."
+        )
+    return findings
+
+
+def _build_projection(collection_id: str) -> _CoreReportProjection:
+    base_dir, resolved_collection_id = _resolve_output_dir(collection_id)
+    profiles = _read_profiles(base_dir)
+    evidence_cards = _read_evidence_cards(base_dir)
+    comparison_rows = _read_comparison_rows(base_dir)
+
+    document_lookup: dict[str, dict[str, Any]] = {}
+    for _, row in profiles.iterrows():
+        document_id = _safe_text(row.get("document_id"))
+        if not document_id:
+            continue
+        document_lookup[document_id] = dict(row)
+
+    evidence_lookup: dict[str, dict[str, Any]] = {}
+    for _, row in evidence_cards.iterrows():
+        evidence_id = _safe_text(row.get("evidence_id"))
+        if not evidence_id:
+            continue
+        evidence_lookup[evidence_id] = dict(row)
+
+    comparison_lookup: dict[str, dict[str, Any]] = {}
+    grouped_rows: dict[str, list[dict[str, Any]]] = {}
+    for _, row in comparison_rows.iterrows():
+        row_id = _safe_text(row.get("row_id"))
+        if not row_id:
+            continue
+        payload = dict(row)
+        comparison_lookup[row_id] = payload
+        group_key = "||".join(
+            [
+                _safe_text(payload.get("material_system_normalized")) or "",
+                _safe_text(payload.get("property_normalized")) or "",
+            ]
+        )
+        grouped_rows.setdefault(group_key, []).append(payload)
+
+    groups: list[_PatternGroup] = []
+    sorted_items = sorted(
+        grouped_rows.items(),
+        key=lambda item: (
+            -len(item[1]),
+            _build_group_title(
+                _safe_text(item[1][0].get("material_system_normalized")) if item[1] else None,
+                _safe_text(item[1][0].get("property_normalized")) if item[1] else None,
+            ),
+        ),
+    )
+
+    for index, (_, rows) in enumerate(sorted_items, start=1):
+        first_row = rows[0] if rows else {}
+        material_name = _safe_text(first_row.get("material_system_normalized"))
+        property_name = _safe_text(first_row.get("property_normalized"))
+        evidence_ids: list[str] = []
+        document_ids: list[str] = []
+        text_unit_ids: list[str] = []
+        comparable_count = 0
+        limited_count = 0
+        insufficient_count = 0
+        not_comparable_count = 0
+
+        for row in rows:
+            source_document_id = _safe_text(row.get("source_document_id"))
+            if source_document_id and source_document_id not in document_ids:
+                document_ids.append(source_document_id)
+
+            comparability = _safe_text(row.get("comparability_status")) or "limited"
+            if comparability == "comparable":
+                comparable_count += 1
+            elif comparability == "limited":
+                limited_count += 1
+            elif comparability == "insufficient":
+                insufficient_count += 1
+            elif comparability == "not_comparable":
+                not_comparable_count += 1
+
+            for evidence_id in _string_list(row.get("supporting_evidence_ids")):
+                if evidence_id not in evidence_ids:
+                    evidence_ids.append(evidence_id)
+                evidence = evidence_lookup.get(evidence_id, {})
+                evidence_document_id = _safe_text(evidence.get("document_id"))
+                if evidence_document_id and evidence_document_id not in document_ids:
+                    document_ids.append(evidence_document_id)
+                for snippet_id in _extract_snippet_ids(evidence.get("evidence_anchors")):
+                    if snippet_id not in text_unit_ids:
+                        text_unit_ids.append(snippet_id)
+
+        size = len(rows)
+        rating = round(comparable_count / size, 2) if size > 0 else None
+        title = _build_group_title(material_name, property_name)
+        summary = _build_group_summary(size, len(document_ids), len(evidence_ids))
+        findings = _build_group_findings(
+            rows,
+            comparable_count=comparable_count,
+            limited_count=limited_count,
+            insufficient_count=insufficient_count,
+            not_comparable_count=not_comparable_count,
+        )
+        groups.append(
+            _PatternGroup(
+                community_id=index,
+                title=title,
+                summary=summary,
+                findings=findings,
+                rating=rating,
+                size=size,
+                level=1,
+                row_ids=[
+                    _safe_text(row.get("row_id")) or ""
+                    for row in rows
+                    if _safe_text(row.get("row_id"))
+                ],
+                evidence_ids=evidence_ids,
+                document_ids=document_ids,
+                text_unit_ids=text_unit_ids,
+            )
+        )
+
+    return _CoreReportProjection(
+        collection_id=resolved_collection_id,
+        groups=groups,
+        document_profiles=document_lookup,
+        evidence_cards=evidence_lookup,
+        comparison_rows=comparison_lookup,
+    )
+
+
+def _sort_groups(groups: list[_PatternGroup], sort: str | None) -> list[_PatternGroup]:
     sort_key = (sort or "rating").lower()
-    if sort_key == "size" and "size" in df.columns:
-        return df.sort_values(by=["size", "rating"], ascending=False, na_position="last")
-    if "rating" in df.columns:
-        return df.sort_values(by=["rating", "size"], ascending=False, na_position="last")
-    if "size" in df.columns:
-        return df.sort_values(by=["size"], ascending=False, na_position="last")
-    return df
+    if sort_key == "size":
+        return sorted(groups, key=lambda item: (-item.size, -(item.rating or 0.0), item.title))
+    return sorted(groups, key=lambda item: (-(item.rating or 0.0), -item.size, item.title))
 
 
-def _build_summary(row: pd.Series) -> ReportCommunitySummary:
-    children_value = row.get("children")
-    children = []
-    if isinstance(children_value, (list, tuple, set)):
-        children = [int(c) for c in children_value]
-    elif isinstance(children_value, pd.Series):
-        children = [int(c) for c in children_value.tolist()]
-    elif _safe_value(children_value) is not None:
-        try:
-            children = list(children_value)
-        except Exception:
-            children = []
-
+def _summary_from_group(group: _PatternGroup) -> ReportCommunitySummary:
     return ReportCommunitySummary(
-        report_id=str(row.get("id")) if _safe_value(row.get("id")) is not None else None,
-        community_id=_safe_int(row.get("community")),
-        human_readable_id=_safe_int(row.get("human_readable_id")),
-        level=_safe_int(row.get("level")),
-        parent=_safe_int(row.get("parent")),
-        children=children or None,
-        title=_safe_value(row.get("title")),
-        summary=_safe_value(row.get("summary")),
-        findings=_safe_value(row.get("findings")),
-        rating=_safe_float(row.get("rating")),
-        size=_safe_int(row.get("size")),
+        report_id=f"pattern-{group.community_id}",
+        community_id=group.community_id,
+        human_readable_id=group.community_id,
+        level=group.level,
+        parent=None,
+        children=None,
+        title=group.title,
+        summary=group.summary,
+        findings=group.findings,
+        rating=group.rating,
+        size=group.size,
     )
 
 
-def _find_report_row(
-    reports: pd.DataFrame, community_id: str, level: int | None
-) -> pd.Series:
-    if reports.empty:
-        raise HTTPException(status_code=404, detail="社区报告为空")
-    mask = (
-        (reports["id"].astype(str) == community_id)
-        | (reports["human_readable_id"].astype(str) == community_id)
-        | (reports["community"].astype(str) == community_id)
-    )
-    filtered = reports[mask]
-    if level is not None and "level" in filtered.columns:
-        filtered = filtered[filtered["level"] == level]
-    if filtered.empty:
-        raise HTTPException(status_code=404, detail="未找到指定社区")
-    if "level" in filtered.columns:
-        filtered = filtered.sort_values(by=["level"], ascending=False)
-    return filtered.iloc[0]
+def _find_group(groups: list[_PatternGroup], community_id: str, level: int | None) -> _PatternGroup:
+    matched = [group for group in groups if str(group.community_id) == str(community_id)]
+    if level is not None:
+        matched = [group for group in matched if group.level == level]
+    if not matched:
+        raise HTTPException(status_code=404, detail="未找到指定 pattern group")
+    return matched[0]
 
 
-def _find_community_row(
-    communities: pd.DataFrame, community_id: str | int | None, level: int | None
-) -> pd.Series | None:
-    if communities is None or communities.empty:
-        return None
-    if community_id is None:
-        return None
-    mask = communities["community"].astype(str) == str(community_id)
-    filtered = communities[mask]
-    if level is not None and "level" in communities.columns:
-        filtered = filtered[filtered["level"] == level]
-    if filtered.empty:
-        return None
-    if "level" in filtered.columns:
-        filtered = filtered.sort_values(by=["level"], ascending=False)
-    return filtered.iloc[0]
+def _build_detail_entities(
+    projection: _CoreReportProjection,
+    group: _PatternGroup,
+    entity_limit: int,
+) -> tuple[list[ReportEntityItem], dict[str, int]]:
+    entities: list[tuple[int, int, ReportEntityItem]] = []
+    degree_map: dict[str, int] = {}
+
+    for document_id in group.document_ids:
+        profile = projection.document_profiles.get(document_id, {})
+        title = _safe_text(profile.get("title")) or _safe_text(profile.get("source_filename")) or document_id
+        evidence_count = sum(
+            1
+            for evidence_id in group.evidence_ids
+            if _safe_text(projection.evidence_cards.get(evidence_id, {}).get("document_id")) == document_id
+        )
+        comparison_count = sum(
+            1
+            for row_id in group.row_ids
+            if _safe_text(projection.comparison_rows.get(row_id, {}).get("source_document_id")) == document_id
+        )
+        degree = evidence_count + comparison_count
+        degree_map[f"doc:{document_id}"] = degree
+        entities.append(
+            (
+                degree,
+                comparison_count,
+                ReportEntityItem(
+                    id=f"doc:{document_id}",
+                    title=title,
+                    type="document",
+                    description=_safe_text(profile.get("doc_type")),
+                    degree=degree,
+                    frequency=comparison_count,
+                ),
+            )
+        )
+
+    for evidence_id in group.evidence_ids:
+        evidence = projection.evidence_cards.get(evidence_id, {})
+        supported_rows = [
+            row_id
+            for row_id in group.row_ids
+            if evidence_id
+            in _string_list(projection.comparison_rows.get(row_id, {}).get("supporting_evidence_ids"))
+        ]
+        degree = len(supported_rows) + 1
+        degree_map[f"evi:{evidence_id}"] = degree
+        entities.append(
+            (
+                degree,
+                len(supported_rows),
+                ReportEntityItem(
+                    id=f"evi:{evidence_id}",
+                    title=_safe_text(evidence.get("claim_text")) or evidence_id,
+                    type="evidence",
+                    description=_safe_text(evidence.get("claim_type")),
+                    degree=degree,
+                    frequency=len(supported_rows),
+                ),
+            )
+        )
+
+    for row_id in group.row_ids:
+        row = projection.comparison_rows.get(row_id, {})
+        support_count = len(_string_list(row.get("supporting_evidence_ids")))
+        degree_map[f"cmp:{row_id}"] = support_count
+        entities.append(
+            (
+                support_count,
+                support_count,
+                ReportEntityItem(
+                    id=f"cmp:{row_id}",
+                    title=_build_group_title(
+                        _safe_text(row.get("material_system_normalized")),
+                        _safe_text(row.get("property_normalized")),
+                    ),
+                    type="comparison",
+                    description=_safe_text(row.get("comparability_status")),
+                    degree=support_count,
+                    frequency=support_count,
+                ),
+            )
+        )
+
+    entities.sort(key=lambda item: (-item[0], -item[1], item[2].title))
+    return [item[2] for item in entities[:entity_limit]], degree_map
 
 
-def _load_reports_base_dir(collection_id: str | None):
-    config, resolved_collection_id = collection_store.load_collection_config(collection_id)
-    base_dir = collection_store.collection_output_dir(
-        collection_store.collection_dir(resolved_collection_id)
-    )
-    return base_dir, resolved_collection_id
+def _build_detail_relationships(
+    projection: _CoreReportProjection,
+    group: _PatternGroup,
+    relationship_limit: int,
+    degree_map: dict[str, int],
+) -> list[ReportRelationshipItem]:
+    relationships: list[tuple[float, ReportRelationshipItem]] = []
+
+    for evidence_id in group.evidence_ids:
+        evidence = projection.evidence_cards.get(evidence_id, {})
+        document_id = _safe_text(evidence.get("document_id"))
+        evidence_title = _safe_text(evidence.get("claim_text")) or evidence_id
+        snippet_ids = _extract_snippet_ids(evidence.get("evidence_anchors"))
+        if document_id and document_id in group.document_ids:
+            profile = projection.document_profiles.get(document_id, {})
+            document_title = (
+                _safe_text(profile.get("title"))
+                or _safe_text(profile.get("source_filename"))
+                or document_id
+            )
+            combined_degree = degree_map.get(f"doc:{document_id}", 0) + degree_map.get(
+                f"evi:{evidence_id}", 0
+            )
+            relationships.append(
+                (
+                    float(combined_degree),
+                    ReportRelationshipItem(
+                        id=f"edge:doc:{document_id}:evi:{evidence_id}",
+                        source=document_title,
+                        target=evidence_title,
+                        description="document_to_evidence",
+                        weight=1.0,
+                        combined_degree=float(combined_degree),
+                        text_unit_count=len(snippet_ids) if snippet_ids else None,
+                    ),
+                )
+            )
+
+        for row_id in group.row_ids:
+            row = projection.comparison_rows.get(row_id, {})
+            if evidence_id not in _string_list(row.get("supporting_evidence_ids")):
+                continue
+            comparison_title = _build_group_title(
+                _safe_text(row.get("material_system_normalized")),
+                _safe_text(row.get("property_normalized")),
+            )
+            combined_degree = degree_map.get(f"evi:{evidence_id}", 0) + degree_map.get(
+                f"cmp:{row_id}", 0
+            )
+            relationships.append(
+                (
+                    float(combined_degree),
+                    ReportRelationshipItem(
+                        id=f"edge:evi:{evidence_id}:cmp:{row_id}",
+                        source=evidence_title,
+                        target=comparison_title,
+                        description="evidence_to_comparison",
+                        weight=1.0,
+                        combined_degree=float(combined_degree),
+                        text_unit_count=len(snippet_ids) if snippet_ids else None,
+                    ),
+                )
+            )
+
+    relationships.sort(key=lambda item: (-item[0], item[1].id))
+    return [item[1] for item in relationships[:relationship_limit]]
+
+
+def _build_detail_documents(
+    projection: _CoreReportProjection,
+    group: _PatternGroup,
+    document_limit: int,
+) -> list[ReportDocumentItem]:
+    items: list[ReportDocumentItem] = []
+    for document_id in group.document_ids[:document_limit]:
+        profile = projection.document_profiles.get(document_id, {})
+        items.append(
+            ReportDocumentItem(
+                id=document_id,
+                title=_safe_text(profile.get("title")) or _safe_text(profile.get("source_filename")),
+                creation_date=None,
+            )
+        )
+    return items
 
 
 def list_community_reports(
@@ -160,107 +555,23 @@ def list_community_reports(
     min_size: int,
     sort: str | None,
 ) -> ReportCommunityListResponse:
-    base_dir, resolved_collection_id = _load_reports_base_dir(collection_id)
-    reports = graphml_export.read_parquet_or_error(
-        base_dir / "community_reports.parquet", "社区报告"
-    )
-
-    if level is not None and "level" in reports.columns:
-        reports = reports[reports["level"] == level]
-    if min_size > 0 and "size" in reports.columns:
-        reports = reports[reports["size"].fillna(0) >= min_size]
-
-    total = len(reports)
-    reports = _sort_reports(reports, sort)
-    paged = reports.iloc[offset : offset + limit]
-
-    items = [_build_summary(row) for _, row in paged.iterrows()]
+    projection = _build_projection(collection_id or "")
+    groups = projection.groups
+    if level is not None:
+        groups = [group for group in groups if group.level == level]
+    if min_size > 0:
+        groups = [group for group in groups if group.size >= min_size]
+    groups = _sort_groups(groups, sort)
+    total = len(groups)
+    paged = groups[offset : offset + limit]
 
     return ReportCommunityListResponse(
-        collection_id=resolved_collection_id,
+        collection_id=projection.collection_id,
         level=level,
         total=total,
-        count=len(items),
-        items=items,
+        count=len(paged),
+        items=[_summary_from_group(group) for group in paged],
     )
-
-
-@dataclass(frozen=True)
-class _DetailData:
-    summary: ReportCommunitySummary
-    entity_ids: list[str]
-    relationship_ids: list[str]
-    text_unit_ids: list[str]
-
-
-def _load_detail_context(
-    reports: pd.DataFrame,
-    communities: pd.DataFrame | None,
-    community_id: str,
-    level: int | None,
-) -> _DetailData:
-    report_row = _find_report_row(reports, community_id, level)
-    summary = _build_summary(report_row)
-    community_value = report_row.get("community")
-    community_row = _find_community_row(communities, community_value, summary.level)
-    entity_ids = []
-    relationship_ids = []
-    text_unit_ids = []
-    if community_row is not None:
-        entity_ids = _listify(community_row.get("entity_ids"))
-        relationship_ids = _listify(community_row.get("relationship_ids"))
-        text_unit_ids = _listify(community_row.get("text_unit_ids"))
-    return _DetailData(
-        summary=summary,
-        entity_ids=entity_ids,
-        relationship_ids=relationship_ids,
-        text_unit_ids=text_unit_ids,
-    )
-
-
-def _load_documents_from_text_units(
-    base_dir,
-    text_unit_ids: list[str],
-    document_limit: int,
-) -> tuple[list[ReportDocumentItem], int | None, int | None]:
-    if not text_unit_ids:
-        return [], 0, 0
-    text_units = graphml_export.read_parquet_optional(
-        base_dir / "text_units.parquet", "文本单元"
-    )
-    if text_units is None or "id" not in text_units.columns:
-        return [], len(text_unit_ids), None
-    doc_ids: set[str] = set()
-    text_unit_ids_set = set(text_unit_ids)
-    for _, row in text_units.iterrows():
-        if str(row.get("id")) not in text_unit_ids_set:
-            continue
-        doc_ids.update(_listify(row.get("document_ids")))
-    if not doc_ids:
-        return [], len(text_unit_ids), 0
-
-    documents = graphml_export.read_parquet_optional(
-        base_dir / "documents.parquet", "文档"
-    )
-    items: list[ReportDocumentItem] = []
-    if documents is not None and {"id", "title"}.issubset(documents.columns):
-        subset = documents[documents["id"].astype(str).isin(doc_ids)]
-        subset = subset.head(document_limit)
-        for _, row in subset.iterrows():
-            items.append(
-                ReportDocumentItem(
-                    id=str(row.get("id")),
-                    title=_safe_value(row.get("title")),
-                    creation_date=_safe_value(row.get("creation_date")),
-                )
-            )
-    else:
-        for doc_id in list(doc_ids)[:document_limit]:
-            items.append(
-                ReportDocumentItem(id=str(doc_id), title=None, creation_date=None)
-            )
-
-    return items, len(text_unit_ids), len(doc_ids)
 
 
 def get_community_report_detail(
@@ -271,91 +582,36 @@ def get_community_report_detail(
     relationship_limit: int,
     document_limit: int,
 ) -> ReportCommunityDetailResponse:
-    base_dir, resolved_collection_id = _load_reports_base_dir(collection_id)
-    reports = graphml_export.read_parquet_or_error(
-        base_dir / "community_reports.parquet", "社区报告"
+    projection = _build_projection(collection_id or "")
+    group = _find_group(projection.groups, community_id, level)
+    summary = _summary_from_group(group)
+    entities_payload, degree_map = _build_detail_entities(
+        projection,
+        group,
+        entity_limit,
     )
-    communities = graphml_export.read_parquet_optional(
-        base_dir / "communities.parquet", "社区数据"
+    relationships_payload = _build_detail_relationships(
+        projection,
+        group,
+        relationship_limit,
+        degree_map,
     )
-
-    detail = _load_detail_context(
-        reports,
-        communities,
-        community_id,
-        level,
-    )
-
-    entities_payload: list[ReportEntityItem] = []
-    relationships_payload: list[ReportRelationshipItem] = []
-
-    if detail.entity_ids:
-        entities_df = graphml_export.read_parquet_optional(
-            base_dir / "entities.parquet", "实体数据"
-        )
-        if entities_df is not None:
-            subset = entities_df[entities_df["id"].astype(str).isin(detail.entity_ids)]
-            subset = subset.sort_values(
-                by=["degree", "frequency"], ascending=False, na_position="last"
-            ).head(entity_limit)
-            for _, row in subset.iterrows():
-                entities_payload.append(
-                    ReportEntityItem(
-                        id=str(row.get("id")),
-                        title=_safe_value(row.get("title")) or "",
-                        type=_safe_value(row.get("type")),
-                        description=_safe_value(row.get("description")),
-                        degree=_safe_int(row.get("degree")),
-                        frequency=_safe_int(row.get("frequency")),
-                    )
-                )
-
-    if detail.relationship_ids:
-        relationships_df = graphml_export.read_parquet_optional(
-            base_dir / "relationships.parquet", "关系数据"
-        )
-        if relationships_df is not None:
-            subset = relationships_df[
-                relationships_df["id"].astype(str).isin(detail.relationship_ids)
-            ]
-            subset = subset.sort_values(
-                by=["weight", "combined_degree"], ascending=False, na_position="last"
-            ).head(relationship_limit)
-            for _, row in subset.iterrows():
-                relationships_payload.append(
-                    ReportRelationshipItem(
-                        id=str(row.get("id")),
-                        source=_safe_value(row.get("source")) or "",
-                        target=_safe_value(row.get("target")) or "",
-                        description=_safe_value(row.get("description")),
-                        weight=_safe_float(row.get("weight")),
-                        combined_degree=_safe_float(row.get("combined_degree")),
-                        text_unit_count=len(_listify(row.get("text_unit_ids")))
-                        if row.get("text_unit_ids") is not None
-                        else None,
-                    )
-                )
-
-    documents_payload, text_unit_count, document_count = _load_documents_from_text_units(
-        base_dir,
-        detail.text_unit_ids,
-        document_limit,
-    )
+    documents_payload = _build_detail_documents(projection, group, document_limit)
 
     return ReportCommunityDetailResponse(
-        collection_id=resolved_collection_id,
-        community_id=detail.summary.community_id,
-        human_readable_id=detail.summary.human_readable_id,
-        level=detail.summary.level,
-        parent=detail.summary.parent,
-        children=detail.summary.children,
-        title=detail.summary.title,
-        summary=detail.summary.summary,
-        findings=detail.summary.findings,
-        rating=detail.summary.rating,
-        size=detail.summary.size,
-        document_count=document_count,
-        text_unit_count=text_unit_count,
+        collection_id=projection.collection_id,
+        community_id=summary.community_id,
+        human_readable_id=summary.human_readable_id,
+        level=summary.level,
+        parent=summary.parent,
+        children=summary.children,
+        title=summary.title,
+        summary=summary.summary,
+        findings=summary.findings,
+        rating=summary.rating,
+        size=summary.size,
+        document_count=len(group.document_ids),
+        text_unit_count=len(group.text_unit_ids),
         entities=entities_payload,
         relationships=relationships_payload,
         documents=documents_payload,
@@ -368,48 +624,41 @@ def list_patterns(
     limit: int,
     sort: str | None,
 ) -> ReportPatternsResponse:
-    base_dir, resolved_collection_id = _load_reports_base_dir(collection_id)
-    reports = graphml_export.read_parquet_or_error(
-        base_dir / "community_reports.parquet", "社区报告"
-    )
-    if level is not None and "level" in reports.columns:
-        reports = reports[reports["level"] == level]
+    projection = _build_projection(collection_id or "")
+    groups = projection.groups
+    if level is not None:
+        groups = [group for group in groups if group.level == level]
+    groups = _sort_groups(groups, sort)
 
-    reports = _sort_reports(reports, sort)
-    items = []
-    for _, row in reports.head(limit).iterrows():
-        summary = _build_summary(row)
-        items.append(
-            ReportPatternItem(
-                community_id=summary.community_id,
-                title=summary.title,
-                summary=summary.summary,
-                findings=summary.findings,
-                rating=summary.rating,
-                size=summary.size,
-                level=summary.level,
-            )
+    items = [
+        ReportPatternItem(
+            community_id=group.community_id,
+            title=group.title,
+            summary=group.summary,
+            findings=group.findings,
+            rating=group.rating,
+            size=group.size,
+            level=group.level,
         )
+        for group in groups[:limit]
+    ]
 
-    entities_df = graphml_export.read_parquet_optional(
-        base_dir / "entities.parquet", "实体数据"
-    )
-    relationships_df = graphml_export.read_parquet_optional(
-        base_dir / "relationships.parquet", "关系数据"
-    )
-    documents_df = graphml_export.read_parquet_optional(
-        base_dir / "documents.parquet", "文档"
+    total_relationships = sum(
+        len(group.evidence_ids) + sum(len(_string_list(projection.comparison_rows[row_id].get("supporting_evidence_ids"))) for row_id in group.row_ids)
+        for group in groups
     )
 
     return ReportPatternsResponse(
-        collection_id=resolved_collection_id,
+        collection_id=projection.collection_id,
         level=level,
-        total_communities=len(reports),
-        total_entities=len(entities_df) if entities_df is not None else None,
-        total_relationships=len(relationships_df)
-        if relationships_df is not None
-        else None,
-        total_documents=len(documents_df) if documents_df is not None else None,
+        total_communities=len(groups),
+        total_entities=(
+            len(projection.document_profiles)
+            + len(projection.evidence_cards)
+            + len(projection.comparison_rows)
+        ),
+        total_relationships=total_relationships,
+        total_documents=len(projection.document_profiles),
         count=len(items),
         items=items,
     )

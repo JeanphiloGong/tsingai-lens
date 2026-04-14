@@ -449,8 +449,13 @@ def test_collection_task_and_query_flow(app_client):
     assert graph.status_code == 200
     graph_body = graph.json()
     assert graph_body["collection_id"] == collection_id
-    assert len(graph_body["nodes"]) == 2
-    assert len(graph_body["edges"]) == 1
+    assert len(graph_body["nodes"]) >= 3
+    assert len(graph_body["edges"]) >= 2
+    assert {item["type"] for item in graph_body["nodes"]} >= {
+        "document",
+        "evidence",
+        "comparison",
+    }
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 200
@@ -534,8 +539,9 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     graph_detail = graph.json()["detail"]
     assert graph_detail["code"] == "graph_not_ready"
     assert graph_detail["collection_id"] == collection_id
-    assert "entities.parquet" in graph_detail["missing_artifacts"]
-    assert "relationships.parquet" in graph_detail["missing_artifacts"]
+    assert "document_profiles.parquet" in graph_detail["missing_artifacts"]
+    assert "evidence_cards.parquet" in graph_detail["missing_artifacts"]
+    assert "comparison_rows.parquet" in graph_detail["missing_artifacts"]
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 409
@@ -544,26 +550,19 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     assert graphml_detail["collection_id"] == collection_id
 
 
-def test_graph_endpoint_returns_community_not_found_error(app_client):
-    collection_id, task_id = _create_indexed_collection(app_client, name="Community Graph")
-
-    artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}/artifacts")
-    assert artifacts.status_code == 200
-    output_dir = Path(artifacts.json()["output_path"])
-    _write_community_outputs(output_dir)
-
+def test_graph_endpoint_rejects_legacy_community_filter(app_client):
+    collection_id, _task_id = _create_indexed_collection(app_client, name="Community Graph")
     graph = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/graph",
         params={"community_id": "999"},
     )
-    assert graph.status_code == 404
+    assert graph.status_code == 400
     detail = graph.json()["detail"]
-    assert detail["code"] == "community_not_found"
+    assert detail["code"] == "graph_filter_not_supported"
     assert detail["collection_id"] == collection_id
-    assert detail["community_id"] == "999"
+    assert detail["filter_name"] == "community_id"
 
-
-def test_graph_endpoints_fall_back_to_core_projection_when_legacy_graph_is_missing(
+def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     app_client,
 ):
     from controllers import graph as graph_controller

@@ -24,6 +24,13 @@ Out of scope:
 - detailed visual design and interaction styling
 - backend extraction algorithm internals
 
+## Companion Docs
+
+- [`../../../../backend/docs/plans/claim-traceback-navigation-implementation-plan.md`](../../../../backend/docs/plans/claim-traceback-navigation-implementation-plan.md)
+  Backend-owned child implementation plan for the current v1 traceback slice
+- [`../../../../backend/docs/specs/api.md`](../../../../backend/docs/specs/api.md)
+  Authoritative public API contract for traceback and document content
+
 ## User-Level Workflow Contract
 
 1. user views a claim-bearing output in `comparisons` or `evidence`
@@ -138,4 +145,3 @@ Required checks:
 - one-click jump from evidence cards to source viewer
 - deterministic fallback behavior with explicit warning copy
 - no silent failure path
-

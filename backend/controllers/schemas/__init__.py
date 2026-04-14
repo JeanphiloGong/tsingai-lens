@@ -8,6 +8,8 @@ from .collection import (
     CollectionResponse,
 )
 from .documents import (
+    DocumentContentResponse,
+    DocumentContentSectionResponse,
     DocumentProfileItemResponse,
     DocumentProfileListResponse,
     DocumentProfileSummaryResponse,
@@ -17,6 +19,7 @@ from .evidence import (
     EvidenceAnchorResponse,
     EvidenceCardItemResponse,
     EvidenceCardListResponse,
+    EvidenceTracebackResponse,
 )
 from .goals import (
     CoverageAssessmentResponse,
@@ -76,6 +79,8 @@ __all__ = [
     "CollectionDeleteResponse",
     "CollectionFileResponse",
     "CollectionFileListResponse",
+    "DocumentContentResponse",
+    "DocumentContentSectionResponse",
     "DocumentProfileItemResponse",
     "DocumentProfileListResponse",
     "DocumentProfileSummaryResponse",
@@ -83,6 +88,7 @@ __all__ = [
     "ConditionContextResponse",
     "EvidenceCardItemResponse",
     "EvidenceCardListResponse",
+    "EvidenceTracebackResponse",
     "GoalIntakeRequest",
     "ResearchBriefResponse",
     "CoverageAssessmentResponse",

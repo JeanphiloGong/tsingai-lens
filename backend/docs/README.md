@@ -55,8 +55,9 @@ Start with:
 
 Then move to the owning plan family only when you are already inside that wave:
 
-- Core quality:
-  [`plans/core-parsing-quality-hardening-plan.md`](plans/core-parsing-quality-hardening-plan.md)
+- Core quality and traceback:
+  [`plans/core-parsing-quality-hardening-plan.md`](plans/core-parsing-quality-hardening-plan.md),
+  [`plans/claim-traceback-navigation-implementation-plan.md`](plans/claim-traceback-navigation-implementation-plan.md)
 - Core stabilization and parsing seam extraction:
   [`plans/core-stabilization-and-seam-extraction-plan.md`](plans/core-stabilization-and-seam-extraction-plan.md)
 - Five-layer rollout and contract freeze:

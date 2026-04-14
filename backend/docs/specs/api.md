@@ -242,6 +242,9 @@
 
 前端主展示仍是结构化结果（comparison rows、evidence cards），PDF 是证据回溯层，不是默认首页主视图。
 
+当前这一波后端落地顺序与边界，记录在
+[`../plans/claim-traceback-navigation-implementation-plan.md`](../plans/claim-traceback-navigation-implementation-plan.md)。
+
 推荐入口接口：
 
 - `GET /api/v1/collections/{collection_id}/evidence/{evidence_id}/traceback`
@@ -406,6 +409,7 @@ readiness 类错误至少应包含：
 - [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
 - [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
 - [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/goal-core-source-contract-follow-up-plan.md)
+- [`../plans/claim-traceback-navigation-implementation-plan.md`](../plans/claim-traceback-navigation-implementation-plan.md)
 - [`../../../docs/contracts/lens-v1-definition.md`](../../../docs/contracts/lens-v1-definition.md)
 - [`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md)
 - [`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)

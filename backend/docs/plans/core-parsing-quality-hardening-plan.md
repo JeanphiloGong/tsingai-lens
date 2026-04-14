@@ -20,6 +20,8 @@ For the broader roadmap, read
 [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md).
 For the earlier Core seam work, read
 [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md).
+For the traceback/document-viewer vertical slice under this plan, read
+[`claim-traceback-navigation-implementation-plan.md`](claim-traceback-navigation-implementation-plan.md).
 
 ## Decision
 
@@ -262,5 +264,6 @@ Exit criteria:
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
 - [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
 - [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+- [`claim-traceback-navigation-implementation-plan.md`](claim-traceback-navigation-implementation-plan.md)
 - [`source-collection-builder-normalization-plan.md`](source-collection-builder-normalization-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)

@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from application.comparisons.service import ComparisonService
+from application.documents.section_service import build_sections
 from application.documents.service import DocumentProfileService
 from application.evidence.service import EvidenceCardService
 
@@ -422,3 +423,248 @@ def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_pa
 
     response = EvidenceCardListResponse(**payload)
     assert response.items[0].evidence_anchors[0].quote_span == "[31]"
+
+
+def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.artifact_registry_service import ArtifactRegistryService
+    from application.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+
+    collection = collection_service.create_collection("Traceback Ready Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Traceback Ready Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                        "The slurry was dried at 80 C and annealed at 600 C under Ar.",
+                        "Characterization",
+                        "XRD and SEM were used to characterize the powders.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                "document_ids": ["paper-1"],
+            },
+            {
+                "id": "tu-2",
+                "text": "The slurry was dried at 80 C and annealed at 600 C under Ar.",
+                "document_ids": ["paper-1"],
+            },
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    sections = build_sections(documents, text_units)
+    methods_section = sections[sections["section_type"] == "methods"].iloc[0]
+
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-ready",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                "claim_type": "process",
+                "evidence_source_type": "method",
+                "evidence_anchors": [
+                    {
+                        "anchor_id": "anchor-ready",
+                        "source_type": "method",
+                        "section_id": methods_section["section_id"],
+                        "snippet_id": "tu-1",
+                        "quote_span": "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                    }
+                ],
+                "material_system": {"family": "composite", "composition": None},
+                "condition_context": {"process": {}, "baseline": {}, "test": {}},
+                "confidence": 0.8,
+                "traceability_status": "direct",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    content = document_profile_service.get_document_content(collection_id, "paper-1")
+    assert content["sections"][0]["section_id"] == methods_section["section_id"]
+    assert content["sections"][0]["start_offset"] is not None
+
+    traceback = evidence_card_service.get_evidence_traceback(collection_id, "ev-ready")
+    assert traceback["traceback_status"] == "ready"
+    assert traceback["anchors"][0]["locator_type"] == "char_range"
+    assert traceback["anchors"][0]["char_range"] is not None
+    assert traceback["anchors"][0]["section_id"] == methods_section["section_id"]
+    assert "evidence_id=ev-ready" in traceback["anchors"][0]["deep_link"]
+
+
+def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.artifact_registry_service import ArtifactRegistryService
+    from application.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+
+    collection = collection_service.create_collection("Traceback Partial Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Traceback Partial Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                        "Characterization",
+                        "XRD and SEM were used to characterize the powders.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    sections = build_sections(documents, text_units)
+    methods_section = sections[sections["section_type"] == "methods"].iloc[0]
+
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-partial",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "The document reports a process route.",
+                "claim_type": "process",
+                "evidence_source_type": "method",
+                "evidence_anchors": [
+                    {
+                        "anchor_id": "anchor-partial",
+                        "source_type": "method",
+                        "section_id": methods_section["section_id"],
+                        "quote_span": "This quote is not present in the document.",
+                    }
+                ],
+                "material_system": {"family": "composite", "composition": None},
+                "condition_context": {"process": {}, "baseline": {}, "test": {}},
+                "confidence": 0.72,
+                "traceability_status": "partial",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    traceback = evidence_card_service.get_evidence_traceback(collection_id, "ev-partial")
+    assert traceback["traceback_status"] == "partial"
+    assert traceback["anchors"][0]["locator_type"] == "section"
+    assert traceback["anchors"][0]["section_id"] == methods_section["section_id"]
+    assert traceback["anchors"][0]["char_range"] is None
+
+
+def test_evidence_traceback_unavailable_when_no_locator_can_be_resolved(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.artifact_registry_service import ArtifactRegistryService
+    from application.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+
+    collection = collection_service.create_collection("Traceback Unavailable Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Traceback Unavailable Paper",
+                "text": "A short note without section structure.",
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-unavailable",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "No usable anchor is available.",
+                "claim_type": "property",
+                "evidence_source_type": "figure",
+                "evidence_anchors": [
+                    {
+                        "anchor_id": "anchor-unavailable",
+                        "source_type": "figure",
+                        "figure_or_table": "Figure 2",
+                    }
+                ],
+                "material_system": {"family": "composite", "composition": None},
+                "condition_context": {"process": {}, "baseline": {}, "test": {}},
+                "confidence": 0.51,
+                "traceability_status": "missing",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    traceback = evidence_card_service.get_evidence_traceback(collection_id, "ev-unavailable")
+    assert traceback["traceback_status"] == "unavailable"
+    assert traceback["anchors"] == []

@@ -52,3 +52,28 @@ class DocumentProfileListResponse(BaseModel):
     count: int = Field(..., description="返回条数")
     summary: DocumentProfileSummaryResponse = Field(..., description="集合级摘要")
     items: list[DocumentProfileItemResponse] = Field(default_factory=list, description="文档 profile 列表")
+
+
+class DocumentContentSectionResponse(BaseModel):
+    """Viewer-friendly section payload for one document."""
+
+    section_id: str = Field(..., description="section ID")
+    heading: str | None = Field(default=None, description="section heading")
+    section_type: str | None = Field(default=None, description="section 类型")
+    order: int = Field(default=0, description="section 顺序")
+    text: str = Field(default="", description="section 文本")
+    text_unit_ids: list[str] = Field(default_factory=list, description="相关 text unit IDs")
+    start_offset: int | None = Field(default=None, description="文档级起始字符偏移")
+    end_offset: int | None = Field(default=None, description="文档级结束字符偏移")
+
+
+class DocumentContentResponse(BaseModel):
+    """Collection-scoped document viewer payload."""
+
+    collection_id: str = Field(..., description="集合 ID")
+    document_id: str = Field(..., description="文档 ID")
+    title: str | None = Field(default=None, description="文档标题")
+    source_filename: str | None = Field(default=None, description="源文件名")
+    content_text: str = Field(default="", description="完整文本内容")
+    sections: list[DocumentContentSectionResponse] = Field(default_factory=list, description="section 列表")
+    warnings: list[str] = Field(default_factory=list, description="查看器提示")

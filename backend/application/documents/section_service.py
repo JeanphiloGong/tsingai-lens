@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import re
 from typing import Any
-from uuid import uuid4
 
 import pandas as pd
 
@@ -157,7 +156,7 @@ def _extract_sections_from_text(
         output_order += 1
         sections.append(
             {
-                "section_id": str(uuid4()),
+                "section_id": _make_section_id(paper_id, section_type, output_order, heading),
                 "paper_id": paper_id,
                 "title": title,
                 "section_type": section_type,
@@ -194,7 +193,12 @@ def _fallback_sections_from_text_units(
             return
         sections.append(
             {
-                "section_id": str(uuid4()),
+                "section_id": _make_section_id(
+                    paper_id,
+                    pending_type,
+                    len(sections) + 1,
+                    f"synthetic_{pending_type}",
+                ),
                 "paper_id": paper_id,
                 "title": title,
                 "section_type": pending_type,
@@ -277,3 +281,16 @@ def _classify_text_unit(text: str) -> str | None:
     if characterization_score > method_score:
         return "characterization"
     return "methods"
+
+
+def _make_section_id(
+    paper_id: str,
+    section_type: str,
+    order: int,
+    heading: str,
+) -> str:
+    raw_heading = " ".join(str(heading or section_type or f"section_{order}").split()).lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", raw_heading).strip("_")
+    if not slug:
+        slug = f"section_{order}"
+    return f"sec_{paper_id}_{section_type}_{order}_{slug}"

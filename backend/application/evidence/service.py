@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from urllib.parse import urlencode
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -98,6 +99,15 @@ class EvidenceCardsNotReadyError(RuntimeError):
         super().__init__(f"evidence cards not ready: {collection_id}")
 
 
+class EvidenceCardNotFoundError(FileNotFoundError):
+    """Raised when one evidence card is missing from a collection."""
+
+    def __init__(self, collection_id: str, evidence_id: str) -> None:
+        self.collection_id = collection_id
+        self.evidence_id = evidence_id
+        super().__init__(f"evidence card not found: {collection_id}/{evidence_id}")
+
+
 class EvidenceCardService:
     """Generate and serve collection-scoped evidence card artifacts."""
 
@@ -132,6 +142,57 @@ class EvidenceCardService:
             "total": len(cards),
             "count": len(items),
             "items": items,
+        }
+
+    def get_evidence_traceback(
+        self,
+        collection_id: str,
+        evidence_id: str,
+    ) -> dict[str, Any]:
+        cards = self.read_evidence_cards(collection_id)
+        matched = cards[cards["evidence_id"].astype(str) == str(evidence_id)]
+        if matched.empty:
+            raise EvidenceCardNotFoundError(collection_id, evidence_id)
+
+        row = matched.iloc[0]
+        document_id = str(row.get("document_id") or "").strip()
+        if not document_id:
+            return {
+                "collection_id": collection_id,
+                "evidence_id": evidence_id,
+                "traceback_status": "unavailable",
+                "anchors": [],
+            }
+
+        content = self.document_profile_service.get_document_content(
+            collection_id,
+            document_id,
+        )
+        output_dir = self._resolve_output_dir(collection_id)
+        _, text_units = load_collection_inputs(output_dir)
+        text_unit_lookup = self._build_text_unit_lookup(text_units, document_id)
+
+        anchors = self._normalize_evidence_anchors_payload(
+            row.get("evidence_anchors"),
+            collection_id=collection_id,
+            document_id=document_id,
+            evidence_id=evidence_id,
+        )
+        resolved_anchors = [
+            resolved
+            for anchor in anchors
+            if (resolved := self._resolve_traceback_anchor(anchor, content, text_unit_lookup))
+            is not None
+        ]
+        traceback_status = self._derive_traceback_status(resolved_anchors)
+        if traceback_status == "unavailable":
+            resolved_anchors = []
+
+        return {
+            "collection_id": collection_id,
+            "evidence_id": evidence_id,
+            "traceback_status": traceback_status,
+            "anchors": resolved_anchors,
         }
 
     def read_evidence_cards(self, collection_id: str) -> pd.DataFrame:
@@ -540,15 +601,21 @@ class EvidenceCardService:
         ]
 
     def _serialize_card_row(self, row: pd.Series) -> dict[str, Any]:
+        collection_id = str(row.get("collection_id") or "")
+        document_id = str(row.get("document_id") or "")
+        evidence_id = str(row.get("evidence_id") or "")
         return {
-            "evidence_id": str(row.get("evidence_id") or ""),
-            "document_id": str(row.get("document_id") or ""),
-            "collection_id": str(row.get("collection_id") or ""),
+            "evidence_id": evidence_id,
+            "document_id": document_id,
+            "collection_id": collection_id,
             "claim_text": str(row.get("claim_text") or ""),
             "claim_type": str(row.get("claim_type") or "qualitative"),
             "evidence_source_type": str(row.get("evidence_source_type") or "text"),
             "evidence_anchors": self._normalize_evidence_anchors_payload(
-                row.get("evidence_anchors")
+                row.get("evidence_anchors"),
+                collection_id=collection_id,
+                document_id=document_id,
+                evidence_id=evidence_id,
             ),
             "material_system": self._normalize_material_system_payload(row.get("material_system")),
             "condition_context": self._normalize_condition_context_payload(row.get("condition_context")),
@@ -556,7 +623,14 @@ class EvidenceCardService:
             "traceability_status": str(row.get("traceability_status") or "missing"),
         }
 
-    def _normalize_evidence_anchors_payload(self, value: Any) -> list[dict[str, Any]]:
+    def _normalize_evidence_anchors_payload(
+        self,
+        value: Any,
+        *,
+        collection_id: str | None = None,
+        document_id: str | None = None,
+        evidence_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         normalized = self._normalize_object(value)
         if normalized is None:
             return []
@@ -572,23 +646,336 @@ class EvidenceCardService:
             if not isinstance(anchor, dict):
                 continue
 
+            anchor_id = self._normalize_scalar_text(anchor.get("anchor_id")) or f"anchor_{index + 1}"
+            anchor_document_id = (
+                self._normalize_scalar_text(anchor.get("document_id")) or document_id or ""
+            )
             source_type = self._normalize_scalar_text(anchor.get("source_type")) or "text"
             if source_type not in _EVIDENCE_SOURCE_TYPES:
                 source_type = "text"
+            quote = self._normalize_scalar_text(anchor.get("quote")) or self._normalize_scalar_text(
+                anchor.get("quote_span")
+            )
+            section_id = self._normalize_scalar_text(anchor.get("section_id"))
+            char_range = self._normalize_char_range_payload(anchor.get("char_range"))
+            bbox = self._normalize_bbox_payload(anchor.get("bbox"))
+            explicit_locator_type = self._normalize_scalar_text(anchor.get("locator_type"))
+            locator_type = explicit_locator_type if explicit_locator_type in {
+                "char_range",
+                "bbox",
+                "section",
+            } else None
+            if locator_type is None:
+                if char_range is not None:
+                    locator_type = "char_range"
+                elif bbox is not None:
+                    locator_type = "bbox"
+                elif section_id:
+                    locator_type = "section"
+                elif quote or self._normalize_scalar_text(anchor.get("snippet_id")):
+                    locator_type = "char_range"
+                else:
+                    locator_type = "section"
+
+            explicit_confidence = self._normalize_scalar_text(anchor.get("locator_confidence"))
+            locator_confidence = explicit_confidence if explicit_confidence in {
+                "high",
+                "medium",
+                "low",
+            } else ("medium" if char_range is not None or bbox is not None else "low")
+            page = self._normalize_optional_int(anchor.get("page"))
+            deep_link = self._normalize_scalar_text(anchor.get("deep_link")) or self._build_traceback_deep_link(
+                collection_id=collection_id,
+                document_id=anchor_document_id or document_id,
+                evidence_id=evidence_id,
+                anchor_id=anchor_id,
+                page=page,
+            )
 
             payload.append(
                 {
-                    "anchor_id": self._normalize_scalar_text(anchor.get("anchor_id"))
-                    or f"anchor_{index + 1}",
+                    "anchor_id": anchor_id,
+                    "document_id": anchor_document_id,
+                    "locator_type": locator_type,
+                    "locator_confidence": locator_confidence,
                     "source_type": source_type,
-                    "section_id": self._normalize_scalar_text(anchor.get("section_id")),
+                    "section_id": section_id,
+                    "char_range": char_range,
+                    "bbox": bbox,
+                    "page": page,
+                    "quote": quote,
+                    "deep_link": deep_link,
                     "block_id": self._normalize_scalar_text(anchor.get("block_id")),
                     "snippet_id": self._normalize_scalar_text(anchor.get("snippet_id")),
                     "figure_or_table": self._normalize_scalar_text(anchor.get("figure_or_table")),
-                    "quote_span": self._normalize_scalar_text(anchor.get("quote_span")),
+                    "quote_span": quote,
                 }
             )
         return payload
+
+    def _resolve_traceback_anchor(
+        self,
+        anchor: dict[str, Any],
+        content: dict[str, Any],
+        text_unit_lookup: dict[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        full_text = str(content.get("content_text") or "")
+        sections = content.get("sections") if isinstance(content.get("sections"), list) else []
+        section_id = self._normalize_scalar_text(anchor.get("section_id"))
+        section = self._find_section_by_id(section_id, sections) if section_id else None
+
+        quote = self._normalize_scalar_text(anchor.get("quote")) or self._normalize_scalar_text(
+            anchor.get("quote_span")
+        )
+        snippet_id = self._normalize_scalar_text(anchor.get("snippet_id"))
+        snippet_text = None
+        if snippet_id:
+            snippet_text = self._normalize_scalar_text(text_unit_lookup.get(snippet_id, {}).get("text"))
+
+        explicit_char_range = self._normalize_char_range_payload(anchor.get("char_range"))
+        explicit_bbox = self._normalize_bbox_payload(anchor.get("bbox"))
+        locator_type = str(anchor.get("locator_type") or "section")
+        locator_confidence = str(anchor.get("locator_confidence") or "low")
+
+        if explicit_char_range is not None:
+            section = section or self._find_section_for_char_range(explicit_char_range, sections)
+            section_id = section_id or (
+                self._normalize_scalar_text(section.get("section_id")) if section else None
+            )
+            return {
+                **anchor,
+                "section_id": section_id,
+                "char_range": explicit_char_range,
+                "bbox": None,
+                "locator_type": "char_range",
+                "locator_confidence": locator_confidence if locator_confidence in {"high", "medium"} else "medium",
+                "quote": quote or snippet_text,
+                "quote_span": quote or snippet_text,
+            }
+
+        if explicit_bbox is not None:
+            return {
+                **anchor,
+                "section_id": section_id,
+                "char_range": None,
+                "bbox": explicit_bbox,
+                "locator_type": "bbox",
+                "locator_confidence": locator_confidence if locator_confidence in {"high", "medium"} else "medium",
+                "quote": quote or snippet_text,
+                "quote_span": quote or snippet_text,
+            }
+
+        match_text = quote or snippet_text
+        resolved_char_range: dict[str, int] | None = None
+
+        if match_text:
+            if section is None:
+                section = self._find_section_by_snippet_id(snippet_id, sections)
+            if section is None:
+                section = self._find_section_for_quote(match_text, sections)
+
+            if section is not None:
+                local_index = str(section.get("text") or "").find(match_text)
+                if local_index >= 0 and section.get("start_offset") is not None:
+                    section_start = self._safe_int(section.get("start_offset"))
+                    resolved_char_range = {
+                        "start": section_start + local_index,
+                        "end": section_start + local_index + len(match_text),
+                    }
+                    section_id = self._normalize_scalar_text(section.get("section_id")) or section_id
+                    locator_type = "char_range"
+                    locator_confidence = "high"
+
+            if resolved_char_range is None and full_text:
+                global_index = full_text.find(match_text)
+                if global_index >= 0:
+                    resolved_char_range = {
+                        "start": global_index,
+                        "end": global_index + len(match_text),
+                    }
+                    section = section or self._find_section_for_char_range(resolved_char_range, sections)
+                    section_id = (
+                        self._normalize_scalar_text(section.get("section_id")) if section else section_id
+                    ) or section_id
+                    locator_type = "char_range"
+                    locator_confidence = "medium"
+
+        if resolved_char_range is not None:
+            return {
+                **anchor,
+                "section_id": section_id,
+                "char_range": resolved_char_range,
+                "bbox": None,
+                "locator_type": "char_range",
+                "locator_confidence": locator_confidence,
+                "quote": match_text,
+                "quote_span": match_text,
+            }
+
+        if section is None:
+            section = self._find_section_by_snippet_id(snippet_id, sections)
+        section_id = section_id or (
+            self._normalize_scalar_text(section.get("section_id")) if section else None
+        )
+        if section_id is None:
+            return None
+
+        return {
+            **anchor,
+            "section_id": section_id,
+            "char_range": None,
+            "bbox": None,
+            "locator_type": "section",
+            "locator_confidence": "low",
+            "quote": match_text,
+            "quote_span": match_text,
+        }
+
+    def _derive_traceback_status(self, anchors: list[dict[str, Any]]) -> str:
+        if any(
+            str(anchor.get("locator_type")) in {"char_range", "bbox"}
+            and str(anchor.get("locator_confidence")) in {"high", "medium"}
+            for anchor in anchors
+        ):
+            return "ready"
+        if any(
+            str(anchor.get("locator_type")) in {"char_range", "bbox", "section"}
+            for anchor in anchors
+        ):
+            return "partial"
+        return "unavailable"
+
+    def _build_text_unit_lookup(
+        self,
+        text_units: pd.DataFrame | None,
+        document_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        if text_units is None or text_units.empty:
+            return {}
+
+        lookup: dict[str, dict[str, Any]] = {}
+        for _, row in text_units.iterrows():
+            text_unit_id = self._normalize_scalar_text(row.get("id"))
+            if text_unit_id is None:
+                continue
+            document_ids = self._normalize_list(row.get("document_ids"))
+            if document_ids and str(document_id) not in document_ids:
+                continue
+            lookup[text_unit_id] = dict(row)
+        return lookup
+
+    def _find_section_by_id(
+        self,
+        section_id: str | None,
+        sections: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not section_id:
+            return None
+        for section in sections:
+            if self._normalize_scalar_text(section.get("section_id")) == section_id:
+                return section
+        return None
+
+    def _find_section_by_snippet_id(
+        self,
+        snippet_id: str | None,
+        sections: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not snippet_id:
+            return None
+        for section in sections:
+            if snippet_id in self._normalize_list(section.get("text_unit_ids")):
+                return section
+        return None
+
+    def _find_section_for_quote(
+        self,
+        quote: str,
+        sections: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        for section in sections:
+            if quote and quote in str(section.get("text") or ""):
+                return section
+        return None
+
+    def _find_section_for_char_range(
+        self,
+        char_range: dict[str, int],
+        sections: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        start = self._safe_int(char_range.get("start"))
+        end = self._safe_int(char_range.get("end"))
+        if start is None or end is None:
+            return None
+        for section in sections:
+            section_start = self._safe_int(section.get("start_offset"))
+            section_end = self._safe_int(section.get("end_offset"))
+            if section_start is None or section_end is None:
+                continue
+            if section_start <= start and end <= section_end:
+                return section
+        return None
+
+    def _build_traceback_deep_link(
+        self,
+        *,
+        collection_id: str | None,
+        document_id: str | None,
+        evidence_id: str | None,
+        anchor_id: str | None,
+        page: int | None = None,
+    ) -> str | None:
+        if not collection_id or not document_id:
+            return None
+
+        query: list[tuple[str, str]] = []
+        if evidence_id:
+            query.append(("evidence_id", evidence_id))
+        if anchor_id:
+            query.append(("anchor_id", anchor_id))
+        if page is not None:
+            query.append(("page", str(page)))
+        query_text = urlencode(query)
+        base = f"/collections/{collection_id}/documents/{document_id}"
+        return f"{base}?{query_text}" if query_text else base
+
+    def _normalize_char_range_payload(self, value: Any) -> dict[str, int] | None:
+        payload = self._normalize_object(value)
+        if payload is None or not isinstance(payload, dict):
+            return None
+
+        start = self._safe_int(payload.get("start"))
+        end = self._safe_int(payload.get("end"))
+        if start is None or end is None or end < start:
+            return None
+        return {"start": start, "end": end}
+
+    def _normalize_bbox_payload(self, value: Any) -> dict[str, float] | None:
+        payload = self._normalize_object(value)
+        if payload is None or not isinstance(payload, dict):
+            return None
+        try:
+            x0 = float(payload.get("x0"))
+            y0 = float(payload.get("y0"))
+            x1 = float(payload.get("x1"))
+            y1 = float(payload.get("y1"))
+        except (TypeError, ValueError):
+            return None
+        return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+
+    def _normalize_optional_int(self, value: Any) -> int | None:
+        parsed = self._safe_int(value)
+        if parsed is None or parsed < 0:
+            return None
+        return parsed
+
+    def _safe_int(self, value: Any) -> int | None:
+        try:
+            if value is None:
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _normalize_scalar_text(self, value: Any) -> str | None:
         normalized = self._normalize_object(value)

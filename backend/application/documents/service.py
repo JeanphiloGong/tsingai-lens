@@ -121,6 +121,24 @@ class DocumentProfilesNotReadyError(RuntimeError):
         super().__init__(f"document profiles not ready: {collection_id}")
 
 
+class DocumentContentNotReadyError(RuntimeError):
+    """Raised when a collection cannot yet serve document content."""
+
+    def __init__(self, collection_id: str, output_dir: Path) -> None:
+        self.collection_id = collection_id
+        self.output_dir = output_dir
+        super().__init__(f"document content not ready: {collection_id}")
+
+
+class DocumentNotFoundError(FileNotFoundError):
+    """Raised when one document cannot be resolved inside a collection."""
+
+    def __init__(self, collection_id: str, document_id: str) -> None:
+        self.collection_id = collection_id
+        self.document_id = document_id
+        super().__init__(f"document not found: {collection_id}/{document_id}")
+
+
 class DocumentProfileService:
     """Generate and serve collection-scoped document profile artifacts."""
 
@@ -157,6 +175,65 @@ class DocumentProfileService:
     def get_document_summary(self, collection_id: str) -> dict[str, Any]:
         profiles = self.read_document_profiles(collection_id)
         return self.summarize_document_profiles(profiles)
+
+    def get_document_content(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> dict[str, Any]:
+        output_dir = self._resolve_output_dir(collection_id)
+        documents_path = output_dir / "documents.parquet"
+        if not documents_path.is_file():
+            raise DocumentContentNotReadyError(collection_id, output_dir)
+
+        documents, text_units = load_collection_inputs(output_dir)
+        document_records = build_document_records(documents, text_units)
+        matched = document_records[
+            document_records["paper_id"].astype(str) == str(document_id)
+        ]
+        if matched.empty:
+            raise DocumentNotFoundError(collection_id, document_id)
+
+        row = matched.iloc[0]
+        sections = build_sections(documents, text_units)
+        sections_by_doc = self._group_sections_by_document(sections)
+        profile = self._find_profile_row(collection_id, document_id)
+        file_lookup = self._build_collection_file_lookup(collection_id)
+
+        full_text = str(row.get("text") or "").strip()
+        section_payload = self._build_document_content_sections(
+            full_text=full_text,
+            sections=sections_by_doc.get(str(document_id), []),
+        )
+        if not full_text and section_payload:
+            full_text = "\n\n".join(
+                section["text"] for section in section_payload if str(section.get("text") or "").strip()
+            ).strip()
+
+        title = self._normalize_optional_text(profile.get("title")) if profile else None
+        if title is None:
+            source_filename = self._resolve_source_filename(row, document_id, file_lookup)
+            title = self._resolve_document_title(row, document_id, source_filename, file_lookup)
+        else:
+            source_filename = self._normalize_optional_text(profile.get("source_filename"))
+        if source_filename is None:
+            source_filename = self._resolve_source_filename(row, document_id, file_lookup)
+
+        warnings: list[str] = []
+        if not full_text:
+            warnings.append("missing_document_text")
+        if not section_payload:
+            warnings.append("section_structure_missing")
+
+        return {
+            "collection_id": collection_id,
+            "document_id": str(document_id),
+            "title": title,
+            "source_filename": source_filename,
+            "content_text": full_text,
+            "sections": section_payload,
+            "warnings": warnings,
+        }
 
     def read_document_profiles(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
@@ -547,6 +624,112 @@ class DocumentProfileService:
 
     def _profile_rebuild_required(self, profiles: pd.DataFrame) -> bool:
         return not {"title", "source_filename"}.issubset(set(profiles.columns))
+
+    def _find_profile_row(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> dict[str, Any] | None:
+        try:
+            profiles = self.read_document_profiles(collection_id)
+        except DocumentProfilesNotReadyError:
+            return None
+
+        if profiles.empty:
+            return None
+
+        matched = profiles[profiles["document_id"].astype(str) == str(document_id)]
+        if matched.empty:
+            return None
+        return dict(matched.iloc[0])
+
+    def _build_document_content_sections(
+        self,
+        full_text: str,
+        sections: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        ordered_sections = sorted(
+            (section for section in sections if isinstance(section, dict)),
+            key=lambda item: self._safe_int(item.get("order"), default=0),
+        )
+        payload: list[dict[str, Any]] = []
+        cursor = 0
+
+        for index, section in enumerate(ordered_sections, start=1):
+            section_text = str(section.get("text") or "").strip()
+            if not section_text:
+                continue
+
+            start_offset, end_offset = self._locate_text_span(
+                full_text,
+                section_text,
+                cursor,
+            )
+            if end_offset is not None:
+                cursor = end_offset
+
+            payload.append(
+                {
+                    "section_id": str(section.get("section_id") or f"section_{index}"),
+                    "heading": self._normalize_optional_text(section.get("heading")),
+                    "section_type": self._normalize_optional_text(section.get("section_type")),
+                    "order": self._safe_int(section.get("order"), default=index),
+                    "text": section_text,
+                    "text_unit_ids": self._normalize_string_list(section.get("text_unit_ids")),
+                    "start_offset": start_offset,
+                    "end_offset": end_offset,
+                }
+            )
+
+        if payload:
+            return payload
+
+        if full_text.strip():
+            return [
+                {
+                    "section_id": "document_body",
+                    "heading": "Document body",
+                    "section_type": "full_text",
+                    "order": 1,
+                    "text": full_text,
+                    "text_unit_ids": [],
+                    "start_offset": 0,
+                    "end_offset": len(full_text),
+                }
+            ]
+        return []
+
+    def _locate_text_span(
+        self,
+        full_text: str,
+        target_text: str,
+        start_index: int = 0,
+    ) -> tuple[int | None, int | None]:
+        source = str(full_text or "")
+        target = str(target_text or "").strip()
+        if not source or not target:
+            return (None, None)
+
+        index = source.find(target, max(start_index, 0))
+        if index < 0 and start_index > 0:
+            index = source.find(target)
+        if index < 0 and len(target) > 60:
+            short_target = target[: min(len(target), 160)].strip()
+            if short_target:
+                index = source.find(short_target, max(start_index, 0))
+                if index < 0 and start_index > 0:
+                    index = source.find(short_target)
+                if index >= 0:
+                    return (index, index + len(short_target))
+        if index < 0:
+            return (None, None)
+        return (index, index + len(target))
+
+    def _safe_int(self, value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
     def _build_collection_file_lookup(self, collection_id: str) -> dict[str, Any]:
         try:

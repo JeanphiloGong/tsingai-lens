@@ -57,6 +57,10 @@ The backend should adopt this sequence:
 
 This is a migration, not an immediate hard switch.
 
+Current child execution entrypoint:
+
+- [`core-derived-graph-cutover-implementation-plan.md`](core-derived-graph-cutover-implementation-plan.md)
+
 ## Target Semantic Model
 
 The target graph semantics should be Core-owned and traceable:
@@ -190,5 +194,5 @@ Exit criteria:
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
 - [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
 - [`graph-surface-plan.md`](graph-surface-plan.md)
-- [`../../../docs/30-architecture/graph-surface-current-state.md`](../../../docs/30-architecture/graph-surface-current-state.md)
-- [`../../../docs/30-architecture/lens-v1-architecture-boundary.md`](../../../docs/30-architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/architecture/graph-surface-current-state.md`](../../../docs/architecture/graph-surface-current-state.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)

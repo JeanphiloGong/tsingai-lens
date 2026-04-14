@@ -142,6 +142,75 @@ def _write_community_outputs(output_dir: Path) -> None:
     communities.to_parquet(output_dir / "communities.parquet", index=False)
 
 
+def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Core Projection Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": ["methods_section_detected"],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-1",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
+                "claim_type": "property",
+                "evidence_source_type": "text",
+                "evidence_anchors": [
+                    {
+                        "anchor_id": "anchor-1",
+                        "source_type": "text",
+                        "section_id": None,
+                        "block_id": None,
+                        "snippet_id": "tu-1",
+                        "figure_or_table": None,
+                        "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
+                    }
+                ],
+                "material_system": {"family": "oxide cathode", "composition": None},
+                "condition_context": {
+                    "process": {"temperatures_c": [700.0]},
+                    "baseline": {"control": "as-prepared"},
+                    "test": {"method": "EIS"},
+                },
+                "confidence": 0.83,
+                "traceability_status": "direct",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "row_id": "cmp-1",
+                "collection_id": collection_id,
+                "source_document_id": "paper-1",
+                "supporting_evidence_ids": ["ev-1"],
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "property_normalized": "conductivity",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+                "comparability_status": "comparable",
+                "comparability_warnings": [],
+                "value": 12.0,
+                "unit": "mS/cm",
+            }
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+
+
 def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": name})
     assert create_resp.status_code == 200
@@ -492,6 +561,47 @@ def test_graph_endpoint_returns_community_not_found_error(app_client):
     assert detail["code"] == "community_not_found"
     assert detail["collection_id"] == collection_id
     assert detail["community_id"] == "999"
+
+
+def test_graph_endpoints_fall_back_to_core_projection_when_legacy_graph_is_missing(
+    app_client,
+):
+    from controllers import graph as graph_controller
+
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Core Graph Only"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    output_dir = Path(workspace.json()["artifacts"]["output_path"])
+
+    _write_core_graph_outputs(output_dir, collection_id)
+    graph_controller.graph_service.artifact_registry_service.upsert(
+        collection_id,
+        output_dir,
+    )
+
+    graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
+    assert graph.status_code == 200
+    payload = graph.json()
+    assert payload["collection_id"] == collection_id
+    assert payload["community"] is None
+    assert len(payload["nodes"]) == 3
+    assert len(payload["edges"]) == 2
+    assert {item["type"] for item in payload["nodes"]} == {
+        "document",
+        "evidence",
+        "comparison",
+    }
+
+    graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
+    assert graphml.status_code == 200
+    assert graphml.headers["content-type"].startswith("application/graphml+xml")
+    assert b"<graphml" in graphml.content
 
 
 def test_delete_collection_removes_app_layer_collection(app_client):

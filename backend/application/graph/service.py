@@ -6,6 +6,10 @@ from typing import Any
 from fastapi import HTTPException
 
 from application.collections.service import CollectionService
+from application.graph.core_projection_service import (
+    load_core_graph_payload,
+    missing_core_graph_artifacts,
+)
 from application.workspace.artifact_registry_service import ArtifactRegistryService
 from infra.graphrag.graphml_export import (
     load_graph_payload as load_graph_payload_from_storage,
@@ -15,7 +19,7 @@ from infra.graphrag.graphml_export import (
 
 artifact_registry_service = ArtifactRegistryService()
 collection_service = CollectionService()
-_GRAPH_CORE_ARTIFACTS = ("entities.parquet", "relationships.parquet")
+_GRAPH_LEGACY_ARTIFACTS = ("entities.parquet", "relationships.parquet")
 
 
 class GraphNotReadyError(RuntimeError):
@@ -45,7 +49,7 @@ class GraphCommunityNotFoundError(RuntimeError):
 def _missing_graph_artifacts(base_dir: Path) -> list[str]:
     return [
         filename
-        for filename in _GRAPH_CORE_ARTIFACTS
+        for filename in _GRAPH_LEGACY_ARTIFACTS
         if not (base_dir / filename).is_file()
     ]
 
@@ -68,9 +72,39 @@ def resolve_collection_output_dir(collection_id: str) -> Path:
         raise GraphNotReadyError(
             collection_id=collection_id,
             output_dir=paths.output_dir.resolve(),
-            missing_artifacts=list(_GRAPH_CORE_ARTIFACTS),
+            missing_artifacts=list(_GRAPH_LEGACY_ARTIFACTS),
         )
     return paths.output_dir.resolve()
+
+
+def _resolve_graph_mode(
+    collection_id: str,
+    base_dir: Path,
+    community_id: str | None,
+) -> str:
+    missing_legacy = _missing_graph_artifacts(base_dir)
+    if community_id is not None:
+        if missing_legacy:
+            raise GraphNotReadyError(
+                collection_id=collection_id,
+                output_dir=base_dir,
+                missing_artifacts=missing_legacy,
+            )
+        return "legacy"
+
+    if not missing_legacy:
+        return "legacy"
+
+    missing_core = missing_core_graph_artifacts(base_dir)
+    if not missing_core:
+        return "core"
+
+    missing_artifacts = sorted(set(missing_legacy + missing_core))
+    raise GraphNotReadyError(
+        collection_id=collection_id,
+        output_dir=base_dir,
+        missing_artifacts=missing_artifacts,
+    )
 
 
 def load_graph_payload(
@@ -80,12 +114,12 @@ def load_graph_payload(
     min_weight: float,
     community_id: str | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool, str | None]:
-    missing_artifacts = _missing_graph_artifacts(base_dir)
-    if missing_artifacts:
-        raise GraphNotReadyError(
-            collection_id=collection_id,
-            output_dir=base_dir,
-            missing_artifacts=missing_artifacts,
+    mode = _resolve_graph_mode(collection_id, base_dir, community_id)
+    if mode == "core":
+        return load_core_graph_payload(
+            base_dir=base_dir,
+            max_nodes=max_nodes,
+            min_weight=min_weight,
         )
 
     nodes_payload, edges_payload, truncated, community_label, _ = (

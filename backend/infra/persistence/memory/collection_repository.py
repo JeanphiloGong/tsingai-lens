@@ -23,6 +23,7 @@ class MemoryCollectionRepository:
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self._collections: dict[str, dict] = {}
         self._files: dict[str, list[dict]] = {}
+        self._import_manifests: dict[str, dict] = {}
 
     def get_paths(self, collection_id: str) -> CollectionPaths:
         collection_dir = self.root_dir / collection_id
@@ -32,6 +33,7 @@ class MemoryCollectionRepository:
             output_dir=collection_dir / "output",
             meta_path=collection_dir / "meta.json",
             files_path=collection_dir / "files.json",
+            import_manifest_path=collection_dir / "import_manifest.json",
             artifacts_path=collection_dir / "artifacts.json",
         )
 
@@ -62,6 +64,7 @@ class MemoryCollectionRepository:
     def delete_collection_dir(self, collection_id: str) -> None:
         self._collections.pop(collection_id, None)
         self._files.pop(collection_id, None)
+        self._import_manifests.pop(collection_id, None)
         shutil.rmtree(self.get_paths(collection_id).collection_dir, ignore_errors=True)
 
     def read_files(self, collection_id: str) -> list[dict] | None:
@@ -72,6 +75,14 @@ class MemoryCollectionRepository:
     def write_files(self, collection_id: str, payload: list[dict]) -> None:
         self.create_collection_dirs(collection_id)
         self._files[collection_id] = deepcopy(payload)
+
+    def read_import_manifest(self, collection_id: str) -> dict | None:
+        payload = self._import_manifests.get(collection_id)
+        return deepcopy(payload) if payload is not None else None
+
+    def write_import_manifest(self, collection_id: str, payload: dict) -> None:
+        self.create_collection_dirs(collection_id)
+        self._import_manifests[collection_id] = deepcopy(payload)
 
     def write_input_file(
         self, collection_id: str, stored_filename: str, payload: bytes

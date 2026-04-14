@@ -12,6 +12,7 @@ class CollectionPaths:
     output_dir: Path
     meta_path: Path
     files_path: Path
+    import_manifest_path: Path
     artifacts_path: Path
 
 
@@ -36,6 +37,10 @@ class CollectionRepository(Protocol):
     def read_files(self, collection_id: str) -> list[dict] | None: ...
 
     def write_files(self, collection_id: str, payload: list[dict]) -> None: ...
+
+    def read_import_manifest(self, collection_id: str) -> dict | None: ...
+
+    def write_import_manifest(self, collection_id: str, payload: dict) -> None: ...
 
     def write_input_file(
         self, collection_id: str, stored_filename: str, payload: bytes

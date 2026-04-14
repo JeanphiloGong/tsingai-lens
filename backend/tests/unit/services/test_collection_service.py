@@ -73,6 +73,19 @@ def test_delete_collection_raises_for_missing_collection(tmp_path):
         raise AssertionError("expected FileNotFoundError")
 
 
+def test_collection_service_returns_empty_import_manifest_for_existing_collection(tmp_path):
+    service = CollectionService(tmp_path / "collections")
+    collection = service.create_collection("No Manifest Yet")
+
+    manifest = service.get_import_manifest(collection["collection_id"])
+
+    assert manifest == {
+        "schema_version": 1,
+        "collection_id": collection["collection_id"],
+        "imports": [],
+    }
+
+
 def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_path):
     service = CollectionService(tmp_path / "collections")
     collection = service.create_collection("Imported Collection")
@@ -123,6 +136,35 @@ def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_
     )
     assert service.get_collection(collection_id)["paper_count"] == 1
     assert service.list_files(collection_id)[0]["stored_filename"] == "normalized_paper.txt"
+    manifest = service.get_import_manifest(collection_id)
+    assert manifest["schema_version"] == 1
+    assert manifest["collection_id"] == collection_id
+    assert len(manifest["imports"]) == 1
+    import_entry = manifest["imports"][0]
+    assert import_entry["channel"] == "upload"
+    assert import_entry["adapter_name"] == "upload"
+    assert import_entry["warnings"] == []
+    document_entry = import_entry["documents"][0]
+    assert document_entry["source_document_id"] == "srcdoc_1"
+    assert document_entry["stored_filename"] == "normalized_paper.txt"
+    assert document_entry["storage_relpath"] == "input/normalized_paper.txt"
+    assert document_entry["checksum"] == "abc123"
+    assert document_entry["text_units"] == [
+        {
+            "text_unit_id": "tu_0",
+            "sequence": 0,
+            "page_ref": None,
+            "char_count": len("Experimental Section"),
+        },
+        {
+            "text_unit_id": "tu_1",
+            "sequence": 1,
+            "page_ref": None,
+            "char_count": len("Mix and anneal."),
+        },
+    ]
+    assert "text" not in document_entry["text_units"][0]
+    assert "document_profiles" not in import_entry
 
 
 def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_path):
@@ -177,3 +219,14 @@ def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_pat
     }
     assert record["stored_filename"] == "normalized_upload.txt"
     assert Path(record["stored_path"]).read_text(encoding="utf-8") == "Normalized upload text"
+    manifest = service.get_import_manifest(collection_id)
+    assert len(manifest["imports"]) == 1
+    assert manifest["imports"][0]["documents"][0]["stored_filename"] == "normalized_upload.txt"
+    assert manifest["imports"][0]["documents"][0]["text_units"] == [
+        {
+            "text_unit_id": "tu_upload",
+            "sequence": 0,
+            "page_ref": None,
+            "char_count": len("Normalized upload text"),
+        }
+    ]

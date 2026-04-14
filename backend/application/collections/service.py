@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
@@ -163,6 +164,13 @@ class CollectionService:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return files
 
+    def get_import_manifest(self, collection_id: str) -> dict[str, Any]:
+        self.get_collection(collection_id)
+        manifest = self.repository.read_import_manifest(collection_id)
+        if manifest is None:
+            return self._empty_import_manifest(collection_id)
+        return manifest
+
     def import_normalized_batch(
         self,
         collection_id: str,
@@ -176,6 +184,7 @@ class CollectionService:
         files = self.repository.read_files(collection_id) or []
         text_by_source_document = self._group_text_units(batch)
         created_records: list[dict] = []
+        paths = self.repository.get_paths(collection_id)
 
         for document in batch.documents:
             stored_filename = document.stored_filename or f"{uuid4().hex}_{Path(document.original_filename).name}"
@@ -204,6 +213,15 @@ class CollectionService:
 
         files.extend(created_records)
         self.repository.write_files(collection_id, files)
+        manifest = self.get_import_manifest(collection_id)
+        manifest["imports"].append(
+            self._build_manifest_import_entry(
+                collection_dir=paths.collection_dir,
+                batch=batch,
+                created_records=created_records,
+            )
+        )
+        self.repository.write_import_manifest(collection_id, manifest)
         self.update_collection(collection_id, paper_count=len(files), status="ready")
         return created_records
 
@@ -214,6 +232,8 @@ class CollectionService:
         content: bytes,
         media_type: str | None = None,
     ) -> dict:
+        if not self.repository.collection_exists(collection_id):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
         batch = normalize_upload(
             filename=filename,
             content=content,
@@ -256,3 +276,76 @@ class CollectionService:
                 f"normalized import missing text payload for source document: {source_document_id}"
             )
         return "\n".join(parts).encode("utf-8")
+
+    def _empty_import_manifest(self, collection_id: str) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "collection_id": collection_id,
+            "imports": [],
+        }
+
+    def _build_manifest_import_entry(
+        self,
+        *,
+        collection_dir: Path,
+        batch: NormalizedImportBatch,
+        created_records: list[dict],
+    ) -> dict[str, Any]:
+        if len(created_records) != len(batch.documents):
+            raise ValueError("normalized import record count does not match document count")
+        text_units_by_source_document: dict[str, list[dict[str, Any]]] = {}
+        for text_unit in batch.text_units:
+            text_units_by_source_document.setdefault(
+                text_unit.source_document_id,
+                [],
+            ).append(
+                {
+                    "text_unit_id": text_unit.text_unit_id,
+                    "sequence": int(text_unit.sequence),
+                    "page_ref": text_unit.page_ref,
+                    "char_count": int(text_unit.char_count),
+                }
+            )
+
+        documents: list[dict[str, Any]] = []
+        for document, record in zip(batch.documents, created_records):
+            stored_path = Path(str(record["stored_path"])).resolve()
+            try:
+                storage_relpath = str(stored_path.relative_to(collection_dir))
+            except ValueError:
+                storage_relpath = document.storage_relpath
+            documents.append(
+                {
+                    "source_document_id": document.source_document_id,
+                    "origin_channel": document.origin_channel,
+                    "original_filename": document.original_filename,
+                    "stored_filename": record["stored_filename"],
+                    "stored_path": str(stored_path),
+                    "storage_relpath": storage_relpath,
+                    "media_type": record.get("media_type"),
+                    "checksum": document.checksum,
+                    "language": document.language,
+                    "ingest_status": document.ingest_status,
+                    "text_units": sorted(
+                        text_units_by_source_document.get(
+                            document.source_document_id,
+                            [],
+                        ),
+                        key=lambda item: item["sequence"],
+                    ),
+                }
+            )
+
+        return {
+            "import_id": f"imp_{uuid4().hex[:12]}",
+            "channel": batch.source_metadata.channel,
+            "adapter_name": batch.source_metadata.adapter_name,
+            "adapter_version": batch.source_metadata.adapter_version,
+            "raw_locator": batch.source_metadata.raw_locator,
+            "goal_context": dict(batch.source_metadata.goal_context)
+            if batch.source_metadata.goal_context
+            else None,
+            "warnings": list(batch.source_metadata.warnings),
+            "ingested_at": batch.source_metadata.ingested_at,
+            "documents": documents,
+        }

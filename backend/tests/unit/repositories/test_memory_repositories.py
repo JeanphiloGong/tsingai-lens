@@ -27,6 +27,27 @@ def test_memory_collection_repository_round_trips_records_and_files(tmp_path):
     assert repository.read_files(collection_id) == [{"stored_filename": "paper.txt"}]
 
 
+def test_memory_collection_repository_round_trips_import_manifest(tmp_path):
+    repository = MemoryCollectionRepository(tmp_path / "collections")
+    collection_id = "col_demo"
+
+    repository.create_collection_dirs(collection_id)
+    repository.write_import_manifest(
+        collection_id,
+        {
+            "schema_version": 1,
+            "collection_id": collection_id,
+            "imports": [{"import_id": "imp_demo"}],
+        },
+    )
+
+    assert repository.read_import_manifest(collection_id) == {
+        "schema_version": 1,
+        "collection_id": collection_id,
+        "imports": [{"import_id": "imp_demo"}],
+    }
+
+
 def test_memory_task_repository_round_trips_task_records(tmp_path):
     repository = MemoryTaskRepository(tmp_path / "tasks")
     repository.write_task("task_demo", {"task_id": "task_demo", "status": "queued"})

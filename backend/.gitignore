@@ -215,6 +215,7 @@ data/test_file/
 data/collections/cache/
 data/collections/*/meta.json
 data/collections/*/files.json
+data/collections/*/import_manifest.json
 data/collections/*/artifacts.json
 data/collections/*/input/
 data/collections/*/output/

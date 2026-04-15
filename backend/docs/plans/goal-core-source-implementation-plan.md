@@ -266,6 +266,10 @@ Goal:
 - keep downstream surfaces explicitly dependent on the Core rather than on
   independent semantic pipelines
 
+Current child execution entrypoint:
+
+- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
+
 Primary changes:
 
 - document and harden protocol as a Core-gated downstream branch

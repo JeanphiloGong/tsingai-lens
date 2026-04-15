@@ -68,7 +68,8 @@ Then move to the owning plan family only when you are already inside that wave:
 - Graph retained surface and Core-derived cutover:
   [`plans/graph-surface-plan.md`](plans/graph-surface-plan.md),
   [`plans/core-derived-graph-follow-up-plan.md`](plans/core-derived-graph-follow-up-plan.md),
-  [`plans/core-derived-graph-cutover-implementation-plan.md`](plans/core-derived-graph-cutover-implementation-plan.md)
+  [`plans/core-derived-graph-cutover-implementation-plan.md`](plans/core-derived-graph-cutover-implementation-plan.md),
+  [`plans/core-first-product-surface-cutover-plan.md`](plans/core-first-product-surface-cutover-plan.md)
 
 Historical lineage:
 

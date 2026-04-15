@@ -60,6 +60,7 @@ This is a migration, not an immediate hard switch.
 Current child execution entrypoint:
 
 - [`core-derived-graph-cutover-implementation-plan.md`](core-derived-graph-cutover-implementation-plan.md)
+- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
 
 ## Target Semantic Model
 

@@ -227,6 +227,10 @@ Goal:
 
 - make downstream dependency on Core semantics explicit
 
+Current child execution entrypoint:
+
+- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
+
 Primary changes:
 
 - align protocol, graph, and report positioning language around Core

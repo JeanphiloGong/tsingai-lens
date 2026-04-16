@@ -322,7 +322,6 @@ function normalizeCollection(item: unknown): Collection | null {
     name: typeof record.name === 'string' ? record.name : null,
     description: typeof record.description === 'string' ? record.description : null,
     status: typeof record.status === 'string' ? record.status : null,
-    default_method: typeof record.default_method === 'string' ? record.default_method : null,
     paper_count:
       typeof record.paper_count === 'number'
         ? record.paper_count

@@ -31,8 +31,6 @@
   let selectedFiles: File[] = [];
   let isDragging = false;
   let indexAfterUpload = true;
-  let indexMode: 'update' | 'rebuild' = 'rebuild';
-  let method = 'standard';
   let uploadLoading = false;
   let uploadError = '';
   let uploadResult: { count: number; items: CollectionFile[] } | null = null;
@@ -42,20 +40,12 @@
   let filesError = '';
 
   let advancedOpen = false;
-  let uploadOptionsOpen = false;
-  let canUseIncrementalIndex = false;
   const primaryViewKeys = ['comparisons', 'evidence', 'documents'] as const;
   const setupPreviewKeys = ['comparisons', 'evidence', 'documents', 'protocol'] as const;
 
   $: collectionId = $page.params.id ?? '';
   $: if ($page.url.hash.startsWith('#advanced')) {
     advancedOpen = true;
-  }
-  $: canUseIncrementalIndex = Boolean(
-    workspace?.artifacts.documents_ready || workspace?.artifacts.document_profiles_ready
-  );
-  $: if (!canUseIncrementalIndex && indexMode === 'update') {
-    indexMode = 'rebuild';
   }
   $: effectiveFileCount = Math.max(workspace?.file_count ?? 0, collectionFiles.length);
   $: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
@@ -126,7 +116,6 @@
     if (showLoading) loading = true;
     try {
       workspace = await fetchWorkspaceOverview(collectionId);
-      method = workspace.collection.default_method ?? 'standard';
       const latestTask = workspace.latest_task;
       if (latestTask) {
         if (isTaskActive(latestTask)) {
@@ -341,11 +330,7 @@
 
     actionStatus = '';
     try {
-      const task = await createIndexTask(collectionId, {
-        method,
-        isUpdateRun: canUseIncrementalIndex && indexMode === 'update',
-        verbose: false
-      });
+      const task = await createIndexTask(collectionId);
       mergeTask(task);
       actionStatus = $t('documents.indexing');
       schedulePoll(task.task_id);
@@ -572,44 +557,6 @@
                 {$t('documents.indexAfterLabel')}
               </label>
             </div>
-          {/if}
-
-          {#if isReadyToProcessState || indexAfterUpload}
-            <details class="advanced" bind:open={uploadOptionsOpen}>
-              <summary>{$t('overview.processingOptionsTitle')}</summary>
-              <p class="meta-text">{$t('overview.processingOptionsLead')}</p>
-
-              <fieldset class="field fieldset">
-                <legend>{$t('documents.indexModeLabel')}</legend>
-                <div class="radio-group">
-                  <label>
-                    <input
-                      type="radio"
-                      name="index-mode"
-                      value="update"
-                      bind:group={indexMode}
-                      disabled={!canUseIncrementalIndex}
-                    />
-                    {$t('documents.indexModeUpdate')}
-                  </label>
-                  <label>
-                    <input type="radio" name="index-mode" value="rebuild" bind:group={indexMode} />
-                    {$t('documents.indexModeRebuild')}
-                  </label>
-                </div>
-                {#if !canUseIncrementalIndex}
-                  <p class="meta-text">{$t('documents.indexModeNoBaseline')}</p>
-                {/if}
-              </fieldset>
-
-              <div class="field">
-                <label for="index-method">{$t('documents.methodLabel')}</label>
-                <select id="index-method" class="select" bind:value={method}>
-                  <option value="standard">{$t('documents.methodStandard')}</option>
-                  <option value="fast">{$t('documents.methodFast')}</option>
-                </select>
-              </div>
-            </details>
           {/if}
 
           {#if uploadError}
@@ -1101,10 +1048,6 @@
               <div class="detail-row">
                 <dt>{$t('create.descLabel')}</dt>
                 <dd>{workspace.collection.description || '--'}</dd>
-              </div>
-              <div class="detail-row">
-                <dt>{$t('create.methodLabel')}</dt>
-                <dd>{workspace.collection.default_method || 'standard'}</dd>
               </div>
               <div class="detail-row">
                 <dt>{$t('tasks.tableCreated')}</dt>

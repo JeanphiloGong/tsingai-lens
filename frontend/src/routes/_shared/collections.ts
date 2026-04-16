@@ -7,7 +7,6 @@ type CollectionRecord = {
   name?: string | null;
   description?: string | null;
   status?: string | null;
-  default_method?: string | null;
   paper_count?: number | null;
   document_count?: number | null;
   entity_count?: number | null;
@@ -27,7 +26,6 @@ export type Collection = {
   name?: string | null;
   description?: string | null;
   status?: string | null;
-  default_method?: string | null;
   paper_count?: number | null;
   entity_count?: number | null;
   created_at?: string;
@@ -50,7 +48,6 @@ function normalizeCollection(item: unknown): Collection | null {
     name: record.name,
     description: record.description,
     status: record.status,
-    default_method: record.default_method,
     paper_count: record.paper_count ?? record.document_count,
     entity_count: record.entity_count,
     created_at: record.created_at,
@@ -97,12 +94,10 @@ export async function fetchCollection(collectionId: string) {
 export async function createCollection(payload: {
   name: string;
   description?: string;
-  defaultMethod?: string;
 }) {
   const body = {
     name: payload.name,
-    description: payload.description?.trim() || null,
-    default_method: payload.defaultMethod?.trim() || 'standard'
+    description: payload.description?.trim() || null
   };
 
   const data = await requestJson('/collections', {

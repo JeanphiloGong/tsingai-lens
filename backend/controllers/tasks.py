@@ -48,10 +48,8 @@ async def create_index_task(
         index_task_runner.run_index_task,
         task["task_id"],
         collection_id,
-        payload.method,
-        payload.is_update_run,
-        payload.verbose,
-        payload.additional_context,
+        verbose=payload.verbose,
+        additional_context=payload.additional_context,
     )
     return TaskResponse(**task)
 

@@ -21,7 +21,6 @@ async def create_collection(payload: CollectionCreateRequest) -> CollectionRespo
     record = collection_service.create_collection(
         name=payload.name,
         description=payload.description,
-        default_method=payload.default_method,
     )
     return CollectionResponse(**record)
 

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CollectionCreateRequest(BaseModel):
     """Request payload to create a logical paper collection."""
 
+    model_config = ConfigDict(extra="ignore")
+
     name: str = Field(..., description="集合名称")
     description: str | None = Field(default=None, description="集合描述")
-    default_method: str = Field(default="standard", description="默认索引模式")
 
 
 class CollectionResponse(BaseModel):
@@ -18,7 +19,6 @@ class CollectionResponse(BaseModel):
     name: str = Field(..., description="集合名称")
     description: str | None = Field(default=None, description="集合描述")
     status: str = Field(..., description="集合状态")
-    default_method: str = Field(..., description="默认索引模式")
     paper_count: int = Field(default=0, description="论文数量")
     created_at: str = Field(..., description="创建时间")
     updated_at: str = Field(..., description="更新时间")

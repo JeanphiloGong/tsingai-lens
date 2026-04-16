@@ -60,7 +60,7 @@ class CollectionService:
             payload["name"] = payload["collection_id"]
         payload.setdefault("description", None)
         payload.setdefault("status", "idle")
-        payload.setdefault("default_method", "standard")
+        payload.pop("default_method", None)
         payload["paper_count"] = int(payload.get("paper_count") or 0)
         payload["created_at"] = str(created_at)
         payload["updated_at"] = str(updated_at)
@@ -71,7 +71,6 @@ class CollectionService:
         self,
         name: str,
         description: str | None = None,
-        default_method: str = "standard",
     ) -> dict:
         collection_id = f"col_{uuid4().hex[:12]}"
         now = _now_iso()
@@ -80,7 +79,6 @@ class CollectionService:
             "name": name,
             "description": description,
             "status": "idle",
-            "default_method": default_method,
             "paper_count": 0,
             "created_at": now,
             "updated_at": now,

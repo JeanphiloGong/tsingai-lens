@@ -35,16 +35,18 @@ def test_collection_service_normalizes_legacy_meta(tmp_path):
     listed = service.list_collections()
     assert listed[0]["collection_id"] == "default"
     assert listed[0]["status"] == "idle"
-    assert listed[0]["default_method"] == "standard"
+    assert "default_method" not in listed[0]
     assert listed[0]["updated_at"] == "2026-01-15T12:03:14.032160+00:00"
 
     record = service.get_collection("default")
     assert record["collection_id"] == "default"
     assert record["paper_count"] == 0
+    assert "default_method" not in record
 
     saved = json.loads(paths.meta_path.read_text(encoding="utf-8"))
     assert saved["collection_id"] == "default"
     assert "id" not in saved
+    assert "default_method" not in saved
 
 
 def test_delete_collection_removes_collection_directory(tmp_path):

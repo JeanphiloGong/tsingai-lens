@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
-
-from retrieval.config.enums import IndexingMethod
+from pydantic import BaseModel, ConfigDict, Field
 
 
 TaskStatus = Literal["queued", "running", "completed", "partial_success", "failed"]
@@ -25,11 +23,8 @@ TaskStage = Literal[
 class IndexTaskCreateRequest(BaseModel):
     """Request payload to start a collection index task."""
 
-    method: IndexingMethod | str = Field(
-        default=IndexingMethod.Standard,
-        description="索引模式",
-    )
-    is_update_run: bool = Field(default=False, description="是否增量更新")
+    model_config = ConfigDict(extra="ignore")
+
     verbose: bool = Field(default=False, description="是否输出详细日志")
     additional_context: dict[str, Any] | None = Field(
         default=None,

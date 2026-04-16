@@ -625,6 +625,80 @@ def test_delete_collection_removes_app_layer_collection(app_client):
     )
 
 
+def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app_client):
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={
+            "name": "Compat Collection",
+            "description": "legacy client payload",
+            "default_method": "fast",
+        },
+    )
+    assert create_resp.status_code == 200
+    create_body = create_resp.json()
+    collection_id = create_body["collection_id"]
+    assert "default_method" not in create_body
+
+    get_resp = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
+    assert get_resp.status_code == 200
+    assert "default_method" not in get_resp.json()
+
+    list_resp = app_client.get(f"{API_V1_PREFIX}/collections")
+    assert list_resp.status_code == 200
+    created_item = next(
+        item for item in list_resp.json()["items"] if item["collection_id"] == collection_id
+    )
+    assert "default_method" not in created_item
+
+
+def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
+    import application.index_task_runner as task_runner_module
+
+    captured: dict[str, object] = {}
+
+    async def capturing_build_index(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        output_dir = Path(kwargs["config"].output.base_dir)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(task_runner_module, "build_index", capturing_build_index)
+
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Legacy Task Contract"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    task_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index",
+        json={
+            "method": "fast",
+            "is_update_run": True,
+            "verbose": True,
+            "additional_context": {"caller": "legacy-frontend"},
+        },
+    )
+    assert task_resp.status_code == 200
+
+    task_id = task_resp.json()["task_id"]
+    task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
+    assert task_status.status_code == 200
+    assert task_status.json()["status"] == "completed"
+
+    assert captured["method"] == task_runner_module.IndexingMethod.Standard
+    assert captured["is_update_run"] is False
+    assert captured["verbose"] is True
+    assert captured["additional_context"] == {"caller": "legacy-frontend"}
+
+
 def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_exist(app_client):
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Pending Collection"})
     assert create_resp.status_code == 200

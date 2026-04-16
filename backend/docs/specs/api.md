@@ -14,6 +14,8 @@
 - `workspace` 是 Lens v1 的主入口界面
 - `documents/profiles`、`evidence/cards`、`comparisons` 是主业务资源
 - `protocol/*` 是条件分支，不是所有 collection 的默认主产物
+- `graph/*`、`reports/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
+- `query` 当前是 Source runtime facade，不是 Core artifact 合同
 - `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
 
 ## 文档与静态资源
@@ -102,6 +104,10 @@
 - `GET /api/v1/tasks/{task_id}` 只接收真正的 `task_id`
 - `collection_id` 不能拿来调用 task 详情接口
 - collection 页面如果要展示任务历史，应走 collection 维度的 tasks 接口
+- `current_stage` 对外应使用：
+  `queued | files_registered | source_index_started | source_index_completed | document_profiles_started | evidence_cards_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
+- `graphrag_index_started`、`graphrag_index_completed`
+  只允许作为内部兼容别名存在，不属于公开 API 合同
 
 ### Workspace
 
@@ -136,6 +142,14 @@
   `*_generated` 与 `*_ready` 两类布尔值：
   - `generated` 表示该阶段产物文件已生成（可能为空）
   - `ready` 表示该阶段产物可直接用于主界面消费（通常要求非空）
+- `graph_generated`
+  表示 `document_profiles.parquet`、`evidence_cards.parquet`、
+  `comparison_rows.parquet` 三个 Core graph 输入文件都已生成
+- `graph_ready`
+  表示上述 Core graph 输入已具备图投影消费条件，而不是
+  `entities.parquet` / `relationships.parquet` 是否存在
+- `graphml_generated` 与 `graphml_ready`
+  只描述 `graph.graphml` 导出文件本身，不代表 graph 事实来源
 
 ### Document Profiles
 
@@ -371,6 +385,38 @@ comparison 对 traceback 的依赖约定：
 
 这些接口可以保留，但不是 Lens v1 新界面的主验收面。
 
+Graph 语义约束：
+
+- `/graph` 与 `/graphml` 只消费
+  `document_profiles.parquet`、`evidence_cards.parquet`、
+  `comparison_rows.parquet`
+- 它们当前是 Core-derived graph projection，不再以
+  `entities.parquet`、`relationships.parquet`、`communities.parquet`
+  作为产品语义前提
+- `community_id` 在 graph 路由上已不再受支持；如果传入，应返回
+  `400`，并携带稳定错误码 `graph_filter_not_supported`
+- graph 输入未就绪时，应返回 `409`，并携带稳定错误码
+  `graph_not_ready`
+
+Reports 语义约束：
+
+- `/reports/communities` 与 `/reports/communities/{community_id}`
+  当前是兼容路径名，语义底座已经改为 Core-derived pattern grouping
+- 这里的 `community_id` 应被解释为当前 pattern group 标识，不是
+  GraphRAG community 拓扑 id
+- report detail 里的 `entities`、`relationships`、`documents`
+  都应被视为从 document / evidence / comparison Core artifact
+  派生出的二级投影，而不是旧 entity graph 的直接透出
+- `/reports/patterns` 与上述 report 路由属于同一组 Core-derived
+  派生视图，只是命名更直接
+
+Query 语义约束：
+
+- `POST /api/v1/query` 仍是保留的次级检索界面
+- `method`、`community_level`、`dynamic_community_selection`
+  这些字段当前属于 Source runtime 调参语义，不是 Core 事实模型字段
+- query 运行时可以继续依赖 Source 内部的 retrieval / GraphRAG 表，但这类内部结构不属于前端需要长期绑定的主合同
+
 ## 错误合同
 
 - `400` 请求参数错误
@@ -394,6 +440,9 @@ readiness 类错误至少应包含：
 - `protocol/*`
   - 入口基于 `protocol_steps_generated` 判断是否可访问
   - `protocol_steps_generated=true` 且 `protocol_steps_ready=false` 时允许返回空列表或空结果
+- `graph`
+  - `community_id` 不受支持时返回 `400`
+  - Core graph 输入缺失时返回 `409`
 
 ## 前端集成约束
 
@@ -402,11 +451,14 @@ readiness 类错误至少应包含：
 - 前端不应把 `sections_ready`、`procedure_blocks_ready` 这类内部产物状态当成长期主合同
 - protocol 页面不是默认首页，comparison workspace 才是
 - goal-first 响应只用于 Goal Brief / Intake 与 collection handoff，主展示仍必须消费 Core 资源
+- graph 与 reports 是从 Core artifact 派生出的次级视图，不能反向充当 document/evidence/comparison 的事实来源
+- query 的 runtime 选项是次级搜索接口参数，不应被提升成主界面信息架构或主业务对象语义
 
 ## 相关文档
 
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
 - [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
+- [`../plans/core-first-product-surface-cutover-plan.md`](../plans/core-first-product-surface-cutover-plan.md)
 - [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
 - [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/goal-core-source-contract-follow-up-plan.md)
 - [`../plans/claim-traceback-navigation-implementation-plan.md`](../plans/claim-traceback-navigation-implementation-plan.md)

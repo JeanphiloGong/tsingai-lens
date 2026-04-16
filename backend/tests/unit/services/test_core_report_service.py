@@ -119,6 +119,11 @@ def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
     ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
+    assert not (output_dir / "entities.parquet").exists()
+    assert not (output_dir / "relationships.parquet").exists()
+    assert not (output_dir / "communities.parquet").exists()
+    assert not (output_dir / "community_reports.parquet").exists()
+
     listing = report_service.list_community_reports(
         collection_id=collection_id,
         level=1,

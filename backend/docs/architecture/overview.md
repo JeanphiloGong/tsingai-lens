@@ -11,7 +11,7 @@ delivery sequencing or plan-family routing.
 ## Backend Role In The System
 
 The backend turns collection material into document profile, evidence,
-comparison, retained graph/report, and conditional protocol artifacts and
+comparison, Core-derived graph/report, and conditional protocol artifacts and
 exposes those results through the public HTTP contract.
 
 Within the repository-wide system:
@@ -34,7 +34,8 @@ Within the repository-wide system:
 - `domain/`
   Domain models and port definitions
 - `infra/`
-  Runtime adapters such as persistence, ingestion, and GraphRAG integration
+  Runtime adapters such as persistence, ingestion, Source-owned runtime seams,
+  and GraphRAG integration
 - `retrieval/`
   Index and query engine package
 - `tests/`
@@ -51,7 +52,9 @@ The backend is still in transition, but its intended shape is already visible:
   `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`
 - protocol remains a conditional downstream branch rather than the default
   parsing center
-- graph and reports remain retained secondary surfaces
+- graph and reports are Core-derived secondary surfaces
+- query now crosses a Source-owned runtime facade rather than importing
+  GraphRAG internals from product-facing application code
 - `retrieval/` remains the largest engine surface and should be reached
   through clearer application or infrastructure boundaries over time
 
@@ -61,12 +64,15 @@ larger flat service bag.
 ## Main Runtime Flow
 
 1. collection material enters through collection and ingestion surfaces
-2. indexing orchestration runs GraphRAG plus the Lens backbone
+2. indexing orchestration runs Source-side indexing/runtime preparation plus
+   the Lens backbone
 3. document profiling produces suitability and routing signals
 4. evidence extraction produces claim-centered research objects
 5. comparison generation produces the primary collection-facing workspace view
 6. protocol, graph, and report surfaces derive from or sit beside that primary
    backbone
+7. query crosses a Source-owned runtime facade for retained secondary search
+   behavior
 
 ## Boundary Rules
 
@@ -77,6 +83,9 @@ larger flat service bag.
 - route code should not bypass application-owned orchestration with ad hoc
   engine imports
 - protocol should stay behind documents, evidence, and comparisons
+- product graph and report semantics should stay derived from Core artifacts
+- GraphRAG should remain behind Source-owned seams rather than defining
+  product-facing contracts
 - shared product meaning and cross-module contracts should stay in root `docs/`
 
 ## Code-Owned Neighbors

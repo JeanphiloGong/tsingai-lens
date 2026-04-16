@@ -33,7 +33,7 @@ context.
 
 ## Status Summary
 
-The backend is currently in a mixed migration state.
+The backend product surface is now mostly converged on the Core-first shape.
 
 The Lens v1 core collection workflow is now backed by the new
 evidence-first/comparison-first implementation:
@@ -44,12 +44,14 @@ evidence-first/comparison-first implementation:
 4. `comparison_rows` are generated
 5. `protocol` remains a conditional downstream branch
 
-However, not every public backend interface has been migrated to that same
-shape. Some secondary surfaces still use older graph/report/query flows.
+Graph and report surfaces now consume the same Core artifacts as derived
+secondary views. The main remaining mixed area is Source-owned query/runtime
+internals plus a few compatibility route names that still carry old
+`community_*` vocabulary.
 
 ## Current Surface Map
 
-### Migrated to the new Lens v1 backbone
+### Primary surfaces on the new Lens v1 backbone
 
 - `POST /api/v1/collections/{collection_id}/tasks/index`
   Uses the new indexing orchestration sequence:
@@ -64,6 +66,24 @@ shape. Some secondary surfaces still use older graph/report/query flows.
   Uses the real `ComparisonService`.
 
 These endpoints are the current Lens v1 primary acceptance backbone.
+
+### Core-derived secondary surfaces
+
+- `GET /api/v1/collections/{collection_id}/graph`
+  Now projects graph payloads from
+  `document_profiles/evidence_cards/comparison_rows`.
+- `GET /api/v1/collections/{collection_id}/graphml`
+  Exports the same Core-derived graph projection.
+- `GET /api/v1/collections/{collection_id}/reports/communities`
+  Remains a compatibility route name, but now lists Core-derived pattern
+  groups rather than GraphRAG community reports.
+- `GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`
+  Returns Core-derived pattern-group detail payloads.
+- `GET /api/v1/collections/{collection_id}/reports/patterns`
+  Exposes the same Core-derived report family with more direct naming.
+
+These endpoints are not primary acceptance surfaces, but they are no longer
+legacy product semantics either.
 
 ### Real and required, but not backbone-specific
 
@@ -92,27 +112,26 @@ meaningful for protocol-suitable collections, but their data path is still
 protocol-artifact-centric rather than fully rebuilt as a downstream derivation
 from the evidence/comparison backbone.
 
-### Still on retained legacy or secondary surfaces
+### Source-owned secondary surface
 
-- `GET /api/v1/collections/{collection_id}/graph`
-- `GET /api/v1/collections/{collection_id}/graphml`
-- `GET /api/v1/collections/{collection_id}/reports/communities`
-- `GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`
-- `GET /api/v1/collections/{collection_id}/reports/patterns`
 - `POST /api/v1/query`
 
-These endpoints are still valid backend surfaces, but they are not yet aligned
-to the new Lens v1 primary comparison workflow and should be treated as
-secondary retained interfaces.
+This endpoint remains valid, but it should be read as a Source runtime facade
+rather than a Core artifact surface. It may still depend on Source-internal
+retrieval or GraphRAG tables.
 
 ## Cross-Cutting Mixed-State Notes
 
-### Router registration remains mixed
+### Public routes are more converged than internal runtimes
 
-The FastAPI app still registers both the new Lens v1 primary surfaces and the
-older graph/report/query/protocol surfaces in the same application. The system
-therefore remains in a mixed migration state rather than a fully converged
-backend.
+The FastAPI app still exposes primary surfaces together with protocol, graph,
+reports, and query in one application. That no longer means graph/report are
+legacy. The remaining mixed state is mostly internal:
+
+- query still crosses a Source-owned runtime facade
+- some report route names still carry compatibility `community_*` vocabulary
+- protocol remains a downstream conditional branch rather than a fully rebuilt
+  Core-native derivative
 
 ### Task detail is task-scoped, not collection-scoped
 
@@ -130,30 +149,30 @@ Collection pages that need task history should use
 - real comparison row generation and listing
 - indexing orchestration reordered around the new backbone
 - protocol generation skipped for protocol-unsuitable collections
+- graph product surface cut over to Core-derived projection
+- report product surface cut over to Core-derived pattern grouping
+- workspace graph readiness cut over to Core inputs
+- public task vocabulary cut over from `graphrag_*` to `source_index_*`
+- authority docs aligned to the current Core-first graph/report/query/task wording
 
 ### Next
 
-- complete frontend integration against:
-  `workspace -> documents/profiles -> evidence/cards -> comparisons`
-- verify one real end-to-end path using a real collection
+- add contract guard tests for Core-first graph/report/readiness/task semantics
 - run real app-layer route verification in an environment with FastAPI
   available
 
 ### Later
 
 - rebuild protocol as a true downstream branch over the new backbone
-- decide whether graph becomes a pure derived view from evidence/comparison
-  artifacts
-- decide whether reports remain retained legacy views or become
-  comparison-driven summaries
-- decide whether query remains generic chat/search or becomes a
-  evidence-grounded retrieval surface
+- decide how far Source-internal GraphRAG artifact generation should be
+  retained, made lazy, or retired
+- revisit query request vocabulary if Source runtime knobs continue leaking too
+  much implementation language
 - finish controller/package migration toward domain-oriented backend layout
 
 ## Recommended Execution Order
 
-1. Finish the real frontend/backend closed loop around the Lens v1 primary
-   collection workflow.
+1. Add regression guards for graph/report/readiness/task vocabulary drift.
 2. Verify the full real path:
    create collection, upload file, start index, poll task, open workspace,
    inspect document profiles, inspect evidence cards, inspect comparisons.
@@ -161,8 +180,8 @@ Collection pages that need task history should use
 4. Continue backend code reorganization toward domain-oriented controller and
    application packages.
 5. Rebuild protocol as a strict downstream branch after the backbone is stable.
-6. Revisit graph, reports, and query only after the primary collection
-   comparison surface is fully accepted.
+6. Make an explicit Source-internal decision on legacy GraphRAG artifact
+   generation.
 
 ## Acceptance Reminder
 
@@ -175,7 +194,8 @@ workflow:
 - `comparisons`
 
 `protocol`, `graph`, `reports`, and `query` are not the primary acceptance
-center for this migration stage.
+center for this migration stage, but `graph` and `reports` now already consume
+Core artifacts rather than defining a competing product fact model.
 
 ## Related Docs
 
@@ -185,5 +205,6 @@ center for this migration stage.
 - [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
 - [`graph-surface-plan.md`](graph-surface-plan.md)
+- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
 - [`v1-api-migration-notes.md`](v1-api-migration-notes.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)

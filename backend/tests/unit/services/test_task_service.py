@@ -22,3 +22,35 @@ def test_task_service_lists_collection_tasks_with_status_and_offset(tmp_path):
 
     paged = task_service.list_tasks(collection_id="col_a", limit=1, offset=1)
     assert [item["task_id"] for item in paged] == [task_a["task_id"]]
+
+
+def test_task_service_normalizes_legacy_public_stage_aliases(tmp_path):
+    task_service = TaskService(tmp_path / "tasks")
+
+    task = task_service.create_task("col_a", "index")
+    stored = task_service.repository.read_task(task["task_id"])
+    assert stored is not None
+
+    task_service.repository.write_task(
+        task["task_id"],
+        {
+            **stored,
+            "current_stage": "graphrag_index_started",
+        },
+    )
+
+    fetched = task_service.get_task(task["task_id"])
+    assert fetched["current_stage"] == "source_index_started"
+
+    listed = task_service.list_tasks(collection_id="col_a")
+    assert listed[0]["current_stage"] == "source_index_started"
+
+    updated = task_service.update_task(
+        task["task_id"],
+        current_stage="graphrag_index_completed",
+    )
+    assert updated["current_stage"] == "source_index_completed"
+
+    persisted = task_service.repository.read_task(task["task_id"])
+    assert persisted is not None
+    assert persisted["current_stage"] == "source_index_completed"

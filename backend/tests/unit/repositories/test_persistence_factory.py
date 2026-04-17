@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from infra.persistence.factory import build_persistence_bundle
-from application.collection_service import CollectionService
+from application.collections.service import CollectionService
 
 
 def test_build_persistence_bundle_supports_memory_backend(tmp_path):

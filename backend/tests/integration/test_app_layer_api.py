@@ -248,18 +248,18 @@ def app_client(monkeypatch, tmp_path):
         ReportCommunityListResponse,
         ReportPatternsResponse,
     )
-    import application.graph_service as graph_service_module
-    import application.index_task_runner as task_runner_module
-    import application.report_service as report_service_module
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    import application.graph.service as graph_service_module
+    import application.indexing.index_task_runner as task_runner_module
+    import application.reports.service as report_service_module
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
     from application.comparisons.service import ComparisonService
     from application.documents.service import DocumentProfileService
     from application.evidence.service import EvidenceCardService
     from application.goals.service import GoalService
-    from application.index_task_runner import IndexTaskRunner
-    from application.task_service import TaskService
-    from application.workspace_service import WorkspaceService
+    from application.indexing.index_task_runner import IndexTaskRunner
+    from application.indexing.task_service import TaskService
+    from application.workspace.service import WorkspaceService
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -638,7 +638,7 @@ def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app
 
 
 def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
-    import application.index_task_runner as task_runner_module
+    import application.indexing.index_task_runner as task_runner_module
 
     captured: dict[str, object] = {}
 

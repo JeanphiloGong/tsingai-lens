@@ -12,8 +12,8 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
+from application.workspace.artifact_registry_service import ArtifactRegistryService
+from application.collections.service import CollectionService
 from application.comparisons.service import ComparisonService
 from application.documents.service import DocumentProfileService
 from application.evidence.service import EvidenceCardService

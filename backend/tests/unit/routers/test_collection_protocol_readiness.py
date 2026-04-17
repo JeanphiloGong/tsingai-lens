@@ -8,8 +8,8 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from controllers import protocol as protocol_controller
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
+from application.workspace.artifact_registry_service import ArtifactRegistryService
+from application.collections.service import CollectionService
 
 
 @pytest.fixture()

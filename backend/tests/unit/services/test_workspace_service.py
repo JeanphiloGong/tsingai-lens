@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
-from application.task_service import TaskService
-from application.workspace_service import WorkspaceService
+from application.workspace.artifact_registry_service import ArtifactRegistryService
+from application.collections.service import CollectionService
+from application.indexing.task_service import TaskService
+from application.workspace.service import WorkspaceService
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001

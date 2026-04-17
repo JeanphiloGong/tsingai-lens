@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from application.backbone_codec import (
+from infra.persistence.backbone_codec import (
     normalize_backbone_value,
     prepare_frame_for_storage,
     restore_frame_from_storage,

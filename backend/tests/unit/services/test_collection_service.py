@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from application.collection_service import CollectionService
+from application.collections.service import CollectionService
 from infra.ingestion.normalized_import import (
     NormalizedImportBatch,
     NormalizedImportDocument,

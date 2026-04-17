@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from application.documents.source_service import build_document_records
+from application.documents.input_service import build_document_records
 
 _METHOD_HEADING_PATTERNS = (
     re.compile(r"^(?:\d+(?:\.\d+)*)?\s*(materials?\s+and\s+methods?)$", re.IGNORECASE),

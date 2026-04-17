@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from application.documents.source_service import (
+from application.documents.input_service import (
     CollectionArtifactPaths,
     build_document_records,
     load_collection_inputs,

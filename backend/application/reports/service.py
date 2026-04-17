@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 from fastapi import HTTPException
 
-from application.backbone_codec import restore_frame_from_storage
+from infra.persistence.backbone_codec import restore_frame_from_storage
 from application.collections.service import CollectionService
 from application.workspace.artifact_registry_service import ArtifactRegistryService
 from controllers.schemas.report import (

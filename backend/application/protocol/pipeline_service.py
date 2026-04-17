@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from application.documents.section_service import build_sections
-from application.documents.source_service import load_collection_inputs
+from application.documents.input_service import load_collection_inputs
 from application.protocol.block_service import build_procedure_blocks
 from application.protocol.extract_service import ProtocolExtractService
-from application.protocol.source_service import (
+from application.protocol.artifact_service import (
     persist_procedure_blocks,
     persist_sections,
 )

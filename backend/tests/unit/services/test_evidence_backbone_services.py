@@ -29,8 +29,8 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -361,8 +361,8 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
     from controllers.schemas.evidence import EvidenceCardListResponse
 
     collection_service = CollectionService(tmp_path / "collections")
@@ -428,8 +428,8 @@ def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_pa
 def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -525,8 +525,8 @@ def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeyp
 def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -610,8 +610,8 @@ def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path)
 def test_evidence_traceback_unavailable_when_no_locator_can_be_resolved(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")

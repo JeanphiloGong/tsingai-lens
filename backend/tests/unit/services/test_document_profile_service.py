@@ -26,8 +26,8 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -128,8 +128,8 @@ def test_document_profile_service_returns_null_title_and_source_filename_from_fi
 ):
     _patch_parquet(monkeypatch)
 
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -189,8 +189,8 @@ def test_document_profile_service_rebuilds_legacy_profiles_with_identity_fields(
 ):
     _patch_parquet(monkeypatch)
 
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")

@@ -25,7 +25,7 @@ It contains a flat mix of:
 - indexing task orchestration
 - workspace assembly
 - graph access
-- query and reports
+- reports
 - protocol parsing and SOP helpers
 
 That flat shape should not be deepened further.
@@ -63,6 +63,12 @@ example:
 - [`protocol/README.md`](protocol/README.md)
   Conditional protocol branch for sections, blocks, protocol steps, search,
   and SOP drafting
+
+## Related Docs
+
+- [`docs/application-layer-one-shot-cutover-plan.md`](docs/application-layer-one-shot-cutover-plan.md)
+  Direct cutover plan to remove flat application shims and finish the
+  domain-packaged layout in one pass
 
 ## Non-Goals
 

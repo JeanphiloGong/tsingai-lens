@@ -5,12 +5,11 @@ This node owns the conditional protocol branch in the backend.
 ## Scope
 
 - `pipeline_service.py`
-- `section_service.py`
 - `block_service.py`
 - `extract_service.py`
 - `validate_service.py`
 - `normalize_service.py`
-- `source_service.py`
+- `artifact_service.py`
 - `search_service.py`
 - `sop_service.py`
 - `document_meta_service.py`
@@ -47,10 +46,8 @@ It should not redefine:
 
 - `pipeline_service.py`
   Builds protocol artifacts from indexed collection inputs
-- `source_service.py`
-  Persists protocol branch artifacts and re-exports shared source helpers
-- `section_service.py`
-  Re-exports shared section parsing from `application/documents/section_service.py`
+- `artifact_service.py`
+  Persists protocol branch artifacts over the Documents-owned collection-input seam
 - `block_service.py`
   Builds procedure blocks from sections
 - `extract_service.py`

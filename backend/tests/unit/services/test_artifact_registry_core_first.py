@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from application.artifact_registry_service import ArtifactRegistryService
+from application.workspace.artifact_registry_service import ArtifactRegistryService
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001

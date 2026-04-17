@@ -11,10 +11,10 @@ import pandas as pd
 if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
-from application.index_task_runner import IndexTaskRunner
-from application.task_service import TaskService
+from application.workspace.artifact_registry_service import ArtifactRegistryService
+from application.collections.service import CollectionService
+from application.indexing.index_task_runner import IndexTaskRunner
+from application.indexing.task_service import TaskService
 
 
 class DummyWorkflowOutput:
@@ -132,7 +132,7 @@ def _write_review_only_outputs(output_dir: Path) -> None:
 def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    import application.index_task_runner as task_runner_module
+    import application.indexing.index_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -185,7 +185,7 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 def test_index_task_runner_downgrades_first_update_run(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    import application.index_task_runner as task_runner_module
+    import application.indexing.index_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -230,8 +230,8 @@ def test_index_task_runner_downgrades_when_vector_store_baseline_missing(
 ):
     _patch_parquet(monkeypatch)
 
-    import application.index_task_runner as task_runner_module
-    import application.index_run_mode_service as run_mode_service
+    import application.indexing.index_task_runner as task_runner_module
+    import application.indexing.run_mode_service as run_mode_service
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -291,7 +291,7 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
 ):
     _patch_parquet(monkeypatch)
 
-    import application.index_task_runner as task_runner_module
+    import application.indexing.index_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")

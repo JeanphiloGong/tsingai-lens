@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from application.backbone_codec import restore_frame_from_storage
+from infra.persistence.backbone_codec import restore_frame_from_storage
 
 
 _CORE_GRAPH_ARTIFACTS = (

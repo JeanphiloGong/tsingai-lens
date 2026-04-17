@@ -7,7 +7,6 @@ related retrieval artifacts.
 
 - `workflows/`
 - `operations/`
-- `update/`
 - `input/`
 - `text_splitting/`
 
@@ -15,5 +14,5 @@ related retrieval artifacts.
 
 - load source documents and text units
 - build graph-oriented outputs
-- support full and incremental index workflows
+- support full index workflows
 - persist the artifacts consumed by downstream backend features

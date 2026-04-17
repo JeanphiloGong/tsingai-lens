@@ -200,89 +200,6 @@ def _index_cli(
         method=method,
     )
 
-
-@app.command("update")
-def _update_cli(
-    config: Path | None = typer.Option(
-        None,
-        "--config",
-        "-c",
-        help="The configuration to use.",
-        exists=True,
-        file_okay=True,
-        readable=True,
-        autocompletion=CONFIG_AUTOCOMPLETE,
-    ),
-    root: Path = typer.Option(
-        Path(),
-        "--root",
-        "-r",
-        help="The project root directory.",
-        exists=True,
-        dir_okay=True,
-        writable=True,
-        resolve_path=True,
-        autocompletion=ROOT_AUTOCOMPLETE,
-    ),
-    method: IndexingMethod = typer.Option(
-        IndexingMethod.Standard.value,
-        "--method",
-        "-m",
-        help="The indexing method to use.",
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Run the indexing pipeline with verbose logging.",
-    ),
-    memprofile: bool = typer.Option(
-        False,
-        "--memprofile",
-        help="Run the indexing pipeline with memory profiling.",
-    ),
-    cache: bool = typer.Option(
-        True,
-        "--cache/--no-cache",
-        help="Use LLM cache.",
-    ),
-    skip_validation: bool = typer.Option(
-        False,
-        "--skip-validation",
-        help="Skip any preflight validation. Useful when running no LLM steps.",
-    ),
-    output: Path | None = typer.Option(
-        None,
-        "--output",
-        "-o",
-        help=(
-            "Indexing pipeline output directory. "
-            "Overrides output.base_dir in the configuration file."
-        ),
-        dir_okay=True,
-        writable=True,
-        resolve_path=True,
-    ),
-) -> None:
-    """
-    Update an existing knowledge graph index.
-
-    Applies a default output configuration (if not provided by config), saving the new index to the local file system in the `update_output` folder.
-    """
-    from retrieval.cli.index import update_cli
-
-    update_cli(
-        root_dir=root,
-        verbose=verbose,
-        memprofile=memprofile,
-        cache=cache,
-        config_filepath=config,
-        skip_validation=skip_validation,
-        output_dir=output,
-        method=method,
-    )
-
-
 @app.command("prompt-tune")
 def _prompt_tune_cli(
     root: Path = typer.Option(
@@ -406,4 +323,3 @@ def _prompt_tune_cli(
             min_examples_required=min_examples_required,
         )
     )
-

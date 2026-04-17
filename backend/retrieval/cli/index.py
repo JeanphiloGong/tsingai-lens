@@ -52,12 +52,10 @@ def index_cli(
     if output_dir:
         cli_overrides["output.base_dir"] = str(output_dir)
         cli_overrides["reporting.base_dir"] = str(output_dir)
-        cli_overrides["update_index_output.base_dir"] = str(output_dir)
     config = load_config(root_dir, config_filepath, cli_overrides)
     _run_index(
         config=config,
         method=method,
-        is_update_run=False,
         verbose=verbose,
         memprofile=memprofile,
         cache=cache,
@@ -66,41 +64,9 @@ def index_cli(
     )
 
 
-def update_cli(
-    root_dir: Path,
-    method: IndexingMethod,
-    verbose: bool,
-    memprofile: bool,
-    cache: bool,
-    config_filepath: Path | None,
-    skip_validation: bool,
-    output_dir: Path | None,
-):
-    """Run the pipeline with the given config."""
-    cli_overrides = {}
-    if output_dir:
-        cli_overrides["output.base_dir"] = str(output_dir)
-        cli_overrides["reporting.base_dir"] = str(output_dir)
-        cli_overrides["update_index_output.base_dir"] = str(output_dir)
-
-    config = load_config(root_dir, config_filepath, cli_overrides)
-
-    _run_index(
-        config=config,
-        method=method,
-        is_update_run=True,
-        verbose=verbose,
-        memprofile=memprofile,
-        cache=cache,
-        dry_run=False,
-        skip_validation=skip_validation,
-    )
-
-
 def _run_index(
     config,
     method,
-    is_update_run,
     verbose,
     memprofile,
     cache,
@@ -138,7 +104,6 @@ def _run_index(
         api.build_index(
             config=config,
             method=method,
-            is_update_run=is_update_run,
             memory_profile=memprofile,
             callbacks=[ConsoleWorkflowCallbacks(verbose=verbose)],
             verbose=verbose,

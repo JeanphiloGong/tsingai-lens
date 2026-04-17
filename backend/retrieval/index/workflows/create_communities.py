@@ -146,7 +146,7 @@ def create_communities(
     final_communities["children"] = final_communities["children"].apply(
         lambda x: x if isinstance(x, np.ndarray) else []  # type: ignore
     )
-    # add fields for incremental update tracking
+    # add run metadata used by downstream community shaping
     final_communities["period"] = datetime.now(timezone.utc).date().isoformat()
     final_communities["size"] = final_communities.loc[:, "entity_ids"].apply(len)
 

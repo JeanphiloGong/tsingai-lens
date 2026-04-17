@@ -1,11 +1,10 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Different methods to run the pipeline."""
+"""Run the indexing pipeline."""
 
 import json
 import logging
-import re
 import time
 from collections.abc import AsyncIterable
 from dataclasses import asdict
@@ -19,9 +18,8 @@ from retrieval.index.run.utils import create_run_context
 from retrieval.index.typing.context import PipelineRunContext
 from retrieval.index.typing.pipeline import Pipeline
 from retrieval.index.typing.pipeline_run_result import PipelineRunResult
-from retrieval.storage.pipeline_storage import PipelineStorage
 from retrieval.utils.api import create_cache_from_config, create_storage_from_config
-from retrieval.utils.storage import load_table_from_storage, write_table_to_storage
+from retrieval.utils.storage import write_table_to_storage
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +28,6 @@ async def run_pipeline(
     pipeline: Pipeline,
     config: GraphRagConfig,
     callbacks: WorkflowCallbacks,
-    is_update_run: bool = False,
     additional_context: dict[str, Any] | None = None,
     input_documents: pd.DataFrame | None = None,
 ) -> AsyncIterable[PipelineRunResult]:
@@ -48,50 +45,20 @@ async def run_pipeline(
     if additional_context:
         state.setdefault("additional_context", {}).update(additional_context)
 
-    if is_update_run:
-        logger.info("Running incremental indexing.")
+    logger.info("Running standard indexing.")
 
-        update_storage = create_storage_from_config(config.update_index_output)
-        # we use this to store the new subset index, and will merge its content with the previous index
-        update_timestamp = time.strftime("%Y%m%d-%H%M%S")
-        timestamped_storage = update_storage.child(update_timestamp)
-        delta_storage = timestamped_storage.child("delta")
-        # copy the previous output to a backup folder, so we can replace it with the update
-        # we'll read from this later when we merge the old and new indexes
-        previous_storage = timestamped_storage.child("previous")
-        await _copy_previous_output(output_storage, previous_storage)
+    # if the user passes in a df directly, write directly to storage so we can skip finding/parsing later
+    if input_documents is not None:
+        await write_table_to_storage(input_documents, "documents", output_storage)
+        pipeline.remove("load_input_documents")
 
-        state["update_timestamp"] = update_timestamp
-
-        # if the user passes in a df directly, write directly to storage so we can skip finding/parsing later
-        if input_documents is not None:
-            await write_table_to_storage(input_documents, "documents", delta_storage)
-            pipeline.remove("load_update_documents")
-
-        context = create_run_context(
-            input_storage=input_storage,
-            output_storage=delta_storage,
-            previous_storage=previous_storage,
-            cache=cache,
-            callbacks=callbacks,
-            state=state,
-        )
-
-    else:
-        logger.info("Running standard indexing.")
-
-        # if the user passes in a df directly, write directly to storage so we can skip finding/parsing later
-        if input_documents is not None:
-            await write_table_to_storage(input_documents, "documents", output_storage)
-            pipeline.remove("load_input_documents")
-
-        context = create_run_context(
-            input_storage=input_storage,
-            output_storage=output_storage,
-            cache=cache,
-            callbacks=callbacks,
-            state=state,
-        )
+    context = create_run_context(
+        input_storage=input_storage,
+        output_storage=output_storage,
+        cache=cache,
+        callbacks=callbacks,
+        state=state,
+    )
 
     async for table in _run_pipeline(
         pipeline=pipeline,
@@ -155,13 +122,3 @@ async def _dump_json(context: PipelineRunContext) -> None:
             context.state["additional_context"] = temp_context
 
     await context.output_storage.set("context.json", state_blob)
-
-
-async def _copy_previous_output(
-    storage: PipelineStorage,
-    copy_storage: PipelineStorage,
-):
-    for file in storage.find(re.compile(r"\.parquet$")):
-        base_name = file[0].replace(".parquet", "")
-        table = await load_table_from_storage(base_name, storage)
-        await write_table_to_storage(table, base_name, copy_storage)

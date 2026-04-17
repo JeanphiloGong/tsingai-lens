@@ -37,7 +37,6 @@ def _summarize_workflow_result(result: Any) -> str:
 async def build_index(
     config: GraphRagConfig,
     method: IndexingMethod | str = IndexingMethod.Standard,
-    is_update_run: bool = False,
     memory_profile: bool = False,
     callbacks: list[WorkflowCallbacks] | None = None,
     additional_context: dict[str, Any] | None = None,
@@ -79,8 +78,6 @@ async def build_index(
         logger.warning("New pipeline does not yet support memory profiling.")
 
     logger.info("Initializing indexing pipeline...")
-    # todo: this could propagate out to the cli for better clarity, but will be a breaking api change
-    method = _get_method(method, is_update_run)
     pipeline = PipelineFactory.create_pipeline(config, method)
 
     workflow_callbacks.pipeline_start(pipeline.names())
@@ -89,7 +86,6 @@ async def build_index(
         pipeline,
         config,
         callbacks=workflow_callbacks,
-        is_update_run=is_update_run,
         additional_context=additional_context,
         input_documents=input_documents,
     ):
@@ -106,8 +102,3 @@ async def build_index(
 
     workflow_callbacks.pipeline_end(outputs)
     return outputs
-
-
-def _get_method(method: IndexingMethod | str, is_update_run: bool) -> str:
-    m = method.value if isinstance(method, IndexingMethod) else method
-    return f"{m}-update" if is_update_run else m

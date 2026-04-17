@@ -11,7 +11,6 @@ from application.comparisons.service import ComparisonService
 from application.collections.service import CollectionService
 from application.documents.service import DocumentProfileService
 from application.evidence.service import EvidenceCardService
-from application.indexing.run_mode_service import resolve_update_run
 from application.indexing.task_service import TaskService
 from application.protocol.pipeline_service import build_protocol_artifacts
 from application.workspace.artifact_registry_service import ArtifactRegistryService
@@ -97,7 +96,6 @@ class IndexTaskRunner:
         task_id: str,
         collection_id: str,
         method: IndexingMethod | str = IndexingMethod.Standard,
-        is_update_run: bool = False,
         verbose: bool = False,
         additional_context: dict | None = None,
     ) -> dict:
@@ -123,22 +121,6 @@ class IndexTaskRunner:
             raise RuntimeError("collection has no files")
 
         config, output_dir = self._load_collection_config(collection_id)
-        effective_is_update_run, update_warning = resolve_update_run(
-            output_dir,
-            is_update_run,
-            config=config,
-        )
-        if update_warning:
-            logger.warning(
-                "Downgrading update run to full rebuild task_id=%s collection_id=%s output_dir=%s",
-                task_id,
-                collection_id,
-                output_dir,
-            )
-            record = self.task_service.get_task(task_id)
-            warnings = list(record.get("warnings", []))
-            warnings.append(update_warning)
-            self.task_service.update_task(task_id, warnings=warnings)
         self.collection_service.update_collection(collection_id, status="running")
 
         try:
@@ -152,7 +134,6 @@ class IndexTaskRunner:
             outputs = await resolved_build_index(
                 config=config,
                 method=method or IndexingMethod.Standard,
-                is_update_run=effective_is_update_run,
                 additional_context=additional_context,
                 verbose=verbose,
             )

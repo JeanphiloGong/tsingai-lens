@@ -147,7 +147,10 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     default_config.parent.mkdir(parents=True, exist_ok=True)
     default_config.write_text("dummy: true\n", encoding="utf-8")
 
+    captured: dict[str, object] = {}
+
     async def fake_build_index(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
         _write_index_outputs(paths.output_dir)
         return [DummyWorkflowOutput()]
 
@@ -160,6 +163,8 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     assert result["status"] == "completed"
     assert result["current_stage"] == "artifacts_ready"
+    assert captured["method"] == task_runner_module.IndexingMethod.Standard
+    assert "is_update_run" not in captured
     artifacts = artifact_registry.get(collection["collection_id"])
     assert artifacts["documents_generated"] is True
     assert artifacts["documents_ready"] is True
@@ -180,110 +185,6 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
     assert paths.output_dir.joinpath("evidence_cards.parquet").exists()
     assert paths.output_dir.joinpath("comparison_rows.parquet").exists()
-
-
-def test_index_task_runner_downgrades_first_update_run(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    import application.indexing.index_task_runner as task_runner_module
-
-    collection_service = CollectionService(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
-
-    collection = collection_service.create_collection("Composite Papers")
-    paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal.")
-
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
-    captured: dict[str, object] = {}
-
-    async def fake_build_index(**kwargs):  # noqa: ANN003
-        captured.update(kwargs)
-        _write_index_outputs(paths.output_dir)
-        return [DummyWorkflowOutput()]
-
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
-    monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
-
-    task = task_service.create_task(collection["collection_id"], "index")
-    result = asyncio.run(
-        runner.run_index_task(
-            task["task_id"],
-            collection["collection_id"],
-            is_update_run=True,
-        )
-    )
-
-    assert captured["is_update_run"] is False
-    assert result["status"] == "completed"
-    assert result["warnings"] == ["未找到上一轮索引产物 documents.parquet，已自动降级为全量重建。"]
-
-
-def test_index_task_runner_downgrades_when_vector_store_baseline_missing(
-    monkeypatch, tmp_path
-):
-    _patch_parquet(monkeypatch)
-
-    import application.indexing.index_task_runner as task_runner_module
-    import application.indexing.run_mode_service as run_mode_service
-
-    collection_service = CollectionService(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
-
-    collection = collection_service.create_collection("Composite Papers")
-    paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(
-        collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal."
-    )
-    _write_index_outputs(paths.output_dir)
-    (paths.output_dir.parent / "vector_store" / "lancedb").mkdir(parents=True, exist_ok=True)
-
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
-    captured: dict[str, object] = {}
-
-    async def fake_build_index(**kwargs):  # noqa: ANN003
-        captured.update(kwargs)
-        _write_index_outputs(paths.output_dir)
-        return [DummyWorkflowOutput()]
-
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
-    monkeypatch.setattr(
-        task_runner_module,
-        "load_config",
-        lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
-    )
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
-    monkeypatch.setattr(
-        run_mode_service,
-        "_probe_lancedb_tables",
-        lambda db_uri, required_tables: (["default-entity-description"], "missing"),
-    )
-
-    task = task_service.create_task(collection["collection_id"], "index")
-    result = asyncio.run(
-        runner.run_index_task(
-            task["task_id"],
-            collection["collection_id"],
-            is_update_run=True,
-        )
-    )
-
-    assert captured["is_update_run"] is False
-    assert result["status"] == "completed"
-    assert result["warnings"] == [
-        "未找到完整的向量索引基线，已自动降级为全量重建。 缺失或不可用的表: default-entity-description。 详情: missing"
-    ]
 
 
 def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(

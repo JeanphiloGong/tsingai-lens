@@ -680,7 +680,7 @@ def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert task_status.json()["status"] == "completed"
 
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
-    assert captured["is_update_run"] is False
+    assert "is_update_run" not in captured
     assert captured["verbose"] is True
     assert captured["additional_context"] == {"caller": "legacy-frontend"}
 

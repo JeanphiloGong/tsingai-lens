@@ -7,12 +7,10 @@ GraphRAG engine, and collection-facing artifact readiness.
 
 - `index_task_runner.py`
 - `task_service.py`
-- `run_mode_service.py`
 
 ## Responsibilities
 
 - create and update index task records
-- resolve rebuild versus update-run semantics
 - load collection-specific indexing config
 - invoke GraphRAG indexing
 - run the Lens v1 post-index backbone in order:
@@ -45,8 +43,6 @@ It should not reimplement:
   Main task orchestration entry for real collection indexing
 - `task_service.py`
   Task persistence and task-state lifecycle
-- `run_mode_service.py`
-  Update-run downgrade and rebuild decision logic
 
 ## Upstream / Downstream
 

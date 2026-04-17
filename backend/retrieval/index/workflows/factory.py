@@ -71,27 +71,9 @@ _fast_workflows = [
     "create_community_reports_text",
     "generate_text_embeddings",
 ]
-_update_workflows = [
-    "update_final_documents",
-    "update_entities_relationships",
-    "update_text_units",
-    "update_covariates",
-    "update_communities",
-    "update_community_reports",
-    "update_text_embeddings",
-    "update_clean_state",
-]
 PipelineFactory.register_pipeline(
     IndexingMethod.Standard, ["load_input_documents", *_standard_workflows]
 )
 PipelineFactory.register_pipeline(
     IndexingMethod.Fast, ["load_input_documents", *_fast_workflows]
-)
-PipelineFactory.register_pipeline(
-    IndexingMethod.StandardUpdate,
-    ["load_update_documents", *_standard_workflows, *_update_workflows],
-)
-PipelineFactory.register_pipeline(
-    IndexingMethod.FastUpdate,
-    ["load_update_documents", *_fast_workflows, *_update_workflows],
 )

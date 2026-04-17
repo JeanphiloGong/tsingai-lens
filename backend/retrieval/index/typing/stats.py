@@ -15,8 +15,6 @@ class PipelineRunStats:
 
     num_documents: int = field(default=0)
     """Number of documents."""
-    update_documents: int = field(default=0)
-    """Number of update documents."""
 
     input_load_time: float = field(default=0)
     """Float representing the input load time."""

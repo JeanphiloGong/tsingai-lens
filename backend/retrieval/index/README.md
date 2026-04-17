@@ -1,7 +1,7 @@
 # Retrieval Index Workflows
 
-This node owns index-time transformations that convert documents into graph and
-related retrieval artifacts.
+This node owns Source-side index-time normalization that converts collection
+files into the minimal handoff consumed by Core.
 
 ## Scope
 
@@ -12,7 +12,9 @@ related retrieval artifacts.
 
 ## Responsibilities
 
-- load source documents and text units
-- build graph-oriented outputs
+- load source documents
+- chunk and normalize text units
+- normalize documents with source-level text-unit linkage
 - support full index workflows
-- persist the artifacts consumed by downstream backend features
+- persist the minimal artifacts consumed by downstream backend features:
+  `documents.parquet` and `text_units.parquet`

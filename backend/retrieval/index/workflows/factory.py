@@ -49,31 +49,14 @@ class PipelineFactory:
 
 
 # --- Register default implementations ---
-_standard_workflows = [
+_source_handoff_workflows = [
     "create_base_text_units",
     "create_final_documents",
-    "extract_graph",
-    "finalize_graph",
-    "extract_covariates",
-    "create_communities",
     "create_final_text_units",
-    "create_community_reports",
-    "generate_text_embeddings",
-]
-_fast_workflows = [
-    "create_base_text_units",
-    "create_final_documents",
-    "extract_graph_nlp",
-    "prune_graph",
-    "finalize_graph",
-    "create_communities",
-    "create_final_text_units",
-    "create_community_reports_text",
-    "generate_text_embeddings",
 ]
 PipelineFactory.register_pipeline(
-    IndexingMethod.Standard, ["load_input_documents", *_standard_workflows]
+    IndexingMethod.Standard, ["load_input_documents", *_source_handoff_workflows]
 )
 PipelineFactory.register_pipeline(
-    IndexingMethod.Fast, ["load_input_documents", *_fast_workflows]
+    IndexingMethod.Fast, ["load_input_documents", *_source_handoff_workflows]
 )

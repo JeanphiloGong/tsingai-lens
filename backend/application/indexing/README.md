@@ -1,7 +1,7 @@
 # Backend Indexing Application Node
 
 This node owns backend indexing orchestration between collection files, the
-GraphRAG engine, and collection-facing artifact readiness.
+Source normalization pipeline, and collection-facing artifact readiness.
 
 ## Scope
 
@@ -12,7 +12,7 @@ GraphRAG engine, and collection-facing artifact readiness.
 
 - create and update index task records
 - load collection-specific indexing config
-- invoke GraphRAG indexing
+- invoke Source indexing
 - run the Lens v1 post-index backbone in order:
   `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`
 - publish collection and artifact readiness state after execution
@@ -49,6 +49,7 @@ It should not reimplement:
 - upstream inputs:
   collection files, task creation requests, backend config
 - downstream artifacts:
+  `documents.parquet`, `text_units.parquet`,
   `document_profiles.parquet`, `evidence_cards.parquet`,
   `comparison_rows.parquet`, optional `protocol_steps.parquet`
 - downstream APIs:

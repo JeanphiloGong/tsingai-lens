@@ -84,62 +84,8 @@ def _write_index_outputs(output_dir: Path) -> None:
             },
         ]
     )
-    entities = pd.DataFrame(
-        [
-            {
-                "id": "ent-1",
-                "title": "epoxy",
-                "type": "material",
-                "description": "matrix",
-                "degree": 3,
-                "frequency": 2,
-                "x": 0.1,
-                "y": 0.2,
-            },
-            {
-                "id": "ent-2",
-                "title": "SiO2",
-                "type": "material",
-                "description": "filler",
-                "degree": 2,
-                "frequency": 1,
-                "x": 0.3,
-                "y": 0.4,
-            },
-        ]
-    )
-    relationships = pd.DataFrame(
-        [
-            {
-                "id": "rel-1",
-                "source": "epoxy",
-                "target": "SiO2",
-                "weight": 1.0,
-                "description": "composite relation",
-                "rank": 1,
-            }
-        ]
-    )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    entities.to_parquet(output_dir / "entities.parquet", index=False)
-    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
-
-
-def _write_community_outputs(output_dir: Path) -> None:
-    communities = pd.DataFrame(
-        [
-            {
-                "id": "community-1",
-                "human_readable_id": 1,
-                "community": 1,
-                "level": 1,
-                "title": "Community 1",
-                "entity_ids": ["ent-1", "ent-2"],
-            }
-        ]
-    )
-    communities.to_parquet(output_dir / "communities.parquet", index=False)
 
 
 def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:

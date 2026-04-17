@@ -36,7 +36,7 @@ async def run_workflow(
 def create_final_documents(
     documents: pd.DataFrame, text_units: pd.DataFrame
 ) -> pd.DataFrame:
-    """All the steps to transform final documents."""
+    """Normalize documents into the minimal Source handoff consumed by Core."""
     exploded = (
         text_units.explode("document_ids")
         .loc[:, ["id", "document_ids", "text"]]
@@ -71,6 +71,8 @@ def create_final_documents(
     rejoined["id"] = rejoined["id"].astype(str)
     rejoined["human_readable_id"] = rejoined.index
 
+    if "creation_date" not in rejoined.columns:
+        rejoined["creation_date"] = pd.Series(dtype="object")
     if "metadata" not in rejoined.columns:
         rejoined["metadata"] = pd.Series(dtype="object")
 

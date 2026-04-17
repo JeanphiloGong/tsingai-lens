@@ -3,48 +3,29 @@
 
 """A module containing run_workflow method definition."""
 
+import ast
 import logging
+from typing import Any
 
 import pandas as pd
 
-from retrieval.config.models.graph_rag_config import GraphRagConfig
 from retrieval.data_model.schemas import TEXT_UNITS_FINAL_COLUMNS
+from retrieval.config.models.graph_rag_config import GraphRagConfig
 from retrieval.index.typing.context import PipelineRunContext
 from retrieval.index.typing.workflow import WorkflowFunctionOutput
-from retrieval.utils.storage import (
-    load_table_from_storage,
-    storage_has_table,
-    write_table_to_storage,
-)
+from retrieval.utils.storage import load_table_from_storage, write_table_to_storage
 
 logger = logging.getLogger(__name__)
 
 
 async def run_workflow(
-    config: GraphRagConfig,
+    _config: GraphRagConfig,
     context: PipelineRunContext,
 ) -> WorkflowFunctionOutput:
     """All the steps to transform the text units."""
     logger.info("Workflow started: create_final_text_units")
     text_units = await load_table_from_storage("text_units", context.output_storage)
-    final_entities = await load_table_from_storage("entities", context.output_storage)
-    final_relationships = await load_table_from_storage(
-        "relationships", context.output_storage
-    )
-    final_covariates = None
-    if config.extract_claims.enabled and await storage_has_table(
-        "covariates", context.output_storage
-    ):
-        final_covariates = await load_table_from_storage(
-            "covariates", context.output_storage
-        )
-
-    output = create_final_text_units(
-        text_units,
-        final_entities,
-        final_relationships,
-        final_covariates,
-    )
+    output = create_final_text_units(text_units)
 
     await write_table_to_storage(output, "text_units", context.output_storage)
 
@@ -54,74 +35,44 @@ async def run_workflow(
 
 def create_final_text_units(
     text_units: pd.DataFrame,
-    final_entities: pd.DataFrame,
-    final_relationships: pd.DataFrame,
-    final_covariates: pd.DataFrame | None,
 ) -> pd.DataFrame:
-    """All the steps to transform the text units."""
-    selected = text_units.loc[:, ["id", "text", "document_ids", "n_tokens"]]
-    selected["human_readable_id"] = selected.index
+    """Normalize text units into the minimal Source handoff consumed by Core."""
+    normalized = text_units.copy()
+    for column in ("id", "text", "document_ids", "n_tokens"):
+        if column not in normalized.columns:
+            normalized[column] = None
 
-    entity_join = _entities(final_entities)
-    relationship_join = _relationships(final_relationships)
+    selected = normalized.loc[:, ["id", "text", "document_ids", "n_tokens"]].copy()
+    selected["id"] = selected["id"].astype(str)
+    selected["text"] = selected["text"].fillna("").astype(str)
+    selected["document_ids"] = selected["document_ids"].apply(_normalize_string_list)
+    selected["human_readable_id"] = range(len(selected))
 
-    entity_joined = _join(selected, entity_join)
-    relationship_joined = _join(entity_joined, relationship_join)
-    final_joined = relationship_joined
-
-    if final_covariates is not None:
-        covariate_join = _covariates(final_covariates)
-        final_joined = _join(relationship_joined, covariate_join)
-    else:
-        final_joined["covariate_ids"] = [[] for i in range(len(final_joined))]
-
-    aggregated = final_joined.groupby("id", sort=False).agg("first").reset_index()
-
-    return aggregated.loc[
-        :,
-        TEXT_UNITS_FINAL_COLUMNS,
-    ]
+    return selected.loc[:, TEXT_UNITS_FINAL_COLUMNS]
 
 
-def _entities(df: pd.DataFrame) -> pd.DataFrame:
-    selected = df.loc[:, ["id", "text_unit_ids"]]
-    unrolled = selected.explode(["text_unit_ids"]).reset_index(drop=True)
-
-    return (
-        unrolled.groupby("text_unit_ids", sort=False)
-        .agg(entity_ids=("id", "unique"))
-        .reset_index()
-        .rename(columns={"text_unit_ids": "id"})
-    )
-
-
-def _relationships(df: pd.DataFrame) -> pd.DataFrame:
-    selected = df.loc[:, ["id", "text_unit_ids"]]
-    unrolled = selected.explode(["text_unit_ids"]).reset_index(drop=True)
-
-    return (
-        unrolled.groupby("text_unit_ids", sort=False)
-        .agg(relationship_ids=("id", "unique"))
-        .reset_index()
-        .rename(columns={"text_unit_ids": "id"})
-    )
-
-
-def _covariates(df: pd.DataFrame) -> pd.DataFrame:
-    selected = df.loc[:, ["id", "text_unit_id"]]
-
-    return (
-        selected.groupby("text_unit_id", sort=False)
-        .agg(covariate_ids=("id", "unique"))
-        .reset_index()
-        .rename(columns={"text_unit_id": "id"})
-    )
-
-
-def _join(left, right):
-    return left.merge(
-        right,
-        on="id",
-        how="left",
-        suffixes=["_1", "_2"],
-    )
+def _normalize_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, tuple | set):
+        return [str(item) for item in value]
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
+        converted = value.tolist()
+        if converted is not value:
+            return _normalize_string_list(converted)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = ast.literal_eval(text)
+            except (ValueError, SyntaxError):
+                return [text]
+            return _normalize_string_list(parsed)
+        return [text]
+    if isinstance(value, float) and pd.isna(value):
+        return []
+    return [str(value)]

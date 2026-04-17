@@ -22,6 +22,32 @@ cutover and query retirement:
 It should be read as the next backend-local retirement wave after the query
 path has been removed.
 
+## Status
+
+Status as of 2026-04-17:
+
+- Wave A is complete
+- Wave B is complete
+- Wave C is complete
+- Wave D is partially complete
+
+Completed implementation in this repository now includes:
+
+- default Source indexing emits only the minimal handoff consumed by Core:
+  `documents.parquet` and `text_units.parquet`
+- `create_final_text_units.py` no longer loads entities, relationships, or
+  covariates
+- default Standard/Fast pipeline registration has been reduced to:
+  `load_input_documents -> create_base_text_units -> create_final_documents -> create_final_text_units`
+- graph/community/report/embedding workflow files have been removed from the
+  active workflow registry and deleted from `retrieval/index/workflows/`
+
+Still pending after this cut:
+
+- deeper retirement of now-orphaned GraphRAG operations, prompt/config slices,
+  and supporting runtime modules that no longer sit on the active Source path
+- product-facing cleanup of `graphml_*` readiness flags described in Wave E
+
 ## Context
 
 The backend has already cut product-facing graph and report semantics over to

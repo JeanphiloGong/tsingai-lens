@@ -41,22 +41,6 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
         output=SimpleNamespace(base_dir=str(output_dir)),
         input=SimpleNamespace(storage=SimpleNamespace(base_dir=str(input_dir))),
         root_dir=str(output_dir.parent),
-        embed_text=SimpleNamespace(
-            names=[
-                "entity.description",
-                "community.full_content",
-                "text_unit.text",
-            ],
-            vector_store_id="default_vector_store",
-        ),
-        vector_store={
-            "default_vector_store": {
-                "type": "lancedb",
-                "db_uri": str(output_dir.parent / "vector_store" / "lancedb"),
-                "container_name": "default",
-                "overwrite": True,
-            }
-        },
     )
 
 
@@ -93,12 +77,8 @@ def _write_index_outputs(output_dir: Path) -> None:
             },
         ]
     )
-    entities = pd.DataFrame([{"id": "ent-1", "title": "epoxy"}])
-    relationships = pd.DataFrame([{"source": "epoxy", "target": "SiO2", "weight": 1.0}])
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    entities.to_parquet(output_dir / "entities.parquet", index=False)
-    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
 
 
 def _write_review_only_outputs(output_dir: Path) -> None:
@@ -121,12 +101,8 @@ def _write_review_only_outputs(output_dir: Path) -> None:
             }
         ]
     )
-    entities = pd.DataFrame([{"id": "ent-1", "title": "epoxy"}])
-    relationships = pd.DataFrame([{"source": "epoxy", "target": "SiO2", "weight": 1.0}])
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    entities.to_parquet(output_dir / "entities.parquet", index=False)
-    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
 
 
 def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
@@ -185,6 +161,8 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
     assert paths.output_dir.joinpath("evidence_cards.parquet").exists()
     assert paths.output_dir.joinpath("comparison_rows.parquet").exists()
+    assert paths.output_dir.joinpath("entities.parquet").exists() is False
+    assert paths.output_dir.joinpath("relationships.parquet").exists() is False
 
 
 def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(

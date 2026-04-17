@@ -8,7 +8,6 @@ from controllers import (
     goals,
     graph,
     protocol,
-    query,
     reports,
     tasks,
     workspace,
@@ -54,7 +53,6 @@ def create_app() -> FastAPI:
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.mount(f"{PUBLIC_API_PREFIX}/static", StaticFiles(directory=DATA_DIR), name="static")
-    app.include_router(query.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)

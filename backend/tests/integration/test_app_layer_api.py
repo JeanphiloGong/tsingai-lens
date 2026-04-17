@@ -240,19 +240,16 @@ def app_client(monkeypatch, tmp_path):
     from controllers import goals as goals_controller
     from controllers import graph as graph_controller
     from controllers import protocol as protocol_controller
-    from controllers import query as query_controller
     from controllers import reports as reports_controller
     from controllers import tasks as tasks_controller
     from controllers import workspace as workspace_controller
     from controllers.schemas import (
-        QueryResponse,
         ReportCommunityDetailResponse,
         ReportCommunityListResponse,
         ReportPatternsResponse,
     )
     import application.graph_service as graph_service_module
     import application.index_task_runner as task_runner_module
-    import application.query_service as query_service_module
     import application.report_service as report_service_module
     from application.artifact_registry_service import ArtifactRegistryService
     from application.collection_service import CollectionService
@@ -302,15 +299,6 @@ def app_client(monkeypatch, tmp_path):
         output_dir = Path(kwargs["config"].output.base_dir)
         _write_index_outputs(output_dir)
         return [DummyWorkflowOutput()]
-
-    async def fake_query_index(payload):  # noqa: ANN001
-        return QueryResponse(
-            answer="stub-answer",
-            method=str(payload.method),
-            collection_id=payload.collection_id or "default",
-            output_path=str(tmp_path / "output"),
-            context_data=None,
-        )
 
     def fake_list_community_reports(  # noqa: ANN001
         collection_id, level, limit, offset, min_size, sort
@@ -377,7 +365,6 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
     monkeypatch.setattr(evidence_controller, "evidence_card_service", evidence_card_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(query_service_module, "query_index", fake_query_index)
     monkeypatch.setattr(
         report_service_module,
         "list_community_reports",
@@ -391,7 +378,6 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(report_service_module, "list_patterns", fake_list_patterns)
 
     app = FastAPI()
-    app.include_router(query_controller.router, prefix=API_V1_PREFIX)
     app.include_router(reports_controller.router, prefix=API_V1_PREFIX)
     app.include_router(collections_controller.router, prefix=API_V1_PREFIX)
     app.include_router(goals_controller.router, prefix=API_V1_PREFIX)
@@ -405,7 +391,7 @@ def app_client(monkeypatch, tmp_path):
     return TestClient(app)
 
 
-def test_collection_task_and_query_flow(app_client):
+def test_collection_task_flow(app_client):
     collection_id, task_id = _create_indexed_collection(app_client)
 
     task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
@@ -776,11 +762,7 @@ def test_collection_protocol_steps_returns_empty_list_when_generated_but_not_rea
     assert payload["items"] == []
 
 
-def test_public_query_and_reports_routes_are_exposed(app_client):
-    query_resp = app_client.post(f"{API_V1_PREFIX}/query", json={"query": "status"})
-    assert query_resp.status_code == 200
-    assert query_resp.json()["answer"] == "stub-answer"
-
+def test_reports_routes_are_exposed(app_client):
     reports_resp = app_client.get(f"{API_V1_PREFIX}/collections/demo/reports/communities")
     assert reports_resp.status_code == 200
     assert reports_resp.json()["collection_id"] == "demo"

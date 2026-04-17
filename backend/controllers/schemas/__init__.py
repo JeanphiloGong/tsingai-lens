@@ -47,7 +47,6 @@ from .protocol import (
     SOPDraftRequest,
     SOPDraftResponse,
 )
-from .query import QueryRequest, QueryResponse
 from .report import (
     ReportCommunityDetailResponse,
     ReportCommunityListResponse,
@@ -98,8 +97,6 @@ __all__ = [
     "GraphNodeResponse",
     "GraphEdgeResponse",
     "CollectionGraphResponse",
-    "QueryRequest",
-    "QueryResponse",
     "ReportCommunityDetailResponse",
     "ReportCommunityListResponse",
     "ReportCommunitySummary",

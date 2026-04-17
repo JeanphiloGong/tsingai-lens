@@ -45,9 +45,9 @@ evidence-first/comparison-first implementation:
 5. `protocol` remains a conditional downstream branch
 
 Graph and report surfaces now consume the same Core artifacts as derived
-secondary views. The main remaining mixed area is Source-owned query/runtime
-internals plus a few compatibility route names that still carry old
-`community_*` vocabulary.
+secondary views. The main remaining mixed area is Source-internal GraphRAG
+generation/runtime ownership plus a few compatibility route names that still
+carry old `community_*` vocabulary.
 
 ## Current Surface Map
 
@@ -112,26 +112,18 @@ meaningful for protocol-suitable collections, but their data path is still
 protocol-artifact-centric rather than fully rebuilt as a downstream derivation
 from the evidence/comparison backbone.
 
-### Source-owned secondary surface
-
-- `POST /api/v1/query`
-
-This endpoint remains valid, but it should be read as a Source runtime facade
-rather than a Core artifact surface. It may still depend on Source-internal
-retrieval or GraphRAG tables.
-
 ## Cross-Cutting Mixed-State Notes
 
 ### Public routes are more converged than internal runtimes
 
 The FastAPI app still exposes primary surfaces together with protocol, graph,
-reports, and query in one application. That no longer means graph/report are
-legacy. The remaining mixed state is mostly internal:
+and reports in one application. That no longer means graph/report are legacy.
+The remaining mixed state is mostly internal:
 
-- query still crosses a Source-owned runtime facade
 - some report route names still carry compatibility `community_*` vocabulary
 - protocol remains a downstream conditional branch rather than a fully rebuilt
   Core-native derivative
+- Source may still retain GraphRAG-shaped generation/runtime code internally
 
 ### Task detail is task-scoped, not collection-scoped
 
@@ -153,7 +145,8 @@ Collection pages that need task history should use
 - report product surface cut over to Core-derived pattern grouping
 - workspace graph readiness cut over to Core inputs
 - public task vocabulary cut over from `graphrag_*` to `source_index_*`
-- authority docs aligned to the current Core-first graph/report/query/task wording
+- public query surface and app/source query runtime retired
+- authority docs aligned to the current Core-first graph/report/task wording
 
 ### Next
 
@@ -166,8 +159,6 @@ Collection pages that need task history should use
 - rebuild protocol as a true downstream branch over the new backbone
 - decide how far Source-internal GraphRAG artifact generation should be
   retained, made lazy, or retired
-- revisit query request vocabulary if Source runtime knobs continue leaking too
-  much implementation language
 - finish controller/package migration toward domain-oriented backend layout
 
 ## Recommended Execution Order
@@ -193,9 +184,9 @@ workflow:
 - `evidence/cards`
 - `comparisons`
 
-`protocol`, `graph`, `reports`, and `query` are not the primary acceptance
-center for this migration stage, but `graph` and `reports` now already consume
-Core artifacts rather than defining a competing product fact model.
+`protocol`, `graph`, and `reports` are not the primary acceptance center for
+this migration stage, but `graph` and `reports` now already consume Core
+artifacts rather than defining a competing product fact model.
 
 ## Related Docs
 

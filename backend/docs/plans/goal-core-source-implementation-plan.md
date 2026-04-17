@@ -337,7 +337,7 @@ Exit criteria:
 
 ### Regression Verification
 
-- collection upload, indexing kickoff, graph, reports, and query flows remain
+- collection upload, indexing kickoff, graph, and report flows remain
   available while Core refactors land
 - protocol-capable fixtures still produce usable protocol outputs after Core
   seam extraction

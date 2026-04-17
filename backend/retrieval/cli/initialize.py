@@ -16,20 +16,6 @@ from retrieval.prompts.index.community_report_text_units import (
 from retrieval.prompts.index.extract_claims import EXTRACT_CLAIMS_PROMPT
 from retrieval.prompts.index.extract_graph import GRAPH_EXTRACTION_PROMPT
 from retrieval.prompts.index.summarize_descriptions import SUMMARIZE_PROMPT
-from retrieval.prompts.query.basic_search_system_prompt import BASIC_SEARCH_SYSTEM_PROMPT
-from retrieval.prompts.query.drift_search_system_prompt import (
-    DRIFT_LOCAL_SYSTEM_PROMPT,
-    DRIFT_REDUCE_PROMPT,
-)
-from retrieval.prompts.query.global_search_knowledge_system_prompt import (
-    GENERAL_KNOWLEDGE_INSTRUCTION,
-)
-from retrieval.prompts.query.global_search_map_system_prompt import MAP_SYSTEM_PROMPT
-from retrieval.prompts.query.global_search_reduce_system_prompt import (
-    REDUCE_SYSTEM_PROMPT,
-)
-from retrieval.prompts.query.local_search_system_prompt import LOCAL_SEARCH_SYSTEM_PROMPT
-from retrieval.prompts.query.question_gen_system_prompt import QUESTION_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -78,14 +64,6 @@ def initialize_project_at(path: Path, force: bool) -> None:
         "extract_claims": EXTRACT_CLAIMS_PROMPT,
         "community_report_graph": COMMUNITY_REPORT_PROMPT,
         "community_report_text": COMMUNITY_REPORT_TEXT_PROMPT,
-        "drift_search_system_prompt": DRIFT_LOCAL_SYSTEM_PROMPT,
-        "drift_reduce_prompt": DRIFT_REDUCE_PROMPT,
-        "global_search_map_system_prompt": MAP_SYSTEM_PROMPT,
-        "global_search_reduce_system_prompt": REDUCE_SYSTEM_PROMPT,
-        "global_search_knowledge_system_prompt": GENERAL_KNOWLEDGE_INSTRUCTION,
-        "local_search_system_prompt": LOCAL_SEARCH_SYSTEM_PROMPT,
-        "basic_search_system_prompt": BASIC_SEARCH_SYSTEM_PROMPT,
-        "question_gen_system_prompt": QUESTION_SYSTEM_PROMPT,
     }
 
     for name, content in prompts.items():

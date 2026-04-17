@@ -46,7 +46,7 @@ for the shared boundary and object model.
 
 - `backend/controllers/`
   Current HTTP route surface for collections, tasks, workspace, graph,
-  protocol, query, and reports.
+  protocol, and reports.
 - `backend/application/`
   Use-case orchestration layer with active business-domain packages for
   collections, indexing, workspace, documents, evidence, comparisons, and
@@ -54,7 +54,7 @@ for the shared boundary and object model.
 - `backend/domain/`
   Domain models and port definitions.
 - `backend/retrieval/`
-  Indexing and query engine package.
+  Indexing engine package plus remaining Source-internal runtime code.
 - `backend/infra/persistence/`
   Persistence adapter boundary.
 

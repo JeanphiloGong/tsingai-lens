@@ -15,7 +15,7 @@
 - `documents/profiles`、`evidence/cards`、`comparisons` 是主业务资源
 - `protocol/*` 是条件分支，不是所有 collection 的默认主产物
 - `graph/*`、`reports/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
-- `query` 当前是 Source runtime facade，不是 Core artifact 合同
+- 当前没有单独公开的 `query/search` 产品接口
 - `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
 
 ## 文档与静态资源
@@ -374,14 +374,13 @@ comparison 对 traceback 的依赖约定：
 - 如果 workspace 或 document profiles 已经表明 collection 不适合 protocol，
   前端应降级展示，而不是强推 protocol 页面
 
-### Graph、Reports、Query 次级界面
+### Graph、Reports 次级界面
 
 - `GET /api/v1/collections/{collection_id}/graph`
 - `GET /api/v1/collections/{collection_id}/graphml`
 - `GET /api/v1/collections/{collection_id}/reports/communities`
 - `GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`
 - `GET /api/v1/collections/{collection_id}/reports/patterns`
-- `POST /api/v1/query`
 
 这些接口可以保留，但不是 Lens v1 新界面的主验收面。
 
@@ -409,13 +408,6 @@ Reports 语义约束：
   派生出的二级投影，而不是旧 entity graph 的直接透出
 - `/reports/patterns` 与上述 report 路由属于同一组 Core-derived
   派生视图，只是命名更直接
-
-Query 语义约束：
-
-- `POST /api/v1/query` 仍是保留的次级检索界面
-- `method`、`community_level`、`dynamic_community_selection`
-  这些字段当前属于 Source runtime 调参语义，不是 Core 事实模型字段
-- query 运行时可以继续依赖 Source 内部的 retrieval / GraphRAG 表，但这类内部结构不属于前端需要长期绑定的主合同
 
 ## 错误合同
 

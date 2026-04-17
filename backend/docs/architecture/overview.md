@@ -27,7 +27,7 @@ Within the repository-wide system:
 
 - `controllers/`
   Current HTTP route surface for collections, tasks, workspace, graph,
-  protocol, query, reports, documents, evidence, and comparisons
+  protocol, reports, documents, evidence, and comparisons
 - `application/`
   Use-case orchestration layer with active business-domain packages plus some
   remaining legacy flat services
@@ -71,8 +71,6 @@ larger flat service bag.
 5. comparison generation produces the primary collection-facing workspace view
 6. protocol, graph, and report surfaces derive from or sit beside that primary
    backbone
-7. query crosses a Source-owned runtime facade for retained secondary search
-   behavior
 
 ## Boundary Rules
 

@@ -122,10 +122,6 @@ Owns graph browsing and exports as a retained secondary surface.
 
 Owns report retrieval and browsing as a retained secondary surface.
 
-### Query
-
-Owns generic query entrypoints outside the primary Lens v1 comparison workflow.
-
 ## Target Package Layout
 
 The target direction is:
@@ -160,9 +156,6 @@ backend/
     reports/
       router.py
       schemas.py
-    query/
-      router.py
-      schemas.py
   application/
     collections/
     indexing/
@@ -173,7 +166,6 @@ backend/
     protocol/
     graph/
     reports/
-    query/
   domain/
     collections/
     indexing/
@@ -256,8 +248,6 @@ Create domain folders and relocate current files without changing behavior:
   -> `application/workspace/artifact_registry_service.py`
 - `application/graph_service.py`
   -> `application/graph/service.py`
-- `application/query_service.py`
-  -> `application/query/service.py`
 - `application/report_service.py`
   -> `application/reports/service.py`
 

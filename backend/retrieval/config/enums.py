@@ -124,19 +124,6 @@ class ChunkStrategyType(str, Enum):
         return f'"{self.value}"'
 
 
-class SearchMethod(Enum):
-    """The type of search to run."""
-
-    LOCAL = "local"
-    GLOBAL = "global"
-    DRIFT = "drift"
-    BASIC = "basic"
-
-    def __str__(self):
-        """Return the string representation of the enum value."""
-        return self.value
-
-
 class IndexingMethod(str, Enum):
     """Enum for the type of indexing to perform."""
 

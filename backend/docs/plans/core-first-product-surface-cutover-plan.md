@@ -54,9 +54,7 @@ That architecture now has concrete code movement behind it:
 - [`application/indexing/task_service.py`](../../application/indexing/task_service.py)
   and [`controllers/schemas/task.py`](../../controllers/schemas/task.py)
   expose `source_index_*` stage names
-- [`application/query/service.py`](../../application/query/service.py) no
-  longer imports `infra.graphrag` directly, and now crosses
-  [`application/source/query_runtime_service.py`](../../application/source/query_runtime_service.py)
+- public `query` surface and its application/Source runtime chain are retired
 - GraphML rendering for the product graph surface now lives under
   [`infra/graph/graphml.py`](../../infra/graph/graphml.py)
 
@@ -205,23 +203,17 @@ Frozen rules:
 Compatibility aliasing may exist inside service logic for old records, but it
 must not redefine the public API vocabulary.
 
-### 6. Query Boundary Contract
+### 6. Query Retirement Contract
 
-Query remains a retained secondary surface, but its dependency direction is
-now explicit.
+The public query surface is retired.
 
 Frozen rules:
 
-- `application/query/` must cross a Source-owned facade
-- GraphRAG and retrieval runtime details belong under Source-owned seams only
-- controller- or application-level product semantics must not depend directly
-  on `infra.graphrag`
-
-Deferred question:
-
-- query request vocabulary still carries community-oriented knobs today; that
-  vocabulary should be treated as Source-runtime-facing, not as a Core fact
-  contract
+- backend must not expose `/query` as a retained product surface
+- `application/query/` and `application/source/query_runtime_service.py`
+  must not reappear as compatibility layers
+- GraphRAG and retrieval query runtime details, if still present, belong only
+  to Source-internal cleanup scope and not to product contracts
 
 ### 7. Source Privacy Contract
 

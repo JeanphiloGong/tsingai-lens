@@ -73,7 +73,7 @@ This matches the current backend-local docs direction:
 
 - the primary acceptance backbone remains
   `workspace -> documents/profiles -> evidence/cards -> comparisons`
-- `graph`, `reports`, and `query` remain retained secondary surfaces for now
+- `graph` and `reports` remain retained secondary surfaces for now
 
 ## Current-Stage Definition of Done
 

@@ -65,6 +65,8 @@ Then move to the owning plan family only when you are already inside that wave:
   [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md)
 - Source and collection-builder normalization:
   [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
+- Residual Source/GraphRAG retirement:
+  [`plans/source-residual-graphrag-retirement-plan.md`](plans/source-residual-graphrag-retirement-plan.md)
 - Query retirement and GraphRAG query decoupling:
   [`plans/query-retirement-and-graphrag-query-decoupling-plan.md`](plans/query-retirement-and-graphrag-query-decoupling-plan.md)
 - Graph retained surface and Core-derived cutover:

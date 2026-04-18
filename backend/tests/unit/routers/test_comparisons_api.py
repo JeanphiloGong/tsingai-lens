@@ -107,3 +107,50 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
     assert payload.collection_id == collection_id
     assert payload.total == 0
     assert payload.count == 0
+
+
+def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
+    comparison_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _comparison_service = comparison_services
+    record = collection_service.create_collection(name="Existing Comparisons Collection")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    pd.DataFrame(
+        [
+            {
+                "row_id": "cmp-1",
+                "collection_id": collection_id,
+                "source_document_id": "paper-1",
+                "supporting_evidence_ids": ["ev-1"],
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "property_normalized": "conductivity",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+                "comparability_status": "comparable",
+                "comparability_warnings": [],
+                "value": 12.0,
+                "unit": "mS/cm",
+            }
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        comparisons_controller.list_collection_comparisons(collection_id)
+    )
+
+    assert payload.count == 1
+    item = payload.items[0]
+    assert item.row_id == "cmp-1"
+    assert item.variant_id is None
+    assert item.variant_label is None
+    assert item.variable_axis is None
+    assert item.variable_value is None
+    assert item.baseline_reference is None
+    assert item.result_source_type is None

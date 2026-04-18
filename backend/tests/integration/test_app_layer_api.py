@@ -422,6 +422,12 @@ def test_collection_task_flow(app_client):
         "not_comparable",
         "insufficient",
     }
+    assert "variant_id" in comparisons_body["items"][0]
+    assert "variant_label" in comparisons_body["items"][0]
+    assert "variable_axis" in comparisons_body["items"][0]
+    assert "variable_value" in comparisons_body["items"][0]
+    assert "baseline_reference" in comparisons_body["items"][0]
+    assert "result_source_type" in comparisons_body["items"][0]
 
 
 def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):

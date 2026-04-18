@@ -22,6 +22,27 @@ _COMPARISON_JSON_COLUMNS = (
     "supporting_evidence_ids",
     "comparability_warnings",
 )
+_COMPARISON_ROW_COLUMNS = [
+    "row_id",
+    "collection_id",
+    "source_document_id",
+    "variant_id",
+    "variant_label",
+    "variable_axis",
+    "variable_value",
+    "baseline_reference",
+    "result_source_type",
+    "supporting_evidence_ids",
+    "material_system_normalized",
+    "process_normalized",
+    "property_normalized",
+    "baseline_normalized",
+    "test_condition_normalized",
+    "comparability_status",
+    "comparability_warnings",
+    "value",
+    "unit",
+]
 _VALUE_PATTERN = re.compile(
     r"(\d+(?:\.\d+)?)\s*(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b",
     re.IGNORECASE,
@@ -127,21 +148,7 @@ class ComparisonService:
                     rows.append(self._build_row_from_card(card))
         table = pd.DataFrame(
             rows,
-            columns=[
-                "row_id",
-                "collection_id",
-                "source_document_id",
-                "supporting_evidence_ids",
-                "material_system_normalized",
-                "process_normalized",
-                "property_normalized",
-                "baseline_normalized",
-                "test_condition_normalized",
-                "comparability_status",
-                "comparability_warnings",
-                "value",
-                "unit",
-            ],
+            columns=_COMPARISON_ROW_COLUMNS,
         )
         table = self._normalize_rows_table(table, collection_id)
         base_dir.mkdir(parents=True, exist_ok=True)
@@ -217,6 +224,12 @@ class ComparisonService:
             "row_id": f"cmp_{uuid4().hex[:12]}",
             "collection_id": str(row.get("collection_id") or ""),
             "source_document_id": str(row.get("document_id") or ""),
+            "variant_id": None,
+            "variant_label": None,
+            "variable_axis": None,
+            "variable_value": None,
+            "baseline_reference": baseline_normalized if baseline_normalized != "unspecified baseline" else None,
+            "result_source_type": str(row.get("evidence_source_type") or "") or None,
             "supporting_evidence_ids": [evidence_id] if evidence_id else [],
             "material_system_normalized": material_system_normalized,
             "process_normalized": process_normalized,
@@ -382,36 +395,36 @@ class ComparisonService:
         normalized = rows.copy()
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
+        for column in _COMPARISON_ROW_COLUMNS:
+            if column not in normalized.columns:
+                normalized[column] = None
         for column in ("supporting_evidence_ids", "comparability_warnings"):
             if column in normalized.columns:
                 normalized[column] = normalized[column].apply(self._normalize_list)
-        return normalized[
-            [
-                "row_id",
-                "collection_id",
-                "source_document_id",
-                "supporting_evidence_ids",
-                "material_system_normalized",
-                "process_normalized",
-                "property_normalized",
-                "baseline_normalized",
-                "test_condition_normalized",
-                "comparability_status",
-                "comparability_warnings",
-                "value",
-                "unit",
-            ]
-        ]
+        return normalized[_COMPARISON_ROW_COLUMNS]
 
     def _serialize_row(self, row: pd.Series) -> dict[str, Any]:
         value = row.get("value")
         normalized_value = None if value is None or (isinstance(value, float) and pd.isna(value)) else float(value)
         unit = row.get("unit")
         normalized_unit = None if unit is None or (isinstance(unit, float) and pd.isna(unit)) else str(unit)
+        variable_value = row.get("variable_value")
+        if isinstance(variable_value, float) and pd.isna(variable_value):
+            normalized_variable_value = None
+        elif variable_value is None:
+            normalized_variable_value = None
+        else:
+            normalized_variable_value = variable_value
         return {
             "row_id": str(row.get("row_id") or ""),
             "collection_id": str(row.get("collection_id") or ""),
             "source_document_id": str(row.get("source_document_id") or ""),
+            "variant_id": self._normalize_optional_text(row.get("variant_id")),
+            "variant_label": self._normalize_optional_text(row.get("variant_label")),
+            "variable_axis": self._normalize_optional_text(row.get("variable_axis")),
+            "variable_value": normalized_variable_value,
+            "baseline_reference": self._normalize_optional_text(row.get("baseline_reference")),
+            "result_source_type": self._normalize_optional_text(row.get("result_source_type")),
             "supporting_evidence_ids": self._normalize_list(row.get("supporting_evidence_ids")),
             "material_system_normalized": str(row.get("material_system_normalized") or "unspecified material system"),
             "process_normalized": str(row.get("process_normalized") or "unspecified process"),
@@ -434,3 +447,10 @@ class ComparisonService:
         if isinstance(payload, list):
             return [str(item) for item in payload if str(item).strip()]
         return [str(payload)]
+
+    def _normalize_optional_text(self, value: Any) -> str | None:
+        payload = self._normalize_object(value)
+        if payload is None:
+            return None
+        text = str(payload).strip()
+        return text or None

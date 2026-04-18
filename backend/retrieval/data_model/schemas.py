@@ -158,3 +158,30 @@ DOCUMENTS_FINAL_COLUMNS = [
     CREATION_DATE,
     METADATA,
 ]
+
+SECTIONS_FINAL_COLUMNS = [
+    "section_id",
+    ID,
+    TITLE,
+    "section_type",
+    "heading",
+    TEXT,
+    TEXT_UNIT_IDS,
+    "page",
+    "char_range",
+    "confidence",
+]
+
+TABLE_CELLS_FINAL_COLUMNS = [
+    "cell_id",
+    ID,
+    "table_id",
+    "row_index",
+    "col_index",
+    "cell_text",
+    "header_path",
+    "page",
+    "bbox",
+    "char_range",
+    "unit_hint",
+]

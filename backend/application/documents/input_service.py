@@ -14,6 +14,7 @@ class CollectionArtifactPaths:
     documents: Path
     text_units: Path
     sections: Path
+    table_cells: Path
     procedure_blocks: Path
 
 
@@ -24,6 +25,7 @@ def resolve_collection_artifact_paths(base_dir: str | Path) -> CollectionArtifac
         documents=base_path / "documents.parquet",
         text_units=base_path / "text_units.parquet",
         sections=base_path / "sections.parquet",
+        table_cells=base_path / "table_cells.parquet",
         procedure_blocks=base_path / "procedure_blocks.parquet",
     )
 

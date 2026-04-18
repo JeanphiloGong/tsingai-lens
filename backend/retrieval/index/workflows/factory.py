@@ -53,6 +53,8 @@ _source_handoff_workflows = [
     "create_base_text_units",
     "create_final_documents",
     "create_final_text_units",
+    "create_sections",
+    "create_table_cells",
 ]
 PipelineFactory.register_pipeline(
     IndexingMethod.Standard, ["load_input_documents", *_source_handoff_workflows]

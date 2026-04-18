@@ -6,7 +6,6 @@ This node owns collection-scoped document profiling for the Lens v1 backbone.
 
 - `service.py`
 - `input_service.py`
-- `section_service.py`
 
 ## Responsibilities
 
@@ -25,8 +24,8 @@ It may depend on:
 
 - `application/collections/`
 - `application/workspace/`
-- `application/documents/section_service.py`
 - `application/documents/input_service.py`
+- `retrieval/index/operations/source_evidence.py`
 
 It should not own:
 
@@ -41,8 +40,6 @@ It should not own:
   `document_profiles.parquet`, and produces collection-level summaries
 - `input_service.py`
   Owns shared collection-input loading and document-record assembly
-- `section_service.py`
-  Owns shared section derivation used by documents, evidence, and protocol
 
 ## Upstream / Downstream
 

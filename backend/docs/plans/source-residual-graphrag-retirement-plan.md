@@ -22,6 +22,9 @@ cutover and query retirement:
 It should be read as the next backend-local retirement wave after the query
 path has been removed.
 
+For the next Source follow-up after runtime shrink, read
+[`born-digital-source-parser-first-plan.md`](born-digital-source-parser-first-plan.md).
+
 ## Status
 
 Status as of 2026-04-17:

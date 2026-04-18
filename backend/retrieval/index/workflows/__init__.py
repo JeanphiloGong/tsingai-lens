@@ -15,6 +15,12 @@ from .create_final_documents import (
 from .create_final_text_units import (
     run_workflow as run_create_final_text_units,
 )
+from .create_sections import (
+    run_workflow as run_create_sections,
+)
+from .create_table_cells import (
+    run_workflow as run_create_table_cells,
+)
 from .load_input_documents import (
     run_workflow as run_load_input_documents,
 )
@@ -25,4 +31,6 @@ PipelineFactory.register_all({
     "create_base_text_units": run_create_base_text_units,
     "create_final_documents": run_create_final_documents,
     "create_final_text_units": run_create_final_text_units,
+    "create_sections": run_create_sections,
+    "create_table_cells": run_create_table_cells,
 })

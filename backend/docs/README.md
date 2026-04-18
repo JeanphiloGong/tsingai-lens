@@ -66,7 +66,10 @@ Then move to the owning plan family only when you are already inside that wave:
 - Source and collection-builder normalization:
   [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
 - Residual Source/GraphRAG retirement:
-  [`plans/source-residual-graphrag-retirement-plan.md`](plans/source-residual-graphrag-retirement-plan.md)
+  [`plans/source-residual-graphrag-retirement-plan.md`](plans/source-residual-graphrag-retirement-plan.md),
+  [`plans/born-digital-source-parser-first-plan.md`](plans/born-digital-source-parser-first-plan.md)
+- Materials comparison expansion:
+  [`plans/materials-comparison-v2-plan.md`](plans/materials-comparison-v2-plan.md)
 - Query retirement and GraphRAG query decoupling:
   [`plans/query-retirement-and-graphrag-query-decoupling-plan.md`](plans/query-retirement-and-graphrag-query-decoupling-plan.md)
 - Graph retained surface and Core-derived cutover:

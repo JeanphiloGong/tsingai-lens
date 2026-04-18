@@ -8,9 +8,9 @@ import pandas as pd
 import pytest
 
 from application.comparisons.service import ComparisonService
-from application.documents.section_service import build_sections
 from application.documents.service import DocumentProfileService
 from application.evidence.service import EvidenceCardService
+from retrieval.index.operations.source_evidence import build_sections
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001

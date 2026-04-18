@@ -37,12 +37,47 @@ Read this plan after:
 
 ## Status
 
-Status as of 2026-04-17:
+Status as of 2026-04-18:
 
-- planned
-- not started in code
-- intended as the next Core-and-Source expansion wave after Source/GraphRAG
+- Wave A contract freeze is complete in code
+- Wave B Source evidence runtime is complete in code
+- Wave C onward are not started in runtime
+- this remains the next Core-and-Source expansion wave after Source/GraphRAG
   runtime shrink
+
+## Reference Corpus Fit
+
+The current client-provided papers under `backend/data/test_file/` are not a
+generic materials corpus.
+
+They are strongly concentrated around:
+
+- metal additive manufacturing
+- field-assisted or hybrid additive manufacturing
+- in-situ heating and thermal-history control
+- microstructure evolution
+- residual stress control
+- mechanical-property and fatigue outcomes
+
+The strongest recurring patterns in the current reference set are:
+
+- Ti-alloy directed energy deposition with induction-assisted or hybrid process
+  control
+- LPBF or SLM with in-situ heating strategies for residual-stress reduction and
+  process stabilization
+- review papers on field-assisted metal additive manufacturing, in-situ heat
+  treatment, and powder-bed-fusion process families
+
+That means phase 1 should not start from a broad all-materials comparison
+template.
+
+It should start with a default enabled profile that matches the real papers
+already in hand.
+
+That default profile does not define the whole system ontology.
+
+It only defines which profile is optimized first, which fixtures are used
+first, and which extraction paths are hardened first.
 
 ## Problem
 
@@ -97,6 +132,8 @@ The main materials-specific gaps are:
 
 This plan covers:
 
+- keeping the Core backbone generic enough to support multiple materials-domain
+  profiles
 - expanding the Source handoff beyond only documents and text units
 - introducing Source-owned `sections`, `table_cells`, and
   `figure_captions` artifacts
@@ -110,6 +147,12 @@ This plan covers:
   from individual claim cards
 - updating graph and report projections to consume the stronger comparison
   backbone after cutover
+
+This plan treats domain profiles as pluggable specializations layered on top of
+the generic backbone.
+
+The current reference corpus only sets phase-1 priority. It does not lock the
+system to metal additive manufacturing forever.
 
 This plan does not cover:
 
@@ -144,6 +187,37 @@ This plan does not cover:
 
 ## Target Contracts
 
+### Core-Neutral Backbone And Domain Profiles
+
+This plan distinguishes two layers:
+
+- a Core-neutral backbone contract
+- profile-specific ontology and normalization overlays
+
+The Core-neutral backbone owns:
+
+- `sample_variants`
+- `characterization_observations`
+- `structure_features`
+- `test_conditions`
+- `baseline_references`
+- `measurement_results`
+- `comparison_rows`
+- `evidence_bundle / assessment / uncertainty`
+
+Domain profiles define how those objects are specialized for one subdomain.
+
+Examples of future profiles include:
+
+- `metal_additive_manufacturing`
+- `electrochemistry`
+- `catalysis`
+- `thin_film_device`
+- `general_mechanics`
+
+The current client corpus only justifies enabling one profile by default in
+phase 1. It should not be treated as the only supported long-term direction.
+
 ### Materials Ontology And Normalization Layer
 
 Before the Core artifact set grows, the backend should freeze a minimal
@@ -155,9 +229,10 @@ It is the domain schema that prevents `sample_variants`,
 `characterization_observations`, `measurement_results`, and
 `comparison_rows` from turning into free-form text buckets.
 
-The minimum normalization families are:
+The minimum Core-neutral normalization families are:
 
 - `material_family_type`
+- `process_family_type`
 - `variable_axis_type`
 - `property_type`
 - `characterization_type`
@@ -178,15 +253,69 @@ attempting a full materials-wide ontology.
 
 Recommended initial scope in this repository:
 
-- `mechanics`
-- `electrochemistry`
+- default enabled profile: `metal_additive_manufacturing`
+
+Within that phase-1 default profile, the first two scenario templates
+should be:
+
+- `ded_field_assisted_ti_alloy`
+- `lpbf_in_situ_heating_stress_control`
 
 If product priority changes before implementation starts, these two templates
-may be replaced, but Wave A should still freeze no more than two initial
-subdomain templates.
+may be replaced, but Wave A should still freeze no more than one default
+enabled profile and two initial scenario templates.
 
-All other subdomains should explicitly remain `unresolved` or unsupported in
-phase 1 rather than being partially modeled.
+All other profiles should explicitly remain available-but-not-enabled in phase 1
+rather than being partially modeled.
+
+Each enabled profile may register narrower profile-specific vocabularies on top
+of the Core-neutral families.
+
+For the current reference corpus, the phase-1 default profile should register
+metal-additive-manufacturing specializations such as:
+
+Examples of profile-specific extensions:
+
+- `alloy_system_type`
+  - `ti_6al_4v`
+  - `316l`
+  - `al_cu`
+- `process_route_type`
+  - `lpbf`
+  - `slm`
+  - `ded`
+  - `laser_deposition`
+  - `eb_pbf`
+  - `hybrid_wire_arc_laser`
+- `auxiliary_field_type`
+  - `induction_heating`
+  - `surface_layer_heating`
+  - `multi_beam_strategy`
+  - `intrinsic_heat_treatment`
+  - `hybrid_energy_input`
+- `property_type`
+  - `yield_strength`
+  - `ultimate_tensile_strength`
+  - `elongation`
+  - `hardness`
+  - `fatigue_life`
+  - `residual_stress`
+- `characterization_type`
+  - `sem`
+  - `xrd`
+  - `neutron_diffraction`
+  - `contour_method`
+  - `microhardness_map`
+- `variable_axis_type`
+  - `laser_power`
+  - `scan_strategy`
+  - `induction_current`
+  - `surface_heating_interval`
+  - `beam_strategy`
+  - `layer_interval`
+
+Those examples belong to the phase-1 default profile. They are not mandatory
+global vocabularies for every future profile.
 
 ### Core Epistemic Status
 
@@ -311,13 +440,14 @@ Minimum intended columns:
 - `variant_id`
 - `document_id`
 - `collection_id`
+- `domain_profile`
 - `variant_label`
 - `host_material_system`
 - `composition`
 - `variable_axis_type`
 - `variable_value`
-- `synthesis_context`
-- `post_treatment_context`
+- `process_context`
+- `profile_payload`
 - `structure_feature_ids`
 - `source_anchor_ids`
 - `confidence`
@@ -325,6 +455,19 @@ Minimum intended columns:
 
 The sample object must remain anchored to the host material system and variant
 definition. A label such as `1 wt%` is not sufficient on its own.
+
+`profile_payload` is where one enabled profile may keep extra normalized fields
+that are not required by the Core-neutral backbone.
+
+For the current reference corpus, a phase-1 sample variant will often be a
+process variant rather than a composition-only variant.
+
+Examples include:
+
+- same alloy with different induction current
+- same LPBF alloy with or without in-situ surface heating
+- same alloy with different multi-beam strategy
+- same DED alloy under different laser-induction parameter combinations
 
 #### `characterization_observations.parquet`
 
@@ -370,6 +513,13 @@ The first pass should support at least these feature categories:
 - thickness
 - surface_area
 
+For the metal-AM phase-1 corpus, the first pass should explicitly prioritize:
+
+- prior-β grain size or morphology when available
+- α-lath size when available
+- columnar versus equiaxed morphology
+- melt-pool-related morphology cues
+
 The first pass should stay narrow.
 
 The following feature categories should be explicitly deferred until later
@@ -387,6 +537,7 @@ Minimum intended columns:
 - `test_condition_id`
 - `document_id`
 - `collection_id`
+- `domain_profile`
 - `property_type`
 - `template_type`
 - `scope_level`
@@ -421,12 +572,24 @@ Cardinality rules for results and conditions:
 
 The condition template types should start narrow and explicit, for example:
 
-- electrochemistry
-- catalysis
-- thin_film_device
-- mechanics
-- thermal
-- optical
+- tensile_mechanics
+- fatigue
+- residual_stress_measurement
+- microhardness
+
+The current reference corpus does not justify starting from electrochemistry or
+thin-film-device condition templates.
+
+The first phase should optimize the default metal-AM profile for conditions such
+as:
+
+- loading mode
+- specimen orientation
+- build direction
+- stress measurement method
+- layer interval of in-situ heating
+- auxiliary heating schedule
+- post-heat-treatment presence or absence
 
 #### `baseline_references.parquet`
 
@@ -435,6 +598,7 @@ Minimum intended columns:
 - `baseline_id`
 - `document_id`
 - `collection_id`
+- `domain_profile`
 - `variant_id`
 - `baseline_type`
 - `baseline_label`
@@ -445,13 +609,15 @@ Minimum intended columns:
 
 The baseline taxonomy should at least distinguish:
 
-- pristine_or_undoped
-- same_process_without_additive
-- commercial_benchmark
+- as_built_reference
+- same_process_without_auxiliary_field
+- post_heat_treated_reference
 - literature_benchmark
-- blank_or_substrate_control
-- best_prior_art
+- conventional_process_reference
 - implicit_within_document_control
+
+These are phase-1 default-profile examples, not universal baseline categories
+for every future materials profile.
 
 #### `measurement_results.parquet`
 
@@ -460,6 +626,7 @@ Minimum intended columns:
 - `result_id`
 - `document_id`
 - `collection_id`
+- `domain_profile`
 - `variant_id`
 - `property_normalized`
 - `result_type`
@@ -486,6 +653,15 @@ The first result types should at least cover:
 - fitted_value
 - trend
 - optimum
+
+For the current reference corpus, the phase-1 default profile should explicitly
+support these result families first:
+
+- tensile strength and yield strength
+- elongation
+- hardness
+- residual stress magnitude
+- fatigue life or damage-tolerance metrics
 
 #### Comparability Semantics
 
@@ -591,7 +767,10 @@ Primary changes:
   - baseline types
   - result types
   - test condition template types
-- freeze the phase-1 subdomain scope to no more than two concrete templates
+- freeze the Core-neutral backbone contract
+- freeze the phase-1 default enabled profile as
+  `metal_additive_manufacturing`
+- freeze the phase-1 scenario scope to no more than two concrete templates
 - record the upgraded comparison contract in
   `backend/controllers/schemas/comparisons.py`
 - keep this wave documentation-first and contract-first
@@ -606,8 +785,9 @@ Files expected to change:
 Exit criteria:
 
 - new artifact names and minimum fields are frozen
-- the materials-specific normalization families are frozen
-- the phase-1 subdomain scope is frozen and intentionally narrow
+- the Core-neutral normalization families are frozen
+- the phase-1 default profile is frozen around the current metal-AM corpus
+- the phase-1 scenario scope is frozen and intentionally narrow
 - later implementation waves no longer need to redefine what Source hands off
 - controller schema direction is clear even if runtime cutover has not yet
   happened
@@ -647,6 +827,10 @@ Design rules:
 - keep page, bbox, or char-range locator data whenever available
 - keep Source output descriptive, not interpretive
 - do not let these workflows emit sample-level or comparison-level semantics
+- preserve process-parameter tables and method-section evidence because the
+  phase-1 default corpus expresses many variants through laser power, induction
+  current, heating mode, and beam strategy rather than through composition
+  labels
 
 Exit criteria:
 
@@ -691,6 +875,8 @@ Fixture requirements:
 - cover at least one phase or morphology statement
 - cover at least one structured condition template
 - cover at least one explicit and one implicit baseline form
+- for phase 1, prefer fixtures taken from or shaped after the current metal-AM
+  corpus rather than synthetic generic materials examples
 
 Exit criteria:
 
@@ -738,6 +924,14 @@ Fixture requirements:
 - cover at least one explicit baseline sample
 - cover at least one table-derived property result
 - cover at least one non-scalar result shape such as retention or fitted value
+
+For the current default profile, this wave should also cover process-centric sample
+variants such as:
+
+- induction current sweep
+- with versus without in-situ heating
+- beam-strategy variants
+- laser-parameter combinations
 
 Exit criteria:
 
@@ -866,6 +1060,8 @@ Main risks:
   characterization evidence supports
 - comparability outputs may be misread as expert-equivalent scientific judgment
 - ontology scope may sprawl too early and block actual backbone delivery
+- the phase-1 design may drift back into generic materials schemas that do not
+  match the actual metal-AM reference papers
 
 Mitigations:
 
@@ -878,16 +1074,23 @@ Mitigations:
   differences
 - cut the route contract only after one full end-to-end fixture passes
 - expose review flags whenever critical context is missing
-- keep phase-1 ontology limited to one or two concrete subdomain templates
+- keep phase-1 enablement limited to one default profile and two concrete
+  scenario templates
+- use the client-provided metal-AM papers as phase-1 fixtures, not as the
+  system-wide ontology boundary
 
-## Applicability And Limits
+## Current Phase-1 Fit
 
-This backbone is expected to fit best for:
+The generic backbone is intended to remain extendable beyond one domain.
 
-- battery-material result comparison
-- catalysis and electrocatalysis variable sweeps
-- sensor or optoelectronic device result tables
-- doping, composition, and annealing comparison papers
+The current phase-1 default profile is expected to fit best for:
+
+- field-assisted or hybrid metal additive manufacturing
+- Ti-alloy DED and laser-deposition process comparison
+- LPBF or SLM residual-stress and mechanics studies
+- in-situ heating and thermal-history control papers
+- metal-AM review corpora organized around process, microstructure, and
+  mechanical outcomes
 
 It is expected to remain weaker for:
 
@@ -895,6 +1098,8 @@ It is expected to remain weaker for:
 - spectrum-heavy mechanism papers
 - phase-diagram-driven work
 - fracture or in-situ evolution studies
+- non-metal materials domains such as electrochemistry or photocatalysis before
+  dedicated domain profiles are added
 
 Those weaker cases are not excluded from the system, but they should be treated
 as future expansion areas rather than silently over-claimed as fully solved.

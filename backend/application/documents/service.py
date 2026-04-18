@@ -15,12 +15,12 @@ from infra.persistence.backbone_codec import (
     restore_frame_from_storage,
 )
 from application.collections.service import CollectionService
-from application.documents.section_service import build_sections
 from application.documents.input_service import (
     build_document_records,
     load_collection_inputs,
 )
 from application.workspace.artifact_registry_service import ArtifactRegistryService
+from retrieval.index.operations.source_evidence import build_sections
 
 
 _DOCUMENT_PROFILES_FILE = "document_profiles.parquet"

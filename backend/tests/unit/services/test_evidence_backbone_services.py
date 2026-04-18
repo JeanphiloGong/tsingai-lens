@@ -71,6 +71,7 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
                         "The slurry was dried at 80 C and annealed at 600 C under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
+                        "SEM showed columnar beta phase with grain size of 12 um.",
                         "Flexural strength increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
@@ -113,9 +114,25 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     assert "limited" in set(comparisons["comparability_status"]) or "comparable" in set(
         comparisons["comparability_status"]
     )
+    characterization = pd.read_parquet(output_dir / "characterization_observations.parquet")
+    structure_features = pd.read_parquet(output_dir / "structure_features.parquet")
+    test_conditions = pd.read_parquet(output_dir / "test_conditions.parquet")
+    baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
+    assert not characterization.empty
+    assert not structure_features.empty
+    assert not test_conditions.empty
+    assert not baseline_references.empty
+    assert "directly_observed" in set(characterization["epistemic_status"])
+    assert "inferred_from_characterization" in set(structure_features["epistemic_status"])
+    assert "normalized_from_evidence" in set(test_conditions["epistemic_status"])
+    assert set(baseline_references["baseline_type"]) == {"implicit_within_document_control"}
     artifacts = artifact_registry.get(collection_id)
     assert artifacts["document_profiles_ready"] is True
     assert artifacts["evidence_cards_ready"] is True
+    assert artifacts["characterization_observations_ready"] is True
+    assert artifacts["structure_features_ready"] is True
+    assert artifacts["test_conditions_ready"] is True
+    assert artifacts["baseline_references_ready"] is True
     assert artifacts["comparison_rows_ready"] is True
 
 

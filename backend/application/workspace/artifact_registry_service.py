@@ -29,6 +29,10 @@ class ArtifactRegistryService:
         documents_path = base_dir / "documents.parquet"
         document_profiles_path = base_dir / "document_profiles.parquet"
         evidence_cards_path = base_dir / "evidence_cards.parquet"
+        characterization_observations_path = base_dir / "characterization_observations.parquet"
+        structure_features_path = base_dir / "structure_features.parquet"
+        test_conditions_path = base_dir / "test_conditions.parquet"
+        baseline_references_path = base_dir / "baseline_references.parquet"
         comparison_rows_path = base_dir / "comparison_rows.parquet"
         sections_path = base_dir / "sections.parquet"
         table_cells_path = base_dir / "table_cells.parquet"
@@ -39,9 +43,19 @@ class ArtifactRegistryService:
         documents_generated = documents_path.exists()
         document_profiles_generated = document_profiles_path.exists()
         evidence_cards_generated = evidence_cards_path.exists()
+        characterization_observations_generated = characterization_observations_path.exists()
+        structure_features_generated = structure_features_path.exists()
+        test_conditions_generated = test_conditions_path.exists()
+        baseline_references_generated = baseline_references_path.exists()
         comparison_rows_generated = comparison_rows_path.exists()
         document_profiles_ready = self._parquet_has_rows(document_profiles_path)
         evidence_cards_ready = self._parquet_has_rows(evidence_cards_path)
+        characterization_observations_ready = self._parquet_has_rows(
+            characterization_observations_path
+        )
+        structure_features_ready = self._parquet_has_rows(structure_features_path)
+        test_conditions_ready = self._parquet_has_rows(test_conditions_path)
+        baseline_references_ready = self._parquet_has_rows(baseline_references_path)
         comparison_rows_ready = self._parquet_has_rows(comparison_rows_path)
         graph_generated = (
             document_profiles_generated
@@ -66,6 +80,14 @@ class ArtifactRegistryService:
             "document_profiles_ready": document_profiles_ready,
             "evidence_cards_generated": evidence_cards_generated,
             "evidence_cards_ready": evidence_cards_ready,
+            "characterization_observations_generated": characterization_observations_generated,
+            "characterization_observations_ready": characterization_observations_ready,
+            "structure_features_generated": structure_features_generated,
+            "structure_features_ready": structure_features_ready,
+            "test_conditions_generated": test_conditions_generated,
+            "test_conditions_ready": test_conditions_ready,
+            "baseline_references_generated": baseline_references_generated,
+            "baseline_references_ready": baseline_references_ready,
             "comparison_rows_generated": comparison_rows_generated,
             "comparison_rows_ready": comparison_rows_ready,
             "graph_generated": graph_generated,

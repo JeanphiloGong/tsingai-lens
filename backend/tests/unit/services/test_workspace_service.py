@@ -123,6 +123,14 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["artifacts"]["document_profiles_ready"] is True
     assert overview["artifacts"]["evidence_cards_generated"] is False
     assert overview["artifacts"]["evidence_cards_ready"] is False
+    assert overview["artifacts"]["characterization_observations_generated"] is False
+    assert overview["artifacts"]["characterization_observations_ready"] is False
+    assert overview["artifacts"]["structure_features_generated"] is False
+    assert overview["artifacts"]["structure_features_ready"] is False
+    assert overview["artifacts"]["test_conditions_generated"] is False
+    assert overview["artifacts"]["test_conditions_ready"] is False
+    assert overview["artifacts"]["baseline_references_generated"] is False
+    assert overview["artifacts"]["baseline_references_ready"] is False
     assert overview["artifacts"]["comparison_rows_generated"] is False
     assert overview["artifacts"]["comparison_rows_ready"] is False
     assert overview["artifacts"]["table_cells_generated"] is True

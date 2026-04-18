@@ -371,6 +371,14 @@ def test_collection_task_flow(app_client):
     assert body["document_profiles_ready"] is True
     assert body["evidence_cards_generated"] is True
     assert body["evidence_cards_ready"] is True
+    assert body["characterization_observations_generated"] is True
+    assert body["characterization_observations_ready"] is True
+    assert body["structure_features_generated"] is True
+    assert body["structure_features_ready"] is False
+    assert body["test_conditions_generated"] is True
+    assert body["test_conditions_ready"] is True
+    assert body["baseline_references_generated"] is True
+    assert body["baseline_references_ready"] is False
     assert body["comparison_rows_generated"] is True
     assert body["comparison_rows_ready"] is True
     assert body["graph_generated"] is True

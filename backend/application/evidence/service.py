@@ -34,6 +34,82 @@ _EVIDENCE_JSON_COLUMNS = (
     "material_system",
     "condition_context",
 )
+_CHARACTERIZATION_OBSERVATIONS_FILE = "characterization_observations.parquet"
+_CHARACTERIZATION_JSON_COLUMNS = (
+    "condition_context",
+    "evidence_anchor_ids",
+)
+_STRUCTURE_FEATURES_FILE = "structure_features.parquet"
+_STRUCTURE_FEATURES_JSON_COLUMNS = ("source_observation_ids",)
+_TEST_CONDITIONS_FILE = "test_conditions.parquet"
+_TEST_CONDITIONS_JSON_COLUMNS = (
+    "condition_payload",
+    "missing_fields",
+    "evidence_anchor_ids",
+)
+_BASELINE_REFERENCES_FILE = "baseline_references.parquet"
+_BASELINE_REFERENCES_JSON_COLUMNS = ("evidence_anchor_ids",)
+_DOMAIN_PROFILE_CORE_NEUTRAL = "core_neutral"
+_EPISTEMIC_DIRECTLY_OBSERVED = "directly_observed"
+_EPISTEMIC_NORMALIZED_FROM_EVIDENCE = "normalized_from_evidence"
+_EPISTEMIC_INFERRED_FROM_CHARACTERIZATION = "inferred_from_characterization"
+_EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE = "inferred_with_low_confidence"
+_EPISTEMIC_UNRESOLVED = "unresolved"
+_CHARACTERIZATION_COLUMNS = [
+    "observation_id",
+    "document_id",
+    "collection_id",
+    "variant_id",
+    "characterization_type",
+    "observation_text",
+    "observed_value",
+    "observed_unit",
+    "condition_context",
+    "evidence_anchor_ids",
+    "confidence",
+    "epistemic_status",
+]
+_STRUCTURE_FEATURE_COLUMNS = [
+    "feature_id",
+    "document_id",
+    "collection_id",
+    "variant_id",
+    "feature_type",
+    "feature_value",
+    "feature_unit",
+    "qualitative_descriptor",
+    "source_observation_ids",
+    "confidence",
+    "epistemic_status",
+]
+_TEST_CONDITION_COLUMNS = [
+    "test_condition_id",
+    "document_id",
+    "collection_id",
+    "domain_profile",
+    "property_type",
+    "template_type",
+    "scope_level",
+    "condition_payload",
+    "condition_completeness",
+    "missing_fields",
+    "evidence_anchor_ids",
+    "confidence",
+    "epistemic_status",
+]
+_BASELINE_REFERENCE_COLUMNS = [
+    "baseline_id",
+    "document_id",
+    "collection_id",
+    "domain_profile",
+    "variant_id",
+    "baseline_type",
+    "baseline_label",
+    "baseline_scope",
+    "evidence_anchor_ids",
+    "confidence",
+    "epistemic_status",
+]
 
 _CHARACTERIZATION_METHODS = (
     "XRD",
@@ -92,6 +168,37 @@ _ATMOSPHERE_PATTERN = re.compile(
 _TABLE_NUMERIC_PATTERN = re.compile(r"[-+]?\d+(?:\.\d+)?")
 _TABLE_SAMPLE_HEADER_HINTS = ("sample", "group", "variant", "condition")
 _TABLE_BASELINE_HEADER_HINTS = ("baseline", "control", "reference")
+_OBSERVED_VALUE_PATTERN = re.compile(
+    r"([-+]?\d+(?:\.\d+)?)\s*(nm|um|μm|mm|cm|m2/g|m\^2/g|m²/g|mpa|gpa|pa|%)\b",
+    re.IGNORECASE,
+)
+_PHASE_PATTERN = re.compile(
+    r"\b(alpha|beta|gamma|martensite|martensitic|austenite|ferrite|alpha-phase|beta-phase)\b",
+    re.IGNORECASE,
+)
+_GRAIN_SIZE_PATTERN = re.compile(
+    r"(?:grain size|grain diameter|prior-β grain size|alpha-lath size|alpha lath size)[^\d]{0,20}"
+    r"([-+]?\d+(?:\.\d+)?)\s*(nm|um|μm|mm)\b",
+    re.IGNORECASE,
+)
+_THICKNESS_PATTERN = re.compile(
+    r"(?:thickness|film thickness|layer thickness)[^\d]{0,20}"
+    r"([-+]?\d+(?:\.\d+)?)\s*(nm|um|μm|mm)\b",
+    re.IGNORECASE,
+)
+_SURFACE_AREA_PATTERN = re.compile(
+    r"(?:surface area|specific surface area)[^\d]{0,20}"
+    r"([-+]?\d+(?:\.\d+)?)\s*(m2/g|m\^2/g|m²/g)\b",
+    re.IGNORECASE,
+)
+_MORPHOLOGY_KEYWORDS = (
+    "equiaxed",
+    "columnar",
+    "dendritic",
+    "lamellar",
+    "spherical",
+    "melt pool",
+)
 
 
 class EvidenceCardsNotReadyError(RuntimeError):
@@ -290,9 +397,406 @@ class EvidenceCardService:
             cards_table,
             _EVIDENCE_JSON_COLUMNS,
         ).to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
+        self._persist_wave_c_artifacts(
+            base_dir=base_dir,
+            collection_id=collection_id,
+            cards_table=cards_table,
+            sections_by_doc=sections_by_doc,
+            table_cells_by_doc=table_cells_by_doc,
+        )
         self.artifact_registry_service.upsert(collection_id, base_dir)
 
         return cards_table
+
+    def _persist_wave_c_artifacts(
+        self,
+        *,
+        base_dir: Path,
+        collection_id: str,
+        cards_table: pd.DataFrame,
+        sections_by_doc: dict[str, list[dict[str, Any]]],
+        table_cells_by_doc: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        characterization = self._build_characterization_observations(
+            collection_id=collection_id,
+            cards_table=cards_table,
+            sections_by_doc=sections_by_doc,
+            table_cells_by_doc=table_cells_by_doc,
+        )
+        structure_features = self._build_structure_features(characterization)
+        test_conditions = self._build_test_conditions(cards_table, collection_id)
+        baseline_references = self._build_baseline_references(cards_table, collection_id)
+
+        prepare_frame_for_storage(
+            characterization,
+            _CHARACTERIZATION_JSON_COLUMNS,
+        ).to_parquet(base_dir / _CHARACTERIZATION_OBSERVATIONS_FILE, index=False)
+        prepare_frame_for_storage(
+            structure_features,
+            _STRUCTURE_FEATURES_JSON_COLUMNS,
+        ).to_parquet(base_dir / _STRUCTURE_FEATURES_FILE, index=False)
+        prepare_frame_for_storage(
+            test_conditions,
+            _TEST_CONDITIONS_JSON_COLUMNS,
+        ).to_parquet(base_dir / _TEST_CONDITIONS_FILE, index=False)
+        prepare_frame_for_storage(
+            baseline_references,
+            _BASELINE_REFERENCES_JSON_COLUMNS,
+        ).to_parquet(base_dir / _BASELINE_REFERENCES_FILE, index=False)
+
+    def _build_characterization_observations(
+        self,
+        *,
+        collection_id: str,
+        cards_table: pd.DataFrame,
+        sections_by_doc: dict[str, list[dict[str, Any]]],
+        table_cells_by_doc: dict[str, list[dict[str, Any]]],
+    ) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        characterization_cards = (
+            cards_table[cards_table["claim_type"].astype(str) == "characterization"]
+            if cards_table is not None and not cards_table.empty
+            else pd.DataFrame(columns=cards_table.columns if cards_table is not None else [])
+        )
+
+        for document_id, sections in sections_by_doc.items():
+            matching_cards = characterization_cards[
+                characterization_cards["document_id"].astype(str) == str(document_id)
+            ]
+            anchor_ids: list[str] = []
+            condition_context: dict[str, Any] = self._normalize_condition_context_payload({})
+            if not matching_cards.empty:
+                card_row = matching_cards.iloc[0]
+                anchor_ids = self._extract_anchor_ids(card_row.get("evidence_anchors"))
+                condition_context = self._normalize_condition_context_payload(
+                    card_row.get("condition_context")
+                )
+
+            for section in sections:
+                if str(section.get("section_type") or "") != "characterization":
+                    continue
+                section_text = str(section.get("text") or "").strip()
+                if not section_text:
+                    continue
+                methods = self._extract_characterization_methods(section_text)
+                if not methods:
+                    continue
+                observed_value, observed_unit = self._extract_observed_value_and_unit(section_text)
+                for method in methods:
+                    rows.append(
+                        {
+                            "observation_id": f"obs_{uuid4().hex[:12]}",
+                            "document_id": str(document_id),
+                            "collection_id": collection_id,
+                            "variant_id": None,
+                            "characterization_type": method.lower(),
+                            "observation_text": section_text,
+                            "observed_value": observed_value,
+                            "observed_unit": observed_unit,
+                            "condition_context": condition_context,
+                            "evidence_anchor_ids": anchor_ids,
+                            "confidence": 0.84 if observed_value is not None else 0.78,
+                            "epistemic_status": _EPISTEMIC_DIRECTLY_OBSERVED,
+                        }
+                    )
+
+        for document_id, table_cells in table_cells_by_doc.items():
+            grouped_rows: dict[tuple[str, int], list[dict[str, Any]]] = {}
+            for cell in table_cells:
+                table_id = str(cell.get("table_id") or "").strip()
+                row_index = self._safe_int(cell.get("row_index"))
+                if not table_id or row_index is None or row_index <= 0:
+                    continue
+                grouped_rows.setdefault((table_id, row_index), []).append(cell)
+
+            for (_table_id, _row_index), row_cells in grouped_rows.items():
+                summary = self._build_table_row_summary(row_cells)
+                methods = self._extract_characterization_methods(summary)
+                if not methods:
+                    continue
+                observed_value, observed_unit = self._extract_observed_value_and_unit(summary)
+                for method in methods:
+                    rows.append(
+                        {
+                            "observation_id": f"obs_{uuid4().hex[:12]}",
+                            "document_id": str(document_id),
+                            "collection_id": collection_id,
+                            "variant_id": None,
+                            "characterization_type": method.lower(),
+                            "observation_text": summary,
+                            "observed_value": observed_value,
+                            "observed_unit": observed_unit,
+                            "condition_context": self._normalize_condition_context_payload({}),
+                            "evidence_anchor_ids": [],
+                            "confidence": 0.68,
+                            "epistemic_status": _EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+                        }
+                    )
+
+        return self._normalize_characterization_table(
+            pd.DataFrame(rows, columns=_CHARACTERIZATION_COLUMNS),
+            collection_id,
+        )
+
+    def _build_structure_features(
+        self,
+        characterization: pd.DataFrame,
+    ) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        if characterization is None or characterization.empty:
+            return self._normalize_structure_features_table(
+                pd.DataFrame(columns=_STRUCTURE_FEATURE_COLUMNS)
+            )
+
+        for _, observation in characterization.iterrows():
+            rows.extend(self._extract_structure_features_from_observation(observation))
+
+        return self._normalize_structure_features_table(
+            pd.DataFrame(rows, columns=_STRUCTURE_FEATURE_COLUMNS)
+        )
+
+    def _build_test_conditions(
+        self,
+        cards_table: pd.DataFrame,
+        collection_id: str,
+    ) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        dedupe: set[tuple[str, str, str, str]] = set()
+        if cards_table is None or cards_table.empty:
+            return self._normalize_test_conditions_table(
+                pd.DataFrame(columns=_TEST_CONDITION_COLUMNS),
+                collection_id,
+            )
+
+        for _, row in cards_table.iterrows():
+            condition_context = self._normalize_condition_context_payload(
+                row.get("condition_context")
+            )
+            process_context = condition_context.get("process", {})
+            test_context = condition_context.get("test", {})
+            payload = {
+                "method": test_context.get("method"),
+                "methods": self._normalize_list(test_context.get("methods")),
+                "temperatures_c": list(process_context.get("temperatures_c") or []),
+                "durations": list(process_context.get("durations") or []),
+                "atmosphere": process_context.get("atmosphere"),
+            }
+            payload = {
+                key: value
+                for key, value in payload.items()
+                if value not in (None, "", [], {})
+            }
+            if not payload:
+                continue
+
+            property_type = self._infer_property_type_from_card(
+                claim_type=str(row.get("claim_type") or ""),
+                claim_text=str(row.get("claim_text") or ""),
+            )
+            template_type = self._infer_condition_template_type(property_type)
+            scope_level = self._infer_condition_scope_level(
+                str(row.get("evidence_source_type") or "")
+            )
+            missing_fields = self._infer_missing_condition_fields(
+                payload=payload,
+                template_type=template_type,
+                scope_level=scope_level,
+            )
+            condition_completeness = self._infer_condition_completeness(
+                payload=payload,
+                missing_fields=missing_fields,
+            )
+            dedupe_key = (
+                str(row.get("document_id") or ""),
+                property_type,
+                scope_level,
+                json.dumps(payload, sort_keys=True, ensure_ascii=False),
+            )
+            if dedupe_key in dedupe:
+                continue
+            dedupe.add(dedupe_key)
+            rows.append(
+                {
+                    "test_condition_id": f"tc_{uuid4().hex[:12]}",
+                    "document_id": str(row.get("document_id") or ""),
+                    "collection_id": collection_id,
+                    "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
+                    "property_type": property_type,
+                    "template_type": template_type,
+                    "scope_level": scope_level,
+                    "condition_payload": payload,
+                    "condition_completeness": condition_completeness,
+                    "missing_fields": missing_fields,
+                    "evidence_anchor_ids": self._extract_anchor_ids(
+                        row.get("evidence_anchors")
+                    ),
+                    "confidence": 0.82 if condition_completeness == "complete" else 0.72,
+                    "epistemic_status": (
+                        _EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                        if condition_completeness != "unresolved"
+                        else _EPISTEMIC_UNRESOLVED
+                    ),
+                }
+            )
+
+        return self._normalize_test_conditions_table(
+            pd.DataFrame(rows, columns=_TEST_CONDITION_COLUMNS),
+            collection_id,
+        )
+
+    def _build_baseline_references(
+        self,
+        cards_table: pd.DataFrame,
+        collection_id: str,
+    ) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        dedupe: set[tuple[str, str, str]] = set()
+        if cards_table is None or cards_table.empty:
+            return self._normalize_baseline_references_table(
+                pd.DataFrame(columns=_BASELINE_REFERENCE_COLUMNS),
+                collection_id,
+            )
+
+        for _, row in cards_table.iterrows():
+            condition_context = self._normalize_condition_context_payload(
+                row.get("condition_context")
+            )
+            baseline_label = str(
+                (condition_context.get("baseline") or {}).get("control") or ""
+            ).strip()
+            if not baseline_label:
+                continue
+
+            baseline_scope = self._infer_baseline_scope(
+                str(row.get("evidence_source_type") or "")
+            )
+            dedupe_key = (
+                str(row.get("document_id") or ""),
+                baseline_label.lower(),
+                baseline_scope,
+            )
+            if dedupe_key in dedupe:
+                continue
+            dedupe.add(dedupe_key)
+
+            baseline_type = self._classify_baseline_type(baseline_label)
+            epistemic_status = (
+                _EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                if self._baseline_label_is_explicit(baseline_label)
+                else _EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE
+            )
+            rows.append(
+                {
+                    "baseline_id": f"base_{uuid4().hex[:12]}",
+                    "document_id": str(row.get("document_id") or ""),
+                    "collection_id": collection_id,
+                    "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
+                    "variant_id": None,
+                    "baseline_type": baseline_type,
+                    "baseline_label": baseline_label,
+                    "baseline_scope": baseline_scope,
+                    "evidence_anchor_ids": self._extract_anchor_ids(
+                        row.get("evidence_anchors")
+                    ),
+                    "confidence": (
+                        0.8
+                        if epistemic_status == _EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                        else 0.64
+                    ),
+                    "epistemic_status": epistemic_status,
+                }
+            )
+
+        return self._normalize_baseline_references_table(
+            pd.DataFrame(rows, columns=_BASELINE_REFERENCE_COLUMNS),
+            collection_id,
+        )
+
+    def _normalize_characterization_table(
+        self,
+        characterization: pd.DataFrame,
+        collection_id: str | None,
+    ) -> pd.DataFrame:
+        if characterization is None or characterization.empty:
+            return pd.DataFrame(columns=_CHARACTERIZATION_COLUMNS)
+
+        normalized = characterization.copy()
+        if collection_id is not None and "collection_id" not in normalized.columns:
+            normalized["collection_id"] = collection_id
+        normalized["condition_context"] = normalized["condition_context"].apply(
+            self._normalize_condition_context_payload
+        )
+        normalized["evidence_anchor_ids"] = normalized["evidence_anchor_ids"].apply(
+            self._normalize_list
+        )
+        normalized["confidence"] = normalized["confidence"].apply(
+            lambda value: round(float(value or 0.0), 2)
+        )
+        return normalized[_CHARACTERIZATION_COLUMNS]
+
+    def _normalize_structure_features_table(
+        self,
+        structure_features: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if structure_features is None or structure_features.empty:
+            return pd.DataFrame(columns=_STRUCTURE_FEATURE_COLUMNS)
+
+        normalized = structure_features.copy()
+        normalized["source_observation_ids"] = normalized["source_observation_ids"].apply(
+            self._normalize_list
+        )
+        normalized["confidence"] = normalized["confidence"].apply(
+            lambda value: round(float(value or 0.0), 2)
+        )
+        return normalized[_STRUCTURE_FEATURE_COLUMNS]
+
+    def _normalize_test_conditions_table(
+        self,
+        test_conditions: pd.DataFrame,
+        collection_id: str | None,
+    ) -> pd.DataFrame:
+        if test_conditions is None or test_conditions.empty:
+            return pd.DataFrame(columns=_TEST_CONDITION_COLUMNS)
+
+        normalized = test_conditions.copy()
+        if collection_id is not None and "collection_id" not in normalized.columns:
+            normalized["collection_id"] = collection_id
+        if "domain_profile" not in normalized.columns:
+            normalized["domain_profile"] = _DOMAIN_PROFILE_CORE_NEUTRAL
+        normalized["condition_payload"] = normalized["condition_payload"].apply(
+            self._normalize_condition_payload
+        )
+        normalized["missing_fields"] = normalized["missing_fields"].apply(
+            self._normalize_list
+        )
+        normalized["evidence_anchor_ids"] = normalized["evidence_anchor_ids"].apply(
+            self._normalize_list
+        )
+        normalized["confidence"] = normalized["confidence"].apply(
+            lambda value: round(float(value or 0.0), 2)
+        )
+        return normalized[_TEST_CONDITION_COLUMNS]
+
+    def _normalize_baseline_references_table(
+        self,
+        baseline_references: pd.DataFrame,
+        collection_id: str | None,
+    ) -> pd.DataFrame:
+        if baseline_references is None or baseline_references.empty:
+            return pd.DataFrame(columns=_BASELINE_REFERENCE_COLUMNS)
+
+        normalized = baseline_references.copy()
+        if collection_id is not None and "collection_id" not in normalized.columns:
+            normalized["collection_id"] = collection_id
+        if "domain_profile" not in normalized.columns:
+            normalized["domain_profile"] = _DOMAIN_PROFILE_CORE_NEUTRAL
+        normalized["evidence_anchor_ids"] = normalized["evidence_anchor_ids"].apply(
+            self._normalize_list
+        )
+        normalized["confidence"] = normalized["confidence"].apply(
+            lambda value: round(float(value or 0.0), 2)
+        )
+        return normalized[_BASELINE_REFERENCE_COLUMNS]
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)
@@ -660,6 +1164,287 @@ class EvidenceCardService:
         if unit:
             return f"{subject} reported {property_label} of {numeric_value} {unit}."
         return f"{subject} reported {property_label} of {numeric_value}."
+
+    def _extract_observed_value_and_unit(
+        self,
+        text: str,
+    ) -> tuple[float | None, str | None]:
+        match = _OBSERVED_VALUE_PATTERN.search(str(text or ""))
+        if match is None:
+            return None, None
+        return float(match.group(1)), match.group(2)
+
+    def _extract_structure_features_from_observation(
+        self,
+        observation: pd.Series,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        observation_text = str(observation.get("observation_text") or "")
+        lowered = observation_text.lower()
+        observation_id = str(observation.get("observation_id") or "")
+        document_id = str(observation.get("document_id") or "")
+        collection_id = str(observation.get("collection_id") or "")
+        variant_id = self._normalize_scalar_text(observation.get("variant_id"))
+
+        phase_match = _PHASE_PATTERN.search(observation_text)
+        if phase_match:
+            rows.append(
+                self._build_structure_feature_row(
+                    document_id=document_id,
+                    collection_id=collection_id,
+                    variant_id=variant_id,
+                    feature_type="phase",
+                    feature_value=phase_match.group(1).lower(),
+                    feature_unit=None,
+                    qualitative_descriptor=observation_text,
+                    source_observation_ids=[observation_id],
+                    confidence=0.7,
+                )
+            )
+
+        for keyword in _MORPHOLOGY_KEYWORDS:
+            if keyword not in lowered:
+                continue
+            rows.append(
+                self._build_structure_feature_row(
+                    document_id=document_id,
+                    collection_id=collection_id,
+                    variant_id=variant_id,
+                    feature_type="morphology",
+                    feature_value=keyword,
+                    feature_unit=None,
+                    qualitative_descriptor=observation_text,
+                    source_observation_ids=[observation_id],
+                    confidence=0.74,
+                )
+            )
+
+        grain_match = _GRAIN_SIZE_PATTERN.search(observation_text)
+        if grain_match:
+            rows.append(
+                self._build_structure_feature_row(
+                    document_id=document_id,
+                    collection_id=collection_id,
+                    variant_id=variant_id,
+                    feature_type="grain_size",
+                    feature_value=float(grain_match.group(1)),
+                    feature_unit=grain_match.group(2),
+                    qualitative_descriptor=observation_text,
+                    source_observation_ids=[observation_id],
+                    confidence=0.84,
+                )
+            )
+
+        thickness_match = _THICKNESS_PATTERN.search(observation_text)
+        if thickness_match:
+            rows.append(
+                self._build_structure_feature_row(
+                    document_id=document_id,
+                    collection_id=collection_id,
+                    variant_id=variant_id,
+                    feature_type="thickness",
+                    feature_value=float(thickness_match.group(1)),
+                    feature_unit=thickness_match.group(2),
+                    qualitative_descriptor=observation_text,
+                    source_observation_ids=[observation_id],
+                    confidence=0.84,
+                )
+            )
+
+        surface_area_match = _SURFACE_AREA_PATTERN.search(observation_text)
+        if surface_area_match:
+            rows.append(
+                self._build_structure_feature_row(
+                    document_id=document_id,
+                    collection_id=collection_id,
+                    variant_id=variant_id,
+                    feature_type="surface_area",
+                    feature_value=float(surface_area_match.group(1)),
+                    feature_unit=surface_area_match.group(2),
+                    qualitative_descriptor=observation_text,
+                    source_observation_ids=[observation_id],
+                    confidence=0.84,
+                )
+            )
+
+        return rows
+
+    def _build_structure_feature_row(
+        self,
+        *,
+        document_id: str,
+        collection_id: str,
+        variant_id: str | None,
+        feature_type: str,
+        feature_value: Any,
+        feature_unit: str | None,
+        qualitative_descriptor: str | None,
+        source_observation_ids: list[str],
+        confidence: float,
+    ) -> dict[str, Any]:
+        return {
+            "feature_id": f"feat_{uuid4().hex[:12]}",
+            "document_id": document_id,
+            "collection_id": collection_id,
+            "variant_id": variant_id,
+            "feature_type": feature_type,
+            "feature_value": feature_value,
+            "feature_unit": feature_unit,
+            "qualitative_descriptor": qualitative_descriptor,
+            "source_observation_ids": source_observation_ids,
+            "confidence": confidence,
+            "epistemic_status": _EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
+        }
+
+    def _infer_property_type_from_card(
+        self,
+        *,
+        claim_type: str,
+        claim_text: str,
+    ) -> str:
+        lowered = str(claim_text or "").lower()
+        for token, normalized in _PROPERTY_HINTS.items():
+            if token in lowered:
+                return normalized
+        if claim_type == "characterization":
+            return "characterization"
+        if claim_type == "process":
+            return "process_route"
+        return claim_type or "qualitative"
+
+    def _infer_condition_template_type(
+        self,
+        property_type: str,
+    ) -> str:
+        if property_type in {"strength", "flexural_strength", "modulus", "elongation"}:
+            return "tensile_mechanics"
+        if property_type == "fatigue_life":
+            return "fatigue"
+        if property_type == "hardness":
+            return "microhardness"
+        if property_type == "residual_stress":
+            return "residual_stress_measurement"
+        if property_type == "characterization":
+            return "characterization"
+        return "generic_materials_measurement"
+
+    def _infer_condition_scope_level(
+        self,
+        evidence_source_type: str,
+    ) -> str:
+        source_type = str(evidence_source_type or "").strip()
+        if source_type == "table":
+            return "table"
+        if source_type == "method":
+            return "experiment"
+        return "measurement"
+
+    def _infer_missing_condition_fields(
+        self,
+        *,
+        payload: dict[str, Any],
+        template_type: str,
+        scope_level: str,
+    ) -> list[str]:
+        missing: list[str] = []
+        methods = payload.get("methods") or []
+        if not methods and not payload.get("method") and template_type != "generic_materials_measurement":
+            missing.append("method")
+        if scope_level == "experiment" and not payload.get("temperatures_c") and not payload.get("durations"):
+            missing.append("process_window")
+        return missing
+
+    def _infer_condition_completeness(
+        self,
+        *,
+        payload: dict[str, Any],
+        missing_fields: list[str],
+    ) -> str:
+        if not payload:
+            return "unresolved"
+        if missing_fields:
+            return "partial"
+        return "complete"
+
+    def _infer_baseline_scope(
+        self,
+        evidence_source_type: str,
+    ) -> str:
+        source_type = str(evidence_source_type or "").strip()
+        if source_type == "table":
+            return "table"
+        return "measurement"
+
+    def _classify_baseline_type(
+        self,
+        baseline_label: str,
+    ) -> str:
+        lowered = str(baseline_label or "").lower()
+        if any(token in lowered for token in ("as-built", "as built", "as-prepared", "as prepared", "pristine")):
+            return "as_built_reference"
+        if "without" in lowered and any(token in lowered for token in ("field", "heating", "induction", "beam")):
+            return "same_process_without_auxiliary_field"
+        if any(token in lowered for token in ("annealed", "heat treated", "post-heat", "post heat")):
+            return "post_heat_treated_reference"
+        if any(token in lowered for token in ("literature", "reported", "prior art", "benchmark")):
+            return "literature_benchmark"
+        if any(token in lowered for token in ("conventional", "wrought", "cast", "rolling")):
+            return "conventional_process_reference"
+        return "implicit_within_document_control"
+
+    def _baseline_label_is_explicit(
+        self,
+        baseline_label: str,
+    ) -> bool:
+        lowered = str(baseline_label or "").lower()
+        return any(
+            token in lowered
+            for token in (
+                "baseline",
+                "control",
+                "reference",
+                "benchmark",
+                "literature",
+                "without",
+            )
+        )
+
+    def _normalize_condition_payload(
+        self,
+        value: Any,
+    ) -> dict[str, Any]:
+        payload = self._normalize_object(value) or {}
+        if not isinstance(payload, dict):
+            return {}
+
+        normalized: dict[str, Any] = {}
+        for key, item in payload.items():
+            parsed = self._normalize_object(item)
+            if isinstance(parsed, list):
+                normalized[key] = [entry for entry in parsed if entry not in (None, "", [], {})]
+            else:
+                normalized[key] = parsed
+        return {
+            key: value
+            for key, value in normalized.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _extract_anchor_ids(
+        self,
+        evidence_anchors: Any,
+    ) -> list[str]:
+        anchors = self._normalize_object(evidence_anchors)
+        if not isinstance(anchors, list):
+            return []
+        anchor_ids: list[str] = []
+        for anchor in anchors:
+            if not isinstance(anchor, dict):
+                continue
+            anchor_id = self._normalize_scalar_text(anchor.get("anchor_id"))
+            if anchor_id:
+                anchor_ids.append(anchor_id)
+        return anchor_ids
 
     def _extract_process_context(self, text: Any) -> dict[str, Any]:
         source = str(text or "")

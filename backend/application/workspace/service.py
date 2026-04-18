@@ -42,6 +42,14 @@ class WorkspaceService:
             "document_profiles_ready": False,
             "evidence_cards_generated": False,
             "evidence_cards_ready": False,
+            "characterization_observations_generated": False,
+            "characterization_observations_ready": False,
+            "structure_features_generated": False,
+            "structure_features_ready": False,
+            "test_conditions_generated": False,
+            "test_conditions_ready": False,
+            "baseline_references_generated": False,
+            "baseline_references_ready": False,
             "comparison_rows_generated": False,
             "comparison_rows_ready": False,
             "graph_generated": False,
@@ -370,6 +378,26 @@ class WorkspaceService:
                 "document_profiles_ready": bool(artifacts.get("document_profiles_ready")),
                 "evidence_cards_generated": bool(artifacts.get("evidence_cards_generated")),
                 "evidence_cards_ready": bool(artifacts.get("evidence_cards_ready")),
+                "characterization_observations_generated": bool(
+                    artifacts.get("characterization_observations_generated")
+                ),
+                "characterization_observations_ready": bool(
+                    artifacts.get("characterization_observations_ready")
+                ),
+                "structure_features_generated": bool(
+                    artifacts.get("structure_features_generated")
+                ),
+                "structure_features_ready": bool(
+                    artifacts.get("structure_features_ready")
+                ),
+                "test_conditions_generated": bool(artifacts.get("test_conditions_generated")),
+                "test_conditions_ready": bool(artifacts.get("test_conditions_ready")),
+                "baseline_references_generated": bool(
+                    artifacts.get("baseline_references_generated")
+                ),
+                "baseline_references_ready": bool(
+                    artifacts.get("baseline_references_ready")
+                ),
                 "comparison_rows_generated": bool(artifacts.get("comparison_rows_generated")),
                 "comparison_rows_ready": bool(artifacts.get("comparison_rows_ready")),
                 "graph_generated": bool(artifacts.get("graph_generated")),

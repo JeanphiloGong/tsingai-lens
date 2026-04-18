@@ -153,6 +153,14 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["document_profiles_ready"] is True
     assert artifacts["evidence_cards_generated"] is True
     assert artifacts["evidence_cards_ready"] is True
+    assert artifacts["characterization_observations_generated"] is True
+    assert artifacts["characterization_observations_ready"] is True
+    assert artifacts["structure_features_generated"] is True
+    assert artifacts["structure_features_ready"] is False
+    assert artifacts["test_conditions_generated"] is True
+    assert artifacts["test_conditions_ready"] is True
+    assert artifacts["baseline_references_generated"] is True
+    assert artifacts["baseline_references_ready"] is False
     assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is True
     assert artifacts["graph_generated"] is True
@@ -224,6 +232,14 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert artifacts["table_cells_ready"] is False
     assert artifacts["evidence_cards_generated"] is True
     assert artifacts["evidence_cards_ready"] is False
+    assert artifacts["characterization_observations_generated"] is True
+    assert artifacts["characterization_observations_ready"] is False
+    assert artifacts["structure_features_generated"] is True
+    assert artifacts["structure_features_ready"] is False
+    assert artifacts["test_conditions_generated"] is True
+    assert artifacts["test_conditions_ready"] is False
+    assert artifacts["baseline_references_generated"] is True
+    assert artifacts["baseline_references_ready"] is False
     assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is False
     assert artifacts["protocol_steps_generated"] is False

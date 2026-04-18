@@ -166,6 +166,7 @@ SECTIONS_FINAL_COLUMNS = [
     "section_type",
     "heading",
     TEXT,
+    "order",
     TEXT_UNIT_IDS,
     "page",
     "char_range",

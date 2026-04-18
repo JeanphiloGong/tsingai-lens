@@ -31,6 +31,7 @@ class ArtifactRegistryService:
         evidence_cards_path = base_dir / "evidence_cards.parquet"
         comparison_rows_path = base_dir / "comparison_rows.parquet"
         sections_path = base_dir / "sections.parquet"
+        table_cells_path = base_dir / "table_cells.parquet"
         procedure_blocks_path = base_dir / "procedure_blocks.parquet"
         protocol_steps_path = base_dir / "protocol_steps.parquet"
         graphml_path = base_dir / "graph.graphml"
@@ -51,6 +52,7 @@ class ArtifactRegistryService:
             document_profiles_ready or evidence_cards_ready or comparison_rows_ready
         )
         sections_generated = sections_path.exists()
+        table_cells_generated = table_cells_path.exists()
         procedure_blocks_generated = procedure_blocks_path.exists()
         protocol_steps_generated = protocol_steps_path.exists()
         graphml_generated = graphml_path.exists()
@@ -70,6 +72,8 @@ class ArtifactRegistryService:
             "graph_ready": graph_ready,
             "sections_generated": sections_generated,
             "sections_ready": self._parquet_has_rows(sections_path),
+            "table_cells_generated": table_cells_generated,
+            "table_cells_ready": self._parquet_has_rows(table_cells_path),
             "procedure_blocks_generated": procedure_blocks_generated,
             "procedure_blocks_ready": self._parquet_has_rows(procedure_blocks_path),
             "protocol_steps_generated": protocol_steps_generated,

@@ -18,6 +18,7 @@ from application.comparisons.service import ComparisonService
 from application.documents.service import DocumentProfileService
 from application.evidence.service import EvidenceCardService
 from controllers import comparisons as comparisons_controller
+from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -31,6 +32,15 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _write_source_artifacts(
+    output_dir: Path,
+    documents: pd.DataFrame,
+    text_units: pd.DataFrame | None = None,
+) -> None:
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 @pytest.fixture()
@@ -89,7 +99,7 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
 
-    pd.DataFrame(
+    documents = pd.DataFrame(
         [
             {
                 "id": "doc-1",
@@ -97,7 +107,9 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
                 "text": "This review summarizes recent advances in composite filler systems.",
             }
         ]
-    ).to_parquet(output_dir / "documents.parquet", index=False)
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, None)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(

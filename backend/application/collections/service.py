@@ -103,6 +103,8 @@ class CollectionService:
                 "graph_ready": False,
                 "sections_generated": False,
                 "sections_ready": False,
+                "table_cells_generated": False,
+                "table_cells_ready": False,
                 "procedure_blocks_generated": False,
                 "procedure_blocks_ready": False,
                 "protocol_steps_generated": False,

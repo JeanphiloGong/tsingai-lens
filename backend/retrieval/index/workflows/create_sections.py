@@ -36,7 +36,7 @@ def create_sections(
 ) -> pd.DataFrame:
     sections = build_sections(documents, text_units)
     normalized = sections.copy()
-    for column in ("section_id", "title", "section_type", "heading", "text", "text_unit_ids", "page", "char_range", "confidence"):
+    for column in ("section_id", "title", "section_type", "heading", "text", "order", "text_unit_ids", "page", "char_range", "confidence"):
         if column not in normalized.columns:
             normalized[column] = None
     normalized["id"] = normalized.get("paper_id")

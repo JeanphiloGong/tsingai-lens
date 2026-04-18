@@ -17,6 +17,7 @@ from application.collections.service import CollectionService
 from application.documents.service import DocumentProfileService
 from application.evidence.service import EvidenceCardService
 from controllers import evidence as evidence_controller
+from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -30,6 +31,15 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _write_source_artifacts(
+    output_dir: Path,
+    documents: pd.DataFrame,
+    text_units: pd.DataFrame | None = None,
+) -> None:
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 @pytest.fixture()
@@ -92,6 +102,19 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
             }
         ]
     ).to_parquet(output_dir / "documents.parquet", index=False)
+    _write_source_artifacts(
+        output_dir,
+        pd.DataFrame(
+            [
+                {
+                    "id": "doc-1",
+                    "title": "Review of Composite Fillers",
+                    "text": "This review summarizes recent advances in composite filler systems.",
+                }
+            ]
+        ),
+        None,
+    )
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(

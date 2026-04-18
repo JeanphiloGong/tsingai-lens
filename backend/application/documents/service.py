@@ -18,9 +18,9 @@ from application.collections.service import CollectionService
 from application.documents.input_service import (
     build_document_records,
     load_collection_inputs,
+    load_sections_artifact,
 )
 from application.workspace.artifact_registry_service import ArtifactRegistryService
-from retrieval.index.operations.source_evidence import build_sections
 
 
 _DOCUMENT_PROFILES_FILE = "document_profiles.parquet"
@@ -187,6 +187,10 @@ class DocumentProfileService:
             raise DocumentContentNotReadyError(collection_id, output_dir)
 
         documents, text_units = load_collection_inputs(output_dir)
+        try:
+            sections = load_sections_artifact(output_dir)
+        except FileNotFoundError as exc:
+            raise DocumentContentNotReadyError(collection_id, output_dir) from exc
         document_records = build_document_records(documents, text_units)
         matched = document_records[
             document_records["paper_id"].astype(str) == str(document_id)
@@ -195,7 +199,6 @@ class DocumentProfileService:
             raise DocumentNotFoundError(collection_id, document_id)
 
         row = matched.iloc[0]
-        sections = build_sections(documents, text_units)
         sections_by_doc = self._group_sections_by_document(sections)
         profile = self._find_profile_row(collection_id, document_id)
         file_lookup = self._build_collection_file_lookup(collection_id)
@@ -264,8 +267,11 @@ class DocumentProfileService:
             raise DocumentProfilesNotReadyError(collection_id, base_dir)
 
         documents, text_units = load_collection_inputs(base_dir)
+        try:
+            sections = load_sections_artifact(base_dir)
+        except FileNotFoundError as exc:
+            raise DocumentProfilesNotReadyError(collection_id, base_dir) from exc
         document_records = build_document_records(documents, text_units)
-        sections = build_sections(documents, text_units)
         sections_by_doc = self._group_sections_by_document(sections)
         file_lookup = self._build_collection_file_lookup(collection_id)
 
@@ -567,7 +573,13 @@ class DocumentProfileService:
             return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
         for _, row in sections.iterrows():
-            grouped.setdefault(str(row.get("paper_id") or ""), []).append(dict(row))
+            document_id = str(
+                row.get("paper_id")
+                or row.get("document_id")
+                or row.get("id")
+                or ""
+            )
+            grouped.setdefault(document_id, []).append(dict(row))
         return grouped
 
     def _count_keyword_hits(self, text: str, keywords: tuple[str, ...]) -> int:

@@ -15,6 +15,7 @@ from application.workspace.artifact_registry_service import ArtifactRegistryServ
 from application.collections.service import CollectionService
 from application.indexing.index_task_runner import IndexTaskRunner
 from application.indexing.task_service import TaskService
+from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 
 class DummyWorkflowOutput:
@@ -79,6 +80,8 @@ def _write_index_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def _write_review_only_outputs(output_dir: Path) -> None:
@@ -103,6 +106,8 @@ def _write_review_only_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
@@ -154,6 +159,8 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["graph_ready"] is True
     assert artifacts["sections_generated"] is True
     assert artifacts["sections_ready"] is True
+    assert artifacts["table_cells_generated"] is True
+    assert artifacts["table_cells_ready"] is False
     assert artifacts["procedure_blocks_generated"] is True
     assert artifacts["procedure_blocks_ready"] is True
     assert artifacts["protocol_steps_generated"] is True
@@ -213,6 +220,8 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert artifacts["document_profiles_ready"] is True
     assert artifacts["graph_generated"] is True
     assert artifacts["graph_ready"] is True
+    assert artifacts["table_cells_generated"] is True
+    assert artifacts["table_cells_ready"] is False
     assert artifacts["evidence_cards_generated"] is True
     assert artifacts["evidence_cards_ready"] is False
     assert artifacts["comparison_rows_generated"] is True

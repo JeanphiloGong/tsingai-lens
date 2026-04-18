@@ -43,6 +43,7 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "section_type",
         "heading",
         "text",
+        "order",
         "text_unit_ids",
         "page",
         "char_range",

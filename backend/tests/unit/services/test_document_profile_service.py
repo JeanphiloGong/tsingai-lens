@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from application.documents.service import DocumentProfileService
+from retrieval.index.operations.source_evidence import build_sections
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -21,6 +22,10 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _write_sections(output_dir: Path, documents: pd.DataFrame, text_units: pd.DataFrame | None = None) -> None:
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
 
 
 def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_path):
@@ -93,6 +98,7 @@ def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_p
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_sections(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = profile_service.list_document_profiles(collection_id)
@@ -171,6 +177,7 @@ def test_document_profile_service_returns_null_title_and_source_filename_from_fi
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_sections(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = profile_service.list_document_profiles(collection_id)
@@ -245,6 +252,7 @@ def test_document_profile_service_rebuilds_legacy_profiles_with_identity_fields(
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_sections(output_dir, documents, text_units)
     legacy_profiles.to_parquet(output_dir / "document_profiles.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
@@ -325,6 +333,7 @@ def test_document_profile_service_round_trips_json_storage_fields(tmp_path):
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_sections(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
 
     profile_service.build_document_profiles(collection_id, output_dir)

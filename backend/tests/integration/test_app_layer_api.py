@@ -11,6 +11,7 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
+from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 try:
     from fastapi.testclient import TestClient
@@ -86,6 +87,8 @@ def _write_index_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
@@ -374,6 +377,8 @@ def test_collection_task_flow(app_client):
     assert body["graph_ready"] is True
     assert body["sections_generated"] is True
     assert body["sections_ready"] is True
+    assert body["table_cells_generated"] is True
+    assert body["table_cells_ready"] is False
     assert body["protocol_steps_generated"] is True
     assert body["protocol_steps_ready"] is True
 

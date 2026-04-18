@@ -9,6 +9,7 @@ from application.workspace.artifact_registry_service import ArtifactRegistryServ
 from application.collections.service import CollectionService
 from application.indexing.task_service import TaskService
 from application.workspace.service import WorkspaceService
+from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -22,6 +23,15 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _write_source_artifacts(
+    output_dir: Path,
+    documents: pd.DataFrame,
+    text_units: pd.DataFrame | None = None,
+) -> None:
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def test_workspace_service_builds_collection_overview(tmp_path):
@@ -101,6 +111,7 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
 
     overview = workspace_service.get_workspace_overview(collection_id)
@@ -114,6 +125,8 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["artifacts"]["evidence_cards_ready"] is False
     assert overview["artifacts"]["comparison_rows_generated"] is False
     assert overview["artifacts"]["comparison_rows_ready"] is False
+    assert overview["artifacts"]["table_cells_generated"] is True
+    assert overview["artifacts"]["table_cells_ready"] is False
     assert overview["artifacts"]["protocol_steps_generated"] is False
     assert overview["document_summary"]["total_documents"] == 1
     assert overview["document_summary"]["by_doc_type"]["experimental"] == 1

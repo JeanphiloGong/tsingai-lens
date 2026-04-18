@@ -16,6 +16,7 @@ from application.workspace.artifact_registry_service import ArtifactRegistryServ
 from application.collections.service import CollectionService
 from application.documents.service import DocumentProfileService
 from controllers import documents as documents_controller
+from retrieval.index.operations.source_evidence import build_sections
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -29,6 +30,10 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _write_sections(output_dir: Path, documents: pd.DataFrame) -> None:
+    build_sections(documents, None).to_parquet(output_dir / "sections.parquet", index=False)
 
 
 @pytest.fixture()
@@ -85,6 +90,7 @@ def test_documents_route_returns_200_with_empty_profiles_after_stage_generated(
         output_dir / "documents.parquet",
         index=False,
     )
+    _write_sections(output_dir, pd.DataFrame(columns=["id", "title", "text"]))
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(

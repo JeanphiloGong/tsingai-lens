@@ -39,6 +39,43 @@ def load_collection_inputs(base_dir: str | Path) -> tuple[pd.DataFrame, pd.DataF
     return documents, text_units
 
 
+def load_sections_artifact(base_dir: str | Path) -> pd.DataFrame:
+    paths = resolve_collection_artifact_paths(base_dir)
+    if not paths.sections.is_file():
+        raise FileNotFoundError(paths.sections)
+
+    sections = pd.read_parquet(paths.sections)
+    normalized = sections.copy()
+    if "paper_id" not in normalized.columns:
+        if "id" in normalized.columns:
+            normalized["paper_id"] = normalized["id"]
+        elif "document_id" in normalized.columns:
+            normalized["paper_id"] = normalized["document_id"]
+        else:
+            normalized["paper_id"] = None
+    if "order" not in normalized.columns:
+        if normalized.empty:
+            normalized["order"] = pd.Series(dtype="int64")
+        else:
+            normalized["order"] = normalized.groupby("paper_id").cumcount() + 1
+    return normalized
+
+
+def load_table_cells_artifact(base_dir: str | Path) -> pd.DataFrame:
+    paths = resolve_collection_artifact_paths(base_dir)
+    if not paths.table_cells.is_file():
+        raise FileNotFoundError(paths.table_cells)
+
+    table_cells = pd.read_parquet(paths.table_cells)
+    normalized = table_cells.copy()
+    if "document_id" not in normalized.columns:
+        if "id" in normalized.columns:
+            normalized["document_id"] = normalized["id"]
+        else:
+            normalized["document_id"] = None
+    return normalized
+
+
 def build_document_records(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,

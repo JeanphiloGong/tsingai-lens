@@ -18,13 +18,14 @@ from application.collections.service import CollectionService
 from application.documents.input_service import (
     build_document_records,
     load_collection_inputs,
+    load_sections_artifact,
+    load_table_cells_artifact,
 )
 from application.documents.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
 from application.workspace.artifact_registry_service import ArtifactRegistryService
-from retrieval.index.operations.source_evidence import build_sections
 
 
 _EVIDENCE_CARDS_FILE = "evidence_cards.parquet"
@@ -88,6 +89,9 @@ _TIME_PATTERN = re.compile(
 _ATMOSPHERE_PATTERN = re.compile(
     r"\b(?:under|in)\s+(air|argon|ar|nitrogen|n2|vacuum)\b", re.IGNORECASE
 )
+_TABLE_NUMERIC_PATTERN = re.compile(r"[-+]?\d+(?:\.\d+)?")
+_TABLE_SAMPLE_HEADER_HINTS = ("sample", "group", "variant", "condition")
+_TABLE_BASELINE_HEADER_HINTS = ("baseline", "control", "reference")
 
 
 class EvidenceCardsNotReadyError(RuntimeError):
@@ -227,9 +231,14 @@ class EvidenceCardService:
             raise EvidenceCardsNotReadyError(collection_id, exc.output_dir) from exc
 
         documents, text_units = load_collection_inputs(base_dir)
+        try:
+            sections = load_sections_artifact(base_dir)
+            table_cells = load_table_cells_artifact(base_dir)
+        except FileNotFoundError as exc:
+            raise EvidenceCardsNotReadyError(collection_id, base_dir) from exc
         document_records = build_document_records(documents, text_units)
-        sections = build_sections(documents, text_units)
         sections_by_doc = self._group_sections_by_document(sections)
+        table_cells_by_doc = self._group_table_cells_by_document(table_cells)
 
         profile_by_doc = {
             str(row.get("document_id")): dict(row)
@@ -254,6 +263,7 @@ class EvidenceCardService:
                     text_unit_ids=self._normalize_list(row.get("text_unit_ids")),
                     profile=profile,
                     sections=doc_sections,
+                    table_cells=table_cells_by_doc.get(document_id, []),
                 )
             )
 
@@ -303,6 +313,7 @@ class EvidenceCardService:
         text_unit_ids: list[str],
         profile: dict[str, Any],
         sections: list[dict[str, Any]],
+        table_cells: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         cards: list[dict[str, Any]] = []
         material_system = self._infer_material_system(title, text)
@@ -343,6 +354,15 @@ class EvidenceCardService:
                         )
                     )
                     break
+
+            cards.extend(
+                self._build_table_property_cards(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    material_system=material_system,
+                    table_cells=table_cells,
+                )
+            )
 
         candidate_sentence = self._find_claim_sentence(text)
         if candidate_sentence:
@@ -449,6 +469,88 @@ class EvidenceCardService:
             "traceability_status": traceability_status,
         }
 
+    def _build_table_property_cards(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        material_system: dict[str, Any],
+        table_cells: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not table_cells:
+            return []
+
+        grouped_rows: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        for cell in table_cells:
+            table_id = str(cell.get("table_id") or "").strip()
+            row_index = self._safe_int(cell.get("row_index"))
+            if not table_id or row_index is None or row_index <= 0:
+                continue
+            grouped_rows.setdefault((table_id, row_index), []).append(cell)
+
+        cards: list[dict[str, Any]] = []
+        for (table_id, _row_index), row_cells in grouped_rows.items():
+            ordered_cells = sorted(
+                (cell for cell in row_cells if isinstance(cell, dict)),
+                key=lambda item: self._safe_int(item.get("col_index")) or 0,
+            )
+            sample_label = self._resolve_table_sample_label(ordered_cells)
+            baseline = self._resolve_table_baseline(ordered_cells)
+            row_summary = self._build_table_row_summary(ordered_cells)
+
+            for cell in ordered_cells:
+                header = str(cell.get("header_path") or "").strip()
+                if not header:
+                    continue
+                if self._is_table_sample_header(header) or self._is_table_baseline_header(header):
+                    continue
+
+                cell_text = str(cell.get("cell_text") or "").strip()
+                numeric_value = self._extract_table_numeric_value(cell_text)
+                if numeric_value is None:
+                    continue
+
+                unit = self._resolve_table_unit(cell)
+                claim_text = self._build_table_property_claim(
+                    sample_label=sample_label,
+                    header=header,
+                    numeric_value=numeric_value,
+                    unit=unit,
+                )
+                cards.append(
+                    {
+                        "evidence_id": f"ev_{uuid4().hex[:12]}",
+                        "document_id": document_id,
+                        "collection_id": collection_id,
+                        "claim_text": claim_text,
+                        "claim_type": "property",
+                        "evidence_source_type": "table",
+                        "evidence_anchors": [
+                            {
+                                "anchor_id": f"anchor_{uuid4().hex[:12]}",
+                                "source_type": "table",
+                                "section_id": None,
+                                "block_id": None,
+                                "snippet_id": None,
+                                "figure_or_table": table_id,
+                                "quote_span": row_summary or claim_text,
+                            }
+                        ],
+                        "material_system": self._normalize_material_system_payload(material_system),
+                        "condition_context": self._normalize_condition_context_payload(
+                            {
+                                "process": {},
+                                "baseline": baseline,
+                                "test": {},
+                            }
+                        ),
+                        "confidence": 0.8 if unit else 0.74,
+                        "traceability_status": "direct",
+                    }
+                )
+
+        return cards
+
     def _infer_material_system(self, title: str, text: str) -> dict[str, Any]:
         source = f"{title} {text}".lower()
         family = None
@@ -469,6 +571,95 @@ class EvidenceCardService:
         if composition is None and title.strip() and title.strip() != family:
             composition = title.strip()
         return {"family": family, "composition": composition}
+
+    def _resolve_table_sample_label(
+        self,
+        row_cells: list[dict[str, Any]],
+    ) -> str | None:
+        for cell in row_cells:
+            header = str(cell.get("header_path") or "").strip()
+            if self._is_table_sample_header(header):
+                text = str(cell.get("cell_text") or "").strip()
+                if text:
+                    return text
+        for cell in row_cells:
+            header = str(cell.get("header_path") or "").strip()
+            text = str(cell.get("cell_text") or "").strip()
+            if not text or self._extract_table_numeric_value(text) is not None:
+                continue
+            if self._is_table_baseline_header(header):
+                continue
+            return text
+        return None
+
+    def _resolve_table_baseline(
+        self,
+        row_cells: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        for cell in row_cells:
+            header = str(cell.get("header_path") or "").strip()
+            if not self._is_table_baseline_header(header):
+                continue
+            text = str(cell.get("cell_text") or "").strip()
+            if text:
+                return {"control": text}
+        return {}
+
+    def _build_table_row_summary(
+        self,
+        row_cells: list[dict[str, Any]],
+    ) -> str:
+        parts: list[str] = []
+        for cell in row_cells:
+            header = str(cell.get("header_path") or "").strip()
+            text = str(cell.get("cell_text") or "").strip()
+            if not text:
+                continue
+            if header:
+                parts.append(f"{header}: {text}")
+            else:
+                parts.append(text)
+        return "; ".join(parts)
+
+    def _is_table_sample_header(self, header: str) -> bool:
+        lowered = str(header or "").strip().lower()
+        return any(hint in lowered for hint in _TABLE_SAMPLE_HEADER_HINTS)
+
+    def _is_table_baseline_header(self, header: str) -> bool:
+        lowered = str(header or "").strip().lower()
+        return any(hint in lowered for hint in _TABLE_BASELINE_HEADER_HINTS)
+
+    def _extract_table_numeric_value(self, cell_text: str) -> str | None:
+        match = _TABLE_NUMERIC_PATTERN.search(str(cell_text or ""))
+        if match is None:
+            return None
+        return match.group(0)
+
+    def _resolve_table_unit(self, cell: dict[str, Any]) -> str | None:
+        for candidate in (cell.get("unit_hint"), cell.get("header_path")):
+            text = str(candidate or "").strip()
+            if not text:
+                continue
+            unit_match = re.search(r"\(([^)]+)\)", text)
+            if unit_match:
+                return unit_match.group(1).strip() or None
+            if text.lower() in {"mpa", "gpa", "pa", "%", "s/cm", "ms/cm", "w/mk", "wt%", "vol%"}:
+                return text
+        return None
+
+    def _build_table_property_claim(
+        self,
+        *,
+        sample_label: str | None,
+        header: str,
+        numeric_value: str,
+        unit: str | None,
+    ) -> str:
+        subject = sample_label or "Sample"
+        property_label = header
+        if unit:
+            return f"{subject} reported {property_label} of {numeric_value} {unit}."
+        return f"{subject} reported {property_label} of {numeric_value}."
 
     def _extract_process_context(self, text: Any) -> dict[str, Any]:
         source = str(text or "")
@@ -542,7 +733,25 @@ class EvidenceCardService:
             return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
         for _, row in sections.iterrows():
-            grouped.setdefault(str(row.get("paper_id") or ""), []).append(dict(row))
+            document_id = str(
+                row.get("paper_id")
+                or row.get("document_id")
+                or row.get("id")
+                or ""
+            )
+            grouped.setdefault(document_id, []).append(dict(row))
+        return grouped
+
+    def _group_table_cells_by_document(
+        self,
+        table_cells: pd.DataFrame,
+    ) -> dict[str, list[dict[str, Any]]]:
+        if table_cells is None or table_cells.empty:
+            return {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for _, row in table_cells.iterrows():
+            document_id = str(row.get("document_id") or row.get("id") or "")
+            grouped.setdefault(document_id, []).append(dict(row))
         return grouped
 
     def _normalize_cards_table(

@@ -351,6 +351,7 @@ def test_collection_service_imports_from_source_adapter(tmp_path):
     assert artifacts["document_profiles_generated"] is False
     assert artifacts["evidence_cards_generated"] is False
     assert artifacts["comparison_rows_generated"] is False
+    assert artifacts["table_cells_generated"] is False
 
 
 def test_collection_service_rejects_source_adapter_batch_shape_mismatch(tmp_path):

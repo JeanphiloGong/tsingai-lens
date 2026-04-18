@@ -34,6 +34,8 @@ class WorkspaceArtifactStatusResponse(BaseModel):
     graph_ready: bool = Field(default=False, description="Core graph 视图是否可用")
     sections_generated: bool = Field(default=False, description="sections.parquet 是否存在")
     sections_ready: bool = Field(default=False, description="sections.parquet 是否存在且非空")
+    table_cells_generated: bool = Field(default=False, description="table_cells.parquet 是否存在")
+    table_cells_ready: bool = Field(default=False, description="table_cells.parquet 是否存在且非空")
     procedure_blocks_generated: bool = Field(default=False, description="procedure_blocks.parquet 是否存在")
     procedure_blocks_ready: bool = Field(
         default=False,

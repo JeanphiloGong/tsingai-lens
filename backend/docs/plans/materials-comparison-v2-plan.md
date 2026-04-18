@@ -41,9 +41,43 @@ Status as of 2026-04-18:
 
 - Wave A contract freeze is complete in code
 - Wave B Source evidence runtime is complete in code
-- Wave C onward are not started in runtime
-- this remains the next Core-and-Source expansion wave after Source/GraphRAG
-  runtime shrink
+- Wave C characterization, structure, test-condition, and baseline artifacts
+  are complete in code
+- Wave D sample-variant and measurement-result artifacts are complete in code
+- Wave E comparison-row cutover to the sample/result backbone is complete in
+  code
+- Wave F does not currently require a separate backend migration wave; graph
+  and report consumers continue to pass on the stronger comparison backbone
+- the primary backend-local rollout recorded in this plan is complete; the
+  remaining work is follow-up verification, parser quality improvement, and
+  consumer adoption rather than unfinished backbone construction
+
+## Implementation Outcome
+
+As implemented in the backend runtime, this plan now yields:
+
+- Source-owned persisted handoff artifacts for `sections.parquet` and
+  `table_cells.parquet`, which are consumed directly by documents and evidence
+  flows rather than being rebuilt at read time
+- Core-owned `characterization_observations.parquet`,
+  `structure_features.parquet`, `test_conditions.parquet`, and
+  `baseline_references.parquet`
+- Core-owned `sample_variants.parquet` and `measurement_results.parquet`
+- `comparison_rows.parquet` rebuilt from sample/result objects rather than from
+  direct evidence-card projection
+- `/collections/{collection_id}/comparisons` cut over in place to consume the
+  stronger Core backbone and expose separate `display`, `evidence_bundle`,
+  `assessment`, and `uncertainty` zones
+- downstream graph and report projections continuing to consume Core-derived
+  comparison rows without reverting to legacy GraphRAG-era semantics
+
+The implemented Core order is now:
+
+- `document_profiles -> evidence_cards -> sample_variants /
+  measurement_results -> comparison_rows -> protocol branch`
+
+No long-lived compatibility path remains from direct evidence-card projection
+to `comparison_rows.parquet`.
 
 ## Reference Corpus Fit
 
@@ -746,6 +780,12 @@ The minimum logical split is:
 
 ## Execution Waves
 
+The wave definitions below remain as delivery lineage.
+
+As of 2026-04-18, Waves A through E are complete in code, and Wave F is
+currently satisfied by downstream regression passing on the stronger
+comparison backbone.
+
 ### Wave A: Freeze Materials V2 Contracts And Ontology
 
 Goal:
@@ -1031,6 +1071,16 @@ surface is explicit and stable enough to support it.
 
 ## Verification Plan
 
+Current implementation status against this verification plan:
+
+- backend unit and integration tests now cover Source handoff persistence,
+  Wave C Core artifacts, Wave D sample/result artifacts, Wave E comparison
+  cutover, and downstream graph/report consumers
+- the remaining notable verification gap is environment-dependent route and
+  app-layer execution where `fastapi` is not installed in the current runtime;
+  those checks belong to follow-up validation rather than unfinished backbone
+  implementation
+
 Minimum verification expected across the plan:
 
 - unit tests for Source handoff artifacts and column normalization
@@ -1047,6 +1097,24 @@ Minimum verification expected across the plan:
   handling
 - integration tests proving `/comparisons` returns upgraded rows after cutover
 - graph/report tests proving downstream Core consumers still function
+
+## Remaining Follow-Up After This Plan
+
+The following items are still worth doing, but they are not unfinished core
+rollout waves in this plan:
+
+- run the `fastapi`-dependent router and app-layer tests in an environment that
+  has the API stack installed
+- update any frontend or external consumer that still assumes the old flat
+  `/comparisons` response shape rather than the implemented
+  `display/evidence_bundle/assessment/uncertainty` structure
+- continue Source parser quality and extraction-depth work in the dedicated
+  follow-up plans rather than reopening this backbone rollout plan:
+  `source-parser-evaluation-plan.md` and
+  `born-digital-source-parser-first-plan.md`
+- continue domain-depth quality work, such as richer structure features,
+  stronger non-scalar result handling, and profile-specific extraction
+  refinement, as follow-up quality waves rather than as remaining cutover work
 
 ## Risks
 

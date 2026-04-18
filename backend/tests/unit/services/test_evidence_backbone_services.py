@@ -415,42 +415,77 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
         evidence_card_service,
     )
 
-    row = comparison_service._build_row_from_card(
-        pd.Series(
+    row = comparison_service._build_row_from_result(
+        collection_id="col-1",
+        result_row=pd.Series(
             {
-                "evidence_id": "evi-1",
-                "collection_id": "col-1",
                 "document_id": "paper-1",
-                "claim_text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
-                "claim_type": "property",
-                "condition_context": {
-                    "process": {
-                        "temperatures_c": np.array([80.0]),
-                        "durations": np.array(["2 h"], dtype=object),
-                        "atmosphere": "Ar",
-                    },
-                    "baseline": {
-                        "control": "untreated baseline",
-                    },
-                    "test": {
-                        "methods": np.array(["SEM"], dtype=object),
-                        "method": None,
-                    },
+                "variant_id": "var-1",
+                "property_normalized": "flexural_strength",
+                "result_type": "scalar",
+                "value_payload": {
+                    "value": 97.0,
+                    "statement": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
                 },
-                "material_system": {
+                "unit": "MPa",
+                "test_condition_id": "tc-1",
+                "baseline_id": "base-1",
+                "structure_feature_ids": [],
+                "characterization_observation_ids": [],
+                "evidence_anchor_ids": ["anchor-1"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+            }
+        ),
+        sample_lookup={
+            "var-1": {
+                "variant_id": "var-1",
+                "variant_label": "epoxy composite",
+                "variable_axis_type": None,
+                "variable_value": None,
+                "host_material_system": {
                     "family": "epoxy composite",
                     "composition": None,
                 },
-                "evidence_anchors": [],
-                "traceability_status": "direct",
+                "process_context": {
+                    "temperatures_c": np.array([80.0]),
+                    "durations": np.array(["2 h"], dtype=object),
+                    "atmosphere": "Ar",
+                },
             }
-        )
+        },
+        test_condition_lookup={
+            "tc-1": {
+                "test_condition_id": "tc-1",
+                "condition_payload": {
+                    "methods": np.array(["SEM"], dtype=object),
+                    "method": None,
+                },
+            }
+        },
+        baseline_lookup={
+            "base-1": {
+                "baseline_id": "base-1",
+                "baseline_label": "untreated baseline",
+            }
+        },
+        anchor_to_evidence_ids={"anchor-1": ["evi-1"]},
     )
 
     assert row["process_normalized"] == "80 C, 2 h, under Ar"
     assert row["baseline_normalized"] == "untreated baseline"
     assert row["test_condition_normalized"] == "SEM"
     assert row["comparability_status"] == "comparable"
+    assert row["supporting_evidence_ids"] == ["evi-1"]
+    assert row["comparability_basis"] == [
+        "variant_linked",
+        "baseline_resolved",
+        "test_condition_resolved",
+        "direct_traceability",
+        "numeric_value_available",
+        "result_type:scalar",
+    ]
+    assert row["assessment_epistemic_status"] == "normalized_from_evidence"
 
 
 def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_path):
@@ -529,7 +564,10 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert isinstance(stored_evidence.iloc[0]["material_system"], str)
     assert isinstance(stored_evidence.iloc[0]["condition_context"], str)
     assert isinstance(stored_comparisons.iloc[0]["supporting_evidence_ids"], str)
+    assert isinstance(stored_comparisons.iloc[0]["supporting_anchor_ids"], str)
     assert isinstance(stored_comparisons.iloc[0]["comparability_warnings"], str)
+    assert isinstance(stored_comparisons.iloc[0]["comparability_basis"], str)
+    assert isinstance(stored_comparisons.iloc[0]["missing_critical_context"], str)
 
     restored_evidence = evidence_card_service.read_evidence_cards(collection_id)
     restored_comparisons = comparison_service.read_comparison_rows(collection_id)
@@ -537,7 +575,10 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert isinstance(restored_evidence.iloc[0]["material_system"], dict)
     assert isinstance(restored_evidence.iloc[0]["condition_context"], dict)
     assert isinstance(restored_comparisons.iloc[0]["supporting_evidence_ids"], list)
+    assert isinstance(restored_comparisons.iloc[0]["supporting_anchor_ids"], list)
     assert isinstance(restored_comparisons.iloc[0]["comparability_warnings"], list)
+    assert isinstance(restored_comparisons.iloc[0]["comparability_basis"], list)
+    assert isinstance(restored_comparisons.iloc[0]["missing_critical_context"], list)
 
 
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):

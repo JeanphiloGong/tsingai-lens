@@ -59,6 +59,7 @@ def _write_index_outputs(output_dir: Path) -> None:
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
+                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
             }
@@ -74,6 +75,11 @@ def _write_index_outputs(output_dir: Path) -> None:
             {
                 "id": "tu-2",
                 "text": "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
+                "document_ids": ["paper-1"],
+            },
+            {
+                "id": "tu-3",
+                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
                 "document_ids": ["paper-1"],
             },
         ]
@@ -160,11 +166,11 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["test_conditions_generated"] is True
     assert artifacts["test_conditions_ready"] is True
     assert artifacts["baseline_references_generated"] is True
-    assert artifacts["baseline_references_ready"] is False
+    assert artifacts["baseline_references_ready"] is True
     assert artifacts["sample_variants_generated"] is True
     assert artifacts["sample_variants_ready"] is True
     assert artifacts["measurement_results_generated"] is True
-    assert artifacts["measurement_results_ready"] is False
+    assert artifacts["measurement_results_ready"] is True
     assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is True
     assert artifacts["graph_generated"] is True

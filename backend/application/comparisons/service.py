@@ -1,26 +1,60 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pandas as pd
 
+from application.collections.service import CollectionService
+from application.evidence.service import EvidenceCardService, EvidenceCardsNotReadyError
+from application.workspace.artifact_registry_service import ArtifactRegistryService
 from infra.persistence.backbone_codec import (
     normalize_backbone_value,
     prepare_frame_for_storage,
     restore_frame_from_storage,
 )
-from application.collections.service import CollectionService
-from application.evidence.service import EvidenceCardService, EvidenceCardsNotReadyError
-from application.workspace.artifact_registry_service import ArtifactRegistryService
 
 
 _COMPARISON_ROWS_FILE = "comparison_rows.parquet"
+_EVIDENCE_CARDS_FILE = "evidence_cards.parquet"
+_SAMPLE_VARIANTS_FILE = "sample_variants.parquet"
+_MEASUREMENT_RESULTS_FILE = "measurement_results.parquet"
+_TEST_CONDITIONS_FILE = "test_conditions.parquet"
+_BASELINE_REFERENCES_FILE = "baseline_references.parquet"
+
+_EVIDENCE_JSON_COLUMNS = (
+    "evidence_anchors",
+    "material_system",
+    "condition_context",
+)
+_SAMPLE_VARIANT_JSON_COLUMNS = (
+    "host_material_system",
+    "process_context",
+    "profile_payload",
+    "structure_feature_ids",
+    "source_anchor_ids",
+)
+_MEASUREMENT_RESULT_JSON_COLUMNS = (
+    "value_payload",
+    "structure_feature_ids",
+    "characterization_observation_ids",
+    "evidence_anchor_ids",
+)
+_TEST_CONDITION_JSON_COLUMNS = (
+    "condition_payload",
+    "missing_fields",
+    "evidence_anchor_ids",
+)
+_BASELINE_REFERENCE_JSON_COLUMNS = ("evidence_anchor_ids",)
 _COMPARISON_JSON_COLUMNS = (
     "supporting_evidence_ids",
+    "supporting_anchor_ids",
+    "characterization_observation_ids",
+    "structure_feature_ids",
     "comparability_warnings",
+    "comparability_basis",
+    "missing_critical_context",
 )
 _COMPARISON_ROW_COLUMNS = [
     "row_id",
@@ -32,7 +66,12 @@ _COMPARISON_ROW_COLUMNS = [
     "variable_value",
     "baseline_reference",
     "result_source_type",
+    "result_type",
+    "result_summary",
     "supporting_evidence_ids",
+    "supporting_anchor_ids",
+    "characterization_observation_ids",
+    "structure_feature_ids",
     "material_system_normalized",
     "process_normalized",
     "property_normalized",
@@ -40,25 +79,14 @@ _COMPARISON_ROW_COLUMNS = [
     "test_condition_normalized",
     "comparability_status",
     "comparability_warnings",
+    "comparability_basis",
+    "requires_expert_review",
+    "assessment_epistemic_status",
+    "missing_critical_context",
     "value",
     "unit",
 ]
-_VALUE_PATTERN = re.compile(
-    r"(\d+(?:\.\d+)?)\s*(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b",
-    re.IGNORECASE,
-)
-
-_PROPERTY_MAP = {
-    "strength": "strength",
-    "flexural": "flexural_strength",
-    "modulus": "modulus",
-    "conductivity": "conductivity",
-    "fatigue": "fatigue_life",
-    "density": "density",
-    "porosity": "porosity",
-    "hardness": "hardness",
-    "stability": "stability",
-}
+_SCALAR_LIKE_RESULT_TYPES = {"scalar", "retention", "fitted_value", "optimum"}
 
 
 class ComparisonRowsNotReadyError(RuntimeError):
@@ -128,29 +156,36 @@ class ComparisonService:
             if output_dir is not None
             else self._resolve_output_dir(collection_id)
         )
+        frames = self._load_comparison_inputs(collection_id, base_dir)
 
-        try:
-            cards = self.evidence_card_service.read_evidence_cards(collection_id)
-        except EvidenceCardsNotReadyError as exc:
-            raise ComparisonRowsNotReadyError(collection_id, exc.output_dir) from exc
+        sample_variants = frames["sample_variants"]
+        measurement_results = frames["measurement_results"]
+        test_conditions = frames["test_conditions"]
+        baseline_references = frames["baseline_references"]
+        evidence_cards = frames["evidence_cards"]
 
-        rows: list[dict[str, Any]] = []
-        if cards is not None and not cards.empty:
-            grouped = cards.groupby(cards["document_id"].astype(str), sort=False)
-            for _, card_group in grouped:
-                has_benchmark_claim = any(
-                    str(item.get("claim_type") or "") in {"property", "mechanism"}
-                    for _, item in card_group.iterrows()
-                )
-                for _, card in card_group.iterrows():
-                    if not self._is_card_comparison_eligible(card, has_benchmark_claim):
-                        continue
-                    rows.append(self._build_row_from_card(card))
-        table = pd.DataFrame(
-            rows,
-            columns=_COMPARISON_ROW_COLUMNS,
+        sample_lookup = self._index_by_id(sample_variants, "variant_id")
+        test_condition_lookup = self._index_by_id(test_conditions, "test_condition_id")
+        baseline_lookup = self._index_by_id(baseline_references, "baseline_id")
+        anchor_to_evidence_ids = self._build_anchor_to_evidence_lookup(evidence_cards)
+
+        rows = [
+            self._build_row_from_result(
+                collection_id=collection_id,
+                result_row=result_row,
+                sample_lookup=sample_lookup,
+                test_condition_lookup=test_condition_lookup,
+                baseline_lookup=baseline_lookup,
+                anchor_to_evidence_ids=anchor_to_evidence_ids,
+            )
+            for _, result_row in measurement_results.iterrows()
+        ]
+        rows = [row for row in rows if row is not None]
+
+        table = self._normalize_rows_table(
+            pd.DataFrame(rows, columns=_COMPARISON_ROW_COLUMNS),
+            collection_id,
         )
-        table = self._normalize_rows_table(table, collection_id)
         base_dir.mkdir(parents=True, exist_ok=True)
         prepare_frame_for_storage(
             table,
@@ -159,17 +194,50 @@ class ComparisonService:
         self.artifact_registry_service.upsert(collection_id, base_dir)
         return table
 
-    def _is_card_comparison_eligible(
+    def _load_comparison_inputs(
         self,
-        card: pd.Series,
-        has_benchmark_claim: bool,
-    ) -> bool:
-        claim_type = str(card.get("claim_type") or "qualitative")
-        if claim_type in {"property", "mechanism"}:
-            return True
-        if claim_type in {"process", "characterization"}:
-            return not has_benchmark_claim
-        return not has_benchmark_claim
+        collection_id: str,
+        base_dir: Path,
+    ) -> dict[str, pd.DataFrame]:
+        required = (
+            _SAMPLE_VARIANTS_FILE,
+            _MEASUREMENT_RESULTS_FILE,
+            _TEST_CONDITIONS_FILE,
+            _BASELINE_REFERENCES_FILE,
+            _EVIDENCE_CARDS_FILE,
+        )
+        if any(not (base_dir / name).is_file() for name in required):
+            try:
+                self.evidence_card_service.build_evidence_cards(collection_id, base_dir)
+            except EvidenceCardsNotReadyError as exc:
+                raise ComparisonRowsNotReadyError(collection_id, exc.output_dir) from exc
+
+        missing = [name for name in required if not (base_dir / name).is_file()]
+        if missing:
+            raise ComparisonRowsNotReadyError(collection_id, base_dir)
+
+        return {
+            "sample_variants": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _SAMPLE_VARIANTS_FILE),
+                _SAMPLE_VARIANT_JSON_COLUMNS,
+            ),
+            "measurement_results": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _MEASUREMENT_RESULTS_FILE),
+                _MEASUREMENT_RESULT_JSON_COLUMNS,
+            ),
+            "test_conditions": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _TEST_CONDITIONS_FILE),
+                _TEST_CONDITION_JSON_COLUMNS,
+            ),
+            "baseline_references": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _BASELINE_REFERENCES_FILE),
+                _BASELINE_REFERENCE_JSON_COLUMNS,
+            ),
+            "evidence_cards": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _EVIDENCE_CARDS_FILE),
+                _EVIDENCE_JSON_COLUMNS,
+            ),
+        }
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)
@@ -181,95 +249,386 @@ class ComparisonService:
             return Path(str(artifacts["output_path"])).expanduser().resolve()
         return self.collection_service.get_paths(collection_id).output_dir.resolve()
 
-    def _build_row_from_card(self, row: pd.Series) -> dict[str, Any]:
-        evidence_id = str(row.get("evidence_id") or "")
-        claim_text = str(row.get("claim_text") or "")
-        claim_type = str(row.get("claim_type") or "qualitative")
-        condition_context = self._normalize_object(row.get("condition_context")) or {}
-        material_system = self._normalize_object(row.get("material_system")) or {}
-        evidence_anchors = self._normalize_object(row.get("evidence_anchors")) or []
-        baseline = condition_context.get("baseline") or {}
-        test_context = condition_context.get("test") or {}
-        process_context = condition_context.get("process") or {}
-        traceability_status = str(row.get("traceability_status") or "missing")
+    def _index_by_id(
+        self,
+        frame: pd.DataFrame,
+        id_column: str,
+    ) -> dict[str, dict[str, Any]]:
+        if frame is None or frame.empty:
+            return {}
+        lookup: dict[str, dict[str, Any]] = {}
+        for _, row in frame.iterrows():
+            item_id = self._safe_text(row.get(id_column))
+            if not item_id:
+                continue
+            lookup[item_id] = dict(row)
+        return lookup
 
-        value, unit = self._extract_value_and_unit(claim_text, evidence_anchors)
-        property_normalized = self._normalize_property(claim_type, claim_text, test_context)
-        material_system_normalized = self._normalize_material_system(material_system)
-        process_normalized = self._normalize_process(process_context)
-        baseline_normalized, baseline_missing = self._normalize_baseline(baseline, claim_type)
-        test_condition_normalized, test_missing = self._normalize_test(test_context, claim_type)
+    def _build_anchor_to_evidence_lookup(
+        self,
+        evidence_cards: pd.DataFrame,
+    ) -> dict[str, list[str]]:
+        lookup: dict[str, list[str]] = {}
+        if evidence_cards is None or evidence_cards.empty:
+            return lookup
+        for _, row in evidence_cards.iterrows():
+            evidence_id = self._safe_text(row.get("evidence_id"))
+            if not evidence_id:
+                continue
+            for anchor in self._normalize_list_of_dicts(row.get("evidence_anchors")):
+                anchor_id = self._safe_text(anchor.get("anchor_id"))
+                if not anchor_id:
+                    continue
+                lookup.setdefault(anchor_id, [])
+                if evidence_id not in lookup[anchor_id]:
+                    lookup[anchor_id].append(evidence_id)
+        return lookup
 
-        warnings: list[str] = []
-        if traceability_status != "direct":
-            warnings.append("Traceability is partial or indirect.")
-        if baseline_missing and claim_type in {"property", "mechanism"}:
-            warnings.append("Baseline definition is missing or ambiguous.")
-        if test_missing and claim_type in {"property", "mechanism", "microstructure"}:
-            warnings.append("Test or measurement conditions are missing.")
-        if claim_type in {"process", "characterization"}:
-            warnings.append("This row reflects process or characterization context rather than a direct property benchmark.")
-        if value is None and claim_type == "property":
-            warnings.append("Property claim is qualitative and lacks a normalized numeric value.")
+    def _build_row_from_result(
+        self,
+        *,
+        collection_id: str,
+        result_row: pd.Series,
+        sample_lookup: dict[str, dict[str, Any]],
+        test_condition_lookup: dict[str, dict[str, Any]],
+        baseline_lookup: dict[str, dict[str, Any]],
+        anchor_to_evidence_ids: dict[str, list[str]],
+    ) -> dict[str, Any] | None:
+        source_document_id = self._safe_text(result_row.get("document_id"))
+        if not source_document_id:
+            return None
 
-        status = self._derive_comparability_status(
-            claim_type=claim_type,
+        variant_id = self._safe_text(result_row.get("variant_id"))
+        variant = sample_lookup.get(variant_id or "", {})
+        test_condition_id = self._safe_text(result_row.get("test_condition_id"))
+        test_condition = test_condition_lookup.get(test_condition_id or "", {})
+        baseline_id = self._safe_text(result_row.get("baseline_id"))
+        baseline = baseline_lookup.get(baseline_id or "", {})
+
+        supporting_anchor_ids = self._normalize_string_list(
+            result_row.get("evidence_anchor_ids")
+        )
+        supporting_evidence_ids = self._resolve_supporting_evidence_ids(
+            supporting_anchor_ids,
+            anchor_to_evidence_ids,
+        )
+        characterization_observation_ids = self._normalize_string_list(
+            result_row.get("characterization_observation_ids")
+        )
+        structure_feature_ids = self._normalize_string_list(
+            result_row.get("structure_feature_ids")
+        )
+
+        result_type = self._safe_text(result_row.get("result_type")) or "scalar"
+        unit = self._safe_text(result_row.get("unit"))
+        result_summary, numeric_value = self._summarize_result(
+            result_type=result_type,
+            value_payload=result_row.get("value_payload"),
+            unit=unit,
+        )
+
+        baseline_reference = self._safe_text(baseline.get("baseline_label"))
+        baseline_normalized = baseline_reference or "unspecified baseline"
+        test_condition_normalized = self._summarize_test_condition(test_condition)
+        traceability_status = self._safe_text(result_row.get("traceability_status")) or "missing"
+
+        missing_critical_context = self._derive_missing_critical_context(
+            variant_id=variant_id,
+            baseline_reference=baseline_reference,
+            test_condition_id=test_condition_id,
             traceability_status=traceability_status,
-            baseline_missing=baseline_missing,
-            test_missing=test_missing,
-            has_value=value is not None,
+            result_type=result_type,
+            result_summary=result_summary,
+        )
+        comparability_basis = self._derive_comparability_basis(
+            variant_id=variant_id,
+            baseline_reference=baseline_reference,
+            test_condition_id=test_condition_id,
+            traceability_status=traceability_status,
+            result_type=result_type,
+            numeric_value=numeric_value,
+            structure_feature_ids=structure_feature_ids,
+            characterization_observation_ids=characterization_observation_ids,
+        )
+        comparability_warnings = self._build_comparability_warnings(
+            missing_critical_context=missing_critical_context,
+            result_type=result_type,
+        )
+        comparability_status = self._derive_comparability_status(
+            missing_critical_context=missing_critical_context,
+            traceability_status=traceability_status,
+        )
+        requires_expert_review = self._requires_expert_review(
+            comparability_status=comparability_status,
+            result_type=result_type,
+            missing_critical_context=missing_critical_context,
+        )
+        assessment_epistemic_status = self._derive_assessment_epistemic_status(
+            comparability_status=comparability_status,
+            requires_expert_review=requires_expert_review,
         )
 
         return {
             "row_id": f"cmp_{uuid4().hex[:12]}",
-            "collection_id": str(row.get("collection_id") or ""),
-            "source_document_id": str(row.get("document_id") or ""),
-            "variant_id": None,
-            "variant_label": None,
-            "variable_axis": None,
-            "variable_value": None,
-            "baseline_reference": baseline_normalized if baseline_normalized != "unspecified baseline" else None,
-            "result_source_type": str(row.get("evidence_source_type") or "") or None,
-            "supporting_evidence_ids": [evidence_id] if evidence_id else [],
-            "material_system_normalized": material_system_normalized,
-            "process_normalized": process_normalized,
-            "property_normalized": property_normalized,
+            "collection_id": collection_id,
+            "source_document_id": source_document_id,
+            "variant_id": variant_id,
+            "variant_label": self._safe_text(variant.get("variant_label")),
+            "variable_axis": self._safe_text(variant.get("variable_axis_type")),
+            "variable_value": self._normalize_scalar_or_text(variant.get("variable_value")),
+            "baseline_reference": baseline_reference,
+            "result_source_type": self._safe_text(result_row.get("result_source_type")),
+            "result_type": result_type,
+            "result_summary": result_summary,
+            "supporting_evidence_ids": supporting_evidence_ids,
+            "supporting_anchor_ids": supporting_anchor_ids,
+            "characterization_observation_ids": characterization_observation_ids,
+            "structure_feature_ids": structure_feature_ids,
+            "material_system_normalized": self._normalize_material_system(
+                variant.get("host_material_system")
+            ),
+            "process_normalized": self._normalize_process(variant.get("process_context")),
+            "property_normalized": self._safe_text(result_row.get("property_normalized"))
+            or "qualitative",
             "baseline_normalized": baseline_normalized,
             "test_condition_normalized": test_condition_normalized,
-            "comparability_status": status,
-            "comparability_warnings": warnings,
-            "value": value,
+            "comparability_status": comparability_status,
+            "comparability_warnings": comparability_warnings,
+            "comparability_basis": comparability_basis,
+            "requires_expert_review": requires_expert_review,
+            "assessment_epistemic_status": assessment_epistemic_status,
+            "missing_critical_context": missing_critical_context,
+            "value": numeric_value,
             "unit": unit,
         }
 
+    def _resolve_supporting_evidence_ids(
+        self,
+        anchor_ids: list[str],
+        anchor_to_evidence_ids: dict[str, list[str]],
+    ) -> list[str]:
+        evidence_ids: list[str] = []
+        for anchor_id in anchor_ids:
+            for evidence_id in anchor_to_evidence_ids.get(anchor_id, []):
+                if evidence_id not in evidence_ids:
+                    evidence_ids.append(evidence_id)
+        return evidence_ids
+
+    def _summarize_result(
+        self,
+        *,
+        result_type: str,
+        value_payload: Any,
+        unit: str | None,
+    ) -> tuple[str, float | None]:
+        payload = self._normalize_object(value_payload)
+        if not isinstance(payload, dict):
+            payload = {}
+        statement = self._safe_text(payload.get("statement"))
+
+        if result_type == "retention":
+            numeric = self._safe_float(
+                payload.get("retention_percent", payload.get("value"))
+            )
+            if numeric is not None:
+                unit_text = unit or "%"
+                return f"{numeric:g} {unit_text} retention", numeric
+            return statement or "Retention reported", None
+
+        if result_type == "range":
+            minimum = self._safe_float(payload.get("min"))
+            maximum = self._safe_float(payload.get("max"))
+            if minimum is not None and maximum is not None:
+                span = f"{minimum:g}-{maximum:g}"
+                if unit:
+                    span = f"{span} {unit}"
+                return span, None
+            return statement or "Range reported", None
+
+        if result_type == "trend":
+            direction = self._safe_text(payload.get("direction"))
+            if direction and statement:
+                return statement, None
+            if direction:
+                return direction, None
+            return statement or "Trend reported", None
+
+        numeric = self._safe_float(payload.get("value"))
+        if numeric is not None:
+            summary = f"{numeric:g}"
+            if unit:
+                summary = f"{summary} {unit}"
+            return summary, numeric
+        return statement or "Result reported", None
+
+    def _summarize_test_condition(self, condition_row: dict[str, Any]) -> str:
+        if not condition_row:
+            return "unspecified test condition"
+
+        payload = self._normalize_object(condition_row.get("condition_payload"))
+        if not isinstance(payload, dict) or not payload:
+            return "unspecified test condition"
+
+        parts: list[str] = []
+        method = self._safe_text(payload.get("method"))
+        methods = self._normalize_string_list(payload.get("methods"))
+        if method:
+            parts.append(method)
+        elif methods:
+            parts.append(", ".join(methods))
+
+        temperatures = payload.get("temperatures_c")
+        if isinstance(temperatures, list) and temperatures:
+            parts.append(" / ".join(f"{float(value):g} C" for value in temperatures))
+
+        durations = self._normalize_string_list(payload.get("durations"))
+        if durations:
+            parts.append(" / ".join(durations))
+
+        atmosphere = self._safe_text(payload.get("atmosphere"))
+        if atmosphere:
+            parts.append(f"under {atmosphere}")
+
+        if not parts:
+            fallback = [
+                f"{key}={value}"
+                for key, value in payload.items()
+                if value not in (None, "", [], {})
+            ]
+            if fallback:
+                return ", ".join(str(item) for item in fallback)
+            return "unspecified test condition"
+        return ", ".join(parts)
+
+    def _derive_missing_critical_context(
+        self,
+        *,
+        variant_id: str | None,
+        baseline_reference: str | None,
+        test_condition_id: str | None,
+        traceability_status: str,
+        result_type: str,
+        result_summary: str,
+    ) -> list[str]:
+        missing: list[str] = []
+        if not variant_id:
+            missing.append("variant_link")
+        if not baseline_reference:
+            missing.append("baseline_reference")
+        if not test_condition_id:
+            missing.append("test_condition")
+        if traceability_status != "direct":
+            missing.append("direct_traceability")
+        if not result_summary or result_summary == "Result reported":
+            missing.append("result_value")
+        if result_type not in _SCALAR_LIKE_RESULT_TYPES:
+            missing.append("expert_interpretation")
+        return missing
+
+    def _derive_comparability_basis(
+        self,
+        *,
+        variant_id: str | None,
+        baseline_reference: str | None,
+        test_condition_id: str | None,
+        traceability_status: str,
+        result_type: str,
+        numeric_value: float | None,
+        structure_feature_ids: list[str],
+        characterization_observation_ids: list[str],
+    ) -> list[str]:
+        basis: list[str] = []
+        if variant_id:
+            basis.append("variant_linked")
+        if baseline_reference:
+            basis.append("baseline_resolved")
+        if test_condition_id:
+            basis.append("test_condition_resolved")
+        if traceability_status == "direct":
+            basis.append("direct_traceability")
+        if numeric_value is not None:
+            basis.append("numeric_value_available")
+        if result_type in _SCALAR_LIKE_RESULT_TYPES:
+            basis.append(f"result_type:{result_type}")
+        if structure_feature_ids:
+            basis.append("structure_context_available")
+        if characterization_observation_ids:
+            basis.append("characterization_context_available")
+        return basis
+
+    def _build_comparability_warnings(
+        self,
+        *,
+        missing_critical_context: list[str],
+        result_type: str,
+    ) -> list[str]:
+        warnings: list[str] = []
+        warning_map = {
+            "variant_link": "Variant linkage could not be resolved for this result.",
+            "baseline_reference": "Baseline reference is missing or unresolved.",
+            "test_condition": "Test condition is missing or unresolved.",
+            "direct_traceability": "Traceability is partial or indirect.",
+            "result_value": "Result payload is incomplete for comparison display.",
+            "expert_interpretation": "Result shape requires expert interpretation before comparison.",
+        }
+        for item in missing_critical_context:
+            warning = warning_map.get(item)
+            if warning and warning not in warnings:
+                warnings.append(warning)
+        if result_type not in _SCALAR_LIKE_RESULT_TYPES:
+            warnings.append(
+                "This comparison row summarizes a non-scalar result and should be reviewed by a domain expert."
+            )
+        return warnings
+
     def _derive_comparability_status(
         self,
-        claim_type: str,
+        *,
+        missing_critical_context: list[str],
         traceability_status: str,
-        baseline_missing: bool,
-        test_missing: bool,
-        has_value: bool,
     ) -> str:
+        missing = set(missing_critical_context)
         if traceability_status == "missing":
             return "insufficient"
-        if claim_type in {"process", "characterization"}:
+        if {"baseline_reference", "test_condition"} <= missing:
+            return "not_comparable"
+        if "variant_link" in missing and {"baseline_reference", "test_condition"} & missing:
+            return "insufficient"
+        if missing:
             return "limited"
-        if claim_type == "mechanism":
-            return "insufficient" if (baseline_missing and test_missing) else "limited"
-        if claim_type == "property":
-            if baseline_missing and test_missing:
-                return "not_comparable"
-            if baseline_missing or test_missing or not has_value or traceability_status != "direct":
-                return "limited"
-            return "comparable"
-        return "limited"
+        return "comparable"
+
+    def _requires_expert_review(
+        self,
+        *,
+        comparability_status: str,
+        result_type: str,
+        missing_critical_context: list[str],
+    ) -> bool:
+        if comparability_status != "comparable":
+            return True
+        if result_type not in _SCALAR_LIKE_RESULT_TYPES:
+            return True
+        return bool(missing_critical_context)
+
+    def _derive_assessment_epistemic_status(
+        self,
+        *,
+        comparability_status: str,
+        requires_expert_review: bool,
+    ) -> str:
+        if comparability_status == "comparable" and not requires_expert_review:
+            return "normalized_from_evidence"
+        if comparability_status == "limited":
+            return "inferred_with_low_confidence"
+        return "unresolved"
 
     def _normalize_material_system(self, material_system: Any) -> str:
         payload = self._normalize_object(material_system) or {}
         if not isinstance(payload, dict):
             return str(payload)
-        family = str(payload.get("family") or "").strip()
-        composition = str(payload.get("composition") or "").strip()
+        family = self._safe_text(payload.get("family"))
+        composition = self._safe_text(payload.get("composition"))
         if family and composition and composition != family:
             return f"{family} ({composition})"
         if family:
@@ -282,92 +641,28 @@ class ComparisonService:
         payload = self._normalize_object(process_context) or {}
         if not isinstance(payload, dict) or not payload:
             return "unspecified process"
+
         parts: list[str] = []
-        if payload.get("temperatures_c"):
-            temps = payload["temperatures_c"]
-            if isinstance(temps, list):
-                parts.append(" / ".join(f"{temp:g} C" for temp in temps))
-        if payload.get("durations"):
-            durations = payload["durations"]
-            if isinstance(durations, list):
-                parts.append(" / ".join(str(item) for item in durations))
-        if payload.get("atmosphere"):
-            parts.append(f"under {payload['atmosphere']}")
-        if not parts:
-            fallback_parts = [
-                f"{key}={value}"
-                for key, value in payload.items()
-                if value not in (None, "", [], {})
-            ]
-            if not fallback_parts:
-                return "unspecified process"
-            parts.extend(fallback_parts)
-        return ", ".join(str(part) for part in parts)
+        temperatures = payload.get("temperatures_c")
+        if isinstance(temperatures, list) and temperatures:
+            parts.append(" / ".join(f"{float(value):g} C" for value in temperatures))
 
-    def _normalize_property(
-        self,
-        claim_type: str,
-        claim_text: str,
-        test_context: dict[str, Any],
-    ) -> str:
-        lowered = claim_text.lower()
-        for token, normalized in _PROPERTY_MAP.items():
-            if token in lowered:
-                return normalized
-        if claim_type == "characterization":
-            methods = test_context.get("methods") or []
-            if methods:
-                return f"characterization:{'+'.join(str(item).lower() for item in methods)}"
-            return "characterization_method"
-        if claim_type == "process":
-            return "process_route"
-        return claim_type or "qualitative"
+        durations = self._normalize_string_list(payload.get("durations"))
+        if durations:
+            parts.append(" / ".join(durations))
 
-    def _normalize_baseline(
-        self,
-        baseline_context: Any,
-        claim_type: str,
-    ) -> tuple[str, bool]:
-        payload = self._normalize_object(baseline_context) or {}
-        if not isinstance(payload, dict) or not payload:
-            return ("not_applicable" if claim_type in {"process", "characterization"} else "unspecified baseline", claim_type not in {"process", "characterization"})
-        control = str(payload.get("control") or "").strip()
-        if control:
-            return control, False
-        return ("not_applicable" if claim_type in {"process", "characterization"} else "unspecified baseline", claim_type not in {"process", "characterization"})
+        atmosphere = self._safe_text(payload.get("atmosphere"))
+        if atmosphere:
+            parts.append(f"under {atmosphere}")
 
-    def _normalize_test(
-        self,
-        test_context: Any,
-        claim_type: str,
-    ) -> tuple[str, bool]:
-        payload = self._normalize_object(test_context) or {}
-        if not isinstance(payload, dict) or not payload:
-            return ("process context" if claim_type == "process" else "unspecified test condition", claim_type not in {"process"})
-        methods = payload.get("methods") or []
-        if methods:
-            method_text = ", ".join(str(item) for item in methods)
-            return method_text, False
-        method = str(payload.get("method") or "").strip()
-        if method:
-            return method, False
-        return ("process context" if claim_type == "process" else "unspecified test condition", claim_type not in {"process"})
+        for key, value in payload.items():
+            if key in {"temperatures_c", "durations", "atmosphere"}:
+                continue
+            normalized = self._normalize_scalar_or_text(value)
+            if normalized not in (None, "", [], {}):
+                parts.append(f"{key}={normalized}")
 
-    def _extract_value_and_unit(
-        self,
-        claim_text: str,
-        evidence_anchors: list[dict[str, Any]],
-    ) -> tuple[float | None, str | None]:
-        search_space = [claim_text]
-        for anchor in evidence_anchors:
-            quote = str(anchor.get("quote_span") or "").strip()
-            if quote:
-                search_space.append(quote)
-        for text in search_space:
-            match = _VALUE_PATTERN.search(text)
-            if match:
-                return float(match.group(1)), match.group(2)
-        return None, None
+        return ", ".join(str(part) for part in parts) if parts else "unspecified process"
 
     def _normalize_rows_table(
         self,
@@ -375,82 +670,155 @@ class ComparisonService:
         collection_id: str | None,
     ) -> pd.DataFrame:
         if rows is None or rows.empty:
-            return pd.DataFrame(
-                columns=[
-                    "row_id",
-                    "collection_id",
-                    "source_document_id",
-                    "supporting_evidence_ids",
-                    "material_system_normalized",
-                    "process_normalized",
-                    "property_normalized",
-                    "baseline_normalized",
-                    "test_condition_normalized",
-                    "comparability_status",
-                    "comparability_warnings",
-                    "value",
-                    "unit",
-                ]
-            )
+            return pd.DataFrame(columns=_COMPARISON_ROW_COLUMNS)
+
         normalized = rows.copy()
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
         for column in _COMPARISON_ROW_COLUMNS:
             if column not in normalized.columns:
                 normalized[column] = None
-        for column in ("supporting_evidence_ids", "comparability_warnings"):
-            if column in normalized.columns:
-                normalized[column] = normalized[column].apply(self._normalize_list)
+        for column in (
+            "supporting_evidence_ids",
+            "supporting_anchor_ids",
+            "characterization_observation_ids",
+            "structure_feature_ids",
+            "comparability_warnings",
+            "comparability_basis",
+            "missing_critical_context",
+        ):
+            normalized[column] = normalized[column].apply(self._normalize_string_list)
+        normalized["requires_expert_review"] = normalized["requires_expert_review"].apply(
+            lambda value: bool(False if value is None or (isinstance(value, float) and pd.isna(value)) else value)
+        )
         return normalized[_COMPARISON_ROW_COLUMNS]
 
     def _serialize_row(self, row: pd.Series) -> dict[str, Any]:
-        value = row.get("value")
-        normalized_value = None if value is None or (isinstance(value, float) and pd.isna(value)) else float(value)
-        unit = row.get("unit")
-        normalized_unit = None if unit is None or (isinstance(unit, float) and pd.isna(unit)) else str(unit)
-        variable_value = row.get("variable_value")
-        if isinstance(variable_value, float) and pd.isna(variable_value):
-            normalized_variable_value = None
-        elif variable_value is None:
-            normalized_variable_value = None
-        else:
-            normalized_variable_value = variable_value
+        missing_critical_context = self._normalize_string_list(
+            row.get("missing_critical_context")
+        )
+        value = self._safe_float(row.get("value"))
         return {
-            "row_id": str(row.get("row_id") or ""),
-            "collection_id": str(row.get("collection_id") or ""),
-            "source_document_id": str(row.get("source_document_id") or ""),
-            "variant_id": self._normalize_optional_text(row.get("variant_id")),
-            "variant_label": self._normalize_optional_text(row.get("variant_label")),
-            "variable_axis": self._normalize_optional_text(row.get("variable_axis")),
-            "variable_value": normalized_variable_value,
-            "baseline_reference": self._normalize_optional_text(row.get("baseline_reference")),
-            "result_source_type": self._normalize_optional_text(row.get("result_source_type")),
-            "supporting_evidence_ids": self._normalize_list(row.get("supporting_evidence_ids")),
-            "material_system_normalized": str(row.get("material_system_normalized") or "unspecified material system"),
-            "process_normalized": str(row.get("process_normalized") or "unspecified process"),
-            "property_normalized": str(row.get("property_normalized") or "qualitative"),
-            "baseline_normalized": str(row.get("baseline_normalized") or "unspecified baseline"),
-            "test_condition_normalized": str(row.get("test_condition_normalized") or "unspecified test condition"),
-            "comparability_status": str(row.get("comparability_status") or "insufficient"),
-            "comparability_warnings": self._normalize_list(row.get("comparability_warnings")),
-            "value": normalized_value,
-            "unit": normalized_unit,
+            "row_id": self._safe_text(row.get("row_id")) or "",
+            "collection_id": self._safe_text(row.get("collection_id")) or "",
+            "source_document_id": self._safe_text(row.get("source_document_id")) or "",
+            "display": {
+                "material_system_normalized": self._safe_text(
+                    row.get("material_system_normalized")
+                )
+                or "unspecified material system",
+                "process_normalized": self._safe_text(row.get("process_normalized"))
+                or "unspecified process",
+                "variant_id": self._safe_text(row.get("variant_id")),
+                "variant_label": self._safe_text(row.get("variant_label")),
+                "variable_axis": self._safe_text(row.get("variable_axis")),
+                "variable_value": self._normalize_scalar_or_text(row.get("variable_value")),
+                "property_normalized": self._safe_text(row.get("property_normalized"))
+                or "qualitative",
+                "result_type": self._safe_text(row.get("result_type")) or "scalar",
+                "result_summary": self._safe_text(row.get("result_summary"))
+                or "Result reported",
+                "value": value,
+                "unit": self._safe_text(row.get("unit")),
+                "test_condition_normalized": self._safe_text(
+                    row.get("test_condition_normalized")
+                )
+                or "unspecified test condition",
+                "baseline_reference": self._safe_text(row.get("baseline_reference")),
+                "baseline_normalized": self._safe_text(row.get("baseline_normalized"))
+                or "unspecified baseline",
+            },
+            "evidence_bundle": {
+                "result_source_type": self._safe_text(row.get("result_source_type")),
+                "supporting_evidence_ids": self._normalize_string_list(
+                    row.get("supporting_evidence_ids")
+                ),
+                "supporting_anchor_ids": self._normalize_string_list(
+                    row.get("supporting_anchor_ids")
+                ),
+                "characterization_observation_ids": self._normalize_string_list(
+                    row.get("characterization_observation_ids")
+                ),
+                "structure_feature_ids": self._normalize_string_list(
+                    row.get("structure_feature_ids")
+                ),
+            },
+            "assessment": {
+                "comparability_status": self._safe_text(row.get("comparability_status"))
+                or "limited",
+                "comparability_warnings": self._normalize_string_list(
+                    row.get("comparability_warnings")
+                ),
+                "comparability_basis": self._normalize_string_list(
+                    row.get("comparability_basis")
+                ),
+                "requires_expert_review": bool(row.get("requires_expert_review")),
+                "assessment_epistemic_status": self._safe_text(
+                    row.get("assessment_epistemic_status")
+                )
+                or "unresolved",
+            },
+            "uncertainty": {
+                "missing_critical_context": missing_critical_context,
+                "unresolved_fields": missing_critical_context,
+                "unresolved_baseline_link": "baseline_reference" in missing_critical_context,
+                "unresolved_condition_link": "test_condition" in missing_critical_context,
+            },
         }
 
-    def _normalize_object(self, value: Any) -> Any:
-        return normalize_backbone_value(value)
+    def _normalize_list_of_dicts(self, value: Any) -> list[dict[str, Any]]:
+        payload = self._normalize_object(value)
+        if not isinstance(payload, list):
+            return []
+        return [item for item in payload if isinstance(item, dict)]
 
-    def _normalize_list(self, value: Any) -> list[str]:
+    def _normalize_string_list(self, value: Any) -> list[str]:
         payload = self._normalize_object(value)
         if payload is None:
             return []
         if isinstance(payload, list):
-            return [str(item) for item in payload if str(item).strip()]
-        return [str(payload)]
+            return [str(item) for item in payload if self._safe_text(item)]
+        text = self._safe_text(payload)
+        return [text] if text else []
 
-    def _normalize_optional_text(self, value: Any) -> str | None:
+    def _normalize_scalar_or_text(self, value: Any) -> str | float | int | None:
         payload = self._normalize_object(value)
         if payload is None:
             return None
-        text = str(payload).strip()
+        if isinstance(payload, bool):
+            return str(payload).lower()
+        if isinstance(payload, int):
+            return payload
+        if isinstance(payload, float):
+            if pd.isna(payload):
+                return None
+            if payload.is_integer():
+                return int(payload)
+            return payload
+        text = self._safe_text(payload)
+        return text
+
+    def _normalize_object(self, value: Any) -> Any:
+        return normalize_backbone_value(value)
+
+    def _safe_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, float) and pd.isna(value):
+            return None
+        text = str(value).strip()
         return text or None
+
+    def _safe_float(self, value: Any) -> float | None:
+        try:
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+
+__all__ = [
+    "ComparisonRowsNotReadyError",
+    "ComparisonService",
+]

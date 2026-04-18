@@ -66,6 +66,7 @@ def _write_index_outputs(output_dir: Path) -> None:
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
+                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
             }
@@ -81,6 +82,11 @@ def _write_index_outputs(output_dir: Path) -> None:
             {
                 "id": "tu-2",
                 "text": "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
+                "document_ids": ["paper-1"],
+            },
+            {
+                "id": "tu-3",
+                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
                 "document_ids": ["paper-1"],
             },
         ]
@@ -378,11 +384,11 @@ def test_collection_task_flow(app_client):
     assert body["test_conditions_generated"] is True
     assert body["test_conditions_ready"] is True
     assert body["baseline_references_generated"] is True
-    assert body["baseline_references_ready"] is False
+    assert body["baseline_references_ready"] is True
     assert body["sample_variants_generated"] is True
     assert body["sample_variants_ready"] is True
     assert body["measurement_results_generated"] is True
-    assert body["measurement_results_ready"] is False
+    assert body["measurement_results_ready"] is True
     assert body["comparison_rows_generated"] is True
     assert body["comparison_rows_ready"] is True
     assert body["graph_generated"] is True
@@ -433,18 +439,22 @@ def test_collection_task_flow(app_client):
     assert comparisons.status_code == 200
     comparisons_body = comparisons.json()
     assert comparisons_body["count"] >= 1
-    assert comparisons_body["items"][0]["comparability_status"] in {
+    assert comparisons_body["items"][0]["assessment"]["comparability_status"] in {
         "comparable",
         "limited",
         "not_comparable",
         "insufficient",
     }
-    assert "variant_id" in comparisons_body["items"][0]
-    assert "variant_label" in comparisons_body["items"][0]
-    assert "variable_axis" in comparisons_body["items"][0]
-    assert "variable_value" in comparisons_body["items"][0]
-    assert "baseline_reference" in comparisons_body["items"][0]
-    assert "result_source_type" in comparisons_body["items"][0]
+    assert "display" in comparisons_body["items"][0]
+    assert "evidence_bundle" in comparisons_body["items"][0]
+    assert "assessment" in comparisons_body["items"][0]
+    assert "uncertainty" in comparisons_body["items"][0]
+    assert "variant_id" in comparisons_body["items"][0]["display"]
+    assert "variant_label" in comparisons_body["items"][0]["display"]
+    assert "variable_axis" in comparisons_body["items"][0]["display"]
+    assert "variable_value" in comparisons_body["items"][0]["display"]
+    assert "baseline_reference" in comparisons_body["items"][0]["display"]
+    assert "result_source_type" in comparisons_body["items"][0]["evidence_bundle"]
 
 
 def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):

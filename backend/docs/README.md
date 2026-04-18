@@ -67,9 +67,13 @@ Then move to the owning plan family only when you are already inside that wave:
   [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
 - Residual Source/GraphRAG retirement:
   [`plans/source-residual-graphrag-retirement-plan.md`](plans/source-residual-graphrag-retirement-plan.md),
+  [`plans/source-parser-evaluation-plan.md`](plans/source-parser-evaluation-plan.md),
   [`plans/born-digital-source-parser-first-plan.md`](plans/born-digital-source-parser-first-plan.md)
 - Materials comparison expansion:
   [`plans/materials-comparison-v2-plan.md`](plans/materials-comparison-v2-plan.md)
+  Canonical contract and implementation-closure page for the materials
+  comparison backbone; Waves A through E are complete in backend runtime and
+  remaining work has moved to follow-up quality and validation plans
 - Query retirement and GraphRAG query decoupling:
   [`plans/query-retirement-and-graphrag-query-decoupling-plan.md`](plans/query-retirement-and-graphrag-query-decoupling-plan.md)
 - Graph retained surface and Core-derived cutover:

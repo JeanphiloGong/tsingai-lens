@@ -354,6 +354,8 @@ def test_collection_service_imports_from_source_adapter(tmp_path):
     assert artifacts["structure_features_generated"] is False
     assert artifacts["test_conditions_generated"] is False
     assert artifacts["baseline_references_generated"] is False
+    assert artifacts["sample_variants_generated"] is False
+    assert artifacts["measurement_results_generated"] is False
     assert artifacts["comparison_rows_generated"] is False
     assert artifacts["table_cells_generated"] is False
 

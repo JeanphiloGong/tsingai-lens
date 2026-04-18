@@ -50,6 +50,10 @@ class WorkspaceService:
             "test_conditions_ready": False,
             "baseline_references_generated": False,
             "baseline_references_ready": False,
+            "sample_variants_generated": False,
+            "sample_variants_ready": False,
+            "measurement_results_generated": False,
+            "measurement_results_ready": False,
             "comparison_rows_generated": False,
             "comparison_rows_ready": False,
             "graph_generated": False,
@@ -397,6 +401,14 @@ class WorkspaceService:
                 ),
                 "baseline_references_ready": bool(
                     artifacts.get("baseline_references_ready")
+                ),
+                "sample_variants_generated": bool(artifacts.get("sample_variants_generated")),
+                "sample_variants_ready": bool(artifacts.get("sample_variants_ready")),
+                "measurement_results_generated": bool(
+                    artifacts.get("measurement_results_generated")
+                ),
+                "measurement_results_ready": bool(
+                    artifacts.get("measurement_results_ready")
                 ),
                 "comparison_rows_generated": bool(artifacts.get("comparison_rows_generated")),
                 "comparison_rows_ready": bool(artifacts.get("comparison_rows_ready")),

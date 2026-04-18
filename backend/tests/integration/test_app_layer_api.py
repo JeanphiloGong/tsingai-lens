@@ -379,6 +379,10 @@ def test_collection_task_flow(app_client):
     assert body["test_conditions_ready"] is True
     assert body["baseline_references_generated"] is True
     assert body["baseline_references_ready"] is False
+    assert body["sample_variants_generated"] is True
+    assert body["sample_variants_ready"] is True
+    assert body["measurement_results_generated"] is True
+    assert body["measurement_results_ready"] is False
     assert body["comparison_rows_generated"] is True
     assert body["comparison_rows_ready"] is True
     assert body["graph_generated"] is True

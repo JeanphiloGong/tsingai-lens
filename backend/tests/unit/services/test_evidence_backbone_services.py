@@ -118,14 +118,20 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     structure_features = pd.read_parquet(output_dir / "structure_features.parquet")
     test_conditions = pd.read_parquet(output_dir / "test_conditions.parquet")
     baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
+    sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
+    measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
     assert not characterization.empty
     assert not structure_features.empty
     assert not test_conditions.empty
     assert not baseline_references.empty
+    assert not sample_variants.empty
+    assert not measurement_results.empty
     assert "directly_observed" in set(characterization["epistemic_status"])
     assert "inferred_from_characterization" in set(structure_features["epistemic_status"])
     assert "normalized_from_evidence" in set(test_conditions["epistemic_status"])
     assert set(baseline_references["baseline_type"]) == {"implicit_within_document_control"}
+    assert "inferred_with_low_confidence" in set(sample_variants["epistemic_status"])
+    assert set(measurement_results["result_type"]) == {"scalar"}
     artifacts = artifact_registry.get(collection_id)
     assert artifacts["document_profiles_ready"] is True
     assert artifacts["evidence_cards_ready"] is True
@@ -133,6 +139,8 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     assert artifacts["structure_features_ready"] is True
     assert artifacts["test_conditions_ready"] is True
     assert artifacts["baseline_references_ready"] is True
+    assert artifacts["sample_variants_ready"] is True
+    assert artifacts["measurement_results_ready"] is True
     assert artifacts["comparison_rows_ready"] is True
 
 
@@ -195,6 +203,90 @@ def test_evidence_service_builds_table_backed_property_cards(monkeypatch, tmp_pa
     assert any("12 mS/cm" in claim for claim in table_cards["claim_text"])
     assert any("18 mS/cm" in claim for claim in table_cards["claim_text"])
     assert set(table_cards["traceability_status"]) == {"direct"}
+
+
+def test_evidence_service_builds_sample_variants_and_measurement_results(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.collections.service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+    )
+
+    collection = collection_service.create_collection("Wave D Backbone Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Induction Assisted AM Study",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Ti alloy samples were fabricated under different induction currents.",
+                        "The powders were annealed at 600 C under Ar for 2 h.",
+                        "Characterization",
+                        "SEM showed columnar beta phase with grain size of 12 um.",
+                        "Table 1 Tensile Results",
+                        "Sample | Induction Current (A) | Tensile Strength (MPa) | Retention (%) | Baseline",
+                        "A0 | 0 | 950 | 88 | as-built",
+                        "A1 | 10 | 1010 | 92 | as-built",
+                        "A3 | 30 | 1085 | 95 | as-built",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Ti alloy samples were fabricated under different induction currents.",
+                "document_ids": ["paper-1"],
+            },
+            {
+                "id": "tu-2",
+                "text": "The powders were annealed at 600 C under Ar for 2 h.",
+                "document_ids": ["paper-1"],
+            },
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    evidence_card_service.build_evidence_cards(collection_id, output_dir)
+
+    sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
+    measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
+    baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
+
+    assert set(sample_variants["variant_label"]) == {"A0", "A1", "A3"}
+    assert set(sample_variants["variable_axis_type"]) == {"induction_current"}
+    assert set(sample_variants["variable_value"]) == {0, 10, 30}
+    assert all(sample_variants["source_anchor_ids"].astype(str) != "[]")
+
+    assert len(measurement_results) == 6
+    assert set(measurement_results["property_normalized"]) == {
+        "tensile_strength",
+        "retention",
+    }
+    assert set(measurement_results["result_type"]) == {"scalar", "retention"}
+    assert measurement_results["variant_id"].notna().all()
+    assert measurement_results["baseline_id"].notna().all()
+    assert all(measurement_results["evidence_anchor_ids"].astype(str) != "[]")
+    assert set(baseline_references["baseline_label"]) == {"as-built"}
 
 
 def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):

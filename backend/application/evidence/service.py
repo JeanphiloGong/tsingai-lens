@@ -49,6 +49,21 @@ _TEST_CONDITIONS_JSON_COLUMNS = (
 )
 _BASELINE_REFERENCES_FILE = "baseline_references.parquet"
 _BASELINE_REFERENCES_JSON_COLUMNS = ("evidence_anchor_ids",)
+_SAMPLE_VARIANTS_FILE = "sample_variants.parquet"
+_SAMPLE_VARIANTS_JSON_COLUMNS = (
+    "host_material_system",
+    "process_context",
+    "profile_payload",
+    "structure_feature_ids",
+    "source_anchor_ids",
+)
+_MEASUREMENT_RESULTS_FILE = "measurement_results.parquet"
+_MEASUREMENT_RESULTS_JSON_COLUMNS = (
+    "value_payload",
+    "structure_feature_ids",
+    "characterization_observation_ids",
+    "evidence_anchor_ids",
+)
 _DOMAIN_PROFILE_CORE_NEUTRAL = "core_neutral"
 _EPISTEMIC_DIRECTLY_OBSERVED = "directly_observed"
 _EPISTEMIC_NORMALIZED_FROM_EVIDENCE = "normalized_from_evidence"
@@ -110,6 +125,42 @@ _BASELINE_REFERENCE_COLUMNS = [
     "confidence",
     "epistemic_status",
 ]
+_SAMPLE_VARIANT_COLUMNS = [
+    "variant_id",
+    "document_id",
+    "collection_id",
+    "domain_profile",
+    "variant_label",
+    "host_material_system",
+    "composition",
+    "variable_axis_type",
+    "variable_value",
+    "process_context",
+    "profile_payload",
+    "structure_feature_ids",
+    "source_anchor_ids",
+    "confidence",
+    "epistemic_status",
+]
+_MEASUREMENT_RESULT_COLUMNS = [
+    "result_id",
+    "document_id",
+    "collection_id",
+    "domain_profile",
+    "variant_id",
+    "property_normalized",
+    "result_type",
+    "value_payload",
+    "unit",
+    "test_condition_id",
+    "baseline_id",
+    "structure_feature_ids",
+    "characterization_observation_ids",
+    "evidence_anchor_ids",
+    "traceability_status",
+    "result_source_type",
+    "epistemic_status",
+]
 
 _CHARACTERIZATION_METHODS = (
     "XRD",
@@ -125,17 +176,23 @@ _CHARACTERIZATION_METHODS = (
 
 _EVIDENCE_SOURCE_TYPES = {"figure", "table", "method", "text"}
 
-_PROPERTY_HINTS = {
-    "strength": "strength",
-    "flexural": "flexural_strength",
-    "modulus": "modulus",
-    "hardness": "hardness",
-    "conductivity": "conductivity",
-    "fatigue": "fatigue_life",
-    "stability": "stability",
-    "porosity": "porosity",
-    "density": "density",
-}
+_PROPERTY_HINTS = (
+    ("yield strength", "yield_strength"),
+    ("tensile strength", "tensile_strength"),
+    ("flexural strength", "flexural_strength"),
+    ("residual stress", "residual_stress"),
+    ("fatigue life", "fatigue_life"),
+    ("fatigue", "fatigue_life"),
+    ("elongation", "elongation"),
+    ("retention", "retention"),
+    ("modulus", "modulus"),
+    ("hardness", "hardness"),
+    ("conductivity", "conductivity"),
+    ("stability", "stability"),
+    ("porosity", "porosity"),
+    ("density", "density"),
+    ("strength", "strength"),
+)
 
 _MECHANISM_HINTS = (
     "may be linked",
@@ -168,8 +225,32 @@ _ATMOSPHERE_PATTERN = re.compile(
 _TABLE_NUMERIC_PATTERN = re.compile(r"[-+]?\d+(?:\.\d+)?")
 _TABLE_SAMPLE_HEADER_HINTS = ("sample", "group", "variant", "condition")
 _TABLE_BASELINE_HEADER_HINTS = ("baseline", "control", "reference")
+_TABLE_VARIANT_HEADER_HINTS = (
+    "current",
+    "power",
+    "speed",
+    "heating",
+    "beam",
+    "strategy",
+    "temperature",
+    "orientation",
+    "direction",
+    "content",
+    "wt%",
+    "vol%",
+    "loading",
+    "ratio",
+)
 _OBSERVED_VALUE_PATTERN = re.compile(
     r"([-+]?\d+(?:\.\d+)?)\s*(nm|um|μm|mm|cm|m2/g|m\^2/g|m²/g|mpa|gpa|pa|%)\b",
+    re.IGNORECASE,
+)
+_RANGE_VALUE_PATTERN = re.compile(
+    r"([-+]?\d+(?:\.\d+)?)\s*(?:-|to|–)\s*([-+]?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_CLAIM_VALUE_PATTERN = re.compile(
+    r"\b(?:of|to|at)\s+([-+]?\d+(?:\.\d+)?)\s*([A-Za-z%/0-9\-\^²·]+)?",
     re.IGNORECASE,
 )
 _PHASE_PATTERN = re.compile(
@@ -397,7 +478,7 @@ class EvidenceCardService:
             cards_table,
             _EVIDENCE_JSON_COLUMNS,
         ).to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
-        self._persist_wave_c_artifacts(
+        self._persist_core_artifacts(
             base_dir=base_dir,
             collection_id=collection_id,
             cards_table=cards_table,
@@ -408,7 +489,7 @@ class EvidenceCardService:
 
         return cards_table
 
-    def _persist_wave_c_artifacts(
+    def _persist_core_artifacts(
         self,
         *,
         base_dir: Path,
@@ -423,9 +504,35 @@ class EvidenceCardService:
             sections_by_doc=sections_by_doc,
             table_cells_by_doc=table_cells_by_doc,
         )
-        structure_features = self._build_structure_features(characterization)
         test_conditions = self._build_test_conditions(cards_table, collection_id)
         baseline_references = self._build_baseline_references(cards_table, collection_id)
+        sample_variants = self._build_sample_variants(
+            collection_id=collection_id,
+            cards_table=cards_table,
+            table_cells_by_doc=table_cells_by_doc,
+        )
+        characterization = self._attach_variant_ids_to_characterization(
+            characterization,
+            sample_variants,
+        )
+        structure_features = self._build_structure_features(characterization)
+        sample_variants = self._attach_structure_feature_ids_to_variants(
+            sample_variants,
+            structure_features,
+        )
+        baseline_references = self._attach_variant_ids_to_baseline_references(
+            baseline_references,
+            sample_variants,
+        )
+        measurement_results = self._build_measurement_results(
+            collection_id=collection_id,
+            cards_table=cards_table,
+            sample_variants=sample_variants,
+            characterization=characterization,
+            structure_features=structure_features,
+            test_conditions=test_conditions,
+            baseline_references=baseline_references,
+        )
 
         prepare_frame_for_storage(
             characterization,
@@ -443,6 +550,14 @@ class EvidenceCardService:
             baseline_references,
             _BASELINE_REFERENCES_JSON_COLUMNS,
         ).to_parquet(base_dir / _BASELINE_REFERENCES_FILE, index=False)
+        prepare_frame_for_storage(
+            sample_variants,
+            _SAMPLE_VARIANTS_JSON_COLUMNS,
+        ).to_parquet(base_dir / _SAMPLE_VARIANTS_FILE, index=False)
+        prepare_frame_for_storage(
+            measurement_results,
+            _MEASUREMENT_RESULTS_JSON_COLUMNS,
+        ).to_parquet(base_dir / _MEASUREMENT_RESULTS_FILE, index=False)
 
     def _build_characterization_observations(
         self,
@@ -711,6 +826,936 @@ class EvidenceCardService:
             pd.DataFrame(rows, columns=_BASELINE_REFERENCE_COLUMNS),
             collection_id,
         )
+
+    def _build_sample_variants(
+        self,
+        *,
+        collection_id: str,
+        cards_table: pd.DataFrame,
+        table_cells_by_doc: dict[str, list[dict[str, Any]]],
+    ) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        dedupe: set[tuple[str, str, str, str]] = set()
+        document_ids = set(table_cells_by_doc)
+        if cards_table is not None and not cards_table.empty:
+            document_ids.update(cards_table["document_id"].astype(str).tolist())
+
+        for document_id in sorted(document_ids):
+            document_cards = self._filter_rows_by_document(cards_table, document_id)
+            host_material_system = self._resolve_host_material_system(document_cards)
+            document_process_context = self._merge_process_contexts(document_cards)
+            table_rows = self._group_table_rows(table_cells_by_doc.get(document_id, []))
+            table_variant_count = 0
+
+            for (table_id, row_index), row_cells in table_rows.items():
+                ordered_cells = sorted(
+                    row_cells,
+                    key=lambda item: self._safe_int(item.get("col_index")) or 0,
+                )
+                sample_label = self._resolve_table_sample_label(ordered_cells)
+                variable_header, variable_value = self._resolve_table_variant_axis(ordered_cells)
+                if not sample_label and variable_header is None:
+                    continue
+                variant_label = (
+                    sample_label
+                    or f"{variable_header}: {variable_value}"
+                    if variable_header and variable_value is not None
+                    else None
+                )
+                if not variant_label:
+                    continue
+                variable_axis_type = self._infer_variable_axis_type(variable_header)
+                dedupe_key = (
+                    str(document_id),
+                    str(variant_label).strip().lower(),
+                    str(variable_axis_type or "").strip().lower(),
+                    str(variable_value if variable_value is not None else "").strip().lower(),
+                )
+                if dedupe_key in dedupe:
+                    continue
+                dedupe.add(dedupe_key)
+                row_summary = self._build_table_row_summary(ordered_cells)
+                rows.append(
+                    {
+                        "variant_id": f"var_{uuid4().hex[:12]}",
+                        "document_id": str(document_id),
+                        "collection_id": collection_id,
+                        "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
+                        "variant_label": variant_label,
+                        "host_material_system": host_material_system,
+                        "composition": host_material_system.get("composition"),
+                        "variable_axis_type": variable_axis_type,
+                        "variable_value": self._normalize_variant_value(variable_value),
+                        "process_context": self._build_variant_process_context(
+                            document_process_context=document_process_context,
+                            variable_axis_type=variable_axis_type,
+                            variable_value=variable_value,
+                        ),
+                        "profile_payload": {
+                            "source_kind": "table_row",
+                            "table_id": table_id,
+                            "row_index": row_index,
+                            "row_summary": row_summary,
+                            "variable_header": variable_header,
+                            "baseline_label": (self._resolve_table_baseline(ordered_cells) or {}).get(
+                                "control"
+                            ),
+                        },
+                        "structure_feature_ids": [],
+                        "source_anchor_ids": self._collect_table_row_anchor_ids(
+                            document_cards,
+                            table_id=table_id,
+                            row_summary=row_summary,
+                            sample_label=sample_label,
+                        ),
+                        "confidence": 0.86 if sample_label and variable_value is not None else 0.76,
+                        "epistemic_status": _EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+                    }
+                )
+                table_variant_count += 1
+
+            non_table_property_cards = document_cards[
+                (document_cards["claim_type"].astype(str) == "property")
+                & (document_cards["evidence_source_type"].astype(str) != "table")
+            ] if not document_cards.empty else pd.DataFrame(columns=document_cards.columns)
+            if table_variant_count == 0 or not non_table_property_cards.empty:
+                default_variant = self._build_default_sample_variant(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    document_cards=document_cards,
+                    host_material_system=host_material_system,
+                    document_process_context=document_process_context,
+                )
+                if default_variant is not None:
+                    dedupe_key = (
+                        str(document_id),
+                        str(default_variant["variant_label"]).strip().lower(),
+                        str(default_variant["variable_axis_type"] or "").strip().lower(),
+                        str(default_variant["variable_value"] or "").strip().lower(),
+                    )
+                    if dedupe_key not in dedupe:
+                        dedupe.add(dedupe_key)
+                        rows.append(default_variant)
+
+        return self._normalize_sample_variants_table(
+            pd.DataFrame(rows, columns=_SAMPLE_VARIANT_COLUMNS),
+            collection_id,
+        )
+
+    def _attach_variant_ids_to_characterization(
+        self,
+        characterization: pd.DataFrame,
+        sample_variants: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if characterization is None or characterization.empty:
+            return self._normalize_characterization_table(characterization, None)
+
+        normalized = characterization.copy()
+        for index, row in normalized.iterrows():
+            matched_variant_id = self._match_variant_id_from_text(
+                document_id=str(row.get("document_id") or ""),
+                text=str(row.get("observation_text") or ""),
+                sample_variants=sample_variants,
+            )
+            if matched_variant_id:
+                normalized.at[index, "variant_id"] = matched_variant_id
+        return self._normalize_characterization_table(normalized, None)
+
+    def _attach_variant_ids_to_baseline_references(
+        self,
+        baseline_references: pd.DataFrame,
+        sample_variants: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if baseline_references is None or baseline_references.empty:
+            return self._normalize_baseline_references_table(baseline_references, None)
+
+        normalized = baseline_references.copy()
+        for index, row in normalized.iterrows():
+            matched_variant_id = self._match_variant_id_from_label(
+                document_id=str(row.get("document_id") or ""),
+                label=str(row.get("baseline_label") or ""),
+                sample_variants=sample_variants,
+            )
+            if matched_variant_id:
+                normalized.at[index, "variant_id"] = matched_variant_id
+        return self._normalize_baseline_references_table(normalized, None)
+
+    def _attach_structure_feature_ids_to_variants(
+        self,
+        sample_variants: pd.DataFrame,
+        structure_features: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if sample_variants is None or sample_variants.empty:
+            return self._normalize_sample_variants_table(sample_variants, None)
+
+        normalized = sample_variants.copy()
+        for index, row in normalized.iterrows():
+            variant_id = str(row.get("variant_id") or "")
+            document_id = str(row.get("document_id") or "")
+            feature_ids = self._collect_related_structure_feature_ids(
+                document_id=document_id,
+                variant_id=variant_id or None,
+                structure_features=structure_features,
+                sample_variants=sample_variants,
+            )
+            normalized.at[index, "structure_feature_ids"] = feature_ids
+        return self._normalize_sample_variants_table(normalized, None)
+
+    def _build_measurement_results(
+        self,
+        *,
+        collection_id: str,
+        cards_table: pd.DataFrame,
+        sample_variants: pd.DataFrame,
+        characterization: pd.DataFrame,
+        structure_features: pd.DataFrame,
+        test_conditions: pd.DataFrame,
+        baseline_references: pd.DataFrame,
+    ) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        if cards_table is None or cards_table.empty:
+            return self._normalize_measurement_results_table(
+                pd.DataFrame(columns=_MEASUREMENT_RESULT_COLUMNS),
+                collection_id,
+            )
+
+        property_cards = cards_table[cards_table["claim_type"].astype(str) == "property"]
+        for _, row in property_cards.iterrows():
+            document_id = str(row.get("document_id") or "")
+            claim_text = str(row.get("claim_text") or "").strip()
+            property_normalized = self._infer_property_type_from_card(
+                claim_type=str(row.get("claim_type") or ""),
+                claim_text=claim_text,
+            )
+            result_type = self._infer_result_type(
+                claim_text=claim_text,
+                property_normalized=property_normalized,
+            )
+            value_payload, unit = self._build_result_value_payload(
+                claim_text=claim_text,
+                result_type=result_type,
+            )
+            if not value_payload:
+                continue
+
+            variant_id = self._resolve_variant_id_for_card(
+                card_row=row,
+                sample_variants=sample_variants,
+            )
+            rows.append(
+                {
+                    "result_id": f"res_{uuid4().hex[:12]}",
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                    "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
+                    "variant_id": variant_id,
+                    "property_normalized": property_normalized,
+                    "result_type": result_type,
+                    "value_payload": value_payload,
+                    "unit": unit,
+                    "test_condition_id": self._resolve_test_condition_id(
+                        card_row=row,
+                        property_normalized=property_normalized,
+                        test_conditions=test_conditions,
+                    ),
+                    "baseline_id": self._resolve_baseline_id(
+                        card_row=row,
+                        baseline_references=baseline_references,
+                    ),
+                    "structure_feature_ids": self._collect_related_structure_feature_ids(
+                        document_id=document_id,
+                        variant_id=variant_id,
+                        structure_features=structure_features,
+                        sample_variants=sample_variants,
+                    ),
+                    "characterization_observation_ids": self._collect_related_characterization_ids(
+                        document_id=document_id,
+                        variant_id=variant_id,
+                        characterization=characterization,
+                        sample_variants=sample_variants,
+                    ),
+                    "evidence_anchor_ids": self._extract_anchor_ids(row.get("evidence_anchors")),
+                    "traceability_status": str(row.get("traceability_status") or "missing"),
+                    "result_source_type": str(row.get("evidence_source_type") or "text"),
+                    "epistemic_status": (
+                        _EPISTEMIC_DIRECTLY_OBSERVED
+                        if str(row.get("evidence_source_type") or "") == "table"
+                        else _EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                    ),
+                }
+            )
+
+        return self._normalize_measurement_results_table(
+            pd.DataFrame(rows, columns=_MEASUREMENT_RESULT_COLUMNS),
+            collection_id,
+        )
+
+    def _filter_rows_by_document(
+        self,
+        frame: pd.DataFrame | None,
+        document_id: str,
+    ) -> pd.DataFrame:
+        if frame is None or frame.empty or "document_id" not in frame.columns:
+            return pd.DataFrame(columns=frame.columns if frame is not None else [])
+        return frame[frame["document_id"].astype(str) == str(document_id)]
+
+    def _resolve_host_material_system(
+        self,
+        document_cards: pd.DataFrame,
+    ) -> dict[str, Any]:
+        if document_cards is not None and not document_cards.empty:
+            for _, row in document_cards.iterrows():
+                material_system = self._normalize_material_system_payload(
+                    row.get("material_system")
+                )
+                if material_system.get("family") != "unspecified material system":
+                    return material_system
+        return self._normalize_material_system_payload({})
+
+    def _merge_process_contexts(
+        self,
+        document_cards: pd.DataFrame,
+    ) -> dict[str, Any]:
+        merged = {
+            "temperatures_c": [],
+            "durations": [],
+            "atmosphere": None,
+        }
+        if document_cards is None or document_cards.empty:
+            return merged
+
+        for _, row in document_cards.iterrows():
+            context = self._normalize_condition_context_payload(row.get("condition_context"))
+            process = context.get("process", {})
+            for value in process.get("temperatures_c") or []:
+                if value not in merged["temperatures_c"]:
+                    merged["temperatures_c"].append(value)
+            for value in process.get("durations") or []:
+                if value not in merged["durations"]:
+                    merged["durations"].append(value)
+            if merged["atmosphere"] is None and process.get("atmosphere"):
+                merged["atmosphere"] = process.get("atmosphere")
+        return merged
+
+    def _group_table_rows(
+        self,
+        table_cells: list[dict[str, Any]],
+    ) -> dict[tuple[str, int], list[dict[str, Any]]]:
+        grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        for cell in table_cells:
+            table_id = str(cell.get("table_id") or "").strip()
+            row_index = self._safe_int(cell.get("row_index"))
+            if not table_id or row_index is None or row_index <= 0:
+                continue
+            grouped.setdefault((table_id, row_index), []).append(cell)
+        return grouped
+
+    def _resolve_table_variant_axis(
+        self,
+        row_cells: list[dict[str, Any]],
+    ) -> tuple[str | None, Any]:
+        for cell in row_cells:
+            header = str(cell.get("header_path") or "").strip()
+            if not header:
+                continue
+            if self._is_table_sample_header(header) or self._is_table_baseline_header(header):
+                continue
+            if self._infer_property_type_from_header(header) != "qualitative":
+                continue
+            cell_text = str(cell.get("cell_text") or "").strip()
+            if not cell_text:
+                continue
+            return header, cell_text
+        return None, None
+
+    def _infer_property_type_from_header(
+        self,
+        header: str,
+    ) -> str:
+        lowered = str(header or "").lower()
+        for token, normalized in _PROPERTY_HINTS:
+            if token in lowered:
+                return normalized
+        return "qualitative"
+
+    def _infer_variable_axis_type(
+        self,
+        header: str | None,
+    ) -> str:
+        lowered = str(header or "").strip().lower()
+        if not lowered:
+            return "unspecified_variant_axis"
+        if "current" in lowered:
+            return "induction_current"
+        if "beam" in lowered and "strategy" in lowered:
+            return "beam_strategy"
+        if "heating" in lowered:
+            return "in_situ_heating"
+        if "temperature" in lowered:
+            return "temperature"
+        if "power" in lowered:
+            return "laser_power"
+        if "speed" in lowered:
+            return "scan_speed"
+        if "orientation" in lowered:
+            return "specimen_orientation"
+        if "direction" in lowered:
+            return "build_direction"
+        if any(token in lowered for token in ("wt%", "vol%", "content", "loading", "ratio")):
+            return "composition_loading"
+        normalized = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+        return normalized or "unspecified_variant_axis"
+
+    def _normalize_variant_value(self, value: Any) -> Any:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if re.fullmatch(r"[-+]?\d+", text):
+            return int(text)
+        if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text):
+            return float(text)
+        return text
+
+    def _build_variant_process_context(
+        self,
+        *,
+        document_process_context: dict[str, Any],
+        variable_axis_type: str,
+        variable_value: Any,
+    ) -> dict[str, Any]:
+        payload = dict(document_process_context)
+        if variable_axis_type in {
+            "induction_current",
+            "beam_strategy",
+            "in_situ_heating",
+            "temperature",
+            "laser_power",
+            "scan_speed",
+            "specimen_orientation",
+            "build_direction",
+        } and variable_value not in (None, ""):
+            payload[variable_axis_type] = self._normalize_variant_value(variable_value)
+        return self._normalize_condition_payload(payload)
+
+    def _collect_table_row_anchor_ids(
+        self,
+        document_cards: pd.DataFrame,
+        *,
+        table_id: str,
+        row_summary: str,
+        sample_label: str | None,
+    ) -> list[str]:
+        if document_cards is None or document_cards.empty:
+            return []
+        anchor_ids: list[str] = []
+        table_cards = document_cards[
+            document_cards["evidence_source_type"].astype(str) == "table"
+        ]
+        for _, row in table_cards.iterrows():
+            claim_text = str(row.get("claim_text") or "")
+            anchors = self._normalize_evidence_anchors_payload(row.get("evidence_anchors"))
+            for anchor in anchors:
+                if str(anchor.get("figure_or_table") or "") != str(table_id):
+                    continue
+                anchor_quote = str(anchor.get("quote_span") or anchor.get("quote") or "")
+                label_match = sample_label and sample_label.lower() in claim_text.lower()
+                summary_match = row_summary and anchor_quote == row_summary
+                if not label_match and not summary_match:
+                    continue
+                anchor_id = self._normalize_scalar_text(anchor.get("anchor_id"))
+                if anchor_id and anchor_id not in anchor_ids:
+                    anchor_ids.append(anchor_id)
+        return anchor_ids
+
+    def _build_default_sample_variant(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        document_cards: pd.DataFrame,
+        host_material_system: dict[str, Any],
+        document_process_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if document_cards is None or document_cards.empty:
+            return None
+        variant_label = str(host_material_system.get("family") or document_id).strip()
+        if not variant_label:
+            return None
+        return {
+            "variant_id": f"var_{uuid4().hex[:12]}",
+            "document_id": str(document_id),
+            "collection_id": collection_id,
+            "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
+            "variant_label": variant_label,
+            "host_material_system": host_material_system,
+            "composition": host_material_system.get("composition"),
+            "variable_axis_type": None,
+            "variable_value": None,
+            "process_context": self._normalize_condition_payload(document_process_context),
+            "profile_payload": {"source_kind": "document_default"},
+            "structure_feature_ids": [],
+            "source_anchor_ids": self._collect_document_anchor_ids(document_cards),
+            "confidence": 0.62,
+            "epistemic_status": _EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
+        }
+
+    def _collect_document_anchor_ids(
+        self,
+        document_cards: pd.DataFrame,
+    ) -> list[str]:
+        anchor_ids: list[str] = []
+        if document_cards is None or document_cards.empty:
+            return anchor_ids
+        for _, row in document_cards.iterrows():
+            for anchor_id in self._extract_anchor_ids(row.get("evidence_anchors")):
+                if anchor_id not in anchor_ids:
+                    anchor_ids.append(anchor_id)
+        return anchor_ids
+
+    def _match_variant_id_from_text(
+        self,
+        *,
+        document_id: str,
+        text: str,
+        sample_variants: pd.DataFrame,
+    ) -> str | None:
+        document_variants = self._filter_rows_by_document(sample_variants, document_id)
+        if document_variants.empty:
+            return None
+
+        non_default = document_variants[
+            document_variants["profile_payload"].apply(
+                lambda payload: str((self._normalize_object(payload) or {}).get("source_kind") or "")
+                != "document_default"
+            )
+        ]
+        lowered = str(text or "").lower()
+        matches: list[str] = []
+        for _, row in non_default.iterrows():
+            variant_id = self._normalize_scalar_text(row.get("variant_id"))
+            if variant_id is None:
+                continue
+            label = str(row.get("variant_label") or "").strip().lower()
+            if label and label in lowered:
+                matches.append(variant_id)
+                continue
+            variable_value = row.get("variable_value")
+            if isinstance(variable_value, str) and variable_value.strip().lower() in lowered:
+                matches.append(variant_id)
+        unique_matches = list(dict.fromkeys(matches))
+        if len(unique_matches) == 1:
+            return unique_matches[0]
+        if len(non_default) == 1:
+            return self._normalize_scalar_text(non_default.iloc[0].get("variant_id"))
+        if len(non_default) == 0 and len(document_variants) == 1:
+            return self._normalize_scalar_text(document_variants.iloc[0].get("variant_id"))
+        return None
+
+    def _match_variant_id_from_label(
+        self,
+        *,
+        document_id: str,
+        label: str,
+        sample_variants: pd.DataFrame,
+    ) -> str | None:
+        lowered = str(label or "").strip().lower()
+        if not lowered:
+            return None
+        document_variants = self._filter_rows_by_document(sample_variants, document_id)
+        if document_variants.empty:
+            return None
+        matched = document_variants[
+            document_variants["variant_label"].astype(str).str.lower() == lowered
+        ]
+        if len(matched) == 1:
+            return self._normalize_scalar_text(matched.iloc[0].get("variant_id"))
+        return None
+
+    def _resolve_variant_id_for_card(
+        self,
+        *,
+        card_row: pd.Series,
+        sample_variants: pd.DataFrame,
+    ) -> str | None:
+        document_id = str(card_row.get("document_id") or "")
+        source_type = str(card_row.get("evidence_source_type") or "")
+        claim_text = str(card_row.get("claim_text") or "")
+        if source_type != "table":
+            return self._match_variant_id_from_text(
+                document_id=document_id,
+                text=claim_text,
+                sample_variants=sample_variants,
+            )
+
+        document_variants = self._filter_rows_by_document(sample_variants, document_id)
+        if document_variants.empty:
+            return None
+
+        anchors = self._normalize_evidence_anchors_payload(card_row.get("evidence_anchors"))
+        table_id = None
+        row_summary = None
+        if anchors:
+            table_id = str(anchors[0].get("figure_or_table") or "").strip() or None
+            row_summary = str(anchors[0].get("quote_span") or anchors[0].get("quote") or "").strip() or None
+
+        candidates = document_variants[
+            document_variants["profile_payload"].apply(
+                lambda payload: str((self._normalize_object(payload) or {}).get("table_id") or "")
+                == str(table_id or "")
+            )
+        ] if table_id else document_variants.iloc[0:0]
+        if not candidates.empty:
+            for _, variant in candidates.iterrows():
+                variant_id = self._normalize_scalar_text(variant.get("variant_id"))
+                label = str(variant.get("variant_label") or "").strip().lower()
+                profile_payload = self._normalize_object(variant.get("profile_payload")) or {}
+                candidate_summary = str(profile_payload.get("row_summary") or "").strip()
+                if label and label in claim_text.lower():
+                    return variant_id
+                if row_summary and candidate_summary and row_summary == candidate_summary:
+                    return variant_id
+            if len(candidates) == 1:
+                return self._normalize_scalar_text(candidates.iloc[0].get("variant_id"))
+
+        return self._match_variant_id_from_text(
+            document_id=document_id,
+            text=claim_text,
+            sample_variants=sample_variants,
+        )
+
+    def _resolve_test_condition_id(
+        self,
+        *,
+        card_row: pd.Series,
+        property_normalized: str,
+        test_conditions: pd.DataFrame,
+    ) -> str | None:
+        document_id = str(card_row.get("document_id") or "")
+        document_conditions = self._filter_rows_by_document(test_conditions, document_id)
+        if document_conditions.empty:
+            return None
+
+        property_conditions = document_conditions[
+            document_conditions["property_type"].astype(str) == str(property_normalized)
+        ]
+        payload = self._build_condition_payload_from_card(card_row)
+        if payload:
+            payload_text = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+            exact_matches = property_conditions[
+                property_conditions["condition_payload"].apply(
+                    lambda value: json.dumps(
+                        self._normalize_condition_payload(value),
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    == payload_text
+                )
+            ]
+            if len(exact_matches) == 1:
+                return self._normalize_scalar_text(exact_matches.iloc[0].get("test_condition_id"))
+        if len(property_conditions) == 1:
+            return self._normalize_scalar_text(property_conditions.iloc[0].get("test_condition_id"))
+        if len(document_conditions) == 1:
+            return self._normalize_scalar_text(document_conditions.iloc[0].get("test_condition_id"))
+        return None
+
+    def _build_condition_payload_from_card(
+        self,
+        card_row: pd.Series,
+    ) -> dict[str, Any]:
+        condition_context = self._normalize_condition_context_payload(
+            card_row.get("condition_context")
+        )
+        process_context = condition_context.get("process", {})
+        test_context = condition_context.get("test", {})
+        payload = {
+            "method": test_context.get("method"),
+            "methods": self._normalize_list(test_context.get("methods")),
+            "temperatures_c": list(process_context.get("temperatures_c") or []),
+            "durations": list(process_context.get("durations") or []),
+            "atmosphere": process_context.get("atmosphere"),
+        }
+        return {
+            key: value
+            for key, value in payload.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _resolve_baseline_id(
+        self,
+        *,
+        card_row: pd.Series,
+        baseline_references: pd.DataFrame,
+    ) -> str | None:
+        document_id = str(card_row.get("document_id") or "")
+        document_baselines = self._filter_rows_by_document(baseline_references, document_id)
+        if document_baselines.empty:
+            return None
+
+        condition_context = self._normalize_condition_context_payload(
+            card_row.get("condition_context")
+        )
+        baseline_label = str(
+            (condition_context.get("baseline") or {}).get("control") or ""
+        ).strip()
+        if baseline_label:
+            matched = document_baselines[
+                document_baselines["baseline_label"].astype(str).str.lower()
+                == baseline_label.lower()
+            ]
+            if len(matched) == 1:
+                return self._normalize_scalar_text(matched.iloc[0].get("baseline_id"))
+        if len(document_baselines) == 1:
+            return self._normalize_scalar_text(document_baselines.iloc[0].get("baseline_id"))
+        return None
+
+    def _collect_related_structure_feature_ids(
+        self,
+        *,
+        document_id: str,
+        variant_id: str | None,
+        structure_features: pd.DataFrame,
+        sample_variants: pd.DataFrame,
+    ) -> list[str]:
+        return self._collect_related_ids(
+            frame=structure_features,
+            document_id=document_id,
+            variant_id=variant_id,
+            id_column="feature_id",
+            sample_variants=sample_variants,
+        )
+
+    def _collect_related_characterization_ids(
+        self,
+        *,
+        document_id: str,
+        variant_id: str | None,
+        characterization: pd.DataFrame,
+        sample_variants: pd.DataFrame,
+    ) -> list[str]:
+        return self._collect_related_ids(
+            frame=characterization,
+            document_id=document_id,
+            variant_id=variant_id,
+            id_column="observation_id",
+            sample_variants=sample_variants,
+        )
+
+    def _collect_related_ids(
+        self,
+        *,
+        frame: pd.DataFrame,
+        document_id: str,
+        variant_id: str | None,
+        id_column: str,
+        sample_variants: pd.DataFrame,
+    ) -> list[str]:
+        document_rows = self._filter_rows_by_document(frame, document_id)
+        if document_rows.empty or id_column not in document_rows.columns:
+            return []
+
+        if variant_id:
+            specific = document_rows[
+                document_rows["variant_id"].astype(str) == str(variant_id)
+            ]
+            if not specific.empty:
+                return [str(value) for value in specific[id_column].tolist() if str(value).strip()]
+            if self._count_non_default_variants(document_id, sample_variants) <= 1:
+                generic = document_rows[
+                    document_rows["variant_id"].isna()
+                    | (document_rows["variant_id"].astype(str) == "")
+                    | (document_rows["variant_id"].astype(str) == "None")
+                ]
+                return [str(value) for value in generic[id_column].tolist() if str(value).strip()]
+            return []
+
+        if self._count_non_default_variants(document_id, sample_variants) <= 1:
+            generic = document_rows[
+                document_rows["variant_id"].isna()
+                | (document_rows["variant_id"].astype(str) == "")
+                | (document_rows["variant_id"].astype(str) == "None")
+            ]
+            return [str(value) for value in generic[id_column].tolist() if str(value).strip()]
+        return []
+
+    def _count_non_default_variants(
+        self,
+        document_id: str,
+        sample_variants: pd.DataFrame,
+    ) -> int:
+        document_variants = self._filter_rows_by_document(sample_variants, document_id)
+        if document_variants.empty:
+            return 0
+        count = 0
+        for _, row in document_variants.iterrows():
+            payload = self._normalize_object(row.get("profile_payload")) or {}
+            if str(payload.get("source_kind") or "") != "document_default":
+                count += 1
+        return count
+
+    def _infer_result_type(
+        self,
+        *,
+        claim_text: str,
+        property_normalized: str,
+    ) -> str:
+        lowered = str(claim_text or "").lower()
+        if property_normalized == "retention" or "retention" in lowered:
+            return "retention"
+        if _RANGE_VALUE_PATTERN.search(claim_text):
+            return "range"
+        if any(token in lowered for token in ("optimal", "optimum", "best")):
+            return "optimum"
+        if any(token in lowered for token in ("fit", "fitted", "arrhenius", "tauc")):
+            return "fitted_value"
+        if (
+            any(token in lowered for token in ("increased", "decreased", "higher", "lower"))
+            and _CLAIM_VALUE_PATTERN.search(claim_text) is None
+        ):
+            return "trend"
+        return "scalar"
+
+    def _build_result_value_payload(
+        self,
+        *,
+        claim_text: str,
+        result_type: str,
+    ) -> tuple[dict[str, Any], str | None]:
+        range_match = _RANGE_VALUE_PATTERN.search(claim_text)
+        if result_type == "range" and range_match is not None:
+            return (
+                {
+                    "min": float(range_match.group(1)),
+                    "max": float(range_match.group(2)),
+                    "statement": claim_text,
+                },
+                self._resolve_claim_unit(claim_text),
+            )
+
+        value, unit = self._extract_claim_value_and_unit(claim_text)
+        if result_type == "retention":
+            if value is None:
+                return ({}, unit)
+            return (
+                {
+                    "retention_percent": value,
+                    "statement": claim_text,
+                },
+                unit or "%",
+            )
+        if result_type == "trend":
+            direction = "increase" if "increase" in claim_text.lower() or "higher" in claim_text.lower() else "decrease"
+            payload: dict[str, Any] = {
+                "direction": direction,
+                "statement": claim_text,
+            }
+            if value is not None:
+                payload["value"] = value
+            return payload, unit
+        if result_type in {"optimum", "fitted_value"}:
+            payload = {"statement": claim_text}
+            if value is not None:
+                payload["value"] = value
+            return payload, unit
+        if value is None:
+            return ({}, unit)
+        return (
+            {
+                "value": value,
+                "statement": claim_text,
+            },
+            unit,
+        )
+
+    def _extract_claim_value_and_unit(
+        self,
+        claim_text: str,
+    ) -> tuple[float | None, str | None]:
+        match = _CLAIM_VALUE_PATTERN.search(claim_text)
+        if match is not None:
+            return float(match.group(1)), self._normalize_unit_text(match.group(2))
+
+        matches = list(re.finditer(r"([-+]?\d+(?:\.\d+)?)(?:\s*([A-Za-z%/0-9\-\^²·]+))?", claim_text))
+        if not matches:
+            return None, self._resolve_claim_unit(claim_text)
+        last = matches[-1]
+        return float(last.group(1)), self._normalize_unit_text(last.group(2)) or self._resolve_claim_unit(claim_text)
+
+    def _resolve_claim_unit(self, claim_text: str) -> str | None:
+        unit_match = re.search(r"\(([^)]+)\)", claim_text)
+        if unit_match:
+            return self._normalize_unit_text(unit_match.group(1))
+        explicit = re.search(r"\b(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b", claim_text, re.IGNORECASE)
+        if explicit:
+            return self._normalize_unit_text(explicit.group(1))
+        return None
+
+    def _normalize_unit_text(self, value: Any) -> str | None:
+        text = str(value or "").strip().strip(".,;:")
+        return text or None
+
+    def _normalize_sample_variants_table(
+        self,
+        sample_variants: pd.DataFrame,
+        collection_id: str | None,
+    ) -> pd.DataFrame:
+        if sample_variants is None or sample_variants.empty:
+            return pd.DataFrame(columns=_SAMPLE_VARIANT_COLUMNS)
+
+        normalized = sample_variants.copy()
+        if collection_id is not None and "collection_id" not in normalized.columns:
+            normalized["collection_id"] = collection_id
+        if "domain_profile" not in normalized.columns:
+            normalized["domain_profile"] = _DOMAIN_PROFILE_CORE_NEUTRAL
+        normalized["host_material_system"] = normalized["host_material_system"].apply(
+            self._normalize_material_system_payload
+        )
+        normalized["process_context"] = normalized["process_context"].apply(
+            self._normalize_condition_payload
+        )
+        normalized["profile_payload"] = normalized["profile_payload"].apply(
+            lambda value: self._normalize_object(value) if isinstance(self._normalize_object(value), dict) else {}
+        )
+        normalized["structure_feature_ids"] = normalized["structure_feature_ids"].apply(
+            self._normalize_list
+        )
+        normalized["source_anchor_ids"] = normalized["source_anchor_ids"].apply(
+            self._normalize_list
+        )
+        normalized["confidence"] = normalized["confidence"].apply(
+            lambda value: round(float(value or 0.0), 2)
+        )
+        normalized["variant_label"] = normalized["variant_label"].apply(
+            lambda value: str(value or "").strip()
+        )
+        return normalized[_SAMPLE_VARIANT_COLUMNS]
+
+    def _normalize_measurement_results_table(
+        self,
+        measurement_results: pd.DataFrame,
+        collection_id: str | None,
+    ) -> pd.DataFrame:
+        if measurement_results is None or measurement_results.empty:
+            return pd.DataFrame(columns=_MEASUREMENT_RESULT_COLUMNS)
+
+        normalized = measurement_results.copy()
+        if collection_id is not None and "collection_id" not in normalized.columns:
+            normalized["collection_id"] = collection_id
+        if "domain_profile" not in normalized.columns:
+            normalized["domain_profile"] = _DOMAIN_PROFILE_CORE_NEUTRAL
+        normalized["value_payload"] = normalized["value_payload"].apply(
+            lambda value: self._normalize_object(value) if isinstance(self._normalize_object(value), dict) else {}
+        )
+        normalized["structure_feature_ids"] = normalized["structure_feature_ids"].apply(
+            self._normalize_list
+        )
+        normalized["characterization_observation_ids"] = normalized[
+            "characterization_observation_ids"
+        ].apply(self._normalize_list)
+        normalized["evidence_anchor_ids"] = normalized["evidence_anchor_ids"].apply(
+            self._normalize_list
+        )
+        return normalized[_MEASUREMENT_RESULT_COLUMNS]
 
     def _normalize_characterization_table(
         self,
@@ -1008,6 +2053,8 @@ class EvidenceCardService:
                     continue
                 if self._is_table_sample_header(header) or self._is_table_baseline_header(header):
                     continue
+                if self._infer_property_type_from_header(header) == "qualitative":
+                    continue
 
                 cell_text = str(cell.get("cell_text") or "").strip()
                 numeric_value = self._extract_table_numeric_value(cell_text)
@@ -1303,7 +2350,7 @@ class EvidenceCardService:
         claim_text: str,
     ) -> str:
         lowered = str(claim_text or "").lower()
-        for token, normalized in _PROPERTY_HINTS.items():
+        for token, normalized in _PROPERTY_HINTS:
             if token in lowered:
                 return normalized
         if claim_type == "characterization":
@@ -1316,7 +2363,14 @@ class EvidenceCardService:
         self,
         property_type: str,
     ) -> str:
-        if property_type in {"strength", "flexural_strength", "modulus", "elongation"}:
+        if property_type in {
+            "strength",
+            "tensile_strength",
+            "yield_strength",
+            "flexural_strength",
+            "modulus",
+            "elongation",
+        }:
             return "tensile_mechanics"
         if property_type == "fatigue_life":
             return "fatigue"

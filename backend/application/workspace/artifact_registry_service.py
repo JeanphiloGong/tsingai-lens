@@ -33,6 +33,8 @@ class ArtifactRegistryService:
         structure_features_path = base_dir / "structure_features.parquet"
         test_conditions_path = base_dir / "test_conditions.parquet"
         baseline_references_path = base_dir / "baseline_references.parquet"
+        sample_variants_path = base_dir / "sample_variants.parquet"
+        measurement_results_path = base_dir / "measurement_results.parquet"
         comparison_rows_path = base_dir / "comparison_rows.parquet"
         sections_path = base_dir / "sections.parquet"
         table_cells_path = base_dir / "table_cells.parquet"
@@ -47,6 +49,8 @@ class ArtifactRegistryService:
         structure_features_generated = structure_features_path.exists()
         test_conditions_generated = test_conditions_path.exists()
         baseline_references_generated = baseline_references_path.exists()
+        sample_variants_generated = sample_variants_path.exists()
+        measurement_results_generated = measurement_results_path.exists()
         comparison_rows_generated = comparison_rows_path.exists()
         document_profiles_ready = self._parquet_has_rows(document_profiles_path)
         evidence_cards_ready = self._parquet_has_rows(evidence_cards_path)
@@ -56,6 +60,8 @@ class ArtifactRegistryService:
         structure_features_ready = self._parquet_has_rows(structure_features_path)
         test_conditions_ready = self._parquet_has_rows(test_conditions_path)
         baseline_references_ready = self._parquet_has_rows(baseline_references_path)
+        sample_variants_ready = self._parquet_has_rows(sample_variants_path)
+        measurement_results_ready = self._parquet_has_rows(measurement_results_path)
         comparison_rows_ready = self._parquet_has_rows(comparison_rows_path)
         graph_generated = (
             document_profiles_generated
@@ -88,6 +94,10 @@ class ArtifactRegistryService:
             "test_conditions_ready": test_conditions_ready,
             "baseline_references_generated": baseline_references_generated,
             "baseline_references_ready": baseline_references_ready,
+            "sample_variants_generated": sample_variants_generated,
+            "sample_variants_ready": sample_variants_ready,
+            "measurement_results_generated": measurement_results_generated,
+            "measurement_results_ready": measurement_results_ready,
             "comparison_rows_generated": comparison_rows_generated,
             "comparison_rows_ready": comparison_rows_ready,
             "graph_generated": graph_generated,

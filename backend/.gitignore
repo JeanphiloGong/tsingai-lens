@@ -207,7 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 # Project local runtime data
-AGENTS.md
 data/logs/
 data/tasks/
 data/update_output/

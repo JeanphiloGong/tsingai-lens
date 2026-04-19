@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
+from domain.source import ArtifactStatusRecord, CollectionRecord, empty_import_manifest
 from infra.source.ingestion import (
     NormalizedImportBatch,
     SourceAdapter,
@@ -44,29 +45,6 @@ class CollectionService:
     def get_paths(self, collection_id: str) -> CollectionPaths:
         return self.repository.get_paths(collection_id)
 
-    def _normalize_collection_record(
-        self,
-        record: dict | None,
-        collection_id: str,
-    ) -> dict:
-        payload = dict(record or {})
-        created_at = payload.get("created_at") or _now_iso()
-        updated_at = payload.get("updated_at") or created_at
-
-        if not payload.get("collection_id"):
-            payload["collection_id"] = str(payload.get("id") or collection_id)
-
-        if "name" not in payload or payload.get("name") is None:
-            payload["name"] = payload["collection_id"]
-        payload.setdefault("description", None)
-        payload.setdefault("status", "idle")
-        payload.pop("default_method", None)
-        payload["paper_count"] = int(payload.get("paper_count") or 0)
-        payload["created_at"] = str(created_at)
-        payload["updated_at"] = str(updated_at)
-        payload.pop("id", None)
-        return payload
-
     def create_collection(
         self,
         name: str,
@@ -74,67 +52,33 @@ class CollectionService:
     ) -> dict:
         collection_id = f"col_{uuid4().hex[:12]}"
         now = _now_iso()
-        record = {
-            "collection_id": collection_id,
-            "name": name,
-            "description": description,
-            "status": "idle",
-            "paper_count": 0,
-            "created_at": now,
-            "updated_at": now,
-        }
+        record = CollectionRecord.create(
+            collection_id=collection_id,
+            name=name,
+            description=description,
+            now_iso=now,
+        ).to_record()
         paths = self.repository.create_collection_dirs(collection_id)
         self.repository.write_collection(collection_id, record)
         self.repository.write_files(collection_id, [])
         self.artifact_repository.write(
             collection_id,
-            {
-                "collection_id": collection_id,
-                "output_path": str(paths.output_dir),
-                "documents_generated": False,
-                "documents_ready": False,
-                "document_profiles_generated": False,
-                "document_profiles_ready": False,
-                "evidence_cards_generated": False,
-                "evidence_cards_ready": False,
-                "characterization_observations_generated": False,
-                "characterization_observations_ready": False,
-                "structure_features_generated": False,
-                "structure_features_ready": False,
-                "test_conditions_generated": False,
-                "test_conditions_ready": False,
-                "baseline_references_generated": False,
-                "baseline_references_ready": False,
-                "sample_variants_generated": False,
-                "sample_variants_ready": False,
-                "measurement_results_generated": False,
-                "measurement_results_ready": False,
-                "comparison_rows_generated": False,
-                "comparison_rows_ready": False,
-                "graph_generated": False,
-                "graph_ready": False,
-                "sections_generated": False,
-                "sections_ready": False,
-                "table_cells_generated": False,
-                "table_cells_ready": False,
-                "procedure_blocks_generated": False,
-                "procedure_blocks_ready": False,
-                "protocol_steps_generated": False,
-                "protocol_steps_ready": False,
-                "graphml_generated": False,
-                "graphml_ready": False,
-                "updated_at": now,
-            },
+            ArtifactStatusRecord.empty(
+                collection_id=collection_id,
+                output_path=str(paths.output_dir),
+                updated_at=now,
+            ).to_record(),
         )
         return record
 
     def list_collections(self) -> list[dict]:
         items: list[dict] = []
         for collection_id, record in self.repository.list_collection_records():
-            record = self._normalize_collection_record(
+            record = CollectionRecord.from_mapping(
                 record,
                 collection_id,
-            )
+                now_iso=_now_iso(),
+            ).to_record()
             items.append(record)
         return items
 
@@ -142,17 +86,26 @@ class CollectionService:
         record = self.repository.read_collection(collection_id)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        normalized = self._normalize_collection_record(record, collection_id)
+        normalized = CollectionRecord.from_mapping(
+            record,
+            collection_id,
+            now_iso=_now_iso(),
+        ).to_record()
         if normalized != record:
             self.repository.write_collection(collection_id, normalized)
         return normalized
 
     def update_collection(self, collection_id: str, **fields) -> dict:
-        record = self.get_collection(collection_id)
+        record = dict(self.get_collection(collection_id))
         record.update(fields)
         record["updated_at"] = _now_iso()
-        self.repository.write_collection(collection_id, record)
-        return record
+        normalized = CollectionRecord.from_mapping(
+            record,
+            collection_id,
+            now_iso=record["updated_at"],
+        ).to_record()
+        self.repository.write_collection(collection_id, normalized)
+        return normalized
 
     def delete_collection(self, collection_id: str) -> dict:
         paths = self.get_paths(collection_id)
@@ -185,7 +138,7 @@ class CollectionService:
         self.get_collection(collection_id)
         manifest = self.repository.read_import_manifest(collection_id)
         if manifest is None:
-            return self._empty_import_manifest(collection_id)
+            return empty_import_manifest(collection_id)
         return manifest
 
     def register_goal_brief_handoff(
@@ -363,14 +316,6 @@ class CollectionService:
             batch.source_metadata.adapter_version != expected_adapter_version
         ):
             raise ValueError("source adapter batch adapter_version does not match adapter contract")
-
-    def _empty_import_manifest(self, collection_id: str) -> dict[str, Any]:
-        return {
-            "schema_version": 1,
-            "collection_id": collection_id,
-            "handoffs": [],
-            "imports": [],
-        }
 
     def _build_manifest_import_entry(
         self,

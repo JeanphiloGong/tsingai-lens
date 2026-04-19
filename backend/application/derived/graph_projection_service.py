@@ -6,6 +6,12 @@ from typing import Any
 
 import pandas as pd
 
+from domain.shared.enums import (
+    COMPARABILITY_STATUS_LIMITED,
+    DOC_TYPE_UNCERTAIN,
+    PROTOCOL_EXTRACTABLE_UNCERTAIN,
+    TRACEABILITY_STATUS_MISSING,
+)
 from infra.persistence.backbone_codec import restore_frame_from_storage
 
 
@@ -123,9 +129,9 @@ def _build_document_record(row: pd.Series) -> dict[str, Any]:
     source_filename = _as_text(row.get("source_filename"))
     label = title or source_filename or document_id
     description_parts = [
-        f"doc_type={_as_text(row.get('doc_type')) or 'uncertain'}",
+        f"doc_type={_as_text(row.get('doc_type')) or DOC_TYPE_UNCERTAIN}",
         "protocol_extractable="
-        f"{_as_text(row.get('protocol_extractable')) or 'uncertain'}",
+        f"{_as_text(row.get('protocol_extractable')) or PROTOCOL_EXTRACTABLE_UNCERTAIN}",
     ]
     warnings = _string_list(row.get("parsing_warnings"))
     if warnings:
@@ -163,7 +169,9 @@ def _build_evidence_record(
     document_id = _as_text(row.get("document_id"))
     claim_text = _as_text(row.get("claim_text")) or evidence_id
     claim_type = _as_text(row.get("claim_type")) or "qualitative"
-    traceability_status = _as_text(row.get("traceability_status")) or "missing"
+    traceability_status = (
+        _as_text(row.get("traceability_status")) or TRACEABILITY_STATUS_MISSING
+    )
     confidence = _as_float(row.get("confidence"))
     snippet_ids = _extract_anchor_snippet_ids(row.get("evidence_anchors"))
     title = doc_records.get(document_id or "", {}).get("title") if document_id else None
@@ -224,7 +232,9 @@ def _build_comparison_projection(
     supporting_evidence_ids = _string_list(row.get("supporting_evidence_ids"))
     property_name = _as_text(row.get("property_normalized"))
     material_name = _as_text(row.get("material_system_normalized"))
-    comparability_status = _as_text(row.get("comparability_status")) or "limited"
+    comparability_status = (
+        _as_text(row.get("comparability_status")) or COMPARABILITY_STATUS_LIMITED
+    )
     baseline = _as_text(row.get("baseline_normalized"))
     test_condition = _as_text(row.get("test_condition_normalized"))
     value = _as_numeric_text(row.get("value"))

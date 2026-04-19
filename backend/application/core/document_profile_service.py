@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import ast
 import json
-import re
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from domain.core.document_profile import (
+    DocumentProfile,
+    analyze_document_profile,
+    summarize_document_profile_collection,
+)
+from domain.shared.enums import (
+    DOC_TYPE_UNCERTAIN,
+    PROTOCOL_EXTRACTABLE_UNCERTAIN,
+    PROTOCOL_SUITABLE_EXTRACTABILITY,
+)
 from infra.persistence.backbone_codec import (
     normalize_backbone_value,
     prepare_frame_for_storage,
@@ -27,65 +35,6 @@ _DOCUMENT_PROFILES_FILE = "document_profiles.parquet"
 _DOCUMENT_PROFILE_JSON_COLUMNS = (
     "protocol_extractability_signals",
     "parsing_warnings",
-)
-
-_REVIEW_TITLE_PATTERNS = (
-    re.compile(r"\breview\b", re.IGNORECASE),
-    re.compile(r"\boverview\b", re.IGNORECASE),
-    re.compile(r"\bperspective\b", re.IGNORECASE),
-    re.compile(r"\bprogress\b", re.IGNORECASE),
-    re.compile(r"\brecent advances?\b", re.IGNORECASE),
-    re.compile(r"\bsurvey\b", re.IGNORECASE),
-    re.compile(r"\bmini[- ]?review\b", re.IGNORECASE),
-    re.compile(r"(综述|进展|评述)"),
-)
-
-_REVIEW_TEXT_HINTS = (
-    "this review",
-    "we review",
-    "recent advances",
-    "state of the art",
-    "in this perspective",
-    "this overview",
-    "综述",
-    "进展",
-    "评述",
-)
-
-_PROCEDURAL_HINTS = (
-    "stir",
-    "mix",
-    "dissolve",
-    "synthes",
-    "fabricat",
-    "prepare",
-    "hydrothermal",
-    "solvothermal",
-    "calcine",
-    "anneal",
-    "wash",
-    "dry",
-    "heat",
-    "cure",
-    "cast",
-    "filter",
-    "centrifug",
-    "加入",
-    "搅拌",
-    "溶解",
-    "制备",
-    "退火",
-    "烧结",
-    "洗涤",
-    "干燥",
-    "加热",
-)
-
-_CONDITION_PATTERNS = (
-    re.compile(r"\b\d+(?:\.\d+)?\s*(?:c|°c|k|f)\b", re.IGNORECASE),
-    re.compile(r"\b\d+(?:\.\d+)?\s*(?:h|hr|hrs|hour|hours|min|mins|minute|minutes|s|sec|secs)\b", re.IGNORECASE),
-    re.compile(r"\b\d+(?:\.\d+)?\s*(?:rpm|wt%|vol%|mol%|m|mm|um|μm|nm)\b", re.IGNORECASE),
-    re.compile(r"\b(?:under|in)\s+(?:air|argon|ar|nitrogen|n2|vacuum)\b", re.IGNORECASE),
 )
 
 _TITLE_FIELD_CANDIDATES = (
@@ -309,9 +258,7 @@ class DocumentProfileService:
 
     def count_protocol_suitable(self, profiles: pd.DataFrame) -> int:
         normalized = self._normalize_profiles_table(profiles, None)
-        return int(
-            normalized["protocol_extractable"].isin(["yes", "partial"]).sum()
-        )
+        return int(normalized["protocol_extractable"].isin(list(PROTOCOL_SUITABLE_EXTRACTABILITY)).sum())
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)
@@ -346,155 +293,24 @@ class DocumentProfileService:
         )
         analysis_title = str(row.get("title") or document_id)
         text = str(row.get("text") or "")
-        lowered_title = analysis_title.lower()
-        lowered_text = text.lower()
-
-        method_sections = [
-            section for section in sections if section.get("section_type") == "methods"
-        ]
-        characterization_sections = [
-            section
-            for section in sections
-            if section.get("section_type") == "characterization"
-        ]
-        method_text = "\n".join(str(section.get("text") or "") for section in method_sections)
-
-        review_title_hits = sum(
-            1 for pattern in _REVIEW_TITLE_PATTERNS if pattern.search(analysis_title)
+        profile = analyze_document_profile(
+            collection_id=collection_id,
+            document_id=document_id,
+            title=title,
+            source_filename=source_filename,
+            analysis_title=analysis_title,
+            text=text,
+            sections=sections,
         )
-        review_text_hits = sum(1 for hint in _REVIEW_TEXT_HINTS if hint in lowered_text)
-        procedural_hits = self._count_keyword_hits(
-            method_text or lowered_text,
-            _PROCEDURAL_HINTS,
-        )
-        condition_hits = self._count_pattern_hits(method_text or text, _CONDITION_PATTERNS)
-
-        experimental_score = 0
-        review_score = 0
-        signals: list[str] = []
-        warnings: list[str] = []
-
-        if method_sections:
-            experimental_score += 2
-            signals.append("methods_section_detected")
-        else:
-            warnings.append("missing_methods_section")
-        if characterization_sections:
-            experimental_score += 1
-            signals.append("characterization_section_detected")
-        if procedural_hits >= 2:
-            experimental_score += 2
-            signals.append("procedural_actions_detected")
-        elif procedural_hits == 1:
-            experimental_score += 1
-            signals.append("limited_procedural_actions_detected")
-        if condition_hits >= 2:
-            experimental_score += 1
-            signals.append("condition_markers_detected")
-        elif condition_hits == 1:
-            signals.append("limited_condition_markers_detected")
-        else:
-            warnings.append("critical_parameters_incomplete")
-
-        if review_title_hits:
-            review_score += 2
-            signals.append("review_title_detected")
-        if review_text_hits:
-            review_score += 1
-            signals.append("review_language_detected")
-
-        if review_score >= 2 and experimental_score >= 2:
-            doc_type = "mixed"
-            warnings.append("review_contamination_detected")
-        elif review_score >= 2:
-            doc_type = "review"
-        elif experimental_score >= 3:
-            doc_type = "experimental"
-        else:
-            doc_type = "uncertain"
-            warnings.append("document_type_uncertain")
-
-        if not text.strip():
-            warnings.append("missing_document_text")
-        elif len(text.strip()) < 120:
-            warnings.append("limited_document_text")
-
-        if doc_type == "review":
-            protocol_extractable = "no"
-        elif doc_type == "experimental":
-            if method_sections and procedural_hits >= 2 and condition_hits >= 2:
-                protocol_extractable = "yes"
-            elif method_sections or procedural_hits > 0:
-                protocol_extractable = "partial"
-            else:
-                protocol_extractable = "uncertain"
-        elif doc_type == "mixed":
-            protocol_extractable = "partial" if (method_sections or procedural_hits > 0) else "no"
-        else:
-            if method_sections or procedural_hits > 0:
-                protocol_extractable = "partial"
-            elif review_score > 0:
-                protocol_extractable = "no"
-            else:
-                protocol_extractable = "uncertain"
-
-        if protocol_extractable in {"partial", "uncertain"} and condition_hits == 0:
-            warnings.append("condition_context_weak")
-
-        confidence = self._compute_confidence(
-            doc_type=doc_type,
-            protocol_extractable=protocol_extractable,
-            signal_count=len(set(signals)),
-            warning_count=len(set(warnings)),
-            review_score=review_score,
-            experimental_score=experimental_score,
-        )
-
-        return {
-            "document_id": document_id,
-            "collection_id": collection_id,
-            "title": title,
-            "source_filename": source_filename,
-            "doc_type": doc_type,
-            "protocol_extractable": protocol_extractable,
-            "protocol_extractability_signals": sorted(set(signals)),
-            "parsing_warnings": sorted(set(warnings)),
-            "confidence": confidence,
-        }
+        return profile.to_record()
 
     def summarize_document_profiles(self, profiles: pd.DataFrame) -> dict[str, Any]:
         normalized = self._normalize_profiles_table(profiles, None)
-        total_documents = len(normalized)
-        by_doc_type = dict(
-            sorted(Counter(str(value) for value in normalized["doc_type"]).items())
+        summary = summarize_document_profile_collection(
+            DocumentProfile.from_mapping(dict(row))
+            for _, row in normalized.iterrows()
         )
-        by_protocol_extractable = dict(
-            sorted(
-                Counter(
-                    str(value) for value in normalized["protocol_extractable"]
-                ).items()
-            )
-        )
-
-        warnings: list[str] = []
-        review_heavy_count = by_doc_type.get("review", 0) + by_doc_type.get("mixed", 0)
-        if total_documents and review_heavy_count / total_documents >= 0.5:
-            warnings.append(
-                "Collection is review-heavy or mixed; protocol outputs should be treated cautiously."
-            )
-        if total_documents and (
-            by_protocol_extractable.get("yes", 0) + by_protocol_extractable.get("partial", 0)
-        ) == 0:
-            warnings.append("No protocol-suitable documents were detected in this collection.")
-        if by_doc_type.get("uncertain", 0) > 0:
-            warnings.append("Some documents remain uncertain and may need manual review.")
-
-        return {
-            "total_documents": total_documents,
-            "by_doc_type": by_doc_type,
-            "by_protocol_extractable": by_protocol_extractable,
-            "warnings": warnings,
-        }
+        return summary.to_payload()
 
     def _normalize_profiles_table(
         self,
@@ -556,8 +372,10 @@ class DocumentProfileService:
             "collection_id": str(row.get("collection_id") or ""),
             "title": self._normalize_optional_text(row.get("title")),
             "source_filename": self._normalize_optional_text(row.get("source_filename")),
-            "doc_type": str(row.get("doc_type") or "uncertain"),
-            "protocol_extractable": str(row.get("protocol_extractable") or "uncertain"),
+            "doc_type": str(row.get("doc_type") or DOC_TYPE_UNCERTAIN),
+            "protocol_extractable": str(
+                row.get("protocol_extractable") or PROTOCOL_EXTRACTABLE_UNCERTAIN
+            ),
             "protocol_extractability_signals": self._normalize_string_list(
                 row.get("protocol_extractability_signals")
             ),
@@ -581,42 +399,6 @@ class DocumentProfileService:
             )
             grouped.setdefault(document_id, []).append(dict(row))
         return grouped
-
-    def _count_keyword_hits(self, text: str, keywords: tuple[str, ...]) -> int:
-        lowered = str(text or "").lower()
-        return sum(1 for keyword in keywords if keyword in lowered)
-
-    def _count_pattern_hits(self, text: str, patterns: tuple[re.Pattern[str], ...]) -> int:
-        source = str(text or "")
-        return sum(1 for pattern in patterns if pattern.search(source))
-
-    def _compute_confidence(
-        self,
-        doc_type: str,
-        protocol_extractable: str,
-        signal_count: int,
-        warning_count: int,
-        review_score: int,
-        experimental_score: int,
-    ) -> float:
-        base = {
-            "experimental": 0.82,
-            "mixed": 0.72,
-            "review": 0.84,
-            "uncertain": 0.56,
-        }[doc_type]
-        if protocol_extractable == "yes":
-            base += 0.06
-        elif protocol_extractable == "partial":
-            base += 0.01
-        elif protocol_extractable == "uncertain":
-            base -= 0.04
-
-        strength = min(signal_count, 4) * 0.02
-        noise = min(warning_count, 3) * 0.03
-        if review_score >= 2 and experimental_score >= 2:
-            noise += 0.03
-        return round(max(0.5, min(0.98, base + strength - noise)), 2)
 
     def _normalize_string_list(self, value: Any) -> list[str]:
         normalized = normalize_backbone_value(value)

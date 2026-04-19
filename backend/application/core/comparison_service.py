@@ -6,6 +6,17 @@ from uuid import uuid4
 
 import pandas as pd
 
+from domain.shared.enums import (
+    COMPARABILITY_STATUS_COMPARABLE,
+    COMPARABILITY_STATUS_INSUFFICIENT,
+    COMPARABILITY_STATUS_LIMITED,
+    COMPARABILITY_STATUS_NOT_COMPARABLE,
+    EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
+    EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+    EPISTEMIC_UNRESOLVED,
+    TRACEABILITY_STATUS_DIRECT,
+    TRACEABILITY_STATUS_MISSING,
+)
 from application.source.collection_service import CollectionService
 from application.core.evidence_card_service import EvidenceCardService, EvidenceCardsNotReadyError
 from application.source.artifact_registry_service import ArtifactRegistryService
@@ -330,7 +341,10 @@ class ComparisonService:
         baseline_reference = self._safe_text(baseline.get("baseline_label"))
         baseline_normalized = baseline_reference or "unspecified baseline"
         test_condition_normalized = self._summarize_test_condition(test_condition)
-        traceability_status = self._safe_text(result_row.get("traceability_status")) or "missing"
+        traceability_status = (
+            self._safe_text(result_row.get("traceability_status"))
+            or TRACEABILITY_STATUS_MISSING
+        )
 
         missing_critical_context = self._derive_missing_critical_context(
             variant_id=variant_id,
@@ -517,7 +531,7 @@ class ComparisonService:
             missing.append("baseline_reference")
         if not test_condition_id:
             missing.append("test_condition")
-        if traceability_status != "direct":
+        if traceability_status != TRACEABILITY_STATUS_DIRECT:
             missing.append("direct_traceability")
         if not result_summary or result_summary == "Result reported":
             missing.append("result_value")
@@ -544,7 +558,7 @@ class ComparisonService:
             basis.append("baseline_resolved")
         if test_condition_id:
             basis.append("test_condition_resolved")
-        if traceability_status == "direct":
+        if traceability_status == TRACEABILITY_STATUS_DIRECT:
             basis.append("direct_traceability")
         if numeric_value is not None:
             basis.append("numeric_value_available")
@@ -588,15 +602,15 @@ class ComparisonService:
         traceability_status: str,
     ) -> str:
         missing = set(missing_critical_context)
-        if traceability_status == "missing":
-            return "insufficient"
+        if traceability_status == TRACEABILITY_STATUS_MISSING:
+            return COMPARABILITY_STATUS_INSUFFICIENT
         if {"baseline_reference", "test_condition"} <= missing:
-            return "not_comparable"
+            return COMPARABILITY_STATUS_NOT_COMPARABLE
         if "variant_link" in missing and {"baseline_reference", "test_condition"} & missing:
-            return "insufficient"
+            return COMPARABILITY_STATUS_INSUFFICIENT
         if missing:
-            return "limited"
-        return "comparable"
+            return COMPARABILITY_STATUS_LIMITED
+        return COMPARABILITY_STATUS_COMPARABLE
 
     def _requires_expert_review(
         self,
@@ -605,7 +619,7 @@ class ComparisonService:
         result_type: str,
         missing_critical_context: list[str],
     ) -> bool:
-        if comparability_status != "comparable":
+        if comparability_status != COMPARABILITY_STATUS_COMPARABLE:
             return True
         if result_type not in _SCALAR_LIKE_RESULT_TYPES:
             return True
@@ -617,11 +631,14 @@ class ComparisonService:
         comparability_status: str,
         requires_expert_review: bool,
     ) -> str:
-        if comparability_status == "comparable" and not requires_expert_review:
-            return "normalized_from_evidence"
-        if comparability_status == "limited":
-            return "inferred_with_low_confidence"
-        return "unresolved"
+        if (
+            comparability_status == COMPARABILITY_STATUS_COMPARABLE
+            and not requires_expert_review
+        ):
+            return EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+        if comparability_status == COMPARABILITY_STATUS_LIMITED:
+            return EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE
+        return EPISTEMIC_UNRESOLVED
 
     def _normalize_material_system(self, material_system: Any) -> str:
         payload = self._normalize_object(material_system) or {}
@@ -745,7 +762,7 @@ class ComparisonService:
             },
             "assessment": {
                 "comparability_status": self._safe_text(row.get("comparability_status"))
-                or "limited",
+                or COMPARABILITY_STATUS_LIMITED,
                 "comparability_warnings": self._normalize_string_list(
                     row.get("comparability_warnings")
                 ),
@@ -756,7 +773,7 @@ class ComparisonService:
                 "assessment_epistemic_status": self._safe_text(
                     row.get("assessment_epistemic_status")
                 )
-                or "unresolved",
+                or EPISTEMIC_UNRESOLVED,
             },
             "uncertainty": {
                 "missing_critical_context": missing_critical_context,

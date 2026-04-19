@@ -9,6 +9,18 @@ from uuid import uuid4
 
 import pandas as pd
 
+from domain.shared.enums import (
+    DOC_TYPE_REVIEW,
+    DOC_TYPE_UNCERTAIN,
+    EPISTEMIC_DIRECTLY_OBSERVED,
+    EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
+    EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
+    EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+    EPISTEMIC_UNRESOLVED,
+    TRACEABILITY_STATUS_DIRECT,
+    TRACEABILITY_STATUS_MISSING,
+    TRACEABILITY_STATUS_PARTIAL,
+)
 from infra.persistence.backbone_codec import (
     normalize_backbone_value,
     prepare_frame_for_storage,
@@ -65,11 +77,6 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
     "evidence_anchor_ids",
 )
 _DOMAIN_PROFILE_CORE_NEUTRAL = "core_neutral"
-_EPISTEMIC_DIRECTLY_OBSERVED = "directly_observed"
-_EPISTEMIC_NORMALIZED_FROM_EVIDENCE = "normalized_from_evidence"
-_EPISTEMIC_INFERRED_FROM_CHARACTERIZATION = "inferred_from_characterization"
-_EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE = "inferred_with_low_confidence"
-_EPISTEMIC_UNRESOLVED = "unresolved"
 _CHARACTERIZATION_COLUMNS = [
     "observation_id",
     "document_id",
@@ -611,7 +618,7 @@ class EvidenceCardService:
                             "condition_context": condition_context,
                             "evidence_anchor_ids": anchor_ids,
                             "confidence": 0.84 if observed_value is not None else 0.78,
-                            "epistemic_status": _EPISTEMIC_DIRECTLY_OBSERVED,
+                            "epistemic_status": EPISTEMIC_DIRECTLY_OBSERVED,
                         }
                     )
 
@@ -644,7 +651,7 @@ class EvidenceCardService:
                             "condition_context": self._normalize_condition_context_payload({}),
                             "evidence_anchor_ids": [],
                             "confidence": 0.68,
-                            "epistemic_status": _EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+                            "epistemic_status": EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
                         }
                     )
 
@@ -747,9 +754,9 @@ class EvidenceCardService:
                     ),
                     "confidence": 0.82 if condition_completeness == "complete" else 0.72,
                     "epistemic_status": (
-                        _EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                        EPISTEMIC_NORMALIZED_FROM_EVIDENCE
                         if condition_completeness != "unresolved"
-                        else _EPISTEMIC_UNRESOLVED
+                        else EPISTEMIC_UNRESOLVED
                     ),
                 }
             )
@@ -796,9 +803,9 @@ class EvidenceCardService:
 
             baseline_type = self._classify_baseline_type(baseline_label)
             epistemic_status = (
-                _EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                EPISTEMIC_NORMALIZED_FROM_EVIDENCE
                 if self._baseline_label_is_explicit(baseline_label)
-                else _EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE
+                else EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE
             )
             rows.append(
                 {
@@ -815,7 +822,7 @@ class EvidenceCardService:
                     ),
                     "confidence": (
                         0.8
-                        if epistemic_status == _EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                        if epistemic_status == EPISTEMIC_NORMALIZED_FROM_EVIDENCE
                         else 0.64
                     ),
                     "epistemic_status": epistemic_status,
@@ -909,7 +916,7 @@ class EvidenceCardService:
                             sample_label=sample_label,
                         ),
                         "confidence": 0.86 if sample_label and variable_value is not None else 0.76,
-                        "epistemic_status": _EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+                        "epistemic_status": EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
                     }
                 )
                 table_variant_count += 1
@@ -1075,12 +1082,14 @@ class EvidenceCardService:
                         sample_variants=sample_variants,
                     ),
                     "evidence_anchor_ids": self._extract_anchor_ids(row.get("evidence_anchors")),
-                    "traceability_status": str(row.get("traceability_status") or "missing"),
+                    "traceability_status": str(
+                        row.get("traceability_status") or TRACEABILITY_STATUS_MISSING
+                    ),
                     "result_source_type": str(row.get("evidence_source_type") or "text"),
                     "epistemic_status": (
-                        _EPISTEMIC_DIRECTLY_OBSERVED
+                        EPISTEMIC_DIRECTLY_OBSERVED
                         if str(row.get("evidence_source_type") or "") == "table"
-                        else _EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                        else EPISTEMIC_NORMALIZED_FROM_EVIDENCE
                     ),
                 }
             )
@@ -1296,7 +1305,7 @@ class EvidenceCardService:
             "structure_feature_ids": [],
             "source_anchor_ids": self._collect_document_anchor_ids(document_cards),
             "confidence": 0.62,
-            "epistemic_status": _EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
+            "epistemic_status": EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
         }
 
     def _collect_document_anchor_ids(
@@ -1866,9 +1875,9 @@ class EvidenceCardService:
     ) -> list[dict[str, Any]]:
         cards: list[dict[str, Any]] = []
         material_system = self._infer_material_system(title, text)
-        doc_type = str(profile.get("doc_type") or "uncertain")
+        doc_type = str(profile.get("doc_type") or DOC_TYPE_UNCERTAIN)
 
-        if doc_type != "review":
+        if doc_type != DOC_TYPE_REVIEW:
             for section in sections:
                 section_type = str(section.get("section_type") or "")
                 if section_type == "methods":
@@ -1973,7 +1982,7 @@ class EvidenceCardService:
                 "test": self._extract_test_context(section_text),
             }),
             "confidence": round(confidence, 2),
-            "traceability_status": "direct",
+            "traceability_status": TRACEABILITY_STATUS_DIRECT,
         }
 
     def _build_text_claim_card(
@@ -1999,7 +2008,9 @@ class EvidenceCardService:
                 "quote_span": claim_text,
             }
         ]
-        traceability_status = "direct" if text_unit_ids else "partial"
+        traceability_status = (
+            TRACEABILITY_STATUS_DIRECT if text_unit_ids else TRACEABILITY_STATUS_PARTIAL
+        )
         return {
             "evidence_id": f"ev_{uuid4().hex[:12]}",
             "document_id": document_id,
@@ -2014,7 +2025,9 @@ class EvidenceCardService:
                 "baseline": baseline,
                 "test": test_context,
             }),
-            "confidence": 0.74 if traceability_status == "direct" else 0.66,
+            "confidence": (
+                0.74 if traceability_status == TRACEABILITY_STATUS_DIRECT else 0.66
+            ),
             "traceability_status": traceability_status,
         }
 
@@ -2096,7 +2109,7 @@ class EvidenceCardService:
                             }
                         ),
                         "confidence": 0.8 if unit else 0.74,
-                        "traceability_status": "direct",
+                        "traceability_status": TRACEABILITY_STATUS_DIRECT,
                     }
                 )
 
@@ -2340,7 +2353,7 @@ class EvidenceCardService:
             "qualitative_descriptor": qualitative_descriptor,
             "source_observation_ids": source_observation_ids,
             "confidence": confidence,
-            "epistemic_status": _EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
+            "epistemic_status": EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
         }
 
     def _infer_property_type_from_card(
@@ -2668,7 +2681,9 @@ class EvidenceCardService:
             "material_system": self._normalize_material_system_payload(row.get("material_system")),
             "condition_context": self._normalize_condition_context_payload(row.get("condition_context")),
             "confidence": round(float(row.get("confidence") or 0.0), 2),
-            "traceability_status": str(row.get("traceability_status") or "missing"),
+            "traceability_status": str(
+                row.get("traceability_status") or TRACEABILITY_STATUS_MISSING
+            ),
         }
 
     def _normalize_evidence_anchors_payload(

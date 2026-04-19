@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from domain.shared.enums import (
+    DOC_TYPE_MIXED,
+    DOC_TYPE_REVIEW,
+    DOC_TYPE_UNCERTAIN,
+    PROTOCOL_EXTRACTABLE_PARTIAL,
+    PROTOCOL_EXTRACTABLE_YES,
+)
 from application.source.collection_service import CollectionService
 from application.core.document_profile_service import (
     DocumentProfileService,
@@ -189,8 +196,12 @@ class WorkspaceService:
         comparison_ready = self._artifact_ready(artifacts, "comparison_rows_ready")
         protocol_ready = self._artifact_ready(artifacts, "protocol_steps_ready")
         protocol_candidates = (
-            document_summary.get("by_protocol_extractable", {}).get("yes", 0)
-            + document_summary.get("by_protocol_extractable", {}).get("partial", 0)
+            document_summary.get("by_protocol_extractable", {}).get(
+                PROTOCOL_EXTRACTABLE_YES, 0
+            )
+            + document_summary.get("by_protocol_extractable", {}).get(
+                PROTOCOL_EXTRACTABLE_PARTIAL, 0
+            )
         )
 
         if file_count == 0:
@@ -302,7 +313,9 @@ class WorkspaceService:
         by_doc_type = document_summary.get("by_doc_type", {})
         by_protocol_extractable = document_summary.get("by_protocol_extractable", {})
 
-        review_like = int(by_doc_type.get("review", 0) or 0) + int(by_doc_type.get("mixed", 0) or 0)
+        review_like = int(by_doc_type.get(DOC_TYPE_REVIEW, 0) or 0) + int(
+            by_doc_type.get(DOC_TYPE_MIXED, 0) or 0
+        )
         if total_documents and review_like / total_documents >= 0.5:
             warnings.append(
                 {
@@ -311,7 +324,10 @@ class WorkspaceService:
                     "message": "Most documents are review-heavy or mixed, so protocol outputs may stay limited.",
                 }
             )
-        if total_documents and (int(by_protocol_extractable.get("yes", 0) or 0) + int(by_protocol_extractable.get("partial", 0) or 0)) == 0:
+        if total_documents and (
+            int(by_protocol_extractable.get(PROTOCOL_EXTRACTABLE_YES, 0) or 0)
+            + int(by_protocol_extractable.get(PROTOCOL_EXTRACTABLE_PARTIAL, 0) or 0)
+        ) == 0:
             warnings.append(
                 {
                     "code": "protocol_limited_collection",
@@ -319,7 +335,7 @@ class WorkspaceService:
                     "message": "No protocol-suitable documents were detected in this collection.",
                 }
             )
-        if int(by_doc_type.get("uncertain", 0) or 0) > 0:
+        if int(by_doc_type.get(DOC_TYPE_UNCERTAIN, 0) or 0) > 0:
             warnings.append(
                 {
                     "code": "uncertain_document_profiles",

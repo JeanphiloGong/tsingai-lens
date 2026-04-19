@@ -7,6 +7,12 @@ from typing import Any
 import pandas as pd
 from fastapi import HTTPException
 
+from domain.shared.enums import (
+    COMPARABILITY_STATUS_COMPARABLE,
+    COMPARABILITY_STATUS_INSUFFICIENT,
+    COMPARABILITY_STATUS_LIMITED,
+    COMPARABILITY_STATUS_NOT_COMPARABLE,
+)
 from infra.persistence.backbone_codec import restore_frame_from_storage
 from application.source.collection_service import CollectionService
 from application.source.artifact_registry_service import ArtifactRegistryService
@@ -279,14 +285,17 @@ def _build_projection(collection_id: str) -> _CoreReportProjection:
             if source_document_id and source_document_id not in document_ids:
                 document_ids.append(source_document_id)
 
-            comparability = _safe_text(row.get("comparability_status")) or "limited"
-            if comparability == "comparable":
+            comparability = (
+                _safe_text(row.get("comparability_status"))
+                or COMPARABILITY_STATUS_LIMITED
+            )
+            if comparability == COMPARABILITY_STATUS_COMPARABLE:
                 comparable_count += 1
-            elif comparability == "limited":
+            elif comparability == COMPARABILITY_STATUS_LIMITED:
                 limited_count += 1
-            elif comparability == "insufficient":
+            elif comparability == COMPARABILITY_STATUS_INSUFFICIENT:
                 insufficient_count += 1
-            elif comparability == "not_comparable":
+            elif comparability == COMPARABILITY_STATUS_NOT_COMPARABLE:
                 not_comparable_count += 1
 
             for evidence_id in _string_list(row.get("supporting_evidence_ids")):

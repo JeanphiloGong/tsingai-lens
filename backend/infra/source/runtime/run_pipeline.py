@@ -12,14 +12,14 @@ from typing import Any
 
 import pandas as pd
 
-from retrieval.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.runtime.run_context import create_run_context
+from infra.source.runtime.storage.table_io import write_table_to_storage
 from infra.source.runtime.typing.context import PipelineRunContext
 from infra.source.runtime.typing.pipeline import Pipeline
 from infra.source.runtime.typing.pipeline_run_result import PipelineRunResult
 from retrieval.utils.api import create_cache_from_config, create_storage_from_config
-from retrieval.utils.storage import write_table_to_storage
 
 logger = logging.getLogger(__name__)
 

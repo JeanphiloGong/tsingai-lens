@@ -1,9 +1,4 @@
-"""
-Indexing API for GraphRAG.
-
-WARNING: This API is under development and may undergo changes in future releases.
-Backwards compatibility is not guaranteed at this time.
-"""
+"""Source indexing entrypoint."""
 
 import logging
 from typing import Any
@@ -11,10 +6,10 @@ from typing import Any
 import pandas as pd
 
 import infra.source.runtime.workflows as _source_runtime_workflows
-from retrieval.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
-from retrieval.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.config.pipeline_mode import IndexingMethod
 from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.runtime.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
+from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.runtime.run_pipeline import run_pipeline
 from infra.source.runtime.run_context import create_callback_chain
 from infra.source.runtime.typing.pipeline_run_result import PipelineRunResult

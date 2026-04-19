@@ -6,11 +6,11 @@
 
 from dataclasses import dataclass
 
-from retrieval.cache.pipeline_cache import PipelineCache
-from retrieval.callbacks.workflow_callbacks import WorkflowCallbacks
+from infra.source.runtime.cache.pipeline_cache import PipelineCache
+from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
+from infra.source.runtime.storage.pipeline_storage import PipelineStorage
 from infra.source.runtime.typing.state import PipelineState
 from infra.source.runtime.typing.stats import PipelineRunStats
-from retrieval.storage.pipeline_storage import PipelineStorage
 
 
 @dataclass

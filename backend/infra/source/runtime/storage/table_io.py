@@ -1,0 +1,43 @@
+# Copyright (c) 2024 Microsoft Corporation.
+# Licensed under the MIT License
+
+"""Parquet table read/write helpers for the Source runtime."""
+
+import logging
+from io import BytesIO
+
+import pandas as pd
+
+from infra.source.runtime.storage.pipeline_storage import PipelineStorage
+
+logger = logging.getLogger(__name__)
+
+
+async def load_table_from_storage(name: str, storage: PipelineStorage) -> pd.DataFrame:
+    """Load a parquet table from storage."""
+    filename = f"{name}.parquet"
+    if not await storage.has(filename):
+        raise ValueError(f"Could not find {filename} in storage!")
+    try:
+        logger.debug("reading table from storage: %s", filename)
+        return pd.read_parquet(BytesIO(await storage.get(filename, as_bytes=True)))
+    except Exception:
+        logger.exception("error loading table from storage: %s", filename)
+        raise
+
+
+async def write_table_to_storage(
+    table: pd.DataFrame, name: str, storage: PipelineStorage
+) -> None:
+    """Write a parquet table to storage."""
+    await storage.set(f"{name}.parquet", table.to_parquet())
+
+
+async def delete_table_from_storage(name: str, storage: PipelineStorage) -> None:
+    """Delete a parquet table from storage."""
+    await storage.delete(f"{name}.parquet")
+
+
+async def storage_has_table(name: str, storage: PipelineStorage) -> bool:
+    """Check if a parquet table exists in storage."""
+    return await storage.has(f"{name}.parquet")

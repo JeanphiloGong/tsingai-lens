@@ -3,16 +3,18 @@
 
 """Utility functions for the GraphRAG run module."""
 
-from retrieval.cache.memory_pipeline_cache import InMemoryCache
-from retrieval.cache.pipeline_cache import PipelineCache
-from retrieval.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
-from retrieval.callbacks.workflow_callbacks import WorkflowCallbacks
-from retrieval.callbacks.workflow_callbacks_manager import WorkflowCallbacksManager
+from infra.source.runtime.cache.memory_pipeline_cache import InMemoryCache
+from infra.source.runtime.cache.pipeline_cache import PipelineCache
+from infra.source.runtime.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
+from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
+from infra.source.runtime.callbacks.workflow_callbacks_manager import (
+    WorkflowCallbacksManager,
+)
+from infra.source.runtime.storage.memory_pipeline_storage import MemoryPipelineStorage
+from infra.source.runtime.storage.pipeline_storage import PipelineStorage
 from infra.source.runtime.typing.context import PipelineRunContext
 from infra.source.runtime.typing.state import PipelineState
 from infra.source.runtime.typing.stats import PipelineRunStats
-from retrieval.storage.memory_pipeline_storage import MemoryPipelineStorage
-from retrieval.storage.pipeline_storage import PipelineStorage
 
 
 def create_run_context(

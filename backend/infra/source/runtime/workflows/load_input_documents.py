@@ -5,12 +5,12 @@ import logging
 import pandas as pd
 
 from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.runtime.storage.pipeline_storage import PipelineStorage
+from infra.source.runtime.storage.table_io import write_table_to_storage
 from retrieval.config.models.input_config import InputConfig
 from retrieval.index.input.factory import create_input
 from infra.source.runtime.typing.context import PipelineRunContext
 from infra.source.runtime.typing.workflow import WorkflowFunctionOutput
-from retrieval.storage.pipeline_storage import PipelineStorage
-from retrieval.utils.storage import write_table_to_storage
 
 logger = logging.getLogger(__name__)
 

@@ -9,9 +9,12 @@ import pandas as pd
 
 from infra.source.config.source_runtime_config import GraphRagConfig
 from infra.source.contracts.artifact_schemas import DOCUMENTS_FINAL_COLUMNS
+from infra.source.runtime.storage.table_io import (
+    load_table_from_storage,
+    write_table_to_storage,
+)
 from infra.source.runtime.typing.context import PipelineRunContext
 from infra.source.runtime.typing.workflow import WorkflowFunctionOutput
-from retrieval.utils.storage import load_table_from_storage, write_table_to_storage
 
 logger = logging.getLogger(__name__)
 

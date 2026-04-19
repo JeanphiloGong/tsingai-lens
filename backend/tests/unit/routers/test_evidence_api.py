@@ -23,11 +23,15 @@ from infra.source.runtime.source_evidence import build_sections, build_table_cel
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
     def fake_to_parquet(self, path, index=False):  # noqa: ANN001
         frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
+        payload = {
+            "columns": list(frame.columns),
+            "records": frame.to_dict(orient="records"),
+        }
+        Path(path).write_text(json.dumps(payload), encoding="utf-8")
 
     def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
+        return pd.DataFrame(payload["records"], columns=payload["columns"])
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)

@@ -21,6 +21,9 @@ This node owns the collection workspace route family in the frontend.
 - [`core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md`](core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md)
   Frontend-local graph cutover plan for the lean graph contract, canonical
   drilldown, and neighbors expansion
+- [`graph-exploration-interaction-and-layout-proposal.md`](graph-exploration-interaction-and-layout-proposal.md)
+  Follow-on proposal for graph focus, neighborhood expansion gestures, and
+  in-node card layout on the Cytoscape graph page
 - [`materials-comparison-v2-frontend-alignment-plan.md`](materials-comparison-v2-frontend-alignment-plan.md)
   Frontend-local contract cutover plan for the nested comparisons response
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)

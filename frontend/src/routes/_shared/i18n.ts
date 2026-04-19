@@ -721,6 +721,7 @@ const translations: Record<Language, Translations> = {
 			visibleNodes: 'Visible nodes',
 			visibleEdges: 'Visible edges',
 			exportImage: 'Export PNG',
+			resetView: 'Reset view',
 			imageExported: 'Image exported',
 			download: 'Download GraphML',
 			downloading: 'Preparing...',
@@ -728,6 +729,8 @@ const translations: Record<Language, Translations> = {
 			maxNodesLabel: 'Max nodes',
 			minWeightLabel: 'Min weight',
 			truncated: 'Truncated to max nodes',
+			interactionHint:
+				'Single click focuses a node and loads detail. Double click a node expands its 1-hop neighborhood. Double click blank space resets the visible view.',
 			detailsTitle: 'Selection',
 			detailsClear: 'Clear',
 			detailsEmpty: 'Click a node or edge to inspect structure and load detail.',
@@ -1578,6 +1581,7 @@ const translations: Record<Language, Translations> = {
 			visibleNodes: '可见节点',
 			visibleEdges: '可见边',
 			exportImage: '导出 PNG',
+			resetView: '重置视图',
 			imageExported: '图片已导出',
 			download: '下载 GraphML',
 			downloading: '生成中...',
@@ -1585,6 +1589,8 @@ const translations: Record<Language, Translations> = {
 			maxNodesLabel: '最大节点数',
 			minWeightLabel: '最小权重',
 			truncated: '已按最大节点数截断',
+			interactionHint:
+				'单击节点会聚焦并加载详情，双击节点会增量展开 1-hop 邻域，双击空白处会把当前可见图重新收回到视口内。',
 			detailsTitle: '详情',
 			detailsClear: '清除',
 			detailsEmpty: '点击节点或边查看结构，并按需加载详情。',

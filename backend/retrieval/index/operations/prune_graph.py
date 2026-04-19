@@ -9,7 +9,7 @@ import graspologic as glc
 import networkx as nx
 import numpy as np
 
-import retrieval.data_model.schemas as schemas
+import infra.source.contracts.artifact_schemas as schemas
 
 if TYPE_CHECKING:
     from networkx.classes.reportviews import DegreeView

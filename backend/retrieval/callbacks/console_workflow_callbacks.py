@@ -4,7 +4,7 @@
 """A logger that emits updates from the indexing engine to the console."""
 
 from retrieval.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
-from retrieval.index.typing.pipeline_run_result import PipelineRunResult
+from infra.source.runtime.typing.pipeline_run_result import PipelineRunResult
 from retrieval.logger.progress import Progress
 
 # ruff: noqa: T201

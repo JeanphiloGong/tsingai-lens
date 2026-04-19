@@ -6,13 +6,13 @@ from pathlib import Path
 import pytest
 
 from application.source.collection_service import CollectionService
-from infra.ingestion.normalized_import import (
+from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
     NormalizedImportDocument,
     NormalizedImportSourceMetadata,
     NormalizedImportTextUnit,
 )
-from infra.ingestion.source_adapter import SourceAdapterRequest
+from infra.source.ingestion.source_adapter import SourceAdapterRequest
 
 
 def test_collection_service_normalizes_legacy_meta(tmp_path):

@@ -10,7 +10,7 @@ from application.derived.protocol.artifact_service import (
     persist_procedure_blocks,
     persist_sections,
 )
-from retrieval.index.operations.source_evidence import build_sections
+from infra.source.runtime.source_evidence import build_sections
 
 
 @dataclass(frozen=True)

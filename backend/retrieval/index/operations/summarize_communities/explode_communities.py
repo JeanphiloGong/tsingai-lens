@@ -5,7 +5,7 @@
 
 import pandas as pd
 
-from retrieval.data_model.schemas import (
+from infra.source.contracts.artifact_schemas import (
     COMMUNITY_ID,
 )
 

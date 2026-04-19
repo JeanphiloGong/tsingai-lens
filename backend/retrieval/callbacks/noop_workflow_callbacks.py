@@ -4,7 +4,7 @@
 """A no-op implementation of WorkflowCallbacks."""
 
 from retrieval.callbacks.workflow_callbacks import WorkflowCallbacks
-from retrieval.index.typing.pipeline_run_result import PipelineRunResult
+from infra.source.runtime.typing.pipeline_run_result import PipelineRunResult
 from retrieval.logger.progress import Progress
 
 

@@ -36,7 +36,7 @@ def _resolve_name_list(value: ast.AST, constants: dict[str, ast.AST]) -> list[st
 
 def test_text_unit_final_columns_only_expose_minimal_source_handoff():
     backend_root = Path(__file__).resolve().parents[3]
-    schema_path = backend_root / "retrieval" / "data_model" / "schemas.py"
+    schema_path = backend_root / "infra" / "source" / "contracts" / "artifact_schemas.py"
     assignments = _assignments_by_name(schema_path)
 
     columns = _resolve_name_list(assignments["TEXT_UNITS_FINAL_COLUMNS"], assignments)
@@ -52,7 +52,9 @@ def test_text_unit_final_columns_only_expose_minimal_source_handoff():
 
 def test_pipeline_factory_defaults_to_minimal_source_handoff():
     backend_root = Path(__file__).resolve().parents[3]
-    factory_path = backend_root / "retrieval" / "index" / "workflows" / "factory.py"
+    factory_path = (
+        backend_root / "infra" / "source" / "runtime" / "workflows" / "factory.py"
+    )
     source = factory_path.read_text(encoding="utf-8")
     assignments = _assignments_by_name(factory_path)
 
@@ -61,6 +63,8 @@ def test_pipeline_factory_defaults_to_minimal_source_handoff():
         "create_base_text_units",
         "create_final_documents",
         "create_final_text_units",
+        "create_sections",
+        "create_table_cells",
     ]
     assert 'IndexingMethod.Standard, ["load_input_documents", *_source_handoff_workflows]' in source
     assert 'IndexingMethod.Fast, ["load_input_documents", *_source_handoff_workflows]' in source
@@ -68,7 +72,14 @@ def test_pipeline_factory_defaults_to_minimal_source_handoff():
 
 def test_create_final_text_units_no_longer_loads_legacy_graph_artifacts():
     backend_root = Path(__file__).resolve().parents[3]
-    workflow_path = backend_root / "retrieval" / "index" / "workflows" / "create_final_text_units.py"
+    workflow_path = (
+        backend_root
+        / "infra"
+        / "source"
+        / "runtime"
+        / "workflows"
+        / "create_final_text_units.py"
+    )
     source = workflow_path.read_text(encoding="utf-8")
 
     assert '"entities"' not in source

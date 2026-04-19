@@ -6,7 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
-from infra.ingestion import (
+from infra.source.ingestion import (
     NormalizedImportBatch,
     SourceAdapter,
     SourceAdapterRequest,

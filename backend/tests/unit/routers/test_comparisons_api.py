@@ -18,7 +18,7 @@ from application.core.comparison_service import ComparisonService
 from application.core.document_profile_service import DocumentProfileService
 from application.core.evidence_card_service import EvidenceCardService
 from controllers.core import comparisons as comparisons_controller
-from retrieval.index.operations.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001

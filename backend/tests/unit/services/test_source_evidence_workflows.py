@@ -5,14 +5,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from retrieval.index.operations.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 
 def test_default_source_pipeline_includes_sections_and_table_cells():
     factory_path = (
         Path(__file__).resolve().parents[3]
-        / "retrieval"
-        / "index"
+        / "infra"
+        / "source"
+        / "runtime"
         / "workflows"
         / "factory.py"
     )

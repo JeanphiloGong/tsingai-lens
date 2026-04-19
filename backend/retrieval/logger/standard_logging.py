@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 from utils.logger import setup_logger
 
 if TYPE_CHECKING:
-    from retrieval.config.models.graph_rag_config import GraphRagConfig
+    from infra.source.config.source_runtime_config import GraphRagConfig
 
 DEFAULT_LOG_FILENAME = "indexing-engine.log"
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from application.source.artifact_input_service import resolve_collection_artifact_paths
-from retrieval.data_model.schemas import (
+from infra.source.contracts.artifact_schemas import (
     DOCUMENTS_FINAL_COLUMNS,
     SECTIONS_FINAL_COLUMNS,
     TABLE_CELLS_FINAL_COLUMNS,

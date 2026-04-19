@@ -9,7 +9,7 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
 from application.core.workspace_overview_service import WorkspaceService
-from retrieval.index.operations.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001

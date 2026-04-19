@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from retrieval.config.models.language_model_config import (
         LanguageModelConfig,
     )
-    from retrieval.index.typing.error_handler import ErrorHandlerFn
+    from infra.source.runtime.typing.error_handler import ErrorHandlerFn
 
 logger = logging.getLogger(__name__)
 

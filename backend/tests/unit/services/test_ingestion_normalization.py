@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from infra.ingestion.normalized_import import normalize_upload
+from infra.source.ingestion.normalized_import import normalize_upload
 
 
 def test_normalize_upload_builds_text_batch_for_plain_text():
@@ -30,7 +30,7 @@ def test_normalize_upload_builds_text_batch_for_plain_text():
 
 def test_normalize_upload_uses_pdf_parser_for_pdf(monkeypatch):
     monkeypatch.setattr(
-        "infra.ingestion.normalized_import.pdf_to_text",
+        "infra.source.ingestion.normalized_import.pdf_to_text",
         lambda content: "Parsed PDF text",
     )
 

@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 import pandas as pd
 
-import retrieval.data_model.schemas as schemas
+import infra.source.contracts.artifact_schemas as schemas
 from retrieval.cache.pipeline_cache import PipelineCache
 from retrieval.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
 from retrieval.callbacks.workflow_callbacks import WorkflowCallbacks

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from retrieval.data_model.schemas import COMMUNITY_REPORTS_FINAL_COLUMNS
+from infra.source.contracts.artifact_schemas import COMMUNITY_REPORTS_FINAL_COLUMNS
 
 
 def finalize_community_reports(

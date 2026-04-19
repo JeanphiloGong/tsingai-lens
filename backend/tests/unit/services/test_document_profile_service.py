@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from application.core.document_profile_service import DocumentProfileService
-from retrieval.index.operations.source_evidence import build_sections
+from infra.source.runtime.source_evidence import build_sections
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001

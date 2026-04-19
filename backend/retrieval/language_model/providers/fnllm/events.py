@@ -7,7 +7,7 @@ from typing import Any
 
 from fnllm.events import LLMEvents
 
-from retrieval.index.typing.error_handler import ErrorHandlerFn
+from infra.source.runtime.typing.error_handler import ErrorHandlerFn
 
 
 class FNLLMEvents(LLMEvents):

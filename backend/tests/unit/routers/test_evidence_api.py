@@ -17,7 +17,7 @@ from application.source.collection_service import CollectionService
 from application.core.document_profile_service import DocumentProfileService
 from application.core.evidence_card_service import EvidenceCardService
 from controllers.core import evidence as evidence_controller
-from retrieval.index.operations.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001

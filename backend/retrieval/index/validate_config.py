@@ -8,7 +8,7 @@ import logging
 import sys
 
 from retrieval.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
-from retrieval.config.models.graph_rag_config import GraphRagConfig
+from infra.source.config.source_runtime_config import GraphRagConfig
 from retrieval.language_model.manager import ModelManager
 
 logger = logging.getLogger(__name__)

@@ -3,7 +3,7 @@
 
 """A module containing get_embedding_settings."""
 
-from retrieval.config.models.graph_rag_config import GraphRagConfig
+from infra.source.config.source_runtime_config import GraphRagConfig
 
 
 def get_embedding_settings(

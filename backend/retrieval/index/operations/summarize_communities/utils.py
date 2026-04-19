@@ -5,7 +5,7 @@
 
 import pandas as pd
 
-import retrieval.data_model.schemas as schemas
+import infra.source.contracts.artifact_schemas as schemas
 
 
 def get_levels(

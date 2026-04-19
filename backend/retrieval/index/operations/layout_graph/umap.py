@@ -14,7 +14,7 @@ from retrieval.index.operations.layout_graph.typing import (
     GraphLayout,
     NodePosition,
 )
-from retrieval.index.typing.error_handler import ErrorHandlerFn
+from infra.source.runtime.typing.error_handler import ErrorHandlerFn
 
 # TODO: This could be handled more elegantly, like what columns to use
 # for "size" or "cluster"

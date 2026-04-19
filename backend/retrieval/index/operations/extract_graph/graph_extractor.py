@@ -13,7 +13,7 @@ from typing import Any
 import networkx as nx
 
 from retrieval.config.defaults import retrieval_config_defaults
-from retrieval.index.typing.error_handler import ErrorHandlerFn
+from infra.source.runtime.typing.error_handler import ErrorHandlerFn
 from retrieval.index.utils.string import clean_str
 from retrieval.language_model.protocol.base import ChatModel
 from retrieval.prompts.index.extract_graph import (

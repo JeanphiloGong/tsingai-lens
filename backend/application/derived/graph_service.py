@@ -9,7 +9,7 @@ from application.derived.graph_projection_service import (
     missing_core_graph_artifacts,
 )
 from application.source.artifact_registry_service import ArtifactRegistryService
-from infra.graph.graphml import to_graphml as render_graphml
+from infra.derived.graph.graphml import to_graphml as render_graphml
 
 
 artifact_registry_service = ArtifactRegistryService()

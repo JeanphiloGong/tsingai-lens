@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
-from retrieval.index.typing.error_handler import ErrorHandlerFn
+from infra.source.runtime.typing.error_handler import ErrorHandlerFn
 from retrieval.language_model.protocol.base import ChatModel
 from retrieval.prompts.index.community_report import COMMUNITY_REPORT_PROMPT
 

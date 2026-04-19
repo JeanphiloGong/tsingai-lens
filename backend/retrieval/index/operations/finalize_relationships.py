@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from retrieval.data_model.schemas import RELATIONSHIPS_FINAL_COLUMNS
+from infra.source.contracts.artifact_schemas import RELATIONSHIPS_FINAL_COLUMNS
 from retrieval.index.operations.compute_degree import compute_degree
 from retrieval.index.operations.compute_edge_combined_degree import (
     compute_edge_combined_degree,

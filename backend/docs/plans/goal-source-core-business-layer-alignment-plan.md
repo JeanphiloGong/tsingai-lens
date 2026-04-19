@@ -29,12 +29,20 @@ Status as of 2026-04-19:
 - Source contracts are already being frozen in runtime
 - Core-first graph and report cutover has already happened
 - public query has already been retired
-- code packaging still does not reflect the business-layer split clearly
+- `application/`, `controllers/`, and `infra/` now expose the business-layer
+  split explicitly
+- active Source entrypoints now live under `infra/source/*`
+- retired GraphRAG public surfaces such as `retrieval/__main__`,
+  `retrieval/api`, `retrieval/cli`, and `retrieval/prompt_tune` have already
+  been removed
 
-The main remaining mismatch is structural:
+The main remaining mismatch is no longer package visibility.
+It is residual engine ownership:
 
-- technical layers are visible
-- business layers are still scattered
+- active Source runtime still depends on internal engine modules under
+  `retrieval/*`
+- some backend docs still describe the old tree more loosely than the code now
+  does
 
 ## Why This Plan Exists
 

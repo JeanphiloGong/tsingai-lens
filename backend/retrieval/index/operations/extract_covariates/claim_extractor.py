@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from retrieval.config.defaults import retrieval_config_defaults
-from retrieval.index.typing.error_handler import ErrorHandlerFn
+from infra.source.runtime.typing.error_handler import ErrorHandlerFn
 from retrieval.language_model.protocol.base import ChatModel
 from retrieval.prompts.index.extract_claims import (
     CONTINUE_PROMPT,

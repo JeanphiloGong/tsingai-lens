@@ -6,7 +6,7 @@
 from pathlib import Path
 from typing import Any
 
-from retrieval.config.models.graph_rag_config import GraphRagConfig
+from infra.source.config.source_runtime_config import GraphRagConfig
 
 
 def create_graphrag_config(

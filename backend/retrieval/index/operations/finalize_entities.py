@@ -8,7 +8,7 @@ from uuid import uuid4
 import pandas as pd
 
 from retrieval.config.models.embed_graph_config import EmbedGraphConfig
-from retrieval.data_model.schemas import ENTITIES_FINAL_COLUMNS
+from infra.source.contracts.artifact_schemas import ENTITIES_FINAL_COLUMNS
 from retrieval.index.operations.compute_degree import compute_degree
 from retrieval.index.operations.create_graph import create_graph
 from retrieval.index.operations.embed_graph.embed_graph import embed_graph

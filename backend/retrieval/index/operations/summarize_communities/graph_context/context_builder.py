@@ -8,7 +8,7 @@ from typing import cast
 
 import pandas as pd
 
-import retrieval.data_model.schemas as schemas
+import infra.source.contracts.artifact_schemas as schemas
 from retrieval.callbacks.workflow_callbacks import WorkflowCallbacks
 from retrieval.index.operations.summarize_communities.build_mixed_context import (
     build_mixed_context,

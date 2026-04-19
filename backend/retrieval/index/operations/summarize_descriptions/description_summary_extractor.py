@@ -6,7 +6,7 @@
 import json
 from dataclasses import dataclass
 
-from retrieval.index.typing.error_handler import ErrorHandlerFn
+from infra.source.runtime.typing.error_handler import ErrorHandlerFn
 from retrieval.language_model.protocol.base import ChatModel
 from retrieval.prompts.index.summarize_descriptions import SUMMARIZE_PROMPT
 from retrieval.tokenizer.get_tokenizer import get_tokenizer

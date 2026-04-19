@@ -11,7 +11,7 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
-from retrieval.index.operations.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 try:
     from fastapi.testclient import TestClient

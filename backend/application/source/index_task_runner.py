@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from config import CONFIG_DIR
-from retrieval.config.enums import IndexingMethod
+from infra.source.config.pipeline_mode import IndexingMethod
 
 from application.core.comparison_service import ComparisonService
 from application.source.collection_service import CollectionService
@@ -18,12 +18,12 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - exercised indirectly in runtime, patched in tests
-    from retrieval.api.index import build_index  # type: ignore
+    from infra.source.runtime.build_index import build_index  # type: ignore
 except Exception:  # noqa: BLE001
     build_index = None
 
 try:  # pragma: no cover - exercised indirectly in runtime, patched in tests
-    from retrieval.config.load_config import load_config  # type: ignore
+    from infra.source.config.load_config import load_config  # type: ignore
 except Exception:  # noqa: BLE001
     load_config = None
 
@@ -63,7 +63,7 @@ class IndexTaskRunner:
     def _resolve_load_config(self):
         global load_config
         if load_config is None:
-            from retrieval.config.load_config import load_config as resolved_load_config
+            from infra.source.config.load_config import load_config as resolved_load_config
 
             load_config = resolved_load_config
         return load_config
@@ -71,7 +71,7 @@ class IndexTaskRunner:
     def _resolve_build_index(self):
         global build_index
         if build_index is None:
-            from retrieval.api.index import build_index as resolved_build_index
+            from infra.source.runtime.build_index import build_index as resolved_build_index
 
             build_index = resolved_build_index
         return build_index

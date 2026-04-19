@@ -16,7 +16,7 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.document_profile_service import DocumentProfileService
 from controllers.core import documents as documents_controller
-from retrieval.index.operations.source_evidence import build_sections
+from infra.source.runtime.source_evidence import build_sections
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001

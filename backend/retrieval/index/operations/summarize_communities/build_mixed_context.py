@@ -4,7 +4,7 @@
 
 import pandas as pd
 
-import retrieval.data_model.schemas as schemas
+import infra.source.contracts.artifact_schemas as schemas
 from retrieval.index.operations.summarize_communities.graph_context.sort_context import (
     sort_context,
 )

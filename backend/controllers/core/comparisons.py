@@ -66,12 +66,28 @@ async def list_collection_comparisons(
     collection_id: str,
     limit: Annotated[int, Query(ge=1, le=500, description="返回数量")] = 50,
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
+    material_system_normalized: Annotated[
+        str | None, Query(description="按标准化材料体系筛选")
+    ] = None,
+    property_normalized: Annotated[
+        str | None, Query(description="按标准化性质指标筛选")
+    ] = None,
+    test_condition_normalized: Annotated[
+        str | None, Query(description="按标准化测试条件筛选")
+    ] = None,
+    baseline_normalized: Annotated[
+        str | None, Query(description="按标准化 baseline 筛选")
+    ] = None,
 ) -> ComparisonRowListResponse:
     try:
         payload = comparison_service.list_comparison_rows(
             collection_id,
             offset=offset,
             limit=limit,
+            material_system_normalized=material_system_normalized,
+            property_normalized=property_normalized,
+            test_condition_normalized=test_condition_normalized,
+            baseline_normalized=baseline_normalized,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

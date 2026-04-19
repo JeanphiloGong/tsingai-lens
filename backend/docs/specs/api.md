@@ -342,6 +342,13 @@ comparison 对 traceback 的依赖约定：
 
 这是 Lens v1 的主 collection-facing 比较资源。
 
+列表接口支持这些可选过滤参数：
+
+- `material_system_normalized`
+- `property_normalized`
+- `test_condition_normalized`
+- `baseline_normalized`
+
 最小返回结构：
 
 - `collection_id`
@@ -409,10 +416,17 @@ Graph 语义约束：
   `id / label / type / degree`
 - graph edge 只保留：
   `id / source / target / weight / edge_description`
+- graph node `type` 当前可以是：
+  `document | evidence | comparison | material | property | test_condition | baseline`
+- graph edge `edge_description` 当前可以是：
+  `document_to_evidence | evidence_to_comparison | comparison_to_material |
+  comparison_to_property | comparison_to_test_condition | comparison_to_baseline`
 - `/graph/nodes/{node_id}/neighbors` 返回中心节点的一跳邻域，字段与 `/graph`
   保持同一精简结构
 - 节点详情不再经由 graph 聚合透出；前端应根据 `doc:` / `evi:` / `cmp:`
   前缀回到 document / evidence / comparison canonical 资源
+- 聚合节点 `mat:` / `prop:` / `tc:` / `base:` 不提供 graph-owned detail；
+  前端应回到 `/comparisons` 并使用对应过滤参数做 canonical drilldown
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码
   `graph_not_ready`
 

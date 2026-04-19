@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +32,62 @@ _NODE_TYPE_PRIORITY = {
     "comparison": 0,
     "evidence": 1,
     "document": 2,
+    "material": 3,
+    "property": 4,
+    "test_condition": 5,
+    "baseline": 6,
 }
+_BACKBONE_NODE_TYPES = frozenset({"document", "evidence", "comparison"})
+_SEMANTIC_NODE_SPECS = (
+    {
+        "field": "material_system_normalized",
+        "type": "material",
+        "prefix": "mat",
+        "edge_description": "comparison_to_material",
+        "placeholders": {
+            "",
+            "--",
+            "unknown",
+            "unspecified material system",
+        },
+    },
+    {
+        "field": "property_normalized",
+        "type": "property",
+        "prefix": "prop",
+        "edge_description": "comparison_to_property",
+        "placeholders": {
+            "",
+            "--",
+            "unknown",
+        },
+    },
+    {
+        "field": "test_condition_normalized",
+        "type": "test_condition",
+        "prefix": "tc",
+        "edge_description": "comparison_to_test_condition",
+        "placeholders": {
+            "",
+            "--",
+            "unknown",
+            "unspecified test condition",
+        },
+    },
+    {
+        "field": "baseline_normalized",
+        "type": "baseline",
+        "prefix": "base",
+        "edge_description": "comparison_to_baseline",
+        "placeholders": {
+            "",
+            "--",
+            "unknown",
+            "unspecified baseline",
+        },
+    },
+)
+_BACKBONE_TRUNCATION_SHARE = 0.6
 
 
 def missing_core_graph_artifacts(base_dir: Path) -> list[str]:
@@ -51,8 +108,8 @@ def load_core_graph_payload(
     doc_records: dict[str, dict[str, Any]] = {}
     evidence_records: dict[str, dict[str, Any]] = {}
 
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
+    node_index: dict[str, dict[str, Any]] = {}
+    edge_index: dict[str, dict[str, Any]] = {}
 
     for _, row in profiles.iterrows():
         document_id = _as_text(row.get("document_id"))
@@ -60,7 +117,7 @@ def load_core_graph_payload(
             continue
         record = _build_document_record(row)
         doc_records[document_id] = record
-        nodes.append(record["node"])
+        _put_node(node_index, record["node"])
 
     for _, row in evidence_cards.iterrows():
         evidence_id = _as_text(row.get("evidence_id"))
@@ -68,20 +125,26 @@ def load_core_graph_payload(
             continue
         record = _build_evidence_record(row, doc_records)
         evidence_records[evidence_id] = record
-        nodes.append(record["node"])
+        _put_node(node_index, record["node"])
         if record["document_edge"] is not None:
-            edges.append(record["document_edge"])
+            _put_edge(edge_index, record["document_edge"])
 
     for _, row in comparison_rows.iterrows():
         comparison_id = _as_text(row.get("row_id"))
         if not comparison_id:
             continue
-        comparison_node, comparison_edges = _build_comparison_projection(
+        comparison_node, semantic_nodes, comparison_edges = _build_comparison_projection(
             row,
             evidence_records=evidence_records,
         )
-        nodes.append(comparison_node)
-        edges.extend(comparison_edges)
+        _put_node(node_index, comparison_node)
+        for semantic_node in semantic_nodes:
+            _put_node(node_index, semantic_node)
+        for edge in comparison_edges:
+            _put_edge(edge_index, edge)
+
+    nodes = list(node_index.values())
+    edges = list(edge_index.values())
 
     if min_weight > 0:
         edges = [
@@ -162,11 +225,11 @@ def _build_evidence_record(
 def _build_comparison_projection(
     row: pd.Series,
     evidence_records: dict[str, dict[str, Any]],
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     comparison_id = _as_text(row.get("row_id")) or ""
     supporting_evidence_ids = _string_list(row.get("supporting_evidence_ids"))
-    property_name = _as_text(row.get("property_normalized"))
-    material_name = _as_text(row.get("material_system_normalized"))
+    property_name = _clean_graph_text(row.get("property_normalized"))
+    material_name = _clean_graph_text(row.get("material_system_normalized"))
 
     node = {
         "id": f"cmp:{comparison_id}",
@@ -188,7 +251,57 @@ def _build_comparison_projection(
                 "edge_description": "evidence_to_comparison",
             }
         )
-    return node, edges
+
+    semantic_nodes: list[dict[str, Any]] = []
+    for spec in _SEMANTIC_NODE_SPECS:
+        semantic_projection = _build_semantic_projection(
+            row=row,
+            comparison_id=comparison_id,
+            field=str(spec["field"]),
+            node_type=str(spec["type"]),
+            node_prefix=str(spec["prefix"]),
+            edge_description=str(spec["edge_description"]),
+            placeholders={str(item) for item in spec["placeholders"]},
+        )
+        if semantic_projection is None:
+            continue
+        semantic_node, semantic_edge = semantic_projection
+        semantic_nodes.append(semantic_node)
+        edges.append(semantic_edge)
+
+    return node, semantic_nodes, edges
+
+
+def _build_semantic_projection(
+    *,
+    row: pd.Series,
+    comparison_id: str,
+    field: str,
+    node_type: str,
+    node_prefix: str,
+    edge_description: str,
+    placeholders: set[str],
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    display_value, normalized_key = _normalize_semantic_value(row.get(field))
+    if not display_value or not normalized_key or normalized_key in placeholders:
+        return None
+
+    node_id = f"{node_prefix}:{sha1(normalized_key.encode('utf-8')).hexdigest()}"
+    return (
+        {
+            "id": node_id,
+            "label": display_value,
+            "type": node_type,
+            "degree": 0,
+        },
+        {
+            "id": f"edge:cmp:{comparison_id}:{node_id}",
+            "source": f"cmp:{comparison_id}",
+            "target": node_id,
+            "weight": 1.0,
+            "edge_description": edge_description,
+        },
+    )
 
 
 def _truncate_graph(
@@ -202,15 +315,7 @@ def _truncate_graph(
 
     truncated = len(nodes) > max_nodes
     if truncated:
-        ordered_nodes = sorted(
-            nodes,
-            key=lambda node: (
-                -int(node.get("degree") or 0),
-                _NODE_TYPE_PRIORITY.get(str(node.get("type") or ""), 99),
-                str(node.get("label") or node.get("id") or ""),
-            ),
-        )
-        selected_nodes = ordered_nodes[:max_nodes]
+        selected_nodes = _select_truncated_nodes(nodes, edges, max_nodes)
     else:
         selected_nodes = list(nodes)
 
@@ -236,6 +341,112 @@ def _compute_degrees(edges: list[dict[str, Any]]) -> dict[str, int]:
         if target:
             degrees[target] = degrees.get(target, 0) + 1
     return degrees
+
+
+def _select_truncated_nodes(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    max_nodes: int,
+) -> list[dict[str, Any]]:
+    node_lookup = {str(node["id"]): node for node in nodes}
+    ordered_backbone = _ordered_nodes(
+        node for node in nodes if str(node.get("type")) in _BACKBONE_NODE_TYPES
+    )
+    ordered_semantic = _ordered_nodes(
+        node for node in nodes if str(node.get("type")) not in _BACKBONE_NODE_TYPES
+    )
+    if len(ordered_backbone) <= max_nodes:
+        return _fill_truncation_budget(
+            selected_nodes=ordered_backbone,
+            fallback_nodes=ordered_semantic,
+            max_nodes=max_nodes,
+        )
+
+    backbone_budget = min(
+        len(ordered_backbone),
+        max(math.ceil(max_nodes * _BACKBONE_TRUNCATION_SHARE), 1),
+    )
+    selected_backbone = ordered_backbone[:backbone_budget]
+    selected_comparison_ids = {
+        str(node["id"])
+        for node in selected_backbone
+        if str(node.get("type")) == "comparison"
+    }
+    ordered_adjacent_semantic = _ordered_nodes(
+        node_lookup[node_id]
+        for node_id in _semantic_neighbors_of_comparisons(edges, selected_comparison_ids)
+        if node_id in node_lookup
+    )
+    selected_nodes = _fill_truncation_budget(
+        selected_nodes=selected_backbone,
+        fallback_nodes=ordered_adjacent_semantic,
+        max_nodes=max_nodes,
+    )
+    if len(selected_nodes) < max_nodes:
+        remaining_backbone = ordered_backbone[backbone_budget:]
+        selected_nodes = _fill_truncation_budget(
+            selected_nodes=selected_nodes,
+            fallback_nodes=remaining_backbone,
+            max_nodes=max_nodes,
+        )
+    if len(selected_nodes) < max_nodes:
+        selected_nodes = _fill_truncation_budget(
+            selected_nodes=selected_nodes,
+            fallback_nodes=ordered_semantic,
+            max_nodes=max_nodes,
+        )
+    return selected_nodes
+
+
+def _fill_truncation_budget(
+    *,
+    selected_nodes: list[dict[str, Any]],
+    fallback_nodes: list[dict[str, Any]],
+    max_nodes: int,
+) -> list[dict[str, Any]]:
+    selected = list(selected_nodes)
+    selected_ids = {str(node["id"]) for node in selected}
+    for node in fallback_nodes:
+        node_id = str(node["id"])
+        if node_id in selected_ids:
+            continue
+        selected.append(node)
+        selected_ids.add(node_id)
+        if len(selected) >= max_nodes:
+            break
+    return selected
+
+
+def _semantic_neighbors_of_comparisons(
+    edges: list[dict[str, Any]],
+    comparison_ids: set[str],
+) -> list[str]:
+    neighbor_ids: set[str] = set()
+    for edge in edges:
+        source = _as_text(edge.get("source"))
+        target = _as_text(edge.get("target"))
+        if source in comparison_ids and target and not target.startswith("evi:"):
+            neighbor_ids.add(target)
+    return list(neighbor_ids)
+
+
+def _ordered_nodes(nodes: Any) -> list[dict[str, Any]]:
+    return sorted(
+        list(nodes),
+        key=lambda node: (
+            -int(node.get("degree") or 0),
+            _NODE_TYPE_PRIORITY.get(str(node.get("type") or ""), 99),
+            str(node.get("label") or node.get("id") or ""),
+        ),
+    )
+
+
+def _put_node(index: dict[str, dict[str, Any]], node: dict[str, Any]) -> None:
+    index[str(node["id"])] = node
+
+
+def _put_edge(index: dict[str, dict[str, Any]], edge: dict[str, Any]) -> None:
+    index[str(edge["id"])] = edge
 
 
 def _build_comparison_label(
@@ -270,6 +481,20 @@ def _shorten_text(value: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return f"{text[: limit - 3].rstrip()}..."
+
+
+def _normalize_semantic_value(value: Any) -> tuple[str | None, str | None]:
+    display_value = _clean_graph_text(value)
+    if not display_value:
+        return None, None
+    return display_value, display_value.lower()
+
+
+def _clean_graph_text(value: Any) -> str | None:
+    text = _as_text(value)
+    if not text:
+        return None
+    return " ".join(text.split())
 
 
 def _as_text(value: Any) -> str | None:

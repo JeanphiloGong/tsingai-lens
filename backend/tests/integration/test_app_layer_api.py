@@ -478,6 +478,107 @@ def test_collection_task_flow(app_client):
     assert comparison_detail.json()["row_id"] == row_id
 
 
+def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
+    from controllers.core import comparisons as comparisons_controller
+
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Filtered Comparisons"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    output_dir = Path(workspace.json()["artifacts"]["output_path"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "row_id": "cmp-1",
+                "collection_id": collection_id,
+                "source_document_id": "paper-1",
+                "variant_id": "var-1",
+                "variant_label": "A1",
+                "variable_axis": "anneal_temp",
+                "variable_value": 700,
+                "baseline_reference": "as-prepared",
+                "result_source_type": "table",
+                "result_type": "scalar",
+                "result_summary": "12 mS/cm",
+                "supporting_evidence_ids": ["ev-1"],
+                "supporting_anchor_ids": ["anchor-1"],
+                "characterization_observation_ids": [],
+                "structure_feature_ids": [],
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "property_normalized": "conductivity",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+                "comparability_status": "comparable",
+                "comparability_warnings": [],
+                "comparability_basis": ["baseline_resolved"],
+                "requires_expert_review": False,
+                "assessment_epistemic_status": "normalized_from_evidence",
+                "missing_critical_context": [],
+                "value": 12.0,
+                "unit": "mS/cm",
+            },
+            {
+                "row_id": "cmp-2",
+                "collection_id": collection_id,
+                "source_document_id": "paper-2",
+                "variant_id": "var-2",
+                "variant_label": "B1",
+                "variable_axis": "atmosphere",
+                "variable_value": "air",
+                "baseline_reference": "air annealed",
+                "result_source_type": "text",
+                "result_type": "trend",
+                "result_summary": "Trend reported",
+                "supporting_evidence_ids": ["ev-2"],
+                "supporting_anchor_ids": ["anchor-2"],
+                "characterization_observation_ids": [],
+                "structure_feature_ids": [],
+                "material_system_normalized": "layered oxide",
+                "process_normalized": "air anneal",
+                "property_normalized": "cycle retention",
+                "baseline_normalized": "air annealed",
+                "test_condition_normalized": "cycling",
+                "comparability_status": "limited",
+                "comparability_warnings": [],
+                "comparability_basis": ["baseline_partial"],
+                "requires_expert_review": True,
+                "assessment_epistemic_status": "provisional",
+                "missing_critical_context": [],
+                "value": None,
+                "unit": None,
+            },
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    comparisons_controller.comparison_service.artifact_registry_service.upsert(
+        collection_id,
+        output_dir,
+    )
+
+    response = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/comparisons",
+        params={
+            "material_system_normalized": "oxide cathode",
+            "property_normalized": "conductivity",
+            "test_condition_normalized": "EIS",
+            "baseline_normalized": "as-prepared",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["total"] == 1
+    assert payload["items"][0]["row_id"] == "cmp-1"
+
+
 def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):
     response = app_client.post(
         f"{API_V1_PREFIX}/goals/intake",
@@ -562,12 +663,16 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert graph.status_code == 200
     payload = graph.json()
     assert payload["collection_id"] == collection_id
-    assert len(payload["nodes"]) == 3
-    assert len(payload["edges"]) == 2
+    assert len(payload["nodes"]) == 7
+    assert len(payload["edges"]) == 6
     assert {item["type"] for item in payload["nodes"]} == {
         "document",
         "evidence",
         "comparison",
+        "material",
+        "property",
+        "test_condition",
+        "baseline",
     }
     assert set(payload["nodes"][0]) == {"id", "label", "type", "degree"}
     assert set(payload["edges"][0]) == {

@@ -193,6 +193,98 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
     assert item.uncertainty.missing_critical_context == []
 
 
+def test_comparisons_route_applies_canonical_graph_filters(
+    comparison_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _comparison_service = comparison_services
+    record = collection_service.create_collection(name="Filtered Comparisons Collection")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    pd.DataFrame(
+        [
+            {
+                "row_id": "cmp-1",
+                "collection_id": collection_id,
+                "source_document_id": "paper-1",
+                "variant_id": "var-1",
+                "variant_label": "A1",
+                "variable_axis": "induction_current",
+                "variable_value": 10,
+                "baseline_reference": "as-prepared",
+                "result_source_type": "table",
+                "result_type": "scalar",
+                "result_summary": "12 mS/cm",
+                "supporting_evidence_ids": ["ev-1"],
+                "supporting_anchor_ids": ["anchor-1"],
+                "characterization_observation_ids": ["obs-1"],
+                "structure_feature_ids": ["feat-1"],
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "property_normalized": "conductivity",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+                "comparability_status": "comparable",
+                "comparability_warnings": [],
+                "comparability_basis": ["variant_linked", "baseline_resolved"],
+                "requires_expert_review": False,
+                "assessment_epistemic_status": "normalized_from_evidence",
+                "missing_critical_context": [],
+                "value": 12.0,
+                "unit": "mS/cm",
+            },
+            {
+                "row_id": "cmp-2",
+                "collection_id": collection_id,
+                "source_document_id": "paper-2",
+                "variant_id": "var-2",
+                "variant_label": "B1",
+                "variable_axis": "anneal_atmosphere",
+                "variable_value": "air",
+                "baseline_reference": "air annealed",
+                "result_source_type": "text",
+                "result_type": "trend",
+                "result_summary": "Trend reported",
+                "supporting_evidence_ids": ["ev-2"],
+                "supporting_anchor_ids": ["anchor-2"],
+                "characterization_observation_ids": [],
+                "structure_feature_ids": [],
+                "material_system_normalized": "layered oxide",
+                "process_normalized": "air anneal",
+                "property_normalized": "cycle retention",
+                "baseline_normalized": "air annealed",
+                "test_condition_normalized": "cycling",
+                "comparability_status": "limited",
+                "comparability_warnings": [],
+                "comparability_basis": ["baseline_partial"],
+                "requires_expert_review": True,
+                "assessment_epistemic_status": "provisional",
+                "missing_critical_context": [],
+                "value": None,
+                "unit": None,
+            },
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        comparisons_controller.list_collection_comparisons(
+            collection_id,
+            material_system_normalized="oxide cathode",
+            property_normalized="conductivity",
+            test_condition_normalized="EIS",
+            baseline_normalized="as-prepared",
+        )
+    )
+
+    assert payload.count == 1
+    assert payload.total == 1
+    assert payload.items[0].row_id == "cmp-1"
+
+
 def test_comparison_route_returns_single_row(
     comparison_services,
     monkeypatch,

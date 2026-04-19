@@ -132,8 +132,19 @@ class ComparisonService:
         collection_id: str,
         offset: int = 0,
         limit: int = 50,
+        material_system_normalized: str | None = None,
+        property_normalized: str | None = None,
+        test_condition_normalized: str | None = None,
+        baseline_normalized: str | None = None,
     ) -> dict[str, Any]:
         rows = self.read_comparison_rows(collection_id)
+        rows = self._filter_rows(
+            rows,
+            material_system_normalized=material_system_normalized,
+            property_normalized=property_normalized,
+            test_condition_normalized=test_condition_normalized,
+            baseline_normalized=baseline_normalized,
+        )
         items = [
             self._serialize_row(item)
             for _, item in rows.iloc[offset : offset + limit].iterrows()
@@ -562,6 +573,30 @@ class ComparisonService:
             for _, row in normalized.iterrows()
         ]
         return pd.DataFrame(records, columns=_COMPARISON_ROW_COLUMNS)
+
+    def _filter_rows(
+        self,
+        rows: pd.DataFrame,
+        *,
+        material_system_normalized: str | None = None,
+        property_normalized: str | None = None,
+        test_condition_normalized: str | None = None,
+        baseline_normalized: str | None = None,
+    ) -> pd.DataFrame:
+        filtered = rows
+        filters = {
+            "material_system_normalized": self._safe_text(material_system_normalized),
+            "property_normalized": self._safe_text(property_normalized),
+            "test_condition_normalized": self._safe_text(test_condition_normalized),
+            "baseline_normalized": self._safe_text(baseline_normalized),
+        }
+        for column, expected in filters.items():
+            if not expected:
+                continue
+            filtered = filtered[
+                filtered[column].apply(lambda value: self._safe_text(value) == expected)
+            ]
+        return filtered
 
     def _serialize_row(self, row: pd.Series) -> dict[str, Any]:
         record = ComparisonRow.from_mapping(dict(row))

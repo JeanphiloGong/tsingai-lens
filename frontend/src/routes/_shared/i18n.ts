@@ -499,6 +499,9 @@ const translations: Record<Language, Translations> = {
 			tableTest: 'Test setup',
 			tableStatus: 'Can compare?',
 			warningsLabel: 'Why be careful',
+			expertReview: 'Expert review needed',
+			missingContext: 'Missing context',
+			noWarnings: 'No major caution flags',
 			tableActions: 'Read next'
 		},
 		traceback: {
@@ -1325,6 +1328,9 @@ const translations: Record<Language, Translations> = {
 			tableTest: '测试条件',
 			tableStatus: '能否比较',
 			warningsLabel: '注意点',
+			expertReview: '需要专家复核',
+			missingContext: '缺失上下文',
+			noWarnings: '当前没有明显警示',
 			tableActions: '下一步'
 		},
 		traceback: {

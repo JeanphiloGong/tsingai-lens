@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from application.collections.service import CollectionService
-from application.goals.service import GoalService
+from application.source.collection_service import CollectionService
+from application.goal.brief_service import GoalService
 
 
 def test_goal_service_creates_seed_collection_and_contract(tmp_path):

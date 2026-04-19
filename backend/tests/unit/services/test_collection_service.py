@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from application.collections.service import CollectionService
+from application.source.collection_service import CollectionService
 from infra.ingestion.normalized_import import (
     NormalizedImportBatch,
     NormalizedImportDocument,
@@ -242,7 +242,7 @@ def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_pat
             ),
         )
 
-    monkeypatch.setattr("application.collections.service.normalize_upload", fake_normalize_upload)
+    monkeypatch.setattr("application.source.collection_service.normalize_upload", fake_normalize_upload)
 
     record = service.add_file(
         collection_id,

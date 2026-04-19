@@ -3,9 +3,9 @@ import json
 import pandas as pd
 import pytest
 
-from application.protocol.extract_service import ProtocolExtractService
-from application.protocol.normalize_service import ProtocolNormalizeService
-from application.protocol.validate_service import (
+from application.derived.protocol.extract_service import ProtocolExtractService
+from application.derived.protocol.normalize_service import ProtocolNormalizeService
+from application.derived.protocol.validate_service import (
     PROTOCOL_STEP_PARQUET_COLUMNS,
     ProtocolValidateService,
 )

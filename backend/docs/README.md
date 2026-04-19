@@ -62,7 +62,8 @@ Then move to the owning plan family only when you are already inside that wave:
   [`plans/core-stabilization-and-seam-extraction-plan.md`](plans/core-stabilization-and-seam-extraction-plan.md)
 - Five-layer rollout and contract freeze:
   [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md),
-  [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md)
+  [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md),
+  [`plans/goal-source-core-business-layer-alignment-plan.md`](plans/goal-source-core-business-layer-alignment-plan.md)
 - Source and collection-builder normalization:
   [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
 - Residual Source/GraphRAG retirement:

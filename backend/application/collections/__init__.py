@@ -1,1 +1,0 @@
-"""Collection-domain application package."""

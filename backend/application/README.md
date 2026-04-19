@@ -1,78 +1,44 @@
 # Backend Application Layer
 
-This node owns use-case orchestration for backend flows that sit between HTTP
-entrypoints and lower-level services or engine packages.
+This node owns backend use-case orchestration between HTTP controllers and
+lower-level runtime or persistence implementations.
 
 ## Scope
 
-- current flat application services under `application/*.py`
-- the target domain-packaged application layout described in
-  [`../docs/architecture/domain-architecture.md`](../docs/architecture/domain-architecture.md)
+- application-level orchestration for Goal, Source, Core, and Derived flows
+- wiring between controllers and domain or infra concerns
+- collection-facing workflows that should stay testable above engine level
 
 ## Responsibilities
 
-- coordinate use-case execution for backend business domains
-- keep orchestration explicit and testable
-- shield HTTP route code from direct engine-level wiring where practical
+- coordinate business flows without leaking route concerns into services
+- keep the business-layer split explicit inside the technical application layer
+- consume Source handoff contracts and produce Core and Derived views
 
-## Current State
+## Internal Structure
 
-The current `application/` node is still in transition.
+`application/` keeps the outer technical layer.
+Inside it, business responsibilities are now grouped as:
 
-It contains a flat mix of:
-
-- collection lifecycle services
-- indexing task orchestration
-- workspace assembly
-- graph access
-- reports
-- protocol parsing and SOP helpers
-
-That flat shape should not be deepened further.
-
-## Target Direction
-
-The target direction is domain-local packaging inside `application/`, for
-example:
-
-- `application/collections/`
-- `application/goals/`
-- `application/indexing/`
-- `application/workspace/`
-- `application/documents/`
-- `application/evidence/`
-- `application/comparisons/`
-- `application/protocol/`
-
-## Local Navigation
-
-- [`collections/README.md`](collections/README.md)
-  Collection lifecycle, file membership, and collection input preparation
-- [`goals/README.md`](goals/README.md)
-  Goal Brief / Intake today, with future Goal Consumer logic kept explicit
-- [`indexing/README.md`](indexing/README.md)
-  Index task orchestration and backbone execution order
-- [`workspace/README.md`](workspace/README.md)
-  Collection-facing workspace read model and artifact readiness summary
-- [`documents/README.md`](documents/README.md)
-  Document profiling, protocol suitability, and collection-level summaries
-- [`evidence/README.md`](evidence/README.md)
-  Claim-centered evidence-card generation and retrieval
-- [`comparisons/README.md`](comparisons/README.md)
-  Collection-facing comparison-row generation and comparability semantics
-- [`protocol/README.md`](protocol/README.md)
-  Conditional protocol branch for sections, blocks, protocol steps, search,
-  and SOP drafting
+- [`goal/README.md`](goal/README.md)
+  Goal Brief intake and research-intent shaping
+- [`source/README.md`](source/README.md)
+  Collection lifecycle, Source indexing orchestration, and artifact readiness
+- [`core/README.md`](core/README.md)
+  Research-fact backbone generation and workspace overview assembly
+- [`derived/README.md`](derived/README.md)
+  Graph, reports, and protocol views derived from Core or Source artifacts
 
 ## Related Docs
 
 - [`docs/application-layer-one-shot-cutover-plan.md`](docs/application-layer-one-shot-cutover-plan.md)
-  Direct cutover plan to remove flat application shims and finish the
-  domain-packaged layout in one pass
+  Historical application cutover background
+- [`../docs/plans/goal-source-core-business-layer-alignment-plan.md`](../docs/plans/goal-source-core-business-layer-alignment-plan.md)
+  Active backend-wide package-alignment plan for Goal, Source, Core, and
+  Derived
 
 ## Non-Goals
 
-- raw HTTP parsing or response formatting
-- low-level persistence implementation
-- ad hoc direct route-to-engine coupling
-- adding more unrelated top-level `*_service.py` files into a flat namespace
+- raw HTTP parsing or response serialization
+- low-level persistence implementations
+- engine-specific runtime logic living directly in controllers

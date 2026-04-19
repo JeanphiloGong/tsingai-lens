@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from application.comparisons.service import ComparisonService
-from application.documents.service import DocumentProfileService
-from application.evidence.service import EvidenceCardService
+from application.core.comparison_service import ComparisonService
+from application.core.document_profile_service import DocumentProfileService
+from application.core.evidence_card_service import EvidenceCardService
 from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 
@@ -38,8 +38,8 @@ def _write_source_artifacts(
 def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
-    from application.collections.service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -147,8 +147,8 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
 def test_evidence_service_builds_table_backed_property_cards(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
-    from application.collections.service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -208,8 +208,8 @@ def test_evidence_service_builds_table_backed_property_cards(monkeypatch, tmp_pa
 def test_evidence_service_builds_sample_variants_and_measurement_results(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
-    from application.collections.service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -292,10 +292,10 @@ def test_evidence_service_builds_sample_variants_and_measurement_results(monkeyp
 def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
     pytest.importorskip("pyarrow")
 
-    from application.collections.service import CollectionService
-    from application.documents.service import DocumentProfileService
-    from application.evidence.service import EvidenceCardService
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from application.core.document_profile_service import DocumentProfileService
+    from application.core.evidence_card_service import EvidenceCardService
+    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -351,10 +351,10 @@ def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
 
 
 def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
-    from application.collections.service import CollectionService
-    from application.documents.service import DocumentProfileService
-    from application.evidence.service import EvidenceCardService
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from application.core.document_profile_service import DocumentProfileService
+    from application.core.evidence_card_service import EvidenceCardService
+    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -399,8 +399,8 @@ def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
 
 
 def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_path):
-    from application.collections.service import CollectionService
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -491,10 +491,10 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
 def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_path):
     pytest.importorskip("pyarrow")
 
-    from application.collections.service import CollectionService
-    from application.documents.service import DocumentProfileService
-    from application.evidence.service import EvidenceCardService
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from application.core.document_profile_service import DocumentProfileService
+    from application.core.evidence_card_service import EvidenceCardService
+    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -584,9 +584,9 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
-    from application.collections.service import CollectionService
-    from controllers.schemas.evidence import EvidenceCardListResponse
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from controllers.schemas.core.evidence import EvidenceCardListResponse
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -651,8 +651,8 @@ def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_pa
 def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
-    from application.collections.service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -749,8 +749,8 @@ def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeyp
 def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
-    from application.collections.service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -835,8 +835,8 @@ def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path)
 def test_evidence_traceback_unavailable_when_no_locator_can_be_resolved(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
-    from application.collections.service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")

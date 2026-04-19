@@ -11,10 +11,10 @@ import pandas as pd
 if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
-from application.workspace.artifact_registry_service import ArtifactRegistryService
-from application.collections.service import CollectionService
-from application.indexing.index_task_runner import IndexTaskRunner
-from application.indexing.task_service import TaskService
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.source.index_task_runner import IndexTaskRunner
+from application.source.task_service import TaskService
 from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 
@@ -119,7 +119,7 @@ def _write_review_only_outputs(output_dir: Path) -> None:
 def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    import application.indexing.index_task_runner as task_runner_module
+    import application.source.index_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -195,7 +195,7 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
 ):
     _patch_parquet(monkeypatch)
 
-    import application.indexing.index_task_runner as task_runner_module
+    import application.source.index_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")

@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from application.workspace.artifact_registry_service import ArtifactRegistryService
-from application.collections.service import CollectionService
-from application.indexing.task_service import TaskService
-from application.workspace.service import WorkspaceService
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.source.task_service import TaskService
+from application.core.workspace_overview_service import WorkspaceService
 from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 

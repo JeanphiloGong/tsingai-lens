@@ -1,17 +1,9 @@
 import os
 
-from controllers import (
-    collections,
-    comparisons,
-    documents,
-    evidence,
-    goals,
-    graph,
-    protocol,
-    reports,
-    tasks,
-    workspace,
-)
+from controllers.core import comparisons, documents, evidence, workspace
+from controllers.derived import graph, protocol, reports
+from controllers.goal import intake as goals
+from controllers.source import collections, tasks
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

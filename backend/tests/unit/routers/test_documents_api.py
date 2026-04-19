@@ -12,10 +12,10 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.workspace.artifact_registry_service import ArtifactRegistryService
-from application.collections.service import CollectionService
-from application.documents.service import DocumentProfileService
-from controllers import documents as documents_controller
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.core.document_profile_service import DocumentProfileService
+from controllers.core import documents as documents_controller
 from retrieval.index.operations.source_evidence import build_sections
 
 

@@ -42,9 +42,9 @@ def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
     _ensure_fastapi_stub(monkeypatch)
     _patch_parquet(monkeypatch)
 
-    from application.collections.service import CollectionService
-    from application.reports import service as report_service
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    import application.derived.report_service as report_service
+    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")

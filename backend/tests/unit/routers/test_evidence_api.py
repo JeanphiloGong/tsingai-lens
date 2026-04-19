@@ -12,11 +12,11 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.workspace.artifact_registry_service import ArtifactRegistryService
-from application.collections.service import CollectionService
-from application.documents.service import DocumentProfileService
-from application.evidence.service import EvidenceCardService
-from controllers import evidence as evidence_controller
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.core.document_profile_service import DocumentProfileService
+from application.core.evidence_card_service import EvidenceCardService
+from controllers.core import evidence as evidence_controller
 from retrieval.index.operations.source_evidence import build_sections, build_table_cells
 
 

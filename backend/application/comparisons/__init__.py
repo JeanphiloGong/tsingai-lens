@@ -1,1 +1,0 @@
-"""Comparisons-domain application package."""

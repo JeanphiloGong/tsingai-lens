@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from application.graph.core_projection_service import load_core_graph_payload
+from application.derived.graph_projection_service import load_core_graph_payload
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -151,11 +151,11 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
             SimpleNamespace(HTTPException=_HTTPException),
         )
 
-    from application.graph import service as graph_service
+    import application.derived.graph_service as graph_service
     _patch_parquet(monkeypatch)
 
-    from application.collections.service import CollectionService
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -273,12 +273,12 @@ def test_graph_service_rejects_legacy_community_filter(monkeypatch, tmp_path):
             SimpleNamespace(HTTPException=_HTTPException),
         )
 
-    from application.graph import service as graph_service
+    import application.derived.graph_service as graph_service
 
     _patch_parquet(monkeypatch)
 
-    from application.collections.service import CollectionService
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")

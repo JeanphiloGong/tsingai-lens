@@ -188,33 +188,33 @@ def app_client(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
     from fastapi import FastAPI
-    from controllers import collections as collections_controller
-    from controllers import comparisons as comparisons_controller
-    from controllers import documents as documents_controller
-    from controllers import evidence as evidence_controller
-    from controllers import goals as goals_controller
-    from controllers import graph as graph_controller
-    from controllers import protocol as protocol_controller
-    from controllers import reports as reports_controller
-    from controllers import tasks as tasks_controller
-    from controllers import workspace as workspace_controller
-    from controllers.schemas import (
+    from controllers.source import collections as collections_controller
+    from controllers.core import comparisons as comparisons_controller
+    from controllers.core import documents as documents_controller
+    from controllers.core import evidence as evidence_controller
+    from controllers.goal import intake as goals_controller
+    from controllers.derived import graph as graph_controller
+    from controllers.derived import protocol as protocol_controller
+    from controllers.derived import reports as reports_controller
+    from controllers.source import tasks as tasks_controller
+    from controllers.core import workspace as workspace_controller
+    from controllers.schemas.derived.report import (
         ReportCommunityDetailResponse,
         ReportCommunityListResponse,
         ReportPatternsResponse,
     )
-    import application.graph.service as graph_service_module
-    import application.indexing.index_task_runner as task_runner_module
-    import application.reports.service as report_service_module
-    from application.workspace.artifact_registry_service import ArtifactRegistryService
-    from application.collections.service import CollectionService
-    from application.comparisons.service import ComparisonService
-    from application.documents.service import DocumentProfileService
-    from application.evidence.service import EvidenceCardService
-    from application.goals.service import GoalService
-    from application.indexing.index_task_runner import IndexTaskRunner
-    from application.indexing.task_service import TaskService
-    from application.workspace.service import WorkspaceService
+    import application.derived.graph_service as graph_service_module
+    import application.source.index_task_runner as task_runner_module
+    import application.derived.report_service as report_service_module
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from application.core.comparison_service import ComparisonService
+    from application.core.document_profile_service import DocumentProfileService
+    from application.core.evidence_card_service import EvidenceCardService
+    from application.goal.brief_service import GoalService
+    from application.source.index_task_runner import IndexTaskRunner
+    from application.source.task_service import TaskService
+    from application.core.workspace_overview_service import WorkspaceService
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -530,7 +530,7 @@ def test_graph_endpoint_rejects_legacy_community_filter(app_client):
 def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     app_client,
 ):
-    from controllers import graph as graph_controller
+    from controllers.derived import graph as graph_controller
 
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
@@ -617,7 +617,7 @@ def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app
 
 
 def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
-    import application.indexing.index_task_runner as task_runner_module
+    import application.source.index_task_runner as task_runner_module
 
     captured: dict[str, object] = {}
 
@@ -708,7 +708,7 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
 def test_collection_protocol_steps_returns_empty_list_when_generated_but_not_ready(
     app_client,
 ):
-    from controllers import protocol as protocol_controller
+    from controllers.derived import protocol as protocol_controller
 
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",

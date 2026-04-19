@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from application.documents.input_service import resolve_collection_artifact_paths
+from application.source.artifact_input_service import resolve_collection_artifact_paths
 from retrieval.data_model.schemas import (
     DOCUMENTS_FINAL_COLUMNS,
     SECTIONS_FINAL_COLUMNS,

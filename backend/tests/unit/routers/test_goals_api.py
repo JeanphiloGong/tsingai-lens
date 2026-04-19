@@ -9,10 +9,10 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.collections.service import CollectionService
-from application.goals.service import GoalService
-from controllers import goals as goals_controller
-from controllers.schemas.goals import GoalIntakeRequest
+from application.source.collection_service import CollectionService
+from application.goal.brief_service import GoalService
+from controllers.goal import intake as goals_controller
+from controllers.schemas.goal.intake import GoalIntakeRequest
 
 
 @pytest.fixture()

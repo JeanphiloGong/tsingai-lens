@@ -89,6 +89,16 @@
 		return String(attrs.label ?? nodeId);
 	}
 
+	function edgeRelationLabel(description?: string | null) {
+		if (description === 'document_to_evidence') {
+			return $t('graph.edgeLabelDocumentEvidence');
+		}
+		if (description === 'evidence_to_comparison') {
+			return $t('graph.edgeLabelEvidenceComparison');
+		}
+		return description?.trim() || $t('graph.edgeLabelFallback');
+	}
+
 	function stableHash(value: string) {
 		let hash = 0;
 		for (const item of value) {
@@ -257,7 +267,8 @@
 				x: position.x,
 				y: position.y,
 				size: Math.max(4, Math.min(18, (node.degree ?? 1) + 4)),
-				color: nodeColor(node.type)
+				color: nodeColor(node.type),
+				forceLabel: true
 			});
 		}
 
@@ -266,6 +277,7 @@
 			const edgeId = edge.id || `${edge.source}-${edge.target}`;
 			if (graph.hasEdge(edgeId)) continue;
 			graph.addEdgeWithKey(edgeId, edge.source, edge.target, {
+				label: edgeRelationLabel(edge.edge_description),
 				weight: edge.weight ?? 1,
 				edgeDescription: edge.edge_description,
 				size: Math.max(1, Math.min(8, edge.weight ?? 1)),
@@ -280,7 +292,10 @@
 		if (graphContainer) {
 			renderer = new Sigma(graph, graphContainer, {
 				renderLabels: true,
-				labelSize: 12,
+				renderEdgeLabels: true,
+				labelSize: 11,
+				edgeLabelSize: 9,
+				edgeLabelColor: { color: 'rgba(15, 27, 45, 0.78)' },
 				defaultEdgeType: 'line'
 			});
 			attachRendererEvents();

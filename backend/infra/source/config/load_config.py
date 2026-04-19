@@ -12,7 +12,6 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
-from retrieval.config.create_graphrag_config import create_graphrag_config
 from infra.source.config.source_runtime_config import GraphRagConfig
 
 _default_config_files = ["settings.yaml", "settings.yml", "settings.json"]
@@ -188,4 +187,5 @@ def load_config(
     config_data = _parse(config_extension, config_text)
     if cli_overrides:
         _apply_overrides(config_data, cli_overrides)
-    return create_graphrag_config(config_data, root_dir=str(root))
+    config_data["root_dir"] = str(root)
+    return GraphRagConfig.model_validate(config_data)

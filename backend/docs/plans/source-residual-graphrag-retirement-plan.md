@@ -44,6 +44,9 @@ Completed implementation in this repository now includes:
   `load_input_documents -> create_base_text_units -> create_final_documents -> create_final_text_units`
 - graph/community/report/embedding workflow files have been removed from the
   active workflow registry and deleted from `retrieval/index/workflows/`
+- active `infra/source/*` code no longer imports `retrieval.*` directly; input
+  loading, chunking, config shaping, storage/cache setup, and runtime logging
+  now live inside Source-owned modules
 
 Still pending after this cut:
 

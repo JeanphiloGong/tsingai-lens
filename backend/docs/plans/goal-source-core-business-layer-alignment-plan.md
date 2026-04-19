@@ -32,6 +32,8 @@ Status as of 2026-04-19:
 - `application/`, `controllers/`, and `infra/` now expose the business-layer
   split explicitly
 - active Source entrypoints now live under `infra/source/*`
+- active Source runtime support code now also lives under `infra/source/*`
+  instead of importing `retrieval` runtime helpers directly
 - retired GraphRAG public surfaces such as `retrieval/__main__`,
   `retrieval/api`, `retrieval/cli`, and `retrieval/prompt_tune` have already
   been removed
@@ -39,8 +41,8 @@ Status as of 2026-04-19:
 The main remaining mismatch is no longer package visibility.
 It is residual engine ownership:
 
-- active Source runtime still depends on internal engine modules under
-  `retrieval/*`
+- active Source runtime package layout is clean, but historical `retrieval/*`
+  still remains in the repository as a non-Source engine subtree
 - some backend docs still describe the old tree more loosely than the code now
   does
 

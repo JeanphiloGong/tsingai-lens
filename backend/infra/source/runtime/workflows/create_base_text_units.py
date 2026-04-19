@@ -9,18 +9,16 @@ from typing import Any, cast
 
 import pandas as pd
 
+from infra.source.runtime.chunking import chunk_text, get_encoding_fn
 from infra.source.config.source_runtime_config import GraphRagConfig
 from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
+from infra.source.runtime.hashing import gen_sha512_hash
 from infra.source.runtime.storage.table_io import (
     load_table_from_storage,
     write_table_to_storage,
 )
-from retrieval.index.operations.chunk_text.chunk_text import chunk_text
-from retrieval.index.operations.chunk_text.strategies import get_encoding_fn
 from infra.source.runtime.typing.context import PipelineRunContext
 from infra.source.runtime.typing.workflow import WorkflowFunctionOutput
-from retrieval.config.models.chunking_config import ChunkStrategyType
-from retrieval.index.utils.hashing import gen_sha512_hash
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +58,7 @@ def create_base_text_units(
     size: int,
     overlap: int,
     encoding_model: str,
-    strategy: ChunkStrategyType,
+    strategy: Any,
     prepend_metadata: bool = False,
     chunk_size_includes_metadata: bool = False,
 ) -> pd.DataFrame:

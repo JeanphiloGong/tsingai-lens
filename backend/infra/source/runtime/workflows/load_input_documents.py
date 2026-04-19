@@ -5,10 +5,9 @@ import logging
 import pandas as pd
 
 from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.runtime.input import create_input
 from infra.source.runtime.storage.pipeline_storage import PipelineStorage
 from infra.source.runtime.storage.table_io import write_table_to_storage
-from retrieval.config.models.input_config import InputConfig
-from retrieval.index.input.factory import create_input
 from infra.source.runtime.typing.context import PipelineRunContext
 from infra.source.runtime.typing.workflow import WorkflowFunctionOutput
 
@@ -34,7 +33,7 @@ async def run_workflow(
 
 
 async def load_input_documents(
-    config: InputConfig, storage: PipelineStorage
+    config: object, storage: PipelineStorage
 ) -> pd.DataFrame:
     """Load and parse input documents into a standard format."""
     return await create_input(config, storage)

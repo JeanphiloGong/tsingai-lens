@@ -10,11 +10,11 @@ from infra.source.config.pipeline_mode import IndexingMethod
 from infra.source.config.source_runtime_config import GraphRagConfig
 from infra.source.runtime.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
 from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
+from infra.source.runtime.logging import init_runtime_loggers
 from infra.source.runtime.run_pipeline import run_pipeline
 from infra.source.runtime.run_context import create_callback_chain
 from infra.source.runtime.typing.pipeline_run_result import PipelineRunResult
 from infra.source.runtime.workflows.factory import PipelineFactory
-from retrieval.logger.standard_logging import init_loggers
 
 logger = logging.getLogger(__name__)
 _ = _source_runtime_workflows
@@ -62,7 +62,7 @@ async def build_index(
     list[PipelineRunResult]
         The list of pipeline run results
     """
-    init_loggers(config=config, verbose=verbose)
+    init_runtime_loggers(config=config, verbose=verbose)
 
     # Create callbacks for pipeline lifecycle events if provided
     workflow_callbacks = (

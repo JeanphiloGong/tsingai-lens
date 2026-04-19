@@ -14,12 +14,13 @@
 		buildCollectionGraphmlUrl,
 		fetchCollectionGraph,
 		fetchCollectionGraphNeighbors,
+		parseGraphNodeId,
 		type GraphEdge,
 		type GraphNode,
 		type GraphResponse
 	} from '../../../_shared/graph';
 	import { t } from '../../../_shared/i18n';
-	import { fetchComparison, type ComparisonRow } from '../../../_shared/comparisons';
+	import { fetchComparisonRow, type ComparisonRow } from '../../../_shared/comparisons';
 	import { fetchDocumentProfile, type DocumentProfile } from '../../../_shared/documents';
 	import { fetchEvidenceCard, type EvidenceCard } from '../../../_shared/evidence';
 	import { buildDocumentViewerHref } from '../../../_shared/traceback';
@@ -120,15 +121,6 @@
 		return positions;
 	}
 
-	function parseNodeRef(nodeId: string): { kind: NodeKind | null; resourceId: string | null } {
-		const [prefix, ...rest] = nodeId.split(':');
-		const resourceId = rest.join(':').trim() || null;
-		if (prefix === 'doc') return { kind: 'document', resourceId };
-		if (prefix === 'evi') return { kind: 'evidence', resourceId };
-		if (prefix === 'cmp') return { kind: 'comparison', resourceId };
-		return { kind: null, resourceId };
-	}
-
 	function clearSelection() {
 		detailRequestId += 1;
 		selectedNode = null;
@@ -184,7 +176,7 @@
 			} else {
 				selectedNodeDetail = {
 					kind: 'comparison',
-					data: await fetchComparison(collectionId, node.resourceId)
+					data: await fetchComparisonRow(collectionId, node.resourceId)
 				};
 			}
 		} catch (err) {
@@ -201,15 +193,15 @@
 	async function selectNode(nodeId: string) {
 		if (!graph) return;
 		const attrs = graph.getNodeAttributes(nodeId) as Record<string, unknown>;
-		const parsed = parseNodeRef(nodeId);
+		const parsed = parseGraphNodeId(nodeId);
 		selectedEdge = null;
 		selectedNode = {
 			id: nodeId,
 			label: String(attrs.label ?? nodeId),
 			type: typeof attrs.entityType === 'string' ? attrs.entityType : null,
 			degree: typeof attrs.degree === 'number' ? attrs.degree : null,
-			kind: parsed.kind,
-			resourceId: parsed.resourceId
+			kind: parsed.kind === 'unknown' ? null : parsed.kind,
+			resourceId: parsed.resourceId || null
 		};
 		await loadNodeDetail(selectedNode);
 	}
@@ -250,6 +242,7 @@
 		focusNodeId: string | null = null
 	) {
 		const previousPositions = currentPositions();
+		const needsLayout = nodes.some((node) => !previousPositions.has(node.id));
 		disposeRenderer();
 		clearSelection();
 		graph = new Graph();
@@ -280,7 +273,7 @@
 			});
 		}
 
-		if (graph.order > 1) {
+		if (graph.order > 1 && needsLayout) {
 			forceAtlas2.assign(graph, 80);
 		}
 
@@ -394,7 +387,7 @@
 
 	function mergeGraphPayload(
 		current: GraphResponse | null,
-		next: Pick<GraphResponse, 'collection_id' | 'nodes' | 'edges'>
+		next: Pick<GraphResponse, 'collection_id' | 'nodes' | 'edges' | 'truncated'>
 	): GraphResponse {
 		const nodes = new Map<string, GraphNode>();
 		const edges = new Map<string, GraphEdge>();
@@ -417,7 +410,7 @@
 			collection_id: next.collection_id,
 			nodes: Array.from(nodes.values()),
 			edges: Array.from(edges.values()),
-			truncated: current?.truncated ?? false
+			truncated: Boolean(current?.truncated || next.truncated)
 		};
 	}
 
@@ -472,6 +465,7 @@
 	}
 
 	$: if (graph) {
+		previewQuery;
 		updateVisibility();
 	}
 

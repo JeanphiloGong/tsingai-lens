@@ -30,6 +30,12 @@ export type GraphNeighborsResponse = {
 	truncated: boolean;
 };
 
+export type GraphNodeRef =
+	| { kind: 'document'; resourceId: string }
+	| { kind: 'evidence'; resourceId: string }
+	| { kind: 'comparison'; resourceId: string }
+	| { kind: 'unknown'; resourceId: string };
+
 export type GraphQuery = {
 	maxNodes?: number;
 	minWeight?: number;
@@ -60,4 +66,18 @@ export async function fetchCollectionGraphNeighbors(collectionId: string, nodeId
 		`/collections/${encodeURIComponent(collectionId)}/graph/nodes/${encodeURIComponent(nodeId)}/neighbors`,
 		{ method: 'GET' }
 	)) as GraphNeighborsResponse;
+}
+
+export function parseGraphNodeId(nodeId: string): GraphNodeRef {
+	const [prefix, ...rest] = nodeId.split(':');
+	const resourceId = rest.join(':').trim();
+
+	if (!resourceId) {
+		return { kind: 'unknown', resourceId: '' };
+	}
+
+	if (prefix === 'doc') return { kind: 'document', resourceId };
+	if (prefix === 'evi') return { kind: 'evidence', resourceId };
+	if (prefix === 'cmp') return { kind: 'comparison', resourceId };
+	return { kind: 'unknown', resourceId };
 }

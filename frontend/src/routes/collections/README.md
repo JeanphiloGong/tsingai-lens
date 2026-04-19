@@ -18,6 +18,9 @@ This node owns the collection workspace route family in the frontend.
 
 - [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
   Collection-facing interface spec for the Lens v1 workspace flow
+- [`core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md`](core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md)
+  Frontend-local graph cutover plan for the lean graph contract, canonical
+  drilldown, and neighbors expansion
 - [`materials-comparison-v2-frontend-alignment-plan.md`](materials-comparison-v2-frontend-alignment-plan.md)
   Frontend-local contract cutover plan for the nested comparisons response
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)

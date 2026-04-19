@@ -420,3 +420,5 @@ export async function fetchComparison(
 	}
 	return row;
 }
+
+export const fetchComparisonRow = fetchComparison;

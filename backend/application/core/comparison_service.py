@@ -6,17 +6,11 @@ from uuid import uuid4
 
 import pandas as pd
 
-from domain.shared.enums import (
-    COMPARABILITY_STATUS_COMPARABLE,
-    COMPARABILITY_STATUS_INSUFFICIENT,
-    COMPARABILITY_STATUS_LIMITED,
-    COMPARABILITY_STATUS_NOT_COMPARABLE,
-    EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
-    EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
-    EPISTEMIC_UNRESOLVED,
-    TRACEABILITY_STATUS_DIRECT,
-    TRACEABILITY_STATUS_MISSING,
+from domain.core.comparison import (
+    ComparisonRow,
+    evaluate_comparison_assessment,
 )
+from domain.shared.enums import TRACEABILITY_STATUS_MISSING
 from application.source.collection_service import CollectionService
 from application.core.evidence_card_service import EvidenceCardService, EvidenceCardsNotReadyError
 from application.source.artifact_registry_service import ArtifactRegistryService
@@ -97,9 +91,6 @@ _COMPARISON_ROW_COLUMNS = [
     "value",
     "unit",
 ]
-_SCALAR_LIKE_RESULT_TYPES = {"scalar", "retention", "fitted_value", "optimum"}
-
-
 class ComparisonRowsNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve comparison rows."""
 
@@ -346,75 +337,52 @@ class ComparisonService:
             or TRACEABILITY_STATUS_MISSING
         )
 
-        missing_critical_context = self._derive_missing_critical_context(
+        assessment = evaluate_comparison_assessment(
             variant_id=variant_id,
             baseline_reference=baseline_reference,
             test_condition_id=test_condition_id,
             traceability_status=traceability_status,
             result_type=result_type,
             result_summary=result_summary,
-        )
-        comparability_basis = self._derive_comparability_basis(
-            variant_id=variant_id,
-            baseline_reference=baseline_reference,
-            test_condition_id=test_condition_id,
-            traceability_status=traceability_status,
-            result_type=result_type,
             numeric_value=numeric_value,
             structure_feature_ids=structure_feature_ids,
             characterization_observation_ids=characterization_observation_ids,
         )
-        comparability_warnings = self._build_comparability_warnings(
-            missing_critical_context=missing_critical_context,
-            result_type=result_type,
-        )
-        comparability_status = self._derive_comparability_status(
-            missing_critical_context=missing_critical_context,
-            traceability_status=traceability_status,
-        )
-        requires_expert_review = self._requires_expert_review(
-            comparability_status=comparability_status,
-            result_type=result_type,
-            missing_critical_context=missing_critical_context,
-        )
-        assessment_epistemic_status = self._derive_assessment_epistemic_status(
-            comparability_status=comparability_status,
-            requires_expert_review=requires_expert_review,
-        )
-
-        return {
-            "row_id": f"cmp_{uuid4().hex[:12]}",
-            "collection_id": collection_id,
-            "source_document_id": source_document_id,
-            "variant_id": variant_id,
-            "variant_label": self._safe_text(variant.get("variant_label")),
-            "variable_axis": self._safe_text(variant.get("variable_axis_type")),
-            "variable_value": self._normalize_scalar_or_text(variant.get("variable_value")),
-            "baseline_reference": baseline_reference,
-            "result_source_type": self._safe_text(result_row.get("result_source_type")),
-            "result_type": result_type,
-            "result_summary": result_summary,
-            "supporting_evidence_ids": supporting_evidence_ids,
-            "supporting_anchor_ids": supporting_anchor_ids,
-            "characterization_observation_ids": characterization_observation_ids,
-            "structure_feature_ids": structure_feature_ids,
-            "material_system_normalized": self._normalize_material_system(
-                variant.get("host_material_system")
-            ),
-            "process_normalized": self._normalize_process(variant.get("process_context")),
-            "property_normalized": self._safe_text(result_row.get("property_normalized"))
-            or "qualitative",
-            "baseline_normalized": baseline_normalized,
-            "test_condition_normalized": test_condition_normalized,
-            "comparability_status": comparability_status,
-            "comparability_warnings": comparability_warnings,
-            "comparability_basis": comparability_basis,
-            "requires_expert_review": requires_expert_review,
-            "assessment_epistemic_status": assessment_epistemic_status,
-            "missing_critical_context": missing_critical_context,
-            "value": numeric_value,
-            "unit": unit,
-        }
+        return ComparisonRow.from_mapping(
+            {
+                "row_id": f"cmp_{uuid4().hex[:12]}",
+                "collection_id": collection_id,
+                "source_document_id": source_document_id,
+                "variant_id": variant_id,
+                "variant_label": self._safe_text(variant.get("variant_label")),
+                "variable_axis": self._safe_text(variant.get("variable_axis_type")),
+                "variable_value": self._normalize_scalar_or_text(variant.get("variable_value")),
+                "baseline_reference": baseline_reference,
+                "result_source_type": self._safe_text(result_row.get("result_source_type")),
+                "result_type": result_type,
+                "result_summary": result_summary,
+                "supporting_evidence_ids": supporting_evidence_ids,
+                "supporting_anchor_ids": supporting_anchor_ids,
+                "characterization_observation_ids": characterization_observation_ids,
+                "structure_feature_ids": structure_feature_ids,
+                "material_system_normalized": self._normalize_material_system(
+                    variant.get("host_material_system")
+                ),
+                "process_normalized": self._normalize_process(variant.get("process_context")),
+                "property_normalized": self._safe_text(result_row.get("property_normalized"))
+                or "qualitative",
+                "baseline_normalized": baseline_normalized,
+                "test_condition_normalized": test_condition_normalized,
+                "comparability_status": assessment.comparability_status,
+                "comparability_warnings": list(assessment.comparability_warnings),
+                "comparability_basis": list(assessment.comparability_basis),
+                "requires_expert_review": assessment.requires_expert_review,
+                "assessment_epistemic_status": assessment.assessment_epistemic_status,
+                "missing_critical_context": list(assessment.missing_critical_context),
+                "value": numeric_value,
+                "unit": unit,
+            }
+        ).to_record()
 
     def _resolve_supporting_evidence_ids(
         self,
@@ -514,132 +482,6 @@ class ComparisonService:
             return "unspecified test condition"
         return ", ".join(parts)
 
-    def _derive_missing_critical_context(
-        self,
-        *,
-        variant_id: str | None,
-        baseline_reference: str | None,
-        test_condition_id: str | None,
-        traceability_status: str,
-        result_type: str,
-        result_summary: str,
-    ) -> list[str]:
-        missing: list[str] = []
-        if not variant_id:
-            missing.append("variant_link")
-        if not baseline_reference:
-            missing.append("baseline_reference")
-        if not test_condition_id:
-            missing.append("test_condition")
-        if traceability_status != TRACEABILITY_STATUS_DIRECT:
-            missing.append("direct_traceability")
-        if not result_summary or result_summary == "Result reported":
-            missing.append("result_value")
-        if result_type not in _SCALAR_LIKE_RESULT_TYPES:
-            missing.append("expert_interpretation")
-        return missing
-
-    def _derive_comparability_basis(
-        self,
-        *,
-        variant_id: str | None,
-        baseline_reference: str | None,
-        test_condition_id: str | None,
-        traceability_status: str,
-        result_type: str,
-        numeric_value: float | None,
-        structure_feature_ids: list[str],
-        characterization_observation_ids: list[str],
-    ) -> list[str]:
-        basis: list[str] = []
-        if variant_id:
-            basis.append("variant_linked")
-        if baseline_reference:
-            basis.append("baseline_resolved")
-        if test_condition_id:
-            basis.append("test_condition_resolved")
-        if traceability_status == TRACEABILITY_STATUS_DIRECT:
-            basis.append("direct_traceability")
-        if numeric_value is not None:
-            basis.append("numeric_value_available")
-        if result_type in _SCALAR_LIKE_RESULT_TYPES:
-            basis.append(f"result_type:{result_type}")
-        if structure_feature_ids:
-            basis.append("structure_context_available")
-        if characterization_observation_ids:
-            basis.append("characterization_context_available")
-        return basis
-
-    def _build_comparability_warnings(
-        self,
-        *,
-        missing_critical_context: list[str],
-        result_type: str,
-    ) -> list[str]:
-        warnings: list[str] = []
-        warning_map = {
-            "variant_link": "Variant linkage could not be resolved for this result.",
-            "baseline_reference": "Baseline reference is missing or unresolved.",
-            "test_condition": "Test condition is missing or unresolved.",
-            "direct_traceability": "Traceability is partial or indirect.",
-            "result_value": "Result payload is incomplete for comparison display.",
-            "expert_interpretation": "Result shape requires expert interpretation before comparison.",
-        }
-        for item in missing_critical_context:
-            warning = warning_map.get(item)
-            if warning and warning not in warnings:
-                warnings.append(warning)
-        if result_type not in _SCALAR_LIKE_RESULT_TYPES:
-            warnings.append(
-                "This comparison row summarizes a non-scalar result and should be reviewed by a domain expert."
-            )
-        return warnings
-
-    def _derive_comparability_status(
-        self,
-        *,
-        missing_critical_context: list[str],
-        traceability_status: str,
-    ) -> str:
-        missing = set(missing_critical_context)
-        if traceability_status == TRACEABILITY_STATUS_MISSING:
-            return COMPARABILITY_STATUS_INSUFFICIENT
-        if {"baseline_reference", "test_condition"} <= missing:
-            return COMPARABILITY_STATUS_NOT_COMPARABLE
-        if "variant_link" in missing and {"baseline_reference", "test_condition"} & missing:
-            return COMPARABILITY_STATUS_INSUFFICIENT
-        if missing:
-            return COMPARABILITY_STATUS_LIMITED
-        return COMPARABILITY_STATUS_COMPARABLE
-
-    def _requires_expert_review(
-        self,
-        *,
-        comparability_status: str,
-        result_type: str,
-        missing_critical_context: list[str],
-    ) -> bool:
-        if comparability_status != COMPARABILITY_STATUS_COMPARABLE:
-            return True
-        if result_type not in _SCALAR_LIKE_RESULT_TYPES:
-            return True
-        return bool(missing_critical_context)
-
-    def _derive_assessment_epistemic_status(
-        self,
-        *,
-        comparability_status: str,
-        requires_expert_review: bool,
-    ) -> str:
-        if (
-            comparability_status == COMPARABILITY_STATUS_COMPARABLE
-            and not requires_expert_review
-        ):
-            return EPISTEMIC_NORMALIZED_FROM_EVIDENCE
-        if comparability_status == COMPARABILITY_STATUS_LIMITED:
-            return EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE
-        return EPISTEMIC_UNRESOLVED
-
     def _normalize_material_system(self, material_system: Any) -> str:
         payload = self._normalize_object(material_system) or {}
         if not isinstance(payload, dict):
@@ -695,85 +537,50 @@ class ComparisonService:
         for column in _COMPARISON_ROW_COLUMNS:
             if column not in normalized.columns:
                 normalized[column] = None
-        for column in (
-            "supporting_evidence_ids",
-            "supporting_anchor_ids",
-            "characterization_observation_ids",
-            "structure_feature_ids",
-            "comparability_warnings",
-            "comparability_basis",
-            "missing_critical_context",
-        ):
-            normalized[column] = normalized[column].apply(self._normalize_string_list)
-        normalized["requires_expert_review"] = normalized["requires_expert_review"].apply(
-            lambda value: bool(False if value is None or (isinstance(value, float) and pd.isna(value)) else value)
-        )
-        return normalized[_COMPARISON_ROW_COLUMNS]
+        records = [
+            ComparisonRow.from_mapping(dict(row)).to_record()
+            for _, row in normalized.iterrows()
+        ]
+        return pd.DataFrame(records, columns=_COMPARISON_ROW_COLUMNS)
 
     def _serialize_row(self, row: pd.Series) -> dict[str, Any]:
-        missing_critical_context = self._normalize_string_list(
-            row.get("missing_critical_context")
-        )
-        value = self._safe_float(row.get("value"))
+        record = ComparisonRow.from_mapping(dict(row))
+        missing_critical_context = list(record.missing_critical_context)
         return {
-            "row_id": self._safe_text(row.get("row_id")) or "",
-            "collection_id": self._safe_text(row.get("collection_id")) or "",
-            "source_document_id": self._safe_text(row.get("source_document_id")) or "",
+            "row_id": record.row_id,
+            "collection_id": record.collection_id,
+            "source_document_id": record.source_document_id,
             "display": {
-                "material_system_normalized": self._safe_text(
-                    row.get("material_system_normalized")
-                )
-                or "unspecified material system",
-                "process_normalized": self._safe_text(row.get("process_normalized"))
-                or "unspecified process",
-                "variant_id": self._safe_text(row.get("variant_id")),
-                "variant_label": self._safe_text(row.get("variant_label")),
-                "variable_axis": self._safe_text(row.get("variable_axis")),
-                "variable_value": self._normalize_scalar_or_text(row.get("variable_value")),
-                "property_normalized": self._safe_text(row.get("property_normalized"))
-                or "qualitative",
-                "result_type": self._safe_text(row.get("result_type")) or "scalar",
-                "result_summary": self._safe_text(row.get("result_summary"))
-                or "Result reported",
-                "value": value,
-                "unit": self._safe_text(row.get("unit")),
-                "test_condition_normalized": self._safe_text(
-                    row.get("test_condition_normalized")
-                )
-                or "unspecified test condition",
-                "baseline_reference": self._safe_text(row.get("baseline_reference")),
-                "baseline_normalized": self._safe_text(row.get("baseline_normalized"))
-                or "unspecified baseline",
+                "material_system_normalized": record.material_system_normalized,
+                "process_normalized": record.process_normalized,
+                "variant_id": record.variant_id,
+                "variant_label": record.variant_label,
+                "variable_axis": record.variable_axis,
+                "variable_value": record.variable_value,
+                "property_normalized": record.property_normalized,
+                "result_type": record.result_type,
+                "result_summary": record.result_summary,
+                "value": record.value,
+                "unit": record.unit,
+                "test_condition_normalized": record.test_condition_normalized,
+                "baseline_reference": record.baseline_reference,
+                "baseline_normalized": record.baseline_normalized,
             },
             "evidence_bundle": {
-                "result_source_type": self._safe_text(row.get("result_source_type")),
-                "supporting_evidence_ids": self._normalize_string_list(
-                    row.get("supporting_evidence_ids")
+                "result_source_type": record.result_source_type,
+                "supporting_evidence_ids": list(record.supporting_evidence_ids),
+                "supporting_anchor_ids": list(record.supporting_anchor_ids),
+                "characterization_observation_ids": list(
+                    record.characterization_observation_ids
                 ),
-                "supporting_anchor_ids": self._normalize_string_list(
-                    row.get("supporting_anchor_ids")
-                ),
-                "characterization_observation_ids": self._normalize_string_list(
-                    row.get("characterization_observation_ids")
-                ),
-                "structure_feature_ids": self._normalize_string_list(
-                    row.get("structure_feature_ids")
-                ),
+                "structure_feature_ids": list(record.structure_feature_ids),
             },
             "assessment": {
-                "comparability_status": self._safe_text(row.get("comparability_status"))
-                or COMPARABILITY_STATUS_LIMITED,
-                "comparability_warnings": self._normalize_string_list(
-                    row.get("comparability_warnings")
-                ),
-                "comparability_basis": self._normalize_string_list(
-                    row.get("comparability_basis")
-                ),
-                "requires_expert_review": bool(row.get("requires_expert_review")),
-                "assessment_epistemic_status": self._safe_text(
-                    row.get("assessment_epistemic_status")
-                )
-                or EPISTEMIC_UNRESOLVED,
+                "comparability_status": record.comparability_status,
+                "comparability_warnings": list(record.comparability_warnings),
+                "comparability_basis": list(record.comparability_basis),
+                "requires_expert_review": record.requires_expert_review,
+                "assessment_epistemic_status": record.assessment_epistemic_status,
             },
             "uncertainty": {
                 "missing_critical_context": missing_critical_context,

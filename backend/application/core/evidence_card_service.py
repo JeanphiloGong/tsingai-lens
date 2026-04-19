@@ -9,6 +9,16 @@ from uuid import uuid4
 
 import pandas as pd
 
+from domain.core.evidence_backbone import (
+    BaselineReference,
+    CORE_NEUTRAL_DOMAIN_PROFILE,
+    CharacterizationObservation,
+    EvidenceAnchor,
+    MeasurementResult,
+    SampleVariant,
+    StructureFeature,
+    TestCondition,
+)
 from domain.shared.enums import (
     DOC_TYPE_REVIEW,
     DOC_TYPE_UNCERTAIN,
@@ -76,7 +86,6 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
     "characterization_observation_ids",
     "evidence_anchor_ids",
 )
-_DOMAIN_PROFILE_CORE_NEUTRAL = "core_neutral"
 _CHARACTERIZATION_COLUMNS = [
     "observation_id",
     "document_id",
@@ -606,20 +615,22 @@ class EvidenceCardService:
                 observed_value, observed_unit = self._extract_observed_value_and_unit(section_text)
                 for method in methods:
                     rows.append(
-                        {
-                            "observation_id": f"obs_{uuid4().hex[:12]}",
-                            "document_id": str(document_id),
-                            "collection_id": collection_id,
-                            "variant_id": None,
-                            "characterization_type": method.lower(),
-                            "observation_text": section_text,
-                            "observed_value": observed_value,
-                            "observed_unit": observed_unit,
-                            "condition_context": condition_context,
-                            "evidence_anchor_ids": anchor_ids,
-                            "confidence": 0.84 if observed_value is not None else 0.78,
-                            "epistemic_status": EPISTEMIC_DIRECTLY_OBSERVED,
-                        }
+                        CharacterizationObservation.from_mapping(
+                            {
+                                "observation_id": f"obs_{uuid4().hex[:12]}",
+                                "document_id": str(document_id),
+                                "collection_id": collection_id,
+                                "variant_id": None,
+                                "characterization_type": method.lower(),
+                                "observation_text": section_text,
+                                "observed_value": observed_value,
+                                "observed_unit": observed_unit,
+                                "condition_context": condition_context,
+                                "evidence_anchor_ids": anchor_ids,
+                                "confidence": 0.84 if observed_value is not None else 0.78,
+                                "epistemic_status": EPISTEMIC_DIRECTLY_OBSERVED,
+                            }
+                        ).to_record()
                     )
 
         for document_id, table_cells in table_cells_by_doc.items():
@@ -639,20 +650,22 @@ class EvidenceCardService:
                 observed_value, observed_unit = self._extract_observed_value_and_unit(summary)
                 for method in methods:
                     rows.append(
-                        {
-                            "observation_id": f"obs_{uuid4().hex[:12]}",
-                            "document_id": str(document_id),
-                            "collection_id": collection_id,
-                            "variant_id": None,
-                            "characterization_type": method.lower(),
-                            "observation_text": summary,
-                            "observed_value": observed_value,
-                            "observed_unit": observed_unit,
-                            "condition_context": self._normalize_condition_context_payload({}),
-                            "evidence_anchor_ids": [],
-                            "confidence": 0.68,
-                            "epistemic_status": EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
-                        }
+                        CharacterizationObservation.from_mapping(
+                            {
+                                "observation_id": f"obs_{uuid4().hex[:12]}",
+                                "document_id": str(document_id),
+                                "collection_id": collection_id,
+                                "variant_id": None,
+                                "characterization_type": method.lower(),
+                                "observation_text": summary,
+                                "observed_value": observed_value,
+                                "observed_unit": observed_unit,
+                                "condition_context": self._normalize_condition_context_payload({}),
+                                "evidence_anchor_ids": [],
+                                "confidence": 0.68,
+                                "epistemic_status": EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+                            }
+                        ).to_record()
                     )
 
         return self._normalize_characterization_table(
@@ -738,27 +751,29 @@ class EvidenceCardService:
                 continue
             dedupe.add(dedupe_key)
             rows.append(
-                {
-                    "test_condition_id": f"tc_{uuid4().hex[:12]}",
-                    "document_id": str(row.get("document_id") or ""),
-                    "collection_id": collection_id,
-                    "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
-                    "property_type": property_type,
-                    "template_type": template_type,
-                    "scope_level": scope_level,
-                    "condition_payload": payload,
-                    "condition_completeness": condition_completeness,
-                    "missing_fields": missing_fields,
-                    "evidence_anchor_ids": self._extract_anchor_ids(
-                        row.get("evidence_anchors")
-                    ),
-                    "confidence": 0.82 if condition_completeness == "complete" else 0.72,
-                    "epistemic_status": (
-                        EPISTEMIC_NORMALIZED_FROM_EVIDENCE
-                        if condition_completeness != "unresolved"
-                        else EPISTEMIC_UNRESOLVED
-                    ),
-                }
+                TestCondition.from_mapping(
+                    {
+                        "test_condition_id": f"tc_{uuid4().hex[:12]}",
+                        "document_id": str(row.get("document_id") or ""),
+                        "collection_id": collection_id,
+                        "domain_profile": CORE_NEUTRAL_DOMAIN_PROFILE,
+                        "property_type": property_type,
+                        "template_type": template_type,
+                        "scope_level": scope_level,
+                        "condition_payload": payload,
+                        "condition_completeness": condition_completeness,
+                        "missing_fields": missing_fields,
+                        "evidence_anchor_ids": self._extract_anchor_ids(
+                            row.get("evidence_anchors")
+                        ),
+                        "confidence": 0.82 if condition_completeness == "complete" else 0.72,
+                        "epistemic_status": (
+                            EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                            if condition_completeness != "unresolved"
+                            else EPISTEMIC_UNRESOLVED
+                        ),
+                    }
+                ).to_record()
             )
 
         return self._normalize_test_conditions_table(
@@ -808,25 +823,27 @@ class EvidenceCardService:
                 else EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE
             )
             rows.append(
-                {
-                    "baseline_id": f"base_{uuid4().hex[:12]}",
-                    "document_id": str(row.get("document_id") or ""),
-                    "collection_id": collection_id,
-                    "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
-                    "variant_id": None,
-                    "baseline_type": baseline_type,
-                    "baseline_label": baseline_label,
-                    "baseline_scope": baseline_scope,
-                    "evidence_anchor_ids": self._extract_anchor_ids(
-                        row.get("evidence_anchors")
-                    ),
-                    "confidence": (
-                        0.8
-                        if epistemic_status == EPISTEMIC_NORMALIZED_FROM_EVIDENCE
-                        else 0.64
-                    ),
-                    "epistemic_status": epistemic_status,
-                }
+                BaselineReference.from_mapping(
+                    {
+                        "baseline_id": f"base_{uuid4().hex[:12]}",
+                        "document_id": str(row.get("document_id") or ""),
+                        "collection_id": collection_id,
+                        "domain_profile": CORE_NEUTRAL_DOMAIN_PROFILE,
+                        "variant_id": None,
+                        "baseline_type": baseline_type,
+                        "baseline_label": baseline_label,
+                        "baseline_scope": baseline_scope,
+                        "evidence_anchor_ids": self._extract_anchor_ids(
+                            row.get("evidence_anchors")
+                        ),
+                        "confidence": (
+                            0.8
+                            if epistemic_status == EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                            else 0.64
+                        ),
+                        "epistemic_status": epistemic_status,
+                    }
+                ).to_record()
             )
 
         return self._normalize_baseline_references_table(
@@ -883,41 +900,45 @@ class EvidenceCardService:
                 dedupe.add(dedupe_key)
                 row_summary = self._build_table_row_summary(ordered_cells)
                 rows.append(
-                    {
-                        "variant_id": f"var_{uuid4().hex[:12]}",
-                        "document_id": str(document_id),
-                        "collection_id": collection_id,
-                        "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
-                        "variant_label": variant_label,
-                        "host_material_system": host_material_system,
-                        "composition": host_material_system.get("composition"),
-                        "variable_axis_type": variable_axis_type,
-                        "variable_value": self._normalize_variant_value(variable_value),
-                        "process_context": self._build_variant_process_context(
-                            document_process_context=document_process_context,
-                            variable_axis_type=variable_axis_type,
-                            variable_value=variable_value,
-                        ),
-                        "profile_payload": {
-                            "source_kind": "table_row",
-                            "table_id": table_id,
-                            "row_index": row_index,
-                            "row_summary": row_summary,
-                            "variable_header": variable_header,
-                            "baseline_label": (self._resolve_table_baseline(ordered_cells) or {}).get(
-                                "control"
+                    SampleVariant.from_mapping(
+                        {
+                            "variant_id": f"var_{uuid4().hex[:12]}",
+                            "document_id": str(document_id),
+                            "collection_id": collection_id,
+                            "domain_profile": CORE_NEUTRAL_DOMAIN_PROFILE,
+                            "variant_label": variant_label,
+                            "host_material_system": host_material_system,
+                            "composition": host_material_system.get("composition"),
+                            "variable_axis_type": variable_axis_type,
+                            "variable_value": self._normalize_variant_value(variable_value),
+                            "process_context": self._build_variant_process_context(
+                                document_process_context=document_process_context,
+                                variable_axis_type=variable_axis_type,
+                                variable_value=variable_value,
                             ),
-                        },
-                        "structure_feature_ids": [],
-                        "source_anchor_ids": self._collect_table_row_anchor_ids(
-                            document_cards,
-                            table_id=table_id,
-                            row_summary=row_summary,
-                            sample_label=sample_label,
-                        ),
-                        "confidence": 0.86 if sample_label and variable_value is not None else 0.76,
-                        "epistemic_status": EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
-                    }
+                            "profile_payload": {
+                                "source_kind": "table_row",
+                                "table_id": table_id,
+                                "row_index": row_index,
+                                "row_summary": row_summary,
+                                "variable_header": variable_header,
+                                "baseline_label": (
+                                    self._resolve_table_baseline(ordered_cells) or {}
+                                ).get("control"),
+                            },
+                            "structure_feature_ids": [],
+                            "source_anchor_ids": self._collect_table_row_anchor_ids(
+                                document_cards,
+                                table_id=table_id,
+                                row_summary=row_summary,
+                                sample_label=sample_label,
+                            ),
+                            "confidence": (
+                                0.86 if sample_label and variable_value is not None else 0.76
+                            ),
+                            "epistemic_status": EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+                        }
+                    ).to_record()
                 )
                 table_variant_count += 1
 
@@ -1050,48 +1071,52 @@ class EvidenceCardService:
                 sample_variants=sample_variants,
             )
             rows.append(
-                {
-                    "result_id": f"res_{uuid4().hex[:12]}",
-                    "document_id": document_id,
-                    "collection_id": collection_id,
-                    "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
-                    "variant_id": variant_id,
-                    "property_normalized": property_normalized,
-                    "result_type": result_type,
-                    "value_payload": value_payload,
-                    "unit": unit,
-                    "test_condition_id": self._resolve_test_condition_id(
-                        card_row=row,
-                        property_normalized=property_normalized,
-                        test_conditions=test_conditions,
-                    ),
-                    "baseline_id": self._resolve_baseline_id(
-                        card_row=row,
-                        baseline_references=baseline_references,
-                    ),
-                    "structure_feature_ids": self._collect_related_structure_feature_ids(
-                        document_id=document_id,
-                        variant_id=variant_id,
-                        structure_features=structure_features,
-                        sample_variants=sample_variants,
-                    ),
-                    "characterization_observation_ids": self._collect_related_characterization_ids(
-                        document_id=document_id,
-                        variant_id=variant_id,
-                        characterization=characterization,
-                        sample_variants=sample_variants,
-                    ),
-                    "evidence_anchor_ids": self._extract_anchor_ids(row.get("evidence_anchors")),
-                    "traceability_status": str(
-                        row.get("traceability_status") or TRACEABILITY_STATUS_MISSING
-                    ),
-                    "result_source_type": str(row.get("evidence_source_type") or "text"),
-                    "epistemic_status": (
-                        EPISTEMIC_DIRECTLY_OBSERVED
-                        if str(row.get("evidence_source_type") or "") == "table"
-                        else EPISTEMIC_NORMALIZED_FROM_EVIDENCE
-                    ),
-                }
+                MeasurementResult.from_mapping(
+                    {
+                        "result_id": f"res_{uuid4().hex[:12]}",
+                        "document_id": document_id,
+                        "collection_id": collection_id,
+                        "domain_profile": CORE_NEUTRAL_DOMAIN_PROFILE,
+                        "variant_id": variant_id,
+                        "property_normalized": property_normalized,
+                        "result_type": result_type,
+                        "value_payload": value_payload,
+                        "unit": unit,
+                        "test_condition_id": self._resolve_test_condition_id(
+                            card_row=row,
+                            property_normalized=property_normalized,
+                            test_conditions=test_conditions,
+                        ),
+                        "baseline_id": self._resolve_baseline_id(
+                            card_row=row,
+                            baseline_references=baseline_references,
+                        ),
+                        "structure_feature_ids": self._collect_related_structure_feature_ids(
+                            document_id=document_id,
+                            variant_id=variant_id,
+                            structure_features=structure_features,
+                            sample_variants=sample_variants,
+                        ),
+                        "characterization_observation_ids": self._collect_related_characterization_ids(
+                            document_id=document_id,
+                            variant_id=variant_id,
+                            characterization=characterization,
+                            sample_variants=sample_variants,
+                        ),
+                        "evidence_anchor_ids": self._extract_anchor_ids(
+                            row.get("evidence_anchors")
+                        ),
+                        "traceability_status": str(
+                            row.get("traceability_status") or TRACEABILITY_STATUS_MISSING
+                        ),
+                        "result_source_type": str(row.get("evidence_source_type") or "text"),
+                        "epistemic_status": (
+                            EPISTEMIC_DIRECTLY_OBSERVED
+                            if str(row.get("evidence_source_type") or "") == "table"
+                            else EPISTEMIC_NORMALIZED_FROM_EVIDENCE
+                        ),
+                    }
+                ).to_record()
             )
 
         return self._normalize_measurement_results_table(
@@ -1290,23 +1315,25 @@ class EvidenceCardService:
         variant_label = str(host_material_system.get("family") or document_id).strip()
         if not variant_label:
             return None
-        return {
-            "variant_id": f"var_{uuid4().hex[:12]}",
-            "document_id": str(document_id),
-            "collection_id": collection_id,
-            "domain_profile": _DOMAIN_PROFILE_CORE_NEUTRAL,
-            "variant_label": variant_label,
-            "host_material_system": host_material_system,
-            "composition": host_material_system.get("composition"),
-            "variable_axis_type": None,
-            "variable_value": None,
-            "process_context": self._normalize_condition_payload(document_process_context),
-            "profile_payload": {"source_kind": "document_default"},
-            "structure_feature_ids": [],
-            "source_anchor_ids": self._collect_document_anchor_ids(document_cards),
-            "confidence": 0.62,
-            "epistemic_status": EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
-        }
+        return SampleVariant.from_mapping(
+            {
+                "variant_id": f"var_{uuid4().hex[:12]}",
+                "document_id": str(document_id),
+                "collection_id": collection_id,
+                "domain_profile": CORE_NEUTRAL_DOMAIN_PROFILE,
+                "variant_label": variant_label,
+                "host_material_system": host_material_system,
+                "composition": host_material_system.get("composition"),
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": self._normalize_condition_payload(document_process_context),
+                "profile_payload": {"source_kind": "document_default"},
+                "structure_feature_ids": [],
+                "source_anchor_ids": self._collect_document_anchor_ids(document_cards),
+                "confidence": 0.62,
+                "epistemic_status": EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
+            }
+        ).to_record()
 
     def _collect_document_anchor_ids(
         self,
@@ -1715,29 +1742,28 @@ class EvidenceCardService:
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
         if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = _DOMAIN_PROFILE_CORE_NEUTRAL
-        normalized["host_material_system"] = normalized["host_material_system"].apply(
-            self._normalize_material_system_payload
-        )
-        normalized["process_context"] = normalized["process_context"].apply(
-            self._normalize_condition_payload
-        )
-        normalized["profile_payload"] = normalized["profile_payload"].apply(
-            lambda value: self._normalize_object(value) if isinstance(self._normalize_object(value), dict) else {}
-        )
-        normalized["structure_feature_ids"] = normalized["structure_feature_ids"].apply(
-            self._normalize_list
-        )
-        normalized["source_anchor_ids"] = normalized["source_anchor_ids"].apply(
-            self._normalize_list
-        )
-        normalized["confidence"] = normalized["confidence"].apply(
-            lambda value: round(float(value or 0.0), 2)
-        )
-        normalized["variant_label"] = normalized["variant_label"].apply(
-            lambda value: str(value or "").strip()
-        )
-        return normalized[_SAMPLE_VARIANT_COLUMNS]
+            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+        records = []
+        for _, row in normalized.iterrows():
+            payload = dict(row)
+            payload["host_material_system"] = self._normalize_material_system_payload(
+                row.get("host_material_system")
+            )
+            payload["process_context"] = self._normalize_condition_payload(
+                row.get("process_context")
+            )
+            profile_payload = self._normalize_object(row.get("profile_payload"))
+            payload["profile_payload"] = (
+                profile_payload if isinstance(profile_payload, dict) else {}
+            )
+            payload["structure_feature_ids"] = self._normalize_list(
+                row.get("structure_feature_ids")
+            )
+            payload["source_anchor_ids"] = self._normalize_list(
+                row.get("source_anchor_ids")
+            )
+            records.append(SampleVariant.from_mapping(payload).to_record())
+        return pd.DataFrame(records, columns=_SAMPLE_VARIANT_COLUMNS)
 
     def _normalize_measurement_results_table(
         self,
@@ -1751,20 +1777,23 @@ class EvidenceCardService:
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
         if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = _DOMAIN_PROFILE_CORE_NEUTRAL
-        normalized["value_payload"] = normalized["value_payload"].apply(
-            lambda value: self._normalize_object(value) if isinstance(self._normalize_object(value), dict) else {}
-        )
-        normalized["structure_feature_ids"] = normalized["structure_feature_ids"].apply(
-            self._normalize_list
-        )
-        normalized["characterization_observation_ids"] = normalized[
-            "characterization_observation_ids"
-        ].apply(self._normalize_list)
-        normalized["evidence_anchor_ids"] = normalized["evidence_anchor_ids"].apply(
-            self._normalize_list
-        )
-        return normalized[_MEASUREMENT_RESULT_COLUMNS]
+            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+        records = []
+        for _, row in normalized.iterrows():
+            payload = dict(row)
+            value_payload = self._normalize_object(row.get("value_payload"))
+            payload["value_payload"] = value_payload if isinstance(value_payload, dict) else {}
+            payload["structure_feature_ids"] = self._normalize_list(
+                row.get("structure_feature_ids")
+            )
+            payload["characterization_observation_ids"] = self._normalize_list(
+                row.get("characterization_observation_ids")
+            )
+            payload["evidence_anchor_ids"] = self._normalize_list(
+                row.get("evidence_anchor_ids")
+            )
+            records.append(MeasurementResult.from_mapping(payload).to_record())
+        return pd.DataFrame(records, columns=_MEASUREMENT_RESULT_COLUMNS)
 
     def _normalize_characterization_table(
         self,
@@ -1777,16 +1806,17 @@ class EvidenceCardService:
         normalized = characterization.copy()
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
-        normalized["condition_context"] = normalized["condition_context"].apply(
-            self._normalize_condition_context_payload
-        )
-        normalized["evidence_anchor_ids"] = normalized["evidence_anchor_ids"].apply(
-            self._normalize_list
-        )
-        normalized["confidence"] = normalized["confidence"].apply(
-            lambda value: round(float(value or 0.0), 2)
-        )
-        return normalized[_CHARACTERIZATION_COLUMNS]
+        records = []
+        for _, row in normalized.iterrows():
+            payload = dict(row)
+            payload["condition_context"] = self._normalize_condition_context_payload(
+                row.get("condition_context")
+            )
+            payload["evidence_anchor_ids"] = self._normalize_list(
+                row.get("evidence_anchor_ids")
+            )
+            records.append(CharacterizationObservation.from_mapping(payload).to_record())
+        return pd.DataFrame(records, columns=_CHARACTERIZATION_COLUMNS)
 
     def _normalize_structure_features_table(
         self,
@@ -1795,14 +1825,14 @@ class EvidenceCardService:
         if structure_features is None or structure_features.empty:
             return pd.DataFrame(columns=_STRUCTURE_FEATURE_COLUMNS)
 
-        normalized = structure_features.copy()
-        normalized["source_observation_ids"] = normalized["source_observation_ids"].apply(
-            self._normalize_list
-        )
-        normalized["confidence"] = normalized["confidence"].apply(
-            lambda value: round(float(value or 0.0), 2)
-        )
-        return normalized[_STRUCTURE_FEATURE_COLUMNS]
+        records = []
+        for _, row in structure_features.iterrows():
+            payload = dict(row)
+            payload["source_observation_ids"] = self._normalize_list(
+                row.get("source_observation_ids")
+            )
+            records.append(StructureFeature.from_mapping(payload).to_record())
+        return pd.DataFrame(records, columns=_STRUCTURE_FEATURE_COLUMNS)
 
     def _normalize_test_conditions_table(
         self,
@@ -1816,20 +1846,19 @@ class EvidenceCardService:
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
         if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = _DOMAIN_PROFILE_CORE_NEUTRAL
-        normalized["condition_payload"] = normalized["condition_payload"].apply(
-            self._normalize_condition_payload
-        )
-        normalized["missing_fields"] = normalized["missing_fields"].apply(
-            self._normalize_list
-        )
-        normalized["evidence_anchor_ids"] = normalized["evidence_anchor_ids"].apply(
-            self._normalize_list
-        )
-        normalized["confidence"] = normalized["confidence"].apply(
-            lambda value: round(float(value or 0.0), 2)
-        )
-        return normalized[_TEST_CONDITION_COLUMNS]
+            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+        records = []
+        for _, row in normalized.iterrows():
+            payload = dict(row)
+            payload["condition_payload"] = self._normalize_condition_payload(
+                row.get("condition_payload")
+            )
+            payload["missing_fields"] = self._normalize_list(row.get("missing_fields"))
+            payload["evidence_anchor_ids"] = self._normalize_list(
+                row.get("evidence_anchor_ids")
+            )
+            records.append(TestCondition.from_mapping(payload).to_record())
+        return pd.DataFrame(records, columns=_TEST_CONDITION_COLUMNS)
 
     def _normalize_baseline_references_table(
         self,
@@ -1843,14 +1872,15 @@ class EvidenceCardService:
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
         if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = _DOMAIN_PROFILE_CORE_NEUTRAL
-        normalized["evidence_anchor_ids"] = normalized["evidence_anchor_ids"].apply(
-            self._normalize_list
-        )
-        normalized["confidence"] = normalized["confidence"].apply(
-            lambda value: round(float(value or 0.0), 2)
-        )
-        return normalized[_BASELINE_REFERENCE_COLUMNS]
+            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+        records = []
+        for _, row in normalized.iterrows():
+            payload = dict(row)
+            payload["evidence_anchor_ids"] = self._normalize_list(
+                row.get("evidence_anchor_ids")
+            )
+            records.append(BaselineReference.from_mapping(payload).to_record())
+        return pd.DataFrame(records, columns=_BASELINE_REFERENCE_COLUMNS)
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)
@@ -2342,19 +2372,21 @@ class EvidenceCardService:
         source_observation_ids: list[str],
         confidence: float,
     ) -> dict[str, Any]:
-        return {
-            "feature_id": f"feat_{uuid4().hex[:12]}",
-            "document_id": document_id,
-            "collection_id": collection_id,
-            "variant_id": variant_id,
-            "feature_type": feature_type,
-            "feature_value": feature_value,
-            "feature_unit": feature_unit,
-            "qualitative_descriptor": qualitative_descriptor,
-            "source_observation_ids": source_observation_ids,
-            "confidence": confidence,
-            "epistemic_status": EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
-        }
+        return StructureFeature.from_mapping(
+            {
+                "feature_id": f"feat_{uuid4().hex[:12]}",
+                "document_id": document_id,
+                "collection_id": collection_id,
+                "variant_id": variant_id,
+                "feature_type": feature_type,
+                "feature_value": feature_value,
+                "feature_unit": feature_unit,
+                "qualitative_descriptor": qualitative_descriptor,
+                "source_observation_ids": source_observation_ids,
+                "confidence": confidence,
+                "epistemic_status": EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
+            }
+        ).to_record()
 
     def _infer_property_type_from_card(
         self,
@@ -2756,23 +2788,27 @@ class EvidenceCardService:
             )
 
             payload.append(
-                {
-                    "anchor_id": anchor_id,
-                    "document_id": anchor_document_id,
-                    "locator_type": locator_type,
-                    "locator_confidence": locator_confidence,
-                    "source_type": source_type,
-                    "section_id": section_id,
-                    "char_range": char_range,
-                    "bbox": bbox,
-                    "page": page,
-                    "quote": quote,
-                    "deep_link": deep_link,
-                    "block_id": self._normalize_scalar_text(anchor.get("block_id")),
-                    "snippet_id": self._normalize_scalar_text(anchor.get("snippet_id")),
-                    "figure_or_table": self._normalize_scalar_text(anchor.get("figure_or_table")),
-                    "quote_span": quote,
-                }
+                EvidenceAnchor.from_mapping(
+                    {
+                        "anchor_id": anchor_id,
+                        "document_id": anchor_document_id,
+                        "locator_type": locator_type,
+                        "locator_confidence": locator_confidence,
+                        "source_type": source_type,
+                        "section_id": section_id,
+                        "char_range": char_range,
+                        "bbox": bbox,
+                        "page": page,
+                        "quote": quote,
+                        "deep_link": deep_link,
+                        "block_id": self._normalize_scalar_text(anchor.get("block_id")),
+                        "snippet_id": self._normalize_scalar_text(anchor.get("snippet_id")),
+                        "figure_or_table": self._normalize_scalar_text(
+                            anchor.get("figure_or_table")
+                        ),
+                        "quote_span": quote,
+                    }
+                ).to_record()
             )
         return payload
 

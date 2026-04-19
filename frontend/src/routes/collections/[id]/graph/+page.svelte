@@ -1015,7 +1015,7 @@
 				<div class="detail-primary">
 					<span class="detail-name">{selectedNode.label}</span>
 					{#if selectedNode.type}
-						<span class="detail-tag">{selectedNode.type}</span>
+						<span class="detail-tag">{selectedNodeTypeLabel(selectedNode.type)}</span>
 					{/if}
 				</div>
 				<dl class="detail-list">

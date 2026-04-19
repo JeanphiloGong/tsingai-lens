@@ -95,29 +95,23 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
         ]
     ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
 
-    nodes, edges, truncated, community = load_core_graph_payload(
+    nodes, edges, truncated = load_core_graph_payload(
         base_dir=output_dir,
         max_nodes=20,
         min_weight=0.0,
     )
 
     assert truncated is False
-    assert community is None
     assert len(nodes) == 3
     assert len(edges) == 2
 
     nodes_by_id = {node["id"]: node for node in nodes}
     assert set(nodes_by_id) == {"doc:paper-1", "evi:ev-1", "cmp:cmp-1"}
     assert nodes_by_id["doc:paper-1"]["type"] == "document"
-    assert json.loads(nodes_by_id["doc:paper-1"]["node_document_ids"]) == ["paper-1"]
     assert nodes_by_id["evi:ev-1"]["type"] == "evidence"
-    assert json.loads(nodes_by_id["evi:ev-1"]["node_text_unit_ids"]) == ["tu-1"]
     assert nodes_by_id["evi:ev-1"]["degree"] == 2
     assert nodes_by_id["cmp:cmp-1"]["type"] == "comparison"
     assert nodes_by_id["cmp:cmp-1"]["label"] == "epoxy composite | flexural_strength"
-    assert json.loads(nodes_by_id["cmp:cmp-1"]["node_document_titles"]) == [
-        "Core Graph Paper"
-    ]
 
     edges_by_id = {edge["id"]: edge for edge in edges}
     assert set(edges_by_id) == {
@@ -127,9 +121,6 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
     assert edges_by_id["edge:doc:paper-1:evi:ev-1"]["edge_description"] == (
         "document_to_evidence"
     )
-    assert json.loads(
-        edges_by_id["edge:evi:ev-1:cmp:cmp-1"]["edge_text_unit_ids"]
-    ) == ["tu-1"]
 
 
 def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
@@ -238,11 +229,9 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
         collection_id=collection_id,
         max_nodes=20,
         min_weight=0.0,
-        community_id=None,
     )
 
     assert payload["collection_id"] == collection_id
-    assert payload["community"] is None
     assert len(payload["nodes"]) == 3
     assert len(payload["edges"]) == 2
 
@@ -250,14 +239,13 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
         collection_id=collection_id,
         max_nodes=20,
         min_weight=0.0,
-        community_id=None,
     )
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
 
 
-def test_graph_service_rejects_legacy_community_filter(monkeypatch, tmp_path):
+def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
     try:
         import fastapi  # noqa: F401
     except ImportError:
@@ -285,7 +273,7 @@ def test_graph_service_rejects_legacy_community_filter(monkeypatch, tmp_path):
     monkeypatch.setattr(graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_service, "artifact_registry_service", artifact_registry)
 
-    collection = collection_service.create_collection("Filtered Graph Collection")
+    collection = collection_service.create_collection("Graph Neighborhood Collection")
     collection_id = collection["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -342,15 +330,20 @@ def test_graph_service_rejects_legacy_community_filter(monkeypatch, tmp_path):
     ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
-    try:
-        graph_service.get_collection_graph(
-            collection_id=collection_id,
-            max_nodes=20,
-            min_weight=0.0,
-            community_id="1",
-        )
-    except graph_service.GraphFilterNotSupportedError as exc:
-        assert exc.collection_id == collection_id
-        assert exc.filter_name == "community_id"
-    else:  # pragma: no cover
-        raise AssertionError("expected GraphFilterNotSupportedError")
+    payload = graph_service.get_collection_graph_neighbors(
+        collection_id=collection_id,
+        node_id="evi:ev-1",
+    )
+
+    assert payload["collection_id"] == collection_id
+    assert payload["center_node_id"] == "evi:ev-1"
+    assert payload["truncated"] is False
+    assert {node["id"] for node in payload["nodes"]} == {
+        "doc:paper-1",
+        "evi:ev-1",
+        "cmp:cmp-1",
+    }
+    assert {edge["id"] for edge in payload["edges"]} == {
+        "edge:doc:paper-1:evi:ev-1",
+        "edge:evi:ev-1:cmp:cmp-1",
+    }

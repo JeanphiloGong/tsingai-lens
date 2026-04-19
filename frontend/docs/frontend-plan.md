@@ -19,7 +19,8 @@
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
 - 启动索引任务：`POST /api/v1/collections/{collection_id}/tasks/index`
 - 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
-- 图谱与 GraphML：`GET /api/v1/collections/{collection_id}/graph`、`GET /api/v1/collections/{collection_id}/graphml`
+- 图谱与 GraphML：`GET /api/v1/collections/{collection_id}/graph`、`GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`、`GET /api/v1/collections/{collection_id}/graphml`
+- 图谱 drilldown 详情：`GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、`GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`、`GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
 - Protocol 结果：`GET /api/v1/collections/{collection_id}/protocol/steps`、`GET /api/v1/collections/{collection_id}/protocol/search`、`POST /api/v1/collections/{collection_id}/protocol/sop`
 - 报告结果：`GET /api/v1/collections/{collection_id}/reports/communities`、`GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`、`GET /api/v1/collections/{collection_id}/reports/patterns`
 

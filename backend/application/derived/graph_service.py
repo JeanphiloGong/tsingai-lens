@@ -14,6 +14,7 @@ from infra.derived.graph.graphml import to_graphml as render_graphml
 
 artifact_registry_service = ArtifactRegistryService()
 collection_service = CollectionService()
+_NEIGHBORHOOD_MAX_NODES = 2_147_483_647
 
 
 class GraphNotReadyError(RuntimeError):
@@ -31,13 +32,13 @@ class GraphNotReadyError(RuntimeError):
         super().__init__(f"graph not ready: {collection_id}")
 
 
-class GraphFilterNotSupportedError(RuntimeError):
-    """Raised when a legacy graph-only filter is requested on the Core graph."""
+class GraphNodeNotFoundError(RuntimeError):
+    """Raised when one graph node is missing from the Core-derived projection."""
 
-    def __init__(self, collection_id: str, filter_name: str) -> None:
+    def __init__(self, collection_id: str, node_id: str) -> None:
         self.collection_id = collection_id
-        self.filter_name = filter_name
-        super().__init__(f"graph filter not supported: {collection_id}:{filter_name}")
+        self.node_id = node_id
+        super().__init__(f"graph node not found: {collection_id}/{node_id}")
 
 
 def resolve_collection_output_dir(collection_id: str) -> Path:
@@ -68,11 +69,7 @@ def load_graph_payload(
     base_dir: Path,
     max_nodes: int,
     min_weight: float,
-    community_id: str | None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool, str | None]:
-    if community_id is not None:
-        raise GraphFilterNotSupportedError(collection_id, "community_id")
-
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     missing_artifacts = missing_core_graph_artifacts(base_dir)
     if missing_artifacts:
         raise GraphNotReadyError(
@@ -92,23 +89,19 @@ def get_collection_graph(
     collection_id: str,
     max_nodes: int,
     min_weight: float,
-    community_id: str | None,
 ) -> dict[str, Any]:
     base_dir = resolve_collection_output_dir(collection_id)
-    nodes_payload, edges_payload, truncated, community_label = load_graph_payload(
+    nodes_payload, edges_payload, truncated = load_graph_payload(
         collection_id=collection_id,
         base_dir=base_dir,
         max_nodes=max_nodes,
         min_weight=min_weight,
-        community_id=community_id,
     )
     return {
         "collection_id": collection_id,
-        "output_path": str(base_dir),
         "nodes": nodes_payload,
         "edges": edges_payload,
         "truncated": truncated,
-        "community": community_label,
     }
 
 
@@ -116,21 +109,55 @@ def build_graphml(
     collection_id: str,
     max_nodes: int,
     min_weight: float,
-    community_id: str | None,
 ) -> tuple[bytes, str]:
     base_dir = resolve_collection_output_dir(collection_id)
-    nodes_payload, edges_payload, _, community_label = load_graph_payload(
+    nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
         base_dir=base_dir,
         max_nodes=max_nodes,
         min_weight=min_weight,
-        community_id=community_id,
     )
-    filename = f"{collection_id}"
-    if community_label:
-        filename += f"_{community_label}"
-    filename += ".graphml"
-    return to_graphml(nodes_payload, edges_payload), filename
+    return to_graphml(nodes_payload, edges_payload), f"{collection_id}.graphml"
+
+
+def get_collection_graph_neighbors(
+    collection_id: str,
+    node_id: str,
+) -> dict[str, Any]:
+    base_dir = resolve_collection_output_dir(collection_id)
+    nodes_payload, edges_payload, _ = load_graph_payload(
+        collection_id=collection_id,
+        base_dir=base_dir,
+        max_nodes=_NEIGHBORHOOD_MAX_NODES,
+        min_weight=0.0,
+    )
+
+    node_ids = {str(node.get("id")) for node in nodes_payload}
+    if node_id not in node_ids:
+        raise GraphNodeNotFoundError(collection_id, node_id)
+
+    neighborhood_edges = [
+        edge
+        for edge in edges_payload
+        if str(edge.get("source")) == node_id or str(edge.get("target")) == node_id
+    ]
+    neighborhood_node_ids = {node_id}
+    for edge in neighborhood_edges:
+        source = str(edge.get("source"))
+        target = str(edge.get("target"))
+        neighborhood_node_ids.add(source)
+        neighborhood_node_ids.add(target)
+    neighborhood_nodes = [
+        node for node in nodes_payload if str(node.get("id")) in neighborhood_node_ids
+    ]
+
+    return {
+        "collection_id": collection_id,
+        "center_node_id": node_id,
+        "nodes": neighborhood_nodes,
+        "edges": neighborhood_edges,
+        "truncated": False,
+    }
 
 
 def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> bytes:
@@ -141,8 +168,9 @@ __all__ = [
     "artifact_registry_service",
     "build_graphml",
     "collection_service",
+    "get_collection_graph_neighbors",
     "get_collection_graph",
-    "GraphFilterNotSupportedError",
+    "GraphNodeNotFoundError",
     "GraphNotReadyError",
     "load_graph_payload",
     "resolve_collection_output_dir",

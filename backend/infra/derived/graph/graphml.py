@@ -11,29 +11,11 @@ def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byte
     key_defs = [
         ("label", "node", "string"),
         ("type", "node", "string"),
-        ("description", "node", "string"),
-        ("edge_description", "edge", "string"),
         ("degree", "node", "int"),
-        ("frequency", "node", "int"),
-        ("x", "node", "double"),
-        ("y", "node", "double"),
-        ("community", "node", "int"),
-        ("node_text_unit_ids", "node", "string"),
-        ("node_text_unit_count", "node", "int"),
-        ("node_document_ids", "node", "string"),
-        ("node_document_titles", "node", "string"),
-        ("node_document_count", "node", "int"),
-        ("edge_text_unit_ids", "edge", "string"),
-        ("edge_text_unit_count", "edge", "int"),
-        ("edge_document_ids", "edge", "string"),
-        ("edge_document_titles", "edge", "string"),
-        ("edge_document_count", "edge", "int"),
+        ("edge_description", "edge", "string"),
         ("weight", "edge", "double"),
     ]
-    has_community = any(node.get("community") is not None for node in nodes)
     for name, domain, attr_type in key_defs:
-        if name == "community" and not has_community:
-            continue
         SubElement(
             gml,
             "key",
@@ -52,21 +34,7 @@ def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byte
 
     for node in nodes:
         node_el = SubElement(graph, "node", id=node["id"])
-        for key in [
-            "label",
-            "type",
-            "description",
-            "degree",
-            "frequency",
-            "x",
-            "y",
-            "community",
-            "node_text_unit_ids",
-            "node_text_unit_count",
-            "node_document_ids",
-            "node_document_titles",
-            "node_document_count",
-        ]:
+        for key in ["label", "type", "degree"]:
             add_data(node_el, key, node.get(key))
 
     for edge in edges:
@@ -77,15 +45,7 @@ def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byte
             source=edge["source"],
             target=edge["target"],
         )
-        for key in [
-            "weight",
-            "edge_description",
-            "edge_text_unit_ids",
-            "edge_text_unit_count",
-            "edge_document_ids",
-            "edge_document_titles",
-            "edge_document_count",
-        ]:
+        for key in ["weight", "edge_description"]:
             add_data(edge_el, key, edge.get(key))
 
     return tostring(gml, encoding="utf-8", xml_declaration=True)

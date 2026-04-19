@@ -456,6 +456,27 @@ def test_collection_task_flow(app_client):
     assert "baseline_reference" in comparisons_body["items"][0]["display"]
     assert "result_source_type" in comparisons_body["items"][0]["evidence_bundle"]
 
+    document_id = profiles_body["items"][0]["document_id"]
+    profile = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/{document_id}/profile"
+    )
+    assert profile.status_code == 200
+    assert profile.json()["document_id"] == document_id
+
+    evidence_id = evidence_body["items"][0]["evidence_id"]
+    evidence_detail = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/evidence/{evidence_id}"
+    )
+    assert evidence_detail.status_code == 200
+    assert evidence_detail.json()["evidence_id"] == evidence_id
+
+    row_id = comparisons_body["items"][0]["row_id"]
+    comparison_detail = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/comparisons/{row_id}"
+    )
+    assert comparison_detail.status_code == 200
+    assert comparison_detail.json()["row_id"] == row_id
+
 
 def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):
     response = app_client.post(
@@ -515,18 +536,6 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     assert graphml_detail["collection_id"] == collection_id
 
 
-def test_graph_endpoint_rejects_legacy_community_filter(app_client):
-    collection_id, _task_id = _create_indexed_collection(app_client, name="Community Graph")
-    graph = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/graph",
-        params={"community_id": "999"},
-    )
-    assert graph.status_code == 400
-    detail = graph.json()["detail"]
-    assert detail["code"] == "graph_filter_not_supported"
-    assert detail["collection_id"] == collection_id
-    assert detail["filter_name"] == "community_id"
-
 def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     app_client,
 ):
@@ -553,7 +562,6 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert graph.status_code == 200
     payload = graph.json()
     assert payload["collection_id"] == collection_id
-    assert payload["community"] is None
     assert len(payload["nodes"]) == 3
     assert len(payload["edges"]) == 2
     assert {item["type"] for item in payload["nodes"]} == {
@@ -561,6 +569,23 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
         "evidence",
         "comparison",
     }
+    assert set(payload["nodes"][0]) == {"id", "label", "type", "degree"}
+    assert set(payload["edges"][0]) == {
+        "id",
+        "source",
+        "target",
+        "weight",
+        "edge_description",
+    }
+
+    neighbors = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/graph/nodes/evi:ev-1/neighbors"
+    )
+    assert neighbors.status_code == 200
+    neighbors_body = neighbors.json()
+    assert neighbors_body["center_node_id"] == "evi:ev-1"
+    assert len(neighbors_body["nodes"]) == 3
+    assert len(neighbors_body["edges"]) == 2
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 200

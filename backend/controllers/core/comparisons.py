@@ -5,10 +5,14 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from application.core.comparison_service import (
+    ComparisonRowNotFoundError,
     ComparisonRowsNotReadyError,
     ComparisonService,
 )
-from controllers.schemas.core.comparisons import ComparisonRowListResponse
+from controllers.schemas.core.comparisons import (
+    ComparisonRowItemResponse,
+    ComparisonRowListResponse,
+)
 
 router = APIRouter(prefix="/collections", tags=["comparisons"])
 comparison_service = ComparisonService()
@@ -20,6 +24,37 @@ def _comparison_rows_not_ready_detail(collection_id: str) -> dict[str, str]:
         "message": "The collection does not have comparison rows yet. Finish indexing first.",
         "collection_id": collection_id,
     }
+
+
+@router.get(
+    "/{collection_id}/comparisons/{row_id}",
+    response_model=ComparisonRowItemResponse,
+    summary="读取单个 comparison row",
+)
+async def get_collection_comparison(
+    collection_id: str,
+    row_id: str,
+) -> ComparisonRowItemResponse:
+    try:
+        payload = comparison_service.get_comparison_row(collection_id, row_id)
+    except ComparisonRowNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "comparison_not_found",
+                "message": str(exc),
+                "collection_id": exc.collection_id,
+                "row_id": exc.row_id,
+            },
+        ) from exc
+    except ComparisonRowsNotReadyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_comparison_rows_not_ready_detail(exc.collection_id),
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ComparisonRowItemResponse(**payload)
 
 
 @router.get(

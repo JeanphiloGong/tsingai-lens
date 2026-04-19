@@ -448,6 +448,31 @@ export async function fetchEvidenceCards(collectionId: string): Promise<Evidence
   return normalizeResponse(data, collectionId);
 }
 
+export async function fetchEvidenceCard(
+  collectionId: string,
+  evidenceId: string
+): Promise<EvidenceCard> {
+  if (USE_API_FIXTURES) {
+    const fixture = buildFixture(collectionId).items.find((item) => item.evidence_id === evidenceId);
+    if (fixture) {
+      return fixture;
+    }
+    throw new Error('Evidence card fixture is missing.');
+  }
+
+  const data = await requestJson(
+    `/collections/${encodeURIComponent(collectionId)}/evidence/${encodeURIComponent(evidenceId)}`,
+    {
+      method: 'GET'
+    }
+  );
+  const card = normalizeCard(data, collectionId);
+  if (!card) {
+    throw new Error('Evidence card response is invalid.');
+  }
+  return card;
+}
+
 function normalizeTracebackResponse(
   value: unknown,
   collectionId: string,

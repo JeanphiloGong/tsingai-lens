@@ -100,6 +100,15 @@ class ComparisonRowsNotReadyError(RuntimeError):
         super().__init__(f"comparison rows not ready: {collection_id}")
 
 
+class ComparisonRowNotFoundError(FileNotFoundError):
+    """Raised when one comparison row is missing from a collection."""
+
+    def __init__(self, collection_id: str, row_id: str) -> None:
+        self.collection_id = collection_id
+        self.row_id = row_id
+        super().__init__(f"comparison row not found: {collection_id}/{row_id}")
+
+
 class ComparisonService:
     """Generate and serve collection-scoped comparison row artifacts."""
 
@@ -135,6 +144,17 @@ class ComparisonService:
             "count": len(items),
             "items": items,
         }
+
+    def get_comparison_row(
+        self,
+        collection_id: str,
+        row_id: str,
+    ) -> dict[str, Any]:
+        rows = self.read_comparison_rows(collection_id)
+        matched = rows[rows["row_id"].astype(str) == str(row_id)]
+        if matched.empty:
+            raise ComparisonRowNotFoundError(collection_id, row_id)
+        return self._serialize_row(matched.iloc[0])
 
     def read_comparison_rows(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
@@ -643,6 +663,7 @@ class ComparisonService:
 
 
 __all__ = [
+    "ComparisonRowNotFoundError",
     "ComparisonRowsNotReadyError",
     "ComparisonService",
 ]

@@ -104,3 +104,37 @@ def test_documents_route_returns_200_with_empty_profiles_after_stage_generated(
     assert payload.collection_id == collection_id
     assert payload.total == 0
     assert payload.count == 0
+
+
+def test_document_profile_route_returns_single_profile(document_services, monkeypatch):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service = document_services
+    record = collection_service.create_collection(name="Single Profile Collection")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Single Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": ["methods_section_detected"],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        documents_controller.get_collection_document_profile(collection_id, "paper-1")
+    )
+
+    assert payload.document_id == "paper-1"
+    assert payload.collection_id == collection_id
+    assert payload.title == "Single Paper"

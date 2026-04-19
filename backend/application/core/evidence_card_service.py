@@ -352,6 +352,17 @@ class EvidenceCardService:
             "items": items,
         }
 
+    def get_evidence_card(
+        self,
+        collection_id: str,
+        evidence_id: str,
+    ) -> dict[str, Any]:
+        cards = self.read_evidence_cards(collection_id)
+        matched = cards[cards["evidence_id"].astype(str) == str(evidence_id)]
+        if matched.empty:
+            raise EvidenceCardNotFoundError(collection_id, evidence_id)
+        return self._serialize_card_row(matched.iloc[0])
+
     def get_evidence_traceback(
         self,
         collection_id: str,

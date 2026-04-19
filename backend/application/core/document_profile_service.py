@@ -125,6 +125,17 @@ class DocumentProfileService:
         profiles = self.read_document_profiles(collection_id)
         return self.summarize_document_profiles(profiles)
 
+    def get_document_profile(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> dict[str, Any]:
+        profiles = self.read_document_profiles(collection_id)
+        matched = profiles[profiles["document_id"].astype(str) == str(document_id)]
+        if matched.empty:
+            raise DocumentNotFoundError(collection_id, document_id)
+        return self._serialize_profile_row(matched.iloc[0])
+
     def get_document_content(
         self,
         collection_id: str,

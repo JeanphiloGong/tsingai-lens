@@ -128,3 +128,39 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
     assert payload.collection_id == collection_id
     assert payload.total == 0
     assert payload.count == 0
+
+
+def test_evidence_card_route_returns_single_card(evidence_services, monkeypatch):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _evidence_card_service = evidence_services
+    record = collection_service.create_collection(name="Single Evidence Collection")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-1",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "Conductivity improved after annealing.",
+                "claim_type": "property",
+                "evidence_source_type": "text",
+                "evidence_anchors": [],
+                "material_system": {"family": "oxide cathode"},
+                "condition_context": {"process": {}, "baseline": {}, "test": {}},
+                "confidence": 0.83,
+                "traceability_status": "direct",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        evidence_controller.get_collection_evidence_card(collection_id, "ev-1")
+    )
+
+    assert payload.evidence_id == "ev-1"
+    assert payload.collection_id == collection_id
+    assert payload.claim_type == "property"

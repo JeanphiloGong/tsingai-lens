@@ -395,3 +395,28 @@ export async function fetchComparisons(collectionId: string): Promise<Comparison
 	});
 	return normalizeResponse(data, collectionId);
 }
+
+export async function fetchComparison(
+	collectionId: string,
+	rowId: string
+): Promise<ComparisonRow> {
+	if (USE_API_FIXTURES) {
+		const fixture = buildFixture(collectionId).items.find((item) => item.row_id === rowId);
+		if (fixture) {
+			return fixture;
+		}
+		throw new Error('Comparison row fixture is missing.');
+	}
+
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/comparisons/${encodeURIComponent(rowId)}`,
+		{
+			method: 'GET'
+		}
+	);
+	const row = normalizeRow(data, collectionId);
+	if (!row) {
+		throw new Error('Comparison row response is invalid.');
+	}
+	return row;
+}

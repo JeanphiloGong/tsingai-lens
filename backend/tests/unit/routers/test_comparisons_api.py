@@ -191,3 +191,59 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
     assert item.assessment.comparability_status == "comparable"
     assert item.assessment.requires_expert_review is False
     assert item.uncertainty.missing_critical_context == []
+
+
+def test_comparison_route_returns_single_row(
+    comparison_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _comparison_service = comparison_services
+    record = collection_service.create_collection(name="Single Comparison Collection")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    pd.DataFrame(
+        [
+            {
+                "row_id": "cmp-1",
+                "collection_id": collection_id,
+                "source_document_id": "paper-1",
+                "variant_id": "var-1",
+                "variant_label": "A1",
+                "variable_axis": "anneal_temp",
+                "variable_value": 700,
+                "baseline_reference": "as-prepared",
+                "result_source_type": "table",
+                "result_type": "scalar",
+                "result_summary": "12 mS/cm",
+                "supporting_evidence_ids": ["ev-1"],
+                "supporting_anchor_ids": ["anchor-1"],
+                "characterization_observation_ids": [],
+                "structure_feature_ids": [],
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "property_normalized": "conductivity",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+                "comparability_status": "comparable",
+                "comparability_warnings": [],
+                "comparability_basis": ["baseline_resolved"],
+                "requires_expert_review": False,
+                "assessment_epistemic_status": "normalized_from_evidence",
+                "missing_critical_context": [],
+                "value": 12.0,
+                "unit": "mS/cm",
+            }
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        comparisons_controller.get_collection_comparison(collection_id, "cmp-1")
+    )
+
+    assert payload.row_id == "cmp-1"
+    assert payload.collection_id == collection_id
+    assert payload.display.property_normalized == "conductivity"

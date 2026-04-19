@@ -13,10 +13,16 @@
 	import {
 		buildCollectionGraphmlUrl,
 		fetchCollectionGraph,
+		fetchCollectionGraphNeighbors,
 		type GraphEdge,
-		type GraphNode
+		type GraphNode,
+		type GraphResponse
 	} from '../../../_shared/graph';
 	import { t } from '../../../_shared/i18n';
+	import { fetchComparison, type ComparisonRow } from '../../../_shared/comparisons';
+	import { fetchDocumentProfile, type DocumentProfile } from '../../../_shared/documents';
+	import { fetchEvidenceCard, type EvidenceCard } from '../../../_shared/evidence';
+	import { buildDocumentViewerHref } from '../../../_shared/traceback';
 	import {
 		fetchWorkspaceOverview,
 		getWorkspaceSurfaceState,
@@ -25,7 +31,12 @@
 
 	const palette = ['#2b6ff7', '#3cc9f5', '#31d0aa', '#f2b646', '#f55f8d', '#8c7bff'];
 
-	type NodeDetail = GraphNode;
+	type NodeKind = 'document' | 'evidence' | 'comparison';
+	type SelectedNode = GraphNode & { kind: NodeKind | null; resourceId: string | null };
+	type NodeDetail =
+		| { kind: 'document'; data: DocumentProfile }
+		| { kind: 'evidence'; data: EvidenceCard }
+		| { kind: 'comparison'; data: ComparisonRow };
 	type EdgeDetail = GraphEdge & { sourceLabel: string; targetLabel: string };
 
 	let collectionId = '';
@@ -34,11 +45,13 @@
 
 	let maxNodes = 200;
 	let minWeight = 0;
-	let communityId = '';
 	let previewQuery = '';
 	let loading = false;
 	let error = '';
 	let status = '';
+	let detailLoading = false;
+	let detailError = '';
+	let expandingNeighborhood = false;
 	let workspace: WorkspaceOverview | null = null;
 	let notFound = false;
 	let visibleNodes = 0;
@@ -46,10 +59,12 @@
 	let graphContainer: HTMLDivElement | null = null;
 	let renderer: Sigma | null = null;
 	let graph: Graph | null = null;
-	let graphMeta: { truncated: boolean; community?: string | null } | null = null;
-	let selectedNode: NodeDetail | null = null;
+	let graphData: GraphResponse | null = null;
+	let selectedNode: SelectedNode | null = null;
+	let selectedNodeDetail: NodeDetail | null = null;
 	let selectedEdge: EdgeDetail | null = null;
 	let loadedCollectionId = '';
+	let detailRequestId = 0;
 	$: surfaceState = getWorkspaceSurfaceState(workspace, 'graph');
 	$: showFallbackState =
 		Boolean(workspace) && !loading && !visibleNodes && (surfaceState !== 'ready' || notFound);
@@ -93,59 +108,34 @@
 		};
 	}
 
-	function selectNode(nodeId: string) {
-		if (!graph) return;
-		const attrs = graph.getNodeAttributes(nodeId) as Record<string, unknown>;
-		selectedEdge = null;
-		selectedNode = {
-			id: nodeId,
-			label: String(attrs.label ?? nodeId),
-			type: typeof attrs.entityType === 'string' ? attrs.entityType : null,
-			description: typeof attrs.description === 'string' ? attrs.description : null,
-			degree: typeof attrs.degree === 'number' ? attrs.degree : null,
-			frequency: typeof attrs.frequency === 'number' ? attrs.frequency : null,
-			x: typeof attrs.x === 'number' ? attrs.x : null,
-			y: typeof attrs.y === 'number' ? attrs.y : null,
-			community: typeof attrs.community === 'number' ? attrs.community : null,
-			node_text_unit_ids: typeof attrs.nodeTextUnitIds === 'string' ? attrs.nodeTextUnitIds : null,
-			node_text_unit_count:
-				typeof attrs.nodeTextUnitCount === 'number' ? attrs.nodeTextUnitCount : null,
-			node_document_ids: typeof attrs.nodeDocumentIds === 'string' ? attrs.nodeDocumentIds : null,
-			node_document_titles:
-				typeof attrs.nodeDocumentTitles === 'string' ? attrs.nodeDocumentTitles : null,
-			node_document_count:
-				typeof attrs.nodeDocumentCount === 'number' ? attrs.nodeDocumentCount : null
-		};
+	function currentPositions() {
+		const positions = new Map<string, { x: number; y: number }>();
+		if (!graph) return positions;
+
+		graph.forEachNode((node, attrs) => {
+			if (typeof attrs.x === 'number' && typeof attrs.y === 'number') {
+				positions.set(node, { x: attrs.x, y: attrs.y });
+			}
+		});
+		return positions;
 	}
 
-	function selectEdge(edgeId: string) {
-		if (!graph) return;
-		const attrs = graph.getEdgeAttributes(edgeId) as Record<string, unknown>;
-		const source = graph.source(edgeId) as string;
-		const target = graph.target(edgeId) as string;
-		selectedNode = null;
-		selectedEdge = {
-			id: edgeId,
-			source,
-			target,
-			sourceLabel: getNodeLabel(source),
-			targetLabel: getNodeLabel(target),
-			weight: typeof attrs.weight === 'number' ? attrs.weight : null,
-			edge_description: typeof attrs.edgeDescription === 'string' ? attrs.edgeDescription : null,
-			edge_text_unit_ids: typeof attrs.edgeTextUnitIds === 'string' ? attrs.edgeTextUnitIds : null,
-			edge_text_unit_count:
-				typeof attrs.edgeTextUnitCount === 'number' ? attrs.edgeTextUnitCount : null,
-			edge_document_ids: typeof attrs.edgeDocumentIds === 'string' ? attrs.edgeDocumentIds : null,
-			edge_document_titles:
-				typeof attrs.edgeDocumentTitles === 'string' ? attrs.edgeDocumentTitles : null,
-			edge_document_count:
-				typeof attrs.edgeDocumentCount === 'number' ? attrs.edgeDocumentCount : null
-		};
+	function parseNodeRef(nodeId: string): { kind: NodeKind | null; resourceId: string | null } {
+		const [prefix, ...rest] = nodeId.split(':');
+		const resourceId = rest.join(':').trim() || null;
+		if (prefix === 'doc') return { kind: 'document', resourceId };
+		if (prefix === 'evi') return { kind: 'evidence', resourceId };
+		if (prefix === 'cmp') return { kind: 'comparison', resourceId };
+		return { kind: null, resourceId };
 	}
 
 	function clearSelection() {
+		detailRequestId += 1;
 		selectedNode = null;
+		selectedNodeDetail = null;
 		selectedEdge = null;
+		detailLoading = false;
+		detailError = '';
 	}
 
 	function updateVisibility() {
@@ -170,41 +160,109 @@
 		renderer?.refresh();
 	}
 
+	async function loadNodeDetail(node: SelectedNode) {
+		const requestId = ++detailRequestId;
+		detailLoading = true;
+		detailError = '';
+		selectedNodeDetail = null;
+
+		try {
+			if (!node.resourceId || !node.kind) {
+				throw new Error('Unsupported graph node type.');
+			}
+
+			if (node.kind === 'document') {
+				selectedNodeDetail = {
+					kind: 'document',
+					data: await fetchDocumentProfile(collectionId, node.resourceId)
+				};
+			} else if (node.kind === 'evidence') {
+				selectedNodeDetail = {
+					kind: 'evidence',
+					data: await fetchEvidenceCard(collectionId, node.resourceId)
+				};
+			} else {
+				selectedNodeDetail = {
+					kind: 'comparison',
+					data: await fetchComparison(collectionId, node.resourceId)
+				};
+			}
+		} catch (err) {
+			if (requestId !== detailRequestId) return;
+			detailError = errorMessage(err);
+			selectedNodeDetail = null;
+		} finally {
+			if (requestId === detailRequestId) {
+				detailLoading = false;
+			}
+		}
+	}
+
+	async function selectNode(nodeId: string) {
+		if (!graph) return;
+		const attrs = graph.getNodeAttributes(nodeId) as Record<string, unknown>;
+		const parsed = parseNodeRef(nodeId);
+		selectedEdge = null;
+		selectedNode = {
+			id: nodeId,
+			label: String(attrs.label ?? nodeId),
+			type: typeof attrs.entityType === 'string' ? attrs.entityType : null,
+			degree: typeof attrs.degree === 'number' ? attrs.degree : null,
+			kind: parsed.kind,
+			resourceId: parsed.resourceId
+		};
+		await loadNodeDetail(selectedNode);
+	}
+
+	function selectEdge(edgeId: string) {
+		if (!graph) return;
+		const attrs = graph.getEdgeAttributes(edgeId) as Record<string, unknown>;
+		const source = graph.source(edgeId) as string;
+		const target = graph.target(edgeId) as string;
+		detailRequestId += 1;
+		selectedNode = null;
+		selectedNodeDetail = null;
+		detailLoading = false;
+		detailError = '';
+		selectedEdge = {
+			id: edgeId,
+			source,
+			target,
+			sourceLabel: getNodeLabel(source),
+			targetLabel: getNodeLabel(target),
+			weight: typeof attrs.weight === 'number' ? attrs.weight : null,
+			edge_description: typeof attrs.edgeDescription === 'string' ? attrs.edgeDescription : null
+		};
+	}
+
 	function attachRendererEvents() {
 		if (!renderer) return;
-		renderer.on('clickNode', (payload) => selectNode(payload.node));
+		renderer.on('clickNode', (payload) => {
+			void selectNode(payload.node);
+		});
 		renderer.on('clickEdge', (payload) => selectEdge(payload.edge));
 		renderer.on('clickStage', () => clearSelection());
 	}
 
-	function renderGraph(nodes: GraphNode[], edges: GraphEdge[]) {
+	function renderGraph(
+		nodes: GraphNode[],
+		edges: GraphEdge[],
+		focusNodeId: string | null = null
+	) {
+		const previousPositions = currentPositions();
 		disposeRenderer();
 		clearSelection();
 		graph = new Graph();
-		const hasStoredCoordinates = nodes.some(
-			(node) => typeof node.x === 'number' && typeof node.y === 'number'
-		);
 
 		for (const [index, node] of nodes.entries()) {
-			const position =
-				typeof node.x === 'number' && typeof node.y === 'number'
-					? { x: node.x, y: node.y }
-					: fallbackPosition(node.id, index, nodes.length);
+			const position = previousPositions.get(node.id) ?? fallbackPosition(node.id, index, nodes.length);
 			graph.addNode(node.id, {
 				label: node.label,
 				type: 'circle',
 				entityType: node.type,
-				description: node.description,
 				degree: node.degree ?? 0,
-				frequency: node.frequency ?? 0,
 				x: position.x,
 				y: position.y,
-				community: node.community,
-				nodeTextUnitIds: node.node_text_unit_ids,
-				nodeTextUnitCount: node.node_text_unit_count ?? 0,
-				nodeDocumentIds: node.node_document_ids,
-				nodeDocumentTitles: node.node_document_titles,
-				nodeDocumentCount: node.node_document_count ?? 0,
 				size: Math.max(4, Math.min(18, (node.degree ?? 1) + 4)),
 				color: nodeColor(node.type)
 			});
@@ -217,17 +275,12 @@
 			graph.addEdgeWithKey(edgeId, edge.source, edge.target, {
 				weight: edge.weight ?? 1,
 				edgeDescription: edge.edge_description,
-				edgeTextUnitIds: edge.edge_text_unit_ids,
-				edgeTextUnitCount: edge.edge_text_unit_count ?? 0,
-				edgeDocumentIds: edge.edge_document_ids,
-				edgeDocumentTitles: edge.edge_document_titles,
-				edgeDocumentCount: edge.edge_document_count ?? 0,
 				size: Math.max(1, Math.min(8, edge.weight ?? 1)),
 				color: 'rgba(15, 27, 45, 0.25)'
 			});
 		}
 
-		if (graph.order > 1 && !hasStoredCoordinates) {
+		if (graph.order > 1) {
 			forceAtlas2.assign(graph, 80);
 		}
 
@@ -241,6 +294,9 @@
 		}
 
 		updateVisibility();
+		if (focusNodeId && graph.hasNode(focusNodeId)) {
+			void selectNode(focusNodeId);
+		}
 	}
 
 	async function loadGraph() {
@@ -252,8 +308,7 @@
 		const [graphResult, workspaceResult] = await Promise.allSettled([
 			fetchCollectionGraph(collectionId, {
 				maxNodes,
-				minWeight,
-				communityId: communityId.trim()
+				minWeight
 			}),
 			fetchWorkspaceOverview(collectionId)
 		]);
@@ -266,25 +321,19 @@
 			}
 
 			const response = graphResult.value;
-			graphMeta = {
-				truncated: response.truncated,
-				community: response.community
-			};
+			graphData = response;
 			renderGraph(response.nodes, response.edges);
 			status = response.truncated ? $t('graph.previewLoadedTruncated') : $t('graph.previewLoaded');
 		} catch (err) {
 			const errorCode = getApiErrorCode(err);
 			error = errorMessage(err);
 			notFound = errorCode ? errorCode === 'collection_not_found' : isHttpStatusError(err, 404);
-			const preservePreview = errorCode === 'community_not_found' && Boolean(graph);
-			if (!preservePreview) {
-				graphMeta = null;
-				disposeRenderer();
-				graph = null;
-				clearSelection();
-				visibleNodes = 0;
-				visibleEdges = 0;
-			}
+			graphData = null;
+			disposeRenderer();
+			graph = null;
+			clearSelection();
+			visibleNodes = 0;
+			visibleEdges = 0;
 		} finally {
 			loading = false;
 		}
@@ -296,8 +345,7 @@
 			const response = await fetch(
 				buildCollectionGraphmlUrl(collectionId, {
 					maxNodes,
-					minWeight,
-					communityId: communityId.trim()
+					minWeight
 				})
 			);
 			if (!response.ok) {
@@ -344,13 +392,92 @@
 		return $t(`overview.surfaceStateCards.${surfaceState}.body`);
 	}
 
+	function mergeGraphPayload(
+		current: GraphResponse | null,
+		next: Pick<GraphResponse, 'collection_id' | 'nodes' | 'edges'>
+	): GraphResponse {
+		const nodes = new Map<string, GraphNode>();
+		const edges = new Map<string, GraphEdge>();
+
+		for (const node of current?.nodes ?? []) {
+			nodes.set(node.id, node);
+		}
+		for (const node of next.nodes) {
+			nodes.set(node.id, node);
+		}
+
+		for (const edge of current?.edges ?? []) {
+			edges.set(edge.id, edge);
+		}
+		for (const edge of next.edges) {
+			edges.set(edge.id, edge);
+		}
+
+		return {
+			collection_id: next.collection_id,
+			nodes: Array.from(nodes.values()),
+			edges: Array.from(edges.values()),
+			truncated: current?.truncated ?? false
+		};
+	}
+
+	async function expandSelectedNeighborhood() {
+		if (!selectedNode) return;
+
+		expandingNeighborhood = true;
+		detailError = '';
+		try {
+			const response = await fetchCollectionGraphNeighbors(collectionId, selectedNode.id);
+			graphData = mergeGraphPayload(graphData, response);
+			renderGraph(graphData.nodes, graphData.edges, selectedNode.id);
+			status = $t('graph.neighborsExpanded');
+		} catch (err) {
+			detailError = errorMessage(err);
+		} finally {
+			expandingNeighborhood = false;
+		}
+	}
+
+	function formatList(items: string[]) {
+		return items.length ? items.join(', ') : '--';
+	}
+
+	function selectedNodeHref() {
+		if (!selectedNode) return null;
+		const returnTo = `/collections/${encodeURIComponent(collectionId)}/graph`;
+
+		if (selectedNode.kind === 'document' && selectedNode.resourceId) {
+			return buildDocumentViewerHref(collectionId, selectedNode.resourceId, { returnTo });
+		}
+		if (
+			selectedNode.kind === 'evidence' &&
+			selectedNodeDetail?.kind === 'evidence' &&
+			selectedNodeDetail.data.document_id
+		) {
+			return buildDocumentViewerHref(collectionId, selectedNodeDetail.data.document_id, {
+				evidenceId: selectedNodeDetail.data.evidence_id,
+				returnTo
+			});
+		}
+		if (selectedNode.kind === 'comparison') {
+			return `/collections/${encodeURIComponent(collectionId)}/comparisons`;
+		}
+		return null;
+	}
+
+	function selectedNodeLinkLabel() {
+		if (selectedNode?.kind === 'comparison') return $t('graph.openComparisons');
+		if (selectedNode?.kind === 'evidence') return $t('graph.openEvidenceSource');
+		return $t('graph.openDocument');
+	}
+
 	$: if (graph) {
 		updateVisibility();
 	}
 
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
-		loadGraph();
+		void loadGraph();
 	}
 
 	onDestroy(() => {
@@ -370,13 +497,13 @@
 			<p class="lead">{$t('graph.lead')}</p>
 		</div>
 		<div class="preview-actions">
-			<button class="btn btn--ghost" type="button" on:click={loadGraph}>
+			<button class="btn btn--ghost" type="button" on:click={() => void loadGraph()}>
 				{$t('graph.previewLoad')}
 			</button>
 			<button class="btn btn--ghost" type="button" on:click={exportImage} disabled={!visibleNodes}>
 				{$t('graph.exportImage')}
 			</button>
-			<button class="btn btn--primary" type="button" on:click={downloadGraphml}>
+			<button class="btn btn--primary" type="button" on:click={() => void downloadGraphml()}>
 				{$t('graph.download')}
 			</button>
 		</div>
@@ -422,15 +549,6 @@
 					/>
 				</div>
 				<div class="field">
-					<label for="communityId">{$t('graph.communityLabel')}</label>
-					<input
-						id="communityId"
-						class="input"
-						bind:value={communityId}
-						placeholder={$t('graph.communityPlaceholder')}
-					/>
-				</div>
-				<div class="field">
 					<label for="previewQuery">{$t('graph.searchLabel')}</label>
 					<input
 						id="previewQuery"
@@ -447,10 +565,7 @@
 				<div class="graph-stats">
 					<span>{$t('graph.visibleNodes')}: {visibleNodes}</span>
 					<span>{$t('graph.visibleEdges')}: {visibleEdges}</span>
-					{#if graphMeta?.community}
-						<span>{$t('graph.communityScope')}: {graphMeta.community}</span>
-					{/if}
-					{#if graphMeta?.truncated}
+					{#if graphData?.truncated}
 						<span>{$t('graph.truncated')}</span>
 					{/if}
 				</div>
@@ -482,9 +597,24 @@
 			{#if selectedNode}
 				<div class="graph-details__header">
 					<span>{$t('graph.detailsNode')}</span>
-					<button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
-						{$t('graph.detailsClear')}
-					</button>
+					<div class="table-actions">
+						<button
+							class="btn btn--ghost btn--small"
+							type="button"
+							on:click={() => void expandSelectedNeighborhood()}
+							disabled={expandingNeighborhood}
+						>
+							{expandingNeighborhood ? $t('graph.neighborsExpanding') : $t('graph.neighborsExpand')}
+						</button>
+						{#if selectedNodeHref()}
+							<a class="btn btn--ghost btn--small" href={selectedNodeHref() ?? '#'}>
+								{selectedNodeLinkLabel()}
+							</a>
+						{/if}
+						<button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
+							{$t('graph.detailsClear')}
+						</button>
+					</div>
 				</div>
 				<div class="detail-primary">
 					<span class="detail-name">{selectedNode.label}</span>
@@ -494,33 +624,89 @@
 				</div>
 				<dl class="detail-list">
 					<div class="detail-row">
-						<dt>{$t('graph.detailCommunity')}</dt>
-						<dd>{selectedNode.community ?? '--'}</dd>
+						<dt>{$t('graph.detailId')}</dt>
+						<dd>{selectedNode.id}</dd>
 					</div>
 					<div class="detail-row">
 						<dt>{$t('graph.detailDegree')}</dt>
 						<dd>{selectedNode.degree ?? '--'}</dd>
 					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailFrequency')}</dt>
-						<dd>{selectedNode.frequency ?? '--'}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailDocuments')}</dt>
-						<dd>{selectedNode.node_document_count ?? '--'}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailTextUnits')}</dt>
-						<dd>{selectedNode.node_text_unit_count ?? '--'}</dd>
-					</div>
-					<div class="detail-row detail-row--wide">
-						<dt>{$t('graph.detailDescription')}</dt>
-						<dd>{selectedNode.description || '--'}</dd>
-					</div>
-					<div class="detail-row detail-row--wide">
-						<dt>{$t('graph.detailDocumentTitles')}</dt>
-						<dd>{selectedNode.node_document_titles || '--'}</dd>
-					</div>
+					{#if detailLoading}
+						<div class="status" role="status">{$t('graph.detailsLoading')}</div>
+					{:else if detailError}
+						<div class="status status--error" role="alert">{detailError}</div>
+					{:else if selectedNodeDetail?.kind === 'document'}
+						<div class="detail-row">
+							<dt>{$t('graph.detailSourceFile')}</dt>
+							<dd>{selectedNodeDetail.data.source_filename ?? '--'}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailDocType')}</dt>
+							<dd>{selectedNodeDetail.data.doc_type}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailProtocol')}</dt>
+							<dd>{selectedNodeDetail.data.protocol_extractable}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailConfidence')}</dt>
+							<dd>{selectedNodeDetail.data.confidence ?? '--'}</dd>
+						</div>
+					{:else if selectedNodeDetail?.kind === 'evidence'}
+						<div class="detail-row detail-row--wide">
+							<dt>{$t('graph.detailClaim')}</dt>
+							<dd>{selectedNodeDetail.data.claim_text || '--'}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailClaimType')}</dt>
+							<dd>{selectedNodeDetail.data.claim_type}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailTraceability')}</dt>
+							<dd>{selectedNodeDetail.data.traceability_status}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailConfidence')}</dt>
+							<dd>{selectedNodeDetail.data.confidence ?? '--'}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailMaterialSystem')}</dt>
+							<dd>{selectedNodeDetail.data.material_system || '--'}</dd>
+						</div>
+						<div class="detail-row detail-row--wide">
+							<dt>{$t('graph.detailProcess')}</dt>
+							<dd>{formatList(selectedNodeDetail.data.condition_context.process)}</dd>
+						</div>
+						<div class="detail-row detail-row--wide">
+							<dt>{$t('graph.detailBaseline')}</dt>
+							<dd>{formatList(selectedNodeDetail.data.condition_context.baseline)}</dd>
+						</div>
+						<div class="detail-row detail-row--wide">
+							<dt>{$t('graph.detailTest')}</dt>
+							<dd>{formatList(selectedNodeDetail.data.condition_context.test)}</dd>
+						</div>
+					{:else if selectedNodeDetail?.kind === 'comparison'}
+						<div class="detail-row">
+							<dt>{$t('graph.detailSourceDocument')}</dt>
+							<dd>{selectedNodeDetail.data.source_document_id}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailProperty')}</dt>
+							<dd>{selectedNodeDetail.data.display.property_normalized}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailComparability')}</dt>
+							<dd>{selectedNodeDetail.data.assessment.comparability_status}</dd>
+						</div>
+						<div class="detail-row detail-row--wide">
+							<dt>{$t('graph.detailResult')}</dt>
+							<dd>{selectedNodeDetail.data.display.result_summary}</dd>
+						</div>
+						<div class="detail-row detail-row--wide">
+							<dt>{$t('graph.detailEvidenceIds')}</dt>
+							<dd>{formatList(selectedNodeDetail.data.evidence_bundle.supporting_evidence_ids)}</dd>
+						</div>
+					{/if}
 				</dl>
 			{:else if selectedEdge}
 				<div class="graph-details__header">
@@ -534,24 +720,24 @@
 				</div>
 				<dl class="detail-list">
 					<div class="detail-row">
+						<dt>{$t('graph.detailId')}</dt>
+						<dd>{selectedEdge.id}</dd>
+					</div>
+					<div class="detail-row">
+						<dt>{$t('graph.detailSource')}</dt>
+						<dd>{selectedEdge.source}</dd>
+					</div>
+					<div class="detail-row">
+						<dt>{$t('graph.detailTarget')}</dt>
+						<dd>{selectedEdge.target}</dd>
+					</div>
+					<div class="detail-row">
 						<dt>{$t('graph.detailWeight')}</dt>
 						<dd>{selectedEdge.weight ?? '--'}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailDocuments')}</dt>
-						<dd>{selectedEdge.edge_document_count ?? '--'}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailTextUnits')}</dt>
-						<dd>{selectedEdge.edge_text_unit_count ?? '--'}</dd>
 					</div>
 					<div class="detail-row detail-row--wide">
 						<dt>{$t('graph.detailDescription')}</dt>
 						<dd>{selectedEdge.edge_description || '--'}</dd>
-					</div>
-					<div class="detail-row detail-row--wide">
-						<dt>{$t('graph.detailDocumentTitles')}</dt>
-						<dd>{selectedEdge.edge_document_titles || '--'}</dd>
 					</div>
 				</dl>
 			{:else}

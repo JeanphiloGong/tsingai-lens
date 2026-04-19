@@ -17,11 +17,11 @@ next to code.
 ## Ownership Map
 
 - `controllers/`
-  Current HTTP route surface for collections, tasks, workspace, graph,
-  protocol, query, reports, documents, evidence, and comparisons.
+  Current HTTP route surface grouped as `goal/`, `source/`, `core/`, and
+  `derived/`.
 - `application/`
-  Use-case orchestration layer. It now contains active business-domain packages
-  and still carries some legacy flat services that should keep shrinking.
+  Use-case orchestration layer grouped as `goal/`, `source/`, `core/`, and
+  `derived/`.
 - `domain/`
   Domain models and port definitions.
 - `infra/`
@@ -55,12 +55,14 @@ Operations:
 
 - [`docs/runbooks/backend-ops.md`](docs/runbooks/backend-ops.md)
   Local development and operations runbook
+- [`docs/plans/README.md`](docs/plans/README.md)
+  Backend plan-family landing page for active waves and retained lineage
 
 If you are already inside an active backend change wave, use
-[`docs/plans/current-api-surface-migration-checklist.md`](docs/plans/current-api-surface-migration-checklist.md)
+[`docs/plans/backend-wide/current-api-surface-migration-checklist.md`](docs/plans/backend-wide/current-api-surface-migration-checklist.md)
 as the current-state page, then choose the owning plan family from
-[`docs/README.md`](docs/README.md) rather than starting from a long plan list
-here.
+[`docs/plans/README.md`](docs/plans/README.md) rather than starting from a
+flat file list.
 
 ## Code-Owned Entry Pages
 
@@ -90,12 +92,14 @@ uvicorn main:app --reload --port 8010
 - The current Lens v1 backbone order is
   `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`.
 - Collection-facing `/api/v1/*` surfaces are currently hosted through
-  `controllers/*`.
+  `controllers/source/*`, `controllers/core/*`, `controllers/derived/*`, and
+  `controllers/goal/*`.
 - `backend/docs/specs/api.md` is the authoritative backend contract for
   frontend integration.
-- The active backend cleanup direction is to keep shrinking legacy flat seams
-  in `application/`, keep Source runtime under `infra/source/*`, and keep
-  protocol behind the evidence/comparison backbone.
+- The active backend cleanup direction is to keep the
+  `goal / source / core / derived` split explicit in `controllers/`,
+  `application/`, and `infra/`, keep Source runtime under `infra/source/*`,
+  and keep protocol behind the evidence/comparison backbone.
 - Public protocol browsing is collection-scoped under
   `/api/v1/collections/{collection_id}/protocol/*`.
 - Use `python3 ../scripts/check_docs_governance.py` when changing governed docs

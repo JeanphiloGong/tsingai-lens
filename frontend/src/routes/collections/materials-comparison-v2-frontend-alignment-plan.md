@@ -32,7 +32,7 @@ Out of scope:
 
 ## Companion Docs
 
-- [`../../../../backend/docs/plans/materials-comparison-v2-plan.md`](../../../../backend/docs/plans/materials-comparison-v2-plan.md)
+- [`../../../../backend/docs/plans/materials-comparison-v2-plan.md`](../../../../backend/docs/plans/backend-wide/materials-comparison-v2-plan.md)
   Backend-owned source plan for the sample/result-backed comparison backbone
 - [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
   Collection route-family interface authority for Lens v1

@@ -34,7 +34,7 @@ The current shared definitions promoted out of this RFC now live in:
 - [Lens V1 Definition](../contracts/lens-v1-definition.md)
 - [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
 - [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
-- [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/evidence-first-parsing-plan.md)
+- [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/historical/evidence-first-parsing-plan.md)
 
 This RFC should keep the why, tradeoff, and transition rationale for the shift
 away from protocol-first parsing. It should not keep absorbing new current-state

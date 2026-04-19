@@ -12,10 +12,10 @@ current execution entry point.
 
 The shared direction is defined by the following shared docs:
 
-- [`../../../docs/overview/lens-mission-positioning.md`](../../../docs/overview/lens-mission-positioning.md)
-- [`../../../docs/contracts/lens-v1-definition.md`](../../../docs/contracts/lens-v1-definition.md)
-- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
-- [`../../../docs/decisions/rfc-evidence-first-literature-parsing.md`](../../../docs/decisions/rfc-evidence-first-literature-parsing.md)
+- [`../../../docs/overview/lens-mission-positioning.md`](../../../../docs/overview/lens-mission-positioning.md)
+- [`../../../docs/contracts/lens-v1-definition.md`](../../../../docs/contracts/lens-v1-definition.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../../docs/architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/decisions/rfc-evidence-first-literature-parsing.md`](../../../../docs/decisions/rfc-evidence-first-literature-parsing.md)
 
 This backend plan narrows that shared direction into module-owned execution
 slices, artifact changes, API adjustments, and verification targets.
@@ -29,11 +29,11 @@ This is a target implementation plan, not a description of already-implemented
 backend current-state behavior.
 
 For the current backend migration state, read
-[`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md).
+[`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md).
 For the active near-term execution plan, read
-[`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md).
+[`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md).
 For the broader parent roadmap, read
-[`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md).
+[`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
 
 ## Scope
 
@@ -211,7 +211,7 @@ Not every phase must land at once, but implementation should move in this
 direction rather than continue deepening the old steps-first backbone.
 
 The shared minimum field contract for these artifacts is defined in
-[`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md).
+[`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../../docs/contracts/lens-core-artifact-contracts.md).
 
 ## File Change Plan
 
@@ -326,25 +326,25 @@ This backend plan is successful when:
 
 ## Related Docs
 
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
+- [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
   Current backend migration state and reading order
-- [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+- [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
   Active near-term child execution plan for the Core slice
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
+- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
   Broader parent roadmap for later Core, Goal, and Source waves
-- [`../../../docs/overview/lens-mission-positioning.md`](../../../docs/overview/lens-mission-positioning.md)
+- [`../../../docs/overview/lens-mission-positioning.md`](../../../../docs/overview/lens-mission-positioning.md)
   Shared long-lived Lens mission and positioning
-- [`../../../docs/contracts/lens-v1-definition.md`](../../../docs/contracts/lens-v1-definition.md)
+- [`../../../docs/contracts/lens-v1-definition.md`](../../../../docs/contracts/lens-v1-definition.md)
   Shared Lens v1 boundary
-- [`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md)
+- [`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../../docs/contracts/lens-core-artifact-contracts.md)
   Shared minimum artifact contracts for the evidence backbone
-- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../../docs/architecture/lens-v1-architecture-boundary.md)
   Shared Lens v1 architecture boundary
-- [`../../../docs/decisions/rfc-evidence-first-literature-parsing.md`](../../../docs/decisions/rfc-evidence-first-literature-parsing.md)
+- [`../../../docs/decisions/rfc-evidence-first-literature-parsing.md`](../../../../docs/decisions/rfc-evidence-first-literature-parsing.md)
   Shared parsing direction RFC
-- [`../architecture/overview.md`](../architecture/overview.md)
+- [`../architecture/overview.md`](../../architecture/overview.md)
   Current backend architecture overview
-- [`../specs/api.md`](../specs/api.md)
+- [`../specs/api.md`](../../specs/api.md)
   Current public backend API contract
-- [`../../../docs/research/materials-optimize.md`](../../../docs/research/materials-optimize.md)
+- [`../../../docs/research/materials-optimize.md`](../../../../docs/research/materials-optimize.md)
   Research-facing requirements that motivate the refactor

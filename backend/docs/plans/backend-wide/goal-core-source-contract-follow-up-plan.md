@@ -190,7 +190,7 @@ Goal:
 
 Current child execution entrypoint:
 
-- [`source-collection-builder-normalization-plan.md`](source-collection-builder-normalization-plan.md)
+- [`source-collection-builder-normalization-plan.md`](../source/source-collection-builder-normalization-plan.md)
 
 Primary changes:
 
@@ -319,15 +319,15 @@ Exit criteria:
 ## Recommended Reading Order
 
 1. [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-2. [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
-3. [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
+2. [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
+3. [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 4. this follow-up plan
-5. [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)
+5. [`core-derived-graph-follow-up-plan.md`](../derived/core-derived-graph-follow-up-plan.md)
 
 ## Related Docs
 
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-- [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
-- [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-- [`../specs/api.md`](../specs/api.md)
+- [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
+- [`core-derived-graph-follow-up-plan.md`](../derived/core-derived-graph-follow-up-plan.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../specs/api.md`](../../specs/api.md)

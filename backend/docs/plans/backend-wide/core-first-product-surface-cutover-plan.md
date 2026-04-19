@@ -43,20 +43,22 @@ The five-layer backend architecture already states that:
 
 That architecture now has concrete code movement behind it:
 
-- [`application/graph/service.py`](../../application/graph/service.py) reads
+- [`../../../application/derived/graph_service.py`](../../../application/derived/graph_service.py)
+  reads
   only `document_profiles.parquet`, `evidence_cards.parquet`, and
   `comparison_rows.parquet`
-- [`application/reports/service.py`](../../application/reports/service.py)
+- [`../../../application/derived/report_service.py`](../../../application/derived/report_service.py)
   derives pattern-group style report payloads from Core artifacts
-- [`application/workspace/artifact_registry_service.py`](../../application/workspace/artifact_registry_service.py)
+- [`../../../application/source/artifact_registry_service.py`](../../../application/source/artifact_registry_service.py)
   computes `graph_generated` and `graph_ready` from Core graph inputs rather
   than GraphRAG entity artifacts
-- [`application/indexing/task_service.py`](../../application/indexing/task_service.py)
-  and [`controllers/schemas/task.py`](../../controllers/schemas/task.py)
+- [`../../../application/source/task_service.py`](../../../application/source/task_service.py)
+  and
+  [`../../../controllers/schemas/source/task.py`](../../../controllers/schemas/source/task.py)
   expose `source_index_*` stage names
 - public `query` surface and its application/Source runtime chain are retired
 - GraphML rendering for the product graph surface now lives under
-  [`infra/graph/graphml.py`](../../infra/graph/graphml.py)
+  [`../../../infra/derived/graph/graphml.py`](../../../infra/derived/graph/graphml.py)
 
 The architecture risk has therefore changed.
 
@@ -210,7 +212,8 @@ The public query surface is retired.
 Frozen rules:
 
 - backend must not expose `/query` as a retained product surface
-- `application/query/` and `application/source/query_runtime_service.py`
+- historical `application/query/*` and
+  `application/source/query_runtime_service.py`
   must not reappear as compatibility layers
 - GraphRAG and retrieval query runtime details, if still present, belong only
   to Source-internal cleanup scope and not to product contracts
@@ -267,7 +270,7 @@ Goal:
 Primary changes:
 
 - update graph/report/task wording in
-  [`../specs/api.md`](../specs/api.md)
+  [`../specs/api.md`](../../specs/api.md)
 - update retained plan docs whose old text still assumes dual-path or
   GraphRAG-first product semantics
 - keep five-layer wording consistent with current code
@@ -338,17 +341,17 @@ Exit criteria:
 
 ## Recommended Reading Order
 
-1. [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
+1. [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 2. [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
-3. [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)
-4. [`core-derived-graph-cutover-implementation-plan.md`](core-derived-graph-cutover-implementation-plan.md)
+3. [`core-derived-graph-follow-up-plan.md`](../derived/core-derived-graph-follow-up-plan.md)
+4. [`core-derived-graph-cutover-implementation-plan.md`](../derived/core-derived-graph-cutover-implementation-plan.md)
 5. this cutover-closure plan
 
 ## Related Docs
 
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
 - [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
-- [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)
-- [`core-derived-graph-cutover-implementation-plan.md`](core-derived-graph-cutover-implementation-plan.md)
-- [`graph-surface-plan.md`](graph-surface-plan.md)
-- [`../specs/api.md`](../specs/api.md)
+- [`core-derived-graph-follow-up-plan.md`](../derived/core-derived-graph-follow-up-plan.md)
+- [`core-derived-graph-cutover-implementation-plan.md`](../derived/core-derived-graph-cutover-implementation-plan.md)
+- [`graph-surface-plan.md`](../derived/graph-surface-plan.md)
+- [`../specs/api.md`](../../specs/api.md)

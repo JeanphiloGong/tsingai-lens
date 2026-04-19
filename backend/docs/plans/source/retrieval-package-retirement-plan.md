@@ -19,7 +19,7 @@ decoupling:
 Read this plan with:
 
 - [`source-residual-graphrag-retirement-plan.md`](source-residual-graphrag-retirement-plan.md)
-- [`goal-source-core-business-layer-alignment-plan.md`](goal-source-core-business-layer-alignment-plan.md)
+- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
 
 ## Status
 
@@ -27,11 +27,10 @@ Status as of 2026-04-19:
 
 - active `infra/source/*` runtime no longer imports `retrieval.*`
 - retired GraphRAG public surfaces have already been removed
-- `backend/retrieval/` still exists as a historical package subtree
-- the last known non-`retrieval` code dependency is:
-  [`../../tests/unit/utils/test_lancedb_vector_store.py`](../../tests/unit/utils/test_lancedb_vector_store.py)
-- several living backend entry and architecture docs still mention
-  `retrieval/` as an active package
+- `backend/retrieval/` has already been removed from the repository tree
+- the last known non-`retrieval` code dependency
+  `tests/unit/utils/test_lancedb_vector_store.py` has already been removed
+- the remaining work is documentation and retained-lineage cleanup
 
 This means the repository has completed runtime cutover but not repository
 retirement.
@@ -107,8 +106,7 @@ Goal:
 
 Primary changes:
 
-- delete
-  [`../../tests/unit/utils/test_lancedb_vector_store.py`](../../tests/unit/utils/test_lancedb_vector_store.py)
+- delete `tests/unit/utils/test_lancedb_vector_store.py`
 
 Reason:
 
@@ -163,11 +161,11 @@ Goal:
 
 Primary changes:
 
-- update [`../../README.md`](../../README.md)
-- update [`../README.md`](../README.md)
-- update [`../architecture/overview.md`](../architecture/overview.md)
+- update [`../../README.md`](../../../README.md)
+- update [`../README.md`](../../README.md)
+- update [`../architecture/overview.md`](../../architecture/overview.md)
 - update
-  [`../architecture/application-layer-boundary.md`](../architecture/application-layer-boundary.md)
+  [`../architecture/application-layer-boundary.md`](../../architecture/application-layer-boundary.md)
 - adjust plan-family docs only where they still speak about `retrieval/` as a
   currently present active subtree rather than historical lineage
 

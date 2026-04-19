@@ -245,10 +245,10 @@ Expected output of Phase 2:
 
 ## Related Docs
 
-- [`../specs/api.md`](../specs/api.md)
-- [`../architecture/overview.md`](../architecture/overview.md)
-- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`v1-api-migration-notes.md`](v1-api-migration-notes.md)
-- [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
+- [`../specs/api.md`](../../specs/api.md)
+- [`../architecture/overview.md`](../../architecture/overview.md)
+- [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
+- [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
+- [`v1-api-migration-notes.md`](../historical/v1-api-migration-notes.md)
+- [`evidence-first-parsing-plan.md`](../historical/evidence-first-parsing-plan.md)
 - [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)

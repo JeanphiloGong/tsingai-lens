@@ -31,9 +31,9 @@ baseline -> comparability support` problem.
 
 Read this plan after:
 
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-- [`source-collection-builder-normalization-plan.md`](source-collection-builder-normalization-plan.md)
-- [`born-digital-source-parser-first-plan.md`](born-digital-source-parser-first-plan.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`source-collection-builder-normalization-plan.md`](../source/source-collection-builder-normalization-plan.md)
+- [`born-digital-source-parser-first-plan.md`](../source/born-digital-source-parser-first-plan.md)
 
 ## Status
 

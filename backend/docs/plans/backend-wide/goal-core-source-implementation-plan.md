@@ -23,7 +23,7 @@ Core backbone.
 ## Context
 
 The architecture proposal in
-[`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
+[`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 now defines five layers rather than a single pre-Core Goal layer.
 
 The most important correction is:
@@ -95,7 +95,7 @@ Goal:
 
 Current child execution entrypoint:
 
-- [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
+- [`core-parsing-quality-hardening-plan.md`](../core/core-parsing-quality-hardening-plan.md)
 
 Primary changes:
 
@@ -213,7 +213,7 @@ Goal:
 
 Current child execution entrypoint:
 
-- [`source-collection-builder-normalization-plan.md`](source-collection-builder-normalization-plan.md)
+- [`source-collection-builder-normalization-plan.md`](../source/source-collection-builder-normalization-plan.md)
 
 Primary changes:
 
@@ -377,10 +377,10 @@ Exit criteria:
 ## Related Docs
 
 - [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+- [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
 - [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
-- [`core-derived-graph-follow-up-plan.md`](core-derived-graph-follow-up-plan.md)
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
-- [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
-- [`v1-api-migration-notes.md`](v1-api-migration-notes.md)
+- [`core-derived-graph-follow-up-plan.md`](../derived/core-derived-graph-follow-up-plan.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
+- [`evidence-first-parsing-plan.md`](../historical/evidence-first-parsing-plan.md)
+- [`v1-api-migration-notes.md`](../historical/v1-api-migration-notes.md)

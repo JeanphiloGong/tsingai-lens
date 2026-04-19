@@ -18,10 +18,10 @@ full repository-layer redesign.
 
 Read this plan with:
 
-- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-- [`goal-source-core-business-layer-alignment-plan.md`](goal-source-core-business-layer-alignment-plan.md)
-- [`materials-comparison-v2-plan.md`](materials-comparison-v2-plan.md)
+- [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
+- [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
 
 ## Context
 
@@ -40,21 +40,21 @@ domain models.
 
 Today the `domain/` package is very small:
 
-- [`../../domain/ports.py`](../../domain/ports.py)
+- [`../../domain/ports.py`](../../../domain/ports.py)
   owns collection, task, and artifact repository protocols
-- [`../../domain/protocol.py`](../../domain/protocol.py)
+- [`../../domain/protocol.py`](../../../domain/protocol.py)
   owns protocol-oriented dataclasses
 
 Meanwhile, stable Core semantics currently live elsewhere:
 
 - document-profile classification and suitability heuristics live in
-  [`../../application/core/document_profile_service.py`](../../application/core/document_profile_service.py)
+  [`../../application/core/document_profile_service.py`](../../../application/core/document_profile_service.py)
 - sample/result/test-condition/baseline semantics live in
-  [`../../application/core/evidence_card_service.py`](../../application/core/evidence_card_service.py)
+  [`../../application/core/evidence_card_service.py`](../../../application/core/evidence_card_service.py)
 - comparison-row semantics and comparability judgments live in
-  [`../../application/core/comparison_service.py`](../../application/core/comparison_service.py)
+  [`../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
 - collection and handoff state normalization lives in
-  [`../../application/source/collection_service.py`](../../application/source/collection_service.py)
+  [`../../application/source/collection_service.py`](../../../application/source/collection_service.py)
 
 That makes the current codebase workable, but it leaves two architectural
 problems:
@@ -209,11 +209,11 @@ blocks into:
 Candidates include:
 
 - epistemic statuses now defined inside
-  [`../../application/core/evidence_card_service.py`](../../application/core/evidence_card_service.py)
+  [`../../application/core/evidence_card_service.py`](../../../application/core/evidence_card_service.py)
 - comparability and review status literals now defined inside
-  [`../../application/core/comparison_service.py`](../../application/core/comparison_service.py)
+  [`../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
 - document-kind and suitability classifications now inferred inside
-  [`../../application/core/document_profile_service.py`](../../application/core/document_profile_service.py)
+  [`../../application/core/document_profile_service.py`](../../../application/core/document_profile_service.py)
 
 ### Core Domain Objects
 
@@ -431,9 +431,9 @@ directly in each wave.
 
 This plan follows, but does not replace:
 
-- [`goal-source-core-business-layer-alignment-plan.md`](goal-source-core-business-layer-alignment-plan.md)
+- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
   which made the business-layer split visible in package layout
-- [`materials-comparison-v2-plan.md`](materials-comparison-v2-plan.md)
+- [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
   which established the stronger sample/result Core backbone
 
 Those plans made the runtime backbone clearer.

@@ -15,9 +15,10 @@ authority page, current-state page, or implementation lineage.
 - `runbooks/`
   Backend-local operational guidance
 - `plans/`
-  Backend implementation current-state, active delivery waves, and retained
-  lineage; this is not the default start surface unless you are already inside
-  backend change work
+  Backend implementation current-state and plan families organized as
+  `backend-wide/`, `source/`, `core/`, `derived/`, and `historical/`; this is
+  not the default start surface unless you are already inside backend change
+  work
 
 ## Start Paths
 
@@ -27,8 +28,10 @@ authority page, current-state page, or implementation lineage.
   [`architecture/overview.md`](architecture/overview.md)
 - Local development and operations:
   [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
+- Backend plan-family landing page:
+  [`plans/README.md`](plans/README.md)
 - Current backend migration and execution state:
-  [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
+  [`plans/backend-wide/current-api-surface-migration-checklist.md`](plans/backend-wide/current-api-surface-migration-checklist.md)
 
 ## Backend-Wide Authority
 
@@ -49,49 +52,24 @@ authority page, current-state page, or implementation lineage.
 
 Start with:
 
-- [`plans/current-api-surface-migration-checklist.md`](plans/current-api-surface-migration-checklist.md)
+- [`plans/README.md`](plans/README.md)
+  Backend-local plans landing page, reading paths, and placement rules
+- [`plans/backend-wide/current-api-surface-migration-checklist.md`](plans/backend-wide/current-api-surface-migration-checklist.md)
   Canonical current-state page for backend API migration and local reading
   order
 
 Then move to the owning plan family only when you are already inside that wave:
 
-- Core quality and traceback:
-  [`plans/core-parsing-quality-hardening-plan.md`](plans/core-parsing-quality-hardening-plan.md),
-  [`plans/claim-traceback-navigation-implementation-plan.md`](plans/claim-traceback-navigation-implementation-plan.md)
-- Core stabilization and parsing seam extraction:
-  [`plans/core-stabilization-and-seam-extraction-plan.md`](plans/core-stabilization-and-seam-extraction-plan.md)
-- Five-layer rollout and contract freeze:
-  [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md),
-  [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md),
-  [`plans/goal-source-core-business-layer-alignment-plan.md`](plans/goal-source-core-business-layer-alignment-plan.md)
-- Domain-model backfill:
-  [`plans/minimal-core-domain-backfill-plan.md`](plans/minimal-core-domain-backfill-plan.md)
-- Source and collection-builder normalization:
-  [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
-- Residual Source/GraphRAG retirement:
-  [`plans/source-residual-graphrag-retirement-plan.md`](plans/source-residual-graphrag-retirement-plan.md),
-  [`plans/retrieval-package-retirement-plan.md`](plans/retrieval-package-retirement-plan.md),
-  [`plans/source-parser-evaluation-plan.md`](plans/source-parser-evaluation-plan.md),
-  [`plans/born-digital-source-parser-first-plan.md`](plans/born-digital-source-parser-first-plan.md)
-- Materials comparison expansion:
-  [`plans/materials-comparison-v2-plan.md`](plans/materials-comparison-v2-plan.md)
-  Canonical contract and implementation-closure page for the materials
-  comparison backbone; Waves A through E are complete in backend runtime and
-  remaining work has moved to follow-up quality and validation plans
-- Query retirement and GraphRAG query decoupling:
-  [`plans/query-retirement-and-graphrag-query-decoupling-plan.md`](plans/query-retirement-and-graphrag-query-decoupling-plan.md)
-- Graph retained surface and Core-derived cutover:
-  [`plans/graph-surface-plan.md`](plans/graph-surface-plan.md),
-  [`plans/core-derived-graph-follow-up-plan.md`](plans/core-derived-graph-follow-up-plan.md),
-  [`plans/core-derived-graph-cutover-implementation-plan.md`](plans/core-derived-graph-cutover-implementation-plan.md),
-  [`plans/core-first-product-surface-cutover-plan.md`](plans/core-first-product-surface-cutover-plan.md)
-
-Historical lineage:
-
-- [`plans/evidence-first-parsing-plan.md`](plans/evidence-first-parsing-plan.md)
-  Origin plan for the evidence-first parsing transition
-- [`plans/v1-api-migration-notes.md`](plans/v1-api-migration-notes.md)
-  Historical bridge note behind the current API migration checklist
+- [`plans/backend-wide/README.md`](plans/backend-wide/README.md)
+  Cross-layer and backend-wide plan family
+- [`plans/source/README.md`](plans/source/README.md)
+  Source runtime, parser, and retirement plan family
+- [`plans/core/README.md`](plans/core/README.md)
+  Core backbone, quality, traceback, and domain-semantic plan family
+- [`plans/derived/README.md`](plans/derived/README.md)
+  Derived-surface and retirement-lineage plan family
+- [`plans/historical/README.md`](plans/historical/README.md)
+  Historical lineage family for retained non-current pages
 
 ## What Does Not Belong Here
 
@@ -104,6 +82,9 @@ Historical lineage:
 
 - Keep backend-wide formal docs in this subtree.
 - Keep narrower route- or package-local docs near the owning code node.
-- Use `plans/` for backend implementation current-state and retained lineage,
-  not as the primary reader start page.
+- Use `plans/` for backend implementation current-state and retained lineage.
+- Put multi-family waves under `plans/backend-wide/`.
+- Put business-layer-local waves under `plans/source/`, `plans/core/`, or
+  `plans/derived/`.
+- Move superseded or origin-only lineage pages under `plans/historical/`.
 - Keep shared product, system, and cross-module docs in root `docs/`.

@@ -17,9 +17,9 @@ organization.
 
 Read this plan with:
 
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-- [`../architecture/application-layer-boundary.md`](../architecture/application-layer-boundary.md)
-- [`../../application/docs/application-layer-one-shot-cutover-plan.md`](../../application/docs/application-layer-one-shot-cutover-plan.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../architecture/application-layer-boundary.md`](../../architecture/application-layer-boundary.md)
+- [`../../application/docs/application-layer-one-shot-cutover-plan.md`](../../../application/docs/application-layer-one-shot-cutover-plan.md)
 
 ## Status
 
@@ -429,7 +429,7 @@ Runtime checks:
 ## Relationship To Existing Plans
 
 This plan is not a duplicate of
-[`../../application/docs/application-layer-one-shot-cutover-plan.md`](../../application/docs/application-layer-one-shot-cutover-plan.md).
+[`../../application/docs/application-layer-one-shot-cutover-plan.md`](../../../application/docs/application-layer-one-shot-cutover-plan.md).
 
 The earlier application-layer plan cleaned flat application shims and clarified
 domain-packaged imports.

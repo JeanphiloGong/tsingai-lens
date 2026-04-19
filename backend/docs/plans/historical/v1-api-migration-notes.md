@@ -3,10 +3,10 @@
 ## Purpose
 
 The authoritative frontend/backend API contract now lives in
-[`../specs/api.md`](../specs/api.md).
+[`../specs/api.md`](../../specs/api.md).
 
 The current backend migration state now lives in
-[`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md).
+[`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md).
 
 This document remains only as a historical backend-local bridge note for
 earlier implementation sequencing and migration decisions behind that contract.
@@ -35,8 +35,8 @@ The recommended backend order remains:
 
 ## Related Docs
 
-- [`../specs/api.md`](../specs/api.md)
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+- [`../specs/api.md`](../../specs/api.md)
+- [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
+- [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
 - [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
-- [`../../../docs/contracts/lens-v1-definition.md`](../../../docs/contracts/lens-v1-definition.md)
+- [`../../../docs/contracts/lens-v1-definition.md`](../../../../docs/contracts/lens-v1-definition.md)

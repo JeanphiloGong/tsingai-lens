@@ -18,9 +18,9 @@ extraction. The current near-term Core quality priority is now recorded in
 [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md).
 
 For the current HTTP and route migration state, read
-[`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md).
+[`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md).
 For the broader future-wave roadmap, read
-[`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md).
+[`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
 
 ## Context
 
@@ -248,12 +248,11 @@ Expected result:
 
 ## Related Docs
 
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-- [`evidence-first-parsing-plan.md`](evidence-first-parsing-plan.md)
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
-- [`../../application/documents/README.md`](../../application/documents/README.md)
-- [`../../application/evidence/README.md`](../../application/evidence/README.md)
-- [`../../application/comparisons/README.md`](../../application/comparisons/README.md)
-- [`../../application/protocol/README.md`](../../application/protocol/README.md)
+- [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
+- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
+- [`evidence-first-parsing-plan.md`](../historical/evidence-first-parsing-plan.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
+- [`../../../application/core/README.md`](../../../application/core/README.md)
+- [`../../../application/derived/protocol/README.md`](../../../application/derived/protocol/README.md)
+- [`../../../application/source/README.md`](../../../application/source/README.md)

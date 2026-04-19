@@ -14,9 +14,9 @@ spans one backend seam across `application/collections/` and
 `infra/ingestion/`.
 
 For the broader five-layer roadmap, read
-[`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md).
+[`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
 For the parent contract freeze, read
-[`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md).
+[`goal-core-source-contract-follow-up-plan.md`](../backend-wide/goal-core-source-contract-follow-up-plan.md).
 
 ## Context
 

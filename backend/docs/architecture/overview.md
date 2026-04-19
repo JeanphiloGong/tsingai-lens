@@ -107,6 +107,7 @@ larger flat service bag.
 ## Current-State And Plan Entry
 
 For active backend migration state, implementation sequencing, or retained plan
-lineage, go back to [`../README.md`](../README.md) and start from
-[`../plans/current-api-surface-migration-checklist.md`](../plans/current-api-surface-migration-checklist.md)
-rather than treating this architecture page as a plan index.
+lineage, go back to [`../README.md`](../README.md), then use
+[`../plans/README.md`](../plans/README.md) and start from
+[`../plans/backend-wide/current-api-surface-migration-checklist.md`](../plans/backend-wide/current-api-surface-migration-checklist.md)
+rather than treating this architecture page as a flat plan index.

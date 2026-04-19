@@ -355,9 +355,9 @@ Exit criteria:
 
 ## Related Docs
 
-- [`query-retirement-and-graphrag-query-decoupling-plan.md`](query-retirement-and-graphrag-query-decoupling-plan.md)
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
+- [`query-retirement-and-graphrag-query-decoupling-plan.md`](../derived/query-retirement-and-graphrag-query-decoupling-plan.md)
+- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
 - [`source-collection-builder-normalization-plan.md`](source-collection-builder-normalization-plan.md)
-- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
+- [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface-cutover-plan.md)
+- [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)

@@ -15,7 +15,7 @@ by giving the user a deterministic way to move from structured claims back to
 document context.
 
 For the broader five-layer roadmap, read
-[`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md).
+[`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
 For the current parent execution wave, read
 [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md).
 
@@ -84,17 +84,17 @@ from the Core-owned evidence/document path.
   is the immediate parent execution plan. This traceback slice is one concrete
   child implementation wave under its evidence-quality and traceback-quality
   scope.
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
+- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
   is the broader backend roadmap. This traceback slice helps complete the Core
   before Source expansion or Goal Consumer work resumes.
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
   defines why traceback belongs to the Core rather than to Goal or Source.
 
 ### Companion Docs
 
-- [`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)
+- [`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)
   owns the collection-route-family navigation contract and fallback behavior.
-- [`../specs/api.md`](../specs/api.md)
+- [`../specs/api.md`](../../specs/api.md)
   owns the public backend API contract for traceback and document content.
 
 ### Child Scope Of This Plan
@@ -224,7 +224,7 @@ Frontend work in this slice should stay minimal and contract-driven:
 - avoid making PDF browsing the new collection homepage
 
 The detailed route behavior remains owned by
-[`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md).
+[`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md).
 
 ## Execution Order
 
@@ -257,7 +257,7 @@ Required checks for this slice:
 ## Related Docs
 
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-- [`../specs/api.md`](../specs/api.md)
-- [`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)
+- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../specs/api.md`](../../specs/api.md)
+- [`../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)

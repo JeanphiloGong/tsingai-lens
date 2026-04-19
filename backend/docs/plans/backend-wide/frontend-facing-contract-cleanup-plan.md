@@ -37,15 +37,15 @@ The current API still leaks internal execution choices into public contracts.
 
 Current leakage points include:
 
-- [`controllers/schemas/collection.py`](../../controllers/schemas/collection.py)
+- [`../../../controllers/schemas/source/collection.py`](../../../controllers/schemas/source/collection.py)
   exposes `default_method`
-- [`controllers/schemas/task.py`](../../controllers/schemas/task.py)
+- [`../../../controllers/schemas/source/task.py`](../../../controllers/schemas/source/task.py)
   exposes `method` and `is_update_run`
-- [`application/collections/service.py`](../../application/collections/service.py)
+- [`../../../application/source/collection_service.py`](../../../application/source/collection_service.py)
   persists `default_method` as collection metadata
-- [`application/indexing/index_task_runner.py`](../../application/indexing/index_task_runner.py)
+- [`../../../application/source/index_task_runner.py`](../../../application/source/index_task_runner.py)
   accepts a caller-provided indexing method
-- [`retrieval/config/enums.py`](../../retrieval/config/enums.py)
+- [`../../../infra/source/config/pipeline_mode.py`](../../../infra/source/config/pipeline_mode.py)
   defines `IndexingMethod.Standard` and `IndexingMethod.Fast` as engine-level
   execution options
 
@@ -205,7 +205,7 @@ Task responses should not gain engine-mode echo fields.
 
 Frontend should drive most UI state from:
 
-- [`controllers/schemas/workspace.py`](../../controllers/schemas/workspace.py)
+- [`../../../controllers/schemas/core/workspace.py`](../../../controllers/schemas/core/workspace.py)
 
 Primary frontend decisions should come from:
 
@@ -222,7 +222,7 @@ engine configuration.
 
 Frontend may continue consuming:
 
-- [`controllers/schemas/goals.py`](../../controllers/schemas/goals.py)
+- [`../../../controllers/schemas/goal/intake.py`](../../../controllers/schemas/goal/intake.py)
 
 In particular:
 
@@ -246,7 +246,8 @@ Backend chooses whether current indexing runs use:
 - fast indexing
 - any future replacement strategy
 
-This policy should remain hidden behind application/indexing seams.
+This policy should remain hidden behind Source application and Source runtime
+seams.
 
 ### Update Policy
 
@@ -256,9 +257,10 @@ Backend decides whether to:
 - attempt update mode
 - downgrade update mode to rebuild
 
-The current downgrade logic already belongs in:
+The current mode-selection and downgrade policy now lives across:
 
-- [`application/indexing/run_mode_service.py`](../../application/indexing/run_mode_service.py)
+- [`../../../application/source/index_task_runner.py`](../../../application/source/index_task_runner.py)
+- [`../../../infra/source/config/pipeline_mode.py`](../../../infra/source/config/pipeline_mode.py)
 
 That logic should remain backend-owned rather than frontend-owned.
 
@@ -383,7 +385,7 @@ stable across rebuilds until evidence ids become deterministic.
 
 ## Related Docs
 
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
 - [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)

@@ -12,7 +12,7 @@ projection that consumes Lens research objects:
 - `comparability`
 
 The plan is a child follow-up of
-[`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
+[`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
 and should be executed after current Core stabilization waves are in a usable
 state.
 
@@ -60,7 +60,7 @@ This is a migration, not an immediate hard switch.
 Current child execution entrypoint:
 
 - [`core-derived-graph-cutover-implementation-plan.md`](core-derived-graph-cutover-implementation-plan.md)
-- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
+- [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface-cutover-plan.md)
 
 ## Target Semantic Model
 
@@ -185,15 +185,15 @@ Exit criteria:
 
 ## Recommended Reading Order
 
-1. [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-2. [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+1. [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
+2. [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
 3. [`graph-surface-plan.md`](graph-surface-plan.md)
 4. this follow-up plan
 
 ## Related Docs
 
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-- [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
+- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
+- [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
 - [`graph-surface-plan.md`](graph-surface-plan.md)
-- [`../../../docs/architecture/graph-surface-current-state.md`](../../../docs/architecture/graph-surface-current-state.md)
-- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/architecture/graph-surface-current-state.md`](../../../../docs/architecture/graph-surface-current-state.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../../docs/architecture/lens-v1-architecture-boundary.md)

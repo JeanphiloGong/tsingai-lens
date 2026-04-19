@@ -25,7 +25,7 @@ This plan assumes:
 For the parent Source retirement lineage, read
 [`source-residual-graphrag-retirement-plan.md`](source-residual-graphrag-retirement-plan.md).
 For the downstream consumer target, read
-[`materials-comparison-v2-plan.md`](materials-comparison-v2-plan.md).
+[`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md).
 
 ## Why This Follow-up Exists
 
@@ -136,7 +136,7 @@ That means:
 ### Target Source Evidence Contract
 
 This plan adopts the Source evidence contract required by
-[`materials-comparison-v2-plan.md`](materials-comparison-v2-plan.md) as its
+[`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md) as its
 target output.
 
 The target collection-local Source artifacts are:

@@ -326,8 +326,8 @@ This backend-local architecture exists to implement, not redefine:
 
 ## Related Docs
 
-- [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)
+- [`../plans/v1-api-migration-notes.md`](../plans/historical/v1-api-migration-notes.md)
 - [`overview.md`](overview.md)
-- [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
+- [`../plans/evidence-first-parsing-plan.md`](../plans/historical/evidence-first-parsing-plan.md)
 - [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
 - [`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md)

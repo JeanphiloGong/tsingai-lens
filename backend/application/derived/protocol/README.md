@@ -70,7 +70,7 @@ It should not redefine:
 
 ## Related Docs
 
-- [`../../docs/plans/evidence-first-parsing-plan.md`](../../docs/plans/evidence-first-parsing-plan.md)
-- [`../../docs/architecture/domain-architecture.md`](../../docs/architecture/domain-architecture.md)
-- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/plans/historical/evidence-first-parsing-plan.md`](../../../docs/plans/historical/evidence-first-parsing-plan.md)
+- [`../../../docs/architecture/domain-architecture.md`](../../../docs/architecture/domain-architecture.md)
+- [`../../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../../docs/architecture/lens-v1-architecture-boundary.md)
 - [`../README.md`](../README.md)

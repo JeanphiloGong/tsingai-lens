@@ -195,7 +195,7 @@ Readiness semantics remain Core-owned:
 
 The active child execution plan for this freeze is:
 
-- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/goal-core-source-contract-follow-up-plan.md)
+- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-core-source-contract-follow-up-plan.md)
 
 ## Current Backend Mapping
 
@@ -283,10 +283,10 @@ Controller implications:
 
 ## Related Docs
 
-- [`../plans/goal-core-source-implementation-plan.md`](../plans/goal-core-source-implementation-plan.md)
-- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/goal-core-source-contract-follow-up-plan.md)
+- [`../plans/goal-core-source-implementation-plan.md`](../plans/backend-wide/goal-core-source-implementation-plan.md)
+- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-core-source-contract-follow-up-plan.md)
 - [`overview.md`](overview.md)
 - [`domain-architecture.md`](domain-architecture.md)
-- [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)
-- [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
+- [`../plans/v1-api-migration-notes.md`](../plans/historical/v1-api-migration-notes.md)
+- [`../plans/evidence-first-parsing-plan.md`](../plans/historical/evidence-first-parsing-plan.md)
 - [`../specs/api.md`](../specs/api.md)

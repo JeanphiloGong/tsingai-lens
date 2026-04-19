@@ -218,7 +218,7 @@ Short-term checks:
 Implemented automation baseline:
 
 - `scripts/check_docs_governance.py` validates local markdown links
-- `scripts/check_docs_governance.py` validates selected node-local `README.md`
-  entry pages
+- `scripts/check_docs_governance.py` validates node-local `README.md` entry
+  pages outside docs trees
 - `scripts/check_docs_governance.py` blocks suspicious docs-path filenames and
   high-signal secret patterns

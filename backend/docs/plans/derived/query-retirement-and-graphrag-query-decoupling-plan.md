@@ -18,6 +18,13 @@ This plan only covers the query side:
 It does not yet remove GraphRAG from indexing, collection config bootstrapping,
 or other Source-internal generation paths.
 
+Status as of 2026-04-19:
+
+- the public query surface is already removed from runtime
+- the historical `application/query/*` package and query-runtime bridge are
+  already gone
+- this page now remains as retained derived-surface retirement lineage
+
 ## Purpose
 
 This plan exists to answer one backend question:
@@ -34,20 +41,18 @@ surface cutover.
 The current backend state already treats query as a retained secondary surface
 rather than part of the Core-backed product backbone.
 
-At the same time, query remains the largest surviving GraphRAG-shaped hole in
-the backend boundary:
+Historically, query was the largest surviving GraphRAG-shaped hole in the
+backend boundary:
 
-- [`application/query/service.py`](../../application/query/service.py) still
-  owns a public app-layer query use case
-- [`application/source/query_runtime_service.py`](../../application/source/query_runtime_service.py)
-  still translates app query calls into GraphRAG/retrieval table reads such as
-  `entities`, `communities`, `community_reports`, and `relationships`
-- [`retrieval/api/query.py`](../../retrieval/api/query.py) and
-  [`retrieval/query/`](../../retrieval/query/) still provide the actual query
-  engine
-- [`retrieval/cli/main.py`](../../retrieval/cli/main.py) still exposes a
-  query-oriented CLI path
-- public docs still describe `/api/v1/query` as a retained secondary route
+- historical `application/query/service.py` owned a public app-layer query use
+  case
+- historical `application/source/query_runtime_service.py` translated app query
+  calls into GraphRAG table reads such as `entities`, `communities`,
+  `community_reports`, and `relationships`
+- historical `backend/retrieval/api/query.py`, `backend/retrieval/query/`, and
+  query-oriented CLI paths provided the actual query engine
+- public docs previously described `/api/v1/query` as a retained secondary
+  route
 
 That shape conflicts with the desired backend layering:
 
@@ -105,11 +110,11 @@ Goal:
 
 Primary changes:
 
-- delete [`controllers/query.py`](../../controllers/query.py)
-- delete [`controllers/schemas/query.py`](../../controllers/schemas/query.py)
+- delete `controllers/query.py`
+- delete `controllers/schemas/query.py`
 - remove `QueryRequest` and `QueryResponse` exports from
-  [`controllers/schemas/__init__.py`](../../controllers/schemas/__init__.py)
-- remove query router registration from [`main.py`](../../main.py)
+  [`controllers/schemas/__init__.py`](../../../controllers/schemas/__init__.py)
+- remove query router registration from [`main.py`](../../../main.py)
 
 Exit criteria:
 
@@ -125,11 +130,10 @@ Goal:
 
 Primary changes:
 
-- delete [`application/query/service.py`](../../application/query/service.py)
-- delete [`application/query/__init__.py`](../../application/query/__init__.py)
-- delete [`application/query_service.py`](../../application/query_service.py)
-- delete
-  [`application/source/query_runtime_service.py`](../../application/source/query_runtime_service.py)
+- delete `application/query/service.py`
+- delete `application/query/__init__.py`
+- delete `application/query_service.py`
+- delete `application/source/query_runtime_service.py`
 
 Exit criteria:
 
@@ -145,14 +149,13 @@ Goal:
 
 Primary changes:
 
-- delete [`retrieval/api/query.py`](../../retrieval/api/query.py)
-- remove query exports from [`retrieval/api/__init__.py`](../../retrieval/api/__init__.py)
-- delete [`retrieval/query/`](../../retrieval/query/)
-- delete [`retrieval/cli/query.py`](../../retrieval/cli/query.py)
-- remove the `query` command from [`retrieval/cli/main.py`](../../retrieval/cli/main.py)
-- remove `SearchMethod` from
-  [`retrieval/config/enums.py`](../../retrieval/config/enums.py)
-- delete [`retrieval/prompts/query/`](../../retrieval/prompts/query/)
+- delete `backend/retrieval/api/query.py`
+- remove query exports from `backend/retrieval/api/__init__.py`
+- delete `backend/retrieval/query/`
+- delete `backend/retrieval/cli/query.py`
+- remove the `query` command from `backend/retrieval/cli/main.py`
+- remove `SearchMethod` from `backend/retrieval/config/enums.py`
+- delete `backend/retrieval/prompts/query/`
 
 Exit criteria:
 
@@ -168,15 +171,15 @@ Goal:
 Primary changes:
 
 - remove `/query` assertions and stubs from
-  [`tests/integration/test_app_layer_api.py`](../../tests/integration/test_app_layer_api.py)
+  [`tests/integration/test_app_layer_api.py`](../../../tests/integration/test_app_layer_api.py)
 - remove `/query` OpenAPI expectations from
-  [`tests/integration/routers/test_protocol_api.py`](../../tests/integration/routers/test_protocol_api.py)
-- update [`../specs/api.md`](../specs/api.md)
-- update [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- update [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
-- update [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+  [`tests/integration/routers/test_protocol_api.py`](../../../tests/integration/routers/test_protocol_api.py)
+- update [`../specs/api.md`](../../specs/api.md)
+- update [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
+- update [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface-cutover-plan.md)
+- update [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
 - update
-  [`../../../docs/overview/system-overview.md`](../../../docs/overview/system-overview.md)
+  [`../../../docs/overview/system-overview.md`](../../../../docs/overview/system-overview.md)
 
 Exit criteria:
 
@@ -228,8 +231,8 @@ than folded into this query retirement wave.
 
 ## Related Docs
 
-- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`../specs/api.md`](../specs/api.md)
-- [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
-- [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
+- [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface-cutover-plan.md)
+- [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
+- [`../specs/api.md`](../../specs/api.md)
+- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)

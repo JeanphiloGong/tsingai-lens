@@ -26,7 +26,7 @@ Out of scope:
 
 ## Companion Docs
 
-- [`../../../../backend/docs/plans/claim-traceback-navigation-implementation-plan.md`](../../../../backend/docs/plans/claim-traceback-navigation-implementation-plan.md)
+- [`../../../../backend/docs/plans/claim-traceback-navigation-implementation-plan.md`](../../../../backend/docs/plans/core/claim-traceback-navigation-implementation-plan.md)
   Backend-owned child implementation plan for the current v1 traceback slice
 - [`../../../../backend/docs/specs/api.md`](../../../../backend/docs/specs/api.md)
   Authoritative public API contract for traceback and document content

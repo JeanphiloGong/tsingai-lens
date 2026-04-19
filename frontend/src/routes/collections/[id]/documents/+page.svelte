@@ -7,6 +7,7 @@
     type DocumentProfilesResponse
   } from '../../../_shared/documents';
   import { t } from '../../../_shared/i18n';
+  import { buildDocumentViewerHref } from '../../../_shared/traceback';
   import {
     fetchWorkspaceOverview,
     getWorkspaceSurfaceState,
@@ -132,6 +133,12 @@
 
   function stateCardBody() {
     return $t(`overview.surfaceStateCards.${surfaceState}.body`);
+  }
+
+  function viewDocumentHref(profile: DocumentProfile) {
+    return buildDocumentViewerHref(collectionId, profile.document_id, {
+      returnTo: $page.url.pathname
+    });
   }
 </script>
 
@@ -290,6 +297,9 @@
                 <td>{warningsFor(item)}</td>
                 <td>
                   <div class="table-actions">
+                    <a class="btn btn--ghost btn--small" href={viewDocumentHref(item)}>
+                      {$t('traceback.openDocument')}
+                    </a>
                     <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/evidence`}>
                       {$t('overview.nextEvidence')}
                     </a>

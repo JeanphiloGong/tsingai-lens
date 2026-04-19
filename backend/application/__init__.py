@@ -1,5 +1,6 @@
-"""Application-layer services and workflows.
+"""Application-layer use-case orchestration.
 
-Flat modules remain for compatibility during the domain-packaging migration.
-Prefer domain packages under ``application/`` for new imports.
+The outer technical layer remains ``application``.
+Inside it, business responsibilities are grouped as ``goal``, ``source``,
+``core``, and ``derived``.
 """

@@ -1,17 +1,9 @@
 import os
 
-from controllers import (
-    collections,
-    comparisons,
-    documents,
-    evidence,
-    graph,
-    protocol,
-    query,
-    reports,
-    tasks,
-    workspace,
-)
+from controllers.core import comparisons, documents, evidence, workspace
+from controllers.derived import graph, protocol, reports
+from controllers.goal import intake as goals
+from controllers.source import collections, tasks
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -35,7 +27,7 @@ def _parse_cors_allowed_origins() -> list[str]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.2.2",
+        version="0.3.0",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",
@@ -53,9 +45,9 @@ def create_app() -> FastAPI:
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.mount(f"{PUBLIC_API_PREFIX}/static", StaticFiles(directory=DATA_DIR), name="static")
-    app.include_router(query.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(graph.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(protocol.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)

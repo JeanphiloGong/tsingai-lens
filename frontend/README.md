@@ -25,6 +25,8 @@ to code.
 
 - [`docs/frontend-plan.md`](docs/frontend-plan.md)
   Frontend same-origin API integration guide
+- [`docs/goal-copilot-proposal.md`](docs/goal-copilot-proposal.md)
+  Proposal for a workflow-first, Core-grounded goal chat entry
 - [`src/routes/collections/lens-v1-interface-spec.md`](src/routes/collections/lens-v1-interface-spec.md)
   Lens v1 collection UI migration spec for workspace, comparisons, evidence,
   documents, protocol, and graph surfaces

@@ -11,10 +11,11 @@ import pandas as pd
 if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
-from application.index_task_runner import IndexTaskRunner
-from application.task_service import TaskService
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.source.index_task_runner import IndexTaskRunner
+from application.source.task_service import TaskService
+from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 
 class DummyWorkflowOutput:
@@ -41,22 +42,6 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
         output=SimpleNamespace(base_dir=str(output_dir)),
         input=SimpleNamespace(storage=SimpleNamespace(base_dir=str(input_dir))),
         root_dir=str(output_dir.parent),
-        embed_text=SimpleNamespace(
-            names=[
-                "entity.description",
-                "community.full_content",
-                "text_unit.text",
-            ],
-            vector_store_id="default_vector_store",
-        ),
-        vector_store={
-            "default_vector_store": {
-                "type": "lancedb",
-                "db_uri": str(output_dir.parent / "vector_store" / "lancedb"),
-                "container_name": "default",
-                "overwrite": True,
-            }
-        },
     )
 
 
@@ -74,6 +59,7 @@ def _write_index_outputs(output_dir: Path) -> None:
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
+                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
             }
@@ -91,14 +77,17 @@ def _write_index_outputs(output_dir: Path) -> None:
                 "text": "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                 "document_ids": ["paper-1"],
             },
+            {
+                "id": "tu-3",
+                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                "document_ids": ["paper-1"],
+            },
         ]
     )
-    entities = pd.DataFrame([{"id": "ent-1", "title": "epoxy"}])
-    relationships = pd.DataFrame([{"source": "epoxy", "target": "SiO2", "weight": 1.0}])
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    entities.to_parquet(output_dir / "entities.parquet", index=False)
-    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def _write_review_only_outputs(output_dir: Path) -> None:
@@ -121,18 +110,16 @@ def _write_review_only_outputs(output_dir: Path) -> None:
             }
         ]
     )
-    entities = pd.DataFrame([{"id": "ent-1", "title": "epoxy"}])
-    relationships = pd.DataFrame([{"source": "epoxy", "target": "SiO2", "weight": 1.0}])
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    entities.to_parquet(output_dir / "entities.parquet", index=False)
-    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    import application.index_task_runner as task_runner_module
+    import application.source.index_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -147,7 +134,10 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     default_config.parent.mkdir(parents=True, exist_ok=True)
     default_config.write_text("dummy: true\n", encoding="utf-8")
 
+    captured: dict[str, object] = {}
+
     async def fake_build_index(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
         _write_index_outputs(paths.output_dir)
         return [DummyWorkflowOutput()]
 
@@ -160,122 +150,44 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     assert result["status"] == "completed"
     assert result["current_stage"] == "artifacts_ready"
+    assert captured["method"] == task_runner_module.IndexingMethod.Standard
+    assert "is_update_run" not in captured
     artifacts = artifact_registry.get(collection["collection_id"])
+    assert artifacts["documents_generated"] is True
     assert artifacts["documents_ready"] is True
+    assert artifacts["document_profiles_generated"] is True
     assert artifacts["document_profiles_ready"] is True
+    assert artifacts["evidence_cards_generated"] is True
     assert artifacts["evidence_cards_ready"] is True
+    assert artifacts["characterization_observations_generated"] is True
+    assert artifacts["characterization_observations_ready"] is True
+    assert artifacts["structure_features_generated"] is True
+    assert artifacts["structure_features_ready"] is False
+    assert artifacts["test_conditions_generated"] is True
+    assert artifacts["test_conditions_ready"] is True
+    assert artifacts["baseline_references_generated"] is True
+    assert artifacts["baseline_references_ready"] is True
+    assert artifacts["sample_variants_generated"] is True
+    assert artifacts["sample_variants_ready"] is True
+    assert artifacts["measurement_results_generated"] is True
+    assert artifacts["measurement_results_ready"] is True
+    assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is True
+    assert artifacts["graph_generated"] is True
     assert artifacts["graph_ready"] is True
+    assert artifacts["sections_generated"] is True
     assert artifacts["sections_ready"] is True
+    assert artifacts["table_cells_generated"] is True
+    assert artifacts["table_cells_ready"] is False
+    assert artifacts["procedure_blocks_generated"] is True
     assert artifacts["procedure_blocks_ready"] is True
+    assert artifacts["protocol_steps_generated"] is True
     assert artifacts["protocol_steps_ready"] is True
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
     assert paths.output_dir.joinpath("evidence_cards.parquet").exists()
     assert paths.output_dir.joinpath("comparison_rows.parquet").exists()
-
-
-def test_index_task_runner_downgrades_first_update_run(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    import application.index_task_runner as task_runner_module
-
-    collection_service = CollectionService(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
-
-    collection = collection_service.create_collection("Composite Papers")
-    paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal.")
-
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
-    captured: dict[str, object] = {}
-
-    async def fake_build_index(**kwargs):  # noqa: ANN003
-        captured.update(kwargs)
-        _write_index_outputs(paths.output_dir)
-        return [DummyWorkflowOutput()]
-
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
-    monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
-
-    task = task_service.create_task(collection["collection_id"], "index")
-    result = asyncio.run(
-        runner.run_index_task(
-            task["task_id"],
-            collection["collection_id"],
-            is_update_run=True,
-        )
-    )
-
-    assert captured["is_update_run"] is False
-    assert result["status"] == "completed"
-    assert result["warnings"] == ["未找到上一轮索引产物 documents.parquet，已自动降级为全量重建。"]
-
-
-def test_index_task_runner_downgrades_when_vector_store_baseline_missing(
-    monkeypatch, tmp_path
-):
-    _patch_parquet(monkeypatch)
-
-    import application.index_task_runner as task_runner_module
-    import application.index_run_mode_service as run_mode_service
-
-    collection_service = CollectionService(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
-
-    collection = collection_service.create_collection("Composite Papers")
-    paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(
-        collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal."
-    )
-    _write_index_outputs(paths.output_dir)
-    (paths.output_dir.parent / "vector_store" / "lancedb").mkdir(parents=True, exist_ok=True)
-
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
-    captured: dict[str, object] = {}
-
-    async def fake_build_index(**kwargs):  # noqa: ANN003
-        captured.update(kwargs)
-        _write_index_outputs(paths.output_dir)
-        return [DummyWorkflowOutput()]
-
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
-    monkeypatch.setattr(
-        task_runner_module,
-        "load_config",
-        lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
-    )
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
-    monkeypatch.setattr(
-        run_mode_service,
-        "_probe_lancedb_tables",
-        lambda db_uri, required_tables: (["default-entity-description"], "missing"),
-    )
-
-    task = task_service.create_task(collection["collection_id"], "index")
-    result = asyncio.run(
-        runner.run_index_task(
-            task["task_id"],
-            collection["collection_id"],
-            is_update_run=True,
-        )
-    )
-
-    assert captured["is_update_run"] is False
-    assert result["status"] == "completed"
-    assert result["warnings"] == [
-        "未找到完整的向量索引基线，已自动降级为全量重建。 缺失或不可用的表: default-entity-description。 详情: missing"
-    ]
+    assert paths.output_dir.joinpath("entities.parquet").exists() is False
+    assert paths.output_dir.joinpath("relationships.parquet").exists() is False
 
 
 def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
@@ -283,7 +195,7 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
 ):
     _patch_parquet(monkeypatch)
 
-    import application.index_task_runner as task_runner_module
+    import application.source.index_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -320,10 +232,30 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert result["status"] == "completed"
     assert "未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。" in result["warnings"]
     artifacts = artifact_registry.get(collection["collection_id"])
+    assert artifacts["documents_generated"] is True
     assert artifacts["documents_ready"] is True
+    assert artifacts["document_profiles_generated"] is True
     assert artifacts["document_profiles_ready"] is True
+    assert artifacts["graph_generated"] is True
     assert artifacts["graph_ready"] is True
+    assert artifacts["table_cells_generated"] is True
+    assert artifacts["table_cells_ready"] is False
+    assert artifacts["evidence_cards_generated"] is True
     assert artifacts["evidence_cards_ready"] is False
+    assert artifacts["characterization_observations_generated"] is True
+    assert artifacts["characterization_observations_ready"] is False
+    assert artifacts["structure_features_generated"] is True
+    assert artifacts["structure_features_ready"] is False
+    assert artifacts["test_conditions_generated"] is True
+    assert artifacts["test_conditions_ready"] is False
+    assert artifacts["baseline_references_generated"] is True
+    assert artifacts["baseline_references_ready"] is False
+    assert artifacts["sample_variants_generated"] is True
+    assert artifacts["sample_variants_ready"] is False
+    assert artifacts["measurement_results_generated"] is True
+    assert artifacts["measurement_results_ready"] is False
+    assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is False
+    assert artifacts["protocol_steps_generated"] is False
     assert artifacts["protocol_steps_ready"] is False
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()

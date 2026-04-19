@@ -25,6 +25,7 @@ class FileCollectionRepository:
             output_dir=collection_dir / "output",
             meta_path=collection_dir / "meta.json",
             files_path=collection_dir / "files.json",
+            import_manifest_path=collection_dir / "import_manifest.json",
             artifacts_path=collection_dir / "artifacts.json",
         )
 
@@ -61,6 +62,15 @@ class FileCollectionRepository:
 
     def write_files(self, collection_id: str, payload: list[dict]) -> None:
         write_json(self.get_paths(collection_id).files_path, payload)
+
+    def read_import_manifest(self, collection_id: str) -> dict | None:
+        paths = self.get_paths(collection_id)
+        if not paths.import_manifest_path.exists():
+            return None
+        return read_json(paths.import_manifest_path, None)
+
+    def write_import_manifest(self, collection_id: str, payload: dict) -> None:
+        write_json(self.get_paths(collection_id).import_manifest_path, payload)
 
     def write_input_file(self, collection_id: str, stored_filename: str, payload: bytes) -> Path:
         paths = self.get_paths(collection_id)

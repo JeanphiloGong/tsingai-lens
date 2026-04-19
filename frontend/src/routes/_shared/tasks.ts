@@ -53,9 +53,6 @@ export type TaskListResponse = {
 };
 
 export type CreateIndexTaskPayload = {
-  method?: string;
-  isUpdateRun?: boolean;
-  verbose?: boolean;
   additionalContext?: Record<string, unknown> | null;
 };
 
@@ -123,14 +120,15 @@ export function isTaskFinished(task: Task | null | undefined) {
 }
 
 export async function createIndexTask(collectionId: string, payload: CreateIndexTaskPayload = {}) {
+  const body: Record<string, unknown> = {};
+
+  if (payload.additionalContext !== undefined) {
+    body.additional_context = payload.additionalContext ?? null;
+  }
+
   const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}/tasks/index`, {
     method: 'POST',
-    body: JSON.stringify({
-      method: payload.method ?? 'standard',
-      is_update_run: payload.isUpdateRun ?? false,
-      verbose: payload.verbose ?? false,
-      additional_context: payload.additionalContext ?? null
-    })
+    body: JSON.stringify(body)
   });
 
   const task = normalizeTask(data);

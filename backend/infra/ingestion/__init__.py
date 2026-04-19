@@ -1,1 +1,0 @@
-"""Document ingestion infrastructure adapters."""

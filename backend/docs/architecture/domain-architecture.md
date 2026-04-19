@@ -122,10 +122,6 @@ Owns graph browsing and exports as a retained secondary surface.
 
 Owns report retrieval and browsing as a retained secondary surface.
 
-### Query
-
-Owns generic query entrypoints outside the primary Lens v1 comparison workflow.
-
 ## Target Package Layout
 
 The target direction is:
@@ -160,9 +156,6 @@ backend/
     reports/
       router.py
       schemas.py
-    query/
-      router.py
-      schemas.py
   application/
     collections/
     indexing/
@@ -173,7 +166,6 @@ backend/
     protocol/
     graph/
     reports/
-    query/
   domain/
     collections/
     indexing/
@@ -256,8 +248,6 @@ Create domain folders and relocate current files without changing behavior:
   -> `application/workspace/artifact_registry_service.py`
 - `application/graph_service.py`
   -> `application/graph/service.py`
-- `application/query_service.py`
-  -> `application/query/service.py`
 - `application/report_service.py`
   -> `application/reports/service.py`
 
@@ -336,8 +326,8 @@ This backend-local architecture exists to implement, not redefine:
 
 ## Related Docs
 
-- [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)
+- [`../plans/v1-api-migration-notes.md`](../plans/historical/v1-api-migration-notes.md)
 - [`overview.md`](overview.md)
-- [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
-- [`../../../docs/30-architecture/lens-v1-architecture-boundary.md`](../../../docs/30-architecture/lens-v1-architecture-boundary.md)
-- [`../../../docs/40-specs/lens-core-artifact-contracts.md`](../../../docs/40-specs/lens-core-artifact-contracts.md)
+- [`../plans/evidence-first-parsing-plan.md`](../plans/historical/evidence-first-parsing-plan.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
+- [`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md)

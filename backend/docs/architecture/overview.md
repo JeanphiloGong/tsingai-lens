@@ -2,97 +2,112 @@
 
 ## Purpose
 
-The backend turns uploaded collection files into document profile, evidence,
-comparison, retained graph/report, and conditional protocol artifacts and
+This document is the backend-wide architecture overview for the current module.
+
+It explains the main ownership seams, the current runtime shape, and the
+backend-local reading path for architecture questions. It does not own active
+delivery sequencing or plan-family routing.
+
+## Backend Role In The System
+
+The backend turns collection material into document profile, evidence,
+comparison, Core-derived graph/report, and conditional protocol artifacts and
 exposes those results through the public HTTP contract.
 
-The backend implements the shared Lens v1 evidence-first architecture defined
-in root docs. This document describes backend ownership seams and local
-navigation rather than redefining shared product or architecture decisions.
+Within the repository-wide system:
+
+- root `docs/` owns shared product meaning, shared architecture, and
+  cross-module contracts
+- `backend/` owns ingestion, orchestration, storage, and the browser-facing
+  API contract
+- `frontend/` owns the same-origin browser experience over those backend
+  surfaces
 
 ## Current Ownership Seams
 
 - `controllers/`
   Current HTTP route surface for collections, tasks, workspace, graph,
-  protocol, query, and reports.
+  protocol, reports, documents, evidence, and comparisons
 - `application/`
-  Use-case orchestration layer with active domain packages plus some remaining
-  legacy flat services.
+  Use-case orchestration layer with active business-domain packages plus some
+  remaining legacy flat services
 - `domain/`
-  Domain models and port definitions.
-- `infra/persistence/`
-  Repository and persistence backends.
-- `retrieval/`
-  Index and query engine package.
+  Domain models and port definitions
+- `infra/`
+  Runtime adapters such as persistence, ingestion, Source-owned runtime seams,
+  and other external integrations
+- `tests/`
+  Verification layout for unit, integration, end-to-end, and load coverage
 
 ## Current Architectural Shape
 
-The backend is in a transition state:
+The backend is still in transition, but its intended shape is already visible:
 
-- all public HTTP flows currently enter through `controllers/`
-- `application/` already contains domain packages for collections, indexing,
-  workspace, documents, evidence, comparisons, and protocol
-- some legacy flat orchestration seams still remain and should not be deepened
-- the Lens v1 collection backbone is now
+- public HTTP flows currently enter through `controllers/`
+- business-domain orchestration is converging under `application/`
+- some legacy flat services still remain and should keep shrinking
+- the Lens v1 backbone is now
   `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`
-- `retrieval/` remains the largest engine surface and should be reached
-  through clearer application or infrastructure boundaries over time
+- protocol remains a conditional downstream branch rather than the default
+  parsing center
+- graph and reports are Core-derived secondary surfaces
+- query now crosses a Source-owned runtime facade rather than importing
+  GraphRAG internals from product-facing application code
+- historical GraphRAG engine code is being retired rather than preserved as a
+  separate active backend package
 
-The target direction is a business-domain-oriented backend shape rather than a
+The target direction is a business-domain-oriented backend rather than a
 larger flat service bag.
 
-## Key Runtime Flows
+## Main Runtime Flow
 
-- collection creation and file upload
-- indexing task orchestration
-- artifact readiness tracking
-- document profile, evidence, and comparison artifact generation
-- graph export and report browsing
-- protocol step listing, search, and SOP draft generation for suitable corpora
+1. collection material enters through collection and ingestion surfaces
+2. indexing orchestration runs Source-side indexing/runtime preparation plus
+   the Lens backbone
+3. document profiling produces suitability and routing signals
+4. evidence extraction produces claim-centered research objects
+5. comparison generation produces the primary collection-facing workspace view
+6. protocol, graph, and report surfaces derive from or sit beside that primary
+   backbone
 
-## Local Navigation
+## Boundary Rules
 
-Start with:
+- HTTP parsing and response shaping stay in `controllers/`
+- orchestration stays in `application/`
+- domain invariants stay in `domain/`
+- external integrations stay in `infra/`
+- route code should not bypass application-owned orchestration with ad hoc
+  engine imports
+- protocol should stay behind documents, evidence, and comparisons
+- product graph and report semantics should stay derived from Core artifacts
+- GraphRAG should remain behind Source-owned seams rather than defining
+  product-facing contracts
+- shared product meaning and cross-module contracts should stay in root `docs/`
 
-- [`../specs/api.md`](../specs/api.md)
-  Authoritative frontend/backend API contract
-- [`../plans/current-api-surface-migration-checklist.md`](../plans/current-api-surface-migration-checklist.md)
-  Canonical current-state page for the active backend migration
+## Code-Owned Neighbors
 
-Active execution plans:
-
-- [`../plans/core-stabilization-and-seam-extraction-plan.md`](../plans/core-stabilization-and-seam-extraction-plan.md)
-  Active near-term child plan for Core stabilization and parsing seam
-  extraction
-- [`../plans/goal-core-source-implementation-plan.md`](../plans/goal-core-source-implementation-plan.md)
-  Broader parent roadmap for later Core, Goal, and Source waves
-- [`../plans/graph-surface-plan.md`](../plans/graph-surface-plan.md)
-  Active retained-secondary-surface plan for graph hardening
-
-Architecture background:
-
-- [`domain-architecture.md`](domain-architecture.md)
-  Target backend-local domain seams and packaging direction
-- [`goal-core-source-layering.md`](goal-core-source-layering.md)
-  Backend-local proposal for goal-driven entry, collection intelligence core,
-  and source acquisition seams
-- [`application-layer-boundary.md`](application-layer-boundary.md)
-  Boundary ADR
-
-Historical background:
-
-- [`../plans/evidence-first-parsing-plan.md`](../plans/evidence-first-parsing-plan.md)
-  Origin plan for the evidence-first parsing transition
-- [`../plans/v1-api-migration-notes.md`](../plans/v1-api-migration-notes.md)
-  Historical bridge note behind the current API migration checklist
-
-Code-owned neighbors:
-
-- [`../runbooks/backend-ops.md`](../runbooks/backend-ops.md)
-  Local development and operations runbook
 - [`../../application/README.md`](../../application/README.md)
-  Use-case orchestration boundary
-- [`../../retrieval/README.md`](../../retrieval/README.md)
-  Retrieval engine boundary
+  Use-case orchestration boundary and domain package map
 - [`../../infra/persistence/README.md`](../../infra/persistence/README.md)
   Persistence adapter boundary
+- [`../../tests/README.md`](../../tests/README.md)
+  Test layout and verification ownership
+
+## Related Architecture Docs
+
+- [`domain-architecture.md`](domain-architecture.md)
+  Target backend-local business-domain seams and package direction
+- [`goal-core-source-layering.md`](goal-core-source-layering.md)
+  Backend-local five-layer research architecture centered on the Core backbone
+- [`application-layer-boundary.md`](application-layer-boundary.md)
+  Backend ADR for HTTP and application ownership separation
+- [`../specs/api.md`](../specs/api.md)
+  Public backend contract reference
+
+## Current-State And Plan Entry
+
+For active backend migration state, implementation sequencing, or retained plan
+lineage, go back to [`../README.md`](../README.md), then use
+[`../plans/README.md`](../plans/README.md) and start from
+[`../plans/backend-wide/current-api-surface-migration-checklist.md`](../plans/backend-wide/current-api-surface-migration-checklist.md)
+rather than treating this architecture page as a flat plan index.

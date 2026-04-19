@@ -30,7 +30,6 @@ def test_docs_and_openapi_move_under_api_prefix(client):
     assert openapi_resp.status_code == 200
 
     openapi_text = openapi_resp.text
-    assert f"{PUBLIC_API_V1_PREFIX}/query" in openapi_text
     assert (
         f"{PUBLIC_API_V1_PREFIX}/collections/{{collection_id}}/reports/communities"
         in openapi_text
@@ -44,6 +43,7 @@ def test_docs_and_openapi_move_under_api_prefix(client):
 def test_static_moves_under_api_prefix(client):
     assert client.get(f"{PUBLIC_API_PREFIX}/static/configs/default.yaml").status_code == 200
     assert client.get("/static/configs/default.yaml").status_code == 404
+
 
 def test_cors_default_is_not_wildcard_with_credentials():
     cors = next(

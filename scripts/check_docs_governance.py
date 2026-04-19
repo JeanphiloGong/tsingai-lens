@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -8,38 +9,33 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GOVERNED_DIRS = [
-    REPO_ROOT / "docs" / "05-policies",
-    REPO_ROOT / "docs" / "10-rfcs",
-    REPO_ROOT / "docs" / "20-adrs",
-    REPO_ROOT / "docs" / "30-architecture",
-    REPO_ROOT / "docs" / "40-specs",
-    REPO_ROOT / "docs" / "50-guides",
-    REPO_ROOT / "docs" / "60-runbooks",
-    REPO_ROOT / "docs" / "70-postmortems",
-    REPO_ROOT / "docs" / "90-archive",
+    REPO_ROOT / "docs" / "overview",
+    REPO_ROOT / "docs" / "architecture",
+    REPO_ROOT / "docs" / "contracts",
+    REPO_ROOT / "docs" / "decisions",
     REPO_ROOT / "docs" / "research",
     REPO_ROOT / "backend" / "docs",
     REPO_ROOT / "frontend" / "docs",
+]
+GOVERNED_FILES = [
+    REPO_ROOT / "docs" / "governance.md",
 ]
 DOCS_PATHS = [
     REPO_ROOT / "docs",
     REPO_ROOT / "backend" / "docs",
     REPO_ROOT / "frontend" / "docs",
 ]
-NODE_LOCAL_DOC_FILES = [
-    REPO_ROOT / "README.md",
-    REPO_ROOT / "backend" / "README.md",
-    REPO_ROOT / "frontend" / "README.md",
-    REPO_ROOT / "backend" / "api" / "README.md",
-    REPO_ROOT / "backend" / "application" / "README.md",
-    REPO_ROOT / "backend" / "retrieval" / "README.md",
-    REPO_ROOT / "backend" / "retrieval" / "index" / "README.md",
-    REPO_ROOT / "backend" / "retrieval" / "query" / "README.md",
-    REPO_ROOT / "backend" / "infra" / "persistence" / "README.md",
-    REPO_ROOT / "backend" / "tests" / "README.md",
-    REPO_ROOT / "frontend" / "src" / "routes" / "_shared" / "README.md",
-    REPO_ROOT / "frontend" / "src" / "routes" / "collections" / "README.md",
-]
+IGNORED_DIR_NAMES = {
+    ".git",
+    ".pytest_cache",
+    ".svelte-kit",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+}
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 SUSPICIOUS_NAME_RE = re.compile(r"(password|secret|credential)", re.IGNORECASE)
 HIGH_SIGNAL_SECRET_PATTERNS = [
@@ -51,6 +47,9 @@ HIGH_SIGNAL_SECRET_PATTERNS = [
 
 def iter_governed_markdown() -> list[Path]:
     docs: list[Path] = []
+    for path in GOVERNED_FILES:
+        if path.exists():
+            docs.append(path)
     for doc_dir in GOVERNED_DIRS:
         if not doc_dir.exists():
             continue
@@ -61,15 +60,46 @@ def iter_governed_markdown() -> list[Path]:
     return docs
 
 
+def is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def is_in_docs_tree(path: Path) -> bool:
+    return any(is_within(path, docs_root) for docs_root in DOCS_PATHS)
+
+
+def iter_node_local_doc_files() -> list[Path]:
+    docs: list[Path] = []
+    for current_root, dirnames, filenames in os.walk(REPO_ROOT):
+        current_path = Path(current_root)
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not name.startswith(".")
+            and name not in IGNORED_DIR_NAMES
+            and not is_in_docs_tree(current_path / name)
+        ]
+
+        if is_in_docs_tree(current_path):
+            continue
+
+        if "README.md" in filenames:
+            docs.append(current_path / "README.md")
+
+    return sorted(docs)
+
+
 def iter_all_docs_markdown() -> list[Path]:
     docs: set[Path] = set()
     for doc_dir in DOCS_PATHS:
         if not doc_dir.exists():
             continue
         docs.update(doc_dir.rglob("*.md"))
-    for path in NODE_LOCAL_DOC_FILES:
-        if path.exists():
-            docs.add(path)
+    docs.update(iter_node_local_doc_files())
     return sorted(docs)
 
 

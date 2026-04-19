@@ -1,1 +1,1 @@
-# Controllers package
+"""HTTP controller layer."""

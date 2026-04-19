@@ -1,1 +1,0 @@
-"""Workspace-domain application package."""

@@ -29,6 +29,27 @@ export type DocumentProfilesResponse = {
   items: DocumentProfile[];
 };
 
+export type DocumentContentSection = {
+  section_id: string;
+  heading: string | null;
+  section_type: string | null;
+  order: number;
+  text: string;
+  text_unit_ids: string[];
+  start_offset: number | null;
+  end_offset: number | null;
+};
+
+export type DocumentContentResponse = {
+  collection_id: string;
+  document_id: string;
+  title: string | null;
+  source_filename: string | null;
+  content_text: string;
+  sections: DocumentContentSection[];
+  warnings: string[];
+};
+
 const DEFAULT_DOC_TYPE_COUNTS: Record<DocumentType, number> = {
   experimental: 0,
   review: 0,
@@ -67,6 +88,28 @@ function toOptionalText(value: unknown) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
   return text ? text : null;
+}
+
+function normalizeContentSection(value: unknown): DocumentContentSection | null {
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const section_id = String(record.section_id ?? '').trim();
+  if (!section_id) return null;
+
+  const startOffset = toNumber(record.start_offset);
+  const endOffset = toNumber(record.end_offset);
+
+  return {
+    section_id,
+    heading: toOptionalText(record.heading),
+    section_type: toOptionalText(record.section_type),
+    order: Number.isFinite(toNumber(record.order)) ? toNumber(record.order) : 0,
+    text: String(record.text ?? '').trim(),
+    text_unit_ids: toStringList(record.text_unit_ids),
+    start_offset: Number.isFinite(startOffset) ? startOffset : null,
+    end_offset: Number.isFinite(endOffset) ? endOffset : null
+  };
 }
 
 function normalizeProfile(value: unknown, collectionId: string): DocumentProfile | null {
@@ -209,4 +252,74 @@ export async function fetchDocumentProfiles(collectionId: string): Promise<Docum
     method: 'GET'
   });
   return normalizeResponse(data, collectionId);
+}
+
+function normalizeDocumentContent(value: unknown, collectionId: string, documentId: string): DocumentContentResponse {
+  const record = asRecord(value);
+  if (!record) {
+    throw new Error('Document content response is invalid.');
+  }
+
+  const sections = Array.isArray(record.sections)
+    ? record.sections
+        .map((item) => normalizeContentSection(item))
+        .filter((item): item is DocumentContentSection => item !== null)
+    : [];
+
+  return {
+    collection_id: String(record.collection_id ?? collectionId).trim() || collectionId,
+    document_id: String(record.document_id ?? documentId).trim() || documentId,
+    title: toOptionalText(record.title),
+    source_filename: toOptionalText(record.source_filename),
+    content_text: String(record.content_text ?? '').trim(),
+    sections,
+    warnings: toStringList(record.warnings)
+  };
+}
+
+export async function fetchDocumentContent(
+  collectionId: string,
+  documentId: string
+): Promise<DocumentContentResponse> {
+  if (USE_API_FIXTURES) {
+    return {
+      collection_id: collectionId,
+      document_id: documentId,
+      title: 'Fixture document viewer',
+      source_filename: 'fixture-paper.txt',
+      content_text:
+        'Experimental Section\nThe precursor powders were mixed in ethanol and stirred for 2 h.\nCharacterization\nXRD and SEM were used to characterize the powders.',
+      sections: [
+        {
+          section_id: 'methods',
+          heading: 'Experimental Section',
+          section_type: 'methods',
+          order: 1,
+          text: 'The precursor powders were mixed in ethanol and stirred for 2 h.',
+          text_unit_ids: ['tu-1'],
+          start_offset: 21,
+          end_offset: 84
+        },
+        {
+          section_id: 'characterization',
+          heading: 'Characterization',
+          section_type: 'characterization',
+          order: 2,
+          text: 'XRD and SEM were used to characterize the powders.',
+          text_unit_ids: ['tu-2'],
+          start_offset: 102,
+          end_offset: 153
+        }
+      ],
+      warnings: []
+    };
+  }
+
+  const data = await requestJson(
+    `/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/content`,
+    {
+      method: 'GET'
+    }
+  );
+  return normalizeDocumentContent(data, collectionId, documentId);
 }

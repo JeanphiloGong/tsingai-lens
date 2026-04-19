@@ -17,17 +17,15 @@ next to code.
 ## Ownership Map
 
 - `controllers/`
-  Current HTTP route surface for collections, tasks, workspace, graph,
-  protocol, query, reports, documents, evidence, and comparisons.
+  Current HTTP route surface grouped as `goal/`, `source/`, `core/`, and
+  `derived/`.
 - `application/`
-  Use-case orchestration layer. It now contains active business-domain packages
-  and still carries some legacy flat services that should keep shrinking.
+  Use-case orchestration layer grouped as `goal/`, `source/`, `core/`, and
+  `derived/`.
 - `domain/`
   Domain models and port definitions.
-- `retrieval/`
-  Indexing and query engine package.
 - `infra/`
-  Persistence and infrastructure adapters.
+  Persistence, Source runtime, ingestion, and other infrastructure adapters.
 - `docs/`
   Backend-owned architecture, spec, plan, and runbook docs.
 - `tests/`
@@ -53,39 +51,18 @@ Start here:
 - [`docs/architecture/overview.md`](docs/architecture/overview.md)
   Backend architecture overview and ownership seams
 
-Current state and active plans:
-
-- [`docs/plans/current-api-surface-migration-checklist.md`](docs/plans/current-api-surface-migration-checklist.md)
-  Canonical current-state page for the active Lens v1 backend migration
-- [`docs/plans/core-stabilization-and-seam-extraction-plan.md`](docs/plans/core-stabilization-and-seam-extraction-plan.md)
-  Active near-term child plan for stabilizing the Core slice and extracting
-  the shared parsing seam from the protocol branch
-- [`docs/plans/goal-core-source-implementation-plan.md`](docs/plans/goal-core-source-implementation-plan.md)
-  Broader parent roadmap for later Core, Goal, and Source waves
-- [`docs/plans/graph-surface-plan.md`](docs/plans/graph-surface-plan.md)
-  Active retained-secondary-surface plan for graph hardening
-
-Architecture background:
-
-- [`docs/architecture/domain-architecture.md`](docs/architecture/domain-architecture.md)
-  Target backend-local business-domain seams and package direction
-- [`docs/architecture/goal-core-source-layering.md`](docs/architecture/goal-core-source-layering.md)
-  Backend-local proposal for goal-driven entry, collection intelligence core,
-  and source acquisition seams
-- [`docs/architecture/application-layer-boundary.md`](docs/architecture/application-layer-boundary.md)
-  Backend ADR for the intended application-boundary direction
-
-Historical background:
-
-- [`docs/plans/evidence-first-parsing-plan.md`](docs/plans/evidence-first-parsing-plan.md)
-  Origin plan for the evidence-first parsing transition, kept for lineage
-- [`docs/plans/v1-api-migration-notes.md`](docs/plans/v1-api-migration-notes.md)
-  Historical bridge note behind the current API migration checklist
-
 Operations:
 
 - [`docs/runbooks/backend-ops.md`](docs/runbooks/backend-ops.md)
   Local development and operations runbook
+- [`docs/plans/README.md`](docs/plans/README.md)
+  Backend plan-family landing page for active waves and retained lineage
+
+If you are already inside an active backend change wave, use
+[`docs/plans/backend-wide/current-api-surface-migration-checklist.md`](docs/plans/backend-wide/current-api-surface-migration-checklist.md)
+as the current-state page, then choose the owning plan family from
+[`docs/plans/README.md`](docs/plans/README.md) rather than starting from a
+flat file list.
 
 ## Code-Owned Entry Pages
 
@@ -93,7 +70,6 @@ Operations:
   Public HTTP contract reference
 - [`application/README.md`](application/README.md)
 - [`controllers/`](controllers/)
-- [`retrieval/README.md`](retrieval/README.md)
 - [`infra/persistence/README.md`](infra/persistence/README.md)
 - [`tests/README.md`](tests/README.md)
 
@@ -116,11 +92,14 @@ uvicorn main:app --reload --port 8010
 - The current Lens v1 backbone order is
   `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`.
 - Collection-facing `/api/v1/*` surfaces are currently hosted through
-  `controllers/*`.
+  `controllers/source/*`, `controllers/core/*`, `controllers/derived/*`, and
+  `controllers/goal/*`.
 - `backend/docs/specs/api.md` is the authoritative backend contract for
   frontend integration.
-- The active backend cleanup direction is to keep shrinking legacy flat seams
-  in `application/` and keep protocol behind the evidence/comparison backbone.
+- The active backend cleanup direction is to keep the
+  `goal / source / core / derived` split explicit in `controllers/`,
+  `application/`, and `infra/`, keep Source runtime under `infra/source/*`,
+  and keep protocol behind the evidence/comparison backbone.
 - Public protocol browsing is collection-scoped under
   `/api/v1/collections/{collection_id}/protocol/*`.
 - Use `python3 ../scripts/check_docs_governance.py` when changing governed docs

@@ -11,6 +11,7 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
+from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 try:
     from fastapi.testclient import TestClient
@@ -65,6 +66,7 @@ def _write_index_outputs(output_dir: Path) -> None:
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
+                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
             }
@@ -82,64 +84,86 @@ def _write_index_outputs(output_dir: Path) -> None:
                 "text": "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                 "document_ids": ["paper-1"],
             },
-        ]
-    )
-    entities = pd.DataFrame(
-        [
             {
-                "id": "ent-1",
-                "title": "epoxy",
-                "type": "material",
-                "description": "matrix",
-                "degree": 3,
-                "frequency": 2,
-                "x": 0.1,
-                "y": 0.2,
+                "id": "tu-3",
+                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                "document_ids": ["paper-1"],
             },
-            {
-                "id": "ent-2",
-                "title": "SiO2",
-                "type": "material",
-                "description": "filler",
-                "degree": 2,
-                "frequency": 1,
-                "x": 0.3,
-                "y": 0.4,
-            },
-        ]
-    )
-    relationships = pd.DataFrame(
-        [
-            {
-                "id": "rel-1",
-                "source": "epoxy",
-                "target": "SiO2",
-                "weight": 1.0,
-                "description": "composite relation",
-                "rank": 1,
-            }
         ]
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    entities.to_parquet(output_dir / "entities.parquet", index=False)
-    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
-def _write_community_outputs(output_dir: Path) -> None:
-    communities = pd.DataFrame(
+def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
         [
             {
-                "id": "community-1",
-                "human_readable_id": 1,
-                "community": 1,
-                "level": 1,
-                "title": "Community 1",
-                "entity_ids": ["ent-1", "ent-2"],
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Core Projection Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": ["methods_section_detected"],
+                "parsing_warnings": [],
+                "confidence": 0.91,
             }
         ]
-    )
-    communities.to_parquet(output_dir / "communities.parquet", index=False)
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-1",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
+                "claim_type": "property",
+                "evidence_source_type": "text",
+                "evidence_anchors": [
+                    {
+                        "anchor_id": "anchor-1",
+                        "source_type": "text",
+                        "section_id": None,
+                        "block_id": None,
+                        "snippet_id": "tu-1",
+                        "figure_or_table": None,
+                        "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
+                    }
+                ],
+                "material_system": {"family": "oxide cathode", "composition": None},
+                "condition_context": {
+                    "process": {"temperatures_c": [700.0]},
+                    "baseline": {"control": "as-prepared"},
+                    "test": {"method": "EIS"},
+                },
+                "confidence": 0.83,
+                "traceability_status": "direct",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "row_id": "cmp-1",
+                "collection_id": collection_id,
+                "source_document_id": "paper-1",
+                "supporting_evidence_ids": ["ev-1"],
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "property_normalized": "conductivity",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+                "comparability_status": "comparable",
+                "comparability_warnings": [],
+                "value": 12.0,
+                "unit": "mS/cm",
+            }
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
 
 
 def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
@@ -162,37 +186,35 @@ def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
-    monkeypatch.setenv("LENS_ENABLE_MOCK_API", "1")
 
     from fastapi import FastAPI
-    from controllers import collections as collections_controller
-    from controllers import comparisons as comparisons_controller
-    from controllers import documents as documents_controller
-    from controllers import evidence as evidence_controller
-    from controllers import graph as graph_controller
-    from controllers import protocol as protocol_controller
-    from controllers import query as query_controller
-    from controllers import reports as reports_controller
-    from controllers import tasks as tasks_controller
-    from controllers import workspace as workspace_controller
-    from controllers.schemas import (
-        QueryResponse,
+    from controllers.source import collections as collections_controller
+    from controllers.core import comparisons as comparisons_controller
+    from controllers.core import documents as documents_controller
+    from controllers.core import evidence as evidence_controller
+    from controllers.goal import intake as goals_controller
+    from controllers.derived import graph as graph_controller
+    from controllers.derived import protocol as protocol_controller
+    from controllers.derived import reports as reports_controller
+    from controllers.source import tasks as tasks_controller
+    from controllers.core import workspace as workspace_controller
+    from controllers.schemas.derived.report import (
         ReportCommunityDetailResponse,
         ReportCommunityListResponse,
         ReportPatternsResponse,
     )
-    import application.graph_service as graph_service_module
-    import application.index_task_runner as task_runner_module
-    import application.query_service as query_service_module
-    import application.report_service as report_service_module
-    from application.artifact_registry_service import ArtifactRegistryService
-    from application.collection_service import CollectionService
-    from application.comparisons.service import ComparisonService
-    from application.documents.service import DocumentProfileService
-    from application.evidence.service import EvidenceCardService
-    from application.index_task_runner import IndexTaskRunner
-    from application.task_service import TaskService
-    from application.workspace_service import WorkspaceService
+    import application.derived.graph_service as graph_service_module
+    import application.source.index_task_runner as task_runner_module
+    import application.derived.report_service as report_service_module
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+    from application.core.comparison_service import ComparisonService
+    from application.core.document_profile_service import DocumentProfileService
+    from application.core.evidence_card_service import EvidenceCardService
+    from application.goal.brief_service import GoalService
+    from application.source.index_task_runner import IndexTaskRunner
+    from application.source.task_service import TaskService
+    from application.core.workspace_overview_service import WorkspaceService
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -222,6 +244,7 @@ def app_client(monkeypatch, tmp_path):
         artifact_registry,
         document_profile_service,
     )
+    goal_service = GoalService(collection_service)
 
     default_config = tmp_path / "configs" / "default.yaml"
     default_config.parent.mkdir(parents=True, exist_ok=True)
@@ -231,15 +254,6 @@ def app_client(monkeypatch, tmp_path):
         output_dir = Path(kwargs["config"].output.base_dir)
         _write_index_outputs(output_dir)
         return [DummyWorkflowOutput()]
-
-    async def fake_query_index(payload):  # noqa: ANN001
-        return QueryResponse(
-            answer="stub-answer",
-            method=str(payload.method),
-            collection_id=payload.collection_id or "default",
-            output_path=str(tmp_path / "output"),
-            context_data=None,
-        )
 
     def fake_list_community_reports(  # noqa: ANN001
         collection_id, level, limit, offset, min_size, sort
@@ -288,6 +302,7 @@ def app_client(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(collections_controller, "collection_service", collection_service)
+    monkeypatch.setattr(goals_controller, "goal_service", goal_service)
     monkeypatch.setattr(graph_controller.graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_controller.graph_service, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(protocol_controller, "collection_service", collection_service)
@@ -305,7 +320,6 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
     monkeypatch.setattr(evidence_controller, "evidence_card_service", evidence_card_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(query_service_module, "query_index", fake_query_index)
     monkeypatch.setattr(
         report_service_module,
         "list_community_reports",
@@ -319,9 +333,9 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(report_service_module, "list_patterns", fake_list_patterns)
 
     app = FastAPI()
-    app.include_router(query_controller.router, prefix=API_V1_PREFIX)
     app.include_router(reports_controller.router, prefix=API_V1_PREFIX)
     app.include_router(collections_controller.router, prefix=API_V1_PREFIX)
+    app.include_router(goals_controller.router, prefix=API_V1_PREFIX)
     app.include_router(graph_controller.router, prefix=API_V1_PREFIX)
     app.include_router(protocol_controller.router, prefix=API_V1_PREFIX)
     app.include_router(tasks_controller.router, prefix=API_V1_PREFIX)
@@ -332,7 +346,7 @@ def app_client(monkeypatch, tmp_path):
     return TestClient(app)
 
 
-def test_collection_task_and_query_flow(app_client):
+def test_collection_task_flow(app_client):
     collection_id, task_id = _create_indexed_collection(app_client)
 
     task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
@@ -357,20 +371,46 @@ def test_collection_task_and_query_flow(app_client):
     artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}/artifacts")
     assert artifacts.status_code == 200
     body = artifacts.json()
+    assert body["documents_generated"] is True
     assert body["documents_ready"] is True
+    assert body["document_profiles_generated"] is True
     assert body["document_profiles_ready"] is True
+    assert body["evidence_cards_generated"] is True
     assert body["evidence_cards_ready"] is True
+    assert body["characterization_observations_generated"] is True
+    assert body["characterization_observations_ready"] is True
+    assert body["structure_features_generated"] is True
+    assert body["structure_features_ready"] is False
+    assert body["test_conditions_generated"] is True
+    assert body["test_conditions_ready"] is True
+    assert body["baseline_references_generated"] is True
+    assert body["baseline_references_ready"] is True
+    assert body["sample_variants_generated"] is True
+    assert body["sample_variants_ready"] is True
+    assert body["measurement_results_generated"] is True
+    assert body["measurement_results_ready"] is True
+    assert body["comparison_rows_generated"] is True
     assert body["comparison_rows_ready"] is True
+    assert body["graph_generated"] is True
     assert body["graph_ready"] is True
+    assert body["sections_generated"] is True
     assert body["sections_ready"] is True
+    assert body["table_cells_generated"] is True
+    assert body["table_cells_ready"] is False
+    assert body["protocol_steps_generated"] is True
     assert body["protocol_steps_ready"] is True
 
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
     assert graph.status_code == 200
     graph_body = graph.json()
     assert graph_body["collection_id"] == collection_id
-    assert len(graph_body["nodes"]) == 2
-    assert len(graph_body["edges"]) == 1
+    assert len(graph_body["nodes"]) >= 3
+    assert len(graph_body["edges"]) >= 2
+    assert {item["type"] for item in graph_body["nodes"]} >= {
+        "document",
+        "evidence",
+        "comparison",
+    }
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 200
@@ -399,12 +439,51 @@ def test_collection_task_and_query_flow(app_client):
     assert comparisons.status_code == 200
     comparisons_body = comparisons.json()
     assert comparisons_body["count"] >= 1
-    assert comparisons_body["items"][0]["comparability_status"] in {
+    assert comparisons_body["items"][0]["assessment"]["comparability_status"] in {
         "comparable",
         "limited",
         "not_comparable",
         "insufficient",
     }
+    assert "display" in comparisons_body["items"][0]
+    assert "evidence_bundle" in comparisons_body["items"][0]
+    assert "assessment" in comparisons_body["items"][0]
+    assert "uncertainty" in comparisons_body["items"][0]
+    assert "variant_id" in comparisons_body["items"][0]["display"]
+    assert "variant_label" in comparisons_body["items"][0]["display"]
+    assert "variable_axis" in comparisons_body["items"][0]["display"]
+    assert "variable_value" in comparisons_body["items"][0]["display"]
+    assert "baseline_reference" in comparisons_body["items"][0]["display"]
+    assert "result_source_type" in comparisons_body["items"][0]["evidence_bundle"]
+
+
+def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):
+    response = app_client.post(
+        f"{API_V1_PREFIX}/goals/intake",
+        json={
+            "material_system": "Li metal",
+            "target_property": "cycling stability",
+            "intent": "compare",
+            "constraints": {"electrolyte": "carbonate"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    collection_id = payload["seed_collection"]["collection_id"]
+
+    assert payload["coverage_assessment"]["level"] == "direct"
+    assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
+    assert payload["seed_collection"]["source_channels"] == ["upload"]
+    assert payload["seed_collection"]["handoff_id"].startswith("handoff_")
+    assert payload["seed_collection"]["handoff_status"] == "awaiting_source_material"
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    workspace_body = workspace.json()
+    assert workspace_body["collection"]["collection_id"] == collection_id
+    assert workspace_body["file_count"] == 0
+    assert workspace_body["status_summary"] == "empty"
 
 
 def test_graph_endpoint_returns_collection_not_found_error(app_client):
@@ -425,8 +504,9 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     graph_detail = graph.json()["detail"]
     assert graph_detail["code"] == "graph_not_ready"
     assert graph_detail["collection_id"] == collection_id
-    assert "entities.parquet" in graph_detail["missing_artifacts"]
-    assert "relationships.parquet" in graph_detail["missing_artifacts"]
+    assert "document_profiles.parquet" in graph_detail["missing_artifacts"]
+    assert "evidence_cards.parquet" in graph_detail["missing_artifacts"]
+    assert "comparison_rows.parquet" in graph_detail["missing_artifacts"]
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 409
@@ -435,105 +515,57 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     assert graphml_detail["collection_id"] == collection_id
 
 
-def test_graph_endpoint_returns_community_not_found_error(app_client):
-    collection_id, task_id = _create_indexed_collection(app_client, name="Community Graph")
-
-    artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}/artifacts")
-    assert artifacts.status_code == 200
-    output_dir = Path(artifacts.json()["output_path"])
-    _write_community_outputs(output_dir)
-
+def test_graph_endpoint_rejects_legacy_community_filter(app_client):
+    collection_id, _task_id = _create_indexed_collection(app_client, name="Community Graph")
     graph = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/graph",
         params={"community_id": "999"},
     )
-    assert graph.status_code == 404
+    assert graph.status_code == 400
     detail = graph.json()["detail"]
-    assert detail["code"] == "community_not_found"
+    assert detail["code"] == "graph_filter_not_supported"
     assert detail["collection_id"] == collection_id
-    assert detail["community_id"] == "999"
+    assert detail["filter_name"] == "community_id"
 
+def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
+    app_client,
+):
+    from controllers.derived import graph as graph_controller
 
-def test_mock_collection_resources_are_available_for_frontend_integration(app_client):
-    collections = app_client.get(f"{API_V1_PREFIX}/collections")
-    assert collections.status_code == 200
-    collection_ids = {item["collection_id"] for item in collections.json()["items"]}
-    assert "col_mock_empty" in collection_ids
-    assert "col_mock_processing" in collection_ids
-    assert "col_mock_ready" in collection_ids
-    assert "col_mock_limited" in collection_ids
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/workspace")
-    assert workspace.status_code == 200
-    workspace_body = workspace.json()
-    assert workspace_body["workflow"]["documents"]["status"] == "ready"
-    assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
-    assert workspace_body["links"]["comparisons"] == "/api/v1/collections/col_mock_ready/comparisons"
-
-    profiles = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/documents/profiles")
-    assert profiles.status_code == 200
-    profiles_body = profiles.json()
-    assert profiles_body["count"] == 3
-    assert profiles_body["items"][0]["title"] == "High-Rate Performance of Layered Oxide Cathodes"
-    assert profiles_body["items"][0]["source_filename"] == "ready-paper-1.pdf"
-    assert profiles_body["summary"]["by_doc_type"]["experimental"] == 2
-
-    evidence = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/evidence/cards")
-    assert evidence.status_code == 200
-    evidence_body = evidence.json()
-    assert evidence_body["count"] == 3
-    assert evidence_body["items"][0]["traceability_status"] == "direct"
-
-    comparisons = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_ready/comparisons")
-    assert comparisons.status_code == 200
-    comparisons_body = comparisons.json()
-    assert comparisons_body["count"] == 2
-    assert comparisons_body["items"][0]["comparability_status"] == "comparable"
-
-    tasks = app_client.get(f"{API_V1_PREFIX}/collections/col_mock_processing/tasks")
-    assert tasks.status_code == 200
-    tasks_body = tasks.json()
-    assert tasks_body["count"] == 1
-    assert tasks_body["items"][0]["status"] == "running"
-
-    task_detail = app_client.get(f"{API_V1_PREFIX}/tasks/task_mock_limited_index")
-    assert task_detail.status_code == 200
-    assert task_detail.json()["status"] == "partial_success"
-
-    task_artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/task_mock_ready_index/artifacts")
-    assert task_artifacts.status_code == 200
-    assert task_artifacts.json()["documents_ready"] is True
-    assert steps.json()["items"][0]["paper_title"] == "Composite Paper"
-
-    search = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/search",
-        params={"q": "anneal Ar", "limit": 5},
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Core Graph Only"},
     )
-    assert search.status_code == 200
-    assert search.json()["count"] >= 1
-    assert search.json()["items"][0]["paper_title"] == "Composite Paper"
-
-    sop = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/sop",
-        json={"goal": "Design a composite SOP", "target_properties": ["mechanical", "thermal"]},
-    )
-    assert sop.status_code == 200
-    sop_body = sop.json()
-    assert sop_body["collection_id"] == collection_id
-    assert sop_body["sop_draft"]["objective"] == "Design a composite SOP"
-    assert sop_body["sop_draft"]["steps"][0]["paper_title"] == "Composite Paper"
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
 
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
-    workspace_body = workspace.json()
-    assert workspace_body["collection"]["collection_id"] == collection_id
-    assert workspace_body["status_summary"] == "ready"
-    assert workspace_body["workflow"]["documents"]["status"] == "ready"
-    assert workspace_body["workflow"]["evidence"]["status"] == "ready"
-    assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
-    assert workspace_body["capabilities"]["can_view_graph"] is True
-    assert workspace_body["capabilities"]["can_generate_sop"] is True
-    assert workspace_body["latest_task"]["task_id"] == task_id
+    output_dir = Path(workspace.json()["artifacts"]["output_path"])
+
+    _write_core_graph_outputs(output_dir, collection_id)
+    graph_controller.graph_service.artifact_registry_service.upsert(
+        collection_id,
+        output_dir,
+    )
+
+    graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
+    assert graph.status_code == 200
+    payload = graph.json()
+    assert payload["collection_id"] == collection_id
+    assert payload["community"] is None
+    assert len(payload["nodes"]) == 3
+    assert len(payload["edges"]) == 2
+    assert {item["type"] for item in payload["nodes"]} == {
+        "document",
+        "evidence",
+        "comparison",
+    }
+
+    graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
+    assert graphml.status_code == 200
+    assert graphml.headers["content-type"].startswith("application/graphml+xml")
+    assert b"<graphml" in graphml.content
 
 
 def test_delete_collection_removes_app_layer_collection(app_client):
@@ -558,6 +590,80 @@ def test_delete_collection_removes_app_layer_collection(app_client):
     )
 
 
+def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app_client):
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={
+            "name": "Compat Collection",
+            "description": "legacy client payload",
+            "default_method": "fast",
+        },
+    )
+    assert create_resp.status_code == 200
+    create_body = create_resp.json()
+    collection_id = create_body["collection_id"]
+    assert "default_method" not in create_body
+
+    get_resp = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
+    assert get_resp.status_code == 200
+    assert "default_method" not in get_resp.json()
+
+    list_resp = app_client.get(f"{API_V1_PREFIX}/collections")
+    assert list_resp.status_code == 200
+    created_item = next(
+        item for item in list_resp.json()["items"] if item["collection_id"] == collection_id
+    )
+    assert "default_method" not in created_item
+
+
+def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
+    import application.source.index_task_runner as task_runner_module
+
+    captured: dict[str, object] = {}
+
+    async def capturing_build_index(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        output_dir = Path(kwargs["config"].output.base_dir)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(task_runner_module, "build_index", capturing_build_index)
+
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Legacy Task Contract"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    task_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index",
+        json={
+            "method": "fast",
+            "is_update_run": True,
+            "verbose": True,
+            "additional_context": {"caller": "legacy-frontend"},
+        },
+    )
+    assert task_resp.status_code == 200
+
+    task_id = task_resp.json()["task_id"]
+    task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
+    assert task_status.status_code == 200
+    assert task_status.json()["status"] == "completed"
+
+    assert captured["method"] == task_runner_module.IndexingMethod.Standard
+    assert "is_update_run" not in captured
+    assert captured["verbose"] is True
+    assert captured["additional_context"] == {"caller": "legacy-frontend"}
+
+
 def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_exist(app_client):
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Pending Collection"})
     assert create_resp.status_code == 200
@@ -572,6 +678,7 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()
+    assert workspace_body["artifacts"]["protocol_steps_generated"] is False
     assert workspace_body["artifacts"]["protocol_steps_ready"] is False
     assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
 
@@ -580,6 +687,7 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     steps_detail = steps.json()["detail"]
     assert steps_detail["code"] == "protocol_artifacts_not_ready"
     assert steps_detail["collection_id"] == collection_id
+    assert steps_detail["artifacts"]["protocol_steps_generated"] is False
     assert steps_detail["artifacts"]["protocol_steps_ready"] is False
 
     search = app_client.get(
@@ -597,11 +705,43 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     assert sop.json()["detail"]["code"] == "protocol_artifacts_not_ready"
 
 
-def test_public_query_and_reports_routes_are_exposed(app_client):
-    query_resp = app_client.post(f"{API_V1_PREFIX}/query", json={"query": "status"})
-    assert query_resp.status_code == 200
-    assert query_resp.json()["answer"] == "stub-answer"
+def test_collection_protocol_steps_returns_empty_list_when_generated_but_not_ready(
+    app_client,
+):
+    from controllers.derived import protocol as protocol_controller
 
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Generated But Empty Protocol"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    output_dir = Path(workspace.json()["artifacts"]["output_path"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame().to_parquet(output_dir / "protocol_steps.parquet", index=False)
+    protocol_controller.artifact_registry_service.upsert(collection_id, output_dir)
+
+    workspace_after = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/workspace"
+    )
+    assert workspace_after.status_code == 200
+    artifacts = workspace_after.json()["artifacts"]
+    assert artifacts["protocol_steps_generated"] is True
+    assert artifacts["protocol_steps_ready"] is False
+    assert workspace_after.json()["capabilities"]["can_view_protocol_steps"] is True
+
+    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
+    assert steps.status_code == 200
+    payload = steps.json()
+    assert payload["total"] == 0
+    assert payload["count"] == 0
+    assert payload["items"] == []
+
+
+def test_reports_routes_are_exposed(app_client):
     reports_resp = app_client.get(f"{API_V1_PREFIX}/collections/demo/reports/communities")
     assert reports_resp.status_code == 200
     assert reports_resp.json()["collection_id"] == "demo"

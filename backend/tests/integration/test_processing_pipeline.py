@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from application import protocol_pipeline_service
+from application.derived.protocol import pipeline_service as protocol_pipeline_service
 
 
 def _write_index_outputs(output_dir: Path) -> None:

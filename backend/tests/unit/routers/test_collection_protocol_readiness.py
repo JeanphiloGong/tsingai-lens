@@ -7,9 +7,9 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from controllers import protocol as protocol_controller
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
+from controllers.derived import protocol as protocol_controller
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
 
 
 @pytest.fixture()
@@ -40,6 +40,7 @@ def test_protocol_ready_guard_returns_409_when_registry_is_missing(protocol_read
     assert exc.status_code == 409
     assert exc.detail["code"] == "protocol_artifacts_not_ready"
     assert exc.detail["collection_id"] == record["collection_id"]
+    assert exc.detail["artifacts"]["protocol_steps_generated"] is False
     assert exc.detail["artifacts"]["protocol_steps_ready"] is False
 
 
@@ -61,7 +62,9 @@ def test_protocol_ready_guard_returns_409_when_steps_are_not_ready(protocol_read
     exc = exc_info.value
     assert exc.status_code == 409
     assert exc.detail["code"] == "protocol_artifacts_not_ready"
+    assert exc.detail["artifacts"]["documents_generated"] is False
     assert exc.detail["artifacts"]["documents_ready"] is False
+    assert exc.detail["artifacts"]["protocol_steps_generated"] is False
     assert exc.detail["artifacts"]["protocol_steps_ready"] is False
 
 
@@ -72,7 +75,7 @@ def test_protocol_ready_guard_returns_output_dir_when_steps_exist(protocol_readi
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "documents.parquet").write_text("[]", encoding="utf-8")
     (output_dir / "protocol_steps.parquet").write_text("[]", encoding="utf-8")
-    artifact_registry.upsert(record["collection_id"], output_dir)
+    artifacts = artifact_registry.upsert(record["collection_id"], output_dir)
     monkeypatch.setattr(
         protocol_controller.graph_service,
         "resolve_collection_output_dir",
@@ -81,6 +84,8 @@ def test_protocol_ready_guard_returns_output_dir_when_steps_exist(protocol_readi
 
     resolved = protocol_controller._ensure_collection_protocol_ready(record["collection_id"])
 
+    assert artifacts["protocol_steps_generated"] is True
+    assert artifacts["protocol_steps_ready"] is False
     assert resolved == output_dir.resolve()
 
 

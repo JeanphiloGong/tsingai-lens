@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from application import protocol_block_service as block_service
-from application import protocol_section_service as section_service
-from application import protocol_source_service as source_service
+from application.derived.protocol import artifact_service as source_service
+from application.derived.protocol import block_service
+from infra.source.runtime import source_evidence as section_service
 
 
 def test_build_document_records_uses_documents_and_text_units():

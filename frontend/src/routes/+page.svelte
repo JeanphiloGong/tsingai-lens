@@ -18,7 +18,6 @@
   let isCreateOpen = false;
   let name = '';
   let description = '';
-  let defaultMethod = 'standard';
   let createLoading = false;
   let createError = '';
   let notice = '';
@@ -61,7 +60,6 @@
     isCreateOpen = false;
     name = '';
     description = '';
-    defaultMethod = 'standard';
     createError = '';
   }
 
@@ -100,8 +98,7 @@
     try {
       const result = await createCollection({
         name: name.trim(),
-        description: description.trim(),
-        defaultMethod
+        description: description.trim()
       });
       closeCreate();
       await loadCollections();
@@ -174,11 +171,7 @@
 
     try {
       setRowMessage(collection.id, $t('home.indexing'));
-      const task = await createIndexTask(collection.id, {
-        method: collection.default_method ?? 'standard',
-        isUpdateRun: false,
-        verbose: false
-      });
+      await createIndexTask(collection.id);
       setRowMessage(collection.id, $t('home.indexStarted'));
     } catch (err) {
       setRowMessage(collection.id, errorMessage(err), 'error');
@@ -254,7 +247,6 @@
             <th>{$t('home.tableName')}</th>
             <th>{$t('home.tableStatus')}</th>
             <th>{$t('home.tableDocs')}</th>
-            <th>{$t('home.tableMethod')}</th>
             <th>{$t('home.tableUpdated')}</th>
             <th>{$t('home.tableActions')}</th>
           </tr>
@@ -279,7 +271,6 @@
               </td>
               <td>{formatStatus(collection.status)}</td>
               <td>{formatCount(collection.paper_count)}</td>
-              <td>{collection.default_method || 'standard'}</td>
               <td>{formatDate(collection.updated_at || collection.created_at)}</td>
               <td>
                 <div class="table-actions">
@@ -366,14 +357,6 @@
           ></textarea>
           <span class="meta-text">{$t('create.descHelper')}</span>
         </div>
-        <div class="field">
-          <label for="collection-method">{$t('create.methodLabel')}</label>
-          <select id="collection-method" class="select" bind:value={defaultMethod}>
-            <option value="standard">standard</option>
-            <option value="fast">fast</option>
-          </select>
-        </div>
-
         {#if createError}
           <div class="status status--error" role="alert">{createError}</div>
         {/if}

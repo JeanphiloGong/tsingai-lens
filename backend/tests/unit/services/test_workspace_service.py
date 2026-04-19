@@ -5,10 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from application.artifact_registry_service import ArtifactRegistryService
-from application.collection_service import CollectionService
-from application.task_service import TaskService
-from application.workspace_service import WorkspaceService
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.source.task_service import TaskService
+from application.core.workspace_overview_service import WorkspaceService
+from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -22,6 +23,15 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _write_source_artifacts(
+    output_dir: Path,
+    documents: pd.DataFrame,
+    text_units: pd.DataFrame | None = None,
+) -> None:
+    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def test_workspace_service_builds_collection_overview(tmp_path):
@@ -38,7 +48,7 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     task_service.update_task(
         task_service.list_tasks(collection_id=collection_id, limit=1)[0]["task_id"],
         status="running",
-        current_stage="graphrag_index_started",
+        current_stage="source_index_started",
         progress_percent=35,
     )
     artifact_registry.upsert(collection_id, collection_service.get_paths(collection_id).output_dir)
@@ -48,7 +58,7 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     assert overview["collection"]["collection_id"] == collection_id
     assert overview["file_count"] == 1
     assert overview["status_summary"] == "processing"
-    assert overview["latest_task"]["current_stage"] == "graphrag_index_started"
+    assert overview["latest_task"]["current_stage"] == "source_index_started"
     assert overview["capabilities"]["can_view_graph"] is False
     assert overview["capabilities"]["can_generate_sop"] is False
 
@@ -99,22 +109,37 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
             },
         ]
     )
-    entities = pd.DataFrame([{"id": "ent-1", "title": "epoxy"}])
-    relationships = pd.DataFrame([{"source": "epoxy", "target": "SiO2", "weight": 1.0}])
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    entities.to_parquet(output_dir / "entities.parquet", index=False)
-    relationships.to_parquet(output_dir / "relationships.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
     assert overview["status_summary"] == "document_profiled"
     assert overview["workflow"]["documents"]["status"] == "ready"
-    assert overview["workflow"]["protocol"]["status"] == "limited"
+    assert overview["workflow"]["protocol"]["status"] == "not_started"
+    assert overview["artifacts"]["document_profiles_generated"] is True
     assert overview["artifacts"]["document_profiles_ready"] is True
+    assert overview["artifacts"]["evidence_cards_generated"] is False
     assert overview["artifacts"]["evidence_cards_ready"] is False
+    assert overview["artifacts"]["characterization_observations_generated"] is False
+    assert overview["artifacts"]["characterization_observations_ready"] is False
+    assert overview["artifacts"]["structure_features_generated"] is False
+    assert overview["artifacts"]["structure_features_ready"] is False
+    assert overview["artifacts"]["test_conditions_generated"] is False
+    assert overview["artifacts"]["test_conditions_ready"] is False
+    assert overview["artifacts"]["baseline_references_generated"] is False
+    assert overview["artifacts"]["baseline_references_ready"] is False
+    assert overview["artifacts"]["sample_variants_generated"] is False
+    assert overview["artifacts"]["sample_variants_ready"] is False
+    assert overview["artifacts"]["measurement_results_generated"] is False
+    assert overview["artifacts"]["measurement_results_ready"] is False
+    assert overview["artifacts"]["comparison_rows_generated"] is False
     assert overview["artifacts"]["comparison_rows_ready"] is False
+    assert overview["artifacts"]["table_cells_generated"] is True
+    assert overview["artifacts"]["table_cells_ready"] is False
+    assert overview["artifacts"]["protocol_steps_generated"] is False
     assert overview["document_summary"]["total_documents"] == 1
     assert overview["document_summary"]["by_doc_type"]["experimental"] == 1
     assert overview["links"]["documents_profiles"] == f"/api/v1/collections/{collection_id}/documents/profiles"

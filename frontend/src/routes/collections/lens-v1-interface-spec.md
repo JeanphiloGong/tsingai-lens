@@ -174,6 +174,9 @@ Expected interactions:
 - open supporting evidence
 - jump to source document context
 
+Detailed traceback rules are defined in
+[`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md).
+
 ### Evidence
 
 Route:
@@ -199,6 +202,9 @@ Expected interactions:
 - filter by `evidence_source_type`
 - expand `condition_context`
 - open linked source anchors
+
+Detailed traceback rules are defined in
+[`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md).
 
 ### Documents
 

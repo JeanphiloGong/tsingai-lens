@@ -64,10 +64,13 @@ Then move to the owning plan family only when you are already inside that wave:
   [`plans/goal-core-source-implementation-plan.md`](plans/goal-core-source-implementation-plan.md),
   [`plans/goal-core-source-contract-follow-up-plan.md`](plans/goal-core-source-contract-follow-up-plan.md),
   [`plans/goal-source-core-business-layer-alignment-plan.md`](plans/goal-source-core-business-layer-alignment-plan.md)
+- Domain-model backfill:
+  [`plans/minimal-core-domain-backfill-plan.md`](plans/minimal-core-domain-backfill-plan.md)
 - Source and collection-builder normalization:
   [`plans/source-collection-builder-normalization-plan.md`](plans/source-collection-builder-normalization-plan.md)
 - Residual Source/GraphRAG retirement:
   [`plans/source-residual-graphrag-retirement-plan.md`](plans/source-residual-graphrag-retirement-plan.md),
+  [`plans/retrieval-package-retirement-plan.md`](plans/retrieval-package-retirement-plan.md),
   [`plans/source-parser-evaluation-plan.md`](plans/source-parser-evaluation-plan.md),
   [`plans/born-digital-source-parser-first-plan.md`](plans/born-digital-source-parser-first-plan.md)
 - Materials comparison expansion:
@@ -92,8 +95,8 @@ Historical lineage:
 
 ## What Does Not Belong Here
 
-- package-local purpose and boundary docs for `application/*`, `retrieval/*`,
-  `infra/*`, and `tests/*`
+- package-local purpose and boundary docs for `application/*`, `infra/*`, and
+  `tests/*`
 - route-family or package-family docs that belong at a narrower code-owned node
 - shared product, system, or cross-module docs that belong in root `docs/`
 

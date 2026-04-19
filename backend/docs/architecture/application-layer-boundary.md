@@ -11,7 +11,7 @@ The backend contains multiple layers with explicit ownership boundaries:
 - `api/` holds the new public route entrypoints
 - `application/` owns use-case orchestration for query and reporting flows
 - `controllers/` and `services/` still coexist with the newer package layout
-- `retrieval/` remains the large engine and infrastructure surface
+- `infra/source/*` now owns the active Source runtime and parser/indexing seam
 
 This has made the intended dependency direction harder to read and easier to
 violate.
@@ -28,8 +28,8 @@ The repository adopts the following backend ownership boundary:
    should remain the main dependency target for HTTP-facing route code.
 3. `domain/` owns domain models, invariants, and domain-level rules.
 4. `infra/` and adapter packages own external integrations such as persistence,
-   retrieval, vector stores, and other runtime dependencies.
-5. `retrieval/` remains an engine package that should be reached through
+   Source runtime, vector stores, and other runtime dependencies.
+5. backend runtime code should reach those external integrations through
    application-owned or infrastructure-owned boundaries rather than ad hoc
    imports from route code.
 

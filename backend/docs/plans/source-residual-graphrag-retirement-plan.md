@@ -24,6 +24,8 @@ path has been removed.
 
 For the next Source follow-up after runtime shrink, read
 [`born-digital-source-parser-first-plan.md`](born-digital-source-parser-first-plan.md).
+For the final repository-level deletion of the retired historical package, read
+[`retrieval-package-retirement-plan.md`](retrieval-package-retirement-plan.md).
 
 ## Status
 

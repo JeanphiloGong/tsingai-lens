@@ -24,10 +24,8 @@ next to code.
   and still carries some legacy flat services that should keep shrinking.
 - `domain/`
   Domain models and port definitions.
-- `retrieval/`
-  Indexing and query engine package.
 - `infra/`
-  Persistence and infrastructure adapters.
+  Persistence, Source runtime, ingestion, and other infrastructure adapters.
 - `docs/`
   Backend-owned architecture, spec, plan, and runbook docs.
 - `tests/`
@@ -70,7 +68,6 @@ here.
   Public HTTP contract reference
 - [`application/README.md`](application/README.md)
 - [`controllers/`](controllers/)
-- [`retrieval/README.md`](retrieval/README.md)
 - [`infra/persistence/README.md`](infra/persistence/README.md)
 - [`tests/README.md`](tests/README.md)
 
@@ -97,7 +94,8 @@ uvicorn main:app --reload --port 8010
 - `backend/docs/specs/api.md` is the authoritative backend contract for
   frontend integration.
 - The active backend cleanup direction is to keep shrinking legacy flat seams
-  in `application/` and keep protocol behind the evidence/comparison backbone.
+  in `application/`, keep Source runtime under `infra/source/*`, and keep
+  protocol behind the evidence/comparison backbone.
 - Public protocol browsing is collection-scoped under
   `/api/v1/collections/{collection_id}/protocol/*`.
 - Use `python3 ../scripts/check_docs_governance.py` when changing governed docs

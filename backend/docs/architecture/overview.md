@@ -35,9 +35,7 @@ Within the repository-wide system:
   Domain models and port definitions
 - `infra/`
   Runtime adapters such as persistence, ingestion, Source-owned runtime seams,
-  and GraphRAG integration
-- `retrieval/`
-  Index and query engine package
+  and other external integrations
 - `tests/`
   Verification layout for unit, integration, end-to-end, and load coverage
 
@@ -55,8 +53,8 @@ The backend is still in transition, but its intended shape is already visible:
 - graph and reports are Core-derived secondary surfaces
 - query now crosses a Source-owned runtime facade rather than importing
   GraphRAG internals from product-facing application code
-- `retrieval/` remains the largest engine surface and should be reached
-  through clearer application or infrastructure boundaries over time
+- historical GraphRAG engine code is being retired rather than preserved as a
+  separate active backend package
 
 The target direction is a business-domain-oriented backend rather than a
 larger flat service bag.
@@ -77,7 +75,7 @@ larger flat service bag.
 - HTTP parsing and response shaping stay in `controllers/`
 - orchestration stays in `application/`
 - domain invariants stay in `domain/`
-- external integrations stay in `infra/` or engine packages
+- external integrations stay in `infra/`
 - route code should not bypass application-owned orchestration with ad hoc
   engine imports
 - protocol should stay behind documents, evidence, and comparisons
@@ -90,8 +88,6 @@ larger flat service bag.
 
 - [`../../application/README.md`](../../application/README.md)
   Use-case orchestration boundary and domain package map
-- [`../../retrieval/README.md`](../../retrieval/README.md)
-  Retrieval engine boundary
 - [`../../infra/persistence/README.md`](../../infra/persistence/README.md)
   Persistence adapter boundary
 - [`../../tests/README.md`](../../tests/README.md)

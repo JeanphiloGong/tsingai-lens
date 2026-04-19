@@ -10,6 +10,9 @@ export default defineConfig(({ mode }) => {
 
 	return {
 		plugins: [tailwindcss(), sveltekit()],
+		optimizeDeps: {
+			include: ['cytoscape', 'cytoscape-fcose']
+		},
 		server: {
 			proxy: {
 				'/api': {

@@ -5,10 +5,14 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from application.core.comparison_service import (
+    ComparisonRowNotFoundError,
     ComparisonRowsNotReadyError,
     ComparisonService,
 )
-from controllers.schemas.core.comparisons import ComparisonRowListResponse
+from controllers.schemas.core.comparisons import (
+    ComparisonRowItemResponse,
+    ComparisonRowListResponse,
+)
 
 router = APIRouter(prefix="/collections", tags=["comparisons"])
 comparison_service = ComparisonService()
@@ -23,6 +27,37 @@ def _comparison_rows_not_ready_detail(collection_id: str) -> dict[str, str]:
 
 
 @router.get(
+    "/{collection_id}/comparisons/{row_id}",
+    response_model=ComparisonRowItemResponse,
+    summary="读取单个 comparison row",
+)
+async def get_collection_comparison(
+    collection_id: str,
+    row_id: str,
+) -> ComparisonRowItemResponse:
+    try:
+        payload = comparison_service.get_comparison_row(collection_id, row_id)
+    except ComparisonRowNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "comparison_not_found",
+                "message": str(exc),
+                "collection_id": exc.collection_id,
+                "row_id": exc.row_id,
+            },
+        ) from exc
+    except ComparisonRowsNotReadyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_comparison_rows_not_ready_detail(exc.collection_id),
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ComparisonRowItemResponse(**payload)
+
+
+@router.get(
     "/{collection_id}/comparisons",
     response_model=ComparisonRowListResponse,
     summary="列出 collection 的 comparison rows",
@@ -31,12 +66,28 @@ async def list_collection_comparisons(
     collection_id: str,
     limit: Annotated[int, Query(ge=1, le=500, description="返回数量")] = 50,
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
+    material_system_normalized: Annotated[
+        str | None, Query(description="按标准化材料体系筛选")
+    ] = None,
+    property_normalized: Annotated[
+        str | None, Query(description="按标准化性质指标筛选")
+    ] = None,
+    test_condition_normalized: Annotated[
+        str | None, Query(description="按标准化测试条件筛选")
+    ] = None,
+    baseline_normalized: Annotated[
+        str | None, Query(description="按标准化 baseline 筛选")
+    ] = None,
 ) -> ComparisonRowListResponse:
     try:
         payload = comparison_service.list_comparison_rows(
             collection_id,
             offset=offset,
             limit=limit,
+            material_system_normalized=material_system_normalized,
+            property_normalized=property_normalized,
+            test_condition_normalized=test_condition_normalized,
+            baseline_normalized=baseline_normalized,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -4,17 +4,7 @@ export type GraphNode = {
 	id: string;
 	label: string;
 	type?: string | null;
-	description?: string | null;
 	degree?: number | null;
-	frequency?: number | null;
-	x?: number | null;
-	y?: number | null;
-	community?: number | null;
-	node_text_unit_ids?: string | null;
-	node_text_unit_count?: number | null;
-	node_document_ids?: string | null;
-	node_document_titles?: string | null;
-	node_document_count?: number | null;
 };
 
 export type GraphEdge = {
@@ -23,35 +13,42 @@ export type GraphEdge = {
 	target: string;
 	weight?: number | null;
 	edge_description?: string | null;
-	edge_text_unit_ids?: string | null;
-	edge_text_unit_count?: number | null;
-	edge_document_ids?: string | null;
-	edge_document_titles?: string | null;
-	edge_document_count?: number | null;
 };
 
 export type GraphResponse = {
 	collection_id: string;
-	output_path: string;
 	nodes: GraphNode[];
 	edges: GraphEdge[];
 	truncated: boolean;
-	community?: string | null;
 };
+
+export type GraphNeighborsResponse = {
+	collection_id: string;
+	center_node_id: string;
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+	truncated: boolean;
+};
+
+export type GraphNodeRef =
+	| { kind: 'document'; resourceId: string }
+	| { kind: 'evidence'; resourceId: string }
+	| { kind: 'comparison'; resourceId: string }
+	| { kind: 'material'; resourceId: string }
+	| { kind: 'property'; resourceId: string }
+	| { kind: 'test_condition'; resourceId: string }
+	| { kind: 'baseline'; resourceId: string }
+	| { kind: 'unknown'; resourceId: string };
 
 export type GraphQuery = {
 	maxNodes?: number;
 	minWeight?: number;
-	communityId?: string;
 };
 
 function buildQuery(query: GraphQuery = {}) {
 	const params = new URLSearchParams();
 	params.set('max_nodes', String(query.maxNodes ?? 200));
 	params.set('min_weight', String(query.minWeight ?? 0));
-	if (query.communityId?.trim()) {
-		params.set('community_id', query.communityId.trim());
-	}
 	return params.toString();
 }
 
@@ -66,4 +63,29 @@ export function buildCollectionGraphmlUrl(collectionId: string, query: GraphQuer
 	return buildApiUrl(
 		`/collections/${encodeURIComponent(collectionId)}/graphml?${buildQuery(query)}`
 	);
+}
+
+export async function fetchCollectionGraphNeighbors(collectionId: string, nodeId: string) {
+	return (await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/graph/nodes/${encodeURIComponent(nodeId)}/neighbors`,
+		{ method: 'GET' }
+	)) as GraphNeighborsResponse;
+}
+
+export function parseGraphNodeId(nodeId: string): GraphNodeRef {
+	const [prefix, ...rest] = nodeId.split(':');
+	const resourceId = rest.join(':').trim();
+
+	if (!resourceId) {
+		return { kind: 'unknown', resourceId: '' };
+	}
+
+	if (prefix === 'doc') return { kind: 'document', resourceId };
+	if (prefix === 'evi') return { kind: 'evidence', resourceId };
+	if (prefix === 'cmp') return { kind: 'comparison', resourceId };
+	if (prefix === 'mat') return { kind: 'material', resourceId };
+	if (prefix === 'prop') return { kind: 'property', resourceId };
+	if (prefix === 'tc') return { kind: 'test_condition', resourceId };
+	if (prefix === 'base') return { kind: 'baseline', resourceId };
+	return { kind: 'unknown', resourceId };
 }

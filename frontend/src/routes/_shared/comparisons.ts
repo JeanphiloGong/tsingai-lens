@@ -60,6 +60,15 @@ export type ComparisonsResponse = {
 	items: ComparisonRow[];
 };
 
+export type ComparisonsQuery = {
+	limit?: number;
+	offset?: number;
+	material_system_normalized?: string;
+	property_normalized?: string;
+	test_condition_normalized?: string;
+	baseline_normalized?: string;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === 'object' && !Array.isArray(value)
 		? (value as Record<string, unknown>)
@@ -365,6 +374,71 @@ function buildFixture(collectionId: string): ComparisonsResponse {
 	};
 }
 
+function buildComparisonsQuery(query: ComparisonsQuery = {}) {
+	const params = new URLSearchParams();
+
+	if (typeof query.limit === 'number') {
+		params.set('limit', String(query.limit));
+	}
+	if (typeof query.offset === 'number') {
+		params.set('offset', String(query.offset));
+	}
+	for (const [key, value] of Object.entries(query)) {
+		if (key === 'limit' || key === 'offset') continue;
+		const normalized = typeof value === 'string' ? value.trim() : '';
+		if (normalized) {
+			params.set(key, normalized);
+		}
+	}
+
+	const rendered = params.toString();
+	return rendered ? `?${rendered}` : '';
+}
+
+function applyComparisonsQuery(
+	response: ComparisonsResponse,
+	query: ComparisonsQuery = {}
+): ComparisonsResponse {
+	const filtered = response.items.filter((item) => {
+		if (
+			query.material_system_normalized &&
+			item.display.material_system_normalized !== query.material_system_normalized
+		) {
+			return false;
+		}
+		if (
+			query.property_normalized &&
+			item.display.property_normalized !== query.property_normalized
+		) {
+			return false;
+		}
+		if (
+			query.test_condition_normalized &&
+			item.display.test_condition_normalized !== query.test_condition_normalized
+		) {
+			return false;
+		}
+		if (
+			query.baseline_normalized &&
+			item.display.baseline_normalized !== query.baseline_normalized
+		) {
+			return false;
+		}
+		return true;
+	});
+
+	const offset = Math.max(query.offset ?? 0, 0);
+	const limit = Math.max(query.limit ?? filtered.length, 0);
+	const items = filtered.slice(offset, offset + limit);
+
+	return {
+		collection_id: response.collection_id,
+		total: filtered.length,
+		count: items.length,
+		items
+	};
+}
+
 function normalizeResponse(value: unknown, collectionId: string): ComparisonsResponse {
 	const record = asRecord(value);
 	if (!record) {
@@ -385,13 +459,46 @@ function normalizeResponse(value: unknown, collectionId: string): ComparisonsRes
 	};
 }
 
-export async function fetchComparisons(collectionId: string): Promise<ComparisonsResponse> {
+export async function fetchComparisons(
+	collectionId: string,
+	query: ComparisonsQuery = {}
+): Promise<ComparisonsResponse> {
 	if (USE_API_FIXTURES) {
-		return buildFixture(collectionId);
+		return applyComparisonsQuery(buildFixture(collectionId), query);
 	}
 
-	const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}/comparisons`, {
-		method: 'GET'
-	});
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/comparisons${buildComparisonsQuery(query)}`,
+		{
+			method: 'GET'
+		}
+	);
 	return normalizeResponse(data, collectionId);
 }
+
+export async function fetchComparison(
+	collectionId: string,
+	rowId: string
+): Promise<ComparisonRow> {
+	if (USE_API_FIXTURES) {
+		const fixture = buildFixture(collectionId).items.find((item) => item.row_id === rowId);
+		if (fixture) {
+			return fixture;
+		}
+		throw new Error('Comparison row fixture is missing.');
+	}
+
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/comparisons/${encodeURIComponent(rowId)}`,
+		{
+			method: 'GET'
+		}
+	);
+	const row = normalizeRow(data, collectionId);
+	if (!row) {
+		throw new Error('Comparison row response is invalid.');
+	}
+	return row;
+}
+
+export const fetchComparisonRow = fetchComparison;

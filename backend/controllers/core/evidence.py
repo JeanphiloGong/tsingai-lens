@@ -14,6 +14,7 @@ from application.core.evidence_card_service import (
     EvidenceCardsNotReadyError,
 )
 from controllers.schemas.core.evidence import (
+    EvidenceCardItemResponse,
     EvidenceCardListResponse,
     EvidenceTracebackResponse,
 )
@@ -54,6 +55,37 @@ async def list_collection_evidence_cards(
             detail=_evidence_cards_not_ready_detail(exc.collection_id),
         ) from exc
     return EvidenceCardListResponse(**payload)
+
+
+@router.get(
+    "/{collection_id}/evidence/{evidence_id}",
+    response_model=EvidenceCardItemResponse,
+    summary="读取单个 evidence card",
+)
+async def get_collection_evidence_card(
+    collection_id: str,
+    evidence_id: str,
+) -> EvidenceCardItemResponse:
+    try:
+        payload = evidence_card_service.get_evidence_card(collection_id, evidence_id)
+    except EvidenceCardNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "evidence_not_found",
+                "message": str(exc),
+                "collection_id": exc.collection_id,
+                "evidence_id": exc.evidence_id,
+            },
+        ) from exc
+    except EvidenceCardsNotReadyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_evidence_cards_not_ready_detail(exc.collection_id),
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return EvidenceCardItemResponse(**payload)
 
 
 @router.get(

@@ -216,9 +216,18 @@
 }
 ```
 
+单项 drilldown 路径：
+
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
+
+其中 `/profile` 返回与 list item 同语义的单项 document profile，`/content`
+返回原文阅读器内容与 section 结构。
+
 ### Evidence Cards
 
 - `GET /api/v1/collections/{collection_id}/evidence/cards`
+- `GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`
 
 这是 Lens v1 主链路的 claim-centered 证据资源。
 
@@ -329,8 +338,16 @@ comparison 对 traceback 的依赖约定：
 ### Comparisons
 
 - `GET /api/v1/collections/{collection_id}/comparisons`
+- `GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
 
 这是 Lens v1 的主 collection-facing 比较资源。
+
+列表接口支持这些可选过滤参数：
+
+- `material_system_normalized`
+- `property_normalized`
+- `test_condition_normalized`
+- `baseline_normalized`
 
 最小返回结构：
 
@@ -377,6 +394,7 @@ comparison 对 traceback 的依赖约定：
 ### Graph、Reports 次级界面
 
 - `GET /api/v1/collections/{collection_id}/graph`
+- `GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`
 - `GET /api/v1/collections/{collection_id}/graphml`
 - `GET /api/v1/collections/{collection_id}/reports/communities`
 - `GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`
@@ -392,8 +410,23 @@ Graph 语义约束：
 - 它们当前是 Core-derived graph projection，不再以
   `entities.parquet`、`relationships.parquet`、`communities.parquet`
   作为产品语义前提
-- `community_id` 在 graph 路由上已不再受支持；如果传入，应返回
-  `400`，并携带稳定错误码 `graph_filter_not_supported`
+- `/graph` 返回结构字段：
+  `collection_id / nodes / edges / truncated`
+- graph node 只保留：
+  `id / label / type / degree`
+- graph edge 只保留：
+  `id / source / target / weight / edge_description`
+- graph node `type` 当前可以是：
+  `document | evidence | comparison | material | property | test_condition | baseline`
+- graph edge `edge_description` 当前可以是：
+  `document_to_evidence | evidence_to_comparison | comparison_to_material |
+  comparison_to_property | comparison_to_test_condition | comparison_to_baseline`
+- `/graph/nodes/{node_id}/neighbors` 返回中心节点的一跳邻域，字段与 `/graph`
+  保持同一精简结构
+- 节点详情不再经由 graph 聚合透出；前端应根据 `doc:` / `evi:` / `cmp:`
+  前缀回到 document / evidence / comparison canonical 资源
+- 聚合节点 `mat:` / `prop:` / `tc:` / `base:` 不提供 graph-owned detail；
+  前端应回到 `/comparisons` 并使用对应过滤参数做 canonical drilldown
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码
   `graph_not_ready`
 
@@ -433,8 +466,8 @@ readiness 类错误至少应包含：
   - 入口基于 `protocol_steps_generated` 判断是否可访问
   - `protocol_steps_generated=true` 且 `protocol_steps_ready=false` 时允许返回空列表或空结果
 - `graph`
-  - `community_id` 不受支持时返回 `400`
   - Core graph 输入缺失时返回 `409`
+  - 请求的 `node_id` 不存在时，`/graph/nodes/{node_id}/neighbors` 返回 `404`
 
 ## 前端集成约束
 

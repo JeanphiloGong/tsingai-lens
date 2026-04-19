@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from hashlib import sha1
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +22,10 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _semantic_node_id(prefix: str, label: str) -> str:
+    return f"{prefix}:{sha1(label.encode('utf-8')).hexdigest()}"
 
 
 def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_path):
@@ -95,41 +100,212 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
         ]
     ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
 
-    nodes, edges, truncated, community = load_core_graph_payload(
+    nodes, edges, truncated = load_core_graph_payload(
         base_dir=output_dir,
         max_nodes=20,
         min_weight=0.0,
     )
 
     assert truncated is False
-    assert community is None
-    assert len(nodes) == 3
-    assert len(edges) == 2
+    assert len(nodes) == 7
+    assert len(edges) == 6
 
+    material_node_id = _semantic_node_id("mat", "epoxy composite")
+    property_node_id = _semantic_node_id("prop", "flexural_strength")
+    test_condition_node_id = _semantic_node_id("tc", "sem")
+    baseline_node_id = _semantic_node_id("base", "untreated baseline")
     nodes_by_id = {node["id"]: node for node in nodes}
-    assert set(nodes_by_id) == {"doc:paper-1", "evi:ev-1", "cmp:cmp-1"}
+    assert set(nodes_by_id) == {
+        "doc:paper-1",
+        "evi:ev-1",
+        "cmp:cmp-1",
+        material_node_id,
+        property_node_id,
+        test_condition_node_id,
+        baseline_node_id,
+    }
     assert nodes_by_id["doc:paper-1"]["type"] == "document"
-    assert json.loads(nodes_by_id["doc:paper-1"]["node_document_ids"]) == ["paper-1"]
     assert nodes_by_id["evi:ev-1"]["type"] == "evidence"
-    assert json.loads(nodes_by_id["evi:ev-1"]["node_text_unit_ids"]) == ["tu-1"]
     assert nodes_by_id["evi:ev-1"]["degree"] == 2
     assert nodes_by_id["cmp:cmp-1"]["type"] == "comparison"
     assert nodes_by_id["cmp:cmp-1"]["label"] == "epoxy composite | flexural_strength"
-    assert json.loads(nodes_by_id["cmp:cmp-1"]["node_document_titles"]) == [
-        "Core Graph Paper"
-    ]
+    assert nodes_by_id[material_node_id]["type"] == "material"
+    assert nodes_by_id[property_node_id]["type"] == "property"
+    assert nodes_by_id[test_condition_node_id]["type"] == "test_condition"
+    assert nodes_by_id[baseline_node_id]["type"] == "baseline"
 
     edges_by_id = {edge["id"]: edge for edge in edges}
     assert set(edges_by_id) == {
         "edge:doc:paper-1:evi:ev-1",
         "edge:evi:ev-1:cmp:cmp-1",
+        f"edge:cmp:cmp-1:{material_node_id}",
+        f"edge:cmp:cmp-1:{property_node_id}",
+        f"edge:cmp:cmp-1:{test_condition_node_id}",
+        f"edge:cmp:cmp-1:{baseline_node_id}",
     }
     assert edges_by_id["edge:doc:paper-1:evi:ev-1"]["edge_description"] == (
         "document_to_evidence"
     )
-    assert json.loads(
-        edges_by_id["edge:evi:ev-1:cmp:cmp-1"]["edge_text_unit_ids"]
-    ) == ["tu-1"]
+    assert edges_by_id[f"edge:cmp:cmp-1:{material_node_id}"]["edge_description"] == (
+        "comparison_to_material"
+    )
+    assert edges_by_id[f"edge:cmp:cmp-1:{property_node_id}"]["edge_description"] == (
+        "comparison_to_property"
+    )
+
+
+def test_core_projection_skips_placeholder_semantic_nodes(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": "col-1",
+                "title": "Placeholder Graph Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-1",
+                "document_id": "paper-1",
+                "collection_id": "col-1",
+                "claim_text": "Qualitative trend reported.",
+                "claim_type": "property",
+                "evidence_source_type": "text",
+                "evidence_anchors": [],
+                "material_system": {"family": "epoxy composite", "composition": None},
+                "condition_context": {"process": {}, "baseline": {}, "test": {}},
+                "confidence": 0.82,
+                "traceability_status": "direct",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "row_id": "cmp-1",
+                "collection_id": "col-1",
+                "source_document_id": "paper-1",
+                "supporting_evidence_ids": ["ev-1"],
+                "material_system_normalized": "unspecified material system",
+                "process_normalized": "700 C",
+                "property_normalized": "qualitative",
+                "baseline_normalized": "unspecified baseline",
+                "test_condition_normalized": "--",
+                "comparability_status": "limited",
+                "comparability_warnings": [],
+                "value": None,
+                "unit": None,
+            }
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+
+    nodes, edges, truncated = load_core_graph_payload(
+        base_dir=output_dir,
+        max_nodes=20,
+        min_weight=0.0,
+    )
+
+    assert truncated is False
+    assert {node["type"] for node in nodes} == {
+        "document",
+        "evidence",
+        "comparison",
+        "property",
+    }
+    assert {
+        edge["edge_description"]
+        for edge in edges
+        if edge["edge_description"].startswith("comparison_to_")
+    } == {"comparison_to_property"}
+
+
+def test_core_projection_truncation_reserves_backbone_capacity(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "document_id": f"paper-{index}",
+                "collection_id": "col-1",
+                "title": f"Paper {index}",
+                "source_filename": f"paper-{index}.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.9,
+            }
+            for index in range(1, 5)
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": f"ev-{index}",
+                "document_id": f"paper-{index}",
+                "collection_id": "col-1",
+                "claim_text": f"Claim {index}",
+                "claim_type": "property",
+                "evidence_source_type": "text",
+                "evidence_anchors": [],
+                "material_system": {"family": "oxide cathode", "composition": None},
+                "condition_context": {"process": {}, "baseline": {}, "test": {}},
+                "confidence": 0.82,
+                "traceability_status": "direct",
+            }
+            for index in range(1, 5)
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "row_id": f"cmp-{index}",
+                "collection_id": "col-1",
+                "source_document_id": f"paper-{index}",
+                "supporting_evidence_ids": [f"ev-{index}"],
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "property_normalized": "conductivity",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+                "comparability_status": "comparable",
+                "comparability_warnings": [],
+                "value": float(index),
+                "unit": "mS/cm",
+            }
+            for index in range(1, 5)
+        ]
+    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+
+    nodes, _edges, truncated = load_core_graph_payload(
+        base_dir=output_dir,
+        max_nodes=10,
+        min_weight=0.0,
+    )
+
+    assert truncated is True
+    backbone_count = sum(
+        1 for node in nodes if node["type"] in {"document", "evidence", "comparison"}
+    )
+    semantic_count = len(nodes) - backbone_count
+    assert backbone_count >= 6
+    assert semantic_count <= 4
 
 
 def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
@@ -238,26 +414,23 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
         collection_id=collection_id,
         max_nodes=20,
         min_weight=0.0,
-        community_id=None,
     )
 
     assert payload["collection_id"] == collection_id
-    assert payload["community"] is None
-    assert len(payload["nodes"]) == 3
-    assert len(payload["edges"]) == 2
+    assert len(payload["nodes"]) == 7
+    assert len(payload["edges"]) == 6
 
     graphml_bytes, filename = graph_service.build_graphml(
         collection_id=collection_id,
         max_nodes=20,
         min_weight=0.0,
-        community_id=None,
     )
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
 
 
-def test_graph_service_rejects_legacy_community_filter(monkeypatch, tmp_path):
+def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
     try:
         import fastapi  # noqa: F401
     except ImportError:
@@ -285,7 +458,7 @@ def test_graph_service_rejects_legacy_community_filter(monkeypatch, tmp_path):
     monkeypatch.setattr(graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_service, "artifact_registry_service", artifact_registry)
 
-    collection = collection_service.create_collection("Filtered Graph Collection")
+    collection = collection_service.create_collection("Graph Neighborhood Collection")
     collection_id = collection["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -342,15 +515,20 @@ def test_graph_service_rejects_legacy_community_filter(monkeypatch, tmp_path):
     ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
-    try:
-        graph_service.get_collection_graph(
-            collection_id=collection_id,
-            max_nodes=20,
-            min_weight=0.0,
-            community_id="1",
-        )
-    except graph_service.GraphFilterNotSupportedError as exc:
-        assert exc.collection_id == collection_id
-        assert exc.filter_name == "community_id"
-    else:  # pragma: no cover
-        raise AssertionError("expected GraphFilterNotSupportedError")
+    payload = graph_service.get_collection_graph_neighbors(
+        collection_id=collection_id,
+        node_id="evi:ev-1",
+    )
+
+    assert payload["collection_id"] == collection_id
+    assert payload["center_node_id"] == "evi:ev-1"
+    assert payload["truncated"] is False
+    assert {node["id"] for node in payload["nodes"]} == {
+        "doc:paper-1",
+        "evi:ev-1",
+        "cmp:cmp-1",
+    }
+    assert {edge["id"] for edge in payload["edges"]} == {
+        "edge:doc:paper-1:evi:ev-1",
+        "edge:evi:ev-1:cmp:cmp-1",
+    }

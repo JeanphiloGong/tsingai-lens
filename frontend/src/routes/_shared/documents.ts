@@ -323,3 +323,28 @@ export async function fetchDocumentContent(
   );
   return normalizeDocumentContent(data, collectionId, documentId);
 }
+
+export async function fetchDocumentProfile(
+  collectionId: string,
+  documentId: string
+): Promise<DocumentProfile> {
+  if (USE_API_FIXTURES) {
+    const fixture = buildFixture(collectionId).items.find((item) => item.document_id === documentId);
+    if (fixture) {
+      return fixture;
+    }
+    throw new Error('Document profile fixture is missing.');
+  }
+
+  const data = await requestJson(
+    `/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/profile`,
+    {
+      method: 'GET'
+    }
+  );
+  const profile = normalizeProfile(data, collectionId);
+  if (!profile) {
+    throw new Error('Document profile response is invalid.');
+  }
+  return profile;
+}

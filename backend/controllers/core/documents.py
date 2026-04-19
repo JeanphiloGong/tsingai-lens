@@ -12,6 +12,7 @@ from application.core.document_profile_service import (
 )
 from controllers.schemas.core.documents import (
     DocumentContentResponse,
+    DocumentProfileItemResponse,
     DocumentProfileListResponse,
 )
 
@@ -59,6 +60,37 @@ async def list_collection_document_profiles(
             detail=_document_profiles_not_ready_detail(exc.collection_id),
         ) from exc
     return DocumentProfileListResponse(**payload)
+
+
+@router.get(
+    "/{collection_id}/documents/{document_id}/profile",
+    response_model=DocumentProfileItemResponse,
+    summary="读取 collection 内单个文档的 profile",
+)
+async def get_collection_document_profile(
+    collection_id: str,
+    document_id: str,
+) -> DocumentProfileItemResponse:
+    try:
+        payload = document_profile_service.get_document_profile(collection_id, document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "document_not_found",
+                "message": str(exc),
+                "collection_id": exc.collection_id,
+                "document_id": exc.document_id,
+            },
+        ) from exc
+    except DocumentProfilesNotReadyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_document_profiles_not_ready_detail(exc.collection_id),
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DocumentProfileItemResponse(**payload)
 
 
 @router.get(

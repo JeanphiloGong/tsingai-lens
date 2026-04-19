@@ -11,6 +11,12 @@ Core outputs.
   Parent follow-up plan for Core-derived graph semantics
 - [`core-derived-graph-cutover-implementation-plan.md`](core-derived-graph-cutover-implementation-plan.md)
   Detailed cutover slices for the Core-derived graph projection
+- [`core-derived-graph-structure-and-drilldown-plan.md`](core-derived-graph-structure-and-drilldown-plan.md)
+  Child proposal for shrinking graph to structure plus neighborhood and
+  canonical drilldown
+- [`core-derived-graph-semantic-expansion-plan.md`](core-derived-graph-semantic-expansion-plan.md)
+  Child proposal for broadening the lean graph with semantic hub nodes and
+  canonical comparison drilldown filters
 - [`query-retirement-and-graphrag-query-decoupling-plan.md`](query-retirement-and-graphrag-query-decoupling-plan.md)
   Retained retirement plan for the removed query surface
 

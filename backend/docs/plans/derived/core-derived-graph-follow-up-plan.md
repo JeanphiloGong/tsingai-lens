@@ -60,6 +60,8 @@ This is a migration, not an immediate hard switch.
 Current child execution entrypoint:
 
 - [`core-derived-graph-cutover-implementation-plan.md`](core-derived-graph-cutover-implementation-plan.md)
+- [`core-derived-graph-structure-and-drilldown-plan.md`](core-derived-graph-structure-and-drilldown-plan.md)
+- [`core-derived-graph-semantic-expansion-plan.md`](core-derived-graph-semantic-expansion-plan.md)
 - [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface-cutover-plan.md)
 
 ## Target Semantic Model
@@ -195,5 +197,7 @@ Exit criteria:
 - [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
 - [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
 - [`graph-surface-plan.md`](graph-surface-plan.md)
+- [`core-derived-graph-structure-and-drilldown-plan.md`](core-derived-graph-structure-and-drilldown-plan.md)
+- [`core-derived-graph-semantic-expansion-plan.md`](core-derived-graph-semantic-expansion-plan.md)
 - [`../../../docs/architecture/graph-surface-current-state.md`](../../../../docs/architecture/graph-surface-current-state.md)
 - [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../../docs/architecture/lens-v1-architecture-boundary.md)

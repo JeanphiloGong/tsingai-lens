@@ -10,6 +10,9 @@ domain-semantic backfill.
   Earlier stabilization wave for the shared parsing seam
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
   Current Core quality hardening wave
+- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
+  Child implementation plan for hard-cutting Core semantic extraction to
+  schema-bound LLM parsing
 - [`claim-traceback-navigation-implementation-plan.md`](claim-traceback-navigation-implementation-plan.md)
   Core traceback vertical slice for reviewable evidence grounding
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)

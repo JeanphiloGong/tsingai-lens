@@ -27,7 +27,7 @@ def _parse_cors_allowed_origins() -> list[str]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.3.1",
+        version="0.3.3",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

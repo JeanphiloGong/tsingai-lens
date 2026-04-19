@@ -9,7 +9,6 @@ import pandas as pd
 
 from domain.core.document_profile import (
     DocumentProfile,
-    analyze_document_profile,
     summarize_document_profile_collection,
 )
 from domain.shared.enums import (
@@ -23,6 +22,15 @@ from infra.persistence.backbone_codec import (
     restore_frame_from_storage,
 )
 from application.source.collection_service import CollectionService
+from application.core.core_semantic_version import (
+    core_semantic_rebuild_required,
+    purge_stale_core_semantic_artifacts,
+    write_core_semantic_manifest,
+)
+from application.core.llm_structured_extractor import (
+    CoreLLMStructuredExtractor,
+    build_default_core_llm_structured_extractor,
+)
 from application.source.artifact_input_service import (
     build_document_records,
     load_collection_inputs,
@@ -95,11 +103,13 @@ class DocumentProfileService:
         self,
         collection_service: CollectionService | None = None,
         artifact_registry_service: ArtifactRegistryService | None = None,
+        structured_extractor: CoreLLMStructuredExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.artifact_registry_service = (
             artifact_registry_service or ArtifactRegistryService()
         )
+        self._structured_extractor = structured_extractor
 
     def list_document_profiles(
         self,
@@ -206,7 +216,10 @@ class DocumentProfileService:
                 pd.read_parquet(path),
                 _DOCUMENT_PROFILE_JSON_COLUMNS,
             )
-            if self._profile_rebuild_required(profiles) and (output_dir / "documents.parquet").is_file():
+            if (
+                self._profile_rebuild_required(profiles)
+                or core_semantic_rebuild_required(output_dir)
+            ) and (output_dir / "documents.parquet").is_file():
                 profiles = self.build_document_profiles(collection_id, output_dir)
         else:
             profiles = self.build_document_profiles(collection_id, output_dir)
@@ -222,6 +235,7 @@ class DocumentProfileService:
             if output_dir is not None
             else self._resolve_output_dir(collection_id)
         )
+        purge_stale_core_semantic_artifacts(base_dir)
         documents_path = base_dir / "documents.parquet"
         if not documents_path.is_file():
             raise DocumentProfilesNotReadyError(collection_id, base_dir)
@@ -264,8 +278,14 @@ class DocumentProfileService:
             profiles,
             _DOCUMENT_PROFILE_JSON_COLUMNS,
         ).to_parquet(base_dir / _DOCUMENT_PROFILES_FILE, index=False)
+        write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
         return profiles
+
+    def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
+        if self._structured_extractor is None:
+            self._structured_extractor = build_default_core_llm_structured_extractor()
+        return self._structured_extractor
 
     def count_protocol_suitable(self, profiles: pd.DataFrame) -> int:
         normalized = self._normalize_profiles_table(profiles, None)
@@ -304,16 +324,45 @@ class DocumentProfileService:
         )
         analysis_title = str(row.get("title") or document_id)
         text = str(row.get("text") or "")
-        profile = analyze_document_profile(
-            collection_id=collection_id,
-            document_id=document_id,
-            title=title,
-            source_filename=source_filename,
-            analysis_title=analysis_title,
-            text=text,
-            sections=sections,
+        profile_payload = {
+            "collection_id": collection_id,
+            "document_id": document_id,
+            "title": title,
+            "source_filename": source_filename,
+            "analysis_title": analysis_title,
+            "representative_text": text[:12000],
+            "sections": [
+                {
+                    "section_id": str(section.get("section_id") or ""),
+                    "section_type": str(section.get("section_type") or ""),
+                    "heading": self._normalize_optional_text(section.get("heading")),
+                    "text": str(section.get("text") or "")[:4000],
+                }
+                for section in sections
+                if isinstance(section, dict)
+            ],
+        }
+        extracted = self._get_structured_extractor().extract_document_profile(
+            profile_payload
         )
-        return profile.to_record()
+        normalized = DocumentProfile.from_mapping(
+            {
+                "document_id": document_id,
+                "collection_id": collection_id,
+                "title": title,
+                "source_filename": source_filename,
+                "doc_type": str(extracted.doc_type or DOC_TYPE_UNCERTAIN),
+                "protocol_extractable": str(
+                    extracted.protocol_extractable or PROTOCOL_EXTRACTABLE_UNCERTAIN
+                ),
+                "protocol_extractability_signals": list(
+                    extracted.protocol_extractability_signals
+                ),
+                "parsing_warnings": list(extracted.parsing_warnings),
+                "confidence": extracted.confidence,
+            }
+        )
+        return normalized.to_record()
 
     def summarize_document_profiles(self, profiles: pd.DataFrame) -> dict[str, Any]:
         normalized = self._normalize_profiles_table(profiles, None)

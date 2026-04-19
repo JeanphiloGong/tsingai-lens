@@ -2,9 +2,12 @@
 	import { onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import cytoscape, {
+		type CollectionReturnValue,
 		type Core,
+		type EdgeSingular,
 		type ElementDefinition,
 		type LayoutOptions,
+		type NodeSingular,
 		type StylesheetJson
 	} from 'cytoscape';
 	import fcose from 'cytoscape-fcose';
@@ -54,6 +57,14 @@
 		| { kind: 'evidence'; data: EvidenceCard }
 		| { kind: 'comparison'; data: ComparisonRow };
 	type EdgeDetail = GraphEdge & { sourceLabel: string; targetLabel: string };
+	type HoverPreview = {
+		nodeId: string;
+		label: string;
+		typeLabel: string;
+		degree: number | null;
+		left: number;
+		top: number;
+	};
 
 	const nodeTypeOrder: NodeKind[] = [
 		'document',
@@ -88,30 +99,45 @@
 		variant: false,
 		process: false
 	};
+	const detailNodeKinds = new Set<NodeKind>(['document', 'evidence', 'comparison']);
+	const graphViewportPadding = 72;
+	const graphAnimationDuration = 220;
 	const graphStylesheet = [
 		{
 			selector: 'node',
 			style: {
 				shape: 'data(shape)',
-				width: 'data(size)',
-				height: 'data(size)',
+				width: 'data(width)',
+				height: 'data(height)',
 				'background-color': 'data(color)',
+				'background-opacity': 0.93,
 				'border-width': 1.5,
-				'border-color': '#ffffff',
+				'border-color': 'rgba(255, 255, 255, 0.94)',
 				label: 'data(label)',
 				color: '#0f1b2d',
-				'font-size': 11,
+				'font-size': 'data(fontSize)',
 				'font-weight': 600,
 				'text-wrap': 'wrap',
-				'text-max-width': 120,
-				'text-valign': 'bottom',
+				'text-max-width': 'data(textMaxWidth)',
+				'text-valign': 'center',
 				'text-halign': 'center',
-				'text-margin-y': 10,
-				'text-background-color': '#ffffff',
-				'text-background-opacity': 0.88,
-				'text-background-shape': 'roundrectangle',
-				'text-background-padding': 2,
+				'text-justification': 'center',
+				'text-margin-y': 0,
 				'overlay-opacity': 0
+			}
+		},
+		{
+			selector: 'node.is-card-node',
+			style: {
+				shape: 'round-rectangle',
+				'border-width': 2,
+				'font-weight': 700
+			}
+		},
+		{
+			selector: 'node.is-detail-node',
+			style: {
+				'background-opacity': 0.97
 			}
 		},
 		{
@@ -146,14 +172,39 @@
 			selector: 'node.is-selected',
 			style: {
 				'border-width': 3,
-				'border-color': '#0f1b2d'
+				'border-color': '#0f1b2d',
+				'shadow-blur': 20,
+				'shadow-color': 'rgba(15, 27, 45, 0.18)',
+				'shadow-opacity': 1,
+				'shadow-offset-x': 0,
+				'shadow-offset-y': 8
 			}
 		},
 		{
 			selector: 'node.is-connected',
 			style: {
 				'border-width': 2,
-				'border-color': '#2b6ff7'
+				'border-color': '#2b6ff7',
+				'background-blacken': -0.05
+			}
+		},
+		{
+			selector: 'node.is-hovered',
+			style: {
+				'border-width': 2.5,
+				'border-color': '#f28f3b',
+				'shadow-blur': 14,
+				'shadow-color': 'rgba(242, 143, 59, 0.22)',
+				'shadow-opacity': 1,
+				'shadow-offset-x': 0,
+				'shadow-offset-y': 4
+			}
+		},
+		{
+			selector: 'node.is-hovered-neighbor',
+			style: {
+				'border-width': 2,
+				'border-color': 'rgba(242, 143, 59, 0.48)'
 			}
 		},
 		{
@@ -168,7 +219,16 @@
 			selector: 'edge.is-connected',
 			style: {
 				'line-color': 'rgba(43, 111, 247, 0.38)',
-				'target-arrow-color': 'rgba(43, 111, 247, 0.38)'
+				'target-arrow-color': 'rgba(43, 111, 247, 0.38)',
+				width: 3
+			}
+		},
+		{
+			selector: 'edge.is-hovered',
+			style: {
+				'line-color': 'rgba(242, 143, 59, 0.54)',
+				'target-arrow-color': 'rgba(242, 143, 59, 0.54)',
+				width: 3
 			}
 		}
 	] as unknown as StylesheetJson;
@@ -196,6 +256,8 @@
 	let selectedNode: SelectedNode | null = null;
 	let selectedNodeDetail: NodeDetail | null = null;
 	let selectedEdge: EdgeDetail | null = null;
+	let hoveredNodeId: string | null = null;
+	let hoverPreview: HoverPreview | null = null;
 	let loadedCollectionId = '';
 	let detailRequestId = 0;
 	let visibleNodeTypes: Record<NodeKind, boolean> = { ...defaultVisibleNodeTypes };
@@ -217,6 +279,20 @@
 		return type && type in nodeTypeMeta ? (type as NodeKind) : null;
 	}
 
+	function isAggregateNodeKind(kind: NodeKind | null) {
+		return Boolean(kind && !detailNodeKinds.has(kind));
+	}
+
+	function clamp(value: number, min: number, max: number) {
+		return Math.max(min, Math.min(max, value));
+	}
+
+	function truncateText(value: string, limit: number) {
+		const normalized = value.replace(/\s+/g, ' ').trim();
+		if (normalized.length <= limit) return normalized;
+		return `${normalized.slice(0, Math.max(limit - 1, 1)).trimEnd()}…`;
+	}
+
 	function nodeColor(type?: string | null) {
 		const kind = asNodeKind(type);
 		return kind ? nodeTypeMeta[kind].color : '#2b6ff7';
@@ -224,21 +300,55 @@
 
 	function nodeShape(type?: string | null) {
 		const kind = asNodeKind(type);
-		return kind ? nodeTypeMeta[kind].shape : 'ellipse';
+		if (!kind) return 'round-rectangle';
+		return isAggregateNodeKind(kind) ? 'round-rectangle' : nodeTypeMeta[kind].shape;
 	}
 
-	function nodeSize(degree?: number | null) {
-		return Math.max(24, Math.min(54, ((degree ?? 1) * 4) + 18));
+	function nodeDisplayLabel(label: string, type?: string | null) {
+		const kind = asNodeKind(type);
+		return truncateText(label || '', isAggregateNodeKind(kind) ? 54 : 22) || '--';
+	}
+
+	function estimatedLineCount(label: string, type?: string | null) {
+		const kind = asNodeKind(type);
+		const charsPerLine = isAggregateNodeKind(kind) ? 16 : 12;
+		const maxLines = isAggregateNodeKind(kind) ? 3 : 2;
+		const normalized = label.replace(/\s+/g, ' ').trim();
+		return clamp(Math.ceil(Math.max(normalized.length, 1) / charsPerLine), 1, maxLines);
+	}
+
+	function nodeLayoutMetrics(node: GraphNode) {
+		const kind = asNodeKind(node.type);
+		const displayLabel = nodeDisplayLabel(node.label || node.id, node.type);
+		const lineCount = estimatedLineCount(displayLabel, node.type);
+		const aggregate = isAggregateNodeKind(kind);
+		const degreeBoost = Math.min(node.degree ?? 0, aggregate ? 5 : 4);
+		const width = aggregate
+			? clamp(98 + Math.min(displayLabel.length, 44) * 2.1 + degreeBoost * 5, 98, 210)
+			: clamp(58 + Math.min(displayLabel.length, 22) * 1.55 + degreeBoost * 4, 58, 128);
+		const height = aggregate
+			? clamp(52 + ((lineCount - 1) * 22) + degreeBoost * 4, 52, 118)
+			: clamp(44 + ((lineCount - 1) * 18) + degreeBoost * 3, 44, 82);
+		return {
+			aggregate,
+			displayLabel,
+			width: Math.round(width),
+			height: Math.round(height),
+			textMaxWidth: Math.max(Math.round(width - 18), aggregate ? 76 : 44),
+			fontSize: aggregate ? 12 : 10,
+			focusZoom: aggregate ? 0.88 : 1.02,
+			layoutRepulsion: aggregate ? 26000 + degreeBoost * 900 : 12000 + degreeBoost * 700
+		};
 	}
 
 	function edgeWidth(weight?: number | null) {
-		return Math.max(1.5, Math.min(6, (weight ?? 1) + 0.5));
+		return Math.max(1.4, Math.min(5, (weight ?? 1) + 0.25));
 	}
 
 	function getNodeLabel(nodeId: string) {
 		if (!cy) return nodeId;
 		const node = cy.$id(nodeId);
-		return node.empty() ? nodeId : String(node.data('label') ?? nodeId);
+		return node.empty() ? nodeId : String(node.data('fullLabel') ?? nodeId);
 	}
 
 	function edgeRelationLabel(description?: string | null) {
@@ -337,26 +447,125 @@
 		cy.pan(viewport.pan);
 	}
 
+	function visibleGraphElements(): CollectionReturnValue | null {
+		if (!cy) return null;
+		return cy.elements().filter((element) => !element.hasClass('is-hidden'));
+	}
+
+	function fitVisibleGraph(animate = true) {
+		if (!cy) return;
+		const visible = visibleGraphElements();
+		if (!visible || visible.empty()) return;
+
+		if (animate) {
+			cy.animate({
+				fit: { eles: visible, padding: graphViewportPadding },
+				duration: graphAnimationDuration,
+				easing: 'ease-out-cubic'
+			});
+			return;
+		}
+
+		cy.fit(visible, graphViewportPadding);
+	}
+
+	function focusNodeInViewport(nodeId: string) {
+		if (!cy) return;
+		const node = cy.$id(nodeId);
+		if (node.empty()) return;
+		const targetZoom = clamp(
+			Math.max(
+				cy.zoom(),
+				typeof node.data('focusZoom') === 'number' ? Number(node.data('focusZoom')) : 0.92
+			),
+			0.45,
+			1.25
+		);
+		cy.animate({
+			center: { eles: node },
+			zoom: targetZoom,
+			duration: graphAnimationDuration,
+			easing: 'ease-out-cubic'
+		});
+	}
+
+	function focusEdgeInViewport(edgeId: string) {
+		if (!cy) return;
+		const edge = cy.$id(edgeId);
+		if (edge.empty()) return;
+		cy.animate({
+			fit: { eles: edge.union(edge.connectedNodes()), padding: 92 },
+			duration: graphAnimationDuration,
+			easing: 'ease-out-cubic'
+		});
+	}
+
+	function clearHoverPreview(shouldSync = true) {
+		hoveredNodeId = null;
+		hoverPreview = null;
+		if (shouldSync) {
+			syncSelectionStyles();
+		}
+	}
+
+	function updateHoverPreview(node: NodeSingular) {
+		if (!graphContainer) return;
+		const position = node.renderedPosition();
+		hoverPreview = {
+			nodeId: node.id(),
+			label: String(node.data('fullLabel') ?? node.id()),
+			typeLabel: selectedNodeTypeLabel(
+				typeof node.data('entityType') === 'string' ? node.data('entityType') : null
+			),
+			degree: typeof node.data('degree') === 'number' ? node.data('degree') : null,
+			left: clamp(position.x + 18, 14, Math.max(14, graphContainer.clientWidth - 228)),
+			top: clamp(position.y + 16, 14, Math.max(14, graphContainer.clientHeight - 104))
+		};
+	}
+
+	function setHoveredNode(node: NodeSingular | null) {
+		if (!node) {
+			clearHoverPreview();
+			return;
+		}
+		if (selectedNode?.id === node.id()) {
+			clearHoverPreview();
+			return;
+		}
+		hoveredNodeId = node.id();
+		updateHoverPreview(node);
+		syncSelectionStyles();
+	}
+
 	function syncSelectionStyles() {
 		if (!cy) return;
 		cy.batch(() => {
 			cy?.elements().removeClass('is-selected');
 			cy?.elements().removeClass('is-connected');
+			cy?.elements().removeClass('is-hovered');
+			cy?.elements().removeClass('is-hovered-neighbor');
 
 			if (selectedNode) {
 				const node = cy?.$id(selectedNode.id);
 				if (node && !node.empty()) {
 					node.addClass('is-selected');
+					node.connectedNodes().difference(node).addClass('is-connected');
 					node.connectedEdges().addClass('is-connected');
 				}
-				return;
-			}
-
-			if (selectedEdge) {
+			} else if (selectedEdge) {
 				const edge = cy?.$id(selectedEdge.id);
 				if (edge && !edge.empty()) {
 					edge.addClass('is-selected');
 					edge.connectedNodes().addClass('is-connected');
+				}
+			}
+
+			if (hoveredNodeId) {
+				const node = cy?.$id(hoveredNodeId);
+				if (node && !node.empty()) {
+					node.addClass('is-hovered');
+					node.connectedNodes().difference(node).addClass('is-hovered-neighbor');
+					node.connectedEdges().addClass('is-hovered');
 				}
 			}
 		});
@@ -364,6 +573,8 @@
 
 	function clearSelection() {
 		detailRequestId += 1;
+		hoveredNodeId = null;
+		hoverPreview = null;
 		selectedNode = null;
 		selectedNodeDetail = null;
 		selectedEdge = null;
@@ -379,7 +590,7 @@
 
 		cy.batch(() => {
 			cy?.nodes().forEach((node) => {
-				const label = String(node.data('label') ?? '').toLowerCase();
+				const label = String(node.data('fullLabel') ?? '').toLowerCase();
 				const type = asNodeKind(
 					typeof node.data('entityType') === 'string' ? node.data('entityType') : null
 				);
@@ -396,6 +607,13 @@
 
 		visibleNodes = cy.nodes().filter((node) => !node.hasClass('is-hidden')).length;
 		visibleEdges = cy.edges().filter((edge) => !edge.hasClass('is-hidden')).length;
+		if (hoveredNodeId) {
+			const hoveredNode = cy.$id(hoveredNodeId);
+			if (hoveredNode.empty() || hoveredNode.hasClass('is-hidden')) {
+				hoveredNodeId = null;
+				hoverPreview = null;
+			}
+		}
 		syncSelectionStyles();
 	}
 
@@ -439,29 +657,47 @@
 		}
 	}
 
-	async function selectNode(nodeId: string) {
+	async function selectNode(
+		nodeId: string,
+		options: { focus?: boolean; reloadDetail?: boolean } = {}
+	) {
 		if (!cy) return;
 		const node = cy.$id(nodeId);
 		if (node.empty()) return;
 		const parsed = parseGraphNodeId(nodeId);
-		selectedEdge = null;
-		selectedNode = {
+		const nextSelectedNode: SelectedNode = {
 			id: nodeId,
-			label: String(node.data('label') ?? nodeId),
+			label: String(node.data('fullLabel') ?? nodeId),
 			type: typeof node.data('entityType') === 'string' ? node.data('entityType') : null,
 			degree: typeof node.data('degree') === 'number' ? node.data('degree') : null,
 			kind: parsed.kind,
 			resourceId: parsed.resourceId || null
 		};
+		const shouldReloadDetail =
+			options.reloadDetail ??
+			(nextSelectedNode.id !== selectedNode?.id ||
+				nextSelectedNode.kind !== selectedNode?.kind ||
+				nextSelectedNode.resourceId !== selectedNode?.resourceId ||
+				Boolean(detailError));
+
+		clearHoverPreview(false);
+		selectedEdge = null;
+		selectedNode = nextSelectedNode;
 		syncSelectionStyles();
-		await loadNodeDetail(selectedNode);
+		if (options.focus !== false) {
+			focusNodeInViewport(nodeId);
+		}
+		if (shouldReloadDetail) {
+			await loadNodeDetail(nextSelectedNode);
+		}
 	}
 
-	function selectEdge(edgeId: string) {
+	function selectEdge(edgeId: string, focus = true) {
 		if (!cy) return;
 		const edge = cy.$id(edgeId);
 		if (edge.empty()) return;
 		detailRequestId += 1;
+		clearHoverPreview(false);
 		selectedNode = null;
 		selectedNodeDetail = null;
 		detailLoading = false;
@@ -477,6 +713,9 @@
 				typeof edge.data('edgeDescription') === 'string' ? edge.data('edgeDescription') : null
 		};
 		syncSelectionStyles();
+		if (focus) {
+			focusEdgeInViewport(edgeId);
+		}
 	}
 
 	function attachRendererEvents() {
@@ -484,12 +723,43 @@
 		cy.on('tap', 'node', (event) => {
 			void selectNode(event.target.id());
 		});
+		cy.on('dbltap', 'node', (event) => {
+			void expandNeighborhood(event.target.id());
+		});
+		cy.on('mouseover', 'node', (event) => {
+			setHoveredNode(event.target);
+		});
+		cy.on('mouseout', 'node', (event) => {
+			if (hoveredNodeId === event.target.id()) {
+				clearHoverPreview();
+			}
+		});
 		cy.on('tap', 'edge', (event) => {
 			selectEdge(event.target.id());
 		});
 		cy.on('tap', (event) => {
 			if (event.target === cy) {
 				clearSelection();
+			}
+		});
+		cy.on('dbltap', (event) => {
+			if (event.target === cy) {
+				fitVisibleGraph(true);
+			}
+		});
+		cy.on('pan', () => {
+			if (hoveredNodeId || hoverPreview) {
+				clearHoverPreview();
+			}
+		});
+		cy.on('zoom', () => {
+			if (hoveredNodeId || hoverPreview) {
+				clearHoverPreview();
+			}
+		});
+		cy.on('tapdrag', () => {
+			if (hoveredNodeId || hoverPreview) {
+				clearHoverPreview();
 			}
 		});
 	}
@@ -500,19 +770,28 @@
 		previousPositions: Map<string, Position>
 	): ElementDefinition[] {
 		const nodeIds = new Set(nodes.map((node) => node.id));
+		const nodeMap = new Map(nodes.map((node) => [node.id, node]));
 		const elements: ElementDefinition[] = [];
 
 		for (const [index, node] of nodes.entries()) {
 			const position = previousPositions.get(node.id) ?? fallbackPosition(node.id, index, nodes.length);
+			const metrics = nodeLayoutMetrics(node);
 			elements.push({
 				group: 'nodes',
+				classes: metrics.aggregate ? 'is-card-node' : 'is-detail-node',
 				data: {
 					id: node.id,
-					label: node.label,
+					label: metrics.displayLabel,
+					fullLabel: node.label,
 					entityType: node.type ?? null,
 					degree: node.degree ?? 0,
 					color: nodeColor(node.type),
-					size: nodeSize(node.degree),
+					width: metrics.width,
+					height: metrics.height,
+					textMaxWidth: metrics.textMaxWidth,
+					fontSize: metrics.fontSize,
+					focusZoom: metrics.focusZoom,
+					layoutRepulsion: metrics.layoutRepulsion,
 					shape: nodeShape(node.type)
 				},
 				position
@@ -522,6 +801,10 @@
 		for (const edge of edges) {
 			if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
 			const edgeId = edge.id || `${edge.source}-${edge.target}`;
+			const sourceKind = asNodeKind(nodeMap.get(edge.source)?.type);
+			const targetKind = asNodeKind(nodeMap.get(edge.target)?.type);
+			const idealLength =
+				isAggregateNodeKind(sourceKind) || isAggregateNodeKind(targetKind) ? 170 : 128;
 			elements.push({
 				group: 'edges',
 				data: {
@@ -531,6 +814,7 @@
 					label: edgeRelationLabel(edge.edge_description),
 					weight: edge.weight ?? 1,
 					width: edgeWidth(edge.weight),
+					idealLength,
 					edgeDescription: edge.edge_description ?? null
 				}
 			});
@@ -539,11 +823,8 @@
 		return elements;
 	}
 
-	async function runGraphLayout(previousPositions: Map<string, Position>, fit: boolean) {
+	async function runGraphLayout(previousPositions: Map<string, Position>) {
 		if (!cy || cy.nodes().length < 2) {
-			if (fit && cy) {
-				cy.fit(cy.elements(), 40);
-			}
 			return;
 		}
 
@@ -559,16 +840,23 @@
 
 			const layout = cy.layout({
 				name: 'fcose',
-				quality: 'default',
+				quality: 'proof',
 				randomize: false,
 				animate: false,
-				fit,
-				padding: 48,
-				nodeRepulsion: 4500,
-				idealEdgeLength: 120,
-				edgeElasticity: 0.25,
-				gravity: 0.2,
-				numIter: 2500,
+				fit: false,
+				padding: graphViewportPadding,
+				nodeDimensionsIncludeLabels: true,
+				uniformNodeDimensions: false,
+				nodeSeparation: 88,
+				nodeRepulsion: (node: NodeSingular) => Number(node.data('layoutRepulsion') ?? 12000),
+				idealEdgeLength: (edge: EdgeSingular) => Number(edge.data('idealLength') ?? 132),
+				edgeElasticity: 0.2,
+				gravity: 0.18,
+				gravityRange: 3.2,
+				numIter: 3000,
+				tile: true,
+				tilingPaddingVertical: 20,
+				tilingPaddingHorizontal: 20,
 				fixedNodeConstraint
 			} as unknown as LayoutOptions);
 
@@ -609,13 +897,16 @@
 		restoreViewport(previousViewport);
 
 		if (hasNewNodes) {
-			await runGraphLayout(previousPositions, shouldFit);
-			restoreViewport(previousViewport);
-		} else if (shouldFit) {
-			cy.fit(cy.elements(), 40);
+			await runGraphLayout(previousPositions);
+			if (previousViewport) {
+				restoreViewport(previousViewport);
+			}
 		}
 
 		updateVisibility();
+		if (shouldFit) {
+			fitVisibleGraph(false);
+		}
 		if (focusNodeId && !cy.$id(focusNodeId).empty()) {
 			await selectNode(focusNodeId);
 		}
@@ -742,21 +1033,25 @@
 		};
 	}
 
-	async function expandSelectedNeighborhood() {
-		if (!selectedNode) return;
-
+	async function expandNeighborhood(nodeId: string) {
+		if (!nodeId || expandingNeighborhood) return;
 		expandingNeighborhood = true;
 		detailError = '';
 		try {
-			const response = await fetchCollectionGraphNeighbors(collectionId, selectedNode.id);
+			const response = await fetchCollectionGraphNeighbors(collectionId, nodeId);
 			graphData = mergeGraphPayload(graphData, response);
-			await renderGraph(graphData.nodes, graphData.edges, selectedNode.id);
+			await renderGraph(graphData.nodes, graphData.edges, nodeId);
 			status = $t('graph.neighborsExpanded');
 		} catch (err) {
 			detailError = errorMessage(err);
 		} finally {
 			expandingNeighborhood = false;
 		}
+	}
+
+	async function expandSelectedNeighborhood() {
+		if (!selectedNode) return;
+		await expandNeighborhood(selectedNode.id);
 	}
 
 	function formatList(items: string[]) {
@@ -870,6 +1165,14 @@
 			<button class="btn btn--ghost" type="button" on:click={() => void loadGraph()}>
 				{$t('graph.previewLoad')}
 			</button>
+			<button
+				class="btn btn--ghost"
+				type="button"
+				on:click={() => fitVisibleGraph(true)}
+				disabled={!visibleNodes}
+			>
+				{$t('graph.resetView')}
+			</button>
 			<button class="btn btn--ghost" type="button" on:click={exportImage} disabled={!visibleNodes}>
 				{$t('graph.exportImage')}
 			</button>
@@ -965,6 +1268,7 @@
 						<span>{$t('graph.truncated')}</span>
 					{/if}
 				</div>
+				<p class="graph-hint">{$t('graph.interactionHint')}</p>
 				{#if status}
 					<div class="status" role="status">{status}</div>
 				{/if}
@@ -982,6 +1286,19 @@
 					<div class="graph-empty">{$t('graph.previewLoading')}</div>
 				{:else if !visibleNodes}
 					<div class="graph-empty">{$t('graph.previewEmpty')}</div>
+				{/if}
+				{#if hoverPreview}
+					<div
+						class="graph-hover-preview"
+						style={`left:${hoverPreview.left}px;top:${hoverPreview.top}px;`}
+						aria-hidden="true"
+					>
+						<div class="graph-hover-preview__title">{hoverPreview.label}</div>
+						<div class="graph-hover-preview__meta">
+							<span>{hoverPreview.typeLabel || '--'}</span>
+							<span>{$t('graph.detailDegree')}: {hoverPreview.degree ?? '--'}</span>
+						</div>
+					</div>
 				{/if}
 			</div>
 		</div>
@@ -1180,5 +1497,40 @@
 		height: 0.7rem;
 		border-radius: 999px;
 		flex: 0 0 auto;
+	}
+
+	.graph-hint {
+		margin: 0;
+		font-size: 0.84rem;
+		line-height: 1.5;
+		color: var(--color-subtle);
+	}
+
+	.graph-hover-preview {
+		position: absolute;
+		z-index: 2;
+		max-width: 210px;
+		padding: 0.7rem 0.8rem;
+		border: 1px solid rgba(15, 27, 45, 0.12);
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.96);
+		box-shadow: 0 16px 32px rgba(15, 27, 45, 0.16);
+		backdrop-filter: blur(10px);
+		pointer-events: none;
+	}
+
+	.graph-hover-preview__title {
+		font-weight: 700;
+		font-size: 0.92rem;
+		line-height: 1.35;
+	}
+
+	.graph-hover-preview__meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-top: 0.35rem;
+		font-size: 0.76rem;
+		color: var(--color-subtle);
 	}
 </style>

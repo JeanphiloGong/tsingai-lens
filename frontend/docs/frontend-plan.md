@@ -21,6 +21,7 @@
 - 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
 - 图谱与 GraphML：`GET /api/v1/collections/{collection_id}/graph`、`GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`、`GET /api/v1/collections/{collection_id}/graphml`
 - 图谱 drilldown 详情：`GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、`GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`、`GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
+- 图谱聚合节点 drilldown：回到 `GET /api/v1/collections/{collection_id}/comparisons`，并使用 `material_system_normalized`、`property_normalized`、`test_condition_normalized`、`baseline_normalized` 过滤参数
 - Protocol 结果：`GET /api/v1/collections/{collection_id}/protocol/steps`、`GET /api/v1/collections/{collection_id}/protocol/search`、`POST /api/v1/collections/{collection_id}/protocol/sop`
 - 报告结果：`GET /api/v1/collections/{collection_id}/reports/communities`、`GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`、`GET /api/v1/collections/{collection_id}/reports/patterns`
 
@@ -28,6 +29,8 @@
 - 不再允许浏览器手工设置 Base URL
 - 遗留调试入口已从浏览器产品流程中退役
 - `frontend/nginx.conf` 只代理 `/api/` 到 `backend:8010`
+- 集合图谱页使用 `Cytoscape.js` 在浏览器端本地布局；邻域扩展保留已有节点位置并只对新增节点做增量重排，不依赖服务端坐标
+- 图谱页的语义聚合节点目前是 `material / property / test_condition / baseline`；默认显示 `material / property`，并通过前端类型开关显式控制其余节点可见性
 - 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已退役为说明页，不再发旧浏览器请求
 
 ## 验收重点

@@ -34,6 +34,10 @@ export type GraphNodeRef =
 	| { kind: 'document'; resourceId: string }
 	| { kind: 'evidence'; resourceId: string }
 	| { kind: 'comparison'; resourceId: string }
+	| { kind: 'material'; resourceId: string }
+	| { kind: 'property'; resourceId: string }
+	| { kind: 'test_condition'; resourceId: string }
+	| { kind: 'baseline'; resourceId: string }
 	| { kind: 'unknown'; resourceId: string };
 
 export type GraphQuery = {
@@ -79,5 +83,9 @@ export function parseGraphNodeId(nodeId: string): GraphNodeRef {
 	if (prefix === 'doc') return { kind: 'document', resourceId };
 	if (prefix === 'evi') return { kind: 'evidence', resourceId };
 	if (prefix === 'cmp') return { kind: 'comparison', resourceId };
+	if (prefix === 'mat') return { kind: 'material', resourceId };
+	if (prefix === 'prop') return { kind: 'property', resourceId };
+	if (prefix === 'tc') return { kind: 'test_condition', resourceId };
+	if (prefix === 'base') return { kind: 'baseline', resourceId };
 	return { kind: 'unknown', resourceId };
 }

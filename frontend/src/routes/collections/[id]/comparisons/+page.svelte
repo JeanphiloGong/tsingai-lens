@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { errorMessage, isHttpStatusError } from '../../../_shared/api';
 	import {
@@ -23,20 +24,68 @@
 	let statusFilter = '';
 	let materialFilter = '';
 	let propertyFilter = '';
-	let loadedCollectionId = '';
+	let testConditionFilter = '';
+	let baselineFilter = '';
+	let loadedRequestKey = '';
 	let notFound = false;
+	let syncedRouteFilterKey = '';
 
-	$: materials = Array.from(
-		new Set((response?.items ?? []).map((item) => item.display.material_system_normalized))
-	).sort();
-	$: properties = Array.from(
-		new Set((response?.items ?? []).map((item) => item.display.property_normalized))
-	).sort();
+	type ComparisonRouteFilterName =
+		| 'material_system_normalized'
+		| 'property_normalized'
+		| 'test_condition_normalized'
+		| 'baseline_normalized';
+
+	function uniqueSorted(values: string[]) {
+		return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value !== ''))).sort();
+	}
+
+	function routeFilterValue(name: ComparisonRouteFilterName) {
+		return $page.url.searchParams.get(name)?.trim() ?? '';
+	}
+
+	$: routeMaterialFilter = routeFilterValue('material_system_normalized');
+	$: routePropertyFilter = routeFilterValue('property_normalized');
+	$: routeTestConditionFilter = routeFilterValue('test_condition_normalized');
+	$: routeBaselineFilter = routeFilterValue('baseline_normalized');
+	$: routeFilterKey = [
+		routeMaterialFilter,
+		routePropertyFilter,
+		routeTestConditionFilter,
+		routeBaselineFilter
+	].join('|');
+	$: if (routeFilterKey !== syncedRouteFilterKey) {
+		materialFilter = routeMaterialFilter;
+		propertyFilter = routePropertyFilter;
+		testConditionFilter = routeTestConditionFilter;
+		baselineFilter = routeBaselineFilter;
+		syncedRouteFilterKey = routeFilterKey;
+	}
+
+	$: materials = uniqueSorted([
+		materialFilter,
+		...(response?.items ?? []).map((item) => item.display.material_system_normalized)
+	]);
+	$: properties = uniqueSorted([
+		propertyFilter,
+		...(response?.items ?? []).map((item) => item.display.property_normalized)
+	]);
+	$: testConditions = uniqueSorted([
+		testConditionFilter,
+		...(response?.items ?? []).map((item) => item.display.test_condition_normalized)
+	]);
+	$: baselines = uniqueSorted([
+		baselineFilter,
+		...(response?.items ?? []).map((item) => item.display.baseline_normalized)
+	]);
 
 	$: items = (response?.items ?? []).filter((item) => {
 		if (statusFilter && item.assessment.comparability_status !== statusFilter) return false;
 		if (materialFilter && item.display.material_system_normalized !== materialFilter) return false;
 		if (propertyFilter && item.display.property_normalized !== propertyFilter) return false;
+		if (testConditionFilter && item.display.test_condition_normalized !== testConditionFilter)
+			return false;
+		if (baselineFilter && item.display.baseline_normalized !== baselineFilter) return false;
 		return true;
 	});
 
@@ -56,8 +105,11 @@
 	$: showFallbackState =
 		Boolean(workspace) && !loading && !items.length && (surfaceState !== 'ready' || notFound);
 
-	$: if (collectionId && collectionId !== loadedCollectionId) {
-		loadedCollectionId = collectionId;
+	$: requestKey = collectionId
+		? `${collectionId}|${routeMaterialFilter}|${routePropertyFilter}|${routeTestConditionFilter}|${routeBaselineFilter}`
+		: '';
+	$: if (requestKey && requestKey !== loadedRequestKey) {
+		loadedRequestKey = requestKey;
 		void loadComparisons();
 	}
 
@@ -67,7 +119,12 @@
 		notFound = false;
 
 		const [comparisonsResult, workspaceResult] = await Promise.allSettled([
-			fetchComparisons(collectionId),
+			fetchComparisons(collectionId, {
+				material_system_normalized: routeMaterialFilter || undefined,
+				property_normalized: routePropertyFilter || undefined,
+				test_condition_normalized: routeTestConditionFilter || undefined,
+				baseline_normalized: routeBaselineFilter || undefined
+			}),
 			fetchWorkspaceOverview(collectionId)
 		]);
 
@@ -106,7 +163,24 @@
 	function viewSourceHref(row: ComparisonRow) {
 		return buildDocumentViewerHref(collectionId, row.source_document_id, {
 			evidenceId: row.evidence_bundle.supporting_evidence_ids[0] ?? null,
-			returnTo: $page.url.pathname
+			returnTo: `${$page.url.pathname}${$page.url.search}`
+		});
+	}
+
+	async function updateRouteFilter(name: ComparisonRouteFilterName, value: string) {
+		const params = new URLSearchParams($page.url.searchParams);
+		const normalized = value.trim();
+		if (normalized) {
+			params.set(name, normalized);
+		} else {
+			params.delete(name);
+		}
+
+		const query = params.toString();
+		await goto(query ? `${$page.url.pathname}?${query}` : $page.url.pathname, {
+			keepFocus: true,
+			noScroll: true,
+			replaceState: true
 		});
 	}
 
@@ -197,7 +271,16 @@
 		</div>
 		<div class="field">
 			<label for="materialFilter">{$t('comparisons.filterMaterial')}</label>
-			<select id="materialFilter" class="select" bind:value={materialFilter}>
+			<select
+				id="materialFilter"
+				class="select"
+				bind:value={materialFilter}
+				on:change={(event) =>
+					void updateRouteFilter(
+						'material_system_normalized',
+						(event.currentTarget as HTMLSelectElement).value
+					)}
+			>
 				<option value="">{$t('comparisons.allOption')}</option>
 				{#each materials as item}
 					<option value={item}>{item}</option>
@@ -206,9 +289,54 @@
 		</div>
 		<div class="field">
 			<label for="propertyFilter">{$t('comparisons.filterProperty')}</label>
-			<select id="propertyFilter" class="select" bind:value={propertyFilter}>
+			<select
+				id="propertyFilter"
+				class="select"
+				bind:value={propertyFilter}
+				on:change={(event) =>
+					void updateRouteFilter(
+						'property_normalized',
+						(event.currentTarget as HTMLSelectElement).value
+					)}
+			>
 				<option value="">{$t('comparisons.allOption')}</option>
 				{#each properties as item}
+					<option value={item}>{item}</option>
+				{/each}
+			</select>
+		</div>
+		<div class="field">
+			<label for="testConditionFilter">{$t('comparisons.filterTest')}</label>
+			<select
+				id="testConditionFilter"
+				class="select"
+				bind:value={testConditionFilter}
+				on:change={(event) =>
+					void updateRouteFilter(
+						'test_condition_normalized',
+						(event.currentTarget as HTMLSelectElement).value
+					)}
+			>
+				<option value="">{$t('comparisons.allOption')}</option>
+				{#each testConditions as item}
+					<option value={item}>{item}</option>
+				{/each}
+			</select>
+		</div>
+		<div class="field">
+			<label for="baselineFilter">{$t('comparisons.filterBaseline')}</label>
+			<select
+				id="baselineFilter"
+				class="select"
+				bind:value={baselineFilter}
+				on:change={(event) =>
+					void updateRouteFilter(
+						'baseline_normalized',
+						(event.currentTarget as HTMLSelectElement).value
+					)}
+			>
+				<option value="">{$t('comparisons.allOption')}</option>
+				{#each baselines as item}
 					<option value={item}>{item}</option>
 				{/each}
 			</select>

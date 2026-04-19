@@ -24,6 +24,22 @@ describe('graph shared helpers', () => {
 			kind: 'comparison',
 			resourceId: 'row-1'
 		});
+		expect(parseGraphNodeId('mat:abc')).toEqual({
+			kind: 'material',
+			resourceId: 'abc'
+		});
+		expect(parseGraphNodeId('prop:def')).toEqual({
+			kind: 'property',
+			resourceId: 'def'
+		});
+		expect(parseGraphNodeId('tc:ghi')).toEqual({
+			kind: 'test_condition',
+			resourceId: 'ghi'
+		});
+		expect(parseGraphNodeId('base:jkl')).toEqual({
+			kind: 'baseline',
+			resourceId: 'jkl'
+		});
 		expect(parseGraphNodeId('weird')).toEqual({
 			kind: 'unknown',
 			resourceId: ''

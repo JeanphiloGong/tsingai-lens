@@ -9,7 +9,6 @@ from domain.core.comparison import (
 from domain.core.document_profile import (
     DocumentProfile,
     DocumentProfileSummary,
-    analyze_document_profile,
     summarize_document_profile_collection,
 )
 from domain.core.evidence_backbone import (
@@ -37,7 +36,6 @@ __all__ = [
     "SampleVariant",
     "StructureFeature",
     "TestCondition",
-    "analyze_document_profile",
     "evaluate_comparison_assessment",
     "summarize_document_profile_collection",
 ]

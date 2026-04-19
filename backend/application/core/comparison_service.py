@@ -11,6 +11,10 @@ from domain.core.comparison import (
     evaluate_comparison_assessment,
 )
 from domain.shared.enums import TRACEABILITY_STATUS_MISSING
+from application.core.core_semantic_version import (
+    core_semantic_rebuild_required,
+    write_core_semantic_manifest,
+)
 from application.source.collection_service import CollectionService
 from application.core.evidence_card_service import EvidenceCardService, EvidenceCardsNotReadyError
 from application.source.artifact_registry_service import ArtifactRegistryService
@@ -175,6 +179,8 @@ class ComparisonService:
                 pd.read_parquet(path),
                 _COMPARISON_JSON_COLUMNS,
             )
+            if core_semantic_rebuild_required(output_dir) and (output_dir / "documents.parquet").is_file():
+                rows = self.build_comparison_rows(collection_id, output_dir)
         else:
             rows = self.build_comparison_rows(collection_id, output_dir)
         return self._normalize_rows_table(rows, collection_id)
@@ -224,6 +230,7 @@ class ComparisonService:
             table,
             _COMPARISON_JSON_COLUMNS,
         ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
+        write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
         return table
 

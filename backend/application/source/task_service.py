@@ -23,7 +23,7 @@ class TaskService:
         self.repository = repository or build_task_repository(root_dir)
         self.root_dir = self.repository.root_dir
 
-    def create_task(self, collection_id: str, task_type: str = "index") -> dict:
+    def create_task(self, collection_id: str, task_type: str = "build") -> dict:
         task_id = f"task_{uuid4().hex[:12]}"
         now = _now_iso()
         record = {

@@ -1,4 +1,4 @@
-"""Source indexing entrypoint."""
+"""Source artifact build entrypoint."""
 
 import logging
 from typing import Any
@@ -31,7 +31,7 @@ def _summarize_workflow_result(result: Any) -> str:
     return type(result).__name__
 
 
-async def build_index(
+async def build_source_artifacts(
     config: SourceRuntimeConfig,
     method: IndexingMethod | str = IndexingMethod.Standard,
     memory_profile: bool = False,
@@ -74,7 +74,7 @@ async def build_index(
     if memory_profile:
         logger.warning("New pipeline does not yet support memory profiling.")
 
-    logger.info("Initializing indexing pipeline...")
+    logger.info("Initializing source artifact pipeline...")
     pipeline = PipelineFactory.create_pipeline(config, method)
 
     workflow_callbacks.pipeline_start(pipeline.names())

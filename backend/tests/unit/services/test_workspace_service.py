@@ -46,11 +46,11 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     collection_id = collection["collection_id"]
     collection_service.add_file(collection_id, "paper.txt", b"Experimental Section\nMix and anneal.")
 
-    task_service.create_task(collection_id, "index")
+    task_service.create_task(collection_id, "build")
     task_service.update_task(
         task_service.list_tasks(collection_id=collection_id, limit=1)[0]["task_id"],
         status="running",
-        current_stage="source_index_started",
+        current_stage="source_artifacts_started",
         progress_percent=35,
     )
     artifact_registry.upsert(collection_id, collection_service.get_paths(collection_id).output_dir)
@@ -60,7 +60,7 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     assert overview["collection"]["collection_id"] == collection_id
     assert overview["file_count"] == 1
     assert overview["status_summary"] == "processing"
-    assert overview["latest_task"]["current_stage"] == "source_index_started"
+    assert overview["latest_task"]["current_stage"] == "source_artifacts_started"
     assert overview["capabilities"]["can_view_graph"] is False
     assert overview["capabilities"]["can_generate_sop"] is False
 

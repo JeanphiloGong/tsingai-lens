@@ -81,7 +81,7 @@ Delete these flat application-root shims once callers are rewritten:
 - `application/collection_service.py`
 - `application/graph_service.py`
 - `application/index_run_mode_service.py`
-- `application/index_task_runner.py`
+- `application/collection_build_task_runner.py`
 - `application/report_service.py`
 - `application/task_service.py`
 - `application/workspace_service.py`
@@ -173,8 +173,8 @@ Reason:
   -> `application.collections.service`
 - `application.task_service`
   -> `application.indexing.task_service`
-- `application.index_task_runner`
-  -> `application.indexing.index_task_runner`
+- `application.collection_build_task_runner`
+  -> `application.indexing.collection_build_task_runner`
 - `application.index_run_mode_service`
   -> `application.indexing.run_mode_service`
 - `application.workspace_service`

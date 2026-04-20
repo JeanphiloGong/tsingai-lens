@@ -238,8 +238,8 @@ Create domain folders and relocate current files without changing behavior:
   -> `application/collections/service.py`
 - `application/task_service.py`
   -> `application/indexing/task_service.py`
-- `application/index_task_runner.py`
-  -> `application/indexing/index_task_runner.py`
+- `application/collection_build_task_runner.py`
+  -> `application/indexing/collection_build_task_runner.py`
 - `application/index_run_mode_service.py`
   -> `application/indexing/run_mode_service.py`
 - `application/workspace_service.py`

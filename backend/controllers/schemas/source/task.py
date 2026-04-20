@@ -9,10 +9,10 @@ TaskStatus = Literal["queued", "running", "completed", "partial_success", "faile
 TaskStage = Literal[
     "queued",
     "files_registered",
-    "source_index_started",
-    "source_index_completed",
+    "source_artifacts_started",
+    "source_artifacts_completed",
     "document_profiles_started",
-    "evidence_cards_started",
+    "paper_facts_started",
     "comparison_rows_started",
     "protocol_artifacts_started",
     "artifacts_ready",
@@ -20,8 +20,8 @@ TaskStage = Literal[
 ]
 
 
-class IndexTaskCreateRequest(BaseModel):
-    """Request payload to start a collection index task."""
+class BuildTaskCreateRequest(BaseModel):
+    """Request payload to start a collection build task."""
 
     model_config = ConfigDict(extra="ignore")
 

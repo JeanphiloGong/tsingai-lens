@@ -6,12 +6,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
 from controllers.schemas.source.task import (
     ArtifactStatusResponse,
-    IndexTaskCreateRequest,
+    BuildTaskCreateRequest,
     TaskListResponse,
     TaskResponse,
 )
 from application.source.collection_service import CollectionService
-from application.source.index_task_runner import IndexTaskRunner
+from application.source.collection_build_task_runner import CollectionBuildTaskRunner
 from application.source.task_service import TaskService
 from application.source.artifact_registry_service import ArtifactRegistryService
 
@@ -19,7 +19,7 @@ router = APIRouter(tags=["tasks"])
 collection_service = CollectionService()
 task_service = TaskService()
 artifact_registry_service = ArtifactRegistryService()
-index_task_runner = IndexTaskRunner(
+build_task_runner = CollectionBuildTaskRunner(
     collection_service=collection_service,
     task_service=task_service,
     artifact_registry_service=artifact_registry_service,
@@ -28,13 +28,13 @@ logger = logging.getLogger(__name__)
 
 
 @router.post(
-    "/collections/{collection_id}/tasks/index",
+    "/collections/{collection_id}/tasks/build",
     response_model=TaskResponse,
-    summary="创建集合索引任务",
+    summary="创建集合构建任务",
 )
-async def create_index_task(
+async def create_build_task(
     collection_id: str,
-    payload: IndexTaskCreateRequest,
+    payload: BuildTaskCreateRequest,
     background_tasks: BackgroundTasks,
     request: Request,
 ) -> TaskResponse:
@@ -45,18 +45,18 @@ async def create_index_task(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     if not files:
-        raise HTTPException(status_code=400, detail="集合内没有可索引文件")
+        raise HTTPException(status_code=400, detail="集合内没有可构建文件")
 
-    task = task_service.create_task(collection_id=collection_id, task_type="index")
+    task = task_service.create_task(collection_id=collection_id, task_type="build")
     request_id = getattr(request.state, "request_id", None)
     logger.info(
-        "Queued index task task_id=%s collection_id=%s verbose=%s",
+        "Queued build task task_id=%s collection_id=%s verbose=%s",
         task["task_id"],
         collection_id,
         payload.verbose,
     )
     background_tasks.add_task(
-        index_task_runner.run_index_task,
+        build_task_runner.run_build_task,
         task["task_id"],
         collection_id,
         verbose=payload.verbose,

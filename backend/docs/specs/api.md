@@ -32,7 +32,7 @@
 
 1. `POST /api/v1/collections`
 2. `POST /api/v1/collections/{collection_id}/files`
-3. `POST /api/v1/collections/{collection_id}/tasks/index`
+3. `POST /api/v1/collections/{collection_id}/tasks/build`
 4. 轮询 `GET /api/v1/tasks/{task_id}`
 5. 打开 `GET /api/v1/collections/{collection_id}/workspace`
 6. 从 workspace 跳转到 document profiles、evidence cards、comparison rows
@@ -97,7 +97,7 @@
 - `DELETE /api/v1/collections/{collection_id}`
 - `POST /api/v1/collections/{collection_id}/files`
 - `GET /api/v1/collections/{collection_id}/files`
-- `POST /api/v1/collections/{collection_id}/tasks/index`
+- `POST /api/v1/collections/{collection_id}/tasks/build`
 - `GET /api/v1/collections/{collection_id}/tasks`
 - `GET /api/v1/tasks/{task_id}`
 - `GET /api/v1/tasks/{task_id}/artifacts`
@@ -107,8 +107,9 @@
 - `GET /api/v1/tasks/{task_id}` 只接收真正的 `task_id`
 - `collection_id` 不能拿来调用 task 详情接口
 - collection 页面如果要展示任务历史，应走 collection 维度的 tasks 接口
+- `task_type` 对外固定为 `build`
 - `current_stage` 对外应使用：
-  `queued | files_registered | source_index_started | source_index_completed | document_profiles_started | evidence_cards_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
+  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | paper_facts_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
 - `graphrag_index_started`、`graphrag_index_completed`
   已退役，不再属于公开或内部活动合同
 
@@ -152,7 +153,7 @@
   表示上述 Core graph 输入已具备图投影消费条件，而不是
   `entities.parquet` / `relationships.parquet` 是否存在
 - `artifacts` 不再暴露 `graphml_generated` / `graphml_ready`
-  因为 GraphML 已改为基于 Core graph 的按需导出能力，不再是索引阶段的 readiness 产物
+  因为 GraphML 已改为基于 Core graph 的按需导出能力，不再是构建阶段的 readiness 产物
 - `capabilities.can_download_graphml`
   应与 `graph_ready` 保持一致，表达当前 collection 是否可以导出按需生成的 GraphML
 

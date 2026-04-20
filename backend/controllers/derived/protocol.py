@@ -33,7 +33,7 @@ def _protocol_not_ready_detail(
     payload = artifacts or {}
     return {
         "code": "protocol_artifacts_not_ready",
-        "message": "集合的 protocol 产物尚未就绪，请先完成索引任务并等待 protocol steps 生成。",
+        "message": "集合的 protocol 产物尚未就绪，请先完成构建任务并等待 protocol steps 生成。",
         "collection_id": collection_id,
         "artifacts": {
             "documents_generated": bool(payload.get("documents_generated")),

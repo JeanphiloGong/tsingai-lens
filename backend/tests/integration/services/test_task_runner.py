@@ -13,13 +13,13 @@ if "devtools" not in sys.modules:
 
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
-from application.source.index_task_runner import IndexTaskRunner
+from application.source.collection_build_task_runner import CollectionBuildTaskRunner
 from application.source.task_service import TaskService
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
 class DummyWorkflowOutput:
-    def __init__(self, workflow: str = "index", errors: list[str] | None = None):
+    def __init__(self, workflow: str = "build", errors: list[str] | None = None):
         self.workflow = workflow
         self.errors = errors
 
@@ -45,7 +45,7 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
-def _write_index_outputs(output_dir: Path) -> None:
+def _write_source_artifact_outputs(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     documents = pd.DataFrame(
         [
@@ -118,15 +118,15 @@ def _write_review_only_outputs(output_dir: Path) -> None:
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
-def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
+def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    import application.source.index_task_runner as task_runner_module
+    import application.source.collection_build_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
+    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Composite Papers")
     paths = collection_service.get_paths(collection["collection_id"])
@@ -138,17 +138,17 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     captured: dict[str, object] = {}
 
-    async def fake_build_index(**kwargs):  # noqa: ANN003
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
-        _write_index_outputs(paths.output_dir)
+        _write_source_artifact_outputs(paths.output_dir)
         return [DummyWorkflowOutput()]
 
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
-    task = task_service.create_task(collection["collection_id"], "index")
-    result = asyncio.run(runner.run_index_task(task["task_id"], collection["collection_id"]))
+    task = task_service.create_task(collection["collection_id"], "build")
+    result = asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
 
     assert result["status"] == "completed"
     assert result["current_stage"] == "artifacts_ready"
@@ -194,17 +194,17 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert paths.output_dir.joinpath("relationships.parquet").exists() is False
 
 
-def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
+def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
     monkeypatch, tmp_path
 ):
     _patch_parquet(monkeypatch)
 
-    import application.source.index_task_runner as task_runner_module
+    import application.source.collection_build_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
+    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Review Papers")
     paths = collection_service.get_paths(collection["collection_id"])
@@ -218,7 +218,7 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     default_config.parent.mkdir(parents=True, exist_ok=True)
     default_config.write_text("dummy: true\n", encoding="utf-8")
 
-    async def fake_build_index(**kwargs):  # noqa: ANN003
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         _write_review_only_outputs(paths.output_dir)
         return [DummyWorkflowOutput()]
 
@@ -228,10 +228,10 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
         "load_config",
         lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
     )
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
-    task = task_service.create_task(collection["collection_id"], "index")
-    result = asyncio.run(runner.run_index_task(task["task_id"], collection["collection_id"]))
+    task = task_service.create_task(collection["collection_id"], "build")
+    result = asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
 
     assert result["status"] == "completed"
     assert "未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。" in result["warnings"]

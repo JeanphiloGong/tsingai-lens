@@ -43,7 +43,7 @@ Current leakage points include:
   exposes `method` and `is_update_run`
 - [`../../../application/source/collection_service.py`](../../../application/source/collection_service.py)
   persists `default_method` as collection metadata
-- [`../../../application/source/index_task_runner.py`](../../../application/source/index_task_runner.py)
+- [`../../../application/source/collection_build_task_runner.py`](../../../application/source/collection_build_task_runner.py)
   accepts a caller-provided indexing method
 - [`../../../infra/source/config/pipeline_mode.py`](../../../infra/source/config/pipeline_mode.py)
   defines `IndexingMethod.Standard` and `IndexingMethod.Fast` as engine-level
@@ -259,7 +259,7 @@ Backend decides whether to:
 
 The current mode-selection and downgrade policy now lives across:
 
-- [`../../../application/source/index_task_runner.py`](../../../application/source/index_task_runner.py)
+- [`../../../application/source/collection_build_task_runner.py`](../../../application/source/collection_build_task_runner.py)
 - [`../../../infra/source/config/pipeline_mode.py`](../../../infra/source/config/pipeline_mode.py)
 
 That logic should remain backend-owned rather than frontend-owned.

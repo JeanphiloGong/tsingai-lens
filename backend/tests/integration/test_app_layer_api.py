@@ -26,7 +26,7 @@ API_V1_PREFIX = "/api/v1"
 
 
 class DummyWorkflowOutput:
-    def __init__(self, workflow: str = "index", errors: list[str] | None = None):
+    def __init__(self, workflow: str = "build", errors: list[str] | None = None):
         self.workflow = workflow
         self.errors = errors
 
@@ -52,7 +52,7 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
-def _write_index_outputs(output_dir: Path) -> None:
+def _write_source_artifact_outputs(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     documents = pd.DataFrame(
         [
@@ -167,7 +167,7 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
     ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
 
 
-def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
+def _create_built_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": name})
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
@@ -178,7 +178,7 @@ def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple
     )
     assert upload_resp.status_code == 200
 
-    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={})
+    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
     assert task_resp.status_code == 200
     task_id = task_resp.json()["task_id"]
     return collection_id, task_id
@@ -191,19 +191,19 @@ def test_request_id_is_generated_and_echoed(app_client):
     assert response.headers["X-Request-ID"].startswith("req_")
 
 
-def test_request_id_is_echoed_and_propagated_to_background_index(app_client, monkeypatch):
-    import application.source.index_task_runner as task_runner_module
+def test_request_id_is_echoed_and_propagated_to_background_build(app_client, monkeypatch):
+    import application.source.collection_build_task_runner as task_runner_module
     from utils.logger import REQUEST_ID_HEADER, get_request_id
 
     captured: dict[str, str | None] = {}
 
-    async def fake_build_index(**kwargs):  # noqa: ANN003
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured["bound_request_id"] = get_request_id()
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_index_outputs(output_dir)
+        _write_source_artifact_outputs(output_dir)
         return [DummyWorkflowOutput()]
 
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Request ID Set"})
     assert create_resp.status_code == 200
@@ -217,7 +217,7 @@ def test_request_id_is_echoed_and_propagated_to_background_index(app_client, mon
 
     request_id = "client-request-123"
     task_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index",
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
         json={},
         headers={REQUEST_ID_HEADER: request_id},
     )
@@ -225,6 +225,21 @@ def test_request_id_is_echoed_and_propagated_to_background_index(app_client, mon
     assert task_resp.status_code == 200
     assert task_resp.headers[REQUEST_ID_HEADER] == request_id
     assert captured["bound_request_id"] == request_id
+
+
+def test_legacy_index_task_route_is_not_registered(app_client):
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Legacy Route"})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={})
+    assert task_resp.status_code == 404
 
 
 @pytest.fixture()
@@ -247,7 +262,7 @@ def app_client(monkeypatch, tmp_path):
         ReportPatternsResponse,
     )
     import application.derived.graph_service as graph_service_module
-    import application.source.index_task_runner as task_runner_module
+    import application.source.collection_build_task_runner as task_runner_module
     import application.derived.report_service as report_service_module
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
@@ -255,7 +270,7 @@ def app_client(monkeypatch, tmp_path):
     from application.core.document_profile_service import DocumentProfileService
     from application.core.paper_facts_service import PaperFactsService
     from application.goal.brief_service import GoalService
-    from application.source.index_task_runner import IndexTaskRunner
+    from application.source.collection_build_task_runner import CollectionBuildTaskRunner
     from application.source.task_service import TaskService
     from application.core.workspace_overview_service import WorkspaceService
     from main import create_app
@@ -274,7 +289,7 @@ def app_client(monkeypatch, tmp_path):
         artifact_registry,
         paper_facts_service,
     )
-    runner = IndexTaskRunner(
+    runner = CollectionBuildTaskRunner(
         collection_service,
         task_service,
         artifact_registry,
@@ -294,9 +309,9 @@ def app_client(monkeypatch, tmp_path):
     default_config.parent.mkdir(parents=True, exist_ok=True)
     default_config.write_text("dummy: true\n", encoding="utf-8")
 
-    async def fake_build_index(**kwargs):  # noqa: ANN003
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_index_outputs(output_dir)
+        _write_source_artifact_outputs(output_dir)
         return [DummyWorkflowOutput()]
 
     def fake_list_community_reports(  # noqa: ANN001
@@ -354,10 +369,10 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
-    monkeypatch.setattr(tasks_controller, "index_task_runner", runner)
+    monkeypatch.setattr(tasks_controller, "build_task_runner", runner)
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(Path("placeholder-output"), Path("placeholder-input")))
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
     monkeypatch.setattr(graph_service_module, "collection_service", collection_service)
     monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
@@ -380,10 +395,11 @@ def app_client(monkeypatch, tmp_path):
 
 
 def test_collection_task_flow(app_client):
-    collection_id, task_id = _create_indexed_collection(app_client)
+    collection_id, task_id = _create_built_collection(app_client)
 
     task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
     assert task_status.status_code == 200
+    assert task_status.json()["task_type"] == "build"
     assert task_status.json()["status"] == "completed"
     assert task_status.json()["current_stage"] == "artifacts_ready"
 
@@ -393,6 +409,7 @@ def test_collection_task_flow(app_client):
     assert tasks_body["collection_id"] == collection_id
     assert tasks_body["count"] >= 1
     assert tasks_body["items"][0]["task_id"] == task_id
+    assert tasks_body["items"][0]["task_type"] == "build"
 
     completed_tasks = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/tasks",
@@ -781,18 +798,22 @@ def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app
     assert "default_method" not in created_item
 
 
-def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
-    import application.source.index_task_runner as task_runner_module
+def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
+    import application.source.collection_build_task_runner as task_runner_module
 
     captured: dict[str, object] = {}
 
-    async def capturing_build_index(**kwargs):  # noqa: ANN003
+    async def capturing_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_index_outputs(output_dir)
+        _write_source_artifact_outputs(output_dir)
         return [DummyWorkflowOutput()]
 
-    monkeypatch.setattr(task_runner_module, "build_index", capturing_build_index)
+    monkeypatch.setattr(
+        task_runner_module,
+        "build_source_artifacts",
+        capturing_build_source_artifacts,
+    )
 
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
@@ -808,7 +829,7 @@ def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert upload_resp.status_code == 200
 
     task_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index",
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
         json={
             "method": "fast",
             "is_update_run": True,
@@ -821,6 +842,7 @@ def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     task_id = task_resp.json()["task_id"]
     task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
     assert task_status.status_code == 200
+    assert task_status.json()["task_type"] == "build"
     assert task_status.json()["status"] == "completed"
 
     assert captured["method"] == task_runner_module.IndexingMethod.Standard

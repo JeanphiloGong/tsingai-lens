@@ -213,7 +213,7 @@ class WorkspaceService:
                 "documents": {"status": "not_started", "detail": "No files uploaded."},
                 "evidence": {"status": "not_started", "detail": "Evidence cards are not generated yet."},
                 "comparisons": {"status": "not_started", "detail": "Comparison rows are not generated yet."},
-                "protocol": {"status": "not_applicable", "detail": "Protocol branch is unavailable before indexing."},
+                "protocol": {"status": "not_applicable", "detail": "Protocol branch is unavailable before collection build."},
             }
         if task_status == "running":
             return {

@@ -419,55 +419,28 @@ class DocumentProfileService:
             )
 
         normalized = profiles.copy()
-        for column in ("title", "source_filename"):
-            if column not in normalized.columns:
-                normalized[column] = None
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
-        for column in ("title", "source_filename"):
-            normalized[column] = normalized[column].apply(self._normalize_optional_text)
-        if "protocol_extractability_signals" in normalized.columns:
-            normalized["protocol_extractability_signals"] = normalized[
-                "protocol_extractability_signals"
-            ].apply(self._normalize_string_list)
-        if "parsing_warnings" in normalized.columns:
-            normalized["parsing_warnings"] = normalized["parsing_warnings"].apply(
-                self._normalize_string_list
-            )
-        if "confidence" in normalized.columns:
-            normalized["confidence"] = normalized["confidence"].apply(
-                lambda value: round(float(value or 0.0), 2)
-            )
-        return normalized[
-            [
-                "document_id",
-                "collection_id",
-                "title",
-                "source_filename",
-                "doc_type",
-                "protocol_extractable",
-                "protocol_extractability_signals",
-                "parsing_warnings",
-                "confidence",
-            ]
+
+        columns = [
+            "document_id",
+            "collection_id",
+            "title",
+            "source_filename",
+            "doc_type",
+            "protocol_extractable",
+            "protocol_extractability_signals",
+            "parsing_warnings",
+            "confidence",
         ]
+        records = [
+            DocumentProfile.from_mapping(dict(row)).to_record()
+            for _, row in normalized.iterrows()
+        ]
+        return pd.DataFrame(records, columns=columns)
 
     def _serialize_profile_row(self, row: pd.Series) -> dict[str, Any]:
-        return {
-            "document_id": str(row.get("document_id") or ""),
-            "collection_id": str(row.get("collection_id") or ""),
-            "title": self._normalize_optional_text(row.get("title")),
-            "source_filename": self._normalize_optional_text(row.get("source_filename")),
-            "doc_type": str(row.get("doc_type") or DOC_TYPE_UNCERTAIN),
-            "protocol_extractable": str(
-                row.get("protocol_extractable") or PROTOCOL_EXTRACTABLE_UNCERTAIN
-            ),
-            "protocol_extractability_signals": self._normalize_string_list(
-                row.get("protocol_extractability_signals")
-            ),
-            "parsing_warnings": self._normalize_string_list(row.get("parsing_warnings")),
-            "confidence": round(float(row.get("confidence") or 0.0), 2),
-        }
+        return DocumentProfile.from_mapping(dict(row)).to_record()
 
     def _group_sections_by_document(
         self,

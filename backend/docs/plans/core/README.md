@@ -13,6 +13,9 @@ domain-semantic backfill.
 - [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
   Child implementation plan for hard-cutting Core semantic extraction to
   schema-bound LLM parsing
+- [`document-profile-lightweight-triage-plan.md`](document-profile-lightweight-triage-plan.md)
+  Child plan for narrowing `document_profiles` to lightweight triage with
+  enum-stable routing outputs
 - [`claim-traceback-navigation-implementation-plan.md`](claim-traceback-navigation-implementation-plan.md)
   Core traceback vertical slice for reviewable evidence grounding
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)

@@ -71,6 +71,16 @@ _SOURCE_PATH_FIELD_CANDIDATES = (
     "name",
 )
 
+_PROFILE_HEADINGS_LIMIT = 8
+_PROFILE_LEAD_SECTION_LIMIT = 3
+_PROFILE_LEAD_TEXT_LIMIT = 3000
+_PROFILE_FRONT_MATTER_HEADINGS = (
+    "abstract",
+    "summary",
+    "introduction",
+    "background",
+)
+
 
 class DocumentProfilesNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve document profile outputs."""
@@ -348,29 +358,36 @@ class DocumentProfileService:
             source_filename=source_filename,
             file_lookup=file_lookup or {},
         )
-        analysis_title = str(row.get("title") or document_id)
-        text = str(row.get("text") or "")
-        profile_payload = {
-            "collection_id": collection_id,
-            "document_id": document_id,
-            "title": title,
-            "source_filename": source_filename,
-            "analysis_title": analysis_title,
-            "representative_text": text[:12000],
-            "sections": [
+        profile_payload = self._build_document_profile_payload(
+            title=title,
+            source_filename=source_filename,
+            full_text=str(row.get("text") or ""),
+            sections=sections,
+        )
+        if self._document_profile_payload_is_insufficient(profile_payload):
+            return DocumentProfile.from_mapping(
                 {
-                    "section_id": str(section.get("section_id") or ""),
-                    "section_type": str(section.get("section_type") or ""),
-                    "heading": self._normalize_optional_text(section.get("heading")),
-                    "text": str(section.get("text") or "")[:4000],
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                    "title": title,
+                    "source_filename": source_filename,
+                    "doc_type": DOC_TYPE_UNCERTAIN,
+                    "protocol_extractable": PROTOCOL_EXTRACTABLE_UNCERTAIN,
+                    "protocol_extractability_signals": [],
+                    "parsing_warnings": ["insufficient_content"],
+                    "confidence": 0.0,
                 }
-                for section in sections
-                if isinstance(section, dict)
-            ],
-        }
+            ).to_record()
+
         extracted = self._get_structured_extractor().extract_document_profile(
             profile_payload
         )
+        parsing_warnings = list(extracted.parsing_warnings)
+        if (
+            extracted.doc_type == DOC_TYPE_UNCERTAIN
+            or extracted.protocol_extractable == PROTOCOL_EXTRACTABLE_UNCERTAIN
+        ) and "classification_uncertain" not in parsing_warnings:
+            parsing_warnings.append("classification_uncertain")
         normalized = DocumentProfile.from_mapping(
             {
                 "document_id": document_id,
@@ -384,11 +401,109 @@ class DocumentProfileService:
                 "protocol_extractability_signals": list(
                     extracted.protocol_extractability_signals
                 ),
-                "parsing_warnings": list(extracted.parsing_warnings),
+                "parsing_warnings": parsing_warnings,
                 "confidence": extracted.confidence,
             }
         )
         return normalized.to_record()
+
+    def _build_document_profile_payload(
+        self,
+        *,
+        title: str | None,
+        source_filename: str | None,
+        full_text: str,
+        sections: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "title": title,
+            "source_filename": source_filename,
+            "abstract_or_lead_text": self._select_document_profile_lead_text(
+                sections,
+                full_text,
+            ),
+            "headings": self._collect_document_profile_headings(sections),
+        }
+
+    def _document_profile_payload_is_insufficient(
+        self,
+        payload: dict[str, Any],
+    ) -> bool:
+        title = self._normalize_optional_text(payload.get("title"))
+        lead_text = self._normalize_optional_text(payload.get("abstract_or_lead_text"))
+        headings = [
+            str(item).strip()
+            for item in payload.get("headings", [])
+            if str(item).strip()
+        ]
+        return title is None and lead_text is None and not headings
+
+    def _collect_document_profile_headings(
+        self,
+        sections: list[dict[str, Any]],
+    ) -> list[str]:
+        headings: list[str] = []
+        seen: set[str] = set()
+        for section in self._ordered_profile_sections(sections):
+            heading = self._normalize_optional_text(section.get("heading"))
+            if heading is None:
+                continue
+            normalized_heading = heading.casefold()
+            if normalized_heading in seen:
+                continue
+            seen.add(normalized_heading)
+            headings.append(heading)
+            if len(headings) >= _PROFILE_HEADINGS_LIMIT:
+                break
+        return headings
+
+    def _select_document_profile_lead_text(
+        self,
+        sections: list[dict[str, Any]],
+        full_text: str,
+    ) -> str | None:
+        ordered_sections = self._ordered_profile_sections(sections)
+        for section in ordered_sections:
+            heading = self._normalize_optional_text(section.get("heading"))
+            section_text = self._normalize_optional_text(section.get("text"))
+            if heading is None or section_text is None:
+                continue
+            if any(
+                marker in heading.casefold()
+                for marker in _PROFILE_FRONT_MATTER_HEADINGS
+            ):
+                return section_text[:_PROFILE_LEAD_TEXT_LIMIT]
+
+        lead_chunks: list[str] = []
+        total_length = 0
+        for section in ordered_sections:
+            section_text = self._normalize_optional_text(section.get("text"))
+            if section_text is None:
+                continue
+            lead_chunks.append(section_text)
+            total_length += len(section_text)
+            if (
+                len(lead_chunks) >= _PROFILE_LEAD_SECTION_LIMIT
+                or total_length >= _PROFILE_LEAD_TEXT_LIMIT
+            ):
+                break
+
+        if lead_chunks:
+            return "\n\n".join(lead_chunks)[:_PROFILE_LEAD_TEXT_LIMIT]
+
+        normalized_full_text = self._normalize_optional_text(full_text)
+        if normalized_full_text is None:
+            return None
+        return normalized_full_text[:_PROFILE_LEAD_TEXT_LIMIT]
+
+    def _ordered_profile_sections(
+        self,
+        sections: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return sorted(
+            (section for section in sections if isinstance(section, dict)),
+            key=lambda item: self._safe_int(item.get("order"), default=0),
+        )
 
     def summarize_document_profiles(self, profiles: pd.DataFrame) -> dict[str, Any]:
         normalized = self._normalize_profiles_table(profiles, None)

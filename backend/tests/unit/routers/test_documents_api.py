@@ -177,4 +177,4 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
     )
 
     assert payload.doc_type == "experimental"
-    assert payload.protocol_extractable == "yes"
+    assert payload.protocol_extractable == "uncertain"

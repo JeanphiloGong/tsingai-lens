@@ -195,6 +195,9 @@
   `experimental | review | mixed | uncertain`
 - `protocol_extractable` 使用
   `yes | partial | no | uncertain`
+- `protocol_extractability_signals` 当前为预留字段，返回空数组
+- `parsing_warnings` 仅用于固定 triage warning，例如
+  `insufficient_content | classification_uncertain`
 - 这是增量字段扩展，不改变 endpoint，也不破坏旧字段
 
 前端消费约定：
@@ -213,7 +216,7 @@
   "source_filename": "wang_2024_battery.pdf",
   "doc_type": "experimental",
   "protocol_extractable": "yes",
-  "protocol_extractability_signals": ["methods_section_detected"],
+  "protocol_extractability_signals": [],
   "parsing_warnings": [],
   "confidence": 0.91
 }

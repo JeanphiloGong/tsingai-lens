@@ -33,11 +33,7 @@ class DocumentProfile:
     def from_mapping(cls, payload: Mapping[str, Any]) -> "DocumentProfile":
         signals = _normalize_string_tuple(payload.get("protocol_extractability_signals"))
         warnings = _normalize_string_tuple(payload.get("parsing_warnings"))
-        doc_type = _normalize_doc_type(
-            payload.get("doc_type"),
-            signals=signals,
-            warnings=warnings,
-        )
+        doc_type = _normalize_doc_type(payload.get("doc_type"))
         return cls(
             document_id=str(payload.get("document_id") or ""),
             collection_id=str(payload.get("collection_id") or ""),
@@ -45,9 +41,7 @@ class DocumentProfile:
             source_filename=_normalize_optional_text(payload.get("source_filename")),
             doc_type=doc_type,
             protocol_extractable=_normalize_protocol_extractable(
-                payload.get("protocol_extractable"),
-                doc_type=doc_type,
-                signals=signals,
+                payload.get("protocol_extractable")
             ),
             protocol_extractability_signals=signals,
             parsing_warnings=warnings,
@@ -146,9 +140,6 @@ def _normalize_string_tuple(value: Any) -> tuple[str, ...]:
 
 def _normalize_doc_type(
     value: Any,
-    *,
-    signals: tuple[str, ...] = (),
-    warnings: tuple[str, ...] = (),
 ) -> str:
     raw = _normalize_label(value)
     if raw in {
@@ -199,28 +190,11 @@ def _normalize_doc_type(
     }:
         return DOC_TYPE_UNCERTAIN
 
-    if "review_contamination_detected" in warnings:
-        return DOC_TYPE_MIXED
-
-    if any(
-        signal in set(signals)
-        for signal in (
-            "methods_section_detected",
-            "procedural_actions_detected",
-            "condition_markers_detected",
-            "characterization_section_detected",
-        )
-    ):
-        return DOC_TYPE_EXPERIMENTAL
-
     return DOC_TYPE_UNCERTAIN
 
 
 def _normalize_protocol_extractable(
     value: Any,
-    *,
-    doc_type: str,
-    signals: tuple[str, ...] = (),
 ) -> str:
     raw = _normalize_label(value)
     if raw in {
@@ -268,28 +242,6 @@ def _normalize_protocol_extractable(
 
     if raw == PROTOCOL_EXTRACTABLE_UNCERTAIN:
         return raw
-
-    signal_set = set(signals)
-    if doc_type == DOC_TYPE_REVIEW:
-        return PROTOCOL_EXTRACTABLE_NO
-    if doc_type == DOC_TYPE_MIXED:
-        return PROTOCOL_EXTRACTABLE_PARTIAL
-    if doc_type == DOC_TYPE_EXPERIMENTAL:
-        if {
-            "methods_section_detected",
-            "procedural_actions_detected",
-            "condition_markers_detected",
-        }.issubset(signal_set):
-            return PROTOCOL_EXTRACTABLE_YES
-        if signal_set.intersection(
-            {
-                "methods_section_detected",
-                "procedural_actions_detected",
-                "condition_markers_detected",
-                "characterization_section_detected",
-            }
-        ):
-            return PROTOCOL_EXTRACTABLE_PARTIAL
     return PROTOCOL_EXTRACTABLE_UNCERTAIN
 
 

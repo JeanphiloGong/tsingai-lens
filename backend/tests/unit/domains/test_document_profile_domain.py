@@ -9,7 +9,6 @@ from domain.shared.enums import (
     DOC_TYPE_REVIEW,
     DOC_TYPE_UNCERTAIN,
     PROTOCOL_EXTRACTABLE_NO,
-    PROTOCOL_EXTRACTABLE_PARTIAL,
     PROTOCOL_EXTRACTABLE_UNCERTAIN,
     PROTOCOL_EXTRACTABLE_YES,
 )
@@ -58,10 +57,10 @@ def test_document_profile_from_mapping_coerces_invalid_llm_status_values() -> No
     )
 
     assert profile.doc_type == DOC_TYPE_EXPERIMENTAL
-    assert profile.protocol_extractable == PROTOCOL_EXTRACTABLE_YES
+    assert profile.protocol_extractable == PROTOCOL_EXTRACTABLE_UNCERTAIN
 
 
-def test_document_profile_from_mapping_falls_back_to_partial_for_mixed_review_contamination() -> None:
+def test_document_profile_from_mapping_does_not_infer_status_from_signals_or_warnings() -> None:
     profile = DocumentProfile.from_mapping(
         {
             "document_id": "doc-mixed",
@@ -73,8 +72,8 @@ def test_document_profile_from_mapping_falls_back_to_partial_for_mixed_review_co
         }
     )
 
-    assert profile.doc_type == "mixed"
-    assert profile.protocol_extractable == PROTOCOL_EXTRACTABLE_PARTIAL
+    assert profile.doc_type == DOC_TYPE_UNCERTAIN
+    assert profile.protocol_extractable == PROTOCOL_EXTRACTABLE_UNCERTAIN
 
 
 def test_summarize_document_profile_collection_emits_collection_warnings() -> None:

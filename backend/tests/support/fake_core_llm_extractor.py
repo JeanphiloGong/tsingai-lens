@@ -41,62 +41,95 @@ _METHODS = ("XRD", "SEM", "TEM", "XPS", "Raman", "FTIR", "DSC", "TGA", "DMA")
 
 class FakeCoreLLMStructuredExtractor:
     def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
-        title = str(payload.get("title") or payload.get("analysis_title") or "").strip()
-        text = str(payload.get("representative_text") or "")
-        sections = payload.get("sections") if isinstance(payload.get("sections"), list) else []
-        lowered_title = title.lower()
-        lowered_text = text.lower()
+        title = str(payload.get("title") or "").strip()
+        source_filename = str(payload.get("source_filename") or "").strip()
+        lead_text = str(payload.get("abstract_or_lead_text") or "")
+        headings = payload.get("headings") if isinstance(payload.get("headings"), list) else []
 
-        has_methods = any(str(item.get("section_type") or "") == "methods" for item in sections)
-        has_characterization = any(
-            str(item.get("section_type") or "") == "characterization" for item in sections
+        heading_text = " ".join(str(item) for item in headings)
+        combined_text = " ".join(part for part in (title, source_filename, heading_text, lead_text) if part)
+        lowered_text = combined_text.lower()
+
+        review_hits = sum(
+            marker in lowered_text
+            for marker in (
+                "review",
+                "overview",
+                "survey",
+                "recent advances",
+                "progress in",
+            )
         )
-        review_hits = int("review" in lowered_title or "overview" in lowered_title) + int(
-            "this review" in lowered_text or "recent advances" in lowered_text
+        methods_hits = sum(
+            marker in lowered_text
+            for marker in (
+                "experimental",
+                "materials and methods",
+                "method",
+                "methods",
+                "experiment",
+            )
+        )
+        characterization_hits = sum(
+            marker in lowered_text
+            for marker in (
+                "characterization",
+                "xrd",
+                "sem",
+                "tem",
+                "xps",
+                "ftir",
+                "raman",
+            )
         )
         procedural_hits = sum(
-            token in lowered_text
-            for token in ("mix", "mixed", "stir", "anneal", "dried", "fabricated", "prepared")
+            marker in lowered_text
+            for marker in (
+                "mixed",
+                "stir",
+                "anneal",
+                "annealed",
+                "dried",
+                "fabricated",
+                "prepared",
+                "sintered",
+            )
         )
-        condition_hits = len(_TEMP_PATTERN.findall(text)) + len(_TIME_PATTERN.findall(text))
+        results_hits = (
+            len(_TEMP_PATTERN.findall(combined_text))
+            + len(_TIME_PATTERN.findall(combined_text))
+            + sum(
+                marker in lowered_text
+                for marker in ("mpa", "gpa", "%", "w/mk", "conductivity", "strength")
+            )
+        )
 
-        signals: list[str] = []
+        experimental_score = (
+            methods_hits + characterization_hits + procedural_hits + results_hits
+        )
+
         warnings: list[str] = []
-        if has_methods:
-            signals.append("methods_section_detected")
-        else:
-            warnings.append("missing_methods_section")
-        if has_characterization:
-            signals.append("characterization_section_detected")
-        if procedural_hits:
-            signals.append("procedural_actions_detected")
-        if condition_hits:
-            signals.append("condition_markers_detected")
-        else:
-            warnings.append("critical_parameters_incomplete")
-
-        if review_hits and (has_methods or procedural_hits):
+        if review_hits and experimental_score >= 3:
             doc_type = "mixed"
             protocol_extractable = "partial"
-            warnings.append("review_contamination_detected")
         elif review_hits:
             doc_type = "review"
             protocol_extractable = "no"
-        elif has_methods and procedural_hits >= 2 and condition_hits >= 2:
+        elif experimental_score >= 5:
             doc_type = "experimental"
             protocol_extractable = "yes"
-        elif has_methods or procedural_hits:
+        elif experimental_score >= 2:
             doc_type = "experimental"
             protocol_extractable = "partial"
         else:
             doc_type = "uncertain"
             protocol_extractable = "uncertain"
-            warnings.append("document_type_uncertain")
+            warnings.append("classification_uncertain")
 
         return StructuredDocumentProfile(
             doc_type=doc_type,
             protocol_extractable=protocol_extractable,
-            protocol_extractability_signals=sorted(set(signals)),
+            protocol_extractability_signals=[],
             parsing_warnings=sorted(set(warnings)),
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )

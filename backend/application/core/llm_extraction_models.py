@@ -73,7 +73,7 @@ class SampleVariantPayload(_StrictModel):
     process_context: ProcessContextPayload = Field(default_factory=ProcessContextPayload)
     confidence: float = 0.0
     epistemic_status: str = "normalized_from_evidence"
-    source_kind: Literal["section", "table_row"] = "section"
+    source_kind: Literal["text_window", "table_row"] = "text_window"
 
 
 class TestConditionPayloadModel(_StrictModel):

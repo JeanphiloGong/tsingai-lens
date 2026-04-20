@@ -134,16 +134,28 @@ class FakeCoreLLMStructuredExtractor:
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
 
-    def extract_section_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
+    def extract_text_window_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
         document_title = str(payload.get("document_title") or "")
         document_profile = payload.get("document_profile") or {}
-        section = payload.get("section") or {}
-        section_type = str(section.get("section_type") or "")
-        text = str(section.get("text") or "")
-        section_id = str(section.get("section_id") or "") or None
-        text_unit_ids = section.get("text_unit_ids") if isinstance(section.get("text_unit_ids"), list) else []
+        text_window = payload.get("text_window") or {}
+        text = str(text_window.get("text") or "")
+        window_id = str(text_window.get("window_id") or "") or None
+        block_ids = (
+            text_window.get("block_ids") if isinstance(text_window.get("block_ids"), list) else []
+        )
+        heading_path = str(text_window.get("heading_path") or "")
+        text_unit_ids = (
+            text_window.get("text_unit_ids")
+            if isinstance(text_window.get("text_unit_ids"), list)
+            else []
+        )
+        window_role = self._classify_text_window_role(heading_path, text)
 
-        if str(document_profile.get("doc_type") or "") == "review" and "experimental section" not in text.lower():
+        if (
+            str(document_profile.get("doc_type") or "") == "review"
+            and "experimental section" not in text.lower()
+            and window_role != "methods"
+        ):
             return StructuredExtractionBundle()
 
         material_system = self._infer_material_system(document_title, text)
@@ -157,7 +169,7 @@ class FakeCoreLLMStructuredExtractor:
         baseline_references: list[BaselineReferencePayload] = []
         measurement_results: list[MeasurementResultPayload] = []
 
-        if section_type == "methods":
+        if window_role == "methods":
             sentence = self._first_statement(text)
             if sentence:
                 method_facts.append(
@@ -175,7 +187,8 @@ class FakeCoreLLMStructuredExtractor:
                             EvidenceAnchorPayload(
                                 quote=sentence,
                                 source_type="method",
-                                section_id=section_id,
+                                section_id=window_id,
+                                block_id=str(block_ids[0]) if block_ids else None,
                                 snippet_id=text_unit_ids[0] if text_unit_ids else None,
                             )
                         ],
@@ -183,11 +196,12 @@ class FakeCoreLLMStructuredExtractor:
                     )
                 )
 
-        if section_type == "characterization" and methods:
+        if window_role == "characterization" and methods:
             anchor = EvidenceAnchorPayload(
                 quote=self._first_statement(text) or text[:160],
                 source_type="text",
-                section_id=section_id,
+                section_id=window_id,
+                block_id=str(block_ids[0]) if block_ids else None,
                 snippet_id=text_unit_ids[0] if text_unit_ids else None,
             )
             for index, method_name in enumerate(methods, start=1):
@@ -227,7 +241,7 @@ class FakeCoreLLMStructuredExtractor:
                     process_context=process_context,
                     confidence=0.66,
                     epistemic_status="inferred_with_low_confidence",
-                    source_kind="section",
+                    source_kind="text_window",
                 )
             )
 
@@ -279,14 +293,15 @@ class FakeCoreLLMStructuredExtractor:
                     variant_ref="default_variant",
                     test_condition_ref="section_tc" if test_conditions else None,
                     baseline_ref="section_base" if baseline_references else None,
-                    anchors=[
-                        EvidenceAnchorPayload(
-                            quote=sentence,
-                            source_type="text",
-                            section_id=section_id,
-                            snippet_id=text_unit_ids[0] if text_unit_ids else None,
-                        )
-                    ],
+                        anchors=[
+                            EvidenceAnchorPayload(
+                                quote=sentence,
+                                source_type="text",
+                                section_id=window_id,
+                                block_id=str(block_ids[0]) if block_ids else None,
+                                snippet_id=text_unit_ids[0] if text_unit_ids else None,
+                            )
+                        ],
                     confidence=0.84,
                 )
             )
@@ -303,19 +318,26 @@ class FakeCoreLLMStructuredExtractor:
         document_title = str(payload.get("document_title") or "")
         document_profile = payload.get("document_profile") or {}
         row = payload.get("table_row") or {}
-        nearby_context = payload.get("nearby_context") or {}
+        supporting_windows = (
+            payload.get("supporting_text_windows")
+            if isinstance(payload.get("supporting_text_windows"), list)
+            else []
+        )
         if str(document_profile.get("doc_type") or "") == "review":
             return StructuredExtractionBundle()
 
         table_id = str(row.get("table_id") or "") or None
         row_summary = str(row.get("row_summary") or "")
         cells = row.get("cells") if isinstance(row.get("cells"), list) else []
-        methods_text = str(nearby_context.get("methods_text") or "")
-        characterization_text = str(nearby_context.get("characterization_text") or "")
+        support_text = "\n\n".join(
+            str(window.get("text") or "").strip()
+            for window in supporting_windows
+            if isinstance(window, dict) and str(window.get("text") or "").strip()
+        )
 
-        material_system = self._infer_material_system(document_title, methods_text or characterization_text)
-        process_context = self._extract_process_context(methods_text)
-        methods = self._extract_methods(characterization_text or methods_text)
+        material_system = self._infer_material_system(document_title, support_text or row_summary)
+        process_context = self._extract_process_context(support_text)
+        methods = self._extract_methods(support_text)
 
         sample_label = None
         variable_axis_type = None
@@ -440,6 +462,19 @@ class FakeCoreLLMStructuredExtractor:
             baseline_references=baseline_references,
             measurement_results=measurement_results,
         )
+
+    def _classify_text_window_role(self, heading_path: str, text: str) -> str | None:
+        lowered_heading = heading_path.lower()
+        lowered_text = text.lower()
+        if any(token in lowered_heading for token in ("experimental", "method", "methods", "materials and methods")):
+            return "methods"
+        if any(token in lowered_heading for token in ("characterization", "analysis")):
+            return "characterization"
+        if any(token in lowered_text for token in ("mixed", "annealed", "stirred", "dried", "sintered")):
+            return "methods"
+        if self._extract_methods(text) and "character" in lowered_text:
+            return "characterization"
+        return None
 
     def _infer_material_system(self, title: str, text: str):
         lowered = f"{title}\n{text}".lower()

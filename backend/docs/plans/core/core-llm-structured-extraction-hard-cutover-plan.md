@@ -11,6 +11,10 @@ It is a Core child plan inside the corrected Lens v1 Core flow:
 
 `document_profiles -> paper facts family -> comparison_rows / evidence_cards`
 
+Read this plan with the accepted paper-facts RFC:
+
+- [`../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md`](../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md)
+
 The purpose of this cutover is straightforward:
 
 - stop treating noisy heuristic inference as the primary semantic extractor
@@ -31,7 +35,7 @@ Source, read
 The current backend already has the right high-level layering:
 
 - Source hands off structural artifacts such as `documents`, `text_units`,
-  `sections`, and `table_cells`
+  `blocks`, `table_rows`, and `table_cells`
 - Core owns stable research-fact extraction and collection-facing review
   artifacts
 - derived and downstream surfaces consume Core outputs rather than defining the
@@ -114,6 +118,8 @@ This hard-cutover plan covers:
   extraction
 - replacing heuristic paper-facts extraction and evidence-view projection with
   LLM-grounded structured extraction plus deterministic projection
+- removing `section` as a Core extraction contract or Source-to-Core semantic
+  handoff requirement
 - preserving deterministic Core assembly for `comparison_rows`
 - invalidating old heuristic-produced Core artifacts rather than supporting
   mixed reads
@@ -136,10 +142,18 @@ Source should continue to produce only structural handoff artifacts:
 
 - `documents`
 - `text_units`
-- `sections`
+- `blocks`
+- `table_rows`
 - `table_cells`
 
 Those are the inputs Core will consume for semantic extraction.
+
+This plan now makes one narrower boundary explicit:
+
+- Core must not depend on `sections.parquet` as an owned semantic handoff
+- Core may build transient text windows over ordered `blocks`
+- those text windows are batching units only, not durable Source or Core
+  domain artifacts
 
 ### What Core Must Extract With LLM Structured Parsing
 
@@ -201,20 +215,27 @@ Output:
 - `parsing_warnings`
 - confidence and contamination markers
 
-### Slice 2: Section Fact Extraction
+### Slice 2: Text-Window Fact Extraction
 
 Input:
 
-- one Core-relevant block window or section at a time
+- one Core-built text window over ordered `blocks`
 - document title and document-level identity
-- section type and local source anchor context
+- local `heading_path`, `block_ids`, and source anchor context
 
 Output:
 
 - `method_facts`
-- `characterization_observations`
-- section-grounded condition or baseline context when present
+- text-grounded `sample_variants`, `test_conditions`, `baseline_references`,
+  and `measurement_results` when the window directly supports them
+- `characterization_observations` when the evidence is explicit enough
 - traceability-ready anchors
+
+This slice replaces the old `extract_section_bundle` idea.
+
+The batching unit may still align with a heading boundary when that makes the
+window more coherent, but the contract should be "bounded text window over
+blocks", not "section object with `section_type` semantics".
 
 ### Slice 3: Table Row Fact Extraction
 
@@ -224,7 +245,7 @@ Input:
 - table title if available
 - header path values
 - one row's cells
-- nearby methods or characterization context when available
+- supporting text windows selected from nearby or anchor-related `blocks`
 
 Output:
 
@@ -237,6 +258,19 @@ Output:
 The extraction unit should be one table row, not the whole paper, so the model
 is forced to reason over bounded local evidence instead of mixing unrelated
 studies in review-heavy documents.
+
+The contextual contract for this slice should no longer be:
+
+- first `methods` section text
+- first `characterization` section text
+
+Instead it should be:
+
+- row-local structure
+- nearby supporting text windows
+- optional caption or block-linked support text
+
+This keeps Core from smuggling `section_type` semantics back into the row path.
 
 ### Slice 4: Evidence View Projection
 
@@ -275,7 +309,7 @@ The design goal is:
 
 Every extraction prompt should enforce the same non-negotiables:
 
-- extract only facts supported by the provided text, row, or section
+- extract only facts supported by the provided text window or table row
 - when evidence is missing or ambiguous, return `null` or an empty list
 - do not infer missing material systems from filenames
 - do not treat years, citation numbers, row numbers, or footnote markers as
@@ -313,9 +347,11 @@ quietly trusting them.
 - `backend/application/core/document_profile_service.py`
 - `backend/application/core/evidence_card_service.py`
 - `backend/application/core/comparison_service.py`
+- `backend/application/core/llm_structured_extractor.py`
 - `backend/application/source/index_task_runner.py`
 - `backend/infra/`
   new minimal OpenAI structured-calling seam
+- `backend/tests/support/fake_core_llm_extractor.py`
 
 ### Suggested New Backend Files
 
@@ -332,6 +368,9 @@ Delete the current heuristic extraction chain after cutover, including:
 - profile keyword-scoring as the primary semantic classifier
 - table-row variant guessing as the primary variant extractor
 - scalar value and unit regex guessing as the primary measurement extractor
+- Core-internal section projection as the primary text extraction contract
+- Source `sections` workflow remnants once no Core read path still depends on
+  them
 - baseline and test-condition inference fallbacks that survive only because the
   LLM extractor was uncertain
 
@@ -341,14 +380,19 @@ not become a second semantic extraction path.
 ## Execution Order
 
 1. Add the minimal OpenAI structured client and extraction models.
-2. Hard-cut table-row extraction to LLM structured parsing.
-3. Hard-cut section fact extraction to LLM structured parsing.
-4. Hard-cut document-profile classification to LLM structured parsing.
-5. Rebuild deterministic evidence-card projection over the extracted fact
+2. Hard-cut Core text extraction from `section` payloads to text-window
+   payloads over `blocks`.
+3. Hard-cut table-row extraction to consume row-local structure plus supporting
+   text windows.
+4. Move characterization support to first-class extracted facts or
+   anchor-linked deterministic derivation only.
+5. Hard-cut document-profile classification to LLM structured parsing.
+6. Rebuild deterministic evidence-card projection over the extracted fact
    layer.
-6. Rebuild Core artifact versioning and stale-artifact invalidation.
-7. Remove the old heuristic extraction implementation.
-8. Lock in regression coverage on a representative benchmark corpus.
+7. Rebuild Core artifact versioning and stale-artifact invalidation.
+8. Remove the old heuristic extraction implementation and remaining `sections`
+   dependency chain.
+9. Lock in regression coverage on a representative benchmark corpus.
 
 This order keeps the highest-noise extraction surface first while preserving
 deterministic comparison assembly until the backbone artifacts improve.
@@ -364,11 +408,14 @@ deterministic comparison assembly until the backbone artifacts improve.
 - table-row extraction rejects literature-summary rows that are not
   comparison-worthy
 - `comparison_rows` become fewer but materially higher signal
+- Core no longer requires `sections.parquet` or `section_type` to extract paper
+  facts
 
 ### Contract Verification
 
 - Source still terminates at structural artifacts only
 - Core remains the only stable fact producer
+- Core consumes `blocks` and `table_rows` rather than `sections`
 - comparison APIs continue to serve deterministic collection-facing rows
 
 ### Regression Verification
@@ -392,6 +439,8 @@ deterministic comparison assembly until the backbone artifacts improve.
   dual-semantic ownership
 - if LLM extraction is placed in Source instead of Core, the layering boundary
   will become weaker rather than stronger
+- if Core keeps using `section_type` as a hidden routing primitive, the system
+  will still be Source-shaped even after the LLM cutover
 
 Guardrails:
 
@@ -399,6 +448,8 @@ Guardrails:
 - no adapter or compatibility layer between heuristic and LLM semantic outputs
 - no direct LLM emission of final `comparison_rows`
 - no Source-owned stable fact artifacts
+- no new permanent Core contract that rebrands `section` without actually
+  removing section semantics
 
 ## Parent, Child, And Companion Relationships
 

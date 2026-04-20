@@ -43,13 +43,13 @@ def build_document_profile_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     return _DOCUMENT_PROFILE_SYSTEM_PROMPT, user_prompt
 
 
-def build_section_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
-        "Extract section-grounded research facts from this one document section.\n\n"
+        "Extract text-window-grounded research facts from this one bounded document window.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "You may emit method facts, sample variants, test conditions, baseline "
         "references, and measurement results only if they are directly grounded in "
-        "this section. Do not emit reader-facing summaries or cards."
+        "this text window. Do not emit reader-facing summaries or cards."
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
 

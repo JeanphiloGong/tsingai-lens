@@ -18,7 +18,6 @@ from application.core.llm_extraction_models import (
 )
 from infra.source.runtime.source_evidence import (
     build_blocks,
-    build_sections,
     build_table_cells,
     build_table_rows,
 )
@@ -43,7 +42,6 @@ def _write_source_artifacts(
     text_units: pd.DataFrame | None = None,
 ) -> None:
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
@@ -58,10 +56,17 @@ class EvidenceOnlyExtractor:
             confidence=0.9,
         )
 
-    def extract_section_bundle(self, payload):  # noqa: ANN001
-        section = payload.get("section") or {}
-        section_id = str(section.get("section_id") or "") or None
-        text_unit_ids = section.get("text_unit_ids") if isinstance(section.get("text_unit_ids"), list) else []
+    def extract_text_window_bundle(self, payload):  # noqa: ANN001
+        text_window = payload.get("text_window") or {}
+        window_id = str(text_window.get("window_id") or "") or None
+        block_ids = (
+            text_window.get("block_ids") if isinstance(text_window.get("block_ids"), list) else []
+        )
+        text_unit_ids = (
+            text_window.get("text_unit_ids")
+            if isinstance(text_window.get("text_unit_ids"), list)
+            else []
+        )
         return StructuredExtractionBundle(
             method_facts=[
                 MethodFactPayload(
@@ -73,7 +78,8 @@ class EvidenceOnlyExtractor:
                         EvidenceAnchorPayload(
                             quote="Process conditions were reported.",
                             source_type="text",
-                            section_id=section_id,
+                            section_id=window_id,
+                            block_id=str(block_ids[0]) if block_ids else None,
                             snippet_id=text_unit_ids[0] if text_unit_ids else None,
                         )
                     ],

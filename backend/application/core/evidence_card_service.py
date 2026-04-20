@@ -69,8 +69,6 @@ from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
     restore_frame_from_storage,
 )
-from infra.source.runtime.source_evidence import classify_heading
-
 logger = logging.getLogger(__name__)
 
 
@@ -117,6 +115,7 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
     "characterization_observation_ids",
     "evidence_anchor_ids",
 )
+_MAX_SUPPORTING_TEXT_WINDOWS = 3
 _CHARACTERIZATION_COLUMNS = [
     "observation_id",
     "document_id",
@@ -467,7 +466,7 @@ class EvidenceCardService:
             raise EvidenceCardsNotReadyError(collection_id, base_dir) from exc
 
         document_records = build_document_records(documents, text_units)
-        sections_by_doc = self._group_sections_by_document(blocks)
+        text_windows_by_doc = self._build_text_windows_by_document(blocks)
         table_rows_by_doc = self._group_table_rows_by_document(table_rows)
         table_cells_by_doc = self._group_table_cells_by_document(table_cells)
         profile_by_doc = {
@@ -509,15 +508,15 @@ class EvidenceCardService:
                 or document_id
             )
             source_filename = self._normalize_scalar_text(profile.get("source_filename"))
-            doc_sections = sections_by_doc.get(document_id, [])
+            doc_text_windows = text_windows_by_doc.get(document_id, [])
             doc_table_rows = table_rows_by_doc.get(document_id, [])
             grouped_row_cells = self._group_table_cells_by_row(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
             logger.info(
-                "Evidence extraction document started collection_id=%s document_id=%s block_count=%s table_row_count=%s doc_type=%s",
+                "Evidence extraction document started collection_id=%s document_id=%s text_window_count=%s table_row_count=%s doc_type=%s",
                 collection_id,
                 document_id,
-                len(doc_sections),
+                len(doc_text_windows),
                 len(doc_table_rows),
                 profile.get("doc_type"),
             )
@@ -528,21 +527,21 @@ class EvidenceCardService:
             doc_condition_start = len(test_condition_rows)
             doc_baseline_start = len(baseline_rows)
             doc_measurement_start = len(measurement_rows)
-            for section in doc_sections:
-                bundle = extractor.extract_section_bundle(
-                    self._build_section_extraction_payload(
+            for text_window in doc_text_windows:
+                bundle = extractor.extract_text_window_bundle(
+                    self._build_text_window_extraction_payload(
                         document_id=document_id,
                         title=title,
                         source_filename=source_filename,
                         profile=profile,
-                        section=section,
+                        text_window=text_window,
                     )
                 )
                 self._materialize_bundle(
                     bundle=bundle,
                     collection_id=collection_id,
                     document_id=document_id,
-                    section=section,
+                    text_window=text_window,
                     table_id=None,
                     row_index=None,
                     evidence_anchor_rows=evidence_anchor_rows,
@@ -554,11 +553,11 @@ class EvidenceCardService:
                     document_state=document_state,
                 )
                 logger.debug(
-                    "Evidence section bundle extracted collection_id=%s document_id=%s section_id=%s section_type=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                    "Evidence text-window bundle extracted collection_id=%s document_id=%s window_id=%s heading_path=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
                     collection_id,
                     document_id,
-                    section.get("section_id"),
-                    section.get("section_type"),
+                    text_window.get("window_id"),
+                    text_window.get("heading_path"),
                     len(bundle.method_facts),
                     len(bundle.sample_variants),
                     len(bundle.test_conditions),
@@ -579,14 +578,14 @@ class EvidenceCardService:
                             profile=profile,
                             table_row=row,
                             row_cells=row_cells,
-                            sections=doc_sections,
+                            text_windows=doc_text_windows,
                         )
                     )
                     self._materialize_bundle(
                         bundle=bundle,
                         collection_id=collection_id,
                         document_id=document_id,
-                        section=None,
+                        text_window=None,
                         table_id=table_id,
                         row_index=row_index,
                         evidence_anchor_rows=evidence_anchor_rows,
@@ -661,7 +660,7 @@ class EvidenceCardService:
             collection_id=collection_id,
             method_facts=method_facts,
             evidence_anchors=evidence_anchors,
-            sections_by_doc=sections_by_doc,
+            text_windows_by_doc=text_windows_by_doc,
         )
         characterization = self._attach_variant_ids_to_characterization(
             characterization,
@@ -848,14 +847,14 @@ class EvidenceCardService:
             "baseline_records_by_id": {},
         }
 
-    def _build_section_extraction_payload(
+    def _build_text_window_extraction_payload(
         self,
         *,
         document_id: str,
         title: str,
         source_filename: str | None,
         profile: dict[str, Any],
-        section: dict[str, Any],
+        text_window: dict[str, Any],
     ) -> dict[str, Any]:
         return {
             "document_id": document_id,
@@ -865,12 +864,13 @@ class EvidenceCardService:
                 "doc_type": str(profile.get("doc_type") or ""),
                 "protocol_extractable": str(profile.get("protocol_extractable") or ""),
             },
-            "section": {
-                "section_id": str(section.get("section_id") or ""),
-                "section_type": str(section.get("section_type") or ""),
-                "heading": self._normalize_scalar_text(section.get("heading")),
-                "text": str(section.get("text") or "")[:12000],
-                "text_unit_ids": self._normalize_list(section.get("text_unit_ids")),
+            "text_window": {
+                "window_id": str(text_window.get("window_id") or ""),
+                "heading": self._normalize_scalar_text(text_window.get("heading")),
+                "heading_path": self._normalize_scalar_text(text_window.get("heading_path")),
+                "text": str(text_window.get("text") or "")[:12000],
+                "text_unit_ids": self._normalize_list(text_window.get("text_unit_ids")),
+                "block_ids": self._normalize_list(text_window.get("block_ids")),
             },
         }
 
@@ -883,10 +883,14 @@ class EvidenceCardService:
         profile: dict[str, Any],
         table_row: dict[str, Any],
         row_cells: list[dict[str, Any]],
-        sections: list[dict[str, Any]],
+        text_windows: list[dict[str, Any]],
     ) -> dict[str, Any]:
         table_id = str(table_row.get("table_id") or "")
         row_index = self._safe_int(table_row.get("row_index")) or 0
+        supporting_text_windows = self._select_supporting_text_windows(
+            text_windows=text_windows,
+            table_row=table_row,
+        )
         return {
             "document_id": document_id,
             "document_title": title,
@@ -912,13 +916,17 @@ class EvidenceCardService:
                     )
                 ],
             },
-            "nearby_context": {
-                "methods_text": self._first_section_text_by_type(sections, "methods"),
-                "characterization_text": self._first_section_text_by_type(
-                    sections,
-                    "characterization",
-                ),
-            },
+            "supporting_text_windows": [
+                {
+                    "window_id": str(window.get("window_id") or ""),
+                    "heading": self._normalize_scalar_text(window.get("heading")),
+                    "heading_path": self._normalize_scalar_text(window.get("heading_path")),
+                    "text": str(window.get("text") or "")[:4000],
+                    "text_unit_ids": self._normalize_list(window.get("text_unit_ids")),
+                    "block_ids": self._normalize_list(window.get("block_ids")),
+                }
+                for window in supporting_text_windows
+            ],
         }
 
     def _materialize_bundle(
@@ -927,7 +935,7 @@ class EvidenceCardService:
         bundle: StructuredExtractionBundle,
         collection_id: str,
         document_id: str,
-        section: dict[str, Any] | None,
+        text_window: dict[str, Any] | None,
         table_id: str | None,
         row_index: int | None,
         evidence_anchor_rows: list[dict[str, Any]],
@@ -948,7 +956,7 @@ class EvidenceCardService:
                 collection_id=collection_id,
                 document_id=document_id,
                 payload=method_fact,
-                section=section,
+                text_window=text_window,
                 table_id=table_id,
                 rows=method_fact_rows,
                 evidence_anchor_rows=evidence_anchor_rows,
@@ -971,7 +979,7 @@ class EvidenceCardService:
                 collection_id=collection_id,
                 document_id=document_id,
                 payload=variant,
-                section=section,
+                text_window=text_window,
                 table_id=table_id,
                 row_index=row_index,
                 rows=sample_variant_rows,
@@ -986,7 +994,7 @@ class EvidenceCardService:
                 collection_id=collection_id,
                 document_id=document_id,
                 payload=condition,
-                section=section,
+                text_window=text_window,
                 table_id=table_id,
                 rows=test_condition_rows,
                 document_state=document_state,
@@ -1000,7 +1008,7 @@ class EvidenceCardService:
                 collection_id=collection_id,
                 document_id=document_id,
                 payload=baseline,
-                section=section,
+                text_window=text_window,
                 table_id=table_id,
                 rows=baseline_rows,
                 document_state=document_state,
@@ -1013,7 +1021,7 @@ class EvidenceCardService:
             anchors = self._materialize_anchor_payloads(
                 anchors=result.anchors,
                 document_id=document_id,
-                section=section,
+                text_window=text_window,
                 table_id=table_id,
                 rows=evidence_anchor_rows,
                 document_state=document_state,
@@ -1066,12 +1074,12 @@ class EvidenceCardService:
             ).to_record()
             if not measurement_record["value_payload"]:
                 logger.warning(
-                    "Dropped empty measurement payload collection_id=%s document_id=%s property=%s result_type=%s section_id=%s table_id=%s row_index=%s",
+                    "Dropped empty measurement payload collection_id=%s document_id=%s property=%s result_type=%s text_window_id=%s table_id=%s row_index=%s",
                     collection_id,
                     document_id,
                     self._normalize_property_name(result.property_normalized),
                     self._normalize_result_type(result.result_type),
-                    self._normalize_scalar_text(section.get("section_id")) if section else None,
+                    self._normalize_scalar_text(text_window.get("window_id")) if text_window else None,
                     table_id,
                     row_index,
                 )
@@ -1108,7 +1116,7 @@ class EvidenceCardService:
         collection_id: str,
         document_id: str,
         payload: MethodFactPayload,
-        section: dict[str, Any] | None,
+        text_window: dict[str, Any] | None,
         table_id: str | None,
         rows: list[dict[str, Any]],
         evidence_anchor_rows: list[dict[str, Any]],
@@ -1122,7 +1130,7 @@ class EvidenceCardService:
         anchors = self._materialize_anchor_payloads(
             anchors=payload.anchors,
             document_id=document_id,
-            section=section,
+            text_window=text_window,
             table_id=table_id,
             rows=evidence_anchor_rows,
             document_state=document_state,
@@ -1167,7 +1175,7 @@ class EvidenceCardService:
         collection_id: str,
         document_id: str,
         payload: SampleVariantPayload,
-        section: dict[str, Any] | None,
+        text_window: dict[str, Any] | None,
         table_id: str | None,
         row_index: int | None,
         rows: list[dict[str, Any]],
@@ -1207,8 +1215,8 @@ class EvidenceCardService:
                 ),
                 "profile_payload": {
                     "source_kind": payload.source_kind,
-                    "section_id": self._normalize_scalar_text(section.get("section_id"))
-                    if section
+                    "text_window_id": self._normalize_scalar_text(text_window.get("window_id"))
+                    if text_window
                     else None,
                     "table_id": table_id,
                     "row_index": row_index,
@@ -1229,7 +1237,7 @@ class EvidenceCardService:
         collection_id: str,
         document_id: str,
         payload: ExtractedTestConditionPayload,
-        section: dict[str, Any] | None,
+        text_window: dict[str, Any] | None,
         table_id: str | None,
         rows: list[dict[str, Any]],
         document_state: dict[str, Any],
@@ -1248,7 +1256,7 @@ class EvidenceCardService:
             return existing_id, None
 
         template_type = self._infer_condition_template_type(property_type)
-        scope_level = "table" if table_id else ("experiment" if section and str(section.get("section_type")) == "methods" else "measurement")
+        scope_level = "table" if table_id else "measurement"
         missing_fields = self._infer_missing_condition_fields(
             payload=normalized_payload,
             template_type=template_type,
@@ -1284,7 +1292,7 @@ class EvidenceCardService:
         collection_id: str,
         document_id: str,
         payload: BaselineReferencePayload,
-        section: dict[str, Any] | None,
+        text_window: dict[str, Any] | None,
         table_id: str | None,
         rows: list[dict[str, Any]],
         document_state: dict[str, Any],
@@ -1319,15 +1327,16 @@ class EvidenceCardService:
         *,
         anchors: list[EvidenceAnchorPayload],
         document_id: str,
-        section: dict[str, Any] | None,
+        text_window: dict[str, Any] | None,
         table_id: str | None,
         rows: list[dict[str, Any]],
         document_state: dict[str, Any],
     ) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
-        section_id = self._normalize_scalar_text(section.get("section_id")) if section else None
-        block_id = self._normalize_scalar_text(section.get("block_id")) if section else None
-        snippet_ids = self._normalize_list(section.get("text_unit_ids")) if section else []
+        section_id = self._normalize_scalar_text(text_window.get("window_id")) if text_window else None
+        window_block_ids = self._normalize_list(text_window.get("block_ids")) if text_window else []
+        block_id = self._normalize_scalar_text(window_block_ids[0]) if window_block_ids else None
+        snippet_ids = self._normalize_list(text_window.get("text_unit_ids")) if text_window else []
         for anchor in anchors:
             quote = self._normalize_scalar_text(anchor.quote)
             source_type = (
@@ -1634,38 +1643,63 @@ class EvidenceCardService:
             return f"{variant_label} reported {property_name} of {result_summary}."
         return f"{variant_label} reported {property_name}."
 
-    def _resolve_characterization_section_text(
+    def _resolve_characterization_window_text(
         self,
         *,
-        sections: list[dict[str, Any]],
-        anchor_section_ids: set[str],
+        text_windows: list[dict[str, Any]],
+        anchor_block_ids: set[str],
         method_name: str | None,
         method_payload: Any,
     ) -> str | None:
-        for section in sections:
-            if str(section.get("section_type") or "") != "characterization":
+        for text_window in text_windows:
+            window_text = str(text_window.get("text") or "").strip()
+            if not window_text:
                 continue
-            section_id = self._normalize_scalar_text(section.get("section_id"))
-            section_text = str(section.get("text") or "").strip()
-            if section_id and section_id in anchor_section_ids and section_text:
-                return section_text
-            if method_name and method_name.lower() in section_text.lower():
-                return section_text
+            window_block_ids = {
+                str(block_id).strip()
+                for block_id in self._normalize_list(text_window.get("block_ids"))
+                if str(block_id).strip()
+            }
+            if anchor_block_ids and window_block_ids & anchor_block_ids:
+                return window_text
+            if method_name and method_name.lower() in window_text.lower():
+                return window_text
         payload = self._normalize_method_payload(method_payload)
         return self._normalize_scalar_text(payload.get("details"))
 
-    def _first_section_text_by_type(
+    def _select_supporting_text_windows(
         self,
-        sections: list[dict[str, Any]],
-        section_type: str,
-    ) -> str | None:
-        for section in sections:
-            if str(section.get("section_type") or "") != section_type:
-                continue
-            text = str(section.get("text") or "").strip()
-            if text:
-                return text[:4000]
-        return None
+        *,
+        text_windows: list[dict[str, Any]],
+        table_row: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if not text_windows:
+            return []
+
+        target_heading_path = self._normalize_scalar_text(table_row.get("heading_path"))
+
+        def _score(window: dict[str, Any]) -> tuple[int, int]:
+            score = 0
+            heading_path = self._normalize_scalar_text(window.get("heading_path"))
+            if target_heading_path and heading_path == target_heading_path:
+                score += 3
+            elif target_heading_path and heading_path and (
+                target_heading_path in heading_path or heading_path in target_heading_path
+            ):
+                score += 1
+            if self._normalize_scalar_text(window.get("block_type")) == "table_caption":
+                score += 2
+            if str(window.get("text") or "").strip():
+                score += 1
+            return score, -(self._safe_int(window.get("order")) or 0)
+
+        ranked = sorted(text_windows, key=_score, reverse=True)
+        selected = [
+            window
+            for window in ranked
+            if str(window.get("text") or "").strip()
+        ]
+        return selected[:_MAX_SUPPORTING_TEXT_WINDOWS]
 
     def _build_characterization_observations(
         self,
@@ -1673,7 +1707,7 @@ class EvidenceCardService:
         collection_id: str,
         method_facts: pd.DataFrame,
         evidence_anchors: pd.DataFrame,
-        sections_by_doc: dict[str, list[dict[str, Any]]],
+        text_windows_by_doc: dict[str, list[dict[str, Any]]],
     ) -> pd.DataFrame:
         rows: list[dict[str, Any]] = []
         if method_facts is None or method_facts.empty:
@@ -1693,16 +1727,17 @@ class EvidenceCardService:
             document_id = str(method_fact.get("document_id") or "")
             if not document_id:
                 continue
-            sections = sections_by_doc.get(document_id, [])
+            text_windows = text_windows_by_doc.get(document_id, [])
             anchor_ids = self._normalize_list(method_fact.get("evidence_anchor_ids"))
-            anchor_section_ids = {
-                self._normalize_scalar_text(anchor_lookup.get(anchor_id, {}).get("section_id"))
+            anchor_block_ids = {
+                self._normalize_scalar_text(anchor_lookup.get(anchor_id, {}).get("block_id"))
+                or self._normalize_scalar_text(anchor_lookup.get(anchor_id, {}).get("section_id"))
                 for anchor_id in anchor_ids
             }
-            anchor_section_ids.discard(None)
-            section_text = self._resolve_characterization_section_text(
-                sections=sections,
-                anchor_section_ids=anchor_section_ids,
+            anchor_block_ids.discard(None)
+            section_text = self._resolve_characterization_window_text(
+                text_windows=text_windows,
+                anchor_block_ids=anchor_block_ids,
                 method_name=self._normalize_scalar_text(method_fact.get("method_name")),
                 method_payload=method_fact.get("method_payload"),
             )
@@ -1870,23 +1905,42 @@ class EvidenceCardService:
             grouped.setdefault((table_id, row_index), []).append(cell)
         return grouped
 
-    def _classify_block_section_type(
+    def _build_text_windows_by_document(
         self,
-        block: dict[str, Any],
-    ) -> str:
-        block_type = self._normalize_scalar_text(block.get("block_type")) or "paragraph"
-        heading_path = self._normalize_scalar_text(block.get("heading_path"))
-        heading_text = heading_path.split(" > ")[-1].strip() if heading_path else None
-        if block_type == "heading":
-            heading_text = self._normalize_scalar_text(block.get("text")) or heading_text
-        classified = classify_heading(heading_text or "")
-        if classified in {"methods", "characterization"}:
-            return classified
-        if block_type == "table_caption":
-            return "table_caption"
-        if block_type == "heading":
-            return "heading"
-        return "body"
+        blocks: pd.DataFrame,
+    ) -> dict[str, list[dict[str, Any]]]:
+        if blocks is None or blocks.empty:
+            return {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for _, row in blocks.iterrows():
+            document_id = str(row.get("document_id") or row.get("paper_id") or row.get("id") or "")
+            block_payload = dict(row)
+            heading_path = self._normalize_scalar_text(block_payload.get("heading_path"))
+            heading = heading_path.split(" > ")[-1].strip() if heading_path else None
+            if heading is None and str(block_payload.get("block_type") or "") == "heading":
+                heading = self._normalize_scalar_text(block_payload.get("text"))
+            block_id = self._normalize_scalar_text(block_payload.get("block_id"))
+            grouped.setdefault(document_id, []).append(
+                {
+                    "window_id": block_id
+                    or f"window_{document_id}_{len(grouped.get(document_id, [])) + 1}",
+                    "heading": heading,
+                    "heading_path": heading_path,
+                    "text": self._normalize_scalar_text(block_payload.get("text")) or "",
+                    "order": self._safe_int(block_payload.get("block_order")) or 0,
+                    "text_unit_ids": self._normalize_list(block_payload.get("text_unit_ids")),
+                    "page": self._safe_int(block_payload.get("page")),
+                    "char_range": block_payload.get("char_range"),
+                    "block_ids": [block_id] if block_id else [],
+                    "block_type": self._normalize_scalar_text(block_payload.get("block_type")),
+                }
+            )
+        for document_id, items in grouped.items():
+            grouped[document_id] = sorted(
+                items,
+                key=lambda item: self._safe_int(item.get("order")) or 0,
+            )
+        return grouped
 
     def _build_table_row_summary(
         self,
@@ -2212,43 +2266,6 @@ class EvidenceCardService:
     def _extract_characterization_methods(self, text: Any) -> list[str]:
         source = str(text or "")
         return [method for method in _CHARACTERIZATION_METHODS if method.lower() in source.lower()]
-
-    def _group_sections_by_document(
-        self,
-        sections: pd.DataFrame,
-    ) -> dict[str, list[dict[str, Any]]]:
-        if sections is None or sections.empty:
-            return {}
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for _, row in sections.iterrows():
-            document_id = str(row.get("document_id") or row.get("paper_id") or row.get("id") or "")
-            block_payload = dict(row)
-            heading_path = self._normalize_scalar_text(block_payload.get("heading_path"))
-            heading = heading_path.split(" > ")[-1].strip() if heading_path else None
-            if heading is None and str(block_payload.get("block_type") or "") == "heading":
-                heading = self._normalize_scalar_text(block_payload.get("text"))
-            grouped.setdefault(document_id, []).append(
-                {
-                    "section_id": self._normalize_scalar_text(block_payload.get("block_id"))
-                    or f"block_{len(grouped.get(document_id, [])) + 1}",
-                    "section_type": self._classify_block_section_type(block_payload),
-                    "heading": heading,
-                    "text": self._normalize_scalar_text(block_payload.get("text")) or "",
-                    "order": self._safe_int(block_payload.get("block_order")) or 0,
-                    "text_unit_ids": self._normalize_list(block_payload.get("text_unit_ids")),
-                    "page": self._safe_int(block_payload.get("page")),
-                    "char_range": block_payload.get("char_range"),
-                    "block_id": self._normalize_scalar_text(block_payload.get("block_id")),
-                    "block_type": self._normalize_scalar_text(block_payload.get("block_type")),
-                    "heading_path": heading_path,
-                }
-            )
-        for document_id, items in grouped.items():
-            grouped[document_id] = sorted(
-                items,
-                key=lambda item: self._safe_int(item.get("order")) or 0,
-            )
-        return grouped
 
     def _group_table_rows_by_document(
         self,

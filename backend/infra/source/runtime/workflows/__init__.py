@@ -16,9 +16,6 @@ try:
     from .create_final_text_units import (
         run_workflow as run_create_final_text_units,
     )
-    from .create_sections import (
-        run_workflow as run_create_sections,
-    )
     from .create_table_cells import (
         run_workflow as run_create_table_cells,
     )
@@ -36,7 +33,6 @@ else:
         "create_base_text_units": run_create_base_text_units,
         "create_final_documents": run_create_final_documents,
         "create_final_text_units": run_create_final_text_units,
-        "create_sections": run_create_sections,
         "create_table_cells": run_create_table_cells,
         "create_source_artifacts": run_create_source_artifacts,
     })

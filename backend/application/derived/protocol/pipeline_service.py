@@ -3,23 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from application.source.artifact_input_service import load_collection_inputs
+from application.source.artifact_input_service import load_blocks_artifact
 from application.derived.protocol.block_service import build_procedure_blocks
 from application.derived.protocol.extract_service import ProtocolExtractService
 from application.derived.protocol.artifact_service import (
     persist_procedure_blocks,
-    persist_sections,
 )
-from infra.source.runtime.source_evidence import build_sections
 
 
 @dataclass(frozen=True)
 class ProtocolPipelineResult:
     output_dir: Path
-    sections_path: Path
     procedure_blocks_path: Path
     protocol_steps_path: Path
-    section_count: int
+    source_block_count: int
     procedure_block_count: int
     protocol_step_count: int
 
@@ -30,12 +27,9 @@ def build_protocol_artifacts(
 ) -> ProtocolPipelineResult:
     output_dir = Path(base_dir).expanduser().resolve()
     extractor = extractor or ProtocolExtractService()
-    documents, text_units = load_collection_inputs(output_dir)
+    blocks = load_blocks_artifact(output_dir)
 
-    sections = build_sections(documents, text_units)
-    sections_path = persist_sections(output_dir, sections)
-
-    procedure_blocks = build_procedure_blocks(sections)
+    procedure_blocks = build_procedure_blocks(blocks)
     procedure_blocks_path = persist_procedure_blocks(output_dir, procedure_blocks)
 
     protocol_steps_path = output_dir / "protocol_steps.parquet"
@@ -45,10 +39,9 @@ def build_protocol_artifacts(
 
     return ProtocolPipelineResult(
         output_dir=output_dir,
-        sections_path=sections_path,
         procedure_blocks_path=procedure_blocks_path,
         protocol_steps_path=protocol_steps_path,
-        section_count=len(sections),
+        source_block_count=len(blocks),
         procedure_block_count=len(procedure_blocks),
         protocol_step_count=len(protocol_steps_table),
     )

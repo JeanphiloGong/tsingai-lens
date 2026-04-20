@@ -33,62 +33,6 @@ _OTHER_HEADING_PATTERNS = (
 )
 
 _NUMBERED_HEADING_PATTERN = re.compile(r"^(?P<number>\d+(?:\.\d+)*)\s+.+$")
-_METHOD_HINTS = (
-    "stir",
-    "stirred",
-    "mix",
-    "mixed",
-    "dissolve",
-    "dissolved",
-    "synthes",
-    "fabricat",
-    "prepare",
-    "prepared",
-    "hydrothermal",
-    "solvothermal",
-    "calcine",
-    "calcined",
-    "anneal",
-    "annealed",
-    "wash",
-    "washed",
-    "dry",
-    "dried",
-    "heated",
-    "加入",
-    "搅拌",
-    "溶解",
-    "制备",
-    "退火",
-    "烧结",
-    "洗涤",
-    "干燥",
-)
-
-_CHARACTERIZATION_HINTS = (
-    "xrd",
-    "sem",
-    "tem",
-    "xps",
-    "raman",
-    "ftir",
-    "dsc",
-    "tga",
-    "tensile",
-    "flexural",
-    "compression",
-    "fatigue",
-    "thermal conductivity",
-    "characteriz",
-    "测试",
-    "表征",
-    "拉伸",
-    "压缩",
-    "疲劳",
-    "热导",
-    "热稳定",
-)
-
 _TABLE_TITLE_PATTERN = re.compile(r"^\s*table\s+([a-z0-9\-]+)\b[:.\-\s]*(.*)$", re.IGNORECASE)
 _UNIT_HINT_PATTERN = re.compile(r"\b(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b", re.IGNORECASE)
 
@@ -126,59 +70,6 @@ def build_blocks(
             "heading_level",
         ],
     )
-
-
-def build_sections_from_blocks(
-    documents: pd.DataFrame,
-    blocks: pd.DataFrame,
-    text_units: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    document_records = _build_document_records(documents, text_units)
-    blocks_by_doc = _group_rows_by_document(blocks, "document_id")
-    text_units_by_doc = _group_text_units_by_document(text_units)
-
-    sections: list[dict[str, Any]] = []
-    for _, row in document_records.iterrows():
-        paper_id = str(row["paper_id"])
-        title = str(row["title"])
-        extracted = _extract_sections_from_blocks(
-            paper_id=paper_id,
-            title=title,
-            blocks=blocks_by_doc.get(paper_id, []),
-        )
-        if not extracted:
-            extracted = _fallback_sections_from_text_units(
-                paper_id=paper_id,
-                title=title,
-                units=text_units_by_doc.get(paper_id, []),
-            )
-        sections.extend(extracted)
-
-    return pd.DataFrame(
-        sections,
-        columns=[
-            "section_id",
-            "paper_id",
-            "title",
-            "section_type",
-            "heading",
-            "text",
-            "order",
-            "source_mode",
-            "text_unit_ids",
-            "page",
-            "char_range",
-            "confidence",
-        ],
-    )
-
-
-def build_sections(
-    documents: pd.DataFrame,
-    text_units: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    blocks = build_blocks(documents, text_units)
-    return build_sections_from_blocks(documents, blocks, text_units)
 
 
 def build_table_rows(
@@ -244,15 +135,6 @@ def classify_heading(line: str) -> str | None:
 
 def extract_unit_hint(header_path: str | None, cell_text: str) -> str | None:
     return _extract_unit_hint(header_path, cell_text)
-
-
-def make_section_id(
-    paper_id: str,
-    section_type: str,
-    order: int,
-    heading: str,
-) -> str:
-    return _make_section_id(paper_id, section_type, order, heading)
 
 
 def make_table_id(paper_id: str, order: int, title: str | None) -> str:
@@ -345,91 +227,6 @@ def _extract_blocks_from_text(
         block_order += 1
 
     return rows
-
-
-def _extract_sections_from_blocks(
-    paper_id: str,
-    title: str,
-    blocks: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    ordered_blocks = sorted(
-        (block for block in blocks if isinstance(block, dict)),
-        key=lambda item: _safe_int(item.get("block_order"), default=0),
-    )
-    if not ordered_blocks:
-        return []
-
-    sections: list[dict[str, Any]] = []
-    current: dict[str, Any] | None = None
-
-    def flush() -> None:
-        nonlocal current
-        if current is None:
-            return
-        body = "\n".join(current["body_parts"]).strip()
-        if len(body) >= 30:
-            sections.append(
-                {
-                    "section_id": _make_section_id(
-                        paper_id,
-                        current["section_type"],
-                        len(sections) + 1,
-                        current["heading"],
-                    ),
-                    "paper_id": paper_id,
-                    "title": title,
-                    "section_type": current["section_type"],
-                    "heading": current["heading"],
-                    "text": body,
-                    "order": len(sections) + 1,
-                    "source_mode": "blocks",
-                    "text_unit_ids": _dedupe_strings(current["text_unit_ids"]),
-                    "page": current["page"],
-                    "char_range": _merge_char_ranges(
-                        current["start_char_range"],
-                        current["end_char_range"],
-                    ),
-                    "confidence": 0.95 if current["section_type"] == "methods" else 0.9,
-                }
-            )
-        current = None
-
-    for block in ordered_blocks:
-        block_type = str(block.get("block_type") or "")
-        block_text = str(block.get("text") or "").strip()
-        if not block_text:
-            continue
-        if block_type == "heading":
-            section_type = _classify_heading(block_text)
-            if section_type in {"methods", "characterization"}:
-                flush()
-                current = {
-                    "section_type": section_type,
-                    "heading": block_text,
-                    "body_parts": [],
-                    "text_unit_ids": [],
-                    "page": block.get("page"),
-                    "start_char_range": block.get("char_range"),
-                    "end_char_range": block.get("char_range"),
-                }
-                continue
-            flush()
-            continue
-        if block_type == "title":
-            continue
-        if current is None:
-            continue
-        current["body_parts"].append(block_text)
-        current["text_unit_ids"].extend(_listify(block.get("text_unit_ids")))
-        if current["page"] is None and block.get("page") is not None:
-            current["page"] = block.get("page")
-        if current["start_char_range"] is None and block.get("char_range") is not None:
-            current["start_char_range"] = block.get("char_range")
-        if block.get("char_range") is not None:
-            current["end_char_range"] = block.get("char_range")
-
-    flush()
-    return sections
 
 
 def _extract_table_rows_from_lines(
@@ -542,27 +339,6 @@ def _find_char_range(
     )
 
 
-def _merge_char_ranges(
-    start_value: str | None,
-    end_value: str | None,
-) -> str | None:
-    if start_value is None:
-        return end_value
-    if end_value is None or end_value == start_value:
-        return start_value
-
-    start_payload = json.loads(start_value)
-    end_payload = json.loads(end_value)
-    return json.dumps(
-        {
-            "start": int(start_payload["start"]),
-            "end": int(end_payload["end"]),
-        },
-        ensure_ascii=True,
-        sort_keys=True,
-    )
-
-
 def _looks_like_structural_heading(line: str) -> bool:
     compact = " ".join(str(line or "").split())
     if not compact:
@@ -619,34 +395,6 @@ def _classify_text_block_type(line: str) -> str:
     return "paragraph"
 
 
-def _group_rows_by_document(
-    frame: pd.DataFrame | None,
-    document_id_column: str,
-) -> dict[str, list[dict[str, Any]]]:
-    if frame is None or frame.empty or document_id_column not in frame.columns:
-        return {}
-
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for _, row in frame.iterrows():
-        document_id = str(row.get(document_id_column) or row.get("id") or "").strip()
-        if not document_id:
-            continue
-        grouped.setdefault(document_id, []).append(dict(row))
-    return grouped
-
-
-def _dedupe_strings(values: list[Any]) -> list[str]:
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for value in values:
-        text = str(value).strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        deduped.append(text)
-    return deduped
-
-
 def _normalize_line(value: Any) -> str | None:
     text = _coerce_optional_text(value)
     if text is None:
@@ -659,68 +407,6 @@ def _safe_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _fallback_sections_from_text_units(
-    paper_id: str,
-    title: str,
-    units: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    if not units:
-        return []
-
-    sections: list[dict[str, Any]] = []
-    pending_type: str | None = None
-    pending_texts: list[str] = []
-    pending_ids: list[str] = []
-
-    def flush() -> None:
-        nonlocal pending_type, pending_texts, pending_ids
-        if pending_type is None or not pending_texts:
-            pending_type = None
-            pending_texts = []
-            pending_ids = []
-            return
-        sections.append(
-            {
-                "section_id": _make_section_id(
-                    paper_id,
-                    pending_type,
-                    len(sections) + 1,
-                    f"synthetic_{pending_type}",
-                ),
-                "paper_id": paper_id,
-                "title": title,
-                "section_type": pending_type,
-                "heading": f"synthetic_{pending_type}",
-                "text": "\n".join(pending_texts),
-                "order": len(sections) + 1,
-                "source_mode": "text_unit_fallback",
-                "text_unit_ids": pending_ids[:],
-                "page": None,
-                "char_range": None,
-                "confidence": 0.65 if pending_type == "methods" else 0.6,
-            }
-        )
-        pending_type = None
-        pending_texts = []
-        pending_ids = []
-
-    for unit in units:
-        text = str(unit.get("text") or "").strip()
-        if not text:
-            continue
-        unit_type = _classify_text_unit(text)
-        if unit_type is None:
-            flush()
-            continue
-        if pending_type not in (None, unit_type):
-            flush()
-        pending_type = unit_type
-        pending_texts.append(text)
-        pending_ids.append(str(unit.get("id")))
-    flush()
-    return sections
 
 
 def _extract_table_cells_from_lines(
@@ -864,19 +550,6 @@ def _coerce_optional_text(value: Any) -> str | None:
     return text
 
 
-def _group_text_units_by_document(
-    text_units: pd.DataFrame | None,
-) -> dict[str, list[dict[str, Any]]]:
-    if text_units is None or text_units.empty:
-        return {}
-
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for _, row in text_units.iterrows():
-        for doc_id in _listify(row.get("document_ids")):
-            grouped.setdefault(str(doc_id), []).append(dict(row))
-    return grouped
-
-
 def _listify(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -916,27 +589,3 @@ def _classify_heading(line: str) -> str | None:
     if any(pattern.match(compact) for pattern in _OTHER_HEADING_PATTERNS):
         return "other"
     return None
-
-
-def _classify_text_unit(text: str) -> str | None:
-    lowered = text.lower()
-    method_hits = sum(1 for hint in _METHOD_HINTS if hint in lowered)
-    characterization_hits = sum(1 for hint in _CHARACTERIZATION_HINTS if hint in lowered)
-    if method_hits >= 2 or ("under" in lowered and any(unit in lowered for unit in (" c", "°c", " h", " min"))):
-        return "methods"
-    if characterization_hits >= 1:
-        return "characterization"
-    return None
-
-
-def _make_section_id(
-    paper_id: str,
-    section_type: str,
-    order: int,
-    heading: str,
-) -> str:
-    raw_heading = " ".join(str(heading or section_type or f"section_{order}").split()).lower()
-    slug = re.sub(r"[^a-z0-9]+", "_", raw_heading).strip("_")
-    if not slug:
-        slug = f"section_{order}"
-    return f"sec_{paper_id}_{section_type}_{order}_{slug}"

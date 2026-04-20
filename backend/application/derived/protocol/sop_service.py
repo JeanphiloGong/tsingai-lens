@@ -12,7 +12,6 @@ from fastapi import HTTPException
 from application.derived.protocol.document_meta_service import load_document_title_map
 
 
-_SECTION_FILE = "sections.parquet"
 _BLOCK_FILE = "procedure_blocks.parquet"
 _STEP_FILE = "protocol_steps.parquet"
 
@@ -131,23 +130,14 @@ def _normalize_step(row: pd.Series, title_map: dict[str, str] | None = None) -> 
     }
 
 
-def _normalize_section(row: pd.Series) -> dict[str, Any]:
-    return {
-        "paper_id": _resolve_paper_id(row) or _to_python(row.get("paper_id")),
-        "section_id": _to_python(row.get("section_id")) or _to_python(row.get("id")),
-        "section_type": _to_python(row.get("section_type")),
-        "title": _to_python(row.get("title")),
-        "text": _to_python(row.get("text")),
-        "order": _safe_int(row.get("order")),
-        "language": _to_python(row.get("language")),
-    }
-
-
 def _normalize_block(row: pd.Series) -> dict[str, Any]:
     return {
         "paper_id": _resolve_paper_id(row) or _to_python(row.get("paper_id")),
         "section_id": _to_python(row.get("section_id")),
         "block_id": _to_python(row.get("block_id")) or _to_python(row.get("id")),
+        "source_block_id": _to_python(row.get("source_block_id")),
+        "source_block_type": _to_python(row.get("source_block_type")),
+        "heading_path": _to_python(row.get("heading_path")),
         "block_type": _to_python(row.get("block_type")),
         "text": _to_python(row.get("text")),
         "order": _safe_int(row.get("order")),
@@ -237,23 +227,19 @@ def _default_controls(steps: list[Any]) -> list[Any]:
 
 def load_protocol_artifacts(base_dir: Path, paper_ids: list[str] | None = None, limit: int = 50) -> dict[str, Any]:
     paper_filter = set(paper_ids or [])
-    sections_df = _read_parquet_optional(base_dir / _SECTION_FILE)
     blocks_df = _read_parquet_optional(base_dir / _BLOCK_FILE)
     steps_df = _read_parquet_optional(base_dir / _STEP_FILE)
     title_map = load_document_title_map(base_dir)
 
-    if sections_df is None and blocks_df is None and steps_df is None:
-        raise HTTPException(status_code=404, detail="未找到 protocol 产物，请先生成 sections/procedure_blocks/protocol_steps parquet")
+    if blocks_df is None and steps_df is None:
+        raise HTTPException(status_code=404, detail="未找到 protocol 产物，请先生成 procedure_blocks/protocol_steps parquet")
 
     if paper_filter:
-        if sections_df is not None:
-            sections_df = sections_df[sections_df.apply(lambda row: _contains_paper(row, paper_filter), axis=1)]
         if blocks_df is not None:
             blocks_df = blocks_df[blocks_df.apply(lambda row: _contains_paper(row, paper_filter), axis=1)]
         if steps_df is not None:
             steps_df = steps_df[steps_df.apply(lambda row: _contains_paper(row, paper_filter), axis=1)]
 
-    sections = [] if sections_df is None else [_normalize_section(row) for _, row in sections_df.head(limit).iterrows()]
     blocks = [] if blocks_df is None else [_normalize_block(row) for _, row in blocks_df.head(limit).iterrows()]
     steps = [] if steps_df is None else [_normalize_step(row, title_map) for _, row in steps_df.head(limit).iterrows()]
 
@@ -261,11 +247,9 @@ def load_protocol_artifacts(base_dir: Path, paper_ids: list[str] | None = None, 
         "output_path": str(base_dir),
         "paper_ids": sorted(paper_filter) if paper_filter else None,
         "summary": {
-            "sections": 0 if sections_df is None else int(len(sections_df)),
             "procedure_blocks": 0 if blocks_df is None else int(len(blocks_df)),
             "protocol_steps": 0 if steps_df is None else int(len(steps_df)),
         },
-        "sections": sections,
         "procedure_blocks": blocks,
         "protocol_steps": steps,
     }

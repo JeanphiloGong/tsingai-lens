@@ -265,7 +265,7 @@ The concrete implementation wave is expected to touch these Source-owned files:
 - [`../../../infra/source/runtime/workflows/create_base_text_units.py`](../../../infra/source/runtime/workflows/create_base_text_units.py)
 - [`../../../infra/source/runtime/workflows/create_final_documents.py`](../../../infra/source/runtime/workflows/create_final_documents.py)
 - [`../../../infra/source/runtime/workflows/create_final_text_units.py`](../../../infra/source/runtime/workflows/create_final_text_units.py)
-- [`../../../infra/source/runtime/workflows/create_sections.py`](../../../infra/source/runtime/workflows/create_sections.py)
+- [`../../../infra/source/runtime/workflows/create_source_artifacts.py`](../../../infra/source/runtime/workflows/create_source_artifacts.py)
 - [`../../../infra/source/runtime/workflows/create_table_cells.py`](../../../infra/source/runtime/workflows/create_table_cells.py)
 - new Docling-backed parser implementation files under
   `backend/infra/source/runtime/`

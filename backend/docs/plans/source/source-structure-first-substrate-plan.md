@@ -93,16 +93,12 @@ Implemented in code:
 
 Important boundary clarification after the cut:
 
-- `sections.parquet` still exists inside the protocol branch, but it is now a
-  protocol-owned derived artifact rather than a Source-owned substrate
-- protocol artifacts are still built from `documents/text_units` plus the
-  local `build_sections(...)` helper, not from a Source-level
-  `sections.parquet` handoff contract
+- the protocol branch no longer persists or depends on `sections.parquet`
+- protocol artifacts are now built from Source `blocks.parquet` into
+  `procedure_blocks.parquet` and then `protocol_steps.parquet`
 
 Known follow-up cleanup still outside this cut:
 
-- the protocol branch still carries section-shaped local semantics because its
-  own artifact family remains section-first
 - several historical plan docs still describe Source as if it emits
   `sections.parquet`
 - some Core-local internal names still use `section` as a local extraction

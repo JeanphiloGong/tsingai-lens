@@ -6,7 +6,7 @@ import pandas as pd
 
 from application.derived.protocol import artifact_service as source_service
 from application.derived.protocol import block_service
-from infra.source.runtime import source_evidence as section_service
+from infra.source.runtime.source_evidence import build_blocks
 
 
 def test_build_document_records_uses_documents_and_text_units():
@@ -38,18 +38,15 @@ def test_persist_protocol_artifacts_uses_parquet_writer(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
 
-    sections = pd.DataFrame([{"section_id": "s-1", "paper_id": "doc-1"}])
     blocks = pd.DataFrame([{"block_id": "b-1", "paper_id": "doc-1"}])
 
-    section_path = source_service.persist_sections(tmp_path, sections)
     block_path = source_service.persist_procedure_blocks(tmp_path, blocks)
 
-    assert section_path.name == "sections.parquet"
     assert block_path.name == "procedure_blocks.parquet"
-    assert [item[0] for item in writes] == ["sections.parquet", "procedure_blocks.parquet"]
+    assert [item[0] for item in writes] == ["procedure_blocks.parquet"]
 
 
-def test_build_sections_extracts_headed_methods_and_characterization():
+def test_build_procedure_blocks_derives_scope_from_source_headings():
     documents = pd.DataFrame(
         [
             {
@@ -71,20 +68,22 @@ def test_build_sections_extracts_headed_methods_and_characterization():
         ]
     )
 
-    sections = section_service.build_sections(documents)
+    source_blocks = build_blocks(documents)
+    blocks = block_service.build_procedure_blocks(source_blocks)
 
-    assert sections["section_type"].tolist() == ["methods", "characterization"]
-    assert sections["heading"].tolist() == ["Experimental Section", "Characterization"]
-    assert sections["source_mode"].tolist() == ["blocks", "blocks"]
+    assert not blocks.empty
+    assert set(blocks["section_type"]) >= {"methods", "characterization"}
+    assert "Experimental Section" in set(blocks["heading_path"].dropna())
+    assert "Characterization" in set(blocks["heading_path"].dropna())
 
 
-def test_build_sections_falls_back_to_text_units_when_no_heading():
+def test_build_procedure_blocks_keeps_extracting_without_headings():
     documents = pd.DataFrame(
         [
             {
                 "id": "doc-2",
                 "title": "Fallback Paper",
-                "text": "This paper focuses on the resulting properties and applications.",
+                "text": "",
             }
         ]
     )
@@ -103,22 +102,21 @@ def test_build_sections_falls_back_to_text_units_when_no_heading():
         ]
     )
 
-    sections = section_service.build_sections(documents, text_units)
+    source_blocks = build_blocks(documents, text_units)
+    blocks = block_service.build_procedure_blocks(source_blocks)
 
-    assert not sections.empty
-    assert set(sections["section_type"]) == {"methods", "characterization"}
-    assert set(sections["source_mode"]) == {"text_unit_fallback"}
+    assert not blocks.empty
+    assert set(blocks["block_type"]) >= {"synthesis", "characterization"}
+    assert blocks["heading_path"].isna().all()
 
 
 def test_build_procedure_blocks_splits_major_method_types():
-    sections = pd.DataFrame(
+    source_blocks = pd.DataFrame(
         [
             {
-                "section_id": "sec-1",
-                "paper_id": "doc-1",
-                "title": "Composite Study",
-                "section_type": "methods",
-                "heading": "Experimental Section",
+                "block_id": "src-1",
+                "document_id": "doc-1",
+                "block_type": "paragraph",
                 "text": "\n".join(
                     [
                         "Li2CO3 and TiO2 were mixed in ethanol and stirred for 2 h.",
@@ -127,15 +125,14 @@ def test_build_procedure_blocks_splits_major_method_types():
                         "Tensile and thermal conductivity tests were performed on the cured samples.",
                     ]
                 ),
-                "order": 1,
-                "source_mode": "heading",
+                "block_order": 1,
+                "heading_path": "Experimental Section",
                 "text_unit_ids": ["tu-1"],
-                "confidence": 0.95,
             }
         ]
     )
 
-    blocks = block_service.build_procedure_blocks(sections)
+    blocks = block_service.build_procedure_blocks(source_blocks)
 
     assert blocks["block_type"].tolist() == [
         "synthesis",
@@ -144,3 +141,4 @@ def test_build_procedure_blocks_splits_major_method_types():
         "property_test",
     ]
     assert blocks["order"].tolist() == [1, 2, 3, 4]
+    assert set(blocks["section_type"]) == {"methods"}

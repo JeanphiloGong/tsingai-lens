@@ -184,20 +184,6 @@ TABLE_ROWS_FINAL_COLUMNS = [
     "heading_path",
 ]
 
-SECTIONS_FINAL_COLUMNS = [
-    "section_id",
-    ID,
-    TITLE,
-    "section_type",
-    "heading",
-    TEXT,
-    "order",
-    TEXT_UNIT_IDS,
-    "page",
-    "char_range",
-    "confidence",
-]
-
 TABLE_CELLS_FINAL_COLUMNS = [
     "cell_id",
     ID,

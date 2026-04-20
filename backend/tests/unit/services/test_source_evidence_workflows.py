@@ -9,14 +9,13 @@ import pandas as pd
 from infra.source.config.source_runtime_config import GraphRagConfig
 from infra.source.runtime.source_evidence import (
     build_blocks,
-    build_sections,
     build_table_cells,
     build_table_rows,
 )
 from infra.source.runtime.workflows.create_source_artifacts import _build_pdf_bundle
 
 
-def test_default_source_pipeline_includes_sections_and_table_cells():
+def test_default_source_pipeline_uses_structure_first_handoff_workflow():
     factory_path = (
         Path(__file__).resolve().parents[3]
         / "infra"
@@ -80,37 +79,6 @@ def test_build_blocks_emits_structure_first_blocks_with_heading_context():
     assert not methods_blocks.empty
     assert methods_blocks["page"].isna().all()
     assert methods_blocks["char_range"].notna().any()
-
-
-def test_build_sections_derives_legacy_semantics_from_blocks():
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "doc-1",
-                "title": "Composite Study",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Powders were mixed in ethanol and stirred for 2 h.",
-                        "The slurry was dried at 80 C and annealed at 600 C under Ar.",
-                        "Characterization",
-                        "XRD and SEM were used to characterize the powders.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {"id": "tu-1", "text": "Powders were mixed in ethanol and stirred for 2 h.", "document_ids": ["doc-1"]},
-            {"id": "tu-2", "text": "The slurry was dried at 80 C and annealed at 600 C under Ar.", "document_ids": ["doc-1"]},
-        ]
-    )
-
-    sections = build_sections(documents, text_units)
-
-    assert set(sections["section_type"]) == {"methods", "characterization"}
-    assert set(sections["paper_id"]) == {"doc-1"}
 
 
 def test_build_table_cells_extracts_pipe_delimited_rows():

@@ -34,8 +34,8 @@ The current frontend still reflects the old product center:
 
 - collection sub-navigation is `overview / steps / sop / graph`
 - the workspace primary action can route users into `steps` or `sop`
-- the workspace model is still artifact-centric and tied to fields such as
-  `sections_ready` and `procedure_blocks_ready`
+- the workspace contract must be driven by workflow readiness and capabilities
+  instead of stale artifact flags such as `sections_ready` or `graphml_ready`
 - `documents`, `tasks`, and `reports` routes are still redirects or legacy
   compatibility surfaces rather than primary pages
 

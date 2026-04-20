@@ -8,6 +8,6 @@
 
 <LegacyRouteNotice
   title="Legacy Index Config Route Retired"
-  lead="The browser no longer exposes config-path indexing as a supported frontend flow."
+  lead="The browser no longer exposes config-path build launching as a supported frontend flow."
   reason="Use the collection workflow for product actions. For engine-level operations, consult the current API docs instead of this retired browser page."
 />

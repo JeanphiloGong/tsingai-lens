@@ -10,10 +10,8 @@ export type WorkspaceArtifactStatus = {
   evidence_cards_ready: boolean;
   comparison_rows_ready: boolean;
   graph_ready: boolean;
-  sections_ready: boolean;
   procedure_blocks_ready: boolean;
   protocol_steps_ready: boolean;
-  graphml_ready: boolean;
   updated_at: string;
 };
 
@@ -286,8 +284,7 @@ export function getWorkspaceSurfaceState(
     if (
       workspace.capabilities.can_view_graph ||
       workspace.capabilities.can_download_graphml ||
-      workspace.artifacts.graph_ready ||
-      workspace.artifacts.graphml_ready
+      workspace.artifacts.graph_ready
     ) {
       return 'ready';
     }
@@ -342,7 +339,7 @@ function normalizeTask(item: unknown): Task | null {
   return {
     task_id: taskId,
     collection_id: String(record.collection_id ?? ''),
-    task_type: String(record.task_type ?? 'index'),
+    task_type: String(record.task_type ?? 'build'),
     status: String(record.status ?? 'queued') as Task['status'],
     current_stage: String(record.current_stage ?? 'queued') as Task['current_stage'],
     progress_percent:
@@ -482,12 +479,10 @@ export async function fetchWorkspaceOverview(collectionId: string) {
     evidence_cards_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.evidence_cards_ready),
     comparison_rows_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.comparison_rows_ready),
     graph_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.graph_ready),
-    sections_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.sections_ready),
     procedure_blocks_ready: Boolean(
       (data.artifacts as Record<string, unknown> | undefined)?.procedure_blocks_ready
     ),
     protocol_steps_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.protocol_steps_ready),
-    graphml_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.graphml_ready),
     updated_at: String((data.artifacts as Record<string, unknown> | undefined)?.updated_at ?? '')
   };
 

@@ -5,7 +5,7 @@
   import { listCollectionFiles, uploadCollectionFiles, type CollectionFile } from '../../_shared/files';
   import { t } from '../../_shared/i18n';
   import {
-    createIndexTask,
+    createBuildTask,
     getTask,
     isTaskActive,
     type Task
@@ -30,7 +30,7 @@
 
   let selectedFiles: File[] = [];
   let isDragging = false;
-  let indexAfterUpload = true;
+  let buildAfterUpload = true;
   let uploadLoading = false;
   let uploadError = '';
   let uploadResult: { count: number; items: CollectionFile[] } | null = null;
@@ -319,10 +319,10 @@
       return;
     }
 
-    void startIndexRun();
+    void startBuildRun();
   }
 
-  async function startIndexRun() {
+  async function startBuildRun() {
     if (!effectiveFileCount) {
       actionStatus = $t('overview.indexNoFiles');
       return;
@@ -330,7 +330,7 @@
 
     actionStatus = '';
     try {
-      const task = await createIndexTask(collectionId);
+      const task = await createBuildTask(collectionId);
       mergeTask(task);
       actionStatus = $t('documents.indexing');
       schedulePoll(task.task_id);
@@ -355,8 +355,8 @@
       if (fileInput) fileInput.value = '';
       await Promise.all([loadFiles(false), loadWorkspace(false)]);
       actionStatus = $t('documents.uploadDone');
-      if (indexAfterUpload) {
-        await startIndexRun();
+      if (buildAfterUpload) {
+        await startBuildRun();
       }
     } catch (err) {
       uploadError = errorMessage(err);
@@ -462,7 +462,7 @@
       return;
     }
     if (isReadyToProcessState) {
-      await startIndexRun();
+      await startBuildRun();
       return;
     }
     browseFiles();
@@ -553,7 +553,7 @@
           {#if !isReadyToProcessState}
             <div class="toggle-row">
               <label>
-                <input type="checkbox" bind:checked={indexAfterUpload} />
+                <input type="checkbox" bind:checked={buildAfterUpload} />
                 {$t('documents.indexAfterLabel')}
               </label>
             </div>

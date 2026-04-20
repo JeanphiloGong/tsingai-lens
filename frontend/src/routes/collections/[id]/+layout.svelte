@@ -23,8 +23,7 @@
     !workspace ||
     workspace.capabilities.can_view_graph ||
     workspace.capabilities.can_download_graphml ||
-    workspace.artifacts.graph_ready ||
-    workspace.artifacts.graphml_ready;
+    workspace.artifacts.graph_ready;
 
   $: if (collectionId && collectionId !== loadedWorkspaceId) {
     loadedWorkspaceId = collectionId;

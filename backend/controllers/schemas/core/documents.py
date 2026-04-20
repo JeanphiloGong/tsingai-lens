@@ -54,14 +54,15 @@ class DocumentProfileListResponse(BaseModel):
     items: list[DocumentProfileItemResponse] = Field(default_factory=list, description="文档 profile 列表")
 
 
-class DocumentContentSectionResponse(BaseModel):
-    """Viewer-friendly section payload for one document."""
+class DocumentContentBlockResponse(BaseModel):
+    """Viewer-friendly block payload for one document."""
 
-    section_id: str = Field(..., description="section ID")
-    heading: str | None = Field(default=None, description="section heading")
-    section_type: str | None = Field(default=None, description="section 类型")
-    order: int = Field(default=0, description="section 顺序")
-    text: str = Field(default="", description="section 文本")
+    block_id: str = Field(..., description="block ID")
+    block_type: str | None = Field(default=None, description="block 类型")
+    heading_path: str | None = Field(default=None, description="heading path")
+    heading_level: int = Field(default=0, description="heading level")
+    order: int = Field(default=0, description="block 顺序")
+    text: str = Field(default="", description="block 文本")
     text_unit_ids: list[str] = Field(default_factory=list, description="相关 text unit IDs")
     start_offset: int | None = Field(default=None, description="文档级起始字符偏移")
     end_offset: int | None = Field(default=None, description="文档级结束字符偏移")
@@ -75,5 +76,5 @@ class DocumentContentResponse(BaseModel):
     title: str | None = Field(default=None, description="文档标题")
     source_filename: str | None = Field(default=None, description="源文件名")
     content_text: str = Field(default="", description="完整文本内容")
-    sections: list[DocumentContentSectionResponse] = Field(default_factory=list, description="section 列表")
+    blocks: list[DocumentContentBlockResponse] = Field(default_factory=list, description="block 列表")
     warnings: list[str] = Field(default_factory=list, description="查看器提示")

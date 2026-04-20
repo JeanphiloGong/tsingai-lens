@@ -75,7 +75,7 @@ def test_build_sections_extracts_headed_methods_and_characterization():
 
     assert sections["section_type"].tolist() == ["methods", "characterization"]
     assert sections["heading"].tolist() == ["Experimental Section", "Characterization"]
-    assert sections["source_mode"].tolist() == ["heading", "heading"]
+    assert sections["source_mode"].tolist() == ["blocks", "blocks"]
 
 
 def test_build_sections_falls_back_to_text_units_when_no_heading():

@@ -11,7 +11,7 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 try:
     from fastapi.testclient import TestClient
@@ -93,7 +93,8 @@ def _write_index_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
@@ -425,8 +426,10 @@ def test_collection_task_flow(app_client):
     assert body["comparison_rows_ready"] is True
     assert body["graph_generated"] is True
     assert body["graph_ready"] is True
-    assert body["sections_generated"] is True
-    assert body["sections_ready"] is True
+    assert body["blocks_generated"] is True
+    assert body["blocks_ready"] is True
+    assert body["table_rows_generated"] is True
+    assert body["table_rows_ready"] is False
     assert body["table_cells_generated"] is True
     assert body["table_cells_ready"] is False
     assert body["protocol_steps_generated"] is True

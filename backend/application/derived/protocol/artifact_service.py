@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
 from application.source.artifact_input_service import (
-    CollectionArtifactPaths,
     build_document_records,
     load_collection_inputs,
-    resolve_collection_artifact_paths,
 )
 
 
-ProtocolArtifactPaths = CollectionArtifactPaths
+@dataclass(frozen=True)
+class ProtocolArtifactPaths:
+    base_dir: Path
+    sections: Path
+    procedure_blocks: Path
+    protocol_steps: Path
 
 __all__ = [
     "ProtocolArtifactPaths",
@@ -25,7 +29,13 @@ __all__ = [
 
 
 def resolve_protocol_artifact_paths(base_dir: str | Path) -> ProtocolArtifactPaths:
-    return resolve_collection_artifact_paths(base_dir)
+    base_path = Path(base_dir).expanduser().resolve()
+    return ProtocolArtifactPaths(
+        base_dir=base_path,
+        sections=base_path / "sections.parquet",
+        procedure_blocks=base_path / "procedure_blocks.parquet",
+        protocol_steps=base_path / "protocol_steps.parquet",
+    )
 
 
 def load_protocol_inputs(base_dir: str | Path) -> tuple[pd.DataFrame, pd.DataFrame | None]:

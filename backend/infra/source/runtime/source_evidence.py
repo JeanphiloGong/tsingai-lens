@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 from typing import Any
 
@@ -31,6 +32,7 @@ _OTHER_HEADING_PATTERNS = (
     re.compile(r"^(?:\d+(?:\.\d+)*)?\s*(引言|结果与讨论|结果|讨论|结论|参考文献)$"),
 )
 
+_NUMBERED_HEADING_PATTERN = re.compile(r"^(?P<number>\d+(?:\.\d+)*)\s+.+$")
 _METHOD_HINTS = (
     "stir",
     "stirred",
@@ -91,23 +93,58 @@ _TABLE_TITLE_PATTERN = re.compile(r"^\s*table\s+([a-z0-9\-]+)\b[:.\-\s]*(.*)$", 
 _UNIT_HINT_PATTERN = re.compile(r"\b(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b", re.IGNORECASE)
 
 
-def build_sections(
+def build_blocks(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     document_records = _build_document_records(documents, text_units)
+
+    rows: list[dict[str, Any]] = []
+    for _, row in document_records.iterrows():
+        rows.extend(
+            _extract_blocks_from_text(
+                paper_id=str(row["paper_id"]),
+                title=str(row["title"]),
+                text=str(row.get("text") or ""),
+                text_unit_ids=list(row.get("text_unit_ids") or []),
+            )
+        )
+
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "block_id",
+            "document_id",
+            "block_type",
+            "text",
+            "block_order",
+            "text_unit_ids",
+            "page",
+            "bbox",
+            "char_range",
+            "heading_path",
+            "heading_level",
+        ],
+    )
+
+
+def build_sections_from_blocks(
+    documents: pd.DataFrame,
+    blocks: pd.DataFrame,
+    text_units: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    document_records = _build_document_records(documents, text_units)
+    blocks_by_doc = _group_rows_by_document(blocks, "document_id")
     text_units_by_doc = _group_text_units_by_document(text_units)
 
     sections: list[dict[str, Any]] = []
     for _, row in document_records.iterrows():
         paper_id = str(row["paper_id"])
         title = str(row["title"])
-        text = str(row["text"] or "")
-        extracted = _extract_sections_from_text(
+        extracted = _extract_sections_from_blocks(
             paper_id=paper_id,
             title=title,
-            text=text,
-            text_unit_ids=list(row.get("text_unit_ids") or []),
+            blocks=blocks_by_doc.get(paper_id, []),
         )
         if not extracted:
             extracted = _fallback_sections_from_text_units(
@@ -132,6 +169,41 @@ def build_sections(
             "page",
             "char_range",
             "confidence",
+        ],
+    )
+
+
+def build_sections(
+    documents: pd.DataFrame,
+    text_units: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    blocks = build_blocks(documents, text_units)
+    return build_sections_from_blocks(documents, blocks, text_units)
+
+
+def build_table_rows(
+    documents: pd.DataFrame,
+    text_units: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    document_records = _build_document_records(documents, text_units)
+
+    rows: list[dict[str, Any]] = []
+    for _, row in document_records.iterrows():
+        paper_id = str(row["paper_id"])
+        lines = [line.strip() for line in re.split(r"\r?\n", str(row.get("text") or "")) if line.strip()]
+        rows.extend(_extract_table_rows_from_lines(paper_id, lines))
+
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "row_id",
+            "document_id",
+            "table_id",
+            "row_index",
+            "row_text",
+            "page",
+            "bbox",
+            "heading_path",
         ],
     )
 
@@ -187,51 +259,406 @@ def make_table_id(paper_id: str, order: int, title: str | None) -> str:
     return _make_table_id(paper_id, order, title)
 
 
-def _extract_sections_from_text(
+def _extract_blocks_from_text(
     paper_id: str,
     title: str,
     text: str,
     text_unit_ids: list[str],
 ) -> list[dict[str, Any]]:
     lines = [line.strip() for line in re.split(r"\r?\n", text) if line.strip()]
-    if not lines:
+    if not lines and not title:
         return []
 
-    headings: list[tuple[int, str, str]] = []
-    for index, line in enumerate(lines):
-        section_type = _classify_heading(line)
-        if section_type is None:
-            continue
-        headings.append((index, line, section_type))
+    rows: list[dict[str, Any]] = []
+    heading_stack: list[str] = []
+    block_order = 1
+    search_start = 0
+    normalized_title = _normalize_line(title)
+    normalized_first_line = _normalize_line(lines[0]) if lines else None
 
-    if not headings:
+    if title and normalized_title and normalized_title != normalized_first_line:
+        rows.append(
+            _build_block_row(
+                paper_id=paper_id,
+                block_order=block_order,
+                block_type="title",
+                text=title,
+                text_unit_ids=[],
+                page=None,
+                bbox=None,
+                char_range=None,
+                heading_path=title,
+                heading_level=0,
+            )
+        )
+        block_order += 1
+
+    for line in lines:
+        if _TABLE_TITLE_PATTERN.match(line):
+            char_range, search_start = _find_char_range(text, line, search_start)
+            rows.append(
+                _build_block_row(
+                    paper_id=paper_id,
+                    block_order=block_order,
+                    block_type="table_caption",
+                    text=line,
+                    text_unit_ids=[],
+                    page=None,
+                    bbox=None,
+                    char_range=char_range,
+                    heading_path=_serialize_heading_path(heading_stack),
+                    heading_level=None,
+                )
+            )
+            block_order += 1
+            continue
+
+        if _split_table_line(line) is not None:
+            _, search_start = _find_char_range(text, line, search_start)
+            continue
+
+        heading_path = _serialize_heading_path(heading_stack)
+        heading_level: int | None = None
+        if _looks_like_structural_heading(line):
+            heading_level = _infer_heading_level(line)
+            heading_stack = _update_heading_path_stack(heading_stack, line, heading_level)
+            heading_path = _serialize_heading_path(heading_stack)
+            block_type = "heading"
+        else:
+            block_type = _classify_text_block_type(line)
+
+        char_range, search_start = _find_char_range(text, line, search_start)
+        rows.append(
+            _build_block_row(
+                paper_id=paper_id,
+                block_order=block_order,
+                block_type=block_type,
+                text=line,
+                text_unit_ids=text_unit_ids if block_type != "title" else [],
+                page=None,
+                bbox=None,
+                char_range=char_range,
+                heading_path=heading_path,
+                heading_level=heading_level,
+            )
+        )
+        block_order += 1
+
+    return rows
+
+
+def _extract_sections_from_blocks(
+    paper_id: str,
+    title: str,
+    blocks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    ordered_blocks = sorted(
+        (block for block in blocks if isinstance(block, dict)),
+        key=lambda item: _safe_int(item.get("block_order"), default=0),
+    )
+    if not ordered_blocks:
         return []
 
     sections: list[dict[str, Any]] = []
-    output_order = 0
-    for order, (line_index, heading, section_type) in enumerate(headings, start=1):
-        end_index = headings[order][0] if order < len(headings) else len(lines)
-        body = "\n".join(lines[line_index + 1 : end_index]).strip()
-        if section_type not in {"methods", "characterization"} or len(body) < 30:
+    current: dict[str, Any] | None = None
+
+    def flush() -> None:
+        nonlocal current
+        if current is None:
+            return
+        body = "\n".join(current["body_parts"]).strip()
+        if len(body) >= 30:
+            sections.append(
+                {
+                    "section_id": _make_section_id(
+                        paper_id,
+                        current["section_type"],
+                        len(sections) + 1,
+                        current["heading"],
+                    ),
+                    "paper_id": paper_id,
+                    "title": title,
+                    "section_type": current["section_type"],
+                    "heading": current["heading"],
+                    "text": body,
+                    "order": len(sections) + 1,
+                    "source_mode": "blocks",
+                    "text_unit_ids": _dedupe_strings(current["text_unit_ids"]),
+                    "page": current["page"],
+                    "char_range": _merge_char_ranges(
+                        current["start_char_range"],
+                        current["end_char_range"],
+                    ),
+                    "confidence": 0.95 if current["section_type"] == "methods" else 0.9,
+                }
+            )
+        current = None
+
+    for block in ordered_blocks:
+        block_type = str(block.get("block_type") or "")
+        block_text = str(block.get("text") or "").strip()
+        if not block_text:
             continue
-        output_order += 1
-        sections.append(
-            {
-                "section_id": _make_section_id(paper_id, section_type, output_order, heading),
-                "paper_id": paper_id,
-                "title": title,
-                "section_type": section_type,
-                "heading": heading,
-                "text": body,
-                "order": output_order,
-                "source_mode": "heading",
-                "text_unit_ids": text_unit_ids,
-                "page": None,
-                "char_range": None,
-                "confidence": 0.95 if section_type == "methods" else 0.9,
-            }
-        )
+        if block_type == "heading":
+            section_type = _classify_heading(block_text)
+            if section_type in {"methods", "characterization"}:
+                flush()
+                current = {
+                    "section_type": section_type,
+                    "heading": block_text,
+                    "body_parts": [],
+                    "text_unit_ids": [],
+                    "page": block.get("page"),
+                    "start_char_range": block.get("char_range"),
+                    "end_char_range": block.get("char_range"),
+                }
+                continue
+            flush()
+            continue
+        if block_type == "title":
+            continue
+        if current is None:
+            continue
+        current["body_parts"].append(block_text)
+        current["text_unit_ids"].extend(_listify(block.get("text_unit_ids")))
+        if current["page"] is None and block.get("page") is not None:
+            current["page"] = block.get("page")
+        if current["start_char_range"] is None and block.get("char_range") is not None:
+            current["start_char_range"] = block.get("char_range")
+        if block.get("char_range") is not None:
+            current["end_char_range"] = block.get("char_range")
+
+    flush()
     return sections
+
+
+def _extract_table_rows_from_lines(
+    paper_id: str,
+    lines: list[str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    heading_stack: list[str] = []
+    pending_title: str | None = None
+    pending_heading_path: str | None = None
+    table_id: str | None = None
+    table_counter = 0
+    row_index = 0
+
+    for line in lines:
+        title_match = _TABLE_TITLE_PATTERN.match(line)
+        if title_match:
+            pending_title = " ".join(filter(None, [title_match.group(1), title_match.group(2).strip()])).strip()
+            pending_heading_path = _serialize_heading_path(heading_stack)
+            table_id = None
+            row_index = 0
+            continue
+
+        cells = _split_table_line(line)
+        if cells is not None:
+            if table_id is None:
+                table_counter += 1
+                table_id = _make_table_id(paper_id, table_counter, pending_title)
+                row_index = 0
+            else:
+                rows.append(
+                    {
+                        "row_id": f"row_{table_id}_{row_index}",
+                        "document_id": paper_id,
+                        "table_id": table_id,
+                        "row_index": row_index,
+                        "row_text": " | ".join(cell for cell in cells if cell),
+                        "page": None,
+                        "bbox": None,
+                        "heading_path": pending_heading_path,
+                    }
+                )
+            row_index += 1
+            continue
+
+        pending_title = None
+        pending_heading_path = None
+        table_id = None
+        row_index = 0
+        if _looks_like_structural_heading(line):
+            heading_level = _infer_heading_level(line)
+            heading_stack = _update_heading_path_stack(heading_stack, line, heading_level)
+
+    return rows
+
+
+def _build_block_row(
+    *,
+    paper_id: str,
+    block_order: int,
+    block_type: str,
+    text: str,
+    text_unit_ids: list[str],
+    page: int | None,
+    bbox: str | None,
+    char_range: str | None,
+    heading_path: str | None,
+    heading_level: int | None,
+) -> dict[str, Any]:
+    return {
+        "block_id": f"blk_{paper_id}_{block_order}",
+        "document_id": paper_id,
+        "block_type": block_type,
+        "text": text,
+        "block_order": block_order,
+        "text_unit_ids": list(text_unit_ids),
+        "page": page,
+        "bbox": bbox,
+        "char_range": char_range,
+        "heading_path": heading_path,
+        "heading_level": heading_level,
+    }
+
+
+def _find_char_range(
+    source_text: str,
+    fragment: str,
+    start_index: int,
+) -> tuple[str | None, int]:
+    if not source_text or not fragment:
+        return (None, start_index)
+
+    index = source_text.find(fragment, max(start_index, 0))
+    if index < 0 and start_index > 0:
+        index = source_text.find(fragment)
+    if index < 0:
+        return (None, start_index)
+
+    end_index = index + len(fragment)
+    return (
+        json.dumps(
+            {
+                "start": index,
+                "end": end_index,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        end_index,
+    )
+
+
+def _merge_char_ranges(
+    start_value: str | None,
+    end_value: str | None,
+) -> str | None:
+    if start_value is None:
+        return end_value
+    if end_value is None or end_value == start_value:
+        return start_value
+
+    start_payload = json.loads(start_value)
+    end_payload = json.loads(end_value)
+    return json.dumps(
+        {
+            "start": int(start_payload["start"]),
+            "end": int(end_payload["end"]),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+
+
+def _looks_like_structural_heading(line: str) -> bool:
+    compact = " ".join(str(line or "").split())
+    if not compact:
+        return False
+    if _split_table_line(compact) is not None or _TABLE_TITLE_PATTERN.match(compact):
+        return False
+    if _classify_heading(compact) is not None:
+        return True
+    if _NUMBERED_HEADING_PATTERN.match(compact):
+        return True
+    if len(compact) > 100:
+        return False
+    if compact.endswith((".", ";", "!", "?", ",")):
+        return False
+    words = compact.split()
+    if len(words) > 12:
+        return False
+    return compact == compact.title() or compact.isupper()
+
+
+def _infer_heading_level(line: str) -> int:
+    match = _NUMBERED_HEADING_PATTERN.match(" ".join(str(line or "").split()))
+    if not match:
+        return 1
+    return len(str(match.group("number")).split("."))
+
+
+def _update_heading_path_stack(
+    stack: list[str],
+    heading: str,
+    level: int,
+) -> list[str]:
+    normalized_heading = " ".join(str(heading or "").split())
+    if not normalized_heading:
+        return list(stack)
+
+    effective_level = max(1, int(level))
+    if effective_level > len(stack) + 1:
+        effective_level = len(stack) + 1
+    return [*stack[: effective_level - 1], normalized_heading]
+
+
+def _serialize_heading_path(stack: list[str]) -> str | None:
+    values = [str(item).strip() for item in stack if str(item).strip()]
+    if not values:
+        return None
+    return " > ".join(values)
+
+
+def _classify_text_block_type(line: str) -> str:
+    stripped = str(line or "").strip()
+    if stripped.startswith(("- ", "* ", "• ")):
+        return "list_item"
+    return "paragraph"
+
+
+def _group_rows_by_document(
+    frame: pd.DataFrame | None,
+    document_id_column: str,
+) -> dict[str, list[dict[str, Any]]]:
+    if frame is None or frame.empty or document_id_column not in frame.columns:
+        return {}
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for _, row in frame.iterrows():
+        document_id = str(row.get(document_id_column) or row.get("id") or "").strip()
+        if not document_id:
+            continue
+        grouped.setdefault(document_id, []).append(dict(row))
+    return grouped
+
+
+def _dedupe_strings(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        deduped.append(text)
+    return deduped
+
+
+def _normalize_line(value: Any) -> str | None:
+    text = _coerce_optional_text(value)
+    if text is None:
+        return None
+    return " ".join(text.split()).casefold()
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _fallback_sections_from_text_units(

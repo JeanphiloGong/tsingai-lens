@@ -70,6 +70,45 @@ Core should answer:
 - which evidence becomes cards, comparisons, protocol steps, or other
   semantic objects
 
+## Current Implementation Status
+
+As of 2026-04-20, the active code path has already completed the first hard
+cut of the Source substrate and the direct Core consumers.
+
+Implemented in code:
+
+- Source artifact creation now writes `documents.parquet`,
+  `text_units.parquet`, `blocks.parquet`, `table_rows.parquet`, and
+  `table_cells.parquet`
+- `backend/application/source/artifact_input_service.py` no longer exposes
+  Source-owned `sections` loading
+- document-profile building now reads Source `blocks`
+- Core evidence extraction now reads Source `blocks`, `table_rows`, and
+  `table_cells`
+- document content and traceback resolution now use document `blocks` instead
+  of Source `sections`
+- collection artifact registry, task payloads, and workspace payloads now
+  expose `blocks_*` and `table_rows_*` readiness flags instead of
+  `sections_*`
+
+Important boundary clarification after the cut:
+
+- `sections.parquet` still exists inside the protocol branch, but it is now a
+  protocol-owned derived artifact rather than a Source-owned substrate
+- protocol artifacts are still built from `documents/text_units` plus the
+  local `build_sections(...)` helper, not from a Source-level
+  `sections.parquet` handoff contract
+
+Known follow-up cleanup still outside this cut:
+
+- the protocol branch still carries section-shaped local semantics because its
+  own artifact family remains section-first
+- several historical plan docs still describe Source as if it emits
+  `sections.parquet`
+- some Core-local internal names still use `section` as a local extraction
+  unit label even though the persisted Source contract is now
+  `blocks/table_rows/table_cells`
+
 ## Scope
 
 This plan covers:

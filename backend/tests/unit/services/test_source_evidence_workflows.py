@@ -7,7 +7,12 @@ from pathlib import Path
 import pandas as pd
 
 from infra.source.config.source_runtime_config import GraphRagConfig
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import (
+    build_blocks,
+    build_sections,
+    build_table_cells,
+    build_table_rows,
+)
 from infra.source.runtime.workflows.create_source_artifacts import _build_pdf_bundle
 
 
@@ -42,7 +47,42 @@ def test_default_source_pipeline_includes_sections_and_table_cells():
     ]
 
 
-def test_build_sections_emits_source_sections_with_locator_fields():
+def test_build_blocks_emits_structure_first_blocks_with_heading_context():
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "doc-1",
+                "title": "Composite Study",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Powders were mixed in ethanol and stirred for 2 h.",
+                        "The slurry was dried at 80 C and annealed at 600 C under Ar.",
+                        "Characterization",
+                        "XRD and SEM were used to characterize the powders.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {"id": "tu-1", "text": "Powders were mixed in ethanol and stirred for 2 h.", "document_ids": ["doc-1"]},
+            {"id": "tu-2", "text": "The slurry was dried at 80 C and annealed at 600 C under Ar.", "document_ids": ["doc-1"]},
+        ]
+    )
+
+    blocks = build_blocks(documents, text_units)
+
+    assert set(blocks["document_id"]) == {"doc-1"}
+    assert {"title", "heading", "paragraph"} <= set(blocks["block_type"])
+    methods_blocks = blocks[blocks["heading_path"].astype(str).str.contains("Experimental Section", na=False)]
+    assert not methods_blocks.empty
+    assert methods_blocks["page"].isna().all()
+    assert methods_blocks["char_range"].notna().any()
+
+
+def test_build_sections_derives_legacy_semantics_from_blocks():
     documents = pd.DataFrame(
         [
             {
@@ -71,10 +111,6 @@ def test_build_sections_emits_source_sections_with_locator_fields():
 
     assert set(sections["section_type"]) == {"methods", "characterization"}
     assert set(sections["paper_id"]) == {"doc-1"}
-    assert "page" in sections.columns
-    assert "char_range" in sections.columns
-    assert sections["page"].isna().all()
-    assert sections["char_range"].isna().all()
 
 
 def test_build_table_cells_extracts_pipe_delimited_rows():
@@ -103,6 +139,33 @@ def test_build_table_cells_extracts_pipe_delimited_rows():
     data_cells = table_cells[table_cells["row_index"] == 1]
     assert "Conductivity (mS/cm)" in set(data_cells["header_path"].dropna())
     assert "mS/cm" in set(table_cells["unit_hint"].dropna())
+
+
+def test_build_table_rows_extracts_row_level_evidence():
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "doc-1",
+                "title": "Table Study",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Table 1 Conductivity Results",
+                        "Sample | Conductivity (mS/cm) | Baseline",
+                        "A | 12 | as-prepared",
+                        "B | 18 | annealed",
+                    ]
+                ),
+            }
+        ]
+    )
+
+    table_rows = build_table_rows(documents, None)
+
+    assert len(table_rows) == 2
+    assert set(table_rows["document_id"]) == {"doc-1"}
+    assert set(table_rows["heading_path"].dropna()) == {"Experimental Section"}
+    assert "A | 12 | as-prepared" in set(table_rows["row_text"])
 
 
 def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch, tmp_path):
@@ -190,7 +253,9 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
     )
 
     assert bundle.documents.iloc[0]["metadata"]["source_parser"] == "docling"
-    assert set(bundle.sections["section_type"]) == {"methods", "characterization"}
+    assert not bundle.blocks.empty
+    assert {"heading", "paragraph"} <= set(bundle.blocks["block_type"])
+    assert not bundle.table_rows.empty
     assert not bundle.table_cells.empty
     assert "Strength (MPa)" in set(bundle.table_cells["header_path"].dropna())
     assert "MPa" in set(bundle.table_cells["unit_hint"].dropna())

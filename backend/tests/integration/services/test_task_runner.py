@@ -15,7 +15,7 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.index_task_runner import IndexTaskRunner
 from application.source.task_service import TaskService
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
 class DummyWorkflowOutput:
@@ -86,7 +86,8 @@ def _write_index_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
@@ -112,7 +113,8 @@ def _write_review_only_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
@@ -164,7 +166,7 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["structure_features_generated"] is True
     assert artifacts["structure_features_ready"] is False
     assert artifacts["test_conditions_generated"] is True
-    assert artifacts["test_conditions_ready"] is True
+    assert artifacts["test_conditions_ready"] is False
     assert artifacts["baseline_references_generated"] is True
     assert artifacts["baseline_references_ready"] is True
     assert artifacts["sample_variants_generated"] is True
@@ -175,8 +177,10 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["comparison_rows_ready"] is True
     assert artifacts["graph_generated"] is True
     assert artifacts["graph_ready"] is True
-    assert artifacts["sections_generated"] is True
-    assert artifacts["sections_ready"] is True
+    assert artifacts["blocks_generated"] is True
+    assert artifacts["blocks_ready"] is True
+    assert artifacts["table_rows_generated"] is True
+    assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
     assert artifacts["procedure_blocks_generated"] is True
@@ -238,6 +242,10 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert artifacts["document_profiles_ready"] is True
     assert artifacts["graph_generated"] is True
     assert artifacts["graph_ready"] is True
+    assert artifacts["blocks_generated"] is True
+    assert artifacts["blocks_ready"] is True
+    assert artifacts["table_rows_generated"] is True
+    assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
     assert artifacts["evidence_cards_generated"] is True

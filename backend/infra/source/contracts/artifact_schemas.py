@@ -159,6 +159,31 @@ DOCUMENTS_FINAL_COLUMNS = [
     METADATA,
 ]
 
+BLOCKS_FINAL_COLUMNS = [
+    "block_id",
+    "document_id",
+    "block_type",
+    TEXT,
+    "block_order",
+    "text_unit_ids",
+    "page",
+    "bbox",
+    "char_range",
+    "heading_path",
+    "heading_level",
+]
+
+TABLE_ROWS_FINAL_COLUMNS = [
+    "row_id",
+    "document_id",
+    "table_id",
+    "row_index",
+    "row_text",
+    "page",
+    "bbox",
+    "heading_path",
+]
+
 SECTIONS_FINAL_COLUMNS = [
     "section_id",
     ID,

@@ -38,8 +38,10 @@ def _protocol_not_ready_detail(
         "artifacts": {
             "documents_generated": bool(payload.get("documents_generated")),
             "documents_ready": bool(payload.get("documents_ready")),
-            "sections_generated": bool(payload.get("sections_generated")),
-            "sections_ready": bool(payload.get("sections_ready")),
+            "blocks_generated": bool(payload.get("blocks_generated")),
+            "blocks_ready": bool(payload.get("blocks_ready")),
+            "table_rows_generated": bool(payload.get("table_rows_generated")),
+            "table_rows_ready": bool(payload.get("table_rows_ready")),
             "procedure_blocks_generated": bool(payload.get("procedure_blocks_generated")),
             "procedure_blocks_ready": bool(payload.get("procedure_blocks_ready")),
             "protocol_steps_generated": bool(payload.get("protocol_steps_generated")),

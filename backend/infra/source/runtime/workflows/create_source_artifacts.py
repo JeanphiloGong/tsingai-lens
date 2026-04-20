@@ -16,17 +16,18 @@ import pandas as pd
 
 from infra.source.config.source_runtime_config import GraphRagConfig
 from infra.source.contracts.artifact_schemas import (
+    BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
-    SECTIONS_FINAL_COLUMNS,
     TABLE_CELLS_FINAL_COLUMNS,
+    TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
 from infra.source.runtime.chunking import get_encoding_fn
 from infra.source.runtime.hashing import gen_sha512_hash
 from infra.source.runtime.source_evidence import (
-    classify_heading,
+    build_blocks,
+    build_table_rows,
     extract_unit_hint,
-    make_section_id,
     make_table_id,
 )
 from infra.source.runtime.storage.table_io import (
@@ -38,7 +39,6 @@ from infra.source.runtime.typing.workflow import WorkflowFunctionOutput
 from .create_base_text_units import create_base_text_units
 from .create_final_documents import create_final_documents
 from .create_final_text_units import create_final_text_units
-from .create_sections import create_sections
 from .create_table_cells import create_table_cells
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,8 @@ logger = logging.getLogger(__name__)
 class SourceArtifactBundle:
     documents: pd.DataFrame
     text_units: pd.DataFrame
-    sections: pd.DataFrame
+    blocks: pd.DataFrame
+    table_rows: pd.DataFrame
     table_cells: pd.DataFrame
 
 
@@ -68,7 +69,8 @@ async def run_workflow(
     context.stats.num_documents = len(output.documents)
     await write_table_to_storage(output.documents, "documents", context.output_storage)
     await write_table_to_storage(output.text_units, "text_units", context.output_storage)
-    await write_table_to_storage(output.sections, "sections", context.output_storage)
+    await write_table_to_storage(output.blocks, "blocks", context.output_storage)
+    await write_table_to_storage(output.table_rows, "table_rows", context.output_storage)
     await write_table_to_storage(output.table_cells, "table_cells", context.output_storage)
     logger.info("Workflow completed: create_source_artifacts")
     return WorkflowFunctionOutput(result=output.documents)
@@ -117,7 +119,8 @@ async def create_source_artifacts(
 
     documents = _concat_frames([bundle.documents for bundle in bundles], DOCUMENTS_FINAL_COLUMNS)
     text_units = _concat_frames([bundle.text_units for bundle in bundles], TEXT_UNITS_FINAL_COLUMNS)
-    sections = _concat_frames([bundle.sections for bundle in bundles], SECTIONS_FINAL_COLUMNS)
+    blocks = _concat_frames([bundle.blocks for bundle in bundles], BLOCKS_FINAL_COLUMNS)
+    table_rows = _concat_frames([bundle.table_rows for bundle in bundles], TABLE_ROWS_FINAL_COLUMNS)
     table_cells = _concat_frames(
         [bundle.table_cells for bundle in bundles],
         TABLE_CELLS_FINAL_COLUMNS,
@@ -133,7 +136,8 @@ async def create_source_artifacts(
     return SourceArtifactBundle(
         documents=documents.loc[:, DOCUMENTS_FINAL_COLUMNS],
         text_units=text_units.loc[:, TEXT_UNITS_FINAL_COLUMNS],
-        sections=sections.loc[:, SECTIONS_FINAL_COLUMNS],
+        blocks=blocks.loc[:, BLOCKS_FINAL_COLUMNS],
+        table_rows=table_rows.loc[:, TABLE_ROWS_FINAL_COLUMNS],
         table_cells=table_cells.loc[:, TABLE_CELLS_FINAL_COLUMNS],
     )
 
@@ -173,12 +177,14 @@ def _build_text_bundle(
     )
     final_documents = create_final_documents(document_frame, base_text_units)
     final_text_units = create_final_text_units(base_text_units)
-    final_sections = create_sections(final_documents, final_text_units)
+    final_blocks = build_blocks(final_documents, final_text_units)
+    final_table_rows = build_table_rows(final_documents, final_text_units)
     final_table_cells = create_table_cells(final_documents, final_text_units)
     return SourceArtifactBundle(
         documents=final_documents.loc[:, DOCUMENTS_FINAL_COLUMNS],
         text_units=final_text_units.loc[:, TEXT_UNITS_FINAL_COLUMNS],
-        sections=final_sections.loc[:, SECTIONS_FINAL_COLUMNS],
+        blocks=final_blocks.loc[:, BLOCKS_FINAL_COLUMNS],
+        table_rows=final_table_rows.loc[:, TABLE_ROWS_FINAL_COLUMNS],
         table_cells=final_table_cells.loc[:, TABLE_CELLS_FINAL_COLUMNS],
     )
 
@@ -213,7 +219,7 @@ def _build_pdf_bundle(
         ],
         columns=DOCUMENTS_FINAL_COLUMNS,
     )
-    final_sections = _build_pdf_sections(
+    final_blocks = _build_pdf_blocks(
         document_id=document_id,
         title=title,
         text_items=text_items,
@@ -222,10 +228,16 @@ def _build_pdf_bundle(
         document_id=document_id,
         document=document,
     )
+    final_table_rows = _build_pdf_table_rows(
+        document_id=document_id,
+        blocks=final_blocks,
+        table_cells=final_table_cells,
+    )
     return SourceArtifactBundle(
         documents=final_documents.loc[:, DOCUMENTS_FINAL_COLUMNS],
         text_units=text_units.loc[:, TEXT_UNITS_FINAL_COLUMNS],
-        sections=final_sections.loc[:, SECTIONS_FINAL_COLUMNS],
+        blocks=final_blocks.loc[:, BLOCKS_FINAL_COLUMNS],
+        table_rows=final_table_rows.loc[:, TABLE_ROWS_FINAL_COLUMNS],
         table_cells=final_table_cells.loc[:, TABLE_CELLS_FINAL_COLUMNS],
     )
 
@@ -265,6 +277,7 @@ def _collect_pdf_text_items(document: Any) -> list[dict[str, Any]]:
                 "text": text,
                 "label": str(getattr(item, "label", "") or ""),
                 "page": _first_page(getattr(item, "prov", None)),
+                "bbox": _serialize_prov_bbox(getattr(item, "prov", None)),
                 "char_range": _serialize_char_range(getattr(item, "prov", None)),
             }
         )
@@ -301,73 +314,85 @@ def _build_pdf_text_units(
     return pd.DataFrame(rows, columns=TEXT_UNITS_FINAL_COLUMNS)
 
 
-def _build_pdf_sections(
+def _build_pdf_blocks(
     *,
     document_id: str,
     title: str,
     text_items: list[dict[str, Any]],
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
-    current: dict[str, Any] | None = None
+    heading_stack: list[str] = []
+    order = 1
+    saw_title = False
 
-    def flush_current() -> None:
-        nonlocal current
-        if current is None:
-            return
-        body = "\n".join(current["body_parts"]).strip()
-        if body:
-            rows.append(
-                {
-                    "section_id": make_section_id(
-                        document_id,
-                        current["section_type"],
-                        len(rows) + 1,
-                        current["heading"],
-                    ),
-                    "id": document_id,
-                    "title": title,
-                    "section_type": current["section_type"],
-                    "heading": current["heading"],
-                    "text": body,
-                    "order": len(rows) + 1,
-                    "text_unit_ids": current["text_unit_ids"],
-                    "page": current["page"],
-                    "char_range": _serialize_range_span(
-                        current["start_char_range"],
-                        current["end_char_range"],
-                    ),
-                    "confidence": 0.95 if current["section_type"] == "methods" else 0.9,
-                }
-            )
-        current = None
+    if not any(str(item.get("label") or "").lower() == "title" for item in text_items) and title:
+        rows.append(
+            {
+                "block_id": f"blk_{document_id}_{order}",
+                "document_id": document_id,
+                "block_type": "title",
+                "text": title,
+                "block_order": order,
+                "text_unit_ids": [],
+                "page": None,
+                "bbox": None,
+                "char_range": None,
+                "heading_path": title,
+                "heading_level": 0,
+            }
+        )
+        order += 1
 
     for item in text_items:
-        heading_type = classify_heading(item["text"])
         label = str(item["label"] or "").lower()
-        is_heading_like = label in {"section_header", "title"} or heading_type is not None
-        if heading_type in {"methods", "characterization"}:
-            flush_current()
-            current = {
-                "section_type": heading_type,
-                "heading": item["text"],
-                "body_parts": [],
-                "text_unit_ids": [],
+        if label == "title":
+            saw_title = True
+        block_type = _map_docling_block_type(label, item["text"])
+        heading_path: str | None = None
+        heading_level: int | None = None
+        if block_type == "heading":
+            heading_level = _infer_heading_level_from_text(item["text"])
+            heading_stack = _update_heading_stack(heading_stack, item["text"], heading_level)
+            heading_path = " > ".join(heading_stack)
+        elif block_type == "title":
+            heading_path = item["text"]
+        else:
+            heading_path = " > ".join(heading_stack) if heading_stack else None
+        rows.append(
+            {
+                "block_id": f"blk_{document_id}_{order}",
+                "document_id": document_id,
+                "block_type": block_type,
+                "text": item["text"],
+                "block_order": order,
+                "text_unit_ids": [item["text_unit_id"]] if item.get("text_unit_id") else [],
                 "page": item["page"],
-                "start_char_range": item["char_range"],
-                "end_char_range": item["char_range"],
+                "bbox": item.get("bbox"),
+                "char_range": item["char_range"],
+                "heading_path": heading_path,
+                "heading_level": heading_level,
             }
-            continue
-        if is_heading_like:
-            flush_current()
-            continue
-        if current is None:
-            continue
-        current["body_parts"].append(item["text"])
-        current["text_unit_ids"].append(item.get("text_unit_id"))
-        current["end_char_range"] = item["char_range"]
+        )
+        order += 1
 
-    flush_current()
-    return pd.DataFrame(rows, columns=SECTIONS_FINAL_COLUMNS)
+    if not saw_title and title and not rows:
+        rows.append(
+            {
+                "block_id": f"blk_{document_id}_{order}",
+                "document_id": document_id,
+                "block_type": "title",
+                "text": title,
+                "block_order": order,
+                "text_unit_ids": [],
+                "page": None,
+                "bbox": None,
+                "char_range": None,
+                "heading_path": title,
+                "heading_level": 0,
+            }
+        )
+
+    return pd.DataFrame(rows, columns=BLOCKS_FINAL_COLUMNS)
 
 
 def _build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
@@ -410,6 +435,64 @@ def _build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows, columns=TABLE_CELLS_FINAL_COLUMNS)
+
+
+def _build_pdf_table_rows(
+    *,
+    document_id: str,
+    blocks: pd.DataFrame,
+    table_cells: pd.DataFrame | None,
+) -> pd.DataFrame:
+    if table_cells is None or table_cells.empty:
+        return pd.DataFrame(columns=TABLE_ROWS_FINAL_COLUMNS)
+
+    heading_blocks = []
+    if blocks is not None and not blocks.empty:
+        heading_blocks = sorted(
+            [
+                {
+                    "page": item.get("page"),
+                    "heading_path": str(item.get("heading_path") or "").strip() or None,
+                    "block_order": int(item.get("block_order") or 0),
+                }
+                for item in blocks.to_dict(orient="records")
+                if str(item.get("heading_path") or "").strip()
+            ],
+            key=lambda item: (item["page"] is None, item["page"], item["block_order"]),
+        )
+
+    rows: list[dict[str, Any]] = []
+    for table_id, table_frame in table_cells.groupby("table_id", sort=False):
+        first_data_row = None
+        for row_index in sorted(int(value) for value in table_frame["row_index"].dropna().tolist()):
+            row_frame = table_frame[table_frame["row_index"].astype(int) == row_index]
+            if row_frame["header_path"].isna().all():
+                continue
+            if first_data_row is None:
+                first_data_row = row_index
+            ordered_cells = row_frame.sort_values("col_index")
+            row_text = " | ".join(
+                str(value).strip()
+                for value in ordered_cells["cell_text"].tolist()
+                if str(value).strip()
+            )
+            if not row_text:
+                continue
+            page = _first_non_null(ordered_cells["page"].tolist())
+            rows.append(
+                {
+                    "row_id": f"row_{document_id}_{table_id}_{row_index}",
+                    "document_id": document_id,
+                    "table_id": str(table_id),
+                    "row_index": row_index,
+                    "row_text": row_text,
+                    "page": page,
+                    "bbox": _merge_bbox_payloads(ordered_cells["bbox"].tolist()),
+                    "heading_path": _resolve_heading_path_for_page(page, heading_blocks),
+                }
+            )
+
+    return pd.DataFrame(rows, columns=TABLE_ROWS_FINAL_COLUMNS)
 
 
 def _build_docling_header_paths(table: Any) -> dict[int, str]:
@@ -508,24 +591,11 @@ def _serialize_char_range(provenance: Any) -> str | None:
     )
 
 
-def _serialize_range_span(
-    start_value: str | None,
-    end_value: str | None,
-) -> str | None:
-    if start_value is None:
-        return end_value
-    if end_value is None or end_value == start_value:
-        return start_value
-    start = json.loads(start_value)
-    end = json.loads(end_value)
-    return json.dumps(
-        {
-            "start": int(start["start"]),
-            "end": int(end["end"]),
-        },
-        ensure_ascii=True,
-        sort_keys=True,
-    )
+def _serialize_prov_bbox(provenance: Any) -> str | None:
+    if not provenance:
+        return None
+    first = provenance[0]
+    return _serialize_bbox(getattr(first, "bbox", None))
 
 
 def _serialize_bbox(bbox: Any) -> str | None:
@@ -542,3 +612,110 @@ def _serialize_bbox(bbox: Any) -> str | None:
         ensure_ascii=True,
         sort_keys=True,
     )
+
+
+def _map_docling_block_type(label: str, text: str) -> str:
+    lowered = str(label or "").lower()
+    if lowered == "title":
+        return "title"
+    if lowered in {"section_header", "heading"}:
+        return "heading"
+    if "caption" in lowered:
+        return "table_caption"
+    if "list" in lowered:
+        return "list_item"
+    return "paragraph"
+
+
+def _infer_heading_level_from_text(text: str) -> int:
+    normalized = " ".join(str(text or "").split())
+    if not normalized:
+        return 1
+    parts = normalized.split(maxsplit=1)
+    if parts and all(part.isdigit() for part in parts[0].split(".")):
+        return len(parts[0].split("."))
+    return 1
+
+
+def _update_heading_stack(
+    stack: list[str],
+    heading: str,
+    level: int,
+) -> list[str]:
+    normalized = " ".join(str(heading or "").split())
+    if not normalized:
+        return list(stack)
+    effective_level = max(1, int(level or 1))
+    if effective_level > len(stack) + 1:
+        effective_level = len(stack) + 1
+    return [*stack[: effective_level - 1], normalized]
+
+
+def _first_non_null(values: list[Any]) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, float) and pd.isna(value):
+            continue
+        return value
+    return None
+
+
+def _merge_bbox_payloads(values: list[Any]) -> str | None:
+    payloads = []
+    for value in values:
+        if not value:
+            continue
+        if isinstance(value, str):
+            payloads.append(json.loads(value))
+        elif isinstance(value, dict):
+            payloads.append(value)
+    if not payloads:
+        return None
+    return json.dumps(
+        {
+            "l": min(float(payload.get("l", 0.0)) for payload in payloads),
+            "t": min(float(payload.get("t", 0.0)) for payload in payloads),
+            "r": max(float(payload.get("r", 0.0)) for payload in payloads),
+            "b": max(float(payload.get("b", 0.0)) for payload in payloads),
+            "coord_origin": str(payloads[0].get("coord_origin") or ""),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+
+
+def _resolve_heading_path_for_page(
+    page: int | None,
+    heading_blocks: list[dict[str, Any]],
+) -> str | None:
+    if not heading_blocks:
+        return None
+    normalized_page = _safe_int(page)
+    eligible = [
+        item
+        for item in heading_blocks
+        if item.get("heading_path")
+        and (
+            normalized_page is None
+            or _safe_int(item.get("page")) is None
+            or _safe_int(item.get("page")) <= normalized_page
+        )
+    ]
+    if not eligible:
+        return heading_blocks[-1].get("heading_path")
+    return eligible[-1].get("heading_path")
+
+
+def _safe_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

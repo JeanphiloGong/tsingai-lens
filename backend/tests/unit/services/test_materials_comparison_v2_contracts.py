@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from application.source.artifact_input_service import resolve_collection_artifact_paths
 from infra.source.contracts.artifact_schemas import (
+    BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
-    SECTIONS_FINAL_COLUMNS,
     TABLE_CELLS_FINAL_COLUMNS,
+    TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
 
@@ -14,7 +15,8 @@ def test_collection_artifact_paths_include_materials_comparison_v2_source_target
 
     assert paths.documents.name == "documents.parquet"
     assert paths.text_units.name == "text_units.parquet"
-    assert paths.sections.name == "sections.parquet"
+    assert paths.blocks.name == "blocks.parquet"
+    assert paths.table_rows.name == "table_rows.parquet"
     assert paths.table_cells.name == "table_cells.parquet"
     assert paths.procedure_blocks.name == "procedure_blocks.parquet"
 
@@ -36,18 +38,28 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "n_tokens",
         "document_ids",
     ]
-    assert SECTIONS_FINAL_COLUMNS == [
-        "section_id",
-        "id",
-        "title",
-        "section_type",
-        "heading",
+    assert BLOCKS_FINAL_COLUMNS == [
+        "block_id",
+        "document_id",
+        "block_type",
         "text",
-        "order",
+        "block_order",
         "text_unit_ids",
         "page",
+        "bbox",
         "char_range",
-        "confidence",
+        "heading_path",
+        "heading_level",
+    ]
+    assert TABLE_ROWS_FINAL_COLUMNS == [
+        "row_id",
+        "document_id",
+        "table_id",
+        "row_index",
+        "row_text",
+        "page",
+        "bbox",
+        "heading_path",
     ]
     assert TABLE_CELLS_FINAL_COLUMNS == [
         "cell_id",

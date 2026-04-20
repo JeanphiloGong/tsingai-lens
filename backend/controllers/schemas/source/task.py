@@ -98,8 +98,6 @@ class ArtifactStatusResponse(BaseModel):
         default=False,
         description="protocol_steps.parquet 是否存在且非空",
     )
-    graphml_generated: bool = Field(default=False, description="graph.graphml 是否存在")
-    graphml_ready: bool = Field(default=False, description="graph.graphml 是否存在")
     updated_at: str = Field(..., description="更新时间")
 
 

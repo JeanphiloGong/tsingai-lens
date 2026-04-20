@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
@@ -54,7 +54,7 @@ class SourceArtifactBundle:
 
 
 async def run_workflow(
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
     context: PipelineRunContext,
 ) -> WorkflowFunctionOutput:
     """Parse mixed raw inputs into the final Source handoff artifacts."""
@@ -79,7 +79,7 @@ async def run_workflow(
 async def create_source_artifacts(
     *,
     inventory: pd.DataFrame,
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
     context: PipelineRunContext,
 ) -> SourceArtifactBundle:
     """Build all final Source artifacts in one pass over the raw inputs."""
@@ -146,7 +146,7 @@ def _build_text_bundle(
     *,
     row: pd.Series,
     text: str,
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
     callbacks: Any,
 ) -> SourceArtifactBundle:
     document_id = _resolve_document_id(row)
@@ -193,7 +193,7 @@ def _build_pdf_bundle(
     *,
     row: pd.Series,
     payload: bytes,
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
     converter: Any,
 ) -> SourceArtifactBundle:
     document = _convert_pdf_document(
@@ -287,7 +287,7 @@ def _collect_pdf_text_items(document: Any) -> list[dict[str, Any]]:
 def _build_pdf_text_units(
     document_id: str,
     text_items: list[dict[str, Any]],
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
 ) -> pd.DataFrame:
     encode, _ = get_encoding_fn(config.chunks.encoding_model)
     rows: list[dict[str, Any]] = []

@@ -45,8 +45,6 @@ class ArtifactStatusRecord:
     procedure_blocks_ready: bool
     protocol_steps_generated: bool
     protocol_steps_ready: bool
-    graphml_generated: bool
-    graphml_ready: bool
     updated_at: str
 
     @classmethod
@@ -104,7 +102,6 @@ class ArtifactStatusRecord:
         procedure_blocks_ready: bool = False,
         protocol_steps_generated: bool = False,
         protocol_steps_ready: bool = False,
-        graphml_generated: bool = False,
     ) -> "ArtifactStatusRecord":
         core_graph_generated = (
             bool(document_profiles_generated)
@@ -159,8 +156,6 @@ class ArtifactStatusRecord:
             procedure_blocks_ready=bool(procedure_blocks_ready),
             protocol_steps_generated=bool(protocol_steps_generated),
             protocol_steps_ready=bool(protocol_steps_ready),
-            graphml_generated=bool(graphml_generated),
-            graphml_ready=bool(graphml_generated),
             updated_at=str(updated_at),
         )
 
@@ -230,7 +225,6 @@ class ArtifactStatusRecord:
             procedure_blocks_ready=_normalize_bool(source.get("procedure_blocks_ready")),
             protocol_steps_generated=_normalize_bool(source.get("protocol_steps_generated")),
             protocol_steps_ready=_normalize_bool(source.get("protocol_steps_ready")),
-            graphml_generated=_normalize_bool(source.get("graphml_generated")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -273,8 +267,6 @@ class ArtifactStatusRecord:
             "procedure_blocks_ready": self.procedure_blocks_ready,
             "protocol_steps_generated": self.protocol_steps_generated,
             "protocol_steps_ready": self.protocol_steps_ready,
-            "graphml_generated": self.graphml_generated,
-            "graphml_ready": self.graphml_ready,
             "updated_at": self.updated_at,
         }
 

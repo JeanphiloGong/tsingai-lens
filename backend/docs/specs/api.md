@@ -110,7 +110,7 @@
 - `current_stage` 对外应使用：
   `queued | files_registered | source_index_started | source_index_completed | document_profiles_started | evidence_cards_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
 - `graphrag_index_started`、`graphrag_index_completed`
-  只允许作为内部兼容别名存在，不属于公开 API 合同
+  已退役，不再属于公开或内部活动合同
 
 ### Workspace
 
@@ -151,8 +151,10 @@
 - `graph_ready`
   表示上述 Core graph 输入已具备图投影消费条件，而不是
   `entities.parquet` / `relationships.parquet` 是否存在
-- `graphml_generated` 与 `graphml_ready`
-  只描述 `graph.graphml` 导出文件本身，不代表 graph 事实来源
+- `artifacts` 不再暴露 `graphml_generated` / `graphml_ready`
+  因为 GraphML 已改为基于 Core graph 的按需导出能力，不再是索引阶段的 readiness 产物
+- `capabilities.can_download_graphml`
+  应与 `graph_ready` 保持一致，表达当前 collection 是否可以导出按需生成的 GraphML
 
 ### Document Profiles
 

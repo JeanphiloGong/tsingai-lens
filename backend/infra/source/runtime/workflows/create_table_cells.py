@@ -7,7 +7,7 @@ import logging
 
 import pandas as pd
 
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import TABLE_CELLS_FINAL_COLUMNS
 from infra.source.runtime.source_evidence import build_table_cells
 from infra.source.runtime.storage.table_io import (
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_workflow(
-    _config: GraphRagConfig,
+    _config: SourceRuntimeConfig,
     context: PipelineRunContext,
 ) -> WorkflowFunctionOutput:
     logger.info("Workflow started: create_table_cells")

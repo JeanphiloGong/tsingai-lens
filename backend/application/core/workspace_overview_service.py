@@ -79,8 +79,6 @@ class WorkspaceService:
             "procedure_blocks_ready": False,
             "protocol_steps_generated": False,
             "protocol_steps_ready": False,
-            "graphml_generated": False,
-            "graphml_ready": False,
             "updated_at": self.collection_service.get_collection(collection_id)["updated_at"],
         }
 
@@ -450,8 +448,6 @@ class WorkspaceService:
                 "procedure_blocks_ready": bool(artifacts.get("procedure_blocks_ready")),
                 "protocol_steps_generated": bool(artifacts.get("protocol_steps_generated")),
                 "protocol_steps_ready": bool(artifacts.get("protocol_steps_ready")),
-                "graphml_generated": bool(artifacts.get("graphml_generated")),
-                "graphml_ready": bool(artifacts.get("graphml_ready")),
                 "updated_at": artifacts["updated_at"],
             },
             "workflow": self._build_workflow(len(files), latest_task, artifacts, document_summary),

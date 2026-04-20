@@ -17,7 +17,7 @@ def test_artifact_status_empty_defaults_all_flags_to_false() -> None:
     assert payload["comparison_rows_ready"] is False
     assert payload["graph_generated"] is False
     assert payload["graph_ready"] is False
-    assert payload["graphml_ready"] is False
+    assert "graphml_ready" not in payload
 
 
 def test_artifact_status_derives_core_graph_flags_from_core_inputs() -> None:
@@ -51,7 +51,6 @@ def test_artifact_status_normalizes_legacy_payload_and_recomputes_graph_flags() 
             "comparison_rows_ready": False,
             "graph_generated": False,
             "graph_ready": True,
-            "graphml_generated": True,
             "updated_at": "2026-04-19T00:00:00+00:00",
         },
         collection_id="col_demo",
@@ -60,5 +59,5 @@ def test_artifact_status_normalizes_legacy_payload_and_recomputes_graph_flags() 
     payload = record.to_record()
     assert payload["graph_generated"] is True
     assert payload["graph_ready"] is False
-    assert payload["graphml_ready"] is True
+    assert "graphml_generated" not in payload
     assert payload["documents_generated"] is False

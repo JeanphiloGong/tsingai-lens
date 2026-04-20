@@ -44,8 +44,6 @@ class ArtifactRegistryService:
         table_cells_path = base_dir / "table_cells.parquet"
         procedure_blocks_path = base_dir / "procedure_blocks.parquet"
         protocol_steps_path = base_dir / "protocol_steps.parquet"
-        graphml_path = base_dir / "graph.graphml"
-
         return ArtifactStatusRecord.build(
             collection_id=collection_id,
             output_path=str(base_dir),
@@ -85,7 +83,6 @@ class ArtifactRegistryService:
             procedure_blocks_ready=self._parquet_has_rows(procedure_blocks_path),
             protocol_steps_generated=protocol_steps_path.exists(),
             protocol_steps_ready=self._parquet_has_rows(protocol_steps_path),
-            graphml_generated=graphml_path.exists(),
             updated_at=_now_iso(),
         ).to_record()
 

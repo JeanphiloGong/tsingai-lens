@@ -7,7 +7,7 @@ import logging
 
 import pandas as pd
 
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import DOCUMENTS_FINAL_COLUMNS
 from infra.source.runtime.storage.table_io import (
     load_table_from_storage,
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_workflow(
-    _config: GraphRagConfig,
+    _config: SourceRuntimeConfig,
     context: PipelineRunContext,
 ) -> WorkflowFunctionOutput:
     """All the steps to transform final documents."""

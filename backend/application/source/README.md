@@ -7,7 +7,7 @@ artifact readiness handoff inside the backend application layer.
   Collection lifecycle, file membership, import provenance, and goal handoff
   registration
 - `task_service.py`
-  Source indexing task registry and public stage normalization
+  Source indexing task registry and stage persistence
 - `index_task_runner.py`
   Source runtime execution followed by Core post-processing kickoff
 - `artifact_input_service.py`

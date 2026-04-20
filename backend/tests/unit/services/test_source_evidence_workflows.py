@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.source_evidence import (
     build_blocks,
     build_table_cells,
@@ -216,7 +216,7 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
             }
         ),
         payload=b"%PDF-1.4 test",
-        config=GraphRagConfig(root_dir=str(tmp_path)),
+        config=SourceRuntimeConfig(root_dir=str(tmp_path)),
         converter=object(),
     )
 

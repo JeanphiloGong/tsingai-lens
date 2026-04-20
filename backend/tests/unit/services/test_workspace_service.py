@@ -154,6 +154,7 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["artifacts"]["table_cells_generated"] is True
     assert overview["artifacts"]["table_cells_ready"] is False
     assert overview["artifacts"]["protocol_steps_generated"] is False
+    assert "graphml_generated" not in overview["artifacts"]
     assert overview["document_summary"]["total_documents"] == 1
     assert overview["document_summary"]["by_doc_type"]["experimental"] == 1
     assert overview["links"]["documents_profiles"] == f"/api/v1/collections/{collection_id}/documents/profiles"

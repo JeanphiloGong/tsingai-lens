@@ -99,7 +99,7 @@ class ChunkingConfig(BaseModel):
     chunk_size_includes_metadata: bool = False
 
 
-class GraphRagConfig(BaseModel):
+class SourceRuntimeConfig(BaseModel):
     """Minimal config consumed by the active Source runtime."""
 
     root_dir: str = Field(default="")
@@ -142,7 +142,7 @@ class GraphRagConfig(BaseModel):
         storage.base_dir = str((Path(self.root_dir) / storage.base_dir).resolve())
 
     @model_validator(mode="after")
-    def _validate_model(self) -> "GraphRagConfig":
+    def _validate_model(self) -> "SourceRuntimeConfig":
         self._resolve_root_dir()
         self._normalize_input_pattern()
         self._resolve_storage_dir(self.input.storage)

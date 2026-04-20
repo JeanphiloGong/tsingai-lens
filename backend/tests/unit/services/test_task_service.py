@@ -24,7 +24,7 @@ def test_task_service_lists_collection_tasks_with_status_and_offset(tmp_path):
     assert [item["task_id"] for item in paged] == [task_a["task_id"]]
 
 
-def test_task_service_normalizes_legacy_public_stage_aliases(tmp_path):
+def test_task_service_preserves_source_stage_values_without_legacy_aliases(tmp_path):
     task_service = TaskService(tmp_path / "tasks")
 
     task = task_service.create_task("col_a", "index")
@@ -35,7 +35,7 @@ def test_task_service_normalizes_legacy_public_stage_aliases(tmp_path):
         task["task_id"],
         {
             **stored,
-            "current_stage": "graphrag_index_started",
+            "current_stage": "source_index_started",
         },
     )
 
@@ -47,7 +47,7 @@ def test_task_service_normalizes_legacy_public_stage_aliases(tmp_path):
 
     updated = task_service.update_task(
         task["task_id"],
-        current_stage="graphrag_index_completed",
+        current_stage="source_index_completed",
     )
     assert updated["current_stage"] == "source_index_completed"
 

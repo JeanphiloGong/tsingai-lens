@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 from infra.source.contracts.artifact_schemas import TEXT_UNITS_FINAL_COLUMNS
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.storage.table_io import (
     load_table_from_storage,
     write_table_to_storage,
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_workflow(
-    _config: GraphRagConfig,
+    _config: SourceRuntimeConfig,
     context: PipelineRunContext,
 ) -> WorkflowFunctionOutput:
     """All the steps to transform the text units."""

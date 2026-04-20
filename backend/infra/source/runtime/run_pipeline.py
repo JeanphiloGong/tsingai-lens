@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 
 from infra.source.runtime.cache.factory import create_cache_from_config
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.runtime.run_context import create_run_context
 from infra.source.runtime.storage.factory import create_storage_from_config
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 async def run_pipeline(
     pipeline: Pipeline,
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
     callbacks: WorkflowCallbacks,
     additional_context: dict[str, Any] | None = None,
     input_documents: pd.DataFrame | None = None,
@@ -71,7 +71,7 @@ async def run_pipeline(
 
 async def _run_pipeline(
     pipeline: Pipeline,
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
     context: PipelineRunContext,
 ) -> AsyncIterable[PipelineRunResult]:
     start_time = time.time()

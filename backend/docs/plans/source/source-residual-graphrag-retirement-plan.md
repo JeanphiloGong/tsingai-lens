@@ -29,12 +29,13 @@ For the final repository-level deletion of the retired historical package, read
 
 ## Status
 
-Status as of 2026-04-17:
+Status as of 2026-04-20:
 
 - Wave A is complete
 - Wave B is complete
 - Wave C is complete
-- Wave D is partially complete
+- Wave D is complete
+- Wave E is complete
 
 Completed implementation in this repository now includes:
 
@@ -49,12 +50,18 @@ Completed implementation in this repository now includes:
 - active `infra/source/*` code no longer imports `retrieval.*` directly; input
   loading, chunking, config shaping, storage/cache setup, and runtime logging
   now live inside Source-owned modules
+- the active Source runtime config model has been renamed to
+  `SourceRuntimeConfig`; residual `GraphRagConfig` naming has been removed
+- task payload handling no longer normalizes or accepts
+  `graphrag_index_started` / `graphrag_index_completed`
+- workspace and task artifact payloads no longer expose
+  `graphml_generated` / `graphml_ready`; GraphML remains an on-demand export
+  derived from the Core graph projection
 
 Still pending after this cut:
 
-- deeper retirement of now-orphaned GraphRAG operations, prompt/config slices,
-  and supporting runtime modules that no longer sit on the active Source path
-- product-facing cleanup of `graphml_*` readiness flags described in Wave E
+- historical docs and older plan pages still mention intermediate GraphRAG-era
+  runtime details that no longer exist on the active path
 
 ## Context
 

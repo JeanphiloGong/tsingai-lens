@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,8 @@ from application.source.artifact_input_service import (
     load_sections_artifact,
 )
 from application.source.artifact_registry_service import ArtifactRegistryService
+
+logger = logging.getLogger(__name__)
 
 
 _DOCUMENT_PROFILES_FILE = "document_profiles.parquet"
@@ -248,16 +251,33 @@ class DocumentProfileService:
         document_records = build_document_records(documents, text_units)
         sections_by_doc = self._group_sections_by_document(sections)
         file_lookup = self._build_collection_file_lookup(collection_id)
+        logger.info(
+            "Document profile build started collection_id=%s document_count=%s section_count=%s",
+            collection_id,
+            len(document_records),
+            len(sections),
+        )
 
-        rows = [
-            self._profile_document_row(
+        rows: list[dict[str, Any]] = []
+        for _, row in document_records.iterrows():
+            document_id = str(row.get("paper_id") or row.get("document_id") or "")
+            document_sections = sections_by_doc.get(document_id, [])
+            profiled = self._profile_document_row(
                 collection_id=collection_id,
                 row=row,
-                sections=sections_by_doc.get(str(row.get("paper_id")), []),
+                sections=document_sections,
                 file_lookup=file_lookup,
             )
-            for _, row in document_records.iterrows()
-        ]
+            logger.info(
+                "Document profile extracted collection_id=%s document_id=%s doc_type=%s protocol_extractable=%s section_count=%s warning_count=%s",
+                collection_id,
+                document_id,
+                profiled.get("doc_type"),
+                profiled.get("protocol_extractable"),
+                len(document_sections),
+                len(profiled.get("parsing_warnings", [])),
+            )
+            rows.append(profiled)
         profiles = pd.DataFrame(
             rows,
             columns=[
@@ -280,6 +300,12 @@ class DocumentProfileService:
         ).to_parquet(base_dir / _DOCUMENT_PROFILES_FILE, index=False)
         write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
+        logger.info(
+            "Document profile build finished collection_id=%s profile_count=%s protocol_candidate_count=%s",
+            collection_id,
+            len(profiles),
+            self.count_protocol_suitable(profiles),
+        )
         return profiles
 
     def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:

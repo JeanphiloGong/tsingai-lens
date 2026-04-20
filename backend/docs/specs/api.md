@@ -17,6 +17,9 @@
 - `graph/*`、`reports/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
 - 当前没有单独公开的 `query/search` 产品接口
 - `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
+- 所有业务响应都会回传 `X-Request-ID`
+  - 客户端可主动传入 `X-Request-ID` 参与链路关联
+  - 如果未传入或值非法，后端会生成新的 request id 并回写到响应头
 
 ## 文档与静态资源
 

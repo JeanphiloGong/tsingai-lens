@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,8 @@ from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
     restore_frame_from_storage,
 )
+
+logger = logging.getLogger(__name__)
 
 
 _EVIDENCE_CARDS_FILE = "evidence_cards.parquet"
@@ -429,6 +432,18 @@ class EvidenceCardService:
             str(row.get("document_id")): dict(row)
             for _, row in profiles.iterrows()
         }
+        logger.info(
+            "Evidence extraction started collection_id=%s document_count=%s section_count=%s table_cell_count=%s",
+            collection_id,
+            len(document_records),
+            len(sections),
+            len(table_cells),
+        )
+        if table_cells.empty:
+            logger.warning(
+                "Evidence extraction found empty table_cells collection_id=%s",
+                collection_id,
+            )
 
         card_rows: list[dict[str, Any]] = []
         sample_variant_rows: list[dict[str, Any]] = []
@@ -453,7 +468,20 @@ class EvidenceCardService:
             doc_sections = sections_by_doc.get(document_id, [])
             grouped_rows = self._group_table_rows(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
+            logger.info(
+                "Evidence extraction document started collection_id=%s document_id=%s section_count=%s table_row_count=%s doc_type=%s",
+                collection_id,
+                document_id,
+                len(doc_sections),
+                len(grouped_rows),
+                profile.get("doc_type"),
+            )
 
+            doc_card_start = len(card_rows)
+            doc_variant_start = len(sample_variant_rows)
+            doc_condition_start = len(test_condition_rows)
+            doc_baseline_start = len(baseline_rows)
+            doc_measurement_start = len(measurement_rows)
             for section in doc_sections:
                 bundle = extractor.extract_section_bundle(
                     self._build_section_extraction_payload(
@@ -473,10 +501,22 @@ class EvidenceCardService:
                     row_index=None,
                     card_rows=card_rows,
                     sample_variant_rows=sample_variant_rows,
-                    test_condition_rows=test_condition_rows,
-                    baseline_rows=baseline_rows,
-                    measurement_rows=measurement_rows,
-                    document_state=document_state,
+                        test_condition_rows=test_condition_rows,
+                        baseline_rows=baseline_rows,
+                        measurement_rows=measurement_rows,
+                        document_state=document_state,
+                    )
+                logger.debug(
+                    "Evidence section bundle extracted collection_id=%s document_id=%s section_id=%s section_type=%s evidence_cards=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                    collection_id,
+                    document_id,
+                    section.get("section_id"),
+                    section.get("section_type"),
+                    len(bundle.evidence_cards),
+                    len(bundle.sample_variants),
+                    len(bundle.test_conditions),
+                    len(bundle.baseline_references),
+                    len(bundle.measurement_results),
                 )
 
             if str(profile.get("doc_type") or "") != DOC_TYPE_REVIEW:
@@ -504,9 +544,33 @@ class EvidenceCardService:
                         sample_variant_rows=sample_variant_rows,
                         test_condition_rows=test_condition_rows,
                         baseline_rows=baseline_rows,
-                        measurement_rows=measurement_rows,
-                        document_state=document_state,
+                            measurement_rows=measurement_rows,
+                            document_state=document_state,
+                        )
+                    logger.debug(
+                        "Evidence table-row bundle extracted collection_id=%s document_id=%s table_id=%s row_index=%s cell_count=%s evidence_cards=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                        collection_id,
+                        document_id,
+                        table_id,
+                        row_index,
+                        len(row_cells),
+                        len(bundle.evidence_cards),
+                        len(bundle.sample_variants),
+                        len(bundle.test_conditions),
+                        len(bundle.baseline_references),
+                        len(bundle.measurement_results),
                     )
+
+            logger.info(
+                "Evidence extraction document finished collection_id=%s document_id=%s evidence_cards=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                collection_id,
+                document_id,
+                len(card_rows) - doc_card_start,
+                len(sample_variant_rows) - doc_variant_start,
+                len(test_condition_rows) - doc_condition_start,
+                len(baseline_rows) - doc_baseline_start,
+                len(measurement_rows) - doc_measurement_start,
+            )
 
         cards_table = self._normalize_cards_table(
             pd.DataFrame(
@@ -543,6 +607,13 @@ class EvidenceCardService:
             pd.DataFrame(measurement_rows, columns=_MEASUREMENT_RESULT_COLUMNS),
             collection_id,
         )
+        if not cards_table.empty and measurement_results.empty:
+            logger.warning(
+                "Evidence extraction produced zero measurement_results collection_id=%s evidence_card_count=%s raw_measurement_count=%s",
+                collection_id,
+                len(cards_table),
+                len(measurement_rows),
+            )
 
         characterization = self._build_characterization_observations(
             collection_id=collection_id,
@@ -595,6 +666,17 @@ class EvidenceCardService:
 
         write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
+        logger.info(
+            "Evidence extraction finished collection_id=%s evidence_cards=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s",
+            collection_id,
+            len(cards_table),
+            len(sample_variants),
+            len(test_conditions),
+            len(baseline_references),
+            len(measurement_results),
+            len(characterization),
+            len(structure_features),
+        )
         return cards_table
 
     def _build_document_state(self) -> dict[str, Any]:
@@ -797,6 +879,16 @@ class EvidenceCardService:
                 }
             ).to_record()
             if not measurement_record["value_payload"]:
+                logger.warning(
+                    "Dropped empty measurement payload collection_id=%s document_id=%s property=%s result_type=%s section_id=%s table_id=%s row_index=%s",
+                    collection_id,
+                    document_id,
+                    self._normalize_property_name(result.property_normalized),
+                    self._normalize_result_type(result.result_type),
+                    self._normalize_scalar_text(section.get("section_id")) if section else None,
+                    table_id,
+                    row_index,
+                )
                 continue
             measurement_rows.append(measurement_record)
 

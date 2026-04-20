@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -23,6 +24,8 @@ from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
     restore_frame_from_storage,
 )
+
+logger = logging.getLogger(__name__)
 
 
 _COMPARISON_ROWS_FILE = "comparison_rows.parquet"
@@ -202,6 +205,20 @@ class ComparisonService:
         test_conditions = frames["test_conditions"]
         baseline_references = frames["baseline_references"]
         evidence_cards = frames["evidence_cards"]
+        logger.info(
+            "Comparison assembly started collection_id=%s measurement_results=%s sample_variants=%s test_conditions=%s baselines=%s evidence_cards=%s",
+            collection_id,
+            len(measurement_results),
+            len(sample_variants),
+            len(test_conditions),
+            len(baseline_references),
+            len(evidence_cards),
+        )
+        if measurement_results.empty:
+            logger.warning(
+                "Comparison assembly skipped due to empty measurement_results collection_id=%s",
+                collection_id,
+            )
 
         sample_lookup = self._index_by_id(sample_variants, "variant_id")
         test_condition_lookup = self._index_by_id(test_conditions, "test_condition_id")
@@ -225,6 +242,17 @@ class ComparisonService:
             pd.DataFrame(rows, columns=_COMPARISON_ROW_COLUMNS),
             collection_id,
         )
+        if measurement_results.empty:
+            logger.warning(
+                "Comparison assembly produced zero rows because upstream measurement_results were empty collection_id=%s",
+                collection_id,
+            )
+        elif table.empty:
+            logger.warning(
+                "Comparison assembly produced zero rows after filtering collection_id=%s measurement_results=%s",
+                collection_id,
+                len(measurement_results),
+            )
         base_dir.mkdir(parents=True, exist_ok=True)
         prepare_frame_for_storage(
             table,
@@ -232,6 +260,11 @@ class ComparisonService:
         ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
         write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
+        logger.info(
+            "Comparison assembly finished collection_id=%s comparison_rows=%s",
+            collection_id,
+            len(table),
+        )
         return table
 
     def _load_comparison_inputs(
@@ -336,6 +369,7 @@ class ComparisonService:
     ) -> dict[str, Any] | None:
         source_document_id = self._safe_text(result_row.get("document_id"))
         if not source_document_id:
+            logger.debug("Skipped comparison result without source_document_id")
             return None
 
         variant_id = self._safe_text(result_row.get("variant_id"))

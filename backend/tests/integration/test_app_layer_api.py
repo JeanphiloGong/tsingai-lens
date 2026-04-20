@@ -183,11 +183,53 @@ def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple
     return collection_id, task_id
 
 
+def test_request_id_is_generated_and_echoed(app_client):
+    response = app_client.get(f"{API_V1_PREFIX}/collections")
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"].startswith("req_")
+
+
+def test_request_id_is_echoed_and_propagated_to_background_index(app_client, monkeypatch):
+    import application.source.index_task_runner as task_runner_module
+    from utils.logger import REQUEST_ID_HEADER, get_request_id
+
+    captured: dict[str, str | None] = {}
+
+    async def fake_build_index(**kwargs):  # noqa: ANN003
+        captured["bound_request_id"] = get_request_id()
+        output_dir = Path(kwargs["config"].output.base_dir)
+        _write_index_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Request ID Set"})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    request_id = "client-request-123"
+    task_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index",
+        json={},
+        headers={REQUEST_ID_HEADER: request_id},
+    )
+
+    assert task_resp.status_code == 200
+    assert task_resp.headers[REQUEST_ID_HEADER] == request_id
+    assert captured["bound_request_id"] == request_id
+
+
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from fastapi import FastAPI
     from controllers.source import collections as collections_controller
     from controllers.core import comparisons as comparisons_controller
     from controllers.core import documents as documents_controller
@@ -215,6 +257,7 @@ def app_client(monkeypatch, tmp_path):
     from application.source.index_task_runner import IndexTaskRunner
     from application.source.task_service import TaskService
     from application.core.workspace_overview_service import WorkspaceService
+    from main import create_app
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -332,18 +375,7 @@ def app_client(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(report_service_module, "list_patterns", fake_list_patterns)
 
-    app = FastAPI()
-    app.include_router(reports_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(collections_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(goals_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(graph_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(protocol_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(tasks_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(workspace_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(documents_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(evidence_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(comparisons_controller.router, prefix=API_V1_PREFIX)
-    return TestClient(app)
+    return TestClient(create_app())
 
 
 def test_collection_task_flow(app_client):

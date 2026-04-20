@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
 from controllers.schemas.source.task import (
     ArtifactStatusResponse,
@@ -22,6 +24,7 @@ index_task_runner = IndexTaskRunner(
     task_service=task_service,
     artifact_registry_service=artifact_registry_service,
 )
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -33,6 +36,7 @@ async def create_index_task(
     collection_id: str,
     payload: IndexTaskCreateRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
 ) -> TaskResponse:
     try:
         collection_service.get_collection(collection_id)
@@ -44,12 +48,20 @@ async def create_index_task(
         raise HTTPException(status_code=400, detail="集合内没有可索引文件")
 
     task = task_service.create_task(collection_id=collection_id, task_type="index")
+    request_id = getattr(request.state, "request_id", None)
+    logger.info(
+        "Queued index task task_id=%s collection_id=%s verbose=%s",
+        task["task_id"],
+        collection_id,
+        payload.verbose,
+    )
     background_tasks.add_task(
         index_task_runner.run_index_task,
         task["task_id"],
         collection_id,
         verbose=payload.verbose,
         additional_context=payload.additional_context,
+        request_id=request_id,
     )
     return TaskResponse(**task)
 

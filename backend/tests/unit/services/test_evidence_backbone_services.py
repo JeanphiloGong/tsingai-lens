@@ -10,6 +10,12 @@ import pytest
 from application.core.comparison_service import ComparisonService
 from application.core.document_profile_service import DocumentProfileService
 from application.core.evidence_card_service import EvidenceCardService
+from application.core.llm_extraction_models import (
+    EvidenceAnchorPayload,
+    EvidenceCardPayload,
+    StructuredDocumentProfile,
+    StructuredExtractionBundle,
+)
 from infra.source.runtime.source_evidence import build_sections, build_table_cells
 
 
@@ -33,6 +39,43 @@ def _write_source_artifacts(
 ) -> None:
     build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
+
+
+class EvidenceOnlyExtractor:
+    def extract_document_profile(self, payload):  # noqa: ANN001
+        return StructuredDocumentProfile(
+            doc_type="experimental",
+            protocol_extractable="yes",
+            protocol_extractability_signals=["methods_section_detected"],
+            parsing_warnings=[],
+            confidence=0.9,
+        )
+
+    def extract_section_bundle(self, payload):  # noqa: ANN001
+        section = payload.get("section") or {}
+        section_id = str(section.get("section_id") or "") or None
+        text_unit_ids = section.get("text_unit_ids") if isinstance(section.get("text_unit_ids"), list) else []
+        return StructuredExtractionBundle(
+            evidence_cards=[
+                EvidenceCardPayload(
+                    claim_text="Process conditions were reported.",
+                    claim_type="process",
+                    evidence_source_type="text",
+                    anchors=[
+                        EvidenceAnchorPayload(
+                            quote="Process conditions were reported.",
+                            source_type="text",
+                            section_id=section_id,
+                            snippet_id=text_unit_ids[0] if text_unit_ids else None,
+                        )
+                    ],
+                    confidence=0.7,
+                )
+            ]
+        )
+
+    def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
+        return StructuredExtractionBundle()
 
 
 def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):
@@ -287,6 +330,143 @@ def test_evidence_service_builds_sample_variants_and_measurement_results(monkeyp
     assert measurement_results["baseline_id"].notna().all()
     assert all(measurement_results["evidence_anchor_ids"].astype(str) != "[]")
     assert set(baseline_references["baseline_label"]) == {"as-built"}
+
+
+def test_evidence_service_logs_warning_when_measurements_are_empty(monkeypatch, tmp_path, caplog):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = EvidenceOnlyExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+
+    collection = collection_service.create_collection("Evidence Only Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Process Note",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Powders were mixed and dried under Ar.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Powders were mixed and dried under Ar.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    with caplog.at_level("WARNING"):
+        evidence_card_service.build_evidence_cards(collection_id, output_dir)
+
+    assert any(
+        "Evidence extraction produced zero measurement_results" in record.message
+        for record in caplog.records
+    )
+
+
+def test_comparison_service_logs_warning_when_upstream_measurements_are_empty(
+    monkeypatch,
+    tmp_path,
+    caplog,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = EvidenceOnlyExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    evidence_card_service = EvidenceCardService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        artifact_registry,
+        evidence_card_service,
+    )
+
+    collection = collection_service.create_collection("No Measurement Comparison Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Process Note",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Powders were mixed and dried under Ar.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Powders were mixed and dried under Ar.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    evidence_card_service.build_evidence_cards(collection_id, output_dir)
+    with caplog.at_level("WARNING"):
+        comparison_service.build_comparison_rows(collection_id, output_dir)
+
+    assert any(
+        "Comparison assembly produced zero rows because upstream measurement_results were empty"
+        in record.message
+        for record in caplog.records
+    )
 
 
 def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):

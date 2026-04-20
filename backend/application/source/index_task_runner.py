@@ -14,6 +14,7 @@ from application.core.evidence_card_service import EvidenceCardService
 from application.source.task_service import TaskService
 from application.derived.protocol.pipeline_service import build_protocol_artifacts
 from application.source.artifact_registry_service import ArtifactRegistryService
+from utils.logger import bind_request_id, clear_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,9 @@ class IndexTaskRunner:
         method: IndexingMethod | str = IndexingMethod.Standard,
         verbose: bool = False,
         additional_context: dict | None = None,
+        request_id: str | None = None,
     ) -> dict:
+        request_token = bind_request_id(request_id) if request_id else None
         task = self.task_service.update_task(
             task_id,
             status="running",
@@ -122,6 +125,14 @@ class IndexTaskRunner:
 
         config, output_dir = self._load_collection_config(collection_id)
         self.collection_service.update_collection(collection_id, status="running")
+        logger.info(
+            "Index task started task_id=%s collection_id=%s method=%s file_count=%s verbose=%s",
+            task_id,
+            collection_id,
+            method,
+            len(files),
+            verbose,
+        )
 
         try:
             self.task_service.update_task(
@@ -214,6 +225,15 @@ class IndexTaskRunner:
                 finished_at=self.task_service.get_task(task_id)["updated_at"],
             )
             self.collection_service.update_collection(collection_id, status=status)
+            final_record = self.task_service.get_task(task_id)
+            logger.info(
+                "Index task finished task_id=%s collection_id=%s status=%s warnings=%s errors=%s",
+                task_id,
+                collection_id,
+                status,
+                len(final_record.get("warnings", [])),
+                len(final_record.get("errors", [])),
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "Index task failed task_id=%s collection_id=%s",
@@ -234,5 +254,8 @@ class IndexTaskRunner:
             )
             self.collection_service.update_collection(collection_id, status="failed")
             raise
+        finally:
+            if request_token is not None:
+                clear_request_id(request_token)
 
         return self.task_service.get_task(task_id)

@@ -13,7 +13,8 @@ class CollectionArtifactPaths:
     base_dir: Path
     documents: Path
     text_units: Path
-    sections: Path
+    blocks: Path
+    table_rows: Path
     table_cells: Path
     procedure_blocks: Path
 
@@ -24,7 +25,8 @@ def resolve_collection_artifact_paths(base_dir: str | Path) -> CollectionArtifac
         base_dir=base_path,
         documents=base_path / "documents.parquet",
         text_units=base_path / "text_units.parquet",
-        sections=base_path / "sections.parquet",
+        blocks=base_path / "blocks.parquet",
+        table_rows=base_path / "table_rows.parquet",
         table_cells=base_path / "table_cells.parquet",
         procedure_blocks=base_path / "procedure_blocks.parquet",
     )
@@ -39,25 +41,38 @@ def load_collection_inputs(base_dir: str | Path) -> tuple[pd.DataFrame, pd.DataF
     return documents, text_units
 
 
-def load_sections_artifact(base_dir: str | Path) -> pd.DataFrame:
+def load_blocks_artifact(base_dir: str | Path) -> pd.DataFrame:
     paths = resolve_collection_artifact_paths(base_dir)
-    if not paths.sections.is_file():
-        raise FileNotFoundError(paths.sections)
+    if not paths.blocks.is_file():
+        raise FileNotFoundError(paths.blocks)
 
-    sections = pd.read_parquet(paths.sections)
-    normalized = sections.copy()
-    if "paper_id" not in normalized.columns:
+    blocks = pd.read_parquet(paths.blocks)
+    normalized = blocks.copy()
+    if "document_id" not in normalized.columns:
         if "id" in normalized.columns:
-            normalized["paper_id"] = normalized["id"]
-        elif "document_id" in normalized.columns:
-            normalized["paper_id"] = normalized["document_id"]
+            normalized["document_id"] = normalized["id"]
         else:
-            normalized["paper_id"] = None
-    if "order" not in normalized.columns:
+            normalized["document_id"] = None
+    if "block_order" not in normalized.columns:
         if normalized.empty:
-            normalized["order"] = pd.Series(dtype="int64")
+            normalized["block_order"] = pd.Series(dtype="int64")
         else:
-            normalized["order"] = normalized.groupby("paper_id").cumcount() + 1
+            normalized["block_order"] = normalized.groupby("document_id").cumcount() + 1
+    return normalized
+
+
+def load_table_rows_artifact(base_dir: str | Path) -> pd.DataFrame:
+    paths = resolve_collection_artifact_paths(base_dir)
+    if not paths.table_rows.is_file():
+        raise FileNotFoundError(paths.table_rows)
+
+    table_rows = pd.read_parquet(paths.table_rows)
+    normalized = table_rows.copy()
+    if "document_id" not in normalized.columns:
+        if "id" in normalized.columns:
+            normalized["document_id"] = normalized["id"]
+        else:
+            normalized["document_id"] = None
     return normalized
 
 

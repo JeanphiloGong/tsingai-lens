@@ -6,10 +6,10 @@ from typing import Any
 from application.core.llm_extraction_models import (
     BaselineReferencePayload,
     EvidenceAnchorPayload,
-    EvidenceCardPayload,
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
     MeasurementValuePayload,
+    MethodFactPayload,
     SampleVariantPayload,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
@@ -151,7 +151,7 @@ class FakeCoreLLMStructuredExtractor:
         methods = self._extract_methods(text)
         baseline_label = self._extract_baseline_label(text)
 
-        evidence_cards: list[EvidenceCardPayload] = []
+        method_facts: list[MethodFactPayload] = []
         sample_variants: list[SampleVariantPayload] = []
         test_conditions: list[ExtractedTestConditionPayload] = []
         baseline_references: list[BaselineReferencePayload] = []
@@ -160,16 +160,16 @@ class FakeCoreLLMStructuredExtractor:
         if section_type == "methods":
             sentence = self._first_statement(text)
             if sentence:
-                evidence_cards.append(
-                    EvidenceCardPayload(
-                        claim_text=sentence,
-                        claim_type="process",
-                        evidence_source_type="method",
-                        material_system=material_system,
-                        condition_context={
-                            "process": process_context,
-                            "baseline": {"control": baseline_label},
-                            "test": {"methods": methods, "method": methods[0] if len(methods) == 1 else None},
+                method_facts.append(
+                    MethodFactPayload(
+                        method_ref="section_process",
+                        method_role="process",
+                        method_name="sample preparation",
+                        method_payload={
+                            "temperatures_c": process_context.get("temperatures_c") or [],
+                            "durations": process_context.get("durations") or [],
+                            "atmosphere": process_context.get("atmosphere"),
+                            "details": sentence,
                         },
                         anchors=[
                             EvidenceAnchorPayload(
@@ -184,28 +184,26 @@ class FakeCoreLLMStructuredExtractor:
                 )
 
         if section_type == "characterization" and methods:
-            evidence_cards.append(
-                EvidenceCardPayload(
-                    claim_text=f"The document reports characterization using {', '.join(methods)}.",
-                    claim_type="characterization",
-                    evidence_source_type="text",
-                    material_system=material_system,
-                    condition_context={
-                        "process": process_context,
-                        "baseline": {"control": baseline_label},
-                        "test": {"methods": methods, "method": methods[0] if len(methods) == 1 else None},
-                    },
-                    anchors=[
-                        EvidenceAnchorPayload(
-                            quote=self._first_statement(text) or text[:160],
-                            source_type="text",
-                            section_id=section_id,
-                            snippet_id=text_unit_ids[0] if text_unit_ids else None,
-                        )
-                    ],
-                    confidence=0.78,
-                )
+            anchor = EvidenceAnchorPayload(
+                quote=self._first_statement(text) or text[:160],
+                source_type="text",
+                section_id=section_id,
+                snippet_id=text_unit_ids[0] if text_unit_ids else None,
             )
+            for index, method_name in enumerate(methods, start=1):
+                method_facts.append(
+                    MethodFactPayload(
+                        method_ref=f"section_char_{index}",
+                        method_role="characterization",
+                        method_name=method_name,
+                        method_payload={
+                            "methods": [method_name],
+                            "details": text[:400],
+                        },
+                        anchors=[anchor],
+                        confidence=0.78,
+                    )
+                )
 
         property_sentences = [
             sentence
@@ -294,7 +292,7 @@ class FakeCoreLLMStructuredExtractor:
             )
 
         return StructuredExtractionBundle(
-            evidence_cards=evidence_cards,
+            method_facts=method_facts,
             sample_variants=sample_variants,
             test_conditions=test_conditions,
             baseline_references=baseline_references,

@@ -23,13 +23,12 @@ from application.core.llm_extraction_models import (
     BaselineReferencePayload,
     ConditionContextPayload,
     EvidenceAnchorPayload,
-    EvidenceCardPayload,
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
+    MethodFactPayload,
     ProcessContextPayload,
     SampleVariantPayload,
     StructuredExtractionBundle,
-    TestConditionPayloadModel,
     TestContextPayload,
 )
 from application.core.llm_structured_extractor import (
@@ -38,8 +37,9 @@ from application.core.llm_structured_extractor import (
 )
 from application.source.artifact_input_service import (
     build_document_records,
+    load_blocks_artifact,
     load_collection_inputs,
-    load_sections_artifact,
+    load_table_rows_artifact,
     load_table_cells_artifact,
 )
 from application.source.artifact_registry_service import ArtifactRegistryService
@@ -49,6 +49,7 @@ from domain.core.evidence_backbone import (
     CORE_NEUTRAL_DOMAIN_PROFILE,
     CharacterizationObservation,
     EvidenceAnchor,
+    MethodFact,
     MeasurementResult,
     SampleVariant,
     StructureFeature,
@@ -68,10 +69,18 @@ from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
     restore_frame_from_storage,
 )
+from infra.source.runtime.source_evidence import classify_heading
 
 logger = logging.getLogger(__name__)
 
 
+_EVIDENCE_ANCHORS_FILE = "evidence_anchors.parquet"
+_EVIDENCE_ANCHOR_JSON_COLUMNS = ("char_range", "bbox")
+_METHOD_FACTS_FILE = "method_facts.parquet"
+_METHOD_FACTS_JSON_COLUMNS = (
+    "method_payload",
+    "evidence_anchor_ids",
+)
 _EVIDENCE_CARDS_FILE = "evidence_cards.parquet"
 _EVIDENCE_JSON_COLUMNS = (
     "evidence_anchors",
@@ -132,6 +141,35 @@ _STRUCTURE_FEATURE_COLUMNS = [
     "feature_unit",
     "qualitative_descriptor",
     "source_observation_ids",
+    "confidence",
+    "epistemic_status",
+]
+_EVIDENCE_ANCHOR_COLUMNS = [
+    "anchor_id",
+    "document_id",
+    "locator_type",
+    "locator_confidence",
+    "source_type",
+    "section_id",
+    "char_range",
+    "bbox",
+    "page",
+    "quote",
+    "deep_link",
+    "block_id",
+    "snippet_id",
+    "figure_or_table",
+    "quote_span",
+]
+_METHOD_FACT_COLUMNS = [
+    "method_id",
+    "document_id",
+    "collection_id",
+    "domain_profile",
+    "method_role",
+    "method_name",
+    "method_payload",
+    "evidence_anchor_ids",
     "confidence",
     "epistemic_status",
 ]
@@ -387,22 +425,24 @@ class EvidenceCardService:
     def read_evidence_cards(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
         path = output_dir / _EVIDENCE_CARDS_FILE
-        if path.is_file():
+        if path.is_file() and not core_semantic_rebuild_required(output_dir):
             cards = restore_frame_from_storage(
                 pd.read_parquet(path),
                 _EVIDENCE_JSON_COLUMNS,
             )
-            if core_semantic_rebuild_required(output_dir) and (output_dir / "documents.parquet").is_file():
-                cards = self.build_evidence_cards(collection_id, output_dir)
         else:
             cards = self.build_evidence_cards(collection_id, output_dir)
         return self._normalize_cards_table(cards, collection_id)
 
-    def build_evidence_cards(
+    def read_paper_fact_frames(self, collection_id: str) -> dict[str, pd.DataFrame]:
+        output_dir = self._resolve_output_dir(collection_id)
+        return self._load_paper_fact_frames(collection_id, output_dir)
+
+    def build_paper_facts(
         self,
         collection_id: str,
         output_dir: str | Path | None = None,
-    ) -> pd.DataFrame:
+    ) -> dict[str, pd.DataFrame]:
         base_dir = (
             Path(output_dir).expanduser().resolve()
             if output_dir is not None
@@ -420,23 +460,26 @@ class EvidenceCardService:
 
         documents, text_units = load_collection_inputs(base_dir)
         try:
-            sections = load_sections_artifact(base_dir)
+            blocks = load_blocks_artifact(base_dir)
+            table_rows = load_table_rows_artifact(base_dir)
             table_cells = load_table_cells_artifact(base_dir)
         except FileNotFoundError as exc:
             raise EvidenceCardsNotReadyError(collection_id, base_dir) from exc
 
         document_records = build_document_records(documents, text_units)
-        sections_by_doc = self._group_sections_by_document(sections)
+        sections_by_doc = self._group_sections_by_document(blocks)
+        table_rows_by_doc = self._group_table_rows_by_document(table_rows)
         table_cells_by_doc = self._group_table_cells_by_document(table_cells)
         profile_by_doc = {
             str(row.get("document_id")): dict(row)
             for _, row in profiles.iterrows()
         }
         logger.info(
-            "Evidence extraction started collection_id=%s document_count=%s section_count=%s table_cell_count=%s",
+            "Evidence extraction started collection_id=%s document_count=%s block_count=%s table_row_count=%s table_cell_count=%s",
             collection_id,
             len(document_records),
-            len(sections),
+            len(blocks),
+            len(table_rows),
             len(table_cells),
         )
         if table_cells.empty:
@@ -445,7 +488,8 @@ class EvidenceCardService:
                 collection_id,
             )
 
-        card_rows: list[dict[str, Any]] = []
+        evidence_anchor_rows: list[dict[str, Any]] = []
+        method_fact_rows: list[dict[str, Any]] = []
         sample_variant_rows: list[dict[str, Any]] = []
         test_condition_rows: list[dict[str, Any]] = []
         baseline_rows: list[dict[str, Any]] = []
@@ -466,18 +510,20 @@ class EvidenceCardService:
             )
             source_filename = self._normalize_scalar_text(profile.get("source_filename"))
             doc_sections = sections_by_doc.get(document_id, [])
-            grouped_rows = self._group_table_rows(table_cells_by_doc.get(document_id, []))
+            doc_table_rows = table_rows_by_doc.get(document_id, [])
+            grouped_row_cells = self._group_table_cells_by_row(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
             logger.info(
-                "Evidence extraction document started collection_id=%s document_id=%s section_count=%s table_row_count=%s doc_type=%s",
+                "Evidence extraction document started collection_id=%s document_id=%s block_count=%s table_row_count=%s doc_type=%s",
                 collection_id,
                 document_id,
                 len(doc_sections),
-                len(grouped_rows),
+                len(doc_table_rows),
                 profile.get("doc_type"),
             )
 
-            doc_card_start = len(card_rows)
+            doc_anchor_start = len(evidence_anchor_rows)
+            doc_method_start = len(method_fact_rows)
             doc_variant_start = len(sample_variant_rows)
             doc_condition_start = len(test_condition_rows)
             doc_baseline_start = len(baseline_rows)
@@ -499,20 +545,21 @@ class EvidenceCardService:
                     section=section,
                     table_id=None,
                     row_index=None,
-                    card_rows=card_rows,
+                    evidence_anchor_rows=evidence_anchor_rows,
+                    method_fact_rows=method_fact_rows,
                     sample_variant_rows=sample_variant_rows,
-                        test_condition_rows=test_condition_rows,
-                        baseline_rows=baseline_rows,
-                        measurement_rows=measurement_rows,
-                        document_state=document_state,
-                    )
+                    test_condition_rows=test_condition_rows,
+                    baseline_rows=baseline_rows,
+                    measurement_rows=measurement_rows,
+                    document_state=document_state,
+                )
                 logger.debug(
-                    "Evidence section bundle extracted collection_id=%s document_id=%s section_id=%s section_type=%s evidence_cards=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                    "Evidence section bundle extracted collection_id=%s document_id=%s section_id=%s section_type=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
                     collection_id,
                     document_id,
                     section.get("section_id"),
                     section.get("section_type"),
-                    len(bundle.evidence_cards),
+                    len(bundle.method_facts),
                     len(bundle.sample_variants),
                     len(bundle.test_conditions),
                     len(bundle.baseline_references),
@@ -520,15 +567,17 @@ class EvidenceCardService:
                 )
 
             if str(profile.get("doc_type") or "") != DOC_TYPE_REVIEW:
-                for (table_id, row_index), row_cells in grouped_rows.items():
+                for row in doc_table_rows:
+                    table_id = str(row.get("table_id") or "")
+                    row_index = self._safe_int(row.get("row_index"))
+                    row_cells = grouped_row_cells.get((table_id, row_index), [])
                     bundle = extractor.extract_table_row_bundle(
                         self._build_table_row_extraction_payload(
                             document_id=document_id,
                             title=title,
                             source_filename=source_filename,
                             profile=profile,
-                            table_id=table_id,
-                            row_index=row_index,
+                            table_row=row,
                             row_cells=row_cells,
                             sections=doc_sections,
                         )
@@ -540,21 +589,22 @@ class EvidenceCardService:
                         section=None,
                         table_id=table_id,
                         row_index=row_index,
-                        card_rows=card_rows,
+                        evidence_anchor_rows=evidence_anchor_rows,
+                        method_fact_rows=method_fact_rows,
                         sample_variant_rows=sample_variant_rows,
                         test_condition_rows=test_condition_rows,
                         baseline_rows=baseline_rows,
-                            measurement_rows=measurement_rows,
-                            document_state=document_state,
-                        )
+                        measurement_rows=measurement_rows,
+                        document_state=document_state,
+                    )
                     logger.debug(
-                        "Evidence table-row bundle extracted collection_id=%s document_id=%s table_id=%s row_index=%s cell_count=%s evidence_cards=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                        "Evidence table-row bundle extracted collection_id=%s document_id=%s table_id=%s row_index=%s cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
                         collection_id,
                         document_id,
                         table_id,
                         row_index,
                         len(row_cells),
-                        len(bundle.evidence_cards),
+                        len(bundle.method_facts),
                         len(bundle.sample_variants),
                         len(bundle.test_conditions),
                         len(bundle.baseline_references),
@@ -562,33 +612,25 @@ class EvidenceCardService:
                     )
 
             logger.info(
-                "Evidence extraction document finished collection_id=%s document_id=%s evidence_cards=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                "Evidence extraction document finished collection_id=%s document_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
                 collection_id,
                 document_id,
-                len(card_rows) - doc_card_start,
+                len(evidence_anchor_rows) - doc_anchor_start,
+                len(method_fact_rows) - doc_method_start,
                 len(sample_variant_rows) - doc_variant_start,
                 len(test_condition_rows) - doc_condition_start,
                 len(baseline_rows) - doc_baseline_start,
                 len(measurement_rows) - doc_measurement_start,
             )
 
-        cards_table = self._normalize_cards_table(
+        evidence_anchors = self._normalize_evidence_anchors_table(
             pd.DataFrame(
-                card_rows,
-                columns=[
-                    "evidence_id",
-                    "document_id",
-                    "collection_id",
-                    "claim_text",
-                    "claim_type",
-                    "evidence_source_type",
-                    "evidence_anchors",
-                    "material_system",
-                    "condition_context",
-                    "confidence",
-                    "traceability_status",
-                ],
+                evidence_anchor_rows,
+                columns=_EVIDENCE_ANCHOR_COLUMNS,
             ),
+        )
+        method_facts = self._normalize_method_facts_table(
+            pd.DataFrame(method_fact_rows, columns=_METHOD_FACT_COLUMNS),
             collection_id,
         )
         sample_variants = self._normalize_sample_variants_table(
@@ -607,17 +649,18 @@ class EvidenceCardService:
             pd.DataFrame(measurement_rows, columns=_MEASUREMENT_RESULT_COLUMNS),
             collection_id,
         )
-        if not cards_table.empty and measurement_results.empty:
+        if not method_facts.empty and measurement_results.empty:
             logger.warning(
-                "Evidence extraction produced zero measurement_results collection_id=%s evidence_card_count=%s raw_measurement_count=%s",
+                "Evidence extraction produced zero measurement_results collection_id=%s method_fact_count=%s raw_measurement_count=%s",
                 collection_id,
-                len(cards_table),
+                len(method_facts),
                 len(measurement_rows),
             )
 
         characterization = self._build_characterization_observations(
             collection_id=collection_id,
-            cards_table=cards_table,
+            method_facts=method_facts,
+            evidence_anchors=evidence_anchors,
             sections_by_doc=sections_by_doc,
         )
         characterization = self._attach_variant_ids_to_characterization(
@@ -633,12 +676,21 @@ class EvidenceCardService:
             baseline_references,
             sample_variants,
         )
+        measurement_results = self._attach_context_to_measurement_results(
+            measurement_results=measurement_results,
+            characterization=characterization,
+            structure_features=structure_features,
+        )
 
         base_dir.mkdir(parents=True, exist_ok=True)
         prepare_frame_for_storage(
-            cards_table,
-            _EVIDENCE_JSON_COLUMNS,
-        ).to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
+            evidence_anchors,
+            _EVIDENCE_ANCHOR_JSON_COLUMNS,
+        ).to_parquet(base_dir / _EVIDENCE_ANCHORS_FILE, index=False)
+        prepare_frame_for_storage(
+            method_facts,
+            _METHOD_FACTS_JSON_COLUMNS,
+        ).to_parquet(base_dir / _METHOD_FACTS_FILE, index=False)
         prepare_frame_for_storage(
             characterization,
             _CHARACTERIZATION_JSON_COLUMNS,
@@ -667,9 +719,10 @@ class EvidenceCardService:
         write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
-            "Evidence extraction finished collection_id=%s evidence_cards=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s",
+            "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s",
             collection_id,
-            len(cards_table),
+            len(evidence_anchors),
+            len(method_facts),
             len(sample_variants),
             len(test_conditions),
             len(baseline_references),
@@ -677,17 +730,122 @@ class EvidenceCardService:
             len(characterization),
             len(structure_features),
         )
+        return {
+            "evidence_anchors": evidence_anchors,
+            "method_facts": method_facts,
+            "sample_variants": sample_variants,
+            "test_conditions": test_conditions,
+            "baseline_references": baseline_references,
+            "measurement_results": measurement_results,
+            "characterization_observations": characterization,
+            "structure_features": structure_features,
+        }
+
+    def build_evidence_cards(
+        self,
+        collection_id: str,
+        output_dir: str | Path | None = None,
+    ) -> pd.DataFrame:
+        base_dir = (
+            Path(output_dir).expanduser().resolve()
+            if output_dir is not None
+            else self._resolve_output_dir(collection_id)
+        )
+        frames = self._load_paper_fact_frames(collection_id, base_dir)
+        cards_table = self._derive_evidence_cards_table(
+            collection_id=collection_id,
+            evidence_anchors=frames["evidence_anchors"],
+            method_facts=frames["method_facts"],
+            sample_variants=frames["sample_variants"],
+            test_conditions=frames["test_conditions"],
+            baseline_references=frames["baseline_references"],
+            measurement_results=frames["measurement_results"],
+        )
+        base_dir.mkdir(parents=True, exist_ok=True)
+        prepare_frame_for_storage(
+            cards_table,
+            _EVIDENCE_JSON_COLUMNS,
+        ).to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
+        write_core_semantic_manifest(base_dir)
+        self.artifact_registry_service.upsert(collection_id, base_dir)
+        logger.info(
+            "Evidence view derivation finished collection_id=%s evidence_cards=%s",
+            collection_id,
+            len(cards_table),
+        )
         return cards_table
+
+    def _load_paper_fact_frames(
+        self,
+        collection_id: str,
+        base_dir: Path,
+    ) -> dict[str, pd.DataFrame]:
+        required = (
+            _EVIDENCE_ANCHORS_FILE,
+            _METHOD_FACTS_FILE,
+            _TEST_CONDITIONS_FILE,
+            _BASELINE_REFERENCES_FILE,
+            _SAMPLE_VARIANTS_FILE,
+            _MEASUREMENT_RESULTS_FILE,
+            _CHARACTERIZATION_OBSERVATIONS_FILE,
+            _STRUCTURE_FEATURES_FILE,
+        )
+        if core_semantic_rebuild_required(base_dir) or any(
+            not (base_dir / name).is_file() for name in required
+        ):
+            self.build_paper_facts(collection_id, base_dir)
+
+        missing = [name for name in required if not (base_dir / name).is_file()]
+        if missing:
+            raise EvidenceCardsNotReadyError(collection_id, base_dir)
+
+        return {
+            "evidence_anchors": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _EVIDENCE_ANCHORS_FILE),
+                _EVIDENCE_ANCHOR_JSON_COLUMNS,
+            ),
+            "method_facts": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _METHOD_FACTS_FILE),
+                _METHOD_FACTS_JSON_COLUMNS,
+            ),
+            "sample_variants": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _SAMPLE_VARIANTS_FILE),
+                _SAMPLE_VARIANTS_JSON_COLUMNS,
+            ),
+            "test_conditions": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _TEST_CONDITIONS_FILE),
+                _TEST_CONDITIONS_JSON_COLUMNS,
+            ),
+            "baseline_references": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _BASELINE_REFERENCES_FILE),
+                _BASELINE_REFERENCES_JSON_COLUMNS,
+            ),
+            "measurement_results": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _MEASUREMENT_RESULTS_FILE),
+                _MEASUREMENT_RESULTS_JSON_COLUMNS,
+            ),
+            "characterization_observations": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _CHARACTERIZATION_OBSERVATIONS_FILE),
+                _CHARACTERIZATION_JSON_COLUMNS,
+            ),
+            "structure_features": restore_frame_from_storage(
+                pd.read_parquet(base_dir / _STRUCTURE_FEATURES_FILE),
+                _STRUCTURE_FEATURES_JSON_COLUMNS,
+            ),
+        }
 
     def _build_document_state(self) -> dict[str, Any]:
         return {
+            "anchor_ids_by_key": {},
+            "anchor_records_by_id": {},
+            "method_ids_by_key": {},
+            "method_records_by_id": {},
             "variant_ids_by_key": {},
             "variant_records_by_id": {},
             "test_condition_ids_by_key": {},
             "test_condition_records_by_id": {},
             "baseline_ids_by_key": {},
             "baseline_records_by_id": {},
-            "card_keys": set(),
         }
 
     def _build_section_extraction_payload(
@@ -723,11 +881,12 @@ class EvidenceCardService:
         title: str,
         source_filename: str | None,
         profile: dict[str, Any],
-        table_id: str,
-        row_index: int,
+        table_row: dict[str, Any],
         row_cells: list[dict[str, Any]],
         sections: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        table_id = str(table_row.get("table_id") or "")
+        row_index = self._safe_int(table_row.get("row_index")) or 0
         return {
             "document_id": document_id,
             "document_title": title,
@@ -739,7 +898,8 @@ class EvidenceCardService:
             "table_row": {
                 "table_id": table_id,
                 "row_index": row_index,
-                "row_summary": self._build_table_row_summary(row_cells),
+                "row_summary": self._normalize_scalar_text(table_row.get("row_text"))
+                or self._build_table_row_summary(row_cells),
                 "cells": [
                     {
                         "header_path": self._normalize_scalar_text(cell.get("header_path")),
@@ -770,7 +930,8 @@ class EvidenceCardService:
         section: dict[str, Any] | None,
         table_id: str | None,
         row_index: int | None,
-        card_rows: list[dict[str, Any]],
+        evidence_anchor_rows: list[dict[str, Any]],
+        method_fact_rows: list[dict[str, Any]],
         sample_variant_rows: list[dict[str, Any]],
         test_condition_rows: list[dict[str, Any]],
         baseline_rows: list[dict[str, Any]],
@@ -781,6 +942,29 @@ class EvidenceCardService:
         local_test_condition_ids: dict[str, str] = {}
         local_baseline_ids: dict[str, str] = {}
         bundle_anchor_ids: list[str] = []
+
+        for method_fact in bundle.method_facts:
+            method_id, created = self._materialize_method_fact_row(
+                collection_id=collection_id,
+                document_id=document_id,
+                payload=method_fact,
+                section=section,
+                table_id=table_id,
+                rows=method_fact_rows,
+                evidence_anchor_rows=evidence_anchor_rows,
+                document_state=document_state,
+            )
+            method_record = (
+                created
+                or document_state["method_records_by_id"].get(method_id)
+            )
+            if method_record is None:
+                continue
+            for anchor_id in method_record["evidence_anchor_ids"]:
+                if anchor_id not in bundle_anchor_ids:
+                    bundle_anchor_ids.append(anchor_id)
+            if created:
+                document_state["method_records_by_id"][method_id] = created
 
         for variant in bundle.sample_variants:
             variant_id, created = self._materialize_variant_row(
@@ -831,6 +1015,8 @@ class EvidenceCardService:
                 document_id=document_id,
                 section=section,
                 table_id=table_id,
+                rows=evidence_anchor_rows,
+                document_state=document_state,
             )
             anchor_ids = [anchor["anchor_id"] for anchor in anchors]
             bundle_anchor_ids.extend(
@@ -892,79 +1078,6 @@ class EvidenceCardService:
                 continue
             measurement_rows.append(measurement_record)
 
-            variant_record = (
-                document_state["variant_records_by_id"].get(linked_variant_id)
-                if linked_variant_id
-                else None
-            )
-            test_condition_record = (
-                document_state["test_condition_records_by_id"].get(linked_test_condition_id)
-                if linked_test_condition_id
-                else None
-            )
-            baseline_record = (
-                document_state["baseline_records_by_id"].get(linked_baseline_id)
-                if linked_baseline_id
-                else None
-            )
-            self._append_card_row(
-                card_rows=card_rows,
-                document_state=document_state,
-                payload=EvidenceCardPayload(
-                    claim_text=result.claim_text,
-                    claim_type="property",
-                    evidence_source_type="table" if table_id else "text",
-                    material_system=self._to_material_payload(
-                        (variant_record or {}).get("host_material_system")
-                    ),
-                    condition_context=self._condition_context_from_records(
-                        test_condition_record,
-                        baseline_record,
-                    ),
-                    anchors=[
-                        EvidenceAnchorPayload(
-                            quote=str(anchor.get("quote") or anchor.get("quote_span") or ""),
-                            source_type=str(anchor.get("source_type") or "text"),
-                            section_id=self._normalize_scalar_text(anchor.get("section_id")),
-                            snippet_id=self._normalize_scalar_text(anchor.get("snippet_id")),
-                            figure_or_table=self._normalize_scalar_text(
-                                anchor.get("figure_or_table")
-                            ),
-                            page=self._safe_int(anchor.get("page")),
-                        )
-                        for anchor in anchors
-                    ],
-                    confidence=result.confidence,
-                ),
-                collection_id=collection_id,
-                document_id=document_id,
-                section=section,
-                table_id=table_id,
-            )
-
-        for card in bundle.evidence_cards:
-            anchors = self._materialize_anchor_payloads(
-                anchors=card.anchors,
-                document_id=document_id,
-                section=section,
-                table_id=table_id,
-            )
-            bundle_anchor_ids.extend(
-                anchor["anchor_id"]
-                for anchor in anchors
-                if anchor["anchor_id"] not in bundle_anchor_ids
-            )
-            self._append_card_row(
-                card_rows=card_rows,
-                document_state=document_state,
-                payload=card,
-                collection_id=collection_id,
-                document_id=document_id,
-                section=section,
-                table_id=table_id,
-                prebuilt_anchors=anchors,
-            )
-
         for variant_id in local_variant_ids.values():
             variant_record = document_state["variant_records_by_id"].get(variant_id)
             if variant_record is None:
@@ -988,6 +1101,65 @@ class EvidenceCardService:
             for anchor_id in bundle_anchor_ids:
                 if anchor_id not in baseline_record["evidence_anchor_ids"]:
                     baseline_record["evidence_anchor_ids"].append(anchor_id)
+
+    def _materialize_method_fact_row(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        payload: MethodFactPayload,
+        section: dict[str, Any] | None,
+        table_id: str | None,
+        rows: list[dict[str, Any]],
+        evidence_anchor_rows: list[dict[str, Any]],
+        document_state: dict[str, Any],
+    ) -> tuple[str, dict[str, Any] | None]:
+        normalized_payload = self._normalize_method_payload(
+            payload.method_payload.model_dump(exclude_none=True)
+        )
+        method_role = self._normalize_method_role(payload.method_role)
+        method_name = self._normalize_scalar_text(payload.method_name) or method_role
+        anchors = self._materialize_anchor_payloads(
+            anchors=payload.anchors,
+            document_id=document_id,
+            section=section,
+            table_id=table_id,
+            rows=evidence_anchor_rows,
+            document_state=document_state,
+        )
+        anchor_ids = [str(anchor.get("anchor_id") or "") for anchor in anchors if str(anchor.get("anchor_id") or "").strip()]
+        method_key = (
+            document_id,
+            method_role,
+            method_name.lower(),
+            json.dumps(normalized_payload, sort_keys=True, ensure_ascii=False),
+        )
+        existing_id = document_state["method_ids_by_key"].get(method_key)
+        if existing_id:
+            existing_record = document_state["method_records_by_id"].get(existing_id)
+            if existing_record is not None:
+                for anchor_id in anchor_ids:
+                    if anchor_id not in existing_record["evidence_anchor_ids"]:
+                        existing_record["evidence_anchor_ids"].append(anchor_id)
+            return existing_id, None
+
+        method_record = MethodFact.from_mapping(
+            {
+                "method_id": f"mf_{uuid4().hex[:12]}",
+                "document_id": document_id,
+                "collection_id": collection_id,
+                "domain_profile": CORE_NEUTRAL_DOMAIN_PROFILE,
+                "method_role": method_role,
+                "method_name": method_name,
+                "method_payload": normalized_payload,
+                "evidence_anchor_ids": anchor_ids,
+                "confidence": payload.confidence,
+                "epistemic_status": str(payload.epistemic_status or EPISTEMIC_NORMALIZED_FROM_EVIDENCE),
+            }
+        ).to_record()
+        rows.append(method_record)
+        document_state["method_ids_by_key"][method_key] = method_record["method_id"]
+        return method_record["method_id"], method_record
 
     def _materialize_variant_row(
         self,
@@ -1142,67 +1314,6 @@ class EvidenceCardService:
         document_state["baseline_ids_by_key"][baseline_key] = baseline_record["baseline_id"]
         return baseline_record["baseline_id"], baseline_record
 
-    def _append_card_row(
-        self,
-        *,
-        card_rows: list[dict[str, Any]],
-        document_state: dict[str, Any],
-        payload: EvidenceCardPayload,
-        collection_id: str,
-        document_id: str,
-        section: dict[str, Any] | None,
-        table_id: str | None,
-        prebuilt_anchors: list[dict[str, Any]] | None = None,
-    ) -> None:
-        anchors = prebuilt_anchors or self._materialize_anchor_payloads(
-            anchors=payload.anchors,
-            document_id=document_id,
-            section=section,
-            table_id=table_id,
-        )
-        anchor_signature = tuple(
-            str(anchor.get("quote") or anchor.get("quote_span") or "").strip()
-            for anchor in anchors
-        )
-        card_key = (
-            document_id,
-            str(payload.claim_text or "").strip().lower(),
-            str(payload.claim_type or "").strip().lower(),
-            str(payload.evidence_source_type or "").strip().lower(),
-            anchor_signature,
-        )
-        if card_key in document_state["card_keys"]:
-            return
-
-        card_rows.append(
-            {
-                "evidence_id": f"ev_{uuid4().hex[:12]}",
-                "document_id": document_id,
-                "collection_id": collection_id,
-                "claim_text": str(payload.claim_text or "").strip(),
-                "claim_type": self._normalize_claim_type(payload.claim_type),
-                "evidence_source_type": (
-                    str(payload.evidence_source_type or "text")
-                    if str(payload.evidence_source_type or "text") in _EVIDENCE_SOURCE_TYPES
-                    else ("table" if table_id else "text")
-                ),
-                "evidence_anchors": anchors,
-                "material_system": self._normalize_material_system_payload(
-                    payload.material_system.model_dump(exclude_none=True)
-                    if payload.material_system
-                    else {}
-                ),
-                "condition_context": self._normalize_condition_context_payload(
-                    payload.condition_context.model_dump(exclude_none=True)
-                ),
-                "confidence": payload.confidence,
-                "traceability_status": (
-                    TRACEABILITY_STATUS_DIRECT if anchors else TRACEABILITY_STATUS_MISSING
-                ),
-            }
-        )
-        document_state["card_keys"].add(card_key)
-
     def _materialize_anchor_payloads(
         self,
         *,
@@ -1210,9 +1321,12 @@ class EvidenceCardService:
         document_id: str,
         section: dict[str, Any] | None,
         table_id: str | None,
+        rows: list[dict[str, Any]],
+        document_state: dict[str, Any],
     ) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
         section_id = self._normalize_scalar_text(section.get("section_id")) if section else None
+        block_id = self._normalize_scalar_text(section.get("block_id")) if section else None
         snippet_ids = self._normalize_list(section.get("text_unit_ids")) if section else []
         for anchor in anchors:
             quote = self._normalize_scalar_text(anchor.quote)
@@ -1221,21 +1335,50 @@ class EvidenceCardService:
                 if str(anchor.source_type or "text") in _EVIDENCE_SOURCE_TYPES
                 else ("table" if table_id else "text")
             )
-            payload.append(
+            resolved_section_id = self._normalize_scalar_text(anchor.section_id) or section_id
+            resolved_snippet_id = self._normalize_scalar_text(anchor.snippet_id) or (
+                snippet_ids[0] if snippet_ids else None
+            )
+            figure_or_table = self._normalize_scalar_text(anchor.figure_or_table) or table_id
+            anchor_key = (
+                document_id,
+                source_type,
+                resolved_section_id,
+                resolved_snippet_id,
+                figure_or_table,
+                self._safe_int(anchor.page),
+                quote,
+            )
+            existing_id = document_state["anchor_ids_by_key"].get(anchor_key)
+            if existing_id:
+                existing_record = document_state["anchor_records_by_id"].get(existing_id)
+                if existing_record is not None:
+                    payload.append(existing_record)
+                    continue
+
+            anchor_record = EvidenceAnchor.from_mapping(
                 {
                     "anchor_id": f"anchor_{uuid4().hex[:12]}",
                     "document_id": document_id,
+                    "locator_type": "section",
+                    "locator_confidence": "low",
                     "source_type": source_type,
-                    "section_id": self._normalize_scalar_text(anchor.section_id) or section_id,
-                    "block_id": None,
-                    "snippet_id": self._normalize_scalar_text(anchor.snippet_id)
-                    or (snippet_ids[0] if snippet_ids else None),
-                    "figure_or_table": self._normalize_scalar_text(anchor.figure_or_table) or table_id,
-                    "page": anchor.page,
+                    "section_id": resolved_section_id,
+                    "char_range": None,
+                    "bbox": None,
+                    "page": self._safe_int(anchor.page),
                     "quote": quote,
+                    "deep_link": None,
+                    "block_id": block_id or resolved_section_id,
+                    "snippet_id": resolved_snippet_id,
+                    "figure_or_table": figure_or_table,
                     "quote_span": quote,
                 }
-            )
+            ).to_record()
+            rows.append(anchor_record)
+            document_state["anchor_ids_by_key"][anchor_key] = anchor_record["anchor_id"]
+            document_state["anchor_records_by_id"][anchor_record["anchor_id"]] = anchor_record
+            payload.append(anchor_record)
         return payload
 
     def _resolve_local_or_single_id(
@@ -1277,6 +1420,240 @@ class EvidenceCardService:
             ),
         )
 
+    def _condition_context_from_method_fact(
+        self,
+        method_fact: pd.Series | dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = self._normalize_method_payload(
+            dict(method_fact).get("method_payload") if isinstance(method_fact, pd.Series) else method_fact.get("method_payload")
+        )
+        method_role = self._normalize_method_role(
+            dict(method_fact).get("method_role") if isinstance(method_fact, pd.Series) else method_fact.get("method_role")
+        )
+        method_name = self._normalize_scalar_text(
+            dict(method_fact).get("method_name") if isinstance(method_fact, pd.Series) else method_fact.get("method_name")
+        )
+        methods = [str(item) for item in payload.get("methods") or [] if str(item).strip()]
+        if method_name and method_role in {"characterization", "test"} and method_name not in methods:
+            methods = [method_name, *methods]
+        test_method = method_name if method_role in {"characterization", "test"} else None
+        return self._normalize_condition_context_payload(
+            {
+                "process": {
+                    "temperatures_c": payload.get("temperatures_c") or [],
+                    "durations": payload.get("durations") or [],
+                    "atmosphere": payload.get("atmosphere"),
+                },
+                "baseline": {"control": None},
+                "test": {
+                    "methods": methods,
+                    "method": test_method,
+                },
+            }
+        )
+
+    def _derive_evidence_cards_table(
+        self,
+        *,
+        collection_id: str,
+        evidence_anchors: pd.DataFrame,
+        method_facts: pd.DataFrame,
+        sample_variants: pd.DataFrame,
+        test_conditions: pd.DataFrame,
+        baseline_references: pd.DataFrame,
+        measurement_results: pd.DataFrame,
+    ) -> pd.DataFrame:
+        anchor_lookup = self._index_rows_by_id(evidence_anchors, "anchor_id")
+        sample_lookup = self._index_rows_by_id(sample_variants, "variant_id")
+        test_condition_lookup = self._index_rows_by_id(test_conditions, "test_condition_id")
+        baseline_lookup = self._index_rows_by_id(baseline_references, "baseline_id")
+        document_material_lookup: dict[str, dict[str, Any]] = {}
+        for _, variant in sample_variants.iterrows():
+            document_id = str(variant.get("document_id") or "")
+            if document_id and document_id not in document_material_lookup:
+                document_material_lookup[document_id] = self._normalize_material_system_payload(
+                    variant.get("host_material_system")
+                )
+
+        rows: list[dict[str, Any]] = []
+        if method_facts is not None and not method_facts.empty:
+            for _, method_fact in method_facts.iterrows():
+                anchors = self._resolve_anchor_rows(
+                    method_fact.get("evidence_anchor_ids"),
+                    anchor_lookup,
+                )
+                method_role = self._normalize_method_role(method_fact.get("method_role"))
+                rows.append(
+                    {
+                        "evidence_id": self._method_fact_evidence_id(method_fact.get("method_id")),
+                        "document_id": str(method_fact.get("document_id") or ""),
+                        "collection_id": collection_id,
+                        "claim_text": self._summarize_method_fact_card(method_fact),
+                        "claim_type": (
+                            "process"
+                            if method_role == "process"
+                            else "characterization"
+                            if method_role == "characterization"
+                            else "qualitative"
+                        ),
+                        "evidence_source_type": self._determine_evidence_source_type(
+                            anchors,
+                            "method" if method_role == "process" else "text",
+                        ),
+                        "evidence_anchors": anchors,
+                        "material_system": document_material_lookup.get(
+                            str(method_fact.get("document_id") or ""),
+                            {},
+                        ),
+                        "condition_context": self._condition_context_from_method_fact(method_fact),
+                        "confidence": round(float(method_fact.get("confidence") or 0.0), 2),
+                        "traceability_status": (
+                            TRACEABILITY_STATUS_DIRECT if anchors else TRACEABILITY_STATUS_MISSING
+                        ),
+                    }
+                )
+
+        if measurement_results is not None and not measurement_results.empty:
+            for _, result in measurement_results.iterrows():
+                variant = sample_lookup.get(str(result.get("variant_id") or ""), {})
+                test_condition = test_condition_lookup.get(
+                    str(result.get("test_condition_id") or ""),
+                    {},
+                )
+                baseline = baseline_lookup.get(str(result.get("baseline_id") or ""), {})
+                anchors = self._resolve_anchor_rows(result.get("evidence_anchor_ids"), anchor_lookup)
+                rows.append(
+                    {
+                        "evidence_id": self._measurement_result_evidence_id(result.get("result_id")),
+                        "document_id": str(result.get("document_id") or ""),
+                        "collection_id": collection_id,
+                        "claim_text": self._measurement_result_claim_text(result, variant),
+                        "claim_type": "property",
+                        "evidence_source_type": self._determine_evidence_source_type(
+                            anchors,
+                            self._normalize_scalar_text(result.get("result_source_type")) or "text",
+                        ),
+                        "evidence_anchors": anchors,
+                        "material_system": self._normalize_material_system_payload(
+                            variant.get("host_material_system")
+                        ),
+                        "condition_context": self._normalize_condition_context_payload(
+                            self._condition_context_from_records(test_condition, baseline).model_dump(
+                                exclude_none=True
+                            )
+                        ),
+                        "confidence": 0.0,
+                        "traceability_status": str(
+                            result.get("traceability_status") or TRACEABILITY_STATUS_MISSING
+                        ),
+                    }
+                )
+
+        return self._normalize_cards_table(
+            pd.DataFrame(rows, columns=[
+                "evidence_id",
+                "document_id",
+                "collection_id",
+                "claim_text",
+                "claim_type",
+                "evidence_source_type",
+                "evidence_anchors",
+                "material_system",
+                "condition_context",
+                "confidence",
+                "traceability_status",
+            ]),
+            collection_id,
+        )
+
+    def _resolve_anchor_rows(
+        self,
+        anchor_ids: Any,
+        anchor_lookup: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        resolved: list[dict[str, Any]] = []
+        for anchor_id in self._normalize_list(anchor_ids):
+            anchor = anchor_lookup.get(anchor_id)
+            if anchor is not None:
+                resolved.append(dict(anchor))
+        return resolved
+
+    def _determine_evidence_source_type(
+        self,
+        anchors: list[dict[str, Any]],
+        fallback: str,
+    ) -> str:
+        for anchor in anchors:
+            source_type = self._normalize_scalar_text(anchor.get("source_type"))
+            if source_type in _EVIDENCE_SOURCE_TYPES:
+                return source_type
+        return fallback if fallback in _EVIDENCE_SOURCE_TYPES else "text"
+
+    def _measurement_result_evidence_id(self, result_id: Any) -> str:
+        return f"ev_result_{self._normalize_scalar_text(result_id) or 'missing'}"
+
+    def _method_fact_evidence_id(self, method_id: Any) -> str:
+        return f"ev_method_{self._normalize_scalar_text(method_id) or 'missing'}"
+
+    def _summarize_method_fact_card(
+        self,
+        method_fact: pd.Series | dict[str, Any],
+    ) -> str:
+        source = dict(method_fact) if isinstance(method_fact, pd.Series) else dict(method_fact)
+        method_role = self._normalize_method_role(source.get("method_role"))
+        method_name = self._normalize_scalar_text(source.get("method_name")) or "unspecified method"
+        payload = self._normalize_method_payload(source.get("method_payload"))
+        details = self._normalize_scalar_text(payload.get("details"))
+        if details:
+            return details
+        if method_role == "characterization":
+            return f"Characterization used {method_name}."
+        if method_role == "test":
+            return f"Testing used {method_name}."
+        return f"Process used {method_name}."
+
+    def _measurement_result_claim_text(
+        self,
+        result_row: pd.Series | dict[str, Any],
+        variant_row: dict[str, Any] | None,
+    ) -> str:
+        source = dict(result_row) if isinstance(result_row, pd.Series) else dict(result_row)
+        value_payload = self._normalize_object(source.get("value_payload"))
+        if isinstance(value_payload, dict):
+            statement = self._normalize_scalar_text(value_payload.get("statement"))
+            if statement:
+                return statement
+        result_summary, _ = self._summarize_result(
+            result_type=self._normalize_result_type(source.get("result_type")),
+            value_payload=source.get("value_payload"),
+            unit=self._sanitize_unit(source.get("unit")),
+        )
+        variant_label = self._normalize_scalar_text((variant_row or {}).get("variant_label")) or "sample"
+        property_name = self._normalize_property_name(source.get("property_normalized"))
+        if result_summary and result_summary != "Result reported":
+            return f"{variant_label} reported {property_name} of {result_summary}."
+        return f"{variant_label} reported {property_name}."
+
+    def _resolve_characterization_section_text(
+        self,
+        *,
+        sections: list[dict[str, Any]],
+        anchor_section_ids: set[str],
+        method_name: str | None,
+        method_payload: Any,
+    ) -> str | None:
+        for section in sections:
+            if str(section.get("section_type") or "") != "characterization":
+                continue
+            section_id = self._normalize_scalar_text(section.get("section_id"))
+            section_text = str(section.get("text") or "").strip()
+            if section_id and section_id in anchor_section_ids and section_text:
+                return section_text
+            if method_name and method_name.lower() in section_text.lower():
+                return section_text
+        payload = self._normalize_method_payload(method_payload)
+        return self._normalize_scalar_text(payload.get("details"))
+
     def _first_section_text_by_type(
         self,
         sections: list[dict[str, Any]],
@@ -1294,58 +1671,63 @@ class EvidenceCardService:
         self,
         *,
         collection_id: str,
-        cards_table: pd.DataFrame,
+        method_facts: pd.DataFrame,
+        evidence_anchors: pd.DataFrame,
         sections_by_doc: dict[str, list[dict[str, Any]]],
     ) -> pd.DataFrame:
         rows: list[dict[str, Any]] = []
-        characterization_cards = (
-            cards_table[cards_table["claim_type"].astype(str) == "characterization"]
-            if cards_table is not None and not cards_table.empty
-            else pd.DataFrame(columns=cards_table.columns if cards_table is not None else [])
-        )
+        if method_facts is None or method_facts.empty:
+            return self._normalize_characterization_table(
+                pd.DataFrame(columns=_CHARACTERIZATION_COLUMNS),
+                collection_id,
+            )
 
-        for document_id, sections in sections_by_doc.items():
-            matching_cards = characterization_cards[
-                characterization_cards["document_id"].astype(str) == str(document_id)
-            ]
-            anchor_ids: list[str] = []
-            condition_context: dict[str, Any] = self._normalize_condition_context_payload({})
-            if not matching_cards.empty:
-                card_row = matching_cards.iloc[0]
-                anchor_ids = self._extract_anchor_ids(card_row.get("evidence_anchors"))
-                condition_context = self._normalize_condition_context_payload(
-                    card_row.get("condition_context")
-                )
-
-            for section in sections:
-                if str(section.get("section_type") or "") != "characterization":
-                    continue
-                section_text = str(section.get("text") or "").strip()
-                if not section_text:
-                    continue
-                methods = self._extract_characterization_methods(section_text)
-                if not methods:
-                    continue
-                observed_value, observed_unit = self._extract_observed_value_and_unit(section_text)
-                for method in methods:
-                    rows.append(
-                        CharacterizationObservation.from_mapping(
-                            {
-                                "observation_id": f"obs_{uuid4().hex[:12]}",
-                                "document_id": str(document_id),
-                                "collection_id": collection_id,
-                                "variant_id": None,
-                                "characterization_type": method.lower(),
-                                "observation_text": section_text,
-                                "observed_value": observed_value,
-                                "observed_unit": observed_unit,
-                                "condition_context": condition_context,
-                                "evidence_anchor_ids": anchor_ids,
-                                "confidence": 0.82 if observed_value is not None else 0.76,
-                                "epistemic_status": EPISTEMIC_DIRECTLY_OBSERVED,
-                            }
-                        ).to_record()
-                    )
+        anchor_lookup = {
+            str(row.get("anchor_id") or ""): dict(row)
+            for _, row in evidence_anchors.iterrows()
+        } if evidence_anchors is not None and not evidence_anchors.empty else {}
+        characterization_facts = method_facts[
+            method_facts["method_role"].astype(str) == "characterization"
+        ]
+        for _, method_fact in characterization_facts.iterrows():
+            document_id = str(method_fact.get("document_id") or "")
+            if not document_id:
+                continue
+            sections = sections_by_doc.get(document_id, [])
+            anchor_ids = self._normalize_list(method_fact.get("evidence_anchor_ids"))
+            anchor_section_ids = {
+                self._normalize_scalar_text(anchor_lookup.get(anchor_id, {}).get("section_id"))
+                for anchor_id in anchor_ids
+            }
+            anchor_section_ids.discard(None)
+            section_text = self._resolve_characterization_section_text(
+                sections=sections,
+                anchor_section_ids=anchor_section_ids,
+                method_name=self._normalize_scalar_text(method_fact.get("method_name")),
+                method_payload=method_fact.get("method_payload"),
+            )
+            if not section_text:
+                continue
+            observed_value, observed_unit = self._extract_observed_value_and_unit(section_text)
+            method_name = self._normalize_scalar_text(method_fact.get("method_name")) or ""
+            rows.append(
+                CharacterizationObservation.from_mapping(
+                    {
+                        "observation_id": f"obs_{uuid4().hex[:12]}",
+                        "document_id": document_id,
+                        "collection_id": collection_id,
+                        "variant_id": None,
+                        "characterization_type": method_name.lower(),
+                        "observation_text": section_text,
+                        "observed_value": observed_value,
+                        "observed_unit": observed_unit,
+                        "condition_context": self._condition_context_from_method_fact(method_fact),
+                        "evidence_anchor_ids": anchor_ids,
+                        "confidence": max(float(method_fact.get("confidence") or 0.0), 0.76),
+                        "epistemic_status": EPISTEMIC_DIRECTLY_OBSERVED,
+                    }
+                ).to_record()
+            )
 
         return self._normalize_characterization_table(
             pd.DataFrame(rows, columns=_CHARACTERIZATION_COLUMNS),
@@ -1429,6 +1811,43 @@ class EvidenceCardService:
             normalized.at[index, "structure_feature_ids"] = feature_ids
         return self._normalize_sample_variants_table(normalized, None)
 
+    def _attach_context_to_measurement_results(
+        self,
+        *,
+        measurement_results: pd.DataFrame,
+        characterization: pd.DataFrame,
+        structure_features: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if measurement_results is None or measurement_results.empty:
+            return self._normalize_measurement_results_table(measurement_results, None)
+
+        normalized = measurement_results.copy()
+        for index, row in normalized.iterrows():
+            document_id = str(row.get("document_id") or "")
+            variant_id = self._normalize_scalar_text(row.get("variant_id"))
+            matched_characterization = self._filter_rows_by_document(characterization, document_id)
+            matched_structure = self._filter_rows_by_document(structure_features, document_id)
+            if variant_id:
+                if not matched_characterization.empty:
+                    matched_characterization = matched_characterization[
+                        matched_characterization["variant_id"].astype(str) == variant_id
+                    ]
+                if not matched_structure.empty:
+                    matched_structure = matched_structure[
+                        matched_structure["variant_id"].astype(str) == variant_id
+                    ]
+            normalized.at[index, "characterization_observation_ids"] = [
+                str(value)
+                for value in matched_characterization.get("observation_id", pd.Series(dtype=object)).tolist()
+                if str(value).strip()
+            ]
+            normalized.at[index, "structure_feature_ids"] = [
+                str(value)
+                for value in matched_structure.get("feature_id", pd.Series(dtype=object)).tolist()
+                if str(value).strip()
+            ]
+        return self._normalize_measurement_results_table(normalized, None)
+
     def _filter_rows_by_document(
         self,
         frame: pd.DataFrame | None,
@@ -1438,7 +1857,7 @@ class EvidenceCardService:
             return pd.DataFrame(columns=frame.columns if frame is not None else [])
         return frame[frame["document_id"].astype(str) == str(document_id)]
 
-    def _group_table_rows(
+    def _group_table_cells_by_row(
         self,
         table_cells: list[dict[str, Any]],
     ) -> dict[tuple[str, int], list[dict[str, Any]]]:
@@ -1450,6 +1869,24 @@ class EvidenceCardService:
                 continue
             grouped.setdefault((table_id, row_index), []).append(cell)
         return grouped
+
+    def _classify_block_section_type(
+        self,
+        block: dict[str, Any],
+    ) -> str:
+        block_type = self._normalize_scalar_text(block.get("block_type")) or "paragraph"
+        heading_path = self._normalize_scalar_text(block.get("heading_path"))
+        heading_text = heading_path.split(" > ")[-1].strip() if heading_path else None
+        if block_type == "heading":
+            heading_text = self._normalize_scalar_text(block.get("text")) or heading_text
+        classified = classify_heading(heading_text or "")
+        if classified in {"methods", "characterization"}:
+            return classified
+        if block_type == "table_caption":
+            return "table_caption"
+        if block_type == "heading":
+            return "heading"
+        return "body"
 
     def _build_table_row_summary(
         self,
@@ -1784,8 +2221,53 @@ class EvidenceCardService:
             return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
         for _, row in sections.iterrows():
-            document_id = str(row.get("paper_id") or row.get("document_id") or row.get("id") or "")
+            document_id = str(row.get("document_id") or row.get("paper_id") or row.get("id") or "")
+            block_payload = dict(row)
+            heading_path = self._normalize_scalar_text(block_payload.get("heading_path"))
+            heading = heading_path.split(" > ")[-1].strip() if heading_path else None
+            if heading is None and str(block_payload.get("block_type") or "") == "heading":
+                heading = self._normalize_scalar_text(block_payload.get("text"))
+            grouped.setdefault(document_id, []).append(
+                {
+                    "section_id": self._normalize_scalar_text(block_payload.get("block_id"))
+                    or f"block_{len(grouped.get(document_id, [])) + 1}",
+                    "section_type": self._classify_block_section_type(block_payload),
+                    "heading": heading,
+                    "text": self._normalize_scalar_text(block_payload.get("text")) or "",
+                    "order": self._safe_int(block_payload.get("block_order")) or 0,
+                    "text_unit_ids": self._normalize_list(block_payload.get("text_unit_ids")),
+                    "page": self._safe_int(block_payload.get("page")),
+                    "char_range": block_payload.get("char_range"),
+                    "block_id": self._normalize_scalar_text(block_payload.get("block_id")),
+                    "block_type": self._normalize_scalar_text(block_payload.get("block_type")),
+                    "heading_path": heading_path,
+                }
+            )
+        for document_id, items in grouped.items():
+            grouped[document_id] = sorted(
+                items,
+                key=lambda item: self._safe_int(item.get("order")) or 0,
+            )
+        return grouped
+
+    def _group_table_rows_by_document(
+        self,
+        table_rows: pd.DataFrame,
+    ) -> dict[str, list[dict[str, Any]]]:
+        if table_rows is None or table_rows.empty:
+            return {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for _, row in table_rows.iterrows():
+            document_id = str(row.get("document_id") or row.get("id") or "")
             grouped.setdefault(document_id, []).append(dict(row))
+        for document_id, items in grouped.items():
+            grouped[document_id] = sorted(
+                items,
+                key=lambda item: (
+                    str(item.get("table_id") or ""),
+                    self._safe_int(item.get("row_index")) or 0,
+                ),
+            )
         return grouped
 
     def _group_table_cells_by_document(
@@ -1981,9 +2463,10 @@ class EvidenceCardService:
         text_unit_lookup: dict[str, dict[str, Any]],
     ) -> dict[str, Any] | None:
         full_text = str(content.get("content_text") or "")
-        sections = content.get("sections") if isinstance(content.get("sections"), list) else []
+        blocks = content.get("blocks") if isinstance(content.get("blocks"), list) else []
         section_id = self._normalize_scalar_text(anchor.get("section_id"))
-        section = self._find_section_by_id(section_id, sections) if section_id else None
+        block_id = self._normalize_scalar_text(anchor.get("block_id")) or section_id
+        block = self._find_block_by_id(block_id, blocks) if block_id else None
 
         quote = self._normalize_scalar_text(anchor.get("quote")) or self._normalize_scalar_text(
             anchor.get("quote_span")
@@ -1998,13 +2481,14 @@ class EvidenceCardService:
         locator_confidence = str(anchor.get("locator_confidence") or "low")
 
         if explicit_char_range is not None:
-            section = section or self._find_section_for_char_range(explicit_char_range, sections)
-            section_id = section_id or (
-                self._normalize_scalar_text(section.get("section_id")) if section else None
+            block = block or self._find_block_for_char_range(explicit_char_range, blocks)
+            block_id = block_id or (
+                self._normalize_scalar_text(block.get("block_id")) if block else None
             )
             return {
                 **anchor,
-                "section_id": section_id,
+                "section_id": section_id or block_id,
+                "block_id": block_id,
                 "char_range": explicit_char_range,
                 "bbox": None,
                 "locator_type": "char_range",
@@ -2016,7 +2500,8 @@ class EvidenceCardService:
         if explicit_bbox is not None:
             return {
                 **anchor,
-                "section_id": section_id,
+                "section_id": section_id or block_id,
+                "block_id": block_id,
                 "char_range": None,
                 "bbox": explicit_bbox,
                 "locator_type": "bbox",
@@ -2029,20 +2514,21 @@ class EvidenceCardService:
         resolved_char_range: dict[str, int] | None = None
 
         if match_text:
-            if section is None:
-                section = self._find_section_by_snippet_id(snippet_id, sections)
-            if section is None:
-                section = self._find_section_for_quote(match_text, sections)
+            if block is None:
+                block = self._find_block_by_snippet_id(snippet_id, blocks)
+            if block is None:
+                block = self._find_block_for_quote(match_text, blocks)
 
-            if section is not None:
-                local_index = str(section.get("text") or "").find(match_text)
-                if local_index >= 0 and section.get("start_offset") is not None:
-                    section_start = self._safe_int(section.get("start_offset"))
+            if block is not None:
+                local_index = str(block.get("text") or "").find(match_text)
+                if local_index >= 0 and block.get("start_offset") is not None:
+                    section_start = self._safe_int(block.get("start_offset"))
                     resolved_char_range = {
                         "start": section_start + local_index,
                         "end": section_start + local_index + len(match_text),
                     }
-                    section_id = self._normalize_scalar_text(section.get("section_id")) or section_id
+                    block_id = self._normalize_scalar_text(block.get("block_id")) or block_id
+                    section_id = section_id or block_id
 
             if resolved_char_range is None and full_text:
                 global_index = full_text.find(match_text)
@@ -2051,15 +2537,17 @@ class EvidenceCardService:
                         "start": global_index,
                         "end": global_index + len(match_text),
                     }
-                    section = section or self._find_section_for_char_range(resolved_char_range, sections)
-                    section_id = (
-                        self._normalize_scalar_text(section.get("section_id")) if section else section_id
-                    ) or section_id
+                    block = block or self._find_block_for_char_range(resolved_char_range, blocks)
+                    block_id = (
+                        self._normalize_scalar_text(block.get("block_id")) if block else block_id
+                    ) or block_id
+                    section_id = section_id or block_id
 
         if resolved_char_range is not None:
             return {
                 **anchor,
-                "section_id": section_id,
+                "section_id": section_id or block_id,
+                "block_id": block_id,
                 "char_range": resolved_char_range,
                 "bbox": None,
                 "locator_type": "char_range",
@@ -2068,17 +2556,19 @@ class EvidenceCardService:
                 "quote_span": match_text,
             }
 
-        if section is None:
-            section = self._find_section_by_snippet_id(snippet_id, sections)
-        section_id = section_id or (
-            self._normalize_scalar_text(section.get("section_id")) if section else None
+        if block is None:
+            block = self._find_block_by_snippet_id(snippet_id, blocks)
+        block_id = block_id or (
+            self._normalize_scalar_text(block.get("block_id")) if block else None
         )
-        if section_id is None:
+        section_id = section_id or block_id
+        if block_id is None and section_id is None:
             return None
 
         return {
             **anchor,
             "section_id": section_id,
+            "block_id": block_id,
             "char_range": None,
             "bbox": None,
             "locator_type": "section",
@@ -2120,56 +2610,56 @@ class EvidenceCardService:
             lookup[text_unit_id] = dict(row)
         return lookup
 
-    def _find_section_by_id(
+    def _find_block_by_id(
         self,
-        section_id: str | None,
-        sections: list[dict[str, Any]],
+        block_id: str | None,
+        blocks: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        if not section_id:
+        if not block_id:
             return None
-        for section in sections:
-            if self._normalize_scalar_text(section.get("section_id")) == section_id:
-                return section
+        for block in blocks:
+            if self._normalize_scalar_text(block.get("block_id")) == block_id:
+                return block
         return None
 
-    def _find_section_by_snippet_id(
+    def _find_block_by_snippet_id(
         self,
         snippet_id: str | None,
-        sections: list[dict[str, Any]],
+        blocks: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         if not snippet_id:
             return None
-        for section in sections:
-            if snippet_id in self._normalize_list(section.get("text_unit_ids")):
-                return section
+        for block in blocks:
+            if snippet_id in self._normalize_list(block.get("text_unit_ids")):
+                return block
         return None
 
-    def _find_section_for_quote(
+    def _find_block_for_quote(
         self,
         quote: str,
-        sections: list[dict[str, Any]],
+        blocks: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        for section in sections:
-            if quote and quote in str(section.get("text") or ""):
-                return section
+        for block in blocks:
+            if quote and quote in str(block.get("text") or ""):
+                return block
         return None
 
-    def _find_section_for_char_range(
+    def _find_block_for_char_range(
         self,
         char_range: dict[str, int],
-        sections: list[dict[str, Any]],
+        blocks: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         start = self._safe_int(char_range.get("start"))
         end = self._safe_int(char_range.get("end"))
         if start is None or end is None:
             return None
-        for section in sections:
-            section_start = self._safe_int(section.get("start_offset"))
-            section_end = self._safe_int(section.get("end_offset"))
+        for block in blocks:
+            section_start = self._safe_int(block.get("start_offset"))
+            section_end = self._safe_int(block.get("end_offset"))
             if section_start is None or section_end is None:
                 continue
             if section_start <= start and end <= section_end:
-                return section
+                return block
         return None
 
     def _build_traceback_deep_link(
@@ -2345,6 +2835,85 @@ class EvidenceCardService:
         if isinstance(normalized, list):
             return [str(item) for item in normalized if str(item).strip()]
         return [str(normalized)]
+
+    def _normalize_method_role(self, value: Any) -> str:
+        lowered = str(value or "").strip().lower()
+        if lowered in {"process", "characterization", "test"}:
+            return lowered
+        return "process"
+
+    def _normalize_method_payload(
+        self,
+        value: Any,
+    ) -> dict[str, Any]:
+        payload = self._normalize_object(value) or {}
+        if not isinstance(payload, dict):
+            return {}
+        normalized = self._normalize_condition_payload(
+            {
+                "temperatures_c": payload.get("temperatures_c"),
+                "durations": payload.get("durations"),
+                "atmosphere": payload.get("atmosphere"),
+                "methods": payload.get("methods"),
+            }
+        )
+        details = self._normalize_scalar_text(payload.get("details"))
+        if details is not None:
+            normalized["details"] = details
+        return normalized
+
+    def _index_rows_by_id(
+        self,
+        frame: pd.DataFrame | None,
+        id_column: str,
+    ) -> dict[str, dict[str, Any]]:
+        if frame is None or frame.empty or id_column not in frame.columns:
+            return {}
+        lookup: dict[str, dict[str, Any]] = {}
+        for _, row in frame.iterrows():
+            item_id = self._normalize_scalar_text(row.get(id_column))
+            if item_id:
+                lookup[item_id] = dict(row)
+        return lookup
+
+    def _normalize_evidence_anchors_table(
+        self,
+        evidence_anchors: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if evidence_anchors is None or evidence_anchors.empty:
+            return pd.DataFrame(columns=_EVIDENCE_ANCHOR_COLUMNS)
+
+        records = []
+        for _, row in evidence_anchors.iterrows():
+            payload = dict(row)
+            payload["char_range"] = self._normalize_object(row.get("char_range"))
+            payload["bbox"] = self._normalize_object(row.get("bbox"))
+            records.append(EvidenceAnchor.from_mapping(payload).to_record())
+        return pd.DataFrame(records, columns=_EVIDENCE_ANCHOR_COLUMNS)
+
+    def _normalize_method_facts_table(
+        self,
+        method_facts: pd.DataFrame,
+        collection_id: str | None,
+    ) -> pd.DataFrame:
+        if method_facts is None or method_facts.empty:
+            return pd.DataFrame(columns=_METHOD_FACT_COLUMNS)
+
+        normalized = method_facts.copy()
+        if collection_id is not None and "collection_id" not in normalized.columns:
+            normalized["collection_id"] = collection_id
+        if "domain_profile" not in normalized.columns:
+            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+        records = []
+        for _, row in normalized.iterrows():
+            payload = dict(row)
+            payload["method_role"] = self._normalize_method_role(row.get("method_role"))
+            payload["method_payload"] = self._normalize_method_payload(row.get("method_payload"))
+            payload["evidence_anchor_ids"] = self._normalize_list(
+                row.get("evidence_anchor_ids")
+            )
+            records.append(MethodFact.from_mapping(payload).to_record())
+        return pd.DataFrame(records, columns=_METHOD_FACT_COLUMNS)
 
     def _normalize_sample_variants_table(
         self,

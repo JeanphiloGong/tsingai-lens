@@ -39,19 +39,28 @@ class EvidenceAnchorPayload(_StrictModel):
     quote: str | None = None
     source_type: Literal["text", "method", "table", "figure"] = "text"
     section_id: str | None = None
+    block_id: str | None = None
     snippet_id: str | None = None
     figure_or_table: str | None = None
     page: int | None = None
 
 
-class EvidenceCardPayload(_StrictModel):
-    claim_text: str
-    claim_type: str
-    evidence_source_type: Literal["text", "method", "table", "figure"] = "text"
-    material_system: MaterialSystemPayload | None = None
-    condition_context: ConditionContextPayload = Field(default_factory=ConditionContextPayload)
+class MethodPayloadModel(_StrictModel):
+    temperatures_c: list[float] = Field(default_factory=list)
+    durations: list[str] = Field(default_factory=list)
+    atmosphere: str | None = None
+    methods: list[str] = Field(default_factory=list)
+    details: str | None = None
+
+
+class MethodFactPayload(_StrictModel):
+    method_ref: str
+    method_role: Literal["process", "characterization", "test"] = "process"
+    method_name: str
+    method_payload: MethodPayloadModel = Field(default_factory=MethodPayloadModel)
     anchors: list[EvidenceAnchorPayload] = Field(default_factory=list)
     confidence: float = 0.0
+    epistemic_status: str = "normalized_from_evidence"
 
 
 class SampleVariantPayload(_StrictModel):
@@ -114,7 +123,7 @@ class MeasurementResultPayload(_StrictModel):
 
 
 class StructuredExtractionBundle(_StrictModel):
-    evidence_cards: list[EvidenceCardPayload] = Field(default_factory=list)
+    method_facts: list[MethodFactPayload] = Field(default_factory=list)
     sample_variants: list[SampleVariantPayload] = Field(default_factory=list)
     test_conditions: list[ExtractedTestConditionPayload] = Field(default_factory=list)
     baseline_references: list[BaselineReferencePayload] = Field(default_factory=list)

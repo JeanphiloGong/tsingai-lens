@@ -17,7 +17,7 @@ from application.source.collection_service import CollectionService
 from application.core.document_profile_service import DocumentProfileService
 from application.core.evidence_card_service import EvidenceCardService
 from controllers.core import evidence as evidence_controller
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -42,7 +42,8 @@ def _write_source_artifacts(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> None:
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 

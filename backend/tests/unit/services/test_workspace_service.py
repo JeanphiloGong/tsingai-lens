@@ -5,11 +5,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from application.core.document_profile_service import DocumentProfileService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
 from application.core.workspace_overview_service import WorkspaceService
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -30,7 +31,8 @@ def _write_source_artifacts(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> None:
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
@@ -113,6 +115,10 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
     _write_source_artifacts(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
+    DocumentProfileService(collection_service, artifact_registry).build_document_profiles(
+        collection_id,
+        output_dir,
+    )
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
@@ -121,6 +127,10 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["workflow"]["protocol"]["status"] == "not_started"
     assert overview["artifacts"]["document_profiles_generated"] is True
     assert overview["artifacts"]["document_profiles_ready"] is True
+    assert overview["artifacts"]["evidence_anchors_generated"] is False
+    assert overview["artifacts"]["evidence_anchors_ready"] is False
+    assert overview["artifacts"]["method_facts_generated"] is False
+    assert overview["artifacts"]["method_facts_ready"] is False
     assert overview["artifacts"]["evidence_cards_generated"] is False
     assert overview["artifacts"]["evidence_cards_ready"] is False
     assert overview["artifacts"]["characterization_observations_generated"] is False
@@ -137,6 +147,10 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["artifacts"]["measurement_results_ready"] is False
     assert overview["artifacts"]["comparison_rows_generated"] is False
     assert overview["artifacts"]["comparison_rows_ready"] is False
+    assert overview["artifacts"]["blocks_generated"] is True
+    assert overview["artifacts"]["blocks_ready"] is True
+    assert overview["artifacts"]["table_rows_generated"] is True
+    assert overview["artifacts"]["table_rows_ready"] is False
     assert overview["artifacts"]["table_cells_generated"] is True
     assert overview["artifacts"]["table_cells_ready"] is False
     assert overview["artifacts"]["protocol_steps_generated"] is False

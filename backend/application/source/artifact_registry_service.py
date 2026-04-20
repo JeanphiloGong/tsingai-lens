@@ -29,6 +29,8 @@ class ArtifactRegistryService:
         base_dir = Path(output_dir).expanduser().resolve()
         documents_path = base_dir / "documents.parquet"
         document_profiles_path = base_dir / "document_profiles.parquet"
+        evidence_anchors_path = base_dir / "evidence_anchors.parquet"
+        method_facts_path = base_dir / "method_facts.parquet"
         evidence_cards_path = base_dir / "evidence_cards.parquet"
         characterization_observations_path = base_dir / "characterization_observations.parquet"
         structure_features_path = base_dir / "structure_features.parquet"
@@ -37,7 +39,8 @@ class ArtifactRegistryService:
         sample_variants_path = base_dir / "sample_variants.parquet"
         measurement_results_path = base_dir / "measurement_results.parquet"
         comparison_rows_path = base_dir / "comparison_rows.parquet"
-        sections_path = base_dir / "sections.parquet"
+        blocks_path = base_dir / "blocks.parquet"
+        table_rows_path = base_dir / "table_rows.parquet"
         table_cells_path = base_dir / "table_cells.parquet"
         procedure_blocks_path = base_dir / "procedure_blocks.parquet"
         protocol_steps_path = base_dir / "protocol_steps.parquet"
@@ -50,6 +53,10 @@ class ArtifactRegistryService:
             documents_ready=self._parquet_has_rows(documents_path),
             document_profiles_generated=document_profiles_path.exists(),
             document_profiles_ready=self._parquet_has_rows(document_profiles_path),
+            evidence_anchors_generated=evidence_anchors_path.exists(),
+            evidence_anchors_ready=self._parquet_has_rows(evidence_anchors_path),
+            method_facts_generated=method_facts_path.exists(),
+            method_facts_ready=self._parquet_has_rows(method_facts_path),
             evidence_cards_generated=evidence_cards_path.exists(),
             evidence_cards_ready=self._parquet_has_rows(evidence_cards_path),
             characterization_observations_generated=characterization_observations_path.exists(),
@@ -68,8 +75,10 @@ class ArtifactRegistryService:
             measurement_results_ready=self._parquet_has_rows(measurement_results_path),
             comparison_rows_generated=comparison_rows_path.exists(),
             comparison_rows_ready=self._parquet_has_rows(comparison_rows_path),
-            sections_generated=sections_path.exists(),
-            sections_ready=self._parquet_has_rows(sections_path),
+            blocks_generated=blocks_path.exists(),
+            blocks_ready=self._parquet_has_rows(blocks_path),
+            table_rows_generated=table_rows_path.exists(),
+            table_rows_ready=self._parquet_has_rows(table_rows_path),
             table_cells_generated=table_cells_path.exists(),
             table_cells_ready=self._parquet_has_rows(table_cells_path),
             procedure_blocks_generated=procedure_blocks_path.exists(),

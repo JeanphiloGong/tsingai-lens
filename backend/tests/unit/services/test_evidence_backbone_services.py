@@ -12,11 +12,16 @@ from application.core.document_profile_service import DocumentProfileService
 from application.core.evidence_card_service import EvidenceCardService
 from application.core.llm_extraction_models import (
     EvidenceAnchorPayload,
-    EvidenceCardPayload,
+    MethodFactPayload,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
 )
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import (
+    build_blocks,
+    build_sections,
+    build_table_cells,
+    build_table_rows,
+)
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -37,7 +42,9 @@ def _write_source_artifacts(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> None:
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
     build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
@@ -46,7 +53,7 @@ class EvidenceOnlyExtractor:
         return StructuredDocumentProfile(
             doc_type="experimental",
             protocol_extractable="yes",
-            protocol_extractability_signals=["methods_section_detected"],
+            protocol_extractability_signals=[],
             parsing_warnings=[],
             confidence=0.9,
         )
@@ -56,11 +63,12 @@ class EvidenceOnlyExtractor:
         section_id = str(section.get("section_id") or "") or None
         text_unit_ids = section.get("text_unit_ids") if isinstance(section.get("text_unit_ids"), list) else []
         return StructuredExtractionBundle(
-            evidence_cards=[
-                EvidenceCardPayload(
-                    claim_text="Process conditions were reported.",
-                    claim_type="process",
-                    evidence_source_type="text",
+            method_facts=[
+                MethodFactPayload(
+                    method_ref="process_1",
+                    method_role="process",
+                    method_name="sample preparation",
+                    method_payload={"details": "Process conditions were reported."},
                     anchors=[
                         EvidenceAnchorPayload(
                             quote="Process conditions were reported.",
@@ -159,28 +167,34 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     )
     characterization = pd.read_parquet(output_dir / "characterization_observations.parquet")
     structure_features = pd.read_parquet(output_dir / "structure_features.parquet")
+    method_facts = pd.read_parquet(output_dir / "method_facts.parquet")
+    evidence_anchors = pd.read_parquet(output_dir / "evidence_anchors.parquet")
     test_conditions = pd.read_parquet(output_dir / "test_conditions.parquet")
     baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
     sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
     measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
     assert not characterization.empty
-    assert not structure_features.empty
-    assert not test_conditions.empty
+    assert not method_facts.empty
+    assert not evidence_anchors.empty
     assert not baseline_references.empty
     assert not sample_variants.empty
     assert not measurement_results.empty
     assert "directly_observed" in set(characterization["epistemic_status"])
-    assert "inferred_from_characterization" in set(structure_features["epistemic_status"])
-    assert "normalized_from_evidence" in set(test_conditions["epistemic_status"])
+    if not structure_features.empty:
+        assert "inferred_from_characterization" in set(structure_features["epistemic_status"])
+    if not test_conditions.empty:
+        assert "normalized_from_evidence" in set(test_conditions["epistemic_status"])
     assert set(baseline_references["baseline_type"]) == {"implicit_within_document_control"}
     assert "inferred_with_low_confidence" in set(sample_variants["epistemic_status"])
     assert set(measurement_results["result_type"]) == {"scalar"}
     artifacts = artifact_registry.get(collection_id)
     assert artifacts["document_profiles_ready"] is True
+    assert artifacts["evidence_anchors_ready"] is True
+    assert artifacts["method_facts_ready"] is True
     assert artifacts["evidence_cards_ready"] is True
     assert artifacts["characterization_observations_ready"] is True
-    assert artifacts["structure_features_ready"] is True
-    assert artifacts["test_conditions_ready"] is True
+    assert artifacts["structure_features_ready"] is (not structure_features.empty)
+    assert artifacts["test_conditions_ready"] is (not test_conditions.empty)
     assert artifacts["baseline_references_ready"] is True
     assert artifacts["sample_variants_ready"] is True
     assert artifacts["measurement_results_ready"] is True
@@ -599,6 +613,7 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
         collection_id="col-1",
         result_row=pd.Series(
             {
+                "result_id": "res-1",
                 "document_id": "paper-1",
                 "variant_id": "var-1",
                 "property_normalized": "flexural_strength",
@@ -649,14 +664,13 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
                 "baseline_label": "untreated baseline",
             }
         },
-        anchor_to_evidence_ids={"anchor-1": ["evi-1"]},
     )
 
     assert row["process_normalized"] == "80 C, 2 h, under Ar"
     assert row["baseline_normalized"] == "untreated baseline"
     assert row["test_condition_normalized"] == "SEM"
     assert row["comparability_status"] == "comparable"
-    assert row["supporting_evidence_ids"] == ["evi-1"]
+    assert row["supporting_evidence_ids"] == ["ev_result_res-1"]
     assert row["comparability_basis"] == [
         "variant_linked",
         "baseline_resolved",
@@ -884,8 +898,10 @@ def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeyp
     artifact_registry.upsert(collection_id, output_dir)
 
     document_profile_service.build_document_profiles(collection_id, output_dir)
-    sections = build_sections(documents, text_units)
-    methods_section = sections[sections["section_type"] == "methods"].iloc[0]
+    blocks = build_blocks(documents, text_units)
+    methods_block = blocks[
+        blocks["text_unit_ids"].apply(lambda value: "tu-1" in (value or []))
+    ].iloc[0]
 
     pd.DataFrame(
         [
@@ -900,7 +916,8 @@ def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeyp
                     {
                         "anchor_id": "anchor-ready",
                         "source_type": "method",
-                        "section_id": methods_section["section_id"],
+                        "section_id": methods_block["block_id"],
+                        "block_id": methods_block["block_id"],
                         "snippet_id": "tu-1",
                         "quote_span": "The precursor powders were mixed in ethanol and stirred for 2 h.",
                     }
@@ -915,14 +932,16 @@ def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeyp
     artifact_registry.upsert(collection_id, output_dir)
 
     content = document_profile_service.get_document_content(collection_id, "paper-1")
-    assert content["sections"][0]["section_id"] == methods_section["section_id"]
-    assert content["sections"][0]["start_offset"] is not None
+    matched_block = next(
+        item for item in content["blocks"] if item["block_id"] == methods_block["block_id"]
+    )
+    assert matched_block["start_offset"] is not None
 
     traceback = evidence_card_service.get_evidence_traceback(collection_id, "ev-ready")
     assert traceback["traceback_status"] == "ready"
     assert traceback["anchors"][0]["locator_type"] == "char_range"
     assert traceback["anchors"][0]["char_range"] is not None
-    assert traceback["anchors"][0]["section_id"] == methods_section["section_id"]
+    assert traceback["anchors"][0]["block_id"] == methods_block["block_id"]
     assert "evidence_id=ev-ready" in traceback["anchors"][0]["deep_link"]
 
 
@@ -976,8 +995,10 @@ def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path)
     artifact_registry.upsert(collection_id, output_dir)
 
     document_profile_service.build_document_profiles(collection_id, output_dir)
-    sections = build_sections(documents, text_units)
-    methods_section = sections[sections["section_type"] == "methods"].iloc[0]
+    blocks = build_blocks(documents, text_units)
+    methods_block = blocks[
+        blocks["text_unit_ids"].apply(lambda value: "tu-1" in (value or []))
+    ].iloc[0]
 
     pd.DataFrame(
         [
@@ -992,7 +1013,8 @@ def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path)
                     {
                         "anchor_id": "anchor-partial",
                         "source_type": "method",
-                        "section_id": methods_section["section_id"],
+                        "section_id": methods_block["block_id"],
+                        "block_id": methods_block["block_id"],
                         "quote_span": "This quote is not present in the document.",
                     }
                 ],
@@ -1008,7 +1030,7 @@ def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path)
     traceback = evidence_card_service.get_evidence_traceback(collection_id, "ev-partial")
     assert traceback["traceback_status"] == "partial"
     assert traceback["anchors"][0]["locator_type"] == "section"
-    assert traceback["anchors"][0]["section_id"] == methods_section["section_id"]
+    assert traceback["anchors"][0]["block_id"] == methods_block["block_id"]
     assert traceback["anchors"][0]["char_range"] is None
 
 

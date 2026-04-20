@@ -13,6 +13,10 @@ class ArtifactStatusRecord:
     documents_ready: bool
     document_profiles_generated: bool
     document_profiles_ready: bool
+    evidence_anchors_generated: bool
+    evidence_anchors_ready: bool
+    method_facts_generated: bool
+    method_facts_ready: bool
     evidence_cards_generated: bool
     evidence_cards_ready: bool
     characterization_observations_generated: bool
@@ -31,8 +35,10 @@ class ArtifactStatusRecord:
     comparison_rows_ready: bool
     graph_generated: bool
     graph_ready: bool
-    sections_generated: bool
-    sections_ready: bool
+    blocks_generated: bool
+    blocks_ready: bool
+    table_rows_generated: bool
+    table_rows_ready: bool
     table_cells_generated: bool
     table_cells_ready: bool
     procedure_blocks_generated: bool
@@ -68,6 +74,10 @@ class ArtifactStatusRecord:
         documents_ready: bool = False,
         document_profiles_generated: bool = False,
         document_profiles_ready: bool = False,
+        evidence_anchors_generated: bool = False,
+        evidence_anchors_ready: bool = False,
+        method_facts_generated: bool = False,
+        method_facts_ready: bool = False,
         evidence_cards_generated: bool = False,
         evidence_cards_ready: bool = False,
         characterization_observations_generated: bool = False,
@@ -84,8 +94,10 @@ class ArtifactStatusRecord:
         measurement_results_ready: bool = False,
         comparison_rows_generated: bool = False,
         comparison_rows_ready: bool = False,
-        sections_generated: bool = False,
-        sections_ready: bool = False,
+        blocks_generated: bool = False,
+        blocks_ready: bool = False,
+        table_rows_generated: bool = False,
+        table_rows_ready: bool = False,
         table_cells_generated: bool = False,
         table_cells_ready: bool = False,
         procedure_blocks_generated: bool = False,
@@ -111,6 +123,10 @@ class ArtifactStatusRecord:
             documents_ready=bool(documents_ready),
             document_profiles_generated=bool(document_profiles_generated),
             document_profiles_ready=bool(document_profiles_ready),
+            evidence_anchors_generated=bool(evidence_anchors_generated),
+            evidence_anchors_ready=bool(evidence_anchors_ready),
+            method_facts_generated=bool(method_facts_generated),
+            method_facts_ready=bool(method_facts_ready),
             evidence_cards_generated=bool(evidence_cards_generated),
             evidence_cards_ready=bool(evidence_cards_ready),
             characterization_observations_generated=bool(
@@ -133,8 +149,10 @@ class ArtifactStatusRecord:
             comparison_rows_ready=bool(comparison_rows_ready),
             graph_generated=core_graph_generated,
             graph_ready=core_graph_ready,
-            sections_generated=bool(sections_generated),
-            sections_ready=bool(sections_ready),
+            blocks_generated=bool(blocks_generated),
+            blocks_ready=bool(blocks_ready),
+            table_rows_generated=bool(table_rows_generated),
+            table_rows_ready=bool(table_rows_ready),
             table_cells_generated=bool(table_cells_generated),
             table_cells_ready=bool(table_cells_ready),
             procedure_blocks_generated=bool(procedure_blocks_generated),
@@ -164,6 +182,10 @@ class ArtifactStatusRecord:
                 source.get("document_profiles_generated")
             ),
             document_profiles_ready=_normalize_bool(source.get("document_profiles_ready")),
+            evidence_anchors_generated=_normalize_bool(source.get("evidence_anchors_generated")),
+            evidence_anchors_ready=_normalize_bool(source.get("evidence_anchors_ready")),
+            method_facts_generated=_normalize_bool(source.get("method_facts_generated")),
+            method_facts_ready=_normalize_bool(source.get("method_facts_ready")),
             evidence_cards_generated=_normalize_bool(source.get("evidence_cards_generated")),
             evidence_cards_ready=_normalize_bool(source.get("evidence_cards_ready")),
             characterization_observations_generated=_normalize_bool(
@@ -196,8 +218,10 @@ class ArtifactStatusRecord:
                 source.get("comparison_rows_generated")
             ),
             comparison_rows_ready=_normalize_bool(source.get("comparison_rows_ready")),
-            sections_generated=_normalize_bool(source.get("sections_generated")),
-            sections_ready=_normalize_bool(source.get("sections_ready")),
+            blocks_generated=_normalize_bool(source.get("blocks_generated")),
+            blocks_ready=_normalize_bool(source.get("blocks_ready")),
+            table_rows_generated=_normalize_bool(source.get("table_rows_generated")),
+            table_rows_ready=_normalize_bool(source.get("table_rows_ready")),
             table_cells_generated=_normalize_bool(source.get("table_cells_generated")),
             table_cells_ready=_normalize_bool(source.get("table_cells_ready")),
             procedure_blocks_generated=_normalize_bool(
@@ -217,6 +241,10 @@ class ArtifactStatusRecord:
             "documents_ready": self.documents_ready,
             "document_profiles_generated": self.document_profiles_generated,
             "document_profiles_ready": self.document_profiles_ready,
+            "evidence_anchors_generated": self.evidence_anchors_generated,
+            "evidence_anchors_ready": self.evidence_anchors_ready,
+            "method_facts_generated": self.method_facts_generated,
+            "method_facts_ready": self.method_facts_ready,
             "evidence_cards_generated": self.evidence_cards_generated,
             "evidence_cards_ready": self.evidence_cards_ready,
             "characterization_observations_generated": self.characterization_observations_generated,
@@ -235,8 +263,10 @@ class ArtifactStatusRecord:
             "comparison_rows_ready": self.comparison_rows_ready,
             "graph_generated": self.graph_generated,
             "graph_ready": self.graph_ready,
-            "sections_generated": self.sections_generated,
-            "sections_ready": self.sections_ready,
+            "blocks_generated": self.blocks_generated,
+            "blocks_ready": self.blocks_ready,
+            "table_rows_generated": self.table_rows_generated,
+            "table_rows_ready": self.table_rows_ready,
             "table_cells_generated": self.table_cells_generated,
             "table_cells_ready": self.table_cells_ready,
             "procedure_blocks_generated": self.procedure_blocks_generated,

@@ -15,7 +15,7 @@ def test_core_semantic_version_requires_rebuild_when_structural_inputs_exist_wit
     output_dir = tmp_path / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "documents.parquet").write_text("placeholder", encoding="utf-8")
-    (output_dir / "sections.parquet").write_text("placeholder", encoding="utf-8")
+    (output_dir / "blocks.parquet").write_text("placeholder", encoding="utf-8")
 
     assert core_semantic_rebuild_required(output_dir) is True
 

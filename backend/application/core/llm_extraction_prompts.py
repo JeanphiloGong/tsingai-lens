@@ -47,9 +47,9 @@ def build_section_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
         "Extract section-grounded research facts from this one document section.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "You may emit section evidence cards, sample variants, test conditions, "
-        "baseline references, and measurement results only if they are directly grounded "
-        "in this section."
+        "You may emit method facts, sample variants, test conditions, baseline "
+        "references, and measurement results only if they are directly grounded in "
+        "this section. Do not emit reader-facing summaries or cards."
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
 
@@ -59,6 +59,7 @@ def build_table_row_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str
         "Extract row-grounded research facts from this one table row.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "Use the row and header context only. Skip outputs when the row is a literature "
-        "summary rather than a directly attributable study row."
+        "summary rather than a directly attributable study row. Return facts only, not "
+        "reader-facing cards."
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt

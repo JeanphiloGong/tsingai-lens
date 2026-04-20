@@ -29,17 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 _COMPARISON_ROWS_FILE = "comparison_rows.parquet"
-_EVIDENCE_CARDS_FILE = "evidence_cards.parquet"
 _SAMPLE_VARIANTS_FILE = "sample_variants.parquet"
 _MEASUREMENT_RESULTS_FILE = "measurement_results.parquet"
 _TEST_CONDITIONS_FILE = "test_conditions.parquet"
 _BASELINE_REFERENCES_FILE = "baseline_references.parquet"
-
-_EVIDENCE_JSON_COLUMNS = (
-    "evidence_anchors",
-    "material_system",
-    "condition_context",
-)
 _SAMPLE_VARIANT_JSON_COLUMNS = (
     "host_material_system",
     "process_context",
@@ -204,15 +197,13 @@ class ComparisonService:
         measurement_results = frames["measurement_results"]
         test_conditions = frames["test_conditions"]
         baseline_references = frames["baseline_references"]
-        evidence_cards = frames["evidence_cards"]
         logger.info(
-            "Comparison assembly started collection_id=%s measurement_results=%s sample_variants=%s test_conditions=%s baselines=%s evidence_cards=%s",
+            "Comparison assembly started collection_id=%s measurement_results=%s sample_variants=%s test_conditions=%s baselines=%s",
             collection_id,
             len(measurement_results),
             len(sample_variants),
             len(test_conditions),
             len(baseline_references),
-            len(evidence_cards),
         )
         if measurement_results.empty:
             logger.warning(
@@ -223,7 +214,6 @@ class ComparisonService:
         sample_lookup = self._index_by_id(sample_variants, "variant_id")
         test_condition_lookup = self._index_by_id(test_conditions, "test_condition_id")
         baseline_lookup = self._index_by_id(baseline_references, "baseline_id")
-        anchor_to_evidence_ids = self._build_anchor_to_evidence_lookup(evidence_cards)
 
         rows = [
             self._build_row_from_result(
@@ -232,7 +222,6 @@ class ComparisonService:
                 sample_lookup=sample_lookup,
                 test_condition_lookup=test_condition_lookup,
                 baseline_lookup=baseline_lookup,
-                anchor_to_evidence_ids=anchor_to_evidence_ids,
             )
             for _, result_row in measurement_results.iterrows()
         ]
@@ -277,11 +266,10 @@ class ComparisonService:
             _MEASUREMENT_RESULTS_FILE,
             _TEST_CONDITIONS_FILE,
             _BASELINE_REFERENCES_FILE,
-            _EVIDENCE_CARDS_FILE,
         )
         if any(not (base_dir / name).is_file() for name in required):
             try:
-                self.evidence_card_service.build_evidence_cards(collection_id, base_dir)
+                self.evidence_card_service.build_paper_facts(collection_id, base_dir)
             except EvidenceCardsNotReadyError as exc:
                 raise ComparisonRowsNotReadyError(collection_id, exc.output_dir) from exc
 
@@ -305,10 +293,6 @@ class ComparisonService:
             "baseline_references": restore_frame_from_storage(
                 pd.read_parquet(base_dir / _BASELINE_REFERENCES_FILE),
                 _BASELINE_REFERENCE_JSON_COLUMNS,
-            ),
-            "evidence_cards": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _EVIDENCE_CARDS_FILE),
-                _EVIDENCE_JSON_COLUMNS,
             ),
         }
 
@@ -337,26 +321,6 @@ class ComparisonService:
             lookup[item_id] = dict(row)
         return lookup
 
-    def _build_anchor_to_evidence_lookup(
-        self,
-        evidence_cards: pd.DataFrame,
-    ) -> dict[str, list[str]]:
-        lookup: dict[str, list[str]] = {}
-        if evidence_cards is None or evidence_cards.empty:
-            return lookup
-        for _, row in evidence_cards.iterrows():
-            evidence_id = self._safe_text(row.get("evidence_id"))
-            if not evidence_id:
-                continue
-            for anchor in self._normalize_list_of_dicts(row.get("evidence_anchors")):
-                anchor_id = self._safe_text(anchor.get("anchor_id"))
-                if not anchor_id:
-                    continue
-                lookup.setdefault(anchor_id, [])
-                if evidence_id not in lookup[anchor_id]:
-                    lookup[anchor_id].append(evidence_id)
-        return lookup
-
     def _build_row_from_result(
         self,
         *,
@@ -365,7 +329,6 @@ class ComparisonService:
         sample_lookup: dict[str, dict[str, Any]],
         test_condition_lookup: dict[str, dict[str, Any]],
         baseline_lookup: dict[str, dict[str, Any]],
-        anchor_to_evidence_ids: dict[str, list[str]],
     ) -> dict[str, Any] | None:
         source_document_id = self._safe_text(result_row.get("document_id"))
         if not source_document_id:
@@ -382,10 +345,7 @@ class ComparisonService:
         supporting_anchor_ids = self._normalize_string_list(
             result_row.get("evidence_anchor_ids")
         )
-        supporting_evidence_ids = self._resolve_supporting_evidence_ids(
-            supporting_anchor_ids,
-            anchor_to_evidence_ids,
-        )
+        supporting_evidence_ids = self._build_supporting_evidence_ids(result_row)
         characterization_observation_ids = self._normalize_string_list(
             result_row.get("characterization_observation_ids")
         )
@@ -455,18 +415,6 @@ class ComparisonService:
                 "unit": unit,
             }
         ).to_record()
-
-    def _resolve_supporting_evidence_ids(
-        self,
-        anchor_ids: list[str],
-        anchor_to_evidence_ids: dict[str, list[str]],
-    ) -> list[str]:
-        evidence_ids: list[str] = []
-        for anchor_id in anchor_ids:
-            for evidence_id in anchor_to_evidence_ids.get(anchor_id, []):
-                if evidence_id not in evidence_ids:
-                    evidence_ids.append(evidence_id)
-        return evidence_ids
 
     def _summarize_result(
         self,
@@ -686,11 +634,14 @@ class ComparisonService:
             },
         }
 
-    def _normalize_list_of_dicts(self, value: Any) -> list[dict[str, Any]]:
-        payload = self._normalize_object(value)
-        if not isinstance(payload, list):
+    def _build_supporting_evidence_ids(
+        self,
+        result_row: pd.Series,
+    ) -> list[str]:
+        result_id = self._safe_text(result_row.get("result_id"))
+        if not result_id:
             return []
-        return [item for item in payload if isinstance(item, dict)]
+        return [f"ev_result_{result_id}"]
 
     def _normalize_string_list(self, value: Any) -> list[str]:
         payload = self._normalize_object(value)

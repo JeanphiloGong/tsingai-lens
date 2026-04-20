@@ -5,7 +5,7 @@ artifacts.
 
 - `document_profile_service.py`
   LLM structured document typing, protocol suitability, and collection summaries
-- `evidence_card_service.py`
+- `paper_facts_service.py`
   facts-first extraction and materialization for evidence anchors, method
   facts, sample/result/condition/baseline facts, plus derived evidence-card
   projections

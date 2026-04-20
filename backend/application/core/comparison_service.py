@@ -17,7 +17,7 @@ from application.core.core_semantic_version import (
     write_core_semantic_manifest,
 )
 from application.source.collection_service import CollectionService
-from application.core.evidence_card_service import EvidenceCardService, EvidenceCardsNotReadyError
+from application.core.paper_facts_service import PaperFactsNotReadyError, PaperFactsService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from infra.persistence.backbone_codec import (
     normalize_backbone_value,
@@ -116,13 +116,13 @@ class ComparisonService:
         self,
         collection_service: CollectionService | None = None,
         artifact_registry_service: ArtifactRegistryService | None = None,
-        evidence_card_service: EvidenceCardService | None = None,
+        paper_facts_service: PaperFactsService | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.artifact_registry_service = (
             artifact_registry_service or ArtifactRegistryService()
         )
-        self.evidence_card_service = evidence_card_service or EvidenceCardService(
+        self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
         )
@@ -269,8 +269,8 @@ class ComparisonService:
         )
         if any(not (base_dir / name).is_file() for name in required):
             try:
-                self.evidence_card_service.build_paper_facts(collection_id, base_dir)
-            except EvidenceCardsNotReadyError as exc:
+                self.paper_facts_service.build_paper_facts(collection_id, base_dir)
+            except PaperFactsNotReadyError as exc:
                 raise ComparisonRowsNotReadyError(collection_id, exc.output_dir) from exc
 
         missing = [name for name in required if not (base_dir / name).is_file()]

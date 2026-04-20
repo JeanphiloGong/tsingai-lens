@@ -9,7 +9,7 @@ import pytest
 
 from application.core.comparison_service import ComparisonService
 from application.core.document_profile_service import DocumentProfileService
-from application.core.evidence_card_service import EvidenceCardService
+from application.core.paper_facts_service import PaperFactsService
 from application.core.llm_extraction_models import (
     EvidenceAnchorPayload,
     MethodFactPayload,
@@ -101,7 +101,7 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -109,7 +109,7 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     comparison_service = ComparisonService(
         collection_service,
         artifact_registry,
-        evidence_card_service,
+        paper_facts_service,
     )
 
     collection = collection_service.create_collection("Evidence Collection")
@@ -160,7 +160,7 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     artifact_registry.upsert(collection_id, output_dir)
 
     profiles = document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = evidence_card_service.build_evidence_cards(collection_id, output_dir)
+    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
     comparisons = comparison_service.build_comparison_rows(collection_id, output_dir)
 
     assert not profiles.empty
@@ -216,7 +216,7 @@ def test_evidence_service_builds_table_backed_property_cards(monkeypatch, tmp_pa
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -259,7 +259,7 @@ def test_evidence_service_builds_table_backed_property_cards(monkeypatch, tmp_pa
     artifact_registry.upsert(collection_id, output_dir)
 
     document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = evidence_card_service.build_evidence_cards(collection_id, output_dir)
+    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
 
     table_cards = evidence[evidence["evidence_source_type"] == "table"]
     assert len(table_cards) == 2
@@ -277,7 +277,7 @@ def test_evidence_service_builds_sample_variants_and_measurement_results(monkeyp
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -329,7 +329,7 @@ def test_evidence_service_builds_sample_variants_and_measurement_results(monkeyp
     artifact_registry.upsert(collection_id, output_dir)
 
     document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence_card_service.build_evidence_cards(collection_id, output_dir)
+    paper_facts_service.build_evidence_cards(collection_id, output_dir)
 
     sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
     measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
@@ -366,7 +366,7 @@ def test_evidence_service_logs_warning_when_measurements_are_empty(monkeypatch, 
         artifact_registry,
         structured_extractor=extractor,
     )
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -407,10 +407,10 @@ def test_evidence_service_logs_warning_when_measurements_are_empty(monkeypatch, 
 
     document_profile_service.build_document_profiles(collection_id, output_dir)
     with caplog.at_level("WARNING"):
-        evidence_card_service.build_evidence_cards(collection_id, output_dir)
+        paper_facts_service.build_evidence_cards(collection_id, output_dir)
 
     assert any(
-        "Evidence extraction produced zero measurement_results" in record.message
+        "Paper facts extraction produced zero measurement_results" in record.message
         for record in caplog.records
     )
 
@@ -433,7 +433,7 @@ def test_comparison_service_logs_warning_when_upstream_measurements_are_empty(
         artifact_registry,
         structured_extractor=extractor,
     )
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -442,7 +442,7 @@ def test_comparison_service_logs_warning_when_upstream_measurements_are_empty(
     comparison_service = ComparisonService(
         collection_service,
         artifact_registry,
-        evidence_card_service,
+        paper_facts_service,
     )
 
     collection = collection_service.create_collection("No Measurement Comparison Collection")
@@ -478,7 +478,7 @@ def test_comparison_service_logs_warning_when_upstream_measurements_are_empty(
     artifact_registry.upsert(collection_id, output_dir)
 
     document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence_card_service.build_evidence_cards(collection_id, output_dir)
+    paper_facts_service.build_evidence_cards(collection_id, output_dir)
     with caplog.at_level("WARNING"):
         comparison_service.build_comparison_rows(collection_id, output_dir)
 
@@ -494,13 +494,13 @@ def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
 
     from application.source.collection_service import CollectionService
     from application.core.document_profile_service import DocumentProfileService
-    from application.core.evidence_card_service import EvidenceCardService
+    from application.core.paper_facts_service import PaperFactsService
     from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -541,7 +541,7 @@ def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
     artifact_registry.upsert(collection_id, output_dir)
 
     document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = evidence_card_service.build_evidence_cards(collection_id, output_dir)
+    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
 
     assert not evidence.empty
     assert output_dir.joinpath("evidence_cards.parquet").exists()
@@ -553,19 +553,19 @@ def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
 def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
     from application.source.collection_service import CollectionService
     from application.core.document_profile_service import DocumentProfileService
-    from application.core.evidence_card_service import EvidenceCardService
+    from application.core.paper_facts_service import PaperFactsService
     from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
     )
 
-    normalized = evidence_card_service._normalize_condition_context_payload(
+    normalized = paper_facts_service._normalize_condition_context_payload(
         {
             "process": {
                 "temperatures_c": np.array([80.0, 600.0]),
@@ -604,7 +604,7 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         DocumentProfileService(collection_service, artifact_registry),
@@ -612,7 +612,7 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
     comparison_service = ComparisonService(
         collection_service,
         artifact_registry,
-        evidence_card_service,
+        paper_facts_service,
     )
 
     row = comparison_service._build_row_from_result(
@@ -693,13 +693,13 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
 
     from application.source.collection_service import CollectionService
     from application.core.document_profile_service import DocumentProfileService
-    from application.core.evidence_card_service import EvidenceCardService
+    from application.core.paper_facts_service import PaperFactsService
     from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -707,7 +707,7 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     comparison_service = ComparisonService(
         collection_service,
         artifact_registry,
-        evidence_card_service,
+        paper_facts_service,
     )
 
     collection = collection_service.create_collection("Round Trip Evidence Collection")
@@ -752,7 +752,7 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     artifact_registry.upsert(collection_id, output_dir)
 
     document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = evidence_card_service.build_evidence_cards(collection_id, output_dir)
+    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
     comparisons = comparison_service.build_comparison_rows(collection_id, output_dir)
 
     assert not evidence.empty
@@ -769,7 +769,7 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert isinstance(stored_comparisons.iloc[0]["comparability_basis"], str)
     assert isinstance(stored_comparisons.iloc[0]["missing_critical_context"], str)
 
-    restored_evidence = evidence_card_service.read_evidence_cards(collection_id)
+    restored_evidence = paper_facts_service.read_evidence_cards(collection_id)
     restored_comparisons = comparison_service.read_comparison_rows(collection_id)
     assert isinstance(restored_evidence.iloc[0]["evidence_anchors"], list)
     assert isinstance(restored_evidence.iloc[0]["material_system"], dict)
@@ -791,7 +791,7 @@ def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_pa
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -841,7 +841,7 @@ def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_pa
     cards.to_parquet(output_dir / "evidence_cards.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
-    payload = evidence_card_service.list_evidence_cards(collection_id)
+    payload = paper_facts_service.list_evidence_cards(collection_id)
     assert payload["items"][0]["evidence_anchors"][0]["quote_span"] == "[31]"
 
     response = EvidenceCardListResponse(**payload)
@@ -857,7 +857,7 @@ def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeyp
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -943,7 +943,7 @@ def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeyp
     )
     assert matched_block["start_offset"] is not None
 
-    traceback = evidence_card_service.get_evidence_traceback(collection_id, "ev-ready")
+    traceback = paper_facts_service.get_evidence_traceback(collection_id, "ev-ready")
     assert traceback["traceback_status"] == "ready"
     assert traceback["anchors"][0]["locator_type"] == "char_range"
     assert traceback["anchors"][0]["char_range"] is not None
@@ -960,7 +960,7 @@ def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path)
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -1033,7 +1033,7 @@ def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path)
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
-    traceback = evidence_card_service.get_evidence_traceback(collection_id, "ev-partial")
+    traceback = paper_facts_service.get_evidence_traceback(collection_id, "ev-partial")
     assert traceback["traceback_status"] == "partial"
     assert traceback["anchors"][0]["locator_type"] == "section"
     assert traceback["anchors"][0]["block_id"] == methods_block["block_id"]
@@ -1049,7 +1049,7 @@ def test_evidence_traceback_unavailable_when_no_locator_can_be_resolved(monkeypa
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -1099,6 +1099,6 @@ def test_evidence_traceback_unavailable_when_no_locator_can_be_resolved(monkeypa
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
-    traceback = evidence_card_service.get_evidence_traceback(collection_id, "ev-unavailable")
+    traceback = paper_facts_service.get_evidence_traceback(collection_id, "ev-unavailable")
     assert traceback["traceback_status"] == "unavailable"
     assert traceback["anchors"] == []

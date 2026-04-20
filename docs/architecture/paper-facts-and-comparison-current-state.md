@@ -95,30 +95,35 @@ fully replace the older claim-centered shared contracts.
 
 The backend runtime currently behaves like a hybrid of the two models.
 
-1. Source prepares `documents`, `text_units`, `sections`, and `table_cells`.
+1. Source prepares `documents`, `text_units`, `blocks`, `table_rows`, and
+   `table_cells`.
 2. `document_profile_service` uses LLM structured output for coarse document
-   typing and protocol suitability.
-3. `evidence_card_service` uses LLM structured extraction for a mixed bundle of:
-   - `evidence_cards`
+   typing and protocol suitability from block-grounded inputs.
+3. `paper_facts_service` uses LLM structured extraction over block-derived text
+   windows and table rows for a mixed bundle of:
+   - `method_facts`
    - `sample_variants`
    - `test_conditions`
    - `baseline_references`
    - `measurement_results`
-4. `evidence_card_service` then materializes those bundle outputs into multiple
-   artifact tables and also regenerates property-flavored `evidence_cards` from
-   extracted `measurement_results`.
-5. `characterization_observations` and `structure_features` are derived later
-   rather than treated as first-pass extracted objects.
+4. `paper_facts_service` then materializes those bundle outputs into fact
+   tables, records `evidence_anchors` for traceback, and derives
+   property-flavored `evidence_cards` as a reader-facing evidence view.
+5. `characterization_observations` are derived from first-pass facts, while
+   `structure_features` remain a downstream enrichment step.
 6. `comparison_service` no longer performs LLM extraction. It deterministically
    assembles `comparison_rows` from:
    - `sample_variants`
    - `measurement_results`
    - `test_conditions`
    - `baseline_references`
-   - `evidence_cards`
+   - `characterization_observations`
+   - `structure_features`
+   - `evidence_anchors`
 
-This means the current runtime is already partly sample/result-backed while the
-shared contract language is still largely claim/evidence-card-backed.
+This means the current runtime is already largely paper-facts-backed while some
+shared contract language and retained view surfaces still reference
+`evidence_cards`.
 
 ## Main Conflicts
 

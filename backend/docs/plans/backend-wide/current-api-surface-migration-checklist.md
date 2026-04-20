@@ -63,7 +63,7 @@ carry old `community_*` vocabulary.
 - `GET /api/v1/collections/{collection_id}/documents/profiles`
   Uses the real `DocumentProfileService`.
 - `GET /api/v1/collections/{collection_id}/evidence/cards`
-  Uses the real `EvidenceCardService`.
+  Uses the real `PaperFactsService`.
 - `GET /api/v1/collections/{collection_id}/comparisons`
   Uses the real `ComparisonService`.
 

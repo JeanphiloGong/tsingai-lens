@@ -345,7 +345,7 @@ quietly trusting them.
 ### Primary Runtime Areas
 
 - `backend/application/core/document_profile_service.py`
-- `backend/application/core/evidence_card_service.py`
+- `backend/application/core/paper_facts_service.py`
 - `backend/application/core/comparison_service.py`
 - `backend/application/core/llm_structured_extractor.py`
 - `backend/application/source/index_task_runner.py`

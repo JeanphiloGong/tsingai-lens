@@ -253,7 +253,7 @@ def app_client(monkeypatch, tmp_path):
     from application.source.collection_service import CollectionService
     from application.core.comparison_service import ComparisonService
     from application.core.document_profile_service import DocumentProfileService
-    from application.core.evidence_card_service import EvidenceCardService
+    from application.core.paper_facts_service import PaperFactsService
     from application.goal.brief_service import GoalService
     from application.source.index_task_runner import IndexTaskRunner
     from application.source.task_service import TaskService
@@ -264,7 +264,7 @@ def app_client(monkeypatch, tmp_path):
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -272,14 +272,14 @@ def app_client(monkeypatch, tmp_path):
     comparison_service = ComparisonService(
         collection_service,
         artifact_registry,
-        evidence_card_service,
+        paper_facts_service,
     )
     runner = IndexTaskRunner(
         collection_service,
         task_service,
         artifact_registry,
         document_profile_service,
-        evidence_card_service,
+        paper_facts_service,
         comparison_service,
     )
     workspace_service = WorkspaceService(
@@ -362,7 +362,7 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
-    monkeypatch.setattr(evidence_controller, "evidence_card_service", evidence_card_service)
+    monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(
         report_service_module,

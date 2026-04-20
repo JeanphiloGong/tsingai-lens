@@ -298,13 +298,13 @@ _MORPHOLOGY_KEYWORDS = (
 )
 
 
-class EvidenceCardsNotReadyError(RuntimeError):
-    """Raised when a collection cannot yet serve evidence cards."""
+class PaperFactsNotReadyError(RuntimeError):
+    """Raised when a collection cannot yet serve paper facts."""
 
     def __init__(self, collection_id: str, output_dir: Path) -> None:
         self.collection_id = collection_id
         self.output_dir = output_dir
-        super().__init__(f"evidence cards not ready: {collection_id}")
+        super().__init__(f"paper facts not ready: {collection_id}")
 
 
 class EvidenceCardNotFoundError(FileNotFoundError):
@@ -316,8 +316,8 @@ class EvidenceCardNotFoundError(FileNotFoundError):
         super().__init__(f"evidence card not found: {collection_id}/{evidence_id}")
 
 
-class EvidenceCardService:
-    """Generate and serve collection-scoped evidence card artifacts."""
+class PaperFactsService:
+    """Generate and serve collection-scoped paper facts and evidence views."""
 
     def __init__(
         self,
@@ -450,12 +450,12 @@ class EvidenceCardService:
         purge_stale_core_semantic_artifacts(base_dir)
         documents_path = base_dir / "documents.parquet"
         if not documents_path.is_file():
-            raise EvidenceCardsNotReadyError(collection_id, base_dir)
+            raise PaperFactsNotReadyError(collection_id, base_dir)
 
         try:
             profiles = self.document_profile_service.read_document_profiles(collection_id)
         except DocumentProfilesNotReadyError as exc:
-            raise EvidenceCardsNotReadyError(collection_id, exc.output_dir) from exc
+            raise PaperFactsNotReadyError(collection_id, exc.output_dir) from exc
 
         documents, text_units = load_collection_inputs(base_dir)
         try:
@@ -463,7 +463,7 @@ class EvidenceCardService:
             table_rows = load_table_rows_artifact(base_dir)
             table_cells = load_table_cells_artifact(base_dir)
         except FileNotFoundError as exc:
-            raise EvidenceCardsNotReadyError(collection_id, base_dir) from exc
+            raise PaperFactsNotReadyError(collection_id, base_dir) from exc
 
         document_records = build_document_records(documents, text_units)
         text_windows_by_doc = self._build_text_windows_by_document(blocks)
@@ -474,7 +474,7 @@ class EvidenceCardService:
             for _, row in profiles.iterrows()
         }
         logger.info(
-            "Evidence extraction started collection_id=%s document_count=%s block_count=%s table_row_count=%s table_cell_count=%s",
+            "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_row_count=%s table_cell_count=%s",
             collection_id,
             len(document_records),
             len(blocks),
@@ -483,7 +483,7 @@ class EvidenceCardService:
         )
         if table_cells.empty:
             logger.warning(
-                "Evidence extraction found empty table_cells collection_id=%s",
+                "Paper facts extraction found empty table_cells collection_id=%s",
                 collection_id,
             )
 
@@ -513,7 +513,7 @@ class EvidenceCardService:
             grouped_row_cells = self._group_table_cells_by_row(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
             logger.info(
-                "Evidence extraction document started collection_id=%s document_id=%s text_window_count=%s table_row_count=%s doc_type=%s",
+                "Paper facts extraction document started collection_id=%s document_id=%s text_window_count=%s table_row_count=%s doc_type=%s",
                 collection_id,
                 document_id,
                 len(doc_text_windows),
@@ -611,7 +611,7 @@ class EvidenceCardService:
                     )
 
             logger.info(
-                "Evidence extraction document finished collection_id=%s document_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                "Paper facts extraction document finished collection_id=%s document_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
                 collection_id,
                 document_id,
                 len(evidence_anchor_rows) - doc_anchor_start,
@@ -650,7 +650,7 @@ class EvidenceCardService:
         )
         if not method_facts.empty and measurement_results.empty:
             logger.warning(
-                "Evidence extraction produced zero measurement_results collection_id=%s method_fact_count=%s raw_measurement_count=%s",
+                "Paper facts extraction produced zero measurement_results collection_id=%s method_fact_count=%s raw_measurement_count=%s",
                 collection_id,
                 len(method_facts),
                 len(measurement_rows),
@@ -796,7 +796,7 @@ class EvidenceCardService:
 
         missing = [name for name in required if not (base_dir / name).is_file()]
         if missing:
-            raise EvidenceCardsNotReadyError(collection_id, base_dir)
+            raise PaperFactsNotReadyError(collection_id, base_dir)
 
         return {
             "evidence_anchors": restore_frame_from_storage(
@@ -3097,6 +3097,6 @@ class EvidenceCardService:
 
 __all__ = [
     "EvidenceCardNotFoundError",
-    "EvidenceCardsNotReadyError",
-    "EvidenceCardService",
+    "PaperFactsNotReadyError",
+    "PaperFactsService",
 ]

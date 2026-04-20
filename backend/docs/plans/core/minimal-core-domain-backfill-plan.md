@@ -50,7 +50,7 @@ Meanwhile, stable Core semantics currently live elsewhere:
 - document-profile classification and suitability heuristics live in
   [`../../application/core/document_profile_service.py`](../../../application/core/document_profile_service.py)
 - sample/result/test-condition/baseline semantics live in
-  [`../../application/core/evidence_card_service.py`](../../../application/core/evidence_card_service.py)
+  [`../../application/core/paper_facts_service.py`](../../../application/core/paper_facts_service.py)
 - comparison-row semantics and comparability judgments live in
   [`../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
 - collection and handoff state normalization lives in
@@ -211,7 +211,7 @@ blocks into:
 Candidates include:
 
 - epistemic statuses now defined inside
-  [`../../application/core/evidence_card_service.py`](../../../application/core/evidence_card_service.py)
+  [`../../application/core/paper_facts_service.py`](../../../application/core/paper_facts_service.py)
 - comparability and review status literals now defined inside
   [`../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
 - document-kind and suitability classifications now inferred inside
@@ -314,7 +314,7 @@ Actions:
 
 Acceptance:
 
-- `application/core/evidence_card_service.py` no longer acts as the only
+- `application/core/paper_facts_service.py` no longer acts as the only
   canonical home of these object definitions
 - artifact writers build domain objects before storage normalization
 
@@ -375,7 +375,7 @@ The expected implementation slices are:
 
 2. Rewrite application callers:
    - `backend/application/core/document_profile_service.py`
-   - `backend/application/core/evidence_card_service.py`
+   - `backend/application/core/paper_facts_service.py`
    - `backend/application/core/comparison_service.py`
    - later:
      - `backend/application/source/collection_service.py`

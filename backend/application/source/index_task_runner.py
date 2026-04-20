@@ -10,7 +10,7 @@ from infra.source.config.pipeline_mode import IndexingMethod
 from application.core.comparison_service import ComparisonService
 from application.source.collection_service import CollectionService
 from application.core.document_profile_service import DocumentProfileService
-from application.core.evidence_card_service import EvidenceCardService
+from application.core.paper_facts_service import PaperFactsService
 from application.source.task_service import TaskService
 from application.derived.protocol.pipeline_service import build_protocol_artifacts
 from application.source.artifact_registry_service import ArtifactRegistryService
@@ -38,7 +38,7 @@ class IndexTaskRunner:
         task_service: TaskService | None = None,
         artifact_registry_service: ArtifactRegistryService | None = None,
         document_profile_service: DocumentProfileService | None = None,
-        evidence_card_service: EvidenceCardService | None = None,
+        paper_facts_service: PaperFactsService | None = None,
         comparison_service: ComparisonService | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
@@ -50,7 +50,7 @@ class IndexTaskRunner:
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
         )
-        self.evidence_card_service = evidence_card_service or EvidenceCardService(
+        self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
             document_profile_service=self.document_profile_service,
@@ -58,7 +58,7 @@ class IndexTaskRunner:
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
-            evidence_card_service=self.evidence_card_service,
+            paper_facts_service=self.paper_facts_service,
         )
 
     def _resolve_load_config(self):
@@ -175,7 +175,7 @@ class IndexTaskRunner:
                     current_stage="evidence_cards_started",
                     progress_percent=76,
                 )
-                evidence_cards = self.evidence_card_service.build_evidence_cards(
+                evidence_cards = self.paper_facts_service.build_evidence_cards(
                     collection_id,
                     output_dir,
                 )

@@ -368,7 +368,7 @@ consumers.
 - keep `document_profile_service` as a lightweight document-level triage step
   built from structure-first inputs rather than from Source-owned `methods` or
   `characterization` sections
-- update `evidence_card_service` so it extracts against
+- update `paper_facts_service` so it extracts against
   `blocks.parquet`, `table_rows.parquet`, and `table_cells.parquet` without a
   prefilter discard stage
 - make the first full-pass block and row labeling pass a Core extraction
@@ -409,7 +409,7 @@ The expected code-owned change surface is:
   keep document-level triage narrow and build triage payloads from
   structure-first artifacts rather than consuming Source-owned semantic
   sections
-- `backend/application/core/evidence_card_service.py`
+- `backend/application/core/paper_facts_service.py`
   run the first full-pass labeling and extraction pass over structural blocks
   and table rows, then assemble higher-order evidence objects from the labeled
   outputs

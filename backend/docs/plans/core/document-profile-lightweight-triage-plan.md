@@ -224,7 +224,7 @@ The checks should confirm:
 
 - do not rename public fields in this wave; keep the output contract shape
   stable
-- do not touch `evidence_card_service` unless a concrete dependency is proven
+- do not touch `paper_facts_service` unless a concrete dependency is proven
 - do not reintroduce signal-driven semantic inference through normalization
 - do not expand this plan into a broader Core data-model redesign
 

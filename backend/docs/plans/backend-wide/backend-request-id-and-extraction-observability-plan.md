@@ -143,7 +143,7 @@ this wave.
 Diagnostics should be added directly inside the owning implementations:
 
 - `DocumentProfileService`
-- `EvidenceCardService`
+- `PaperFactsService`
 - `ComparisonService`
 - the structured OpenAI client only for failure logging
 
@@ -254,9 +254,9 @@ Update `DocumentProfileService` to log:
 - per-document classification result
 - profile warning counts
 
-### Slice 5: Evidence extraction diagnostics
+### Slice 5: Paper facts extraction diagnostics
 
-Update `EvidenceCardService` to log:
+Update `PaperFactsService` to log:
 
 - per-document section count and grouped table-row count
 - per-section bundle counts

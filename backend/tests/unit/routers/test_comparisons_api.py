@@ -16,7 +16,7 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.comparison_service import ComparisonService
 from application.core.document_profile_service import DocumentProfileService
-from application.core.evidence_card_service import EvidenceCardService
+from application.core.paper_facts_service import PaperFactsService
 from controllers.core import comparisons as comparisons_controller
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
@@ -53,7 +53,7 @@ def comparison_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -61,7 +61,7 @@ def comparison_services(monkeypatch, tmp_path):
     comparison_service = ComparisonService(
         collection_service,
         artifact_registry,
-        evidence_card_service,
+        paper_facts_service,
     )
 
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)

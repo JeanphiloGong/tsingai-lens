@@ -220,7 +220,7 @@ class WorkspaceService:
         if task_status == "running":
             return {
                 "documents": {"status": "processing", "detail": "Document profiling is in progress."},
-                "evidence": {"status": "not_started", "detail": "Evidence extraction has not started yet."},
+                "evidence": {"status": "not_started", "detail": "Paper facts extraction has not started yet."},
                 "comparisons": {"status": "not_started", "detail": "Comparison rows are not generated yet."},
                 "protocol": {"status": "not_started", "detail": "Protocol branch has not started yet."},
             }
@@ -249,7 +249,7 @@ class WorkspaceService:
         elif evidence_generated:
             evidence_stage = {
                 "status": "limited",
-                "detail": "Evidence extraction completed, but no evidence cards were extracted from this collection.",
+                "detail": "Paper facts extraction completed, but no evidence cards were derived from this collection.",
             }
         elif documents_ready or documents_generated:
             evidence_stage = {

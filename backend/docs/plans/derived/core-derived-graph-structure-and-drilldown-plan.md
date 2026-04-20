@@ -301,7 +301,7 @@ Primary files:
 - `backend/controllers/schemas/core/evidence.py`
 - `backend/controllers/schemas/core/comparisons.py`
 - `backend/application/core/document_profile_service.py`
-- `backend/application/core/evidence_card_service.py`
+- `backend/application/core/paper_facts_service.py`
 - `backend/application/core/comparison_service.py`
 
 Changes:

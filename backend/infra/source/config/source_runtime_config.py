@@ -25,6 +25,7 @@ class InputFileType(str, Enum):
     """Supported input file types for the active Source runtime."""
 
     csv = "csv"
+    document = "document"
     text = "text"
     json = "json"
 
@@ -77,7 +78,7 @@ class InputConfig(BaseModel):
     """Input configuration for Source runtime normalization."""
 
     storage: InputStorageConfig = Field(default_factory=InputStorageConfig)
-    file_type: InputFileType | str = Field(default=InputFileType.text)
+    file_type: InputFileType | str = Field(default=InputFileType.document)
     encoding: str = Field(default="utf-8")
     file_pattern: str = Field(default="")
     file_filter: dict[str, str] | None = None
@@ -127,6 +128,8 @@ class GraphRagConfig(BaseModel):
         file_type = str(getattr(self.input.file_type, "value", self.input.file_type))
         if file_type == InputFileType.text.value:
             self.input.file_pattern = r".*\.txt$"
+        elif file_type == InputFileType.document.value:
+            self.input.file_pattern = r".*\.(?:txt|pdf)$"
         else:
             self.input.file_pattern = rf".*\.{file_type}$"
 

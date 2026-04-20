@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -222,19 +223,12 @@ def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_pat
                     source_document_id="srcdoc_upload",
                     origin_channel="upload",
                     original_filename=filename,
-                    stored_filename="normalized_upload.txt",
+                    stored_filename="normalized_upload.pdf",
                     media_type=media_type,
+                    storage_payload_base64=base64.b64encode(content).decode("ascii"),
                 ),
             ),
-            text_units=(
-                NormalizedImportTextUnit(
-                    text_unit_id="tu_upload",
-                    source_document_id="srcdoc_upload",
-                    sequence=0,
-                    text="Normalized upload text",
-                    char_count=len("Normalized upload text"),
-                ),
-            ),
+            text_units=(),
             source_metadata=NormalizedImportSourceMetadata(
                 channel="upload",
                 adapter_name="upload",
@@ -256,20 +250,13 @@ def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_pat
         "content": b"%PDF-1.4 fake",
         "media_type": "application/pdf",
     }
-    assert record["stored_filename"] == "normalized_upload.txt"
-    assert Path(record["stored_path"]).read_text(encoding="utf-8") == "Normalized upload text"
+    assert record["stored_filename"] == "normalized_upload.pdf"
+    assert Path(record["stored_path"]).read_bytes() == b"%PDF-1.4 fake"
     manifest = service.get_import_manifest(collection_id)
     assert manifest["handoffs"] == []
     assert len(manifest["imports"]) == 1
-    assert manifest["imports"][0]["documents"][0]["stored_filename"] == "normalized_upload.txt"
-    assert manifest["imports"][0]["documents"][0]["text_units"] == [
-        {
-            "text_unit_id": "tu_upload",
-            "sequence": 0,
-            "page_ref": None,
-            "char_count": len("Normalized upload text"),
-        }
-    ]
+    assert manifest["imports"][0]["documents"][0]["stored_filename"] == "normalized_upload.pdf"
+    assert manifest["imports"][0]["documents"][0]["text_units"] == []
 
 
 def test_collection_service_imports_from_source_adapter(tmp_path):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -208,6 +209,7 @@ class CollectionService:
         for document in batch.documents:
             stored_filename = document.stored_filename or f"{uuid4().hex}_{Path(document.original_filename).name}"
             payload = self._build_import_payload(
+                document=document,
                 source_document_id=document.source_document_id,
                 text_by_source_document=text_by_source_document,
             )
@@ -282,9 +284,14 @@ class CollectionService:
 
     def _build_import_payload(
         self,
+        document: NormalizedImportDocument,
         source_document_id: str,
         text_by_source_document: dict[str, list[str]],
     ) -> bytes:
+        encoded_payload = str(document.storage_payload_base64 or "").strip()
+        if encoded_payload:
+            return base64.b64decode(encoded_payload)
+
         parts = [
             text.strip()
             for text in text_by_source_document.get(source_document_id, [])

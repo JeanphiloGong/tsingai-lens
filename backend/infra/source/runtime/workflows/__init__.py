@@ -21,6 +21,9 @@ from .create_sections import (
 from .create_table_cells import (
     run_workflow as run_create_table_cells,
 )
+from .create_source_artifacts import (
+    run_workflow as run_create_source_artifacts,
+)
 from .load_input_documents import (
     run_workflow as run_load_input_documents,
 )
@@ -33,4 +36,5 @@ PipelineFactory.register_all({
     "create_final_text_units": run_create_final_text_units,
     "create_sections": run_create_sections,
     "create_table_cells": run_create_table_cells,
+    "create_source_artifacts": run_create_source_artifacts,
 })

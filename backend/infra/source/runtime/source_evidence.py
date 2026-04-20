@@ -166,6 +166,27 @@ def build_table_cells(
     )
 
 
+def classify_heading(line: str) -> str | None:
+    return _classify_heading(line)
+
+
+def extract_unit_hint(header_path: str | None, cell_text: str) -> str | None:
+    return _extract_unit_hint(header_path, cell_text)
+
+
+def make_section_id(
+    paper_id: str,
+    section_type: str,
+    order: int,
+    heading: str,
+) -> str:
+    return _make_section_id(paper_id, section_type, order, heading)
+
+
+def make_table_id(paper_id: str, order: int, title: str | None) -> str:
+    return _make_table_id(paper_id, order, title)
+
+
 def _extract_sections_from_text(
     paper_id: str,
     title: str,

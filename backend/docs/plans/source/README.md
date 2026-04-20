@@ -14,6 +14,9 @@ GraphRAG-era Source seams.
   Evaluate parser routes against the fixed Source handoff contract
 - [`born-digital-source-parser-first-plan.md`](born-digital-source-parser-first-plan.md)
   Cut the active Source runtime over to a parser-first born-digital path
+- [`docling-first-source-parser-cutover-plan.md`](docling-first-source-parser-cutover-plan.md)
+  Concrete Docling-first spike, benchmark gate, and hard-cut plan under the
+  fixed Source handoff contract
 - [`retrieval-package-retirement-plan.md`](retrieval-package-retirement-plan.md)
   Finish retirement of the historical `backend/retrieval/` package after
   Source runtime cutover

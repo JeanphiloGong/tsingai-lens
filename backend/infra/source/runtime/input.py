@@ -27,6 +27,7 @@ async def create_input(
     logger.info("loading input from root_dir=%s", config.storage.base_dir)
 
     loaders: dict[str, Callable[..., Awaitable[pd.DataFrame]]] = {
+        "document": load_documents,
         "text": load_text,
         "csv": load_csv,
         "json": load_json,
@@ -56,6 +57,34 @@ async def load_text(config: Any, storage: PipelineStorage) -> pd.DataFrame:
         text = await storage.get(path, encoding=config.encoding)
         new_item = {**group, "text": text}
         new_item["id"] = gen_sha512_hash(new_item, new_item.keys())
+        new_item["title"] = str(Path(path).name)
+        new_item["creation_date"] = await storage.get_creation_date(path)
+        return pd.DataFrame([new_item])
+
+    return await load_files(load_file, config, storage)
+
+
+async def load_documents(config: Any, storage: PipelineStorage) -> pd.DataFrame:
+    """Load mixed document inventories from storage without flattening binaries."""
+
+    async def load_file(path: str, group: dict[str, Any] | None = None) -> pd.DataFrame:
+        group = group or {}
+        suffix = Path(path).suffix.lower()
+        new_item = {
+            **group,
+            "source_path": path,
+            "source_type": suffix.lstrip("."),
+        }
+        if suffix == ".txt":
+            new_item["text"] = await storage.get(path, encoding=config.encoding)
+        elif suffix == ".pdf":
+            new_item["text"] = None
+        else:
+            raise ValueError(f"unsupported document input: {path}")
+        new_item["id"] = gen_sha512_hash(
+            {"source_path": path, "title": str(Path(path).name)},
+            ["source_path", "title"],
+        )
         new_item["title"] = str(Path(path).name)
         new_item["creation_date"] = await storage.get_creation_date(path)
         return pd.DataFrame([new_item])

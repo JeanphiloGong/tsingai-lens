@@ -90,12 +90,15 @@ uvicorn main:app --reload --port 8010
 ## Notes
 
 - The current Lens v1 backbone order is
-  `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`.
+  `document_profiles -> paper facts family -> comparison_rows /
+  evidence_cards -> protocol branch`.
 - Collection-facing `/api/v1/*` surfaces are currently hosted through
   `controllers/source/*`, `controllers/core/*`, `controllers/derived/*`, and
   `controllers/goal/*`.
 - `backend/docs/specs/api.md` is the authoritative backend contract for
   frontend integration.
+- Run backend tests with `uv run pytest` or `./.venv/bin/python -m pytest` so
+  the backend-local FastAPI/test dependencies are available during verification.
 - The active backend cleanup direction is to keep the
   `goal / source / core / derived` split explicit in `controllers/`,
   `application/`, and `infra/`, keep Source runtime under `infra/source/*`,

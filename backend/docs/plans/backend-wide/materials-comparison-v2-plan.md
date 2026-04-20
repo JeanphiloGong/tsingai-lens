@@ -56,9 +56,10 @@ Status as of 2026-04-18:
 
 As implemented in the backend runtime, this plan now yields:
 
-- Source-owned persisted handoff artifacts for `sections.parquet` and
-  `table_cells.parquet`, which are consumed directly by documents and evidence
-  flows rather than being rebuilt at read time
+- Source-owned persisted handoff artifacts for `blocks.parquet`,
+  `table_rows.parquet`, and `table_cells.parquet`, which are consumed directly
+  by documents, evidence, and protocol flows rather than being rebuilt at read
+  time
 - Core-owned `characterization_observations.parquet`,
   `structure_features.parquet`, `test_conditions.parquet`, and
   `baseline_references.parquet`
@@ -384,11 +385,19 @@ objects as if they had been stated directly in the source paper.
 
 ### Source Evidence Surface
 
+Historical note:
+this retained plan originally targeted a `sections.parquet` handoff. The active
+runtime contract is now `documents.parquet`, `text_units.parquet`,
+`blocks.parquet`, `table_rows.parquet`, and `table_cells.parquet`. Remaining
+`sections.parquet` references in this section are lineage notes, not the
+current runtime contract.
+
 The Source layer should emit the following collection-local artifacts:
 
 - `documents.parquet`
 - `text_units.parquet`
-- `sections.parquet`
+- `blocks.parquet`
+- `table_rows.parquet`
 - `table_cells.parquet`
 - `figure_captions.parquet`
 

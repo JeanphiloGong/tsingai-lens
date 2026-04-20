@@ -19,8 +19,14 @@ This plan assumes:
 - Core remains the only producer of research facts
 - Source stays observable and locator-backed only
 - the target Source evidence surface is:
-  `documents.parquet`, `text_units.parquet`, `sections.parquet`, and
-  `table_cells.parquet`
+  `documents.parquet`, `text_units.parquet`, `blocks.parquet`,
+  `table_rows.parquet`, and `table_cells.parquet`
+
+Historical note:
+this retained plan predates the later structure-first substrate cutover. When
+older sections below refer to `sections.parquet`, read that as the earlier
+target that was later replaced by the active
+`blocks.parquet/table_rows.parquet/table_cells.parquet` handoff.
 
 For the parent Source retirement lineage, read
 [`source-residual-graphrag-retirement-plan.md`](source-residual-graphrag-retirement-plan.md).
@@ -421,9 +427,10 @@ This plan is complete when all of the following are true:
 
 - active Source indexing for born-digital PDFs is parser-first
 - active Source indexing no longer depends on generic token chunking
-- Source emits `documents.parquet`, `text_units.parquet`, `sections.parquet`,
-  and `table_cells.parquet`
-- section and table-cell artifacts remain observable and locator-backed
+- Source emits `documents.parquet`, `text_units.parquet`, `blocks.parquet`,
+  `table_rows.parquet`, and `table_cells.parquet`
+- block, table-row, and table-cell artifacts remain observable and
+  locator-backed
 - current Core code does not need schema or orchestration changes just to keep
   current behavior working
 - no GraphRAG graph/community/report/query semantics return through Source

@@ -90,7 +90,8 @@ comparison, not generic paper chat.
 ## Product & Project Standards
 
 - The Lens v1 backbone order is
-  `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`.
+  `document_profiles -> paper facts family -> comparison_rows /
+  evidence_cards -> protocol branch`.
 - Materials science is the first proving vertical, not the permanent product
   boundary.
 - Protocol output is conditional downstream value, not the default Lens v1

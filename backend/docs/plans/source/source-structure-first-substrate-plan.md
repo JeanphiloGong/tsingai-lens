@@ -15,9 +15,10 @@ This plan exists because the Docling-first cutover fixes the most immediate
 parser problem, but it does not yet fix the deeper layering problem:
 
 - raw PDFs are now preserved and parsed inside Source
-- Source still emits `sections.parquet` and `table_cells.parquet`
-- those outputs are still shaped partly around downstream task semantics such
-  as `methods` and `characterization`
+- Source now emits `blocks.parquet`, `table_rows.parquet`, and
+  `table_cells.parquet`
+- those outputs are stronger than the earlier `sections.parquet` contract, but
+  they are still shaped partly around downstream extraction convenience
 
 That means the parser path is stronger, but the Source/Core ownership boundary
 is still mixed.
@@ -47,10 +48,10 @@ The current active Source contract still mixes two jobs:
 
 The main evidence of that mixing is:
 
-- `sections.parquet` still behaves like a task-shaped slice rather than a
-  neutral document-structure artifact
-- Source still gives special treatment to labels such as `methods` and
-  `characterization`
+- `blocks.parquet` still carries heading-derived grouping that downstream
+  consumers can over-read as semantic structure
+- `table_rows.parquet` is still a convenience structural projection rather than
+  a parser-native raw table model
 - `table_cells.parquet` still carries convenience shaping for current Core
   extraction instead of only preserving traceable table structure
 
@@ -104,6 +105,10 @@ Known follow-up cleanup still outside this cut:
 - some Core-local internal names still use `section` as a local extraction
   unit label even though the persisted Source contract is now
   `blocks/table_rows/table_cells`
+
+The migration-shape section later in this retained plan is historical lineage.
+It explains the cutover path that produced the current
+`blocks/table_rows/table_cells` contract; it is not the active runtime spec.
 
 ## Scope
 

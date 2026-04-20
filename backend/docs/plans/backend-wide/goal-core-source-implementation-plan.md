@@ -4,6 +4,10 @@ This document keeps its historical path for continuity, but the plan now
 tracks the five-layer architecture rather than the earlier three-layer
 shorthand.
 
+It should also be read through the paper-facts primary-domain-model decision
+recorded in
+[`../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md`](../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md).
+
 ## Summary
 
 This is the backend-local parent roadmap for executing the five-layer Lens
@@ -57,7 +61,7 @@ The main implementation gaps are now clearer:
 
 This plan covers backend-owned implementation waves for:
 
-- Core artifact completion
+- Core paper-facts and derived-view completion
 - Core versus Protocol boundary repair
 - Goal Brief / Intake contract clarification
 - Source & Collection Builder expansion seams
@@ -77,6 +81,9 @@ This plan does not cover:
 
 - keep one collection-backed Core artifact model for paper-first and goal-first
   entry
+- treat the paper-facts family as the primary Core domain model
+- treat `comparison_rows` and `evidence_cards` as Core-derived views rather
+  than the only primary research objects
 - do not allow Goal Brief logic to generate research judgments
 - do not allow Source & Collection Builder logic to bypass collection creation
   or Core pipelines
@@ -90,8 +97,9 @@ This plan does not cover:
 
 Goal:
 
-- finish the current in-flight rollout of `document_profiles`,
-  `evidence_cards`, and `comparison_rows` for real collections
+- finish the current in-flight rollout of `document_profiles`, the underlying
+  paper-facts family, and the derived `evidence_cards` and
+  `comparison_rows` surfaces for real collections
 
 Current child execution entrypoint:
 
@@ -102,12 +110,15 @@ Primary changes:
 - finish real collection support for `/documents/profiles`,
   `/evidence/cards`, and `/comparisons`
 - stabilize collection-scoped artifact persistence for
-  `document_profiles.parquet`, `evidence_cards.parquet`, and
-  `comparison_rows.parquet`
+  `document_profiles.parquet` plus the fact artifacts that back evidence and
+  comparison views
+- keep `evidence_cards.parquet` and `comparison_rows.parquet` explicitly
+  derived from the paper-facts layer rather than treating cards as the only
+  semantic source
 - make workspace readiness and warnings depend on Core artifact flags rather
   than on protocol by default
 - ensure artifact registry tracks `document_profiles_ready`,
-  `evidence_cards_ready`, and `comparison_rows_ready`
+  evidence-view readiness, and comparison readiness
 
 Exit criteria:
 
@@ -154,7 +165,8 @@ Goal:
 Primary changes:
 
 - keep the post-index sequence as
-  `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`
+  `document_profiles -> paper facts family -> comparison_rows / evidence_cards
+  -> protocol branch`
 - ensure task stages and readiness fields mirror that order
 - make protocol execution depend on Core suitability and Core completion rather
   than on raw document presence alone
@@ -242,8 +254,8 @@ Goal:
 
 Primary changes:
 
-- add Goal Consumer services that read `document_profiles`, `evidence_cards`,
-  and `comparison_rows`
+- add Goal Consumer services that read `document_profiles`, the paper-facts
+  family, `comparison_rows`, and any needed evidence views
 - define consumer-owned outputs such as grounded coverage assessment, gap
   detection, ranked clues, and next-step support
 - keep those outputs traceable to Core artifacts and compatible with workspace
@@ -345,8 +357,8 @@ Exit criteria:
 
 ### New Behavior Verification
 
-- real collections can serve `document_profiles`, `evidence_cards`, and
-  `comparison_rows`
+- real collections can serve the public document-profile, evidence, and
+  comparison routes over a stable paper-facts layer
 - Goal Brief / Intake converges on collection handoff rather than bypassing
   the Core
 - Source & Collection Builder adapters can seed collections but cannot write
@@ -382,5 +394,6 @@ Exit criteria:
 - [`core-derived-graph-follow-up-plan.md`](../derived/core-derived-graph-follow-up-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
+- [`../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md`](../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md)
 - [`evidence-first-parsing-plan.md`](../historical/evidence-first-parsing-plan.md)
 - [`v1-api-migration-notes.md`](../historical/v1-api-migration-notes.md)

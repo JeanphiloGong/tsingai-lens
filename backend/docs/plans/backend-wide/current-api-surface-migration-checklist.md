@@ -3,7 +3,7 @@
 ## Purpose
 
 This document records the current backend API migration state for the Lens v1
-evidence-first backbone.
+paper-facts-backed evidence/comparison backbone.
 
 It exists to answer:
 
@@ -40,8 +40,8 @@ evidence-first/comparison-first implementation:
 
 1. indexing task runs
 2. `document_profiles` are generated
-3. `evidence_cards` are generated
-4. `comparison_rows` are generated
+3. the implemented fact artifacts are generated or refreshed
+4. `evidence_cards` and `comparison_rows` are served as derived Core views
 5. `protocol` remains a conditional downstream branch
 
 Graph and report surfaces now consume the same Core artifacts as derived
@@ -54,8 +54,10 @@ carry old `community_*` vocabulary.
 ### Primary surfaces on the new Lens v1 backbone
 
 - `POST /api/v1/collections/{collection_id}/tasks/index`
-  Uses the new indexing orchestration sequence:
-  `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`.
+  Uses the new indexing orchestration sequence underneath the public route
+  family:
+  `document_profiles -> paper facts family -> evidence/comparison views ->
+  protocol branch`.
 - `GET /api/v1/collections/{collection_id}/workspace`
   Uses the new collection-facing workspace aggregation.
 - `GET /api/v1/collections/{collection_id}/documents/profiles`
@@ -71,7 +73,7 @@ These endpoints are the current Lens v1 primary acceptance backbone.
 
 - `GET /api/v1/collections/{collection_id}/graph`
   Now projects graph payloads from
-  `document_profiles/evidence_cards/comparison_rows`.
+  paper-facts-backed document, evidence, and comparison artifacts.
 - `GET /api/v1/collections/{collection_id}/graphml`
   Exports the same Core-derived graph projection.
 - `GET /api/v1/collections/{collection_id}/reports/communities`
@@ -98,8 +100,8 @@ legacy product semantics either.
 - `GET /api/v1/tasks/{task_id}/artifacts`
 
 These endpoints are already real backend flows and should remain, but they are
-supporting collection/task lifecycle surfaces rather than evidence-backbone
-business artifacts.
+supporting collection/task lifecycle surfaces rather than the paper-facts-backed
+business artifacts themselves.
 
 ### Partially migrated
 
@@ -110,7 +112,7 @@ business artifacts.
 These protocol surfaces are now gated by the new backbone and only become
 meaningful for protocol-suitable collections, but their data path is still
 protocol-artifact-centric rather than fully rebuilt as a downstream derivation
-from the evidence/comparison backbone.
+from the paper-facts/evidence/comparison backbone.
 
 ## Cross-Cutting Mixed-State Notes
 
@@ -137,8 +139,8 @@ Collection pages that need task history should use
 
 - route and artifact contracts for `workspace`
 - real document profile generation and listing
-- real evidence card generation and listing
-- real comparison row generation and listing
+- real evidence card generation and listing over Core facts
+- real comparison row generation and listing over Core facts
 - indexing orchestration reordered around the new backbone
 - protocol generation skipped for protocol-unsuitable collections
 - graph product surface cut over to Core-derived projection
@@ -166,7 +168,8 @@ Collection pages that need task history should use
 1. Add regression guards for graph/report/readiness/task vocabulary drift.
 2. Verify the full real path:
    create collection, upload file, start index, poll task, open workspace,
-   inspect document profiles, inspect evidence cards, inspect comparisons.
+   inspect document profiles, inspect evidence cards, inspect comparisons,
+   and confirm they remain backed by the fact layer.
 3. Stabilize app-layer HTTP verification in the proper runtime environment.
 4. Continue backend code reorganization toward domain-oriented controller and
    application packages.
@@ -188,6 +191,10 @@ workflow:
 this migration stage, but `graph` and `reports` now already consume Core
 artifacts rather than defining a competing product fact model.
 
+The current HTTP surface still exposes `evidence/cards` and `comparisons` as
+primary route families. That public surface does not make evidence cards the
+semantic center of Core.
+
 ## Related Docs
 
 - [`../specs/api.md`](../../specs/api.md)
@@ -197,5 +204,6 @@ artifacts rather than defining a competing product fact model.
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
 - [`graph-surface-plan.md`](../derived/graph-surface-plan.md)
 - [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
+- [`../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md`](../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md)
 - [`v1-api-migration-notes.md`](../historical/v1-api-migration-notes.md)
 - [`evidence-first-parsing-plan.md`](../historical/evidence-first-parsing-plan.md)

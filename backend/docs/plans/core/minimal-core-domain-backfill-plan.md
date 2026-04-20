@@ -145,7 +145,7 @@ backend/domain/
     values.py
   core/
     document_profile.py
-    evidence_backbone.py
+    paper_facts.py
     comparison.py
   source/
     collection.py
@@ -168,6 +168,7 @@ That means:
 Stable research semantics:
 
 - `DocumentProfile`
+- `MethodFact`
 - `EvidenceAnchor`
 - `CharacterizationObservation`
 - `StructureFeature`
@@ -175,6 +176,7 @@ Stable research semantics:
 - `BaselineReference`
 - `SampleVariant`
 - `MeasurementResult`
+- `EvidenceCardView`
 - `ComparisonRow`
 
 Stable value and judgment semantics:
@@ -220,7 +222,7 @@ Candidates include:
 Move stable Core object definitions into:
 
 - `domain/core/document_profile.py`
-- `domain/core/evidence_backbone.py`
+- `domain/core/paper_facts.py`
 - `domain/core/comparison.py`
 
 The application layer should continue to:
@@ -290,7 +292,7 @@ Acceptance:
 - document-profile decision rules are testable independently of artifact IO
 - application service becomes primarily orchestration and serialization logic
 
-### Wave C: Evidence Backbone Domainization
+### Wave C: Paper-Facts Domainization
 
 Objective:
 
@@ -298,9 +300,10 @@ introduce explicit Core objects for the stable sample/result backbone.
 
 Actions:
 
-- add `domain/core/evidence_backbone.py`
+- add `domain/core/paper_facts.py`
 - define stable dataclasses for:
   - `EvidenceAnchor`
+  - `MethodFact`
   - `CharacterizationObservation`
   - `StructureFeature`
   - `TestCondition`
@@ -364,7 +367,7 @@ The expected implementation slices are:
    - `backend/domain/shared/enums.py`
    - `backend/domain/shared/values.py`
    - `backend/domain/core/document_profile.py`
-   - `backend/domain/core/evidence_backbone.py`
+   - `backend/domain/core/paper_facts.py`
    - `backend/domain/core/comparison.py`
    - later, if justified:
      - `backend/domain/source/collection.py`

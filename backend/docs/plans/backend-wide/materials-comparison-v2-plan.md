@@ -71,10 +71,11 @@ As implemented in the backend runtime, this plan now yields:
 - downstream graph and report projections continuing to consume Core-derived
   comparison rows without reverting to legacy GraphRAG-era semantics
 
-The implemented Core order is now:
+The current runtime still materializes `evidence_cards` during extraction for
+route compatibility, but the intended semantic Core order is now:
 
-- `document_profiles -> evidence_cards -> sample_variants /
-  measurement_results -> comparison_rows -> protocol branch`
+- `document_profiles -> paper facts family -> comparison_rows /
+  evidence_cards -> protocol branch`
 
 No long-lived compatibility path remains from direct evidence-card projection
 to `comparison_rows.parquet`.
@@ -997,8 +998,9 @@ Primary changes:
   it over in place
 - split the consumer-facing comparison payload into display, evidence bundle,
   assessment, and uncertainty zones
-- update task orchestration so the Core order becomes:
-  `document_profiles -> evidence_cards -> sample_variants/measurement_results -> comparison_rows -> protocol branch`
+- update task orchestration so the semantic Core order becomes:
+  `document_profiles -> paper facts family -> comparison_rows /
+  evidence_cards -> protocol branch`
 
 Files expected to change:
 

@@ -10,9 +10,10 @@ delivery sequencing or plan-family routing.
 
 ## Backend Role In The System
 
-The backend turns collection material into document profile, evidence,
-comparison, Core-derived graph/report, and conditional protocol artifacts and
-exposes those results through the public HTTP contract.
+The backend turns collection material into document profiles, a paper-facts
+layer, derived evidence/comparison views, Core-derived graph/report artifacts,
+and conditional protocol outputs, and exposes those results through the public
+HTTP contract.
 
 Within the repository-wide system:
 
@@ -46,8 +47,9 @@ The backend is still in transition, but its intended shape is already visible:
 - public HTTP flows currently enter through `controllers/`
 - business-domain orchestration is converging under `application/`
 - some legacy flat services still remain and should keep shrinking
-- the Lens v1 backbone is now
-  `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`
+- the Lens v1 semantic backbone is now
+  `document_profiles -> paper facts family -> comparison_rows /
+  evidence_cards -> protocol branch`
 - protocol remains a conditional downstream branch rather than the default
   parsing center
 - graph and reports are Core-derived secondary surfaces
@@ -65,8 +67,9 @@ larger flat service bag.
 2. indexing orchestration runs Source-side indexing/runtime preparation plus
    the Lens backbone
 3. document profiling produces suitability and routing signals
-4. evidence extraction produces claim-centered research objects
-5. comparison generation produces the primary collection-facing workspace view
+4. paper-facts extraction produces the primary research objects
+5. evidence and comparison generation produce the primary collection-facing
+   reading and workspace views
 6. protocol, graph, and report surfaces derive from or sit beside that primary
    backbone
 

@@ -7,16 +7,16 @@ the current Core parsing and evidence backbone away from heuristic extraction
 and onto LLM structured extraction.
 
 This is not a new architecture layer and not a Source-owned parser expansion.
-It is a Core child plan inside the existing Lens v1 backbone:
+It is a Core child plan inside the corrected Lens v1 Core flow:
 
-`document_profiles -> evidence_cards -> comparison_rows`
+`document_profiles -> paper facts family -> comparison_rows / evidence_cards`
 
 The purpose of this cutover is straightforward:
 
 - stop treating noisy heuristic inference as the primary semantic extractor
 - move Core fact extraction onto schema-bound LLM parsing
-- keep `comparison_rows` as a deterministic Core judgment surface rather than
-  an opaque model-generated final artifact
+- keep `comparison_rows` and `evidence_cards` as deterministic Core-derived
+  surfaces rather than opaque model-generated final artifacts
 
 For the broader backend roadmap, read
 [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
@@ -67,8 +67,9 @@ That means:
 
 - Source remains a structural handoff layer
 - Core becomes an LLM-first semantic extraction layer
-- `comparison_rows` stay deterministic and assembled from Core backbone
-  artifacts
+- primary paper facts are extracted before views are assembled
+- `comparison_rows` and `evidence_cards` stay deterministic and assembled from
+  Core backbone artifacts
 - the old heuristic extraction path is removed rather than retained as a
   fallback
 
@@ -102,7 +103,7 @@ The dependency direction after cutover should remain:
 - downstream views consume Core artifacts
 
 Source may still use rules to split text and tables, but it must not become the
-owner of stable semantic artifacts such as evidence cards, sample variants,
+owner of stable semantic artifacts such as sample variants, methods,
 measurement results, or comparison judgments.
 
 ## Scope
@@ -111,8 +112,8 @@ This hard-cutover plan covers:
 
 - replacing heuristic `document_profiles` classification with LLM structured
   extraction
-- replacing heuristic evidence, variant, result, test-condition, and baseline
-  extraction with LLM structured extraction
+- replacing heuristic paper-facts extraction and evidence-view projection with
+  LLM-grounded structured extraction plus deterministic projection
 - preserving deterministic Core assembly for `comparison_rows`
 - invalidating old heuristic-produced Core artifacts rather than supporting
   mixed reads
@@ -145,24 +146,27 @@ Those are the inputs Core will consume for semantic extraction.
 Core should switch these artifacts to LLM structured extraction:
 
 - `document_profiles`
-- `evidence_cards`
 - `sample_variants`
+- `method_facts`
 - `measurement_results`
 - `test_conditions`
 - `baseline_references`
+- `characterization_observations`
+- `evidence_anchors`
 
 Core may continue to derive:
 
-- `characterization_observations`
+- `evidence_cards`
+- `comparison_rows`
 - `structure_features`
 
-from stronger LLM-grounded evidence outputs when deterministic extraction still
+from stronger LLM-grounded fact outputs when deterministic extraction still
 adds value.
 
 ### What Must Stay Deterministic
 
-`comparison_rows` should remain deterministic and assembled from the backbone
-artifacts above.
+`comparison_rows` and `evidence_cards` should remain deterministic and
+assembled from the backbone artifacts above.
 
 The backend should keep model output away from the final comparison surface for
 three reasons:
@@ -174,9 +178,13 @@ three reasons:
 ## New Extraction Architecture
 
 The cutover should introduce one minimal permanent OpenAI structured-calling
-seam in backend infrastructure and three Core extraction slices above it.
+seam in backend infrastructure, three Core fact-extraction slices, and one
+derived-view projection slice above it.
 
 ### Slice 1: Document Profile Extraction
+
+The current narrowed execution plan for this slice is recorded in
+[`document-profile-lightweight-triage-plan.md`](document-profile-lightweight-triage-plan.md).
 
 Input:
 
@@ -193,22 +201,22 @@ Output:
 - `parsing_warnings`
 - confidence and contamination markers
 
-### Slice 2: Section Evidence Extraction
+### Slice 2: Section Fact Extraction
 
 Input:
 
-- one Core-relevant section at a time
+- one Core-relevant block window or section at a time
 - document title and document-level identity
 - section type and local source anchor context
 
 Output:
 
-- `evidence_cards`
-- section-grounded condition context
-- section-grounded baseline context
+- `method_facts`
+- `characterization_observations`
+- section-grounded condition or baseline context when present
 - traceability-ready anchors
 
-### Slice 3: Table Row Extraction
+### Slice 3: Table Row Fact Extraction
 
 Input:
 
@@ -224,10 +232,27 @@ Output:
 - `measurement_results`
 - `test_conditions`
 - `baseline_references`
+- row-grounded anchors
 
 The extraction unit should be one table row, not the whole paper, so the model
 is forced to reason over bounded local evidence instead of mixing unrelated
 studies in review-heavy documents.
+
+### Slice 4: Evidence View Projection
+
+Input:
+
+- extracted paper facts
+- extracted evidence anchors
+- document-level routing context when needed
+
+Output:
+
+- `evidence_cards`
+
+This slice exists so the system can keep cards as a deterministic projection
+layer rather than asking the model to treat them as the only primary research
+objects.
 
 ## Structured Calling Contract
 
@@ -317,11 +342,13 @@ not become a second semantic extraction path.
 
 1. Add the minimal OpenAI structured client and extraction models.
 2. Hard-cut table-row extraction to LLM structured parsing.
-3. Hard-cut section evidence extraction to LLM structured parsing.
+3. Hard-cut section fact extraction to LLM structured parsing.
 4. Hard-cut document-profile classification to LLM structured parsing.
-5. Rebuild Core artifact versioning and stale-artifact invalidation.
-6. Remove the old heuristic extraction implementation.
-7. Lock in regression coverage on a representative benchmark corpus.
+5. Rebuild deterministic evidence-card projection over the extracted fact
+   layer.
+6. Rebuild Core artifact versioning and stale-artifact invalidation.
+7. Remove the old heuristic extraction implementation.
+8. Lock in regression coverage on a representative benchmark corpus.
 
 This order keeps the highest-noise extraction surface first while preserving
 deterministic comparison assembly until the backbone artifacts improve.

@@ -32,7 +32,9 @@ Current facts:
 - `application/evidence/` and `application/comparisons/` now exist as real
   application nodes
 - indexing already runs
-  `document_profiles -> evidence_cards -> comparison_rows -> protocol`
+  a Core-first route family that should now be interpreted as
+  `document_profiles -> paper facts family -> comparison_rows / evidence_cards
+  -> protocol`
 - workspace and artifact registry already expose Core-oriented readiness fields
 
 The remaining near-term architecture problem is not the absence of layers. The
@@ -74,8 +76,8 @@ This plan does not cover:
 
 Make the current collection-backed Core slice stable enough that:
 
-- real collections can reliably expose `document_profiles`,
-  `evidence_cards`, and `comparison_rows`
+- real collections can reliably expose the public document-profile, evidence,
+  and comparison route family over a stable paper-facts layer
 - workspace, task, and artifact readiness all describe the same state
 - protocol remains downstream of the Core
 - shared parsing helpers no longer live under protocol-owned modules
@@ -84,8 +86,8 @@ Make the current collection-backed Core slice stable enough that:
 
 Goal:
 
-- make `document_profiles`, `evidence_cards`, and `comparison_rows` reliable
-  real outputs for non-mock collections
+- make `document_profiles`, the underlying paper-facts layer, and the derived
+  evidence/comparison views reliable real outputs for non-mock collections
 
 Primary changes:
 

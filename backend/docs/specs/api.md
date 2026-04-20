@@ -112,6 +112,10 @@
   `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | paper_facts_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
 - `graphrag_index_started`、`graphrag_index_completed`
   已退役，不再属于公开或内部活动合同
+- Source 结构产物当前包括
+  `documents.parquet`、`text_units.parquet`、`blocks.parquet`、
+  `figures.parquet`、`table_rows.parquet`、`table_cells.parquet`
+  以及 `image_assets/`
 
 ### Workspace
 
@@ -146,6 +150,10 @@
   `*_generated` 与 `*_ready` 两类布尔值：
   - `generated` 表示该阶段产物文件已生成（可能为空）
   - `ready` 表示该阶段产物可直接用于主界面消费（通常要求非空）
+- `figures_generated` / `figures_ready`
+  对应 Source 层 `figures.parquet` 的生成与可消费状态
+  - figure 行可以存在而 `image_path` 为空
+  - 这种情况下仍应保留 figure traceability 行，不应直接丢弃
 - `graph_generated`
   表示 `document_profiles.parquet`、`evidence_cards.parquet`、
   `comparison_rows.parquet` 三个 Core graph 输入文件都已生成

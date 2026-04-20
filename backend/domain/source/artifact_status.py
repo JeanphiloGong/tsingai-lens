@@ -37,6 +37,8 @@ class ArtifactStatusRecord:
     graph_ready: bool
     blocks_generated: bool
     blocks_ready: bool
+    figures_generated: bool
+    figures_ready: bool
     table_rows_generated: bool
     table_rows_ready: bool
     table_cells_generated: bool
@@ -94,6 +96,8 @@ class ArtifactStatusRecord:
         comparison_rows_ready: bool = False,
         blocks_generated: bool = False,
         blocks_ready: bool = False,
+        figures_generated: bool = False,
+        figures_ready: bool = False,
         table_rows_generated: bool = False,
         table_rows_ready: bool = False,
         table_cells_generated: bool = False,
@@ -148,6 +152,8 @@ class ArtifactStatusRecord:
             graph_ready=core_graph_ready,
             blocks_generated=bool(blocks_generated),
             blocks_ready=bool(blocks_ready),
+            figures_generated=bool(figures_generated),
+            figures_ready=bool(figures_ready),
             table_rows_generated=bool(table_rows_generated),
             table_rows_ready=bool(table_rows_ready),
             table_cells_generated=bool(table_cells_generated),
@@ -215,6 +221,8 @@ class ArtifactStatusRecord:
             comparison_rows_ready=_normalize_bool(source.get("comparison_rows_ready")),
             blocks_generated=_normalize_bool(source.get("blocks_generated")),
             blocks_ready=_normalize_bool(source.get("blocks_ready")),
+            figures_generated=_normalize_bool(source.get("figures_generated")),
+            figures_ready=_normalize_bool(source.get("figures_ready")),
             table_rows_generated=_normalize_bool(source.get("table_rows_generated")),
             table_rows_ready=_normalize_bool(source.get("table_rows_ready")),
             table_cells_generated=_normalize_bool(source.get("table_cells_generated")),
@@ -259,6 +267,8 @@ class ArtifactStatusRecord:
             "graph_ready": self.graph_ready,
             "blocks_generated": self.blocks_generated,
             "blocks_ready": self.blocks_ready,
+            "figures_generated": self.figures_generated,
+            "figures_ready": self.figures_ready,
             "table_rows_generated": self.table_rows_generated,
             "table_rows_ready": self.table_rows_ready,
             "table_cells_generated": self.table_cells_generated,

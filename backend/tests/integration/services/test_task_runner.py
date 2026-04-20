@@ -87,6 +87,7 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
@@ -114,6 +115,7 @@ def _write_review_only_outputs(output_dir: Path) -> None:
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
@@ -179,6 +181,8 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["graph_ready"] is True
     assert artifacts["blocks_generated"] is True
     assert artifacts["blocks_ready"] is True
+    assert artifacts["figures_generated"] is True
+    assert artifacts["figures_ready"] is False
     assert artifacts["table_rows_generated"] is True
     assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
@@ -244,6 +248,8 @@ def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert artifacts["graph_ready"] is True
     assert artifacts["blocks_generated"] is True
     assert artifacts["blocks_ready"] is True
+    assert artifacts["figures_generated"] is True
+    assert artifacts["figures_ready"] is False
     assert artifacts["table_rows_generated"] is True
     assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True

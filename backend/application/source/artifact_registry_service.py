@@ -40,6 +40,7 @@ class ArtifactRegistryService:
         measurement_results_path = base_dir / "measurement_results.parquet"
         comparison_rows_path = base_dir / "comparison_rows.parquet"
         blocks_path = base_dir / "blocks.parquet"
+        figures_path = base_dir / "figures.parquet"
         table_rows_path = base_dir / "table_rows.parquet"
         table_cells_path = base_dir / "table_cells.parquet"
         procedure_blocks_path = base_dir / "procedure_blocks.parquet"
@@ -75,6 +76,8 @@ class ArtifactRegistryService:
             comparison_rows_ready=self._parquet_has_rows(comparison_rows_path),
             blocks_generated=blocks_path.exists(),
             blocks_ready=self._parquet_has_rows(blocks_path),
+            figures_generated=figures_path.exists(),
+            figures_ready=self._parquet_has_rows(figures_path),
             table_rows_generated=table_rows_path.exists(),
             table_rows_ready=self._parquet_has_rows(table_rows_path),
             table_cells_generated=table_cells_path.exists(),

@@ -44,6 +44,8 @@ def test_artifact_registry_ignores_legacy_graph_outputs_for_core_readiness(
 
     assert payload["graph_generated"] is False
     assert payload["graph_ready"] is False
+    assert payload["figures_generated"] is False
+    assert payload["figures_ready"] is False
 
 
 def test_artifact_registry_marks_graph_ready_from_core_inputs_without_legacy_graph_outputs(
@@ -112,3 +114,41 @@ def test_artifact_registry_marks_graph_ready_from_core_inputs_without_legacy_gra
     assert payload["graph_ready"] is True
     assert (output_dir / "entities.parquet").exists() is False
     assert (output_dir / "relationships.parquet").exists() is False
+
+
+def test_artifact_registry_marks_figures_ready_from_source_figure_artifact(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "figure_id": "fig-1",
+                "document_id": "paper-1",
+                "figure_order": 1,
+                "figure_label": "Figure 1",
+                "caption_text": "Figure 1 SEM image.",
+                "caption_block_id": "blk-paper-1-1",
+                "page": 1,
+                "bbox": "{\"b\": 4.0, \"coord_origin\": \"BOTTOMLEFT\", \"l\": 1.0, \"r\": 3.0, \"t\": 2.0}",
+                "heading_path": "Characterization",
+                "image_path": "image_assets/fig-1.png",
+                "image_mime_type": "image/png",
+                "image_width": 20,
+                "image_height": 10,
+                "asset_sha256": "sha",
+                "metadata": {"asset_source": "docling_crop"},
+            }
+        ]
+    ).to_parquet(output_dir / "figures.parquet", index=False)
+
+    payload = artifact_registry.build_registry("col_demo", output_dir)
+
+    assert payload["figures_generated"] is True
+    assert payload["figures_ready"] is True

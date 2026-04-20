@@ -197,3 +197,21 @@ TABLE_CELLS_FINAL_COLUMNS = [
     "char_range",
     "unit_hint",
 ]
+
+FIGURES_FINAL_COLUMNS = [
+    "figure_id",
+    "document_id",
+    "figure_order",
+    "figure_label",
+    "caption_text",
+    "caption_block_id",
+    "page",
+    "bbox",
+    "heading_path",
+    "image_path",
+    "image_mime_type",
+    "image_width",
+    "image_height",
+    "asset_sha256",
+    METADATA,
+]

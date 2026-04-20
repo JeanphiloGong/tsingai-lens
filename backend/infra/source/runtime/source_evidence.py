@@ -34,6 +34,10 @@ _OTHER_HEADING_PATTERNS = (
 
 _NUMBERED_HEADING_PATTERN = re.compile(r"^(?P<number>\d+(?:\.\d+)*)\s+.+$")
 _TABLE_TITLE_PATTERN = re.compile(r"^\s*table\s+([a-z0-9\-]+)\b[:.\-\s]*(.*)$", re.IGNORECASE)
+_FIGURE_TITLE_PATTERN = re.compile(
+    r"^\s*(?:fig(?:ure)?\.?)\s+([a-z0-9\-]+)\b[:.\-\s]*(.*)$",
+    re.IGNORECASE,
+)
 _UNIT_HINT_PATTERN = re.compile(r"\b(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b", re.IGNORECASE)
 
 
@@ -176,6 +180,25 @@ def _extract_blocks_from_text(
         block_order += 1
 
     for line in lines:
+        if _FIGURE_TITLE_PATTERN.match(line):
+            char_range, search_start = _find_char_range(text, line, search_start)
+            rows.append(
+                _build_block_row(
+                    paper_id=paper_id,
+                    block_order=block_order,
+                    block_type="figure_caption",
+                    text=line,
+                    text_unit_ids=[],
+                    page=None,
+                    bbox=None,
+                    char_range=char_range,
+                    heading_path=_serialize_heading_path(heading_stack),
+                    heading_level=None,
+                )
+            )
+            block_order += 1
+            continue
+
         if _TABLE_TITLE_PATTERN.match(line):
             char_range, search_start = _find_char_range(text, line, search_start)
             rows.append(

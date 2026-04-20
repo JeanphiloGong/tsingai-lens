@@ -32,6 +32,7 @@ def _write_source_artifacts(
     text_units: pd.DataFrame | None = None,
 ) -> None:
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
@@ -149,6 +150,8 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["artifacts"]["comparison_rows_ready"] is False
     assert overview["artifacts"]["blocks_generated"] is True
     assert overview["artifacts"]["blocks_ready"] is True
+    assert overview["artifacts"]["figures_generated"] is True
+    assert overview["artifacts"]["figures_ready"] is False
     assert overview["artifacts"]["table_rows_generated"] is True
     assert overview["artifacts"]["table_rows_ready"] is False
     assert overview["artifacts"]["table_cells_generated"] is True

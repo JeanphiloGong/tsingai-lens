@@ -17,6 +17,8 @@ def test_artifact_status_empty_defaults_all_flags_to_false() -> None:
     assert payload["comparison_rows_ready"] is False
     assert payload["graph_generated"] is False
     assert payload["graph_ready"] is False
+    assert payload["figures_generated"] is False
+    assert payload["figures_ready"] is False
     assert "graphml_ready" not in payload
 
 
@@ -36,6 +38,7 @@ def test_artifact_status_derives_core_graph_flags_from_core_inputs() -> None:
     payload = record.to_record()
     assert payload["graph_generated"] is True
     assert payload["graph_ready"] is True
+    assert payload["figures_generated"] is False
 
 
 def test_artifact_status_normalizes_legacy_payload_and_recomputes_graph_flags() -> None:
@@ -61,3 +64,4 @@ def test_artifact_status_normalizes_legacy_payload_and_recomputes_graph_flags() 
     assert payload["graph_ready"] is False
     assert "graphml_generated" not in payload
     assert payload["documents_generated"] is False
+    assert payload["figures_generated"] is False

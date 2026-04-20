@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import ast
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
+from PIL import Image
 
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.source_evidence import (
@@ -136,6 +137,30 @@ def test_build_table_rows_extracts_row_level_evidence():
     assert "A | 12 | as-prepared" in set(table_rows["row_text"])
 
 
+def test_build_blocks_marks_figure_caption_lines_for_plain_text_inputs():
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "doc-1",
+                "title": "Figure Study",
+                "text": "\n".join(
+                    [
+                        "Characterization",
+                        "Figure 1 SEM image of the annealed powder.",
+                        "The morphology remained porous after heat treatment.",
+                    ]
+                ),
+            }
+        ]
+    )
+
+    blocks = build_blocks(documents, None)
+
+    figure_captions = blocks[blocks["block_type"] == "figure_caption"]
+    assert len(figure_captions) == 1
+    assert figure_captions.iloc[0]["text"] == "Figure 1 SEM image of the annealed powder."
+
+
 def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch, tmp_path):
     class FakeBBox:
         def __init__(self) -> None:
@@ -149,6 +174,7 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
         def __init__(self, page_no: int, start: int, end: int) -> None:
             self.page_no = page_no
             self.charspan = (start, end)
+            self.bbox = FakeBBox()
 
     class FakeTextItem:
         def __init__(self, text: str, label: str, start: int, end: int) -> None:
@@ -187,15 +213,38 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
                 ]
             )
 
+    class FakeRef:
+        def __init__(self, cref: str, item: FakeTextItem) -> None:
+            self.cref = cref
+            self._item = item
+
+        def resolve(self, document) -> FakeTextItem:  # noqa: ANN001
+            return self._item
+
+    class FakePicture:
+        def __init__(self, caption_item: FakeTextItem) -> None:
+            self.label = SimpleNamespace(value="picture")
+            self.captions = [FakeRef("#/texts/4", caption_item)]
+            self.prov = [FakeProv(1, 115, 145)]
+
+        def caption_text(self, document) -> str:  # noqa: ANN001
+            return self.captions[0].resolve(document).text
+
+        def get_image(self, document) -> Image.Image:  # noqa: ANN001
+            return Image.new("RGB", (20, 10), color="white")
+
     class FakeDocument:
         def __init__(self) -> None:
+            caption_item = FakeTextItem("Figure 1 SEM image of the annealed powder.", "caption", 115, 156)
             self.texts = [
                 FakeTextItem("Methods", "section_header", 0, 7),
                 FakeTextItem("Powders were mixed and annealed at 600 C.", "text", 8, 48),
                 FakeTextItem("Characterization", "section_header", 49, 65),
                 FakeTextItem("XRD and SEM were used to characterize the sample.", "text", 66, 114),
+                caption_item,
             ]
             self.tables = [FakeTable()]
+            self.pictures = [FakePicture(caption_item)]
 
         def export_to_text(self) -> str:
             return "\n".join(item.text for item in self.texts)
@@ -222,7 +271,15 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
 
     assert bundle.documents.iloc[0]["metadata"]["source_parser"] == "docling"
     assert not bundle.blocks.empty
-    assert {"heading", "paragraph"} <= set(bundle.blocks["block_type"])
+    assert {"heading", "paragraph", "figure_caption"} <= set(bundle.blocks["block_type"])
+    assert not bundle.figures.empty
+    assert bundle.figures.iloc[0]["caption_text"] == "Figure 1 SEM image of the annealed powder."
+    assert bundle.figures.iloc[0]["image_path"].startswith("image_assets/")
+    assert bundle.figures.iloc[0]["image_mime_type"] == "image/png"
+    assert bundle.figures.iloc[0]["image_width"] == 20
+    assert bundle.figures.iloc[0]["caption_block_id"] == "blk_doc-1_6"
+    assert bundle.figures.iloc[0]["figure_label"] == "Figure 1"
+    assert bundle.figure_assets
     assert not bundle.table_rows.empty
     assert not bundle.table_cells.empty
     assert "Strength (MPa)" in set(bundle.table_cells["header_path"].dropna())

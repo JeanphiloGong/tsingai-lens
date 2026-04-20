@@ -50,6 +50,8 @@ class WorkspaceArtifactStatusResponse(BaseModel):
     graph_ready: bool = Field(default=False, description="Core graph 视图是否可用")
     blocks_generated: bool = Field(default=False, description="blocks.parquet 是否存在")
     blocks_ready: bool = Field(default=False, description="blocks.parquet 是否存在且非空")
+    figures_generated: bool = Field(default=False, description="figures.parquet 是否存在")
+    figures_ready: bool = Field(default=False, description="figures.parquet 是否存在且非空")
     table_rows_generated: bool = Field(default=False, description="table_rows.parquet 是否存在")
     table_rows_ready: bool = Field(default=False, description="table_rows.parquet 是否存在且非空")
     table_cells_generated: bool = Field(default=False, description="table_cells.parquet 是否存在")

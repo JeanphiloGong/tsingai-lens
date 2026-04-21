@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 from fastapi import HTTPException
 
+from application.core.comparison_service import ComparisonRowsNotReadyError, ComparisonService
 from domain.shared.enums import (
     COMPARABILITY_STATUS_COMPARABLE,
     COMPARABILITY_STATUS_INSUFFICIENT,
@@ -36,10 +37,6 @@ _EVIDENCE_CARD_JSON_COLUMNS = (
     "evidence_anchors",
     "material_system",
     "condition_context",
-)
-_COMPARISON_ROW_JSON_COLUMNS = (
-    "supporting_evidence_ids",
-    "comparability_warnings",
 )
 
 collection_service = CollectionService()
@@ -112,14 +109,14 @@ def _read_evidence_cards(base_dir: Path) -> pd.DataFrame:
     )
 
 
-def _read_comparison_rows(base_dir: Path) -> pd.DataFrame:
-    path = base_dir / "comparison_rows.parquet"
-    if not path.is_file():
+def _read_comparison_rows(collection_id: str) -> pd.DataFrame:
+    try:
+        return ComparisonService(
+            collection_service=collection_service,
+            artifact_registry_service=artifact_registry_service,
+        ).read_comparison_rows(collection_id)
+    except ComparisonRowsNotReadyError:
         return pd.DataFrame()
-    return restore_frame_from_storage(
-        pd.read_parquet(path),
-        _COMPARISON_ROW_JSON_COLUMNS,
-    )
 
 
 def _safe_text(value: Any) -> str | None:
@@ -224,7 +221,7 @@ def _build_projection(collection_id: str) -> _CoreReportProjection:
     base_dir, resolved_collection_id = _resolve_output_dir(collection_id)
     profiles = _read_profiles(base_dir)
     evidence_cards = _read_evidence_cards(base_dir)
-    comparison_rows = _read_comparison_rows(base_dir)
+    comparison_rows = _read_comparison_rows(resolved_collection_id)
 
     document_lookup: dict[str, dict[str, Any]] = {}
     for _, row in profiles.iterrows():

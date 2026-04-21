@@ -148,25 +148,45 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
             }
         ]
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": collection_id,
-                "source_document_id": "paper-1",
-                "supporting_evidence_ids": ["ev-1"],
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "property_normalized": "conductivity",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-                "value": 12.0,
-                "unit": "mS/cm",
-            }
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    comparable_result, scoped_result, _row_id = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-graph-1",
+        source_document_id="paper-1",
+        variant_id=None,
+        variant_label=None,
+        variable_axis=None,
+        variable_value=None,
+        baseline_reference="as-prepared",
+        result_source_type="text",
+        result_type="scalar",
+        result_summary="12 mS/cm",
+        supporting_evidence_ids=["ev-1"],
+        supporting_anchor_ids=["anchor-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="700 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=12.0,
+        unit="mS/cm",
+        sort_order=0,
+    )
+    pd.DataFrame([comparable_result]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame([scoped_result]).to_parquet(
+        output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
 
 
 def _build_semantic_comparison_record(
@@ -793,7 +813,8 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     assert graph_detail["collection_id"] == collection_id
     assert "document_profiles.parquet" in graph_detail["missing_artifacts"]
     assert "evidence_cards.parquet" in graph_detail["missing_artifacts"]
-    assert "comparison_rows.parquet" in graph_detail["missing_artifacts"]
+    assert "comparable_results.parquet" in graph_detail["missing_artifacts"]
+    assert "collection_comparable_results.parquet" in graph_detail["missing_artifacts"]
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 409
@@ -823,11 +844,13 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
         collection_id,
         output_dir,
     )
+    assert not output_dir.joinpath("comparison_rows.parquet").exists()
 
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
     assert graph.status_code == 200
     payload = graph.json()
     assert payload["collection_id"] == collection_id
+    assert output_dir.joinpath("comparison_rows.parquet").exists()
     assert len(payload["nodes"]) == 7
     assert len(payload["edges"]) == 6
     assert {item["type"] for item in payload["nodes"]} == {

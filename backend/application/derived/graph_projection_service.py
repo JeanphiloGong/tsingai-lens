@@ -10,10 +10,9 @@ import pandas as pd
 from infra.persistence.backbone_codec import restore_frame_from_storage
 
 
-_CORE_GRAPH_ARTIFACTS = (
+_CORE_GRAPH_BACKBONE_ARTIFACTS = (
     "document_profiles.parquet",
     "evidence_cards.parquet",
-    "comparison_rows.parquet",
 )
 _DOCUMENT_PROFILE_JSON_COLUMNS = (
     "protocol_extractability_signals",
@@ -23,10 +22,6 @@ _EVIDENCE_CARD_JSON_COLUMNS = (
     "evidence_anchors",
     "material_system",
     "condition_context",
-)
-_COMPARISON_ROW_JSON_COLUMNS = (
-    "supporting_evidence_ids",
-    "comparability_warnings",
 )
 _NODE_TYPE_PRIORITY = {
     "comparison": 0,
@@ -92,18 +87,20 @@ _BACKBONE_TRUNCATION_SHARE = 0.6
 
 def missing_core_graph_artifacts(base_dir: Path) -> list[str]:
     return [
-        filename for filename in _CORE_GRAPH_ARTIFACTS if not (base_dir / filename).is_file()
+        filename
+        for filename in _CORE_GRAPH_BACKBONE_ARTIFACTS
+        if not (base_dir / filename).is_file()
     ]
 
 
 def load_core_graph_payload(
     base_dir: Path,
+    comparison_rows: pd.DataFrame,
     max_nodes: int,
     min_weight: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     profiles = _read_profiles(base_dir)
     evidence_cards = _read_evidence_cards(base_dir)
-    comparison_rows = _read_comparison_rows(base_dir)
 
     doc_records: dict[str, dict[str, Any]] = {}
     evidence_records: dict[str, dict[str, Any]] = {}
@@ -168,13 +165,6 @@ def _read_evidence_cards(base_dir: Path) -> pd.DataFrame:
     return restore_frame_from_storage(
         pd.read_parquet(base_dir / "evidence_cards.parquet"),
         _EVIDENCE_CARD_JSON_COLUMNS,
-    )
-
-
-def _read_comparison_rows(base_dir: Path) -> pd.DataFrame:
-    return restore_frame_from_storage(
-        pd.read_parquet(base_dir / "comparison_rows.parquet"),
-        _COMPARISON_ROW_JSON_COLUMNS,
     )
 
 

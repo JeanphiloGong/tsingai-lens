@@ -213,45 +213,162 @@ class ComparisonService:
 
     def read_comparison_rows(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
-        path = output_dir / _COMPARISON_ROWS_FILE
-        if path.is_file():
-            rows = restore_frame_from_storage(
-                pd.read_parquet(path),
-                _COMPARISON_JSON_COLUMNS,
-            )
-            if core_semantic_rebuild_required(output_dir) and (output_dir / "documents.parquet").is_file():
-                rows = self.build_comparison_rows(collection_id, output_dir)
-        else:
-            rows = self.build_comparison_rows(collection_id, output_dir)
-        return self._normalize_rows_table(rows, collection_id)
+        # `comparison_rows.parquet` is a materialized projection cache; semantic truth lives
+        # in comparable results plus collection-scoped assessments.
+        comparable_results, scoped_results = self._read_semantic_comparison_artifacts(
+            collection_id,
+            output_dir,
+        )
+        rows = self._project_rows_from_semantic_artifacts(
+            collection_id=collection_id,
+            comparable_results=comparable_results,
+            scoped_results=scoped_results,
+        )
+        self._materialize_row_cache_if_missing(collection_id, output_dir, rows)
+        return rows
 
     def read_comparable_results(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
-        path = output_dir / _COMPARABLE_RESULTS_FILE
-        if not path.is_file() or (
-            core_semantic_rebuild_required(output_dir)
-            and (output_dir / "documents.parquet").is_file()
-        ):
-            self.build_comparison_rows(collection_id, output_dir)
+        comparable_results, _ = self._read_semantic_comparison_artifacts(
+            collection_id,
+            output_dir,
+        )
+        return comparable_results
+
+    def read_collection_comparable_results(self, collection_id: str) -> pd.DataFrame:
+        output_dir = self._resolve_output_dir(collection_id)
+        _, scoped_results = self._read_semantic_comparison_artifacts(
+            collection_id,
+            output_dir,
+        )
+        return scoped_results
+
+    def _read_semantic_comparison_artifacts(
+        self,
+        collection_id: str,
+        output_dir: Path,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        self._ensure_semantic_comparison_artifacts_ready(collection_id, output_dir)
         comparable_results = restore_frame_from_storage(
             pd.read_parquet(output_dir / _COMPARABLE_RESULTS_FILE),
             _COMPARABLE_RESULT_JSON_COLUMNS,
         )
-        return self._normalize_comparable_results_table(comparable_results)
-
-    def read_collection_comparable_results(self, collection_id: str) -> pd.DataFrame:
-        output_dir = self._resolve_output_dir(collection_id)
-        path = output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE
-        if not path.is_file() or (
-            core_semantic_rebuild_required(output_dir)
-            and (output_dir / "documents.parquet").is_file()
-        ):
-            self.build_comparison_rows(collection_id, output_dir)
         scoped_results = restore_frame_from_storage(
             pd.read_parquet(output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE),
             _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
         )
-        return self._normalize_collection_comparable_results_table(scoped_results)
+        return (
+            self._normalize_comparable_results_table(comparable_results),
+            self._normalize_collection_comparable_results_table(scoped_results),
+        )
+
+    def _ensure_semantic_comparison_artifacts_ready(
+        self,
+        collection_id: str,
+        output_dir: Path,
+    ) -> None:
+        documents_path = output_dir / "documents.parquet"
+        comparable_results_path = output_dir / _COMPARABLE_RESULTS_FILE
+        scoped_results_path = output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE
+        semantic_artifacts_missing = (
+            not comparable_results_path.is_file() or not scoped_results_path.is_file()
+        )
+        if core_semantic_rebuild_required(output_dir) and documents_path.is_file():
+            self.build_comparison_rows(collection_id, output_dir)
+            return
+        if semantic_artifacts_missing and documents_path.is_file():
+            self.build_comparison_rows(collection_id, output_dir)
+            return
+        if semantic_artifacts_missing:
+            raise ComparisonRowsNotReadyError(collection_id, output_dir)
+
+    def _project_rows_from_semantic_artifacts(
+        self,
+        *,
+        collection_id: str,
+        comparable_results: pd.DataFrame,
+        scoped_results: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if comparable_results.empty or scoped_results.empty:
+            return pd.DataFrame(columns=_COMPARISON_ROW_COLUMNS)
+
+        comparable_lookup = {
+            record.comparable_result_id: record
+            for record in (
+                ComparableResult.from_mapping(dict(row))
+                for _, row in comparable_results.iterrows()
+            )
+            if record.comparable_result_id
+        }
+
+        row_records_by_id: dict[str, ComparisonRowRecord] = {}
+        scoped_view = scoped_results.copy()
+        if "collection_id" in scoped_view.columns:
+            scoped_view = scoped_view[
+                scoped_view["collection_id"].apply(
+                    lambda value: self._safe_text(value) == collection_id
+                )
+            ]
+        if "included" in scoped_view.columns:
+            scoped_view = scoped_view[scoped_view["included"].astype(bool)]
+        scoped_view = scoped_view.assign(
+            _sort_order_key=scoped_view["sort_order"].apply(
+                lambda value: (
+                    1_000_000_000
+                    if value is None or (isinstance(value, float) and pd.isna(value))
+                    else int(value)
+                )
+            )
+            if "sort_order" in scoped_view.columns
+            else 1_000_000_000
+        ).sort_values(
+            by=["_sort_order_key", "comparable_result_id"],
+            kind="stable",
+        )
+
+        for _, row in scoped_view.iterrows():
+            scoped_result = CollectionComparableResult.from_mapping(dict(row))
+            comparable_result = comparable_lookup.get(scoped_result.comparable_result_id)
+            if comparable_result is None:
+                logger.warning(
+                    "Comparison projection skipped scoped_result without semantic payload collection_id=%s comparable_result_id=%s",
+                    collection_id,
+                    scoped_result.comparable_result_id,
+                )
+                continue
+            row_record = self._project_comparison_row(
+                comparable_result=comparable_result,
+                scoped_result=scoped_result,
+            )
+            existing_row = row_records_by_id.get(row_record.row_id)
+            row_records_by_id[row_record.row_id] = (
+                self._merge_row_records(existing_row, row_record)
+                if existing_row is not None
+                else row_record
+            )
+
+        return self._normalize_rows_table(
+            pd.DataFrame(
+                [record.to_record() for record in row_records_by_id.values()],
+                columns=_COMPARISON_ROW_COLUMNS,
+            ),
+            collection_id,
+        )
+
+    def _materialize_row_cache_if_missing(
+        self,
+        collection_id: str,
+        output_dir: Path,
+        rows: pd.DataFrame,
+    ) -> None:
+        path = output_dir / _COMPARISON_ROWS_FILE
+        if path.is_file():
+            return
+        prepare_frame_for_storage(
+            self._normalize_rows_table(rows, collection_id),
+            _COMPARISON_JSON_COLUMNS,
+        ).to_parquet(path, index=False)
+        self.artifact_registry_service.upsert(collection_id, output_dir)
 
     def build_comparison_rows(
         self,

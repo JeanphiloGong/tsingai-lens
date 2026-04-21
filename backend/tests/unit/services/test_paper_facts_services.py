@@ -1429,6 +1429,17 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert isinstance(restored_comparisons.iloc[0]["comparability_basis"], list)
     assert isinstance(restored_comparisons.iloc[0]["missing_critical_context"], list)
 
+    comparison_rows_path = output_dir / "comparison_rows.parquet"
+    comparison_rows_path.unlink()
+
+    reprojected_comparisons = comparison_service.read_comparison_rows(collection_id)
+    assert comparison_rows_path.exists()
+    assert not reprojected_comparisons.empty
+    assert (
+        reprojected_comparisons.iloc[0]["comparable_result_id"]
+        == restored_comparable_results.iloc[0]["comparable_result_id"]
+    )
+
 
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)

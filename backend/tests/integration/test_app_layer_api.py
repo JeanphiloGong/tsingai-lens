@@ -11,6 +11,7 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
+from domain.core.comparison import build_comparison_row_id
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 try:
@@ -166,6 +167,105 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
             }
         ]
     ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+
+
+def _build_semantic_comparison_record(
+    *,
+    collection_id: str,
+    comparable_result_id: str,
+    source_document_id: str,
+    variant_id: str | None,
+    variant_label: str | None,
+    variable_axis: str | None,
+    variable_value,
+    baseline_reference: str | None,
+    result_source_type: str | None,
+    result_type: str,
+    result_summary: str,
+    supporting_evidence_ids: list[str],
+    supporting_anchor_ids: list[str],
+    characterization_observation_ids: list[str],
+    structure_feature_ids: list[str],
+    material_system_normalized: str,
+    process_normalized: str,
+    property_normalized: str,
+    baseline_normalized: str,
+    test_condition_normalized: str,
+    comparability_status: str,
+    comparability_warnings: list[str],
+    comparability_basis: list[str],
+    requires_expert_review: bool,
+    assessment_epistemic_status: str,
+    missing_critical_context: list[str],
+    value: float | None,
+    unit: str | None,
+    sort_order: int,
+) -> tuple[dict, dict, str]:
+    comparable_result = {
+        "comparable_result_id": comparable_result_id,
+        "source_result_id": f"res-{comparable_result_id}",
+        "source_document_id": source_document_id,
+        "binding": {
+            "variant_id": variant_id,
+            "baseline_id": f"base-{comparable_result_id}" if baseline_reference else None,
+            "test_condition_id": (
+                f"tc-{comparable_result_id}" if test_condition_normalized else None
+            ),
+        },
+        "normalized_context": {
+            "material_system_normalized": material_system_normalized,
+            "process_normalized": process_normalized,
+            "baseline_normalized": baseline_normalized,
+            "test_condition_normalized": test_condition_normalized,
+        },
+        "axis": {
+            "axis_name": variable_axis,
+            "axis_value": variable_value,
+            "axis_unit": None,
+        },
+        "value": {
+            "property_normalized": property_normalized,
+            "result_type": result_type,
+            "numeric_value": value,
+            "unit": unit,
+            "summary": result_summary,
+            "statistic_type": None,
+            "uncertainty": None,
+        },
+        "evidence": {
+            "direct_anchor_ids": supporting_anchor_ids,
+            "contextual_anchor_ids": [],
+            "evidence_ids": supporting_evidence_ids,
+            "structure_feature_ids": structure_feature_ids,
+            "characterization_observation_ids": characterization_observation_ids,
+            "traceability_status": "direct",
+        },
+        "variant_label": variant_label,
+        "baseline_reference": baseline_reference,
+        "result_source_type": result_source_type,
+        "epistemic_status": assessment_epistemic_status,
+        "normalization_version": "comparable_result_v1",
+    }
+    scoped_result = {
+        "collection_id": collection_id,
+        "comparable_result_id": comparable_result_id,
+        "assessment": {
+            "missing_critical_context": missing_critical_context,
+            "comparability_basis": comparability_basis,
+            "comparability_warnings": comparability_warnings,
+            "comparability_status": comparability_status,
+            "requires_expert_review": requires_expert_review,
+            "assessment_epistemic_status": assessment_epistemic_status,
+        },
+        "epistemic_status": assessment_epistemic_status,
+        "included": True,
+        "sort_order": sort_order,
+    }
+    row_id = build_comparison_row_id(
+        collection_id=collection_id,
+        comparable_result_id=comparable_result_id,
+    )
+    return comparable_result, scoped_result, row_id
 
 
 def _create_built_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
@@ -548,70 +648,76 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
     output_dir = Path(workspace.json()["artifacts"]["output_path"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": collection_id,
-                "source_document_id": "paper-1",
-                "variant_id": "var-1",
-                "variant_label": "A1",
-                "variable_axis": "anneal_temp",
-                "variable_value": 700,
-                "baseline_reference": "as-prepared",
-                "result_source_type": "table",
-                "result_type": "scalar",
-                "result_summary": "12 mS/cm",
-                "supporting_evidence_ids": ["ev-1"],
-                "supporting_anchor_ids": ["anchor-1"],
-                "characterization_observation_ids": [],
-                "structure_feature_ids": [],
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "property_normalized": "conductivity",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-                "comparability_basis": ["baseline_resolved"],
-                "requires_expert_review": False,
-                "assessment_epistemic_status": "normalized_from_evidence",
-                "missing_critical_context": [],
-                "value": 12.0,
-                "unit": "mS/cm",
-            },
-            {
-                "row_id": "cmp-2",
-                "collection_id": collection_id,
-                "source_document_id": "paper-2",
-                "variant_id": "var-2",
-                "variant_label": "B1",
-                "variable_axis": "atmosphere",
-                "variable_value": "air",
-                "baseline_reference": "air annealed",
-                "result_source_type": "text",
-                "result_type": "trend",
-                "result_summary": "Trend reported",
-                "supporting_evidence_ids": ["ev-2"],
-                "supporting_anchor_ids": ["anchor-2"],
-                "characterization_observation_ids": [],
-                "structure_feature_ids": [],
-                "material_system_normalized": "layered oxide",
-                "process_normalized": "air anneal",
-                "property_normalized": "cycle retention",
-                "baseline_normalized": "air annealed",
-                "test_condition_normalized": "cycling",
-                "comparability_status": "limited",
-                "comparability_warnings": [],
-                "comparability_basis": ["baseline_partial"],
-                "requires_expert_review": True,
-                "assessment_epistemic_status": "provisional",
-                "missing_critical_context": [],
-                "value": None,
-                "unit": None,
-            },
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    comparable_result_1, scoped_result_1, row_id_1 = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-1",
+        source_document_id="paper-1",
+        variant_id="var-1",
+        variant_label="A1",
+        variable_axis="anneal_temp",
+        variable_value=700,
+        baseline_reference="as-prepared",
+        result_source_type="table",
+        result_type="scalar",
+        result_summary="12 mS/cm",
+        supporting_evidence_ids=["ev-1"],
+        supporting_anchor_ids=["anchor-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="700 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=12.0,
+        unit="mS/cm",
+        sort_order=0,
+    )
+    comparable_result_2, scoped_result_2, _row_id_2 = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-2",
+        source_document_id="paper-2",
+        variant_id="var-2",
+        variant_label="B1",
+        variable_axis="atmosphere",
+        variable_value="air",
+        baseline_reference="air annealed",
+        result_source_type="text",
+        result_type="trend",
+        result_summary="Trend reported",
+        supporting_evidence_ids=["ev-2"],
+        supporting_anchor_ids=["anchor-2"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="layered oxide",
+        process_normalized="air anneal",
+        property_normalized="cycle retention",
+        baseline_normalized="air annealed",
+        test_condition_normalized="cycling",
+        comparability_status="limited",
+        comparability_warnings=[],
+        comparability_basis=["baseline_partial"],
+        requires_expert_review=True,
+        assessment_epistemic_status="provisional",
+        missing_critical_context=[],
+        value=None,
+        unit=None,
+        sort_order=1,
+    )
+    pd.DataFrame([comparable_result_1, comparable_result_2]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame([scoped_result_1, scoped_result_2]).to_parquet(
+        output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
     comparisons_controller.comparison_service.artifact_registry_service.upsert(
         collection_id,
         output_dir,
@@ -631,7 +737,7 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
     payload = response.json()
     assert payload["count"] == 1
     assert payload["total"] == 1
-    assert payload["items"][0]["row_id"] == "cmp-1"
+    assert payload["items"][0]["row_id"] == row_id_1
 
 
 def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):

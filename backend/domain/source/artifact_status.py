@@ -31,6 +31,10 @@ class ArtifactStatusRecord:
     sample_variants_ready: bool
     measurement_results_generated: bool
     measurement_results_ready: bool
+    comparable_results_generated: bool
+    comparable_results_ready: bool
+    collection_comparable_results_generated: bool
+    collection_comparable_results_ready: bool
     comparison_rows_generated: bool
     comparison_rows_ready: bool
     graph_generated: bool
@@ -92,6 +96,10 @@ class ArtifactStatusRecord:
         sample_variants_ready: bool = False,
         measurement_results_generated: bool = False,
         measurement_results_ready: bool = False,
+        comparable_results_generated: bool = False,
+        comparable_results_ready: bool = False,
+        collection_comparable_results_generated: bool = False,
+        collection_comparable_results_ready: bool = False,
         comparison_rows_generated: bool = False,
         comparison_rows_ready: bool = False,
         blocks_generated: bool = False,
@@ -146,6 +154,14 @@ class ArtifactStatusRecord:
             sample_variants_ready=bool(sample_variants_ready),
             measurement_results_generated=bool(measurement_results_generated),
             measurement_results_ready=bool(measurement_results_ready),
+            comparable_results_generated=bool(comparable_results_generated),
+            comparable_results_ready=bool(comparable_results_ready),
+            collection_comparable_results_generated=bool(
+                collection_comparable_results_generated
+            ),
+            collection_comparable_results_ready=bool(
+                collection_comparable_results_ready
+            ),
             comparison_rows_generated=bool(comparison_rows_generated),
             comparison_rows_ready=bool(comparison_rows_ready),
             graph_generated=core_graph_generated,
@@ -215,6 +231,16 @@ class ArtifactStatusRecord:
             measurement_results_ready=_normalize_bool(
                 source.get("measurement_results_ready")
             ),
+            comparable_results_generated=_normalize_bool(
+                source.get("comparable_results_generated")
+            ),
+            comparable_results_ready=_normalize_bool(source.get("comparable_results_ready")),
+            collection_comparable_results_generated=_normalize_bool(
+                source.get("collection_comparable_results_generated")
+            ),
+            collection_comparable_results_ready=_normalize_bool(
+                source.get("collection_comparable_results_ready")
+            ),
             comparison_rows_generated=_normalize_bool(
                 source.get("comparison_rows_generated")
             ),
@@ -261,6 +287,10 @@ class ArtifactStatusRecord:
             "sample_variants_ready": self.sample_variants_ready,
             "measurement_results_generated": self.measurement_results_generated,
             "measurement_results_ready": self.measurement_results_ready,
+            "comparable_results_generated": self.comparable_results_generated,
+            "comparable_results_ready": self.comparable_results_ready,
+            "collection_comparable_results_generated": self.collection_comparable_results_generated,
+            "collection_comparable_results_ready": self.collection_comparable_results_ready,
             "comparison_rows_generated": self.comparison_rows_generated,
             "comparison_rows_ready": self.comparison_rows_ready,
             "graph_generated": self.graph_generated,

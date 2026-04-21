@@ -42,6 +42,10 @@ def test_artifact_registry_ignores_legacy_graph_outputs_for_core_readiness(
 
     payload = artifact_registry.build_registry("col_demo", output_dir)
 
+    assert payload["comparable_results_generated"] is False
+    assert payload["comparable_results_ready"] is False
+    assert payload["collection_comparable_results_generated"] is False
+    assert payload["collection_comparable_results_ready"] is False
     assert payload["graph_generated"] is False
     assert payload["graph_ready"] is False
     assert payload["figures_generated"] is False
@@ -93,6 +97,70 @@ def test_artifact_registry_marks_graph_ready_from_core_inputs_without_legacy_gra
     pd.DataFrame(
         [
             {
+                "comparable_result_id": "cres-1",
+                "source_result_id": "res-1",
+                "source_document_id": "paper-1",
+                "binding": {
+                    "variant_id": "var-1",
+                    "baseline_id": "base-1",
+                    "test_condition_id": "tc-1",
+                },
+                "normalized_context": {
+                    "material_system_normalized": "oxide cathode",
+                    "process_normalized": "700 C",
+                    "baseline_normalized": "as-prepared",
+                    "test_condition_normalized": "EIS",
+                },
+                "axis": {
+                    "axis_name": "anneal_temp",
+                    "axis_value": 700,
+                    "axis_unit": None,
+                },
+                "value": {
+                    "property_normalized": "conductivity",
+                    "result_type": "scalar",
+                    "numeric_value": 12.0,
+                    "unit": "mS/cm",
+                    "summary": "12 mS/cm",
+                },
+                "evidence": {
+                    "direct_anchor_ids": ["anchor-1"],
+                    "contextual_anchor_ids": [],
+                    "evidence_ids": ["ev-1"],
+                    "structure_feature_ids": [],
+                    "characterization_observation_ids": [],
+                    "traceability_status": "direct",
+                },
+                "variant_label": "A1",
+                "baseline_reference": "as-prepared",
+                "result_source_type": "text",
+                "epistemic_status": "normalized_from_evidence",
+                "normalization_version": "comparable_result_v1",
+            }
+        ]
+    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "collection_id": "col_demo",
+                "comparable_result_id": "cres-1",
+                "assessment": {
+                    "missing_critical_context": [],
+                    "comparability_basis": ["baseline_resolved"],
+                    "comparability_warnings": [],
+                    "comparability_status": "comparable",
+                    "requires_expert_review": False,
+                    "assessment_epistemic_status": "normalized_from_evidence",
+                },
+                "epistemic_status": "normalized_from_evidence",
+                "included": True,
+                "sort_order": 0,
+            }
+        ]
+    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
                 "row_id": "cmp-1",
                 "collection_id": "col_demo",
                 "source_document_id": "paper-1",
@@ -110,6 +178,10 @@ def test_artifact_registry_marks_graph_ready_from_core_inputs_without_legacy_gra
 
     payload = artifact_registry.build_registry("col_demo", output_dir)
 
+    assert payload["comparable_results_generated"] is True
+    assert payload["comparable_results_ready"] is True
+    assert payload["collection_comparable_results_generated"] is True
+    assert payload["collection_comparable_results_ready"] is True
     assert payload["graph_generated"] is True
     assert payload["graph_ready"] is True
     assert (output_dir / "entities.parquet").exists() is False

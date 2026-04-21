@@ -175,6 +175,10 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["sample_variants_ready"] is True
     assert artifacts["measurement_results_generated"] is True
     assert artifacts["measurement_results_ready"] is True
+    assert artifacts["comparable_results_generated"] is True
+    assert artifacts["comparable_results_ready"] is True
+    assert artifacts["collection_comparable_results_generated"] is True
+    assert artifacts["collection_comparable_results_ready"] is True
     assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is True
     assert artifacts["graph_generated"] is True
@@ -193,6 +197,8 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["protocol_steps_ready"] is True
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
     assert paths.output_dir.joinpath("evidence_cards.parquet").exists()
+    assert paths.output_dir.joinpath("comparable_results.parquet").exists()
+    assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()
     assert paths.output_dir.joinpath("comparison_rows.parquet").exists()
     assert paths.output_dir.joinpath("entities.parquet").exists() is False
     assert paths.output_dir.joinpath("relationships.parquet").exists() is False
@@ -268,8 +274,14 @@ def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert artifacts["sample_variants_ready"] is False
     assert artifacts["measurement_results_generated"] is True
     assert artifacts["measurement_results_ready"] is False
+    assert artifacts["comparable_results_generated"] is True
+    assert artifacts["comparable_results_ready"] is False
+    assert artifacts["collection_comparable_results_generated"] is True
+    assert artifacts["collection_comparable_results_ready"] is False
     assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is False
     assert artifacts["protocol_steps_generated"] is False
     assert artifacts["protocol_steps_ready"] is False
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
+    assert paths.output_dir.joinpath("comparable_results.parquet").exists()
+    assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()

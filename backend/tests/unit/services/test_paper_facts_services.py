@@ -296,6 +296,8 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     assert artifacts["baseline_references_ready"] is True
     assert artifacts["sample_variants_ready"] is True
     assert artifacts["measurement_results_ready"] is True
+    assert artifacts["comparable_results_ready"] is True
+    assert artifacts["collection_comparable_results_ready"] is True
     assert artifacts["comparison_rows_ready"] is True
 
 

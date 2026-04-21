@@ -14,6 +14,10 @@ def test_artifact_status_empty_defaults_all_flags_to_false() -> None:
     assert payload["collection_id"] == "col_123"
     assert payload["output_path"] == "/tmp/output"
     assert payload["documents_generated"] is False
+    assert payload["comparable_results_generated"] is False
+    assert payload["comparable_results_ready"] is False
+    assert payload["collection_comparable_results_generated"] is False
+    assert payload["collection_comparable_results_ready"] is False
     assert payload["comparison_rows_ready"] is False
     assert payload["graph_generated"] is False
     assert payload["graph_ready"] is False
@@ -30,6 +34,10 @@ def test_artifact_status_derives_core_graph_flags_from_core_inputs() -> None:
         document_profiles_ready=True,
         evidence_cards_generated=True,
         evidence_cards_ready=False,
+        comparable_results_generated=True,
+        comparable_results_ready=True,
+        collection_comparable_results_generated=True,
+        collection_comparable_results_ready=True,
         comparison_rows_generated=True,
         comparison_rows_ready=False,
         updated_at="2026-04-19T00:00:00+00:00",
@@ -48,6 +56,10 @@ def test_artifact_status_normalizes_legacy_payload_and_recomputes_graph_flags() 
             "output_path": "/tmp/output",
             "document_profiles_generated": True,
             "evidence_cards_generated": True,
+            "comparable_results_generated": True,
+            "comparable_results_ready": True,
+            "collection_comparable_results_generated": True,
+            "collection_comparable_results_ready": True,
             "comparison_rows_generated": True,
             "document_profiles_ready": False,
             "evidence_cards_ready": False,
@@ -62,6 +74,8 @@ def test_artifact_status_normalizes_legacy_payload_and_recomputes_graph_flags() 
     payload = record.to_record()
     assert payload["graph_generated"] is True
     assert payload["graph_ready"] is False
+    assert payload["comparable_results_generated"] is True
+    assert payload["collection_comparable_results_generated"] is True
     assert "graphml_generated" not in payload
     assert payload["documents_generated"] is False
     assert payload["figures_generated"] is False

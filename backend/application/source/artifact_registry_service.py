@@ -38,6 +38,10 @@ class ArtifactRegistryService:
         baseline_references_path = base_dir / "baseline_references.parquet"
         sample_variants_path = base_dir / "sample_variants.parquet"
         measurement_results_path = base_dir / "measurement_results.parquet"
+        comparable_results_path = base_dir / "comparable_results.parquet"
+        collection_comparable_results_path = (
+            base_dir / "collection_comparable_results.parquet"
+        )
         comparison_rows_path = base_dir / "comparison_rows.parquet"
         blocks_path = base_dir / "blocks.parquet"
         figures_path = base_dir / "figures.parquet"
@@ -72,6 +76,12 @@ class ArtifactRegistryService:
             sample_variants_ready=self._parquet_has_rows(sample_variants_path),
             measurement_results_generated=measurement_results_path.exists(),
             measurement_results_ready=self._parquet_has_rows(measurement_results_path),
+            comparable_results_generated=comparable_results_path.exists(),
+            comparable_results_ready=self._parquet_has_rows(comparable_results_path),
+            collection_comparable_results_generated=collection_comparable_results_path.exists(),
+            collection_comparable_results_ready=self._parquet_has_rows(
+                collection_comparable_results_path
+            ),
             comparison_rows_generated=comparison_rows_path.exists(),
             comparison_rows_ready=self._parquet_has_rows(comparison_rows_path),
             blocks_generated=blocks_path.exists(),

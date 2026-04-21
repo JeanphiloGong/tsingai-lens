@@ -540,6 +540,10 @@ def test_collection_task_flow(app_client):
     assert body["sample_variants_ready"] is True
     assert body["measurement_results_generated"] is True
     assert body["measurement_results_ready"] is True
+    assert body["comparable_results_generated"] is True
+    assert body["comparable_results_ready"] is True
+    assert body["collection_comparable_results_generated"] is True
+    assert body["collection_comparable_results_ready"] is True
     assert body["comparison_rows_generated"] is True
     assert body["comparison_rows_ready"] is True
     assert body["graph_generated"] is True
@@ -976,6 +980,8 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     workspace_body = workspace.json()
     assert workspace_body["artifacts"]["protocol_steps_generated"] is False
     assert workspace_body["artifacts"]["protocol_steps_ready"] is False
+    assert workspace_body["artifacts"]["comparable_results_generated"] is False
+    assert workspace_body["artifacts"]["collection_comparable_results_generated"] is False
     assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
 
     steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")

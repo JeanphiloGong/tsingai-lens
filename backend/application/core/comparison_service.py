@@ -3,12 +3,22 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import pandas as pd
 
 from domain.core.comparison import (
-    ComparisonRow,
+    COMPARABLE_RESULT_NORMALIZATION_VERSION,
+    COMPARISON_ROW_PROJECTION_VERSION,
+    CollectionComparableResult,
+    ComparableResult,
+    ComparisonAxis,
+    ComparisonRowRecord,
+    ContextBinding,
+    EvidenceTrace,
+    NormalizedComparisonContext,
+    ResultValue,
+    build_comparable_result_id,
+    build_comparison_row_id,
     evaluate_comparison_assessment,
 )
 from domain.shared.enums import TRACEABILITY_STATUS_MISSING
@@ -64,6 +74,7 @@ _COMPARISON_JSON_COLUMNS = (
 _COMPARISON_ROW_COLUMNS = [
     "row_id",
     "collection_id",
+    "comparable_result_id",
     "source_document_id",
     "variant_id",
     "variant_label",
@@ -215,20 +226,37 @@ class ComparisonService:
         test_condition_lookup = self._index_by_id(test_conditions, "test_condition_id")
         baseline_lookup = self._index_by_id(baseline_references, "baseline_id")
 
-        rows = [
-            self._build_row_from_result(
-                collection_id=collection_id,
+        row_records_by_id: dict[str, ComparisonRowRecord] = {}
+        for sort_order, (_, result_row) in enumerate(measurement_results.iterrows()):
+            comparable_result = self._assemble_comparable_result(
                 result_row=result_row,
                 sample_lookup=sample_lookup,
                 test_condition_lookup=test_condition_lookup,
                 baseline_lookup=baseline_lookup,
             )
-            for _, result_row in measurement_results.iterrows()
-        ]
-        rows = [row for row in rows if row is not None]
+            if comparable_result is None:
+                continue
+            scoped_result = self._build_collection_comparable_result(
+                collection_id=collection_id,
+                comparable_result=comparable_result,
+                sort_order=sort_order,
+            )
+            row_record = self._project_comparison_row(
+                comparable_result=comparable_result,
+                scoped_result=scoped_result,
+            )
+            existing_row = row_records_by_id.get(row_record.row_id)
+            row_records_by_id[row_record.row_id] = (
+                self._merge_row_records(existing_row, row_record)
+                if existing_row is not None
+                else row_record
+            )
 
         table = self._normalize_rows_table(
-            pd.DataFrame(rows, columns=_COMPARISON_ROW_COLUMNS),
+            pd.DataFrame(
+                [record.to_record() for record in row_records_by_id.values()],
+                columns=_COMPARISON_ROW_COLUMNS,
+            ),
             collection_id,
         )
         if measurement_results.empty:
@@ -321,15 +349,14 @@ class ComparisonService:
             lookup[item_id] = dict(row)
         return lookup
 
-    def _build_row_from_result(
+    def _assemble_comparable_result(
         self,
         *,
-        collection_id: str,
         result_row: pd.Series,
         sample_lookup: dict[str, dict[str, Any]],
         test_condition_lookup: dict[str, dict[str, Any]],
         baseline_lookup: dict[str, dict[str, Any]],
-    ) -> dict[str, Any] | None:
+    ) -> ComparableResult | None:
         source_document_id = self._safe_text(result_row.get("document_id"))
         if not source_document_id:
             logger.debug("Skipped comparison result without source_document_id")
@@ -362,6 +389,11 @@ class ComparisonService:
         )
 
         baseline_reference = self._safe_text(baseline.get("baseline_label"))
+        material_system_normalized = self._normalize_material_system(
+            variant.get("host_material_system")
+        )
+        process_normalized = self._normalize_process(variant.get("process_context"))
+        property_normalized = self._safe_text(result_row.get("property_normalized")) or "qualitative"
         baseline_normalized = baseline_reference or "unspecified baseline"
         test_condition_normalized = self._summarize_test_condition(test_condition)
         traceability_status = (
@@ -369,52 +401,217 @@ class ComparisonService:
             or TRACEABILITY_STATUS_MISSING
         )
 
-        assessment = evaluate_comparison_assessment(
-            variant_id=variant_id,
-            baseline_reference=baseline_reference,
-            test_condition_id=test_condition_id,
-            traceability_status=traceability_status,
-            result_type=result_type,
-            result_summary=result_summary,
-            numeric_value=numeric_value,
-            structure_feature_ids=structure_feature_ids,
-            characterization_observation_ids=characterization_observation_ids,
+        normalized_variant_payload = {
+            "variant_label": self._safe_text(variant.get("variant_label")),
+            "variable_axis": self._safe_text(variant.get("variable_axis_type")),
+            "variable_value": self._normalize_scalar_or_text(variant.get("variable_value")),
+            "material_system_normalized": material_system_normalized,
+            "process_normalized": process_normalized,
+            "host_material_system": self._normalize_object(variant.get("host_material_system")),
+            "process_context": self._normalize_object(variant.get("process_context")),
+        }
+        normalized_baseline_payload = {
+            "baseline_label": baseline_reference,
+            "baseline_type": self._safe_text(baseline.get("baseline_type")),
+            "baseline_scope": self._safe_text(baseline.get("baseline_scope")),
+        }
+        normalized_test_condition_payload = {
+            "condition_payload": self._normalize_object(test_condition.get("condition_payload")),
+            "condition_normalized": test_condition_normalized,
+        }
+        direct_anchor_ids = tuple(supporting_anchor_ids)
+        contextual_anchor_ids = tuple(
+            self._dedupe_strings(
+                [
+                    *self._normalize_string_list(variant.get("source_anchor_ids")),
+                    *self._normalize_string_list(test_condition.get("evidence_anchor_ids")),
+                    *self._normalize_string_list(baseline.get("evidence_anchor_ids")),
+                ]
+            )
         )
-        return ComparisonRow.from_mapping(
-            {
-                "row_id": f"cmp_{uuid4().hex[:12]}",
-                "collection_id": collection_id,
-                "source_document_id": source_document_id,
-                "variant_id": variant_id,
-                "variant_label": self._safe_text(variant.get("variant_label")),
-                "variable_axis": self._safe_text(variant.get("variable_axis_type")),
-                "variable_value": self._normalize_scalar_or_text(variant.get("variable_value")),
-                "baseline_reference": baseline_reference,
-                "result_source_type": self._safe_text(result_row.get("result_source_type")),
-                "result_type": result_type,
-                "result_summary": result_summary,
-                "supporting_evidence_ids": supporting_evidence_ids,
-                "supporting_anchor_ids": supporting_anchor_ids,
-                "characterization_observation_ids": characterization_observation_ids,
-                "structure_feature_ids": structure_feature_ids,
-                "material_system_normalized": self._normalize_material_system(
-                    variant.get("host_material_system")
-                ),
-                "process_normalized": self._normalize_process(variant.get("process_context")),
-                "property_normalized": self._safe_text(result_row.get("property_normalized"))
-                or "qualitative",
-                "baseline_normalized": baseline_normalized,
-                "test_condition_normalized": test_condition_normalized,
-                "comparability_status": assessment.comparability_status,
-                "comparability_warnings": list(assessment.comparability_warnings),
-                "comparability_basis": list(assessment.comparability_basis),
-                "requires_expert_review": assessment.requires_expert_review,
-                "assessment_epistemic_status": assessment.assessment_epistemic_status,
-                "missing_critical_context": list(assessment.missing_critical_context),
-                "value": numeric_value,
-                "unit": unit,
-            }
-        ).to_record()
+        evidence_ids = tuple(supporting_evidence_ids)
+        comparable_result_id = build_comparable_result_id(
+            source_document_id=source_document_id,
+            property_normalized=property_normalized,
+            result_type=result_type,
+            value_payload=self._normalize_object(result_row.get("value_payload")),
+            unit=unit,
+            result_source_type=self._safe_text(result_row.get("result_source_type")),
+            traceability_status=traceability_status,
+            variant_payload=normalized_variant_payload,
+            baseline_payload=normalized_baseline_payload,
+            test_condition_payload=normalized_test_condition_payload,
+            normalization_version=COMPARABLE_RESULT_NORMALIZATION_VERSION,
+        )
+        return ComparableResult(
+            comparable_result_id=comparable_result_id,
+            source_result_id=self._safe_text(result_row.get("result_id")) or "",
+            source_document_id=source_document_id,
+            binding=ContextBinding(
+                variant_id=variant_id,
+                baseline_id=baseline_id,
+                test_condition_id=test_condition_id,
+            ),
+            normalized_context=NormalizedComparisonContext(
+                material_system_normalized=material_system_normalized,
+                process_normalized=process_normalized,
+                baseline_normalized=baseline_normalized,
+                test_condition_normalized=test_condition_normalized,
+            ),
+            axis=ComparisonAxis(
+                axis_name=normalized_variant_payload["variable_axis"],
+                axis_value=normalized_variant_payload["variable_value"],
+                axis_unit=None,
+            ),
+            value=ResultValue(
+                property_normalized=property_normalized,
+                result_type=result_type,
+                numeric_value=numeric_value,
+                unit=unit,
+                summary=result_summary,
+            ),
+            evidence=EvidenceTrace(
+                direct_anchor_ids=direct_anchor_ids,
+                contextual_anchor_ids=contextual_anchor_ids,
+                evidence_ids=evidence_ids,
+                structure_feature_ids=tuple(structure_feature_ids),
+                characterization_observation_ids=tuple(characterization_observation_ids),
+                traceability_status=traceability_status,
+            ),
+            variant_label=normalized_variant_payload["variant_label"],
+            baseline_reference=baseline_reference,
+            result_source_type=self._safe_text(result_row.get("result_source_type")),
+            epistemic_status=self._safe_text(result_row.get("epistemic_status")) or "",
+            normalization_version=COMPARABLE_RESULT_NORMALIZATION_VERSION,
+        )
+
+    def _build_collection_comparable_result(
+        self,
+        *,
+        collection_id: str,
+        comparable_result: ComparableResult,
+        sort_order: int | None,
+    ) -> CollectionComparableResult:
+        assessment = evaluate_comparison_assessment(comparable_result)
+        return CollectionComparableResult(
+            collection_id=collection_id,
+            comparable_result_id=comparable_result.comparable_result_id,
+            assessment=assessment,
+            epistemic_status=assessment.assessment_epistemic_status,
+            included=True,
+            sort_order=sort_order,
+        )
+
+    def _project_comparison_row(
+        self,
+        *,
+        comparable_result: ComparableResult,
+        scoped_result: CollectionComparableResult,
+    ) -> ComparisonRowRecord:
+        assessment = scoped_result.assessment
+        return ComparisonRowRecord(
+            row_id=build_comparison_row_id(
+                collection_id=scoped_result.collection_id,
+                comparable_result_id=comparable_result.comparable_result_id,
+                projection_version=COMPARISON_ROW_PROJECTION_VERSION,
+            ),
+            collection_id=scoped_result.collection_id,
+            comparable_result_id=comparable_result.comparable_result_id,
+            source_document_id=comparable_result.source_document_id,
+            variant_id=comparable_result.binding.variant_id,
+            variant_label=comparable_result.variant_label,
+            variable_axis=comparable_result.axis.axis_name,
+            variable_value=comparable_result.axis.axis_value,
+            baseline_reference=comparable_result.baseline_reference,
+            result_source_type=comparable_result.result_source_type,
+            result_type=comparable_result.value.result_type,
+            result_summary=comparable_result.value.summary,
+            supporting_evidence_ids=comparable_result.evidence.evidence_ids,
+            supporting_anchor_ids=comparable_result.evidence.direct_anchor_ids,
+            characterization_observation_ids=comparable_result.evidence.characterization_observation_ids,
+            structure_feature_ids=comparable_result.evidence.structure_feature_ids,
+            material_system_normalized=comparable_result.normalized_context.material_system_normalized,
+            process_normalized=comparable_result.normalized_context.process_normalized
+            or "unspecified process",
+            property_normalized=comparable_result.value.property_normalized,
+            baseline_normalized=comparable_result.normalized_context.baseline_normalized
+            or "unspecified baseline",
+            test_condition_normalized=comparable_result.normalized_context.test_condition_normalized
+            or "unspecified test condition",
+            comparability_status=assessment.comparability_status,
+            comparability_warnings=assessment.comparability_warnings,
+            comparability_basis=assessment.comparability_basis,
+            requires_expert_review=assessment.requires_expert_review,
+            assessment_epistemic_status=assessment.assessment_epistemic_status,
+            missing_critical_context=assessment.missing_critical_context,
+            value=comparable_result.value.numeric_value,
+            unit=comparable_result.value.unit,
+        )
+
+    def _merge_row_records(
+        self,
+        existing: ComparisonRowRecord,
+        incoming: ComparisonRowRecord,
+    ) -> ComparisonRowRecord:
+        return ComparisonRowRecord(
+            row_id=existing.row_id,
+            collection_id=existing.collection_id,
+            comparable_result_id=existing.comparable_result_id,
+            source_document_id=existing.source_document_id,
+            variant_id=existing.variant_id,
+            variant_label=existing.variant_label,
+            variable_axis=existing.variable_axis,
+            variable_value=existing.variable_value,
+            baseline_reference=existing.baseline_reference,
+            result_source_type=existing.result_source_type,
+            result_type=existing.result_type,
+            result_summary=existing.result_summary,
+            supporting_evidence_ids=tuple(
+                self._dedupe_strings(
+                    [
+                        *existing.supporting_evidence_ids,
+                        *incoming.supporting_evidence_ids,
+                    ]
+                )
+            ),
+            supporting_anchor_ids=tuple(
+                self._dedupe_strings(
+                    [
+                        *existing.supporting_anchor_ids,
+                        *incoming.supporting_anchor_ids,
+                    ]
+                )
+            ),
+            characterization_observation_ids=tuple(
+                self._dedupe_strings(
+                    [
+                        *existing.characterization_observation_ids,
+                        *incoming.characterization_observation_ids,
+                    ]
+                )
+            ),
+            structure_feature_ids=tuple(
+                self._dedupe_strings(
+                    [
+                        *existing.structure_feature_ids,
+                        *incoming.structure_feature_ids,
+                    ]
+                )
+            ),
+            material_system_normalized=existing.material_system_normalized,
+            process_normalized=existing.process_normalized,
+            property_normalized=existing.property_normalized,
+            baseline_normalized=existing.baseline_normalized,
+            test_condition_normalized=existing.test_condition_normalized,
+            comparability_status=existing.comparability_status,
+            comparability_warnings=existing.comparability_warnings,
+            comparability_basis=existing.comparability_basis,
+            requires_expert_review=existing.requires_expert_review,
+            assessment_epistemic_status=existing.assessment_epistemic_status,
+            missing_critical_context=existing.missing_critical_context,
+            value=existing.value,
+            unit=existing.unit,
+        )
 
     def _summarize_result(
         self,
@@ -558,7 +755,7 @@ class ComparisonService:
             if column not in normalized.columns:
                 normalized[column] = None
         records = [
-            ComparisonRow.from_mapping(dict(row)).to_record()
+            ComparisonRowRecord.from_mapping(dict(row)).to_record()
             for _, row in normalized.iterrows()
         ]
         return pd.DataFrame(records, columns=_COMPARISON_ROW_COLUMNS)
@@ -588,7 +785,7 @@ class ComparisonService:
         return filtered
 
     def _serialize_row(self, row: pd.Series) -> dict[str, Any]:
-        record = ComparisonRow.from_mapping(dict(row))
+        record = ComparisonRowRecord.from_mapping(dict(row))
         missing_critical_context = list(record.missing_critical_context)
         return {
             "row_id": record.row_id,
@@ -651,6 +848,17 @@ class ComparisonService:
             return [str(item) for item in payload if self._safe_text(item)]
         text = self._safe_text(payload)
         return [text] if text else []
+
+    def _dedupe_strings(self, values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = self._safe_text(value)
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            deduped.append(text)
+        return deduped
 
     def _normalize_scalar_or_text(self, value: Any) -> str | float | int | None:
         payload = self._normalize_object(value)

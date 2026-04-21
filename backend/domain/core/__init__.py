@@ -1,9 +1,20 @@
 """Core domain models and judgment rules."""
 
 from domain.core.comparison import (
+    COMPARABLE_RESULT_NORMALIZATION_VERSION,
+    COMPARISON_ROW_PROJECTION_VERSION,
+    CollectionComparableResult,
+    ComparableResult,
     ComparisonAssessment,
-    ComparisonRow,
+    ComparisonAxis,
+    ComparisonRowRecord,
+    ContextBinding,
+    EvidenceTrace,
+    NormalizedComparisonContext,
+    ResultValue,
     SCALAR_LIKE_RESULT_TYPES,
+    build_comparable_result_id,
+    build_comparison_row_id,
     evaluate_comparison_assessment,
 )
 from domain.core.document_profile import (
@@ -24,18 +35,29 @@ from domain.core.evidence_backbone import (
 
 __all__ = [
     "BaselineReference",
+    "COMPARABLE_RESULT_NORMALIZATION_VERSION",
+    "COMPARISON_ROW_PROJECTION_VERSION",
     "CORE_NEUTRAL_DOMAIN_PROFILE",
     "CharacterizationObservation",
+    "CollectionComparableResult",
+    "ComparableResult",
     "ComparisonAssessment",
-    "ComparisonRow",
+    "ComparisonAxis",
+    "ComparisonRowRecord",
+    "ContextBinding",
     "DocumentProfile",
     "DocumentProfileSummary",
+    "EvidenceTrace",
     "EvidenceAnchor",
     "MeasurementResult",
+    "NormalizedComparisonContext",
+    "ResultValue",
     "SCALAR_LIKE_RESULT_TYPES",
     "SampleVariant",
     "StructureFeature",
     "TestCondition",
+    "build_comparable_result_id",
+    "build_comparison_row_id",
     "evaluate_comparison_assessment",
     "summarize_document_profile_collection",
 ]

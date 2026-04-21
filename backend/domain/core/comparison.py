@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha1
+import json
 import math
 from typing import Any, Final, Mapping
 
@@ -20,6 +22,68 @@ from domain.shared.enums import (
 SCALAR_LIKE_RESULT_TYPES: Final[frozenset[str]] = frozenset(
     {"scalar", "retention", "fitted_value", "optimum"}
 )
+COMPARABLE_RESULT_NORMALIZATION_VERSION: Final[str] = "comparable_result_v1"
+COMPARISON_ROW_PROJECTION_VERSION: Final[str] = "comparison_row_v1"
+
+
+@dataclass(frozen=True)
+class ContextBinding:
+    variant_id: str | None
+    baseline_id: str | None
+    test_condition_id: str | None
+
+
+@dataclass(frozen=True)
+class NormalizedComparisonContext:
+    material_system_normalized: str
+    process_normalized: str | None
+    baseline_normalized: str | None
+    test_condition_normalized: str | None
+
+
+@dataclass(frozen=True)
+class ComparisonAxis:
+    axis_name: str | None
+    axis_value: str | float | int | None
+    axis_unit: str | None
+
+
+@dataclass(frozen=True)
+class ResultValue:
+    property_normalized: str
+    result_type: str
+    numeric_value: float | None
+    unit: str | None
+    summary: str
+    statistic_type: str | None = None
+    uncertainty: str | None = None
+
+
+@dataclass(frozen=True)
+class EvidenceTrace:
+    direct_anchor_ids: tuple[str, ...]
+    contextual_anchor_ids: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+    structure_feature_ids: tuple[str, ...]
+    characterization_observation_ids: tuple[str, ...]
+    traceability_status: str
+
+
+@dataclass(frozen=True)
+class ComparableResult:
+    comparable_result_id: str
+    source_result_id: str
+    source_document_id: str
+    binding: ContextBinding
+    normalized_context: NormalizedComparisonContext
+    axis: ComparisonAxis
+    value: ResultValue
+    evidence: EvidenceTrace
+    variant_label: str | None
+    baseline_reference: str | None
+    result_source_type: str | None
+    epistemic_status: str
+    normalization_version: str
 
 
 @dataclass(frozen=True)
@@ -43,9 +107,20 @@ class ComparisonAssessment:
 
 
 @dataclass(frozen=True)
-class ComparisonRow:
+class CollectionComparableResult:
+    collection_id: str
+    comparable_result_id: str
+    assessment: ComparisonAssessment
+    epistemic_status: str
+    included: bool
+    sort_order: int | None = None
+
+
+@dataclass(frozen=True)
+class ComparisonRowRecord:
     row_id: str
     collection_id: str
+    comparable_result_id: str
     source_document_id: str
     variant_id: str | None
     variant_label: str | None
@@ -74,10 +149,11 @@ class ComparisonRow:
     unit: str | None
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ComparisonRow":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ComparisonRowRecord":
         return cls(
             row_id=_normalize_text(payload.get("row_id")) or "",
             collection_id=_normalize_text(payload.get("collection_id")) or "",
+            comparable_result_id=_normalize_text(payload.get("comparable_result_id")) or "",
             source_document_id=_normalize_text(payload.get("source_document_id")) or "",
             variant_id=_normalize_text(payload.get("variant_id")),
             variant_label=_normalize_text(payload.get("variant_label")),
@@ -119,6 +195,7 @@ class ComparisonRow:
         return {
             "row_id": self.row_id,
             "collection_id": self.collection_id,
+            "comparable_result_id": self.comparable_result_id,
             "source_document_id": self.source_document_id,
             "variant_id": self.variant_id,
             "variant_label": self.variant_label,
@@ -148,47 +225,68 @@ class ComparisonRow:
         }
 
 
-def evaluate_comparison_assessment(
+def build_comparable_result_id(
     *,
-    variant_id: str | None,
-    baseline_reference: str | None,
-    test_condition_id: str | None,
-    traceability_status: str,
+    source_document_id: str,
+    property_normalized: str,
     result_type: str,
-    result_summary: str,
-    numeric_value: float | None,
-    structure_feature_ids: list[str],
-    characterization_observation_ids: list[str],
-) -> ComparisonAssessment:
-    missing_critical_context = _derive_missing_critical_context(
-        variant_id=variant_id,
-        baseline_reference=baseline_reference,
-        test_condition_id=test_condition_id,
-        traceability_status=traceability_status,
-        result_type=result_type,
-        result_summary=result_summary,
+    value_payload: Any,
+    unit: str | None,
+    result_source_type: str | None,
+    traceability_status: str,
+    variant_payload: Mapping[str, Any] | None,
+    baseline_payload: Mapping[str, Any] | None,
+    test_condition_payload: Mapping[str, Any] | None,
+    normalization_version: str = COMPARABLE_RESULT_NORMALIZATION_VERSION,
+) -> str:
+    return _build_deterministic_id(
+        "cres",
+        {
+            "source_document_id": source_document_id,
+            "property_normalized": property_normalized,
+            "result_type": result_type,
+            "value_payload": value_payload,
+            "unit": unit,
+            "result_source_type": result_source_type,
+            "traceability_status": traceability_status,
+            "variant": variant_payload or {},
+            "baseline": baseline_payload or {},
+            "test_condition": test_condition_payload or {},
+            "normalization_version": normalization_version,
+        },
     )
-    comparability_basis = _derive_comparability_basis(
-        variant_id=variant_id,
-        baseline_reference=baseline_reference,
-        test_condition_id=test_condition_id,
-        traceability_status=traceability_status,
-        result_type=result_type,
-        numeric_value=numeric_value,
-        structure_feature_ids=structure_feature_ids,
-        characterization_observation_ids=characterization_observation_ids,
+
+
+def build_comparison_row_id(
+    *,
+    collection_id: str,
+    comparable_result_id: str,
+    projection_version: str = COMPARISON_ROW_PROJECTION_VERSION,
+) -> str:
+    return _build_deterministic_id(
+        "cmp",
+        {
+            "collection_id": collection_id,
+            "comparable_result_id": comparable_result_id,
+            "projection_version": projection_version,
+        },
     )
+
+
+def evaluate_comparison_assessment(comparable_result: ComparableResult) -> ComparisonAssessment:
+    missing_critical_context = _derive_missing_critical_context(comparable_result)
+    comparability_basis = _derive_comparability_basis(comparable_result)
     comparability_warnings = _build_comparability_warnings(
         missing_critical_context=missing_critical_context,
-        result_type=result_type,
+        result_type=comparable_result.value.result_type,
     )
     comparability_status = _derive_comparability_status(
         missing_critical_context=missing_critical_context,
-        traceability_status=traceability_status,
+        traceability_status=comparable_result.evidence.traceability_status,
     )
     requires_expert_review = _requires_expert_review(
         comparability_status=comparability_status,
-        result_type=result_type,
+        result_type=comparable_result.value.result_type,
         missing_critical_context=missing_critical_context,
     )
     assessment_epistemic_status = _derive_assessment_epistemic_status(
@@ -205,58 +303,40 @@ def evaluate_comparison_assessment(
     )
 
 
-def _derive_missing_critical_context(
-    *,
-    variant_id: str | None,
-    baseline_reference: str | None,
-    test_condition_id: str | None,
-    traceability_status: str,
-    result_type: str,
-    result_summary: str,
-) -> list[str]:
+def _derive_missing_critical_context(comparable_result: ComparableResult) -> list[str]:
     missing: list[str] = []
-    if not variant_id:
+    if not comparable_result.binding.variant_id:
         missing.append("variant_link")
-    if not baseline_reference:
+    if not comparable_result.baseline_reference:
         missing.append("baseline_reference")
-    if not test_condition_id:
+    if not comparable_result.binding.test_condition_id:
         missing.append("test_condition")
-    if traceability_status != TRACEABILITY_STATUS_DIRECT:
+    if comparable_result.evidence.traceability_status != TRACEABILITY_STATUS_DIRECT:
         missing.append("direct_traceability")
-    if not result_summary or result_summary == "Result reported":
+    if not comparable_result.value.summary or comparable_result.value.summary == "Result reported":
         missing.append("result_value")
-    if result_type not in SCALAR_LIKE_RESULT_TYPES:
+    if comparable_result.value.result_type not in SCALAR_LIKE_RESULT_TYPES:
         missing.append("expert_interpretation")
     return missing
 
 
-def _derive_comparability_basis(
-    *,
-    variant_id: str | None,
-    baseline_reference: str | None,
-    test_condition_id: str | None,
-    traceability_status: str,
-    result_type: str,
-    numeric_value: float | None,
-    structure_feature_ids: list[str],
-    characterization_observation_ids: list[str],
-) -> list[str]:
+def _derive_comparability_basis(comparable_result: ComparableResult) -> list[str]:
     basis: list[str] = []
-    if variant_id:
+    if comparable_result.binding.variant_id:
         basis.append("variant_linked")
-    if baseline_reference:
+    if comparable_result.baseline_reference:
         basis.append("baseline_resolved")
-    if test_condition_id:
+    if comparable_result.binding.test_condition_id:
         basis.append("test_condition_resolved")
-    if traceability_status == TRACEABILITY_STATUS_DIRECT:
+    if comparable_result.evidence.traceability_status == TRACEABILITY_STATUS_DIRECT:
         basis.append("direct_traceability")
-    if numeric_value is not None:
+    if comparable_result.value.numeric_value is not None:
         basis.append("numeric_value_available")
-    if result_type in SCALAR_LIKE_RESULT_TYPES:
-        basis.append(f"result_type:{result_type}")
-    if structure_feature_ids:
+    if comparable_result.value.result_type in SCALAR_LIKE_RESULT_TYPES:
+        basis.append(f"result_type:{comparable_result.value.result_type}")
+    if comparable_result.evidence.structure_feature_ids:
         basis.append("structure_context_available")
-    if characterization_observation_ids:
+    if comparable_result.evidence.characterization_observation_ids:
         basis.append("characterization_context_available")
     return basis
 
@@ -321,14 +401,55 @@ def _derive_assessment_epistemic_status(
     comparability_status: str,
     requires_expert_review: bool,
 ) -> str:
-    if (
-        comparability_status == COMPARABILITY_STATUS_COMPARABLE
-        and not requires_expert_review
-    ):
+    if comparability_status == COMPARABILITY_STATUS_COMPARABLE and not requires_expert_review:
         return EPISTEMIC_NORMALIZED_FROM_EVIDENCE
     if comparability_status == COMPARABILITY_STATUS_LIMITED:
         return EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE
     return EPISTEMIC_UNRESOLVED
+
+
+def _build_deterministic_id(prefix: str, payload: Mapping[str, Any]) -> str:
+    canonical = _canonicalize_for_identity(payload)
+    encoded = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"{prefix}_{sha1(encoded).hexdigest()[:16]}"
+
+
+def _canonicalize_for_identity(value: Any) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, bytearray, dict)):
+        value = value.tolist()
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonicalize_for_identity(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, set):
+        return sorted(
+            (_canonicalize_for_identity(item) for item in value),
+            key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+        )
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize_for_identity(item) for item in value]
+    if isinstance(value, float):
+        if math.isnan(value):
+            return None
+        if value.is_integer():
+            return int(value)
+        return value
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return value
+    text = _normalize_text(value)
+    return text
 
 
 def _normalize_text(value: Any) -> str | None:
@@ -389,8 +510,19 @@ def _normalize_scalar_or_text(value: Any) -> str | float | int | None:
 
 
 __all__ = [
+    "COMPARABLE_RESULT_NORMALIZATION_VERSION",
+    "COMPARISON_ROW_PROJECTION_VERSION",
+    "CollectionComparableResult",
+    "ComparableResult",
     "ComparisonAssessment",
-    "ComparisonRow",
+    "ComparisonAxis",
+    "ComparisonRowRecord",
+    "ContextBinding",
+    "EvidenceTrace",
+    "NormalizedComparisonContext",
+    "ResultValue",
     "SCALAR_LIKE_RESULT_TYPES",
+    "build_comparable_result_id",
+    "build_comparison_row_id",
     "evaluate_comparison_assessment",
 ]

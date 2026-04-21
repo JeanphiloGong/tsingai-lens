@@ -2,25 +2,26 @@
 
 ## Summary
 
-This document records the next Core child plan after the comparable-result
-domain-model decision.
+This document records the delivery roadmap after the comparable-result
+domain-model decision has already been made.
 
-Its job is not to reopen the semantic-center decision. That decision is
-already made:
+This page owns:
 
-- paper facts remain the semantic foundation
-- `ComparableResult` is the primary comparison-semantic unit
-- `CollectionComparableResult` carries collection-scoped judgment and usage
-- `ComparisonRowRecord` is a projection or cache record
+- phase and wave boundaries
+- required outcomes per phase
+- artifact, service, read-path, and verification matrices
+- child-plan breakdown for executable implementation waves
 
-This child plan answers the next engineering question:
+This page does not reopen the semantic-center decision. That remains owned by:
 
-how the Core comparison substrate should evolve from the corrected object model
-into a reusable, persistable, collection-aware comparison backbone.
+- [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
 
 Read this plan with:
 
 - [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
+- [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
+- [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
+- [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
 - [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
 - [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
@@ -28,22 +29,27 @@ Read this plan with:
 ## Purpose
 
 The purpose of this child plan is to turn the corrected comparison model into
-an implementation roadmap for a reusable Core comparison substrate.
+an executable rollout for a reusable Core comparison substrate.
 
-This means making five ownership-heavy areas explicit:
+Without an explicit rollout structure, the backend will keep drifting back
+toward a collection-local row builder even when the object model is
+conceptually correct.
 
-- persistence model and repository boundaries
-- comparable-result identity and deduplication
-- cross-collection reuse and read paths
-- comparison-policy configuration and versioning
-- projection-cache generation and invalidation
+## Delivery Baseline
 
-Without those decisions, the backend will keep drifting back toward a
-collection-local row builder even if the object model is conceptually correct.
+This roadmap starts after the semantic-center correction accepted by the parent
+domain-model plan.
+
+Baseline assumptions inherited from that decision:
+
+- paper facts remain the semantic foundation
+- `ComparableResult` is the primary comparison-semantic unit
+- `CollectionComparableResult` carries collection-scoped judgment and usage
+- `ComparisonRowRecord` is a projection or cache record
 
 ## Non-Goals
 
-This child plan does not attempt to complete the following in one wave:
+This roadmap does not attempt to complete the following in one wave:
 
 - a full productized corpus-wide materials database
 - a full ontology or taxonomy platform
@@ -51,40 +57,26 @@ This child plan does not attempt to complete the following in one wave:
 - an immediate public API redesign
 - automatic expert-grade reasoning over all structure-feature semantics
 
-This plan defines the backbone that later work can build on. It does not
-require finishing the long-term database product in this wave.
+## Phase Map
 
-## Why This Child Plan Exists
+| Phase | Goal | Must Ship | Explicitly Not Required |
+| --- | --- | --- | --- |
+| `Phase 0` | Semantic-center correction | `ComparableResult` decision, explicit scope layer, deterministic identity boundary, row demotion to projection | standalone persistence split |
+| `Phase 1` | Persistence split and collection-first substrate | `ComparableResult` and `CollectionComparableResult` artifacts, collection-first read path, row cache as explicit projection, clear responsibility boundary | corpus-wide search, database cutover, policy-family system |
+| `Phase 2` | Reuse and policy stabilization | document-first read path, policy versioning, reassessment rules, explicit reuse and dedup behavior | corpus-level retrieval productization |
+| `Phase 3` | Projection substrate and broader retrieval expansion | shared projection substrate, cross-scope reuse surfaces, broader retrieval over comparable results | repository-wide platform rewrite |
 
-The comparable-result domain-model plan corrected the semantic center of the
-comparison slice, but it intentionally stopped short of specifying the full
-engineering substrate.
+Current recommended engineering focus after the parent cutover is `Phase 1`.
 
-That leaves five implementation questions as the next critical backbone work:
+## Layered Interpretation
 
-1. which objects must be persisted versus projected
-2. how `ComparableResult` identity is defined and deduplicated
-3. how one collection scope references reusable comparable results
-4. how comparison policy is configured and versioned
-5. when comparison projections are precomputed versus generated on demand
-
-Those are not optional follow-up details.
-They are the minimum engineering decisions required to keep the comparison
-slice stable as it grows.
-
-## Target Layered Model
-
-The intended layered interpretation remains:
+The intended layering remains:
 
 `paper facts -> comparable results -> collection-scoped assessment -> projection/cache`
 
-The target layers are:
+### Layer 1: Paper Facts
 
-### 1. Paper Facts Layer
-
-This layer remains the canonical one-document semantic foundation.
-
-Owned objects include:
+Owned objects:
 
 - `SampleVariant`
 - `MeasurementResult`
@@ -94,374 +86,203 @@ Owned objects include:
 - `CharacterizationObservation`
 - `StructureFeature`
 
-This layer answers what the source document reported.
-It should not absorb collection-specific assessment or UI projection concerns.
+### Layer 2: Comparable Results
 
-### 2. Comparable Result Layer
-
-This layer owns reusable comparison-semantic units.
-
-The primary object is:
+Owned object:
 
 - `ComparableResult`
 
-This layer answers:
+This is the first reusable comparison-semantic layer.
 
-- what measurement-level semantic unit can participate in comparison
-- what bound context defines that unit
-- what stable normalized fields identify that unit
+### Layer 3: Collection-Scoped Assessment And Membership
 
-This is the first layer that should be reusable across collection scopes.
+Owned object:
 
-### 3. Collection-Scoped Assessment And Membership Layer
+- `CollectionComparableResult`
 
 This layer owns collection-specific inclusion and judgment.
 
-The primary object is:
+### Layer 4: Projection And Cache
 
-- `CollectionComparableResult`
-
-This layer answers:
-
-- which comparable units are present in a given collection scope
-- how those units were assessed under the active comparison policy
-- what collection-specific metadata, inclusion flags, or ordering rules apply
-
-### 4. Projection And Cache Layer
-
-This layer owns collection-facing projection records.
-
-The primary object is:
+Owned object:
 
 - `ComparisonRowRecord`
 
-This layer answers:
+This layer owns collection-facing row, graph, report, and export projection
+artifacts.
 
-- what one collection-facing comparison row looks like
-- what report or graph payload can be derived from the semantic substrate
-- what cache artifacts may be materialized for fast reads
+## Phase 1 Execution Envelope
 
-This layer is downstream from the semantic center and should remain
-replaceable.
+### Goal
 
-## Persistence Model
+Move the current comparison flow from row-centered assembly to a persisted
+semantic substrate without requiring a database cutover.
 
-### Persistence Boundary
+### Entry Criteria
 
-The intended persistence split is:
+- the domain-model decision is accepted
+- deterministic `comparable_result_id` exists
+- deterministic `row_id` exists
+- collection-facing API shape does not need to change in this wave
 
-1. paper-fact artifacts
-2. comparable-result artifacts
-3. collection membership and assessment artifacts
-4. projection or cache artifacts
-
-This gives the system one reusable semantic layer and one collection-scoped
-relationship layer instead of collapsing everything into row-shaped storage.
-
-### Persisted Objects
-
-The following objects should be treated as persisted or persistable Core
-artifacts:
-
-- paper-fact artifacts derived from semantic build
-- `ComparableResult`
-- `CollectionComparableResult`
-
-The following object may be persisted, but only as a downstream cache:
-
-- `ComparisonRowRecord`
-
-### Repository And Ownership Boundaries
-
-The ownership boundary should be explicit:
-
-- paper-fact repositories own single-document extracted facts
-- comparable-result repositories own reusable semantic comparison units
-- collection-comparable-result repositories own collection-scoped membership
-  and assessment state
-- projection repositories, if used, own cache artifacts only
-
-The row cache must not become the hidden source of truth for comparison
-semantics.
-
-### Initial Storage Shape
-
-The initial engineering target does not require a full database cutover.
-
-A valid short-term storage split is:
-
-- `sample_variants.parquet`
-- `measurement_results.parquet`
-- `test_conditions.parquet`
-- `baseline_references.parquet`
-- `comparable_results.parquet`
-- `collection_comparable_results.parquet`
-- `comparison_rows.parquet`
-
-The critical rule is semantic separation, not a specific storage technology.
-
-## Identity And Deduplication
-
-### Comparable Result Identity
-
-`comparable_result_id` should be deterministic.
-
-The default identity input should include:
-
-- `source_result_id`
-- bound `variant_id`
-- bound `baseline_id`
-- bound `test_condition_id`
-- normalized property identity
-- normalization version
-
-This should produce rebuild-stable identity for the same semantic comparison
-unit.
-
-### Identity Rules
-
-The identity contract should follow these rules:
-
-- if the semantic source result and bound context are the same under the same
-  normalization version, reuse the same `comparable_result_id`
-- if the normalization version changes and the semantic interpretation changes,
-  issue a new `comparable_result_id`
-- if two units are similar but not fully identical in bound context, do not
-  collapse them into one identity
-
-### Deduplication Categories
-
-Deduplication should explicitly distinguish three cases:
-
-1. strictly identical comparable units
-2. semantically related but context-distinct comparable units
-3. same source result under a different normalization version
-
-Only case 1 should deduplicate to the same comparable-result identity.
-
-### Rebuild And Reuse Rules
-
-The system should define the following behavior:
-
-- rebuild a comparable result when its bound inputs or normalization version
-  change
-- reuse a comparable result when the deterministic identity input is unchanged
-- preserve old identities when historical comparison outputs must remain
-  traceable to an older normalization version
-
-## Query And Read Paths
-
-The comparison substrate should support two first-class read paths and one
-future path.
-
-### Collection-First Read Path
-
-Primary flow:
-
-`collection -> collection_comparable_results -> comparable_results -> projections`
-
-This path serves:
-
-- collection comparison table
-- graph views
-- report and export views
-
-This should remain the default Lens v1 interactive path.
-
-### Document-First Read Path
-
-Primary flow:
-
-`document/result -> comparable_results -> related collections`
-
-This path serves:
-
-- single-paper semantic inspection
-- trace-from-result drill-down
-- debugging and semantic QA
-
-This path is required if comparable results are meant to be reusable rather
-than hidden behind one collection's row cache.
-
-### Future Corpus-First Read Path
-
-Future flow:
-
-`corpus query -> comparable_results -> collections / evidence / projections`
-
-This path is out of current implementation scope, but the repository boundary
-should not block it.
-
-This future path enables:
-
-- corpus-wide result search
-- literature-backed materials-fact retrieval
-- cross-collection reuse and aggregation
-
-## Comparison Policy Model
-
-### Policy Object
-
-Comparison policy should become an explicit object, even if it begins as a
-Core-owned code configuration rather than a database table.
-
-The policy object should define:
-
-- comparability rules
-- missing-context thresholds
-- baseline and condition sufficiency rules
-- expert-review triggers
-- projection-affecting display rules only when those rules are truly semantic
-
-### Policy Placement
-
-Short term, the policy may live as a Core-owned code object or file-backed
-configuration.
-
-Mid term, it should be represented explicitly enough that different comparison
-tasks can bind to different policy identities.
-
-The critical requirement is versionability, not immediate database storage.
-
-### Policy Versioning
-
-Assessment outputs should be traceable to:
-
-- `policy_id`
-- `policy_version`
-- assessment generation timestamp
-- assessment input signature
-
-Without that linkage, assessment outputs will become ambiguous whenever the
-policy changes.
-
-### Assessment Lifecycle Rules
-
-The collection-scoped assessment layer should define when reassessment is
-required.
-
-At minimum, reassessment should happen when:
-
-- a comparable result changes
-- a policy version changes
-- collection membership changes in a way that affects inclusion or ordering
-
-The system should also decide whether historical assessments are replaced or
-retained as versioned records.
-
-## Projection And Cache Strategy
-
-### Projection Rule
-
-Projection is downstream from semantic storage and assessment storage.
-
-That means:
-
-- `ComparisonRowRecord` is generated from `ComparableResult` plus
-  `CollectionComparableResult`
-- graph and report projections should derive from the same semantic substrate
-- no downstream view should own hidden comparison semantics that bypass the
-  semantic core
-
-### Precompute Versus On-Demand
-
-The intended short-term strategy is:
-
-- precompute collection comparison rows during build or rebuild
-- allow graph, report, and export payloads to derive from the same stored row
-  cache or directly from the semantic substrate when needed
-- keep the option open to move some projections to on-demand generation later
-
-The intended mid-term strategy is:
-
-- keep a shared projection substrate
-- avoid separate per-view semantic assemblers
-- precompute only where it materially improves latency or operational
-  simplicity
-
-### Cache Invalidation Rules
-
-Projection cache invalidation should be explicit.
-
-At minimum, invalidate projection caches when:
-
-- comparable-result content changes
-- collection membership or inclusion changes
-- collection-scoped assessment changes
-- policy version changes
-- projection schema or projection version changes
-
-If these invalidation rules remain implicit, graph, report, and comparison
-views will drift apart.
-
-## Phased Rollout
-
-### Phase 1: Short-Term Backbone Engineering
-
-Goal:
-
-move the current comparison flow from row-centered assembly to
-`ComparableResult`-centered assembly without requiring a full database
-cutover.
-
-Required outcomes:
+### Required Outcomes
 
 - persist or materialize `ComparableResult`
 - persist `CollectionComparableResult`
-- generate deterministic `comparable_result_id`
-- generate deterministic `row_id`
-- make `ComparisonRowRecord` an explicit projection output
-- keep assessment collection-scoped
+- keep `ComparisonRowRecord` explicitly downstream from semantic artifacts
+- keep collection-scoped assessment separate from the base semantic object
+- make the collection-first read path explicit
+- make Phase 1 service ownership explicit without adding a generic new service
+  layer
 
-This phase should not block on:
+### Deferred From Phase 1
 
 - corpus-wide search
 - advanced ontology work
 - broad cross-collection merge heuristics
+- a new public API surface
+- projection-substrate unification across every downstream view
+- fully generalized comparison-policy families
 
-### Phase 2: Mid-Term Reuse And Policy Stabilization
+### Exit Criteria
 
-Goal:
+`Phase 1` is complete only when:
 
-make one comparable result reusable across multiple collection scopes.
+- `comparable_results.parquet` exists as a Core-owned semantic artifact
+- `collection_comparable_results.parquet` exists as a Core-owned scope artifact
+- `comparison_rows.parquet` is produced as an explicit projection/cache artifact
+- the collection comparison read path can be described as
+  `collection -> collection_comparable_results -> comparable_results -> row projection`
+- graph and report remain on a documented temporary substrate rather than on an
+  implicit hidden one
 
-Required outcomes:
+## Artifact Matrix
 
-- deduplication and reuse rules become explicit
-- collection-first and document-first read paths both work cleanly
+### Phase 1 Artifact Ownership
+
+| Artifact | Layer | Writer | Primary Readers | Source Of Truth Role | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `sample_variants.parquet` | paper facts | paper-facts build | comparison build, evidence read paths | semantic fact artifact | pre-existing |
+| `measurement_results.parquet` | paper facts | paper-facts build | comparison build | semantic fact artifact | pre-existing |
+| `test_conditions.parquet` | paper facts | paper-facts build | comparison build | semantic fact artifact | pre-existing |
+| `baseline_references.parquet` | paper facts | paper-facts build | comparison build | semantic fact artifact | pre-existing |
+| `comparable_results.parquet` | comparable-result layer | comparison build | collection-first reads, document-first semantic inspection, row projection | semantic source of truth | new in `Phase 1` |
+| `collection_comparable_results.parquet` | collection-scope layer | comparison build | collection-first reads, row projection | scope source of truth | new in `Phase 1` |
+| `comparison_rows.parquet` | projection/cache layer | row projection step | `/comparisons`, graph/report if still on row cache | cache only | must not become semantic source of truth |
+
+### Artifact Cutover Rule
+
+`Phase 1` succeeds only if the semantic source of truth moves upward while row
+artifacts remain downstream caches.
+
+## Service Ownership Matrix
+
+| Responsibility | Owner In Phase 1 | Must Own | Must Not Own |
+| --- | --- | --- | --- |
+| comparable-result assembly | Core comparison build path | bind paper facts and materialize `ComparableResult` | artifact policy history, public route semantics |
+| comparability evaluation | domain/core comparison logic | compute `ComparisonAssessment` from semantic input and active scope rule set | row rendering details |
+| row projection | Core projection step | map semantic plus scope objects into `ComparisonRowRecord` | semantic identity decisions |
+| orchestration and IO | `ComparisonService` | build order, artifact read/write, rebuild coordination | hidden semantic logic that bypasses the owned helpers |
+
+Phase 1 does not require introducing three standalone public service classes.
+It does require that these responsibilities are explicit and testable.
+
+## Read-Path Matrix
+
+| Read Path | Status In Phase 1 | Backing Flow | Notes |
+| --- | --- | --- | --- |
+| collection-first comparison table | required | `collection -> collection_comparable_results -> comparable_results -> row projection/cache` | primary Lens v1 path |
+| graph and report | allowed temporary path | row cache in `Phase 1`, shared substrate later | must be documented, not implicit |
+| document-first semantic inspection | partial or internal | `document/result -> comparable_results -> related scope records` | may begin as debug or internal read path |
+| corpus-first retrieval | deferred | future | not part of `Phase 1` |
+
+## Migration Order
+
+The intended `Phase 1` order is:
+
+1. write `comparable_results` and `collection_comparable_results` artifacts
+2. make row generation consume those artifacts or their in-memory equivalents
+3. keep `comparison_rows` as projection/cache output
+4. cut the collection-first read path so it is explicitly backed by semantic
+   plus scope artifacts
+5. document temporary downstream consumers that still read row cache directly
+
+This order prevents row cache from remaining the accidental source of truth.
+
+## Verification Matrix
+
+| Verification Slice | What It Proves | Minimum Expected Coverage |
+| --- | --- | --- |
+| domain identity tests | deterministic comparable-result and row identity | stable ids across rebuild inputs |
+| artifact round-trip tests | semantic and scope artifacts can be written and read without loss of boundary | new parquet round-trip tests |
+| comparison service build tests | build order writes semantic, scope, and projection artifacts in the right sequence | collection build happy path |
+| API shape tests | collection-facing `/comparisons` responses remain stable | no public contract regression |
+| projection dependency tests | graph/report temporary row-cache dependency is explicit and versioned | no hidden semantic bypass |
+
+## Child Plan Breakdown
+
+### Phase 1 Child Plans
+
+- [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
+  owns artifact introduction, storage contract, writer/reader boundaries, and
+  build order.
+- [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
+  owns collection-first read-path cutover, row-cache usage rules, and
+  collection-facing API stability.
+- [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
+  owns the physical responsibility split for `Phase 1` while preserving the
+  no-generic-service-layer guardrail.
+
+### Later Child Plans
+
+Later child docs should narrow this roadmap further instead of widening this
+page into an open-ended program log. The next likely candidates are:
+
+- comparison-policy versioning
+- collection assessment lifecycle
+- projection-substrate cutover
+- corpus-level comparable-result retrieval
+
+## Phase 2 Summary
+
+### Goal
+
+Make reusable comparable results work cleanly across multiple collection
+scopes.
+
+### Required Outcomes
+
+- document-first read path is explicit
+- reuse and deduplication rules are explicit
 - policy versioning is attached to assessment outputs
-- projection cache becomes a shared substrate rather than a page-local helper
+- reassessment triggers are explicit
 
-### Phase 3: Long-Term Comparison Substrate Expansion
+## Phase 3 Summary
 
-Goal:
+### Goal
 
-let collection degrade into a working view while the backend grows a reusable
-literature-backed comparison substrate.
+Let collection degrade into a working view while the backend grows a reusable
+comparison substrate above document facts.
 
-Possible outcomes:
+### Possible Outcomes
 
 - corpus-level query over comparable results
 - task-specific comparison policy families
 - reusable projection families for table, graph, benchmark, report, and export
-- materials-facts retrieval over normalized literature evidence
-
-This phase should be tracked by later child plans rather than hidden inside
-incremental service drift.
+- broader materials-fact retrieval over normalized literature evidence
 
 ## Acceptance Criteria
 
+- phase boundaries are explicit enough that one implementation wave can be
+  scoped without reopening semantic decisions
 - the persistence split between paper facts, comparable results, collection
-  assessment, and projection is explicit
-- `ComparableResult` identity is deterministic and version-aware
-- deduplication rules distinguish identical versus merely similar comparison
-  units
-- collection scopes reference reusable comparable-result identities rather than
-  only collection-local row records
-- comparison policy is explicitly versionable
-- projection generation and invalidation rules are explicit
-- the planned read paths support future cross-collection reuse instead of
-  blocking it
+  scope, and projection is explicit
+- the collection-first read path is explicit
+- row cache is documented as cache rather than semantic source of truth
+- the service ownership split is explicit without requiring a generic wrapper
+  layer
+- later phase work is discoverable through child-plan links rather than hidden
+  inside one broad roadmap page
 
 ## Risks And Guardrails
 
@@ -469,12 +290,10 @@ Risks:
 
 - if `ComparableResult` is not stored separately, the system will drift back to
   collection-local row generation
-- if identity and deduplication are underspecified, rebuilds will either
-  explode duplicates or incorrectly merge distinct units
-- if policy versioning is omitted, assessment outputs will become historically
-  ambiguous
-- if projection invalidation rules remain implicit, different collection views
-  will diverge
+- if the collection-first read path remains implicit, downstream views will
+  keep coupling to row cache
+- if rollout waves remain vague, follow-up work will reopen already-settled
+  semantic questions
 
 Guardrails:
 
@@ -482,44 +301,34 @@ Guardrails:
 - no row cache promoted to semantic source of truth
 - no collection-local duplicate semantic path unless explicitly justified
 - no random long-term identity for comparable results or rows
-- no per-view shadow assemblers for graph, report, and export
+- no per-view shadow semantic assemblers for graph, report, and export
 
 ## Open Questions
 
-The following questions may remain open after this child plan is recorded, but
-they should stay narrow:
+The following questions may remain open after this roadmap is refined, but they
+should stay narrow:
 
-- whether initial comparable-result persistence remains parquet-backed or moves
-  to a repository abstraction immediately
-- whether assessment history is fully versioned in the first implementation
-  wave or only from the second wave onward
-- whether graph and report should continue reading from row cache during the
-  first rollout wave or move directly onto a shared projection substrate later
+- whether initial `ComparableResult` persistence remains parquet-backed or
+  moves behind a repository abstraction immediately
+- whether assessment history is versioned in `Phase 1` or deferred to `Phase 2`
+- whether graph and report should continue reading row cache through all of
+  `Phase 1` or cut over earlier once the shared substrate is stable
 
 ## Parent, Child, And Companion Relationships
 
-### Parent Docs
+### Parent Doc
 
 - [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
-  remains the immediate parent plan for the semantic-center correction.
-- [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
-  remains the broader Core-domain parent plan.
+  remains the parent semantic decision doc.
+
+### Phase 1 Child Docs
+
+- [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
+- [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
+- [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
 
 ### Companion Docs
 
 - [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
-  remains the extraction-contract companion plan.
 - [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
-  remains the identifier-boundary companion plan.
-
-### Follow-Up Scope
-
-Later child plans may narrow this roadmap into:
-
-- comparable-result repository implementation
-- collection assessment lifecycle implementation
-- projection-substrate cutover
-- corpus-level comparable-result retrieval
-
-Those should be tracked as later child docs instead of widening this page into
-an open-ended program log.
+- [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)

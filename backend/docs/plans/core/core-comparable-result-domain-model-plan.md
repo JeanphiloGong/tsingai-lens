@@ -2,39 +2,44 @@
 
 ## Summary
 
-This document records a focused Core child plan for realigning the comparison
-domain around `ComparableResult` rather than around `ComparisonRow`.
+This document records the stable Core comparison-domain decision after the
+`ComparisonRow`-centered model proved semantically too mixed.
 
-The target is not to add a new backend layer, redesign the public API in one
-wave, or replace the existing Core backbone. The target is narrower:
+This page is the decision and boundary doc for the comparison-semantic center.
+It should stay stable. Delivery sequencing, phase exit criteria, artifact
+cutover order, and projection-cache rollout belong in:
 
-- keep paper facts as the semantic ground truth for one document's research
-  facts
-- treat `ComparableResult` as the primary Core comparison-semantic unit
-- treat `collection` as a comparison scope or working-set boundary rather than
-  as the owner of paper-fact meaning
-- demote `ComparisonRow` to a projection record used by collection-facing
-  views
+- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
+- [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
+- [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
+- [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
 
-The intended interpretation becomes:
+The intended interpretation is:
 
 `paper facts -> comparable results -> collection-scoped assessment -> row projection`
 
-Read this plan with:
+## Page Role
 
-- [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
-- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
-- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
-- [`../../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
-- [`../../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+This plan owns:
+
+- the stable semantic center of the comparison slice
+- the object-boundary decision between paper facts, comparison semantics,
+  collection scope, and projection
+- the long-term identity boundary for comparison-semantic objects
+- the ownership rules that later rollout waves must preserve
+
+This plan does not own:
+
+- phase-by-phase engineering rollout
+- exact artifact schemas for every storage wave
+- projection-cache invalidation rollout details
+- public API redesign
+- repository-wide storage redesign
 
 ## Why This Child Plan Exists
 
-The current Core backbone already has stronger semantics than the current
-comparison-domain model shows.
-
-Today the system already extracts or materializes:
+The current Core backbone already extracts or materializes stronger research
+facts than the old comparison model admitted:
 
 - `SampleVariant`
 - `MeasurementResult`
@@ -44,67 +49,49 @@ Today the system already extracts or materializes:
 - `CharacterizationObservation`
 - `StructureFeature`
 
-Those are the facts that answer the document-level questions that matter most:
+The problem was not missing semantics. The problem was semantic mixing inside a
+row-shaped object:
 
-- what sample or variant was studied
-- under what conditions
-- against what baseline
-- what result was reported
-- and where the evidence came from
+- `ComparisonRow` carried row identity
+- `ComparisonRow` carried collection scope
+- `ComparisonRow` carried normalized comparison context
+- `ComparisonRow` carried assessment outputs
+- `ComparisonRow` was treated like the semantic center
 
-The current comparison modeling problem is not missing data.
-
-The current problem is semantic mixing inside one object:
-
-- `ComparisonRow` currently carries a row resource id
-- it also carries collection scope
-- it also carries normalized comparison context
-- it also carries comparability judgment outputs
-- and it is treated as if it were the domain-semantic center
-
-That shape makes one table row look like the primary research object even
-though the row is only one collection-facing rendering of a stronger semantic
-unit.
-
-It also makes `collection` look like the owner of the semantics when the real
-semantic source is still the single-document fact backbone.
+That made one collection-facing row look like the primary research object even
+though the real semantic source was still the single-document fact backbone.
 
 ## Decision
 
-The Core comparison model should be re-centered on one explicit semantic unit:
-`ComparableResult`.
+The Core comparison domain is re-centered on `ComparableResult`.
 
-This plan makes four design decisions explicit:
+This page fixes four design judgments:
 
-1. Single-document paper facts remain the semantic foundation.
-2. `ComparableResult` becomes the comparison-semantic core object.
-3. `collection` is treated as a comparison scope or working set, not as the
-   owner of document fact meaning.
-4. `ComparisonRowRecord` is a projection record, not the primary domain
-   object.
+1. Paper facts remain the canonical one-document semantic foundation.
+2. `ComparableResult` is the primary comparison-semantic unit.
+3. `collection` is a comparison scope or working set, not the owner of
+   paper-fact meaning.
+4. `ComparisonRowRecord` is a projection record, not the primary domain object.
 
 This plan explicitly rejects:
 
-- treating `ComparisonRow` as the semantic center of the comparison domain
-- pushing `collection_id` down into the primary single-document comparison
-  unit
-- using random `uuid4()` values as the long-term identity strategy for row
-  resources
-- adding wrappers, compatibility layers, or duplicate object paths just to
-  preserve the current shape
+- treating `ComparisonRow` as the semantic center
+- pushing `collection_id` into the base single-document semantic unit
+- using random `uuid4()` values as the long-term identity strategy for
+  comparison units or rows
+- adding wrappers, compatibility layers, or duplicate semantic paths to
+  preserve the old row-first shape
 
 ## Scope
 
 This child plan covers:
 
-- the target domain model for comparison semantics
-- the ownership split between paper facts, comparison semantics, collection
-  scope, and projections
-- the intended Core service responsibilities for assembly, assessment, and
+- the stable target domain model for comparison semantics
+- the ownership split between paper facts, reusable comparison semantics,
+  collection-scoped assessment, and projection
+- the identity rules that define semantic versus scope-level objects
+- the allowed service-responsibility boundary between assembly, assessment, and
   projection
-- storage and identity rules for comparable results and collection-scoped
-  rows
-- a migration path from the current `ComparisonRow`-centered flow
 
 This child plan does not cover:
 
@@ -112,14 +99,14 @@ This child plan does not cover:
 - a repository-wide DDD rewrite
 - Source runtime redesign
 - moving stable research facts into Source
-- changing the current Lens v1 evidence-first product boundary
+- the exact storage and rollout sequence for every later wave
 
-## Core Design Judgments
+## Stable Domain Judgments
 
-### The Semantic Foundation Is Still Paper Facts
+### Paper Facts Stay The Semantic Foundation
 
-The most important stable objects are still the research facts extracted from a
-single document:
+The most important stable objects remain the facts extracted from a single
+document:
 
 - `SampleVariant`
 - `MeasurementResult`
@@ -129,9 +116,7 @@ single document:
 - `CharacterizationObservation`
 - `StructureFeature`
 
-These belong to the one-document semantic layer.
-
-They answer what the document says. They should not be recast as collection
+These objects answer what the document reported. They are not collection-facing
 display objects.
 
 ### `ComparableResult` Is The Standardized Comparison Unit
@@ -141,58 +126,47 @@ enough context to enter comparison semantics.
 
 That means:
 
-- the raw `MeasurementResult` has been linked to its sample, baseline,
-  condition, and evidence context
+- the raw `MeasurementResult` has been linked to sample, baseline, condition,
+  and evidence context
 - normalized comparison fields have been derived
-- the unit is now meaningful as a candidate for collection-level comparison
+- the result is now meaningful as a comparison-semantic unit
 
-This object should not directly carry `collection_id`.
+This object must not directly carry `collection_id`.
 
-Its job is to represent what comparable unit exists in the paper facts, not
-how one particular collection currently uses or displays it.
+### `CollectionComparableResult` Owns Scope-Sensitive Judgment
 
-### `collection` Is A Working-Scope Boundary
+Collection-specific inclusion, ordering, and assessment belong in an explicit
+scope-layer object rather than being hidden inside the base semantic unit.
 
-For comparison semantics, `collection` should be interpreted as:
+This layer answers:
 
-- a comparison scope
-- a working set
-- a saved review context
+- which comparable units are in this collection scope
+- how they were judged in this scope
+- what collection-specific ordering or inclusion rules apply
 
-It may determine:
+This is the layer where `collection_id` belongs.
 
-- which documents or results are included
-- what comparison policy or filtering rules apply
-- how assessment is computed in the current review context
+### `ComparisonRowRecord` Is Projection Only
 
-It should not be treated as:
-
-- the permanent owner of paper-fact meaning
-- the only identity boundary for comparable units
-- the semantic layer where one-document facts are first defined
-
-### `ComparisonRowRecord` Is Only A Projection
-
-Rows exist for:
+Rows exist for collection-facing outputs such as:
 
 - `/comparisons`
 - report generation
 - graph projection
-- exports
+- export payloads
 
-They are collection-facing views over stronger semantics.
+They are downstream renderings over stronger semantics. They must not carry the
+burden of primary domain identity.
 
-They should not keep carrying the full burden of domain identity.
+## Recommended Object Model
 
-## Recommended Domain Model
+### Paper-Fact Layer
 
-### Paper Facts Layer
-
-The paper-fact layer remains in:
+Owned by:
 
 - [`../../../domain/core/evidence_backbone.py`](../../../domain/core/evidence_backbone.py)
 
-The owned objects remain:
+Owned objects:
 
 ```text
 SampleVariant
@@ -204,16 +178,13 @@ CharacterizationObservation
 StructureFeature
 ```
 
-These objects remain single-document semantics and should stay separate from
-collection projection concerns.
+### Comparison-Semantic Layer
 
-### Comparison Semantic Layer
-
-The comparison-semantic layer should live in:
+Owned by:
 
 - [`../../../domain/core/comparison.py`](../../../domain/core/comparison.py)
 
-The recommended shape is:
+Recommended shape:
 
 ```python
 @dataclass(frozen=True)
@@ -245,8 +216,6 @@ class ResultValue:
     numeric_value: float | None
     unit: str | None
     summary: str
-    statistic_type: str | None = None
-    uncertainty: str | None = None
 
 
 @dataclass(frozen=True)
@@ -275,18 +244,14 @@ class ComparableResult:
 
 Design rules:
 
-- `ComparableResult` is derived from paper facts, not from a collection row
+- `ComparableResult` is derived from paper facts, not from a row record
 - `ComparableResult` does not carry `collection_id`
-- normalization metadata belongs here because it defines the semantic unit
-- comparability judgment does not belong inside the object itself because it is
-  scope-sensitive
+- normalization metadata belongs on the semantic object
+- scope-sensitive assessment does not belong on the base semantic object
 
-### Collection-Scope Relationship Layer
+### Collection-Scope Layer
 
-Collection-scoped use and judgment should be represented explicitly rather
-than hidden inside the base semantic object.
-
-The recommended shape is:
+Recommended shape:
 
 ```python
 @dataclass(frozen=True)
@@ -309,19 +274,15 @@ class CollectionComparableResult:
     sort_order: int | None = None
 ```
 
-This layer answers:
-
-- which comparable units are in this collection scope
-- how those units were judged in that scope
-- whether the unit is included, filtered, or ordered for that scope
-
-This is the layer where `collection_id` belongs.
-
 ### Projection Layer
 
-Projection records should be moved out of the semantic center.
+`ComparisonRowRecord` may live either in
+[`../../../domain/core/comparison.py`](../../../domain/core/comparison.py) or
+in a narrower `domain/core/projection.py` home if that file is introduced
+later. This page does not force a physical file split. It only fixes the
+semantic rule that row objects are projection records.
 
-The recommended shape is:
+Recommended shape:
 
 ```python
 @dataclass(frozen=True)
@@ -335,230 +296,81 @@ class ComparisonRowRecord:
     assessment_payload: dict[str, Any]
 ```
 
-One acceptable target module shape is:
-
-```text
-backend/domain/core/
-  document_profile.py
-  evidence_backbone.py
-  comparison.py
-  projection.py
-```
-
-`projection.py` is not a new architecture layer. It is only a narrower home
-for collection-facing projection records that should not be confused with the
-comparison-semantic core.
-
-## Target Service Responsibilities
-
-The comparison flow should be split conceptually into three responsibilities.
-
-### Comparable Result Assembly
-
-`ComparableResultAssembler` should:
-
-- read paper facts
-- bind `MeasurementResult` to variant, baseline, condition, and evidence
-- derive normalized comparison context
-- materialize `ComparableResult`
-
-Input:
-
-- paper facts
-
-Output:
-
-- `ComparableResult`
-
-### Comparability Evaluation
-
-`ComparabilityEvaluator` should:
-
-- receive `ComparableResult`
-- receive collection scope or comparison policy
-- compute `ComparisonAssessment`
-
-Input:
-
-- `ComparableResult`
-- collection scope or policy
-
-Output:
-
-- `ComparisonAssessment`
-
-### Row Projection
-
-`ComparisonRowProjector` should:
-
-- receive `ComparableResult`
-- receive `CollectionComparableResult`
-- produce row, report, or graph-facing projection records
-
-Input:
-
-- `ComparableResult`
-- `CollectionComparableResult`
-
-Output:
-
-- `ComparisonRowRecord`
-
-These are ownership responsibilities, not a requirement to add a new generic
-service layer. The implementation may begin as direct Core-owned modules or as
-a narrowing of the current comparison service, but the responsibilities should
-remain explicit.
-
-## Collection Semantics
-
-The recommended semantic definition is:
-
-`collection = one comparison task's working-set boundary`
-
-It may come from:
-
-- a user-curated paper set
-- one search result set
-- one saved research workspace
-- one project-specific review set
-
-It should not imply:
-
-- permanent ownership of the underlying paper facts
-- one and only one home for a comparable unit
-- the first semantic layer where results become meaningful
-
-In team language, it is safer to describe `collection` as:
-
-- `comparison scope`
-- `working set`
-
-That interpretation matches how the system already behaves better than the
-stronger "data ownership container" interpretation.
-
-## Storage And Identity Rules
-
-### Storage Layers
-
-The intended storage split is:
-
-1. fact layer
-   - `MeasurementResult`
-   - `SampleVariant`
-   - `TestCondition`
-   - `BaselineReference`
-   - `EvidenceAnchor`
-   - related fact artifacts
-2. comparable-result layer
-   - `ComparableResult`
-3. collection relationship layer
-   - `CollectionComparableResult`
-4. projection layer
-   - `ComparisonRowRecord`
-
-`ComparisonRowRecord` may be persisted as a cache or projected on demand.
+## Identity Rules
 
 ### Deterministic Comparable Result Identity
 
-`comparable_result_id` should not be random.
-
-It should be derived deterministically from fields such as:
+`comparable_result_id` should be derived deterministically from semantic inputs
+such as:
 
 - `source_result_id`
 - `variant_id`
 - `baseline_id`
 - `test_condition_id`
-- `property_normalized`
-- `normalization_version`
+- normalized property identity
+- normalization version
 
-That gives the system rebuild-stable identity for the semantic comparison
-unit.
+This identity belongs to the reusable semantic unit, not to one collection.
 
 ### Deterministic Row Identity
 
-`row_id` should also stop using random `uuid4()` values.
-
-It should be derived deterministically from fields such as:
+`row_id` should be derived deterministically from scope-level inputs such as:
 
 - `collection_id`
 - `comparable_result_id`
 - `projection_version`
 
-That gives stable drill-down, report references, graph references, and cache
-keys across rebuilds.
+This identity belongs to the collection-facing projection record.
 
-## Migration Path
+## Service Responsibility Boundary
 
-### Step 1: Demote `ComparisonRow`
+The comparison flow should expose three ownership responsibilities:
 
-Immediately clarify in code and docs that:
+- comparable-result assembly
+- comparability evaluation
+- projection
 
-- `ComparisonRow` or `ComparisonRowRecord` is a projection
-- it is not the primary comparison-semantic object
+These are responsibility boundaries, not a requirement to introduce a generic
+new service layer.
 
-Acceptance:
+Allowed implementation shapes:
 
-- docs and type names no longer imply that the row is the semantic center
-- comparison assembly logic is described as result-driven rather than row-first
+- one owning `ComparisonService` that keeps those responsibilities explicit
+- narrow Core-owned helper modules if needed for testability
 
-### Step 2: Introduce `ComparableResult`
+Disallowed implementation shapes:
 
-Add the comparison-semantic core object and its assembly path.
+- a generic `services/` junk drawer
+- wrappers or compatibility layers that preserve row-first semantics
+- per-view shadow semantic assemblers for graph, report, and export
 
-Acceptance:
+## Migration Boundary
 
-- comparison semantics are materialized from paper facts into
-  `ComparableResult`
-- comparability logic consumes `ComparableResult` rather than a row record
+This decision plan is satisfied when:
 
-### Step 3: Introduce Explicit Collection Relationship Modeling
+- `ComparisonRowRecord` is treated as projection rather than semantic center
+- `ComparableResult` exists as the base comparison-semantic unit
+- collection-scoped assessment is explicit
+- deterministic identity is used for comparable results and rows
 
-Add `CollectionComparableResult` so collection-scoped judgment becomes
-explicit.
+This decision plan intentionally defers:
 
-Acceptance:
+- standalone persistence for `ComparableResult`
+- standalone persistence for `CollectionComparableResult`
+- projection-cache invalidation rollout
+- policy versioning rollout
+- detailed read-path and repository cutover
 
-- collection-sensitive judgment is no longer hidden inside the base semantic
-  object
-- the system can distinguish reusable semantic units from one-scope
-  assessment decisions
-
-### Step 4: Keep Projection As Projection
-
-Move row generation behind the semantic and scope layers.
-
-Acceptance:
-
-- `ComparisonRowRecord` is generated from semantic units plus scope-level
-  assessment
-- row identity is deterministic
-- row projection stays downstream from the semantic center
-
-## File Scope
-
-Expected primary file ownership:
-
-- `backend/domain/core/evidence_backbone.py`
-- `backend/domain/core/comparison.py`
-- `backend/domain/core/projection.py`
-- `backend/application/core/comparison_service.py`
-
-Likely direct implementation follow-up paths:
-
-- `backend/tests/unit/domains/test_comparison_domain.py`
-- `backend/tests/unit/services/test_paper_facts_services.py`
-- `backend/tests/unit/services/test_core_report_service.py`
-- `backend/tests/unit/services/test_graph_core_projection.py`
+Those belong to the roadmap and child implementation plans.
 
 ## Acceptance Criteria
 
 - paper facts remain the canonical one-document semantic foundation
-- `ComparableResult` becomes the primary comparison-semantic unit
-- `collection_id` is removed from the base comparable-result object
-- collection-scoped assessment is modeled explicitly rather than hidden inside
-  the base object
-- `ComparisonRowRecord` is documented and implemented as a projection
-- row ids and comparable-result ids are derived deterministically
+- `ComparableResult` is the primary comparison-semantic unit
+- `collection_id` is removed from the base semantic comparable-result object
+- collection-scoped assessment is modeled explicitly
+- `ComparisonRowRecord` is documented and implemented as projection
+- comparable-result identity and row identity are deterministic
 - comparison logic is easier to test independently from DataFrame-heavy row
   assembly
 
@@ -566,22 +378,20 @@ Likely direct implementation follow-up paths:
 
 Risks:
 
-- if this plan is over-expanded, it can turn into a repository-wide domain
-  rewrite instead of a narrow comparison-domain correction
+- if this page is widened into an implementation backlog, the stable semantic
+  decision will get buried in rollout details
 - if `collection` semantics stay ambiguous, the codebase will keep mixing
-  document facts, comparison scope, and UI projections
-- if deterministic ids are skipped, rebuilds will continue to destabilize row
-  identity and downstream references
-- if the row remains the semantic center, the backend will keep hiding domain
-  ambiguity inside projection records
+  document facts, comparison scope, and UI projection
+- if deterministic ids are skipped, rebuilds will keep destabilizing downstream
+  references
 
 Guardrails:
 
 - no compatibility wrappers
 - no dual semantic paths
 - no Source-owned stable comparison semantics
-- no random long-term row identity
-- no new generic `services/` junk drawer
+- no random long-term identity for semantic units or rows
+- no generic new service layer justified only by naming
 
 ## Parent, Child, And Companion Relationships
 
@@ -590,27 +400,37 @@ Guardrails:
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
   remains the parent plan for the broader Core-domain backfill.
 
-### Companion Docs
+### Roadmap Doc
 
 - [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
-  records the next engineering roadmap for persistence, identity, policy, read
-  paths, and projection-cache evolution after the semantic-center correction.
+  owns the delivery phases, rollout boundaries, artifact sequencing, read-path
+  cutover order, and child-plan orchestration after this semantic decision.
+
+### Phase 1 Child Plans
+
+- [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
+  breaks out the first storage/artifact wave.
+- [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
+  breaks out the collection-first read-path and row-cache cutover.
+- [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
+  breaks out the physical responsibility split for Phase 1 without adding a
+  generic service layer.
+
+### Companion Docs
+
 - [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
   remains the extraction-contract and semantic-build companion plan.
 - [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
   remains the boundary-cleanup companion plan that keeps backend ids out of the
   LLM contract.
 
-### Follow-Up Scope
-
-If later work introduces database-backed comparable-result storage, explicit
-projection versioning, or multi-scope comparison policies, record those as
-later child plans rather than widening this page into an open-ended comparison
-program.
-
 ## Related Docs
 
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
+- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
+- [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
+- [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
+- [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
 - [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
 - [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
 - [`../../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)

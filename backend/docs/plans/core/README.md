@@ -33,6 +33,15 @@ domain-semantic backfill.
 - [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
   Child roadmap plan for persistence, identity, policy, read-path, and
   projection-cache evolution after the comparable-result model decision
+- [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
+  Phase 1 child plan for introducing `comparable_results` and
+  `collection_comparable_results` as explicit Core artifacts
+- [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
+  Phase 1 child plan for making the collection-first comparison read path
+  explicitly consume semantic and scope artifacts
+- [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
+  Phase 1 child plan for clarifying assembly, assessment, projection, and
+  orchestration ownership without adding a generic new service layer
 
 ## Boundary Rule
 

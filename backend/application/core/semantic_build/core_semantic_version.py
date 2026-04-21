@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 
-CURRENT_CORE_SEMANTIC_VERSION = "paper_facts_v2"
+CURRENT_CORE_SEMANTIC_VERSION = "paper_facts_v3"
 CORE_SEMANTIC_MANIFEST_FILE = "core_semantic_manifest.json"
 CORE_SEMANTIC_ARTIFACT_FILES = (
     "document_profiles.parquet",
@@ -17,6 +17,8 @@ CORE_SEMANTIC_ARTIFACT_FILES = (
     "baseline_references.parquet",
     "sample_variants.parquet",
     "measurement_results.parquet",
+    "comparable_results.parquet",
+    "collection_comparable_results.parquet",
     "comparison_rows.parquet",
 )
 _STRUCTURAL_INPUT_FILES = (

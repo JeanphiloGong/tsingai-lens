@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
+    CollectionComparableResult,
     ComparableResult,
+    ComparisonAssessment,
     ComparisonAxis,
     ComparisonRowRecord,
     ContextBinding,
@@ -197,3 +199,46 @@ def test_comparable_result_id_is_stable_for_identical_semantic_payloads() -> Non
 
     assert first == second
     assert first.startswith("cres_")
+
+
+def test_comparable_result_round_trips_through_record_payload() -> None:
+    comparable_result = _build_comparable_result(
+        structure_feature_ids=("feat-1", "feat-2"),
+        characterization_observation_ids=("obs-1", "obs-2"),
+    )
+
+    restored = ComparableResult.from_mapping(comparable_result.to_record())
+
+    assert restored == comparable_result
+
+
+def test_collection_comparable_result_round_trips_through_record_payload() -> None:
+    comparable_result = _build_comparable_result()
+    assessment = evaluate_comparison_assessment(comparable_result)
+    scoped_result = CollectionComparableResult(
+        collection_id="col-1",
+        comparable_result_id=comparable_result.comparable_result_id,
+        assessment=assessment,
+        epistemic_status=assessment.assessment_epistemic_status,
+        included=True,
+        sort_order=3,
+    )
+
+    restored = CollectionComparableResult.from_mapping(scoped_result.to_record())
+
+    assert restored == scoped_result
+
+
+def test_comparison_assessment_round_trips_through_record_payload() -> None:
+    assessment = ComparisonAssessment(
+        missing_critical_context=("baseline_reference",),
+        comparability_basis=("variant_linked",),
+        comparability_warnings=("Baseline reference is missing or unresolved.",),
+        comparability_status=COMPARABILITY_STATUS_LIMITED,
+        requires_expert_review=True,
+        assessment_epistemic_status=EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE,
+    )
+
+    restored = ComparisonAssessment.from_mapping(assessment.to_record())
+
+    assert restored == assessment

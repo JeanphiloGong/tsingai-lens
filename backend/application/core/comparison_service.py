@@ -38,6 +38,8 @@ from infra.persistence.backbone_codec import (
 logger = logging.getLogger(__name__)
 
 
+_COMPARABLE_RESULTS_FILE = "comparable_results.parquet"
+_COLLECTION_COMPARABLE_RESULTS_FILE = "collection_comparable_results.parquet"
 _COMPARISON_ROWS_FILE = "comparison_rows.parquet"
 _SAMPLE_VARIANTS_FILE = "sample_variants.parquet"
 _MEASUREMENT_RESULTS_FILE = "measurement_results.parquet"
@@ -62,6 +64,14 @@ _TEST_CONDITION_JSON_COLUMNS = (
     "evidence_anchor_ids",
 )
 _BASELINE_REFERENCE_JSON_COLUMNS = ("evidence_anchor_ids",)
+_COMPARABLE_RESULT_JSON_COLUMNS = (
+    "binding",
+    "normalized_context",
+    "axis",
+    "value",
+    "evidence",
+)
+_COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS = ("assessment",)
 _COMPARISON_JSON_COLUMNS = (
     "supporting_evidence_ids",
     "supporting_anchor_ids",
@@ -71,6 +81,29 @@ _COMPARISON_JSON_COLUMNS = (
     "comparability_basis",
     "missing_critical_context",
 )
+_COMPARABLE_RESULT_COLUMNS = [
+    "comparable_result_id",
+    "source_result_id",
+    "source_document_id",
+    "binding",
+    "normalized_context",
+    "axis",
+    "value",
+    "evidence",
+    "variant_label",
+    "baseline_reference",
+    "result_source_type",
+    "epistemic_status",
+    "normalization_version",
+]
+_COLLECTION_COMPARABLE_RESULT_COLUMNS = [
+    "collection_id",
+    "comparable_result_id",
+    "assessment",
+    "epistemic_status",
+    "included",
+    "sort_order",
+]
 _COMPARISON_ROW_COLUMNS = [
     "row_id",
     "collection_id",
@@ -121,7 +154,7 @@ class ComparisonRowNotFoundError(FileNotFoundError):
 
 
 class ComparisonService:
-    """Generate and serve collection-scoped comparison row artifacts."""
+    """Generate and serve collection-scoped comparison artifacts."""
 
     def __init__(
         self,
@@ -192,6 +225,34 @@ class ComparisonService:
             rows = self.build_comparison_rows(collection_id, output_dir)
         return self._normalize_rows_table(rows, collection_id)
 
+    def read_comparable_results(self, collection_id: str) -> pd.DataFrame:
+        output_dir = self._resolve_output_dir(collection_id)
+        path = output_dir / _COMPARABLE_RESULTS_FILE
+        if not path.is_file() or (
+            core_semantic_rebuild_required(output_dir)
+            and (output_dir / "documents.parquet").is_file()
+        ):
+            self.build_comparison_rows(collection_id, output_dir)
+        comparable_results = restore_frame_from_storage(
+            pd.read_parquet(output_dir / _COMPARABLE_RESULTS_FILE),
+            _COMPARABLE_RESULT_JSON_COLUMNS,
+        )
+        return self._normalize_comparable_results_table(comparable_results)
+
+    def read_collection_comparable_results(self, collection_id: str) -> pd.DataFrame:
+        output_dir = self._resolve_output_dir(collection_id)
+        path = output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE
+        if not path.is_file() or (
+            core_semantic_rebuild_required(output_dir)
+            and (output_dir / "documents.parquet").is_file()
+        ):
+            self.build_comparison_rows(collection_id, output_dir)
+        scoped_results = restore_frame_from_storage(
+            pd.read_parquet(output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE),
+            _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
+        )
+        return self._normalize_collection_comparable_results_table(scoped_results)
+
     def build_comparison_rows(
         self,
         collection_id: str,
@@ -226,6 +287,8 @@ class ComparisonService:
         test_condition_lookup = self._index_by_id(test_conditions, "test_condition_id")
         baseline_lookup = self._index_by_id(baseline_references, "baseline_id")
 
+        comparable_results_by_id: dict[str, ComparableResult] = {}
+        scoped_results_by_id: dict[str, CollectionComparableResult] = {}
         row_records_by_id: dict[str, ComparisonRowRecord] = {}
         for sort_order, (_, result_row) in enumerate(measurement_results.iterrows()):
             comparable_result = self._assemble_comparable_result(
@@ -241,6 +304,22 @@ class ComparisonService:
                 comparable_result=comparable_result,
                 sort_order=sort_order,
             )
+            existing_comparable_result = comparable_results_by_id.get(
+                comparable_result.comparable_result_id
+            )
+            comparable_results_by_id[comparable_result.comparable_result_id] = (
+                self._merge_comparable_results(existing_comparable_result, comparable_result)
+                if existing_comparable_result is not None
+                else comparable_result
+            )
+            existing_scoped_result = scoped_results_by_id.get(
+                comparable_result.comparable_result_id
+            )
+            scoped_results_by_id[comparable_result.comparable_result_id] = (
+                self._merge_collection_comparable_results(existing_scoped_result, scoped_result)
+                if existing_scoped_result is not None
+                else scoped_result
+            )
             row_record = self._project_comparison_row(
                 comparable_result=comparable_result,
                 scoped_result=scoped_result,
@@ -252,7 +331,19 @@ class ComparisonService:
                 else row_record
             )
 
-        table = self._normalize_rows_table(
+        comparable_results_table = self._normalize_comparable_results_table(
+            pd.DataFrame(
+                [record.to_record() for record in comparable_results_by_id.values()],
+                columns=_COMPARABLE_RESULT_COLUMNS,
+            )
+        )
+        collection_comparable_results_table = self._normalize_collection_comparable_results_table(
+            pd.DataFrame(
+                [record.to_record() for record in scoped_results_by_id.values()],
+                columns=_COLLECTION_COMPARABLE_RESULT_COLUMNS,
+            )
+        )
+        row_table = self._normalize_rows_table(
             pd.DataFrame(
                 [record.to_record() for record in row_records_by_id.values()],
                 columns=_COMPARISON_ROW_COLUMNS,
@@ -264,7 +355,7 @@ class ComparisonService:
                 "Comparison assembly produced zero rows because upstream measurement_results were empty collection_id=%s",
                 collection_id,
             )
-        elif table.empty:
+        elif row_table.empty:
             logger.warning(
                 "Comparison assembly produced zero rows after filtering collection_id=%s measurement_results=%s",
                 collection_id,
@@ -272,17 +363,27 @@ class ComparisonService:
             )
         base_dir.mkdir(parents=True, exist_ok=True)
         prepare_frame_for_storage(
-            table,
+            comparable_results_table,
+            _COMPARABLE_RESULT_JSON_COLUMNS,
+        ).to_parquet(base_dir / _COMPARABLE_RESULTS_FILE, index=False)
+        prepare_frame_for_storage(
+            collection_comparable_results_table,
+            _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
+        ).to_parquet(base_dir / _COLLECTION_COMPARABLE_RESULTS_FILE, index=False)
+        prepare_frame_for_storage(
+            row_table,
             _COMPARISON_JSON_COLUMNS,
         ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
         write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
-            "Comparison assembly finished collection_id=%s comparison_rows=%s",
+            "Comparison assembly finished collection_id=%s comparable_results=%s collection_comparable_results=%s comparison_rows=%s",
             collection_id,
-            len(table),
+            len(comparable_results_table),
+            len(collection_comparable_results_table),
+            len(row_table),
         )
-        return table
+        return row_table
 
     def _load_comparison_inputs(
         self,
@@ -613,6 +714,90 @@ class ComparisonService:
             unit=existing.unit,
         )
 
+    def _merge_comparable_results(
+        self,
+        existing: ComparableResult,
+        incoming: ComparableResult,
+    ) -> ComparableResult:
+        return ComparableResult(
+            comparable_result_id=existing.comparable_result_id,
+            source_result_id=existing.source_result_id or incoming.source_result_id,
+            source_document_id=existing.source_document_id or incoming.source_document_id,
+            binding=existing.binding,
+            normalized_context=existing.normalized_context,
+            axis=existing.axis,
+            value=existing.value,
+            evidence=EvidenceTrace(
+                direct_anchor_ids=tuple(
+                    self._dedupe_strings(
+                        [
+                            *existing.evidence.direct_anchor_ids,
+                            *incoming.evidence.direct_anchor_ids,
+                        ]
+                    )
+                ),
+                contextual_anchor_ids=tuple(
+                    self._dedupe_strings(
+                        [
+                            *existing.evidence.contextual_anchor_ids,
+                            *incoming.evidence.contextual_anchor_ids,
+                        ]
+                    )
+                ),
+                evidence_ids=tuple(
+                    self._dedupe_strings(
+                        [
+                            *existing.evidence.evidence_ids,
+                            *incoming.evidence.evidence_ids,
+                        ]
+                    )
+                ),
+                structure_feature_ids=tuple(
+                    self._dedupe_strings(
+                        [
+                            *existing.evidence.structure_feature_ids,
+                            *incoming.evidence.structure_feature_ids,
+                        ]
+                    )
+                ),
+                characterization_observation_ids=tuple(
+                    self._dedupe_strings(
+                        [
+                            *existing.evidence.characterization_observation_ids,
+                            *incoming.evidence.characterization_observation_ids,
+                        ]
+                    )
+                ),
+                traceability_status=existing.evidence.traceability_status,
+            ),
+            variant_label=existing.variant_label or incoming.variant_label,
+            baseline_reference=existing.baseline_reference or incoming.baseline_reference,
+            result_source_type=existing.result_source_type or incoming.result_source_type,
+            epistemic_status=existing.epistemic_status or incoming.epistemic_status,
+            normalization_version=existing.normalization_version or incoming.normalization_version,
+        )
+
+    def _merge_collection_comparable_results(
+        self,
+        existing: CollectionComparableResult,
+        incoming: CollectionComparableResult,
+    ) -> CollectionComparableResult:
+        sort_order: int | None
+        if existing.sort_order is None:
+            sort_order = incoming.sort_order
+        elif incoming.sort_order is None:
+            sort_order = existing.sort_order
+        else:
+            sort_order = min(existing.sort_order, incoming.sort_order)
+        return CollectionComparableResult(
+            collection_id=existing.collection_id,
+            comparable_result_id=existing.comparable_result_id,
+            assessment=existing.assessment,
+            epistemic_status=existing.epistemic_status or incoming.epistemic_status,
+            included=existing.included or incoming.included,
+            sort_order=sort_order,
+        )
+
     def _summarize_result(
         self,
         *,
@@ -759,6 +944,37 @@ class ComparisonService:
             for _, row in normalized.iterrows()
         ]
         return pd.DataFrame(records, columns=_COMPARISON_ROW_COLUMNS)
+
+    def _normalize_comparable_results_table(self, results: pd.DataFrame) -> pd.DataFrame:
+        if results is None or results.empty:
+            return pd.DataFrame(columns=_COMPARABLE_RESULT_COLUMNS)
+
+        normalized = results.copy()
+        for column in _COMPARABLE_RESULT_COLUMNS:
+            if column not in normalized.columns:
+                normalized[column] = None
+        records = [
+            ComparableResult.from_mapping(dict(row)).to_record()
+            for _, row in normalized.iterrows()
+        ]
+        return pd.DataFrame(records, columns=_COMPARABLE_RESULT_COLUMNS)
+
+    def _normalize_collection_comparable_results_table(
+        self,
+        results: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if results is None or results.empty:
+            return pd.DataFrame(columns=_COLLECTION_COMPARABLE_RESULT_COLUMNS)
+
+        normalized = results.copy()
+        for column in _COLLECTION_COMPARABLE_RESULT_COLUMNS:
+            if column not in normalized.columns:
+                normalized[column] = None
+        records = [
+            CollectionComparableResult.from_mapping(dict(row)).to_record()
+            for _, row in normalized.iterrows()
+        ]
+        return pd.DataFrame(records, columns=_COLLECTION_COMPARABLE_RESULT_COLUMNS)
 
     def _filter_rows(
         self,

@@ -85,6 +85,119 @@ class ComparableResult:
     epistemic_status: str
     normalization_version: str
 
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ComparableResult":
+        binding = _normalize_mapping(payload.get("binding"))
+        normalized_context = _normalize_mapping(payload.get("normalized_context"))
+        axis = _normalize_mapping(payload.get("axis"))
+        value = _normalize_mapping(payload.get("value"))
+        evidence = _normalize_mapping(payload.get("evidence"))
+        return cls(
+            comparable_result_id=_normalize_text(payload.get("comparable_result_id")) or "",
+            source_result_id=_normalize_text(payload.get("source_result_id")) or "",
+            source_document_id=_normalize_text(payload.get("source_document_id")) or "",
+            binding=ContextBinding(
+                variant_id=_normalize_text(binding.get("variant_id")),
+                baseline_id=_normalize_text(binding.get("baseline_id")),
+                test_condition_id=_normalize_text(binding.get("test_condition_id")),
+            ),
+            normalized_context=NormalizedComparisonContext(
+                material_system_normalized=_normalize_text(
+                    normalized_context.get("material_system_normalized")
+                )
+                or "unspecified material system",
+                process_normalized=_normalize_text(normalized_context.get("process_normalized")),
+                baseline_normalized=_normalize_text(normalized_context.get("baseline_normalized")),
+                test_condition_normalized=_normalize_text(
+                    normalized_context.get("test_condition_normalized")
+                ),
+            ),
+            axis=ComparisonAxis(
+                axis_name=_normalize_text(axis.get("axis_name")),
+                axis_value=_normalize_scalar_or_text(axis.get("axis_value")),
+                axis_unit=_normalize_text(axis.get("axis_unit")),
+            ),
+            value=ResultValue(
+                property_normalized=_normalize_text(value.get("property_normalized"))
+                or "qualitative",
+                result_type=_normalize_text(value.get("result_type")) or "scalar",
+                numeric_value=_normalize_optional_float(value.get("numeric_value")),
+                unit=_normalize_text(value.get("unit")),
+                summary=_normalize_text(value.get("summary")) or "Result reported",
+                statistic_type=_normalize_text(value.get("statistic_type")),
+                uncertainty=_normalize_text(value.get("uncertainty")),
+            ),
+            evidence=EvidenceTrace(
+                direct_anchor_ids=_normalize_string_tuple(evidence.get("direct_anchor_ids")),
+                contextual_anchor_ids=_normalize_string_tuple(
+                    evidence.get("contextual_anchor_ids")
+                ),
+                evidence_ids=_normalize_string_tuple(evidence.get("evidence_ids")),
+                structure_feature_ids=_normalize_string_tuple(
+                    evidence.get("structure_feature_ids")
+                ),
+                characterization_observation_ids=_normalize_string_tuple(
+                    evidence.get("characterization_observation_ids")
+                ),
+                traceability_status=_normalize_text(evidence.get("traceability_status"))
+                or TRACEABILITY_STATUS_MISSING,
+            ),
+            variant_label=_normalize_text(payload.get("variant_label")),
+            baseline_reference=_normalize_text(payload.get("baseline_reference")),
+            result_source_type=_normalize_text(payload.get("result_source_type")),
+            epistemic_status=_normalize_text(payload.get("epistemic_status"))
+            or EPISTEMIC_UNRESOLVED,
+            normalization_version=_normalize_text(payload.get("normalization_version"))
+            or COMPARABLE_RESULT_NORMALIZATION_VERSION,
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "comparable_result_id": self.comparable_result_id,
+            "source_result_id": self.source_result_id,
+            "source_document_id": self.source_document_id,
+            "binding": {
+                "variant_id": self.binding.variant_id,
+                "baseline_id": self.binding.baseline_id,
+                "test_condition_id": self.binding.test_condition_id,
+            },
+            "normalized_context": {
+                "material_system_normalized": self.normalized_context.material_system_normalized,
+                "process_normalized": self.normalized_context.process_normalized,
+                "baseline_normalized": self.normalized_context.baseline_normalized,
+                "test_condition_normalized": self.normalized_context.test_condition_normalized,
+            },
+            "axis": {
+                "axis_name": self.axis.axis_name,
+                "axis_value": self.axis.axis_value,
+                "axis_unit": self.axis.axis_unit,
+            },
+            "value": {
+                "property_normalized": self.value.property_normalized,
+                "result_type": self.value.result_type,
+                "numeric_value": self.value.numeric_value,
+                "unit": self.value.unit,
+                "summary": self.value.summary,
+                "statistic_type": self.value.statistic_type,
+                "uncertainty": self.value.uncertainty,
+            },
+            "evidence": {
+                "direct_anchor_ids": list(self.evidence.direct_anchor_ids),
+                "contextual_anchor_ids": list(self.evidence.contextual_anchor_ids),
+                "evidence_ids": list(self.evidence.evidence_ids),
+                "structure_feature_ids": list(self.evidence.structure_feature_ids),
+                "characterization_observation_ids": list(
+                    self.evidence.characterization_observation_ids
+                ),
+                "traceability_status": self.evidence.traceability_status,
+            },
+            "variant_label": self.variant_label,
+            "baseline_reference": self.baseline_reference,
+            "result_source_type": self.result_source_type,
+            "epistemic_status": self.epistemic_status,
+            "normalization_version": self.normalization_version,
+        }
+
 
 @dataclass(frozen=True)
 class ComparisonAssessment:
@@ -95,7 +208,29 @@ class ComparisonAssessment:
     requires_expert_review: bool
     assessment_epistemic_status: str
 
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ComparisonAssessment":
+        return cls(
+            missing_critical_context=_normalize_string_tuple(
+                payload.get("missing_critical_context")
+            ),
+            comparability_basis=_normalize_string_tuple(payload.get("comparability_basis")),
+            comparability_warnings=_normalize_string_tuple(
+                payload.get("comparability_warnings")
+            ),
+            comparability_status=_normalize_text(payload.get("comparability_status"))
+            or COMPARABILITY_STATUS_LIMITED,
+            requires_expert_review=_normalize_bool(payload.get("requires_expert_review")),
+            assessment_epistemic_status=_normalize_text(
+                payload.get("assessment_epistemic_status")
+            )
+            or EPISTEMIC_UNRESOLVED,
+        )
+
     def to_payload(self) -> dict[str, Any]:
+        return self.to_record()
+
+    def to_record(self) -> dict[str, Any]:
         return {
             "missing_critical_context": list(self.missing_critical_context),
             "comparability_basis": list(self.comparability_basis),
@@ -114,6 +249,30 @@ class CollectionComparableResult:
     epistemic_status: str
     included: bool
     sort_order: int | None = None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "CollectionComparableResult":
+        return cls(
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            comparable_result_id=_normalize_text(payload.get("comparable_result_id")) or "",
+            assessment=ComparisonAssessment.from_mapping(
+                _normalize_mapping(payload.get("assessment"))
+            ),
+            epistemic_status=_normalize_text(payload.get("epistemic_status"))
+            or EPISTEMIC_UNRESOLVED,
+            included=_normalize_bool(payload.get("included")),
+            sort_order=_normalize_optional_int(payload.get("sort_order")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "collection_id": self.collection_id,
+            "comparable_result_id": self.comparable_result_id,
+            "assessment": self.assessment.to_record(),
+            "epistemic_status": self.epistemic_status,
+            "included": self.included,
+            "sort_order": self.sort_order,
+        }
 
 
 @dataclass(frozen=True)
@@ -507,6 +666,34 @@ def _normalize_scalar_or_text(value: Any) -> str | float | int | None:
         return value
     text = _normalize_text(value)
     return text
+
+
+def _normalize_optional_int(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_mapping(value: Any) -> Mapping[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = json.loads(text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return {}
+            if isinstance(parsed, Mapping):
+                return parsed
+    return {}
 
 
 __all__ = [

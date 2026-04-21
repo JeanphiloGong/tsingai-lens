@@ -265,12 +265,18 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
     sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
     measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
+    comparable_results = pd.read_parquet(output_dir / "comparable_results.parquet")
+    collection_comparable_results = pd.read_parquet(
+        output_dir / "collection_comparable_results.parquet"
+    )
     assert not characterization.empty
     assert not method_facts.empty
     assert not evidence_anchors.empty
     assert not baseline_references.empty
     assert not sample_variants.empty
     assert not measurement_results.empty
+    assert not comparable_results.empty
+    assert not collection_comparable_results.empty
     assert "directly_observed" in set(characterization["epistemic_status"])
     if not structure_features.empty:
         assert "inferred_from_characterization" in set(structure_features["epistemic_status"])
@@ -1169,6 +1175,148 @@ def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
     assert merged.supporting_anchor_ids == ("anchor-1", "anchor-2")
 
 
+def test_comparison_service_persists_semantic_and_scope_artifacts_for_duplicate_results(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    comparison_service = ComparisonService(
+        collection_service=collection_service,
+        artifact_registry_service=artifact_registry,
+    )
+    collection = collection_service.create_collection("Duplicate Comparable Result Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    measurement_results = pd.DataFrame(
+        [
+            {
+                "result_id": "res-1",
+                "document_id": "paper-1",
+                "variant_id": "var-1",
+                "property_normalized": "flexural_strength",
+                "result_type": "scalar",
+                "value_payload": {
+                    "value": 97.0,
+                    "statement": "Flexural strength increased to 97 MPa.",
+                },
+                "unit": "MPa",
+                "test_condition_id": "tc-1",
+                "baseline_id": "base-1",
+                "structure_feature_ids": [],
+                "characterization_observation_ids": [],
+                "evidence_anchor_ids": ["anchor-1"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+            },
+            {
+                "result_id": "res-2",
+                "document_id": "paper-1",
+                "variant_id": "var-1",
+                "property_normalized": "flexural_strength",
+                "result_type": "scalar",
+                "value_payload": {
+                    "statement": "Flexural strength increased to 97 MPa.",
+                    "value": 97.0,
+                },
+                "unit": "MPa",
+                "test_condition_id": "tc-1",
+                "baseline_id": "base-1",
+                "structure_feature_ids": [],
+                "characterization_observation_ids": [],
+                "evidence_anchor_ids": ["anchor-2"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+            },
+        ]
+    )
+    sample_variants = pd.DataFrame(
+        [
+            {
+                "variant_id": "var-1",
+                "variant_label": "epoxy composite",
+                "variable_axis_type": None,
+                "variable_value": None,
+                "host_material_system": {
+                    "family": "epoxy composite",
+                    "composition": None,
+                },
+                "process_context": {
+                    "temperatures_c": [80.0],
+                    "durations": ["2 h"],
+                    "atmosphere": "Ar",
+                },
+                "source_anchor_ids": [],
+            }
+        ]
+    )
+    test_conditions = pd.DataFrame(
+        [
+            {
+                "test_condition_id": "tc-1",
+                "condition_payload": {
+                    "methods": ["SEM"],
+                    "method": None,
+                },
+                "missing_fields": [],
+                "evidence_anchor_ids": [],
+            }
+        ]
+    )
+    baseline_references = pd.DataFrame(
+        [
+            {
+                "baseline_id": "base-1",
+                "baseline_label": "untreated baseline",
+                "baseline_type": "implicit_within_document_control",
+                "baseline_scope": None,
+                "evidence_anchor_ids": [],
+            }
+        ]
+    )
+
+    monkeypatch.setattr(
+        comparison_service,
+        "_load_comparison_inputs",
+        lambda collection_id, base_dir: {
+            "sample_variants": sample_variants,
+            "measurement_results": measurement_results,
+            "test_conditions": test_conditions,
+            "baseline_references": baseline_references,
+        },
+    )
+
+    comparison_rows = comparison_service.build_comparison_rows(collection_id, output_dir)
+    stored_comparable_results = comparison_service.read_comparable_results(collection_id)
+    stored_scoped_results = comparison_service.read_collection_comparable_results(
+        collection_id
+    )
+
+    assert len(comparison_rows) == 1
+    assert len(stored_comparable_results) == 1
+    assert len(stored_scoped_results) == 1
+    assert stored_comparable_results.iloc[0]["comparable_result_id"].startswith("cres_")
+    assert stored_scoped_results.iloc[0]["comparable_result_id"] == stored_comparable_results.iloc[0][
+        "comparable_result_id"
+    ]
+    assert stored_comparable_results.iloc[0]["evidence"]["evidence_ids"] == [
+        "ev_result_res-1",
+        "ev_result_res-2",
+    ]
+    assert stored_comparable_results.iloc[0]["evidence"]["direct_anchor_ids"] == [
+        "anchor-1",
+        "anchor-2",
+    ]
+    assert (output_dir / "comparable_results.parquet").exists()
+    assert (output_dir / "collection_comparable_results.parquet").exists()
+
+
 def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_path):
     pytest.importorskip("pyarrow")
 
@@ -1240,10 +1388,18 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert not comparisons.empty
 
     stored_evidence = pd.read_parquet(output_dir / "evidence_cards.parquet")
+    stored_comparable_results = pd.read_parquet(output_dir / "comparable_results.parquet")
+    stored_scoped_results = pd.read_parquet(output_dir / "collection_comparable_results.parquet")
     stored_comparisons = pd.read_parquet(output_dir / "comparison_rows.parquet")
     assert isinstance(stored_evidence.iloc[0]["evidence_anchors"], str)
     assert isinstance(stored_evidence.iloc[0]["material_system"], str)
     assert isinstance(stored_evidence.iloc[0]["condition_context"], str)
+    assert isinstance(stored_comparable_results.iloc[0]["binding"], str)
+    assert isinstance(stored_comparable_results.iloc[0]["normalized_context"], str)
+    assert isinstance(stored_comparable_results.iloc[0]["axis"], str)
+    assert isinstance(stored_comparable_results.iloc[0]["value"], str)
+    assert isinstance(stored_comparable_results.iloc[0]["evidence"], str)
+    assert isinstance(stored_scoped_results.iloc[0]["assessment"], str)
     assert isinstance(stored_comparisons.iloc[0]["comparable_result_id"], str)
     assert isinstance(stored_comparisons.iloc[0]["supporting_evidence_ids"], str)
     assert isinstance(stored_comparisons.iloc[0]["supporting_anchor_ids"], str)
@@ -1252,10 +1408,20 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert isinstance(stored_comparisons.iloc[0]["missing_critical_context"], str)
 
     restored_evidence = paper_facts_service.read_evidence_cards(collection_id)
+    restored_comparable_results = comparison_service.read_comparable_results(collection_id)
+    restored_scoped_results = comparison_service.read_collection_comparable_results(
+        collection_id
+    )
     restored_comparisons = comparison_service.read_comparison_rows(collection_id)
     assert isinstance(restored_evidence.iloc[0]["evidence_anchors"], list)
     assert isinstance(restored_evidence.iloc[0]["material_system"], dict)
     assert isinstance(restored_evidence.iloc[0]["condition_context"], dict)
+    assert isinstance(restored_comparable_results.iloc[0]["binding"], dict)
+    assert isinstance(restored_comparable_results.iloc[0]["normalized_context"], dict)
+    assert isinstance(restored_comparable_results.iloc[0]["axis"], dict)
+    assert isinstance(restored_comparable_results.iloc[0]["value"], dict)
+    assert isinstance(restored_comparable_results.iloc[0]["evidence"], dict)
+    assert isinstance(restored_scoped_results.iloc[0]["assessment"], dict)
     assert restored_comparisons.iloc[0]["comparable_result_id"].startswith("cres_")
     assert isinstance(restored_comparisons.iloc[0]["supporting_evidence_ids"], list)
     assert isinstance(restored_comparisons.iloc[0]["supporting_anchor_ids"], list)

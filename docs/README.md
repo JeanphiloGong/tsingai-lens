@@ -59,7 +59,9 @@ Supporting research binaries live under `docs/research/assets/`.
   start at the repo root `README.md`, then read
   [`overview/lens-mission-positioning.md`](overview/lens-mission-positioning.md),
   [`contracts/lens-v1-definition.md`](contracts/lens-v1-definition.md), and
-  [`architecture/lens-v1-architecture-boundary.md`](architecture/lens-v1-architecture-boundary.md)
+  [`architecture/lens-v1-architecture-boundary.md`](architecture/lens-v1-architecture-boundary.md),
+  then
+  [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
 - Shared system understanding:
   start with [`overview/system-overview.md`](overview/system-overview.md), then
   move to the relevant module entry page
@@ -121,6 +123,7 @@ Decisions:
 - [`decisions/rfc-evidence-first-literature-parsing.md`](decisions/rfc-evidence-first-literature-parsing.md)
 - [`decisions/rfc-lens-agent-era-positioning.md`](decisions/rfc-lens-agent-era-positioning.md)
 - [`decisions/rfc-paper-facts-primary-domain-model.md`](decisions/rfc-paper-facts-primary-domain-model.md)
+- [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
 
 Research:
 

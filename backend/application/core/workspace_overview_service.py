@@ -10,7 +10,7 @@ from domain.shared.enums import (
     PROTOCOL_EXTRACTABLE_YES,
 )
 from application.source.collection_service import CollectionService
-from application.core.document_profile_service import (
+from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )

@@ -12,12 +12,12 @@ from domain.core.comparison import (
     evaluate_comparison_assessment,
 )
 from domain.shared.enums import TRACEABILITY_STATUS_MISSING
-from application.core.core_semantic_version import (
+from application.core.semantic_build.core_semantic_version import (
     core_semantic_rebuild_required,
     write_core_semantic_manifest,
 )
 from application.source.collection_service import CollectionService
-from application.core.paper_facts_service import PaperFactsNotReadyError, PaperFactsService
+from application.core.semantic_build.paper_facts_service import PaperFactsNotReadyError, PaperFactsService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from infra.persistence.backbone_codec import (
     normalize_backbone_value,

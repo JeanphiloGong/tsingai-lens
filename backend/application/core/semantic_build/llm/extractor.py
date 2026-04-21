@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.core.llm_extraction_models import (
+from .schemas import (
     StructuredDocumentProfile,
     StructuredExtractionBundle,
 )
-from application.core.llm_extraction_prompts import (
+from .prompts import (
     build_document_profile_prompt,
     build_text_window_extraction_prompt,
     build_table_row_extraction_prompt,

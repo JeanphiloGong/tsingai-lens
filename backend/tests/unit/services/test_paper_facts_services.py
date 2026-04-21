@@ -8,9 +8,9 @@ import pandas as pd
 import pytest
 
 from application.core.comparison_service import ComparisonService
-from application.core.document_profile_service import DocumentProfileService
-from application.core.paper_facts_service import PaperFactsService
-from application.core.llm_extraction_models import (
+from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.semantic_build.llm.schemas import (
     EvidenceAnchorPayload,
     MethodFactPayload,
     StructuredDocumentProfile,
@@ -493,8 +493,8 @@ def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
     pytest.importorskip("pyarrow")
 
     from application.source.collection_service import CollectionService
-    from application.core.document_profile_service import DocumentProfileService
-    from application.core.paper_facts_service import PaperFactsService
+    from application.core.semantic_build.document_profile_service import DocumentProfileService
+    from application.core.semantic_build.paper_facts_service import PaperFactsService
     from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
@@ -552,8 +552,8 @@ def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
 
 def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
     from application.source.collection_service import CollectionService
-    from application.core.document_profile_service import DocumentProfileService
-    from application.core.paper_facts_service import PaperFactsService
+    from application.core.semantic_build.document_profile_service import DocumentProfileService
+    from application.core.semantic_build.paper_facts_service import PaperFactsService
     from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
@@ -692,8 +692,8 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     pytest.importorskip("pyarrow")
 
     from application.source.collection_service import CollectionService
-    from application.core.document_profile_service import DocumentProfileService
-    from application.core.paper_facts_service import PaperFactsService
+    from application.core.semantic_build.document_profile_service import DocumentProfileService
+    from application.core.semantic_build.paper_facts_service import PaperFactsService
     from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")

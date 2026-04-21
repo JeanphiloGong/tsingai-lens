@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from application.core.core_semantic_version import (
+from application.core.semantic_build.core_semantic_version import (
     CURRENT_CORE_SEMANTIC_VERSION,
     core_semantic_rebuild_required,
     write_core_semantic_manifest,

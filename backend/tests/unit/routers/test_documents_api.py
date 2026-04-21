@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover
 
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
-from application.core.document_profile_service import DocumentProfileService
+from application.core.semantic_build.document_profile_service import DocumentProfileService
 from controllers.core import documents as documents_controller
 from infra.source.runtime.source_evidence import build_blocks
 

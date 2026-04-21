@@ -10,16 +10,16 @@ from uuid import uuid4
 
 import pandas as pd
 
-from application.core.core_semantic_version import (
+from .core_semantic_version import (
     core_semantic_rebuild_required,
     purge_stale_core_semantic_artifacts,
     write_core_semantic_manifest,
 )
-from application.core.document_profile_service import (
+from .document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.core.llm_extraction_models import (
+from .llm.schemas import (
     BaselineReferencePayload,
     ConditionContextPayload,
     EvidenceAnchorPayload,
@@ -31,7 +31,7 @@ from application.core.llm_extraction_models import (
     StructuredExtractionBundle,
     TestContextPayload,
 )
-from application.core.llm_structured_extractor import (
+from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
 )

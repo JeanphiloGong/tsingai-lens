@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from application.core.document_profile_service import DocumentProfileService
+from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService

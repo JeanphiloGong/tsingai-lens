@@ -3,12 +3,9 @@
 This package owns the research-fact backbone produced from normalized Source
 artifacts.
 
-- `document_profile_service.py`
-  LLM structured document typing, protocol suitability, and collection summaries
-- `paper_facts_service.py`
-  facts-first extraction and materialization for evidence anchors, method
-  facts, sample/result/condition/baseline facts, plus derived evidence-card
-  projections
+- `semantic_build/`
+  Source-artifact consumption and Core semantic build for document profiles,
+  paper facts, prompt/schema ownership, and Core semantic version invalidation
 - `comparison_service.py`
   deterministic comparison-row generation and comparability evaluation from
   paper facts

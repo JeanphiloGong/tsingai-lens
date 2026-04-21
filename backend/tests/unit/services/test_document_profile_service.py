@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from application.core.document_profile_service import DocumentProfileService
+from application.core.semantic_build.document_profile_service import DocumentProfileService
 from infra.source.runtime.source_evidence import build_blocks
 
 

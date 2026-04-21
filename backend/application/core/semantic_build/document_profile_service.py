@@ -23,12 +23,12 @@ from infra.persistence.backbone_codec import (
     restore_frame_from_storage,
 )
 from application.source.collection_service import CollectionService
-from application.core.core_semantic_version import (
+from .core_semantic_version import (
     core_semantic_rebuild_required,
     purge_stale_core_semantic_artifacts,
     write_core_semantic_manifest,
 )
-from application.core.llm_structured_extractor import (
+from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
 )

@@ -14,8 +14,8 @@ except ImportError:  # pragma: no cover
 
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
-from application.core.document_profile_service import DocumentProfileService
-from application.core.paper_facts_service import PaperFactsService
+from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import evidence as evidence_controller
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 

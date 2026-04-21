@@ -13,6 +13,9 @@ domain-semantic backfill.
 - [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
   Child implementation plan for hard-cutting Core semantic extraction to
   schema-bound LLM parsing
+- [`core-semantic-build-packaging-alignment-plan.md`](core-semantic-build-packaging-alignment-plan.md)
+  Child implementation plan for packaging the Source-to-Core semantic build
+  slice into one explicit Core-owned submodule
 - [`document-profile-lightweight-triage-plan.md`](document-profile-lightweight-triage-plan.md)
   Child plan for narrowing `document_profiles` to lightweight triage with
   enum-stable routing outputs

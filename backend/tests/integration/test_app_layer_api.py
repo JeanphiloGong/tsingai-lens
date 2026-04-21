@@ -268,8 +268,8 @@ def app_client(monkeypatch, tmp_path):
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
     from application.core.comparison_service import ComparisonService
-    from application.core.document_profile_service import DocumentProfileService
-    from application.core.paper_facts_service import PaperFactsService
+    from application.core.semantic_build.document_profile_service import DocumentProfileService
+    from application.core.semantic_build.paper_facts_service import PaperFactsService
     from application.goal.brief_service import GoalService
     from application.source.collection_build_task_runner import CollectionBuildTaskRunner
     from application.source.task_service import TaskService

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from application.core.llm_extraction_models import (
+from application.core.semantic_build.llm.schemas import (
     BaselineReferencePayload,
     EvidenceAnchorPayload,
     ExtractedTestConditionPayload,

@@ -165,7 +165,6 @@ class FakeCoreLLMStructuredExtractor:
             if sentence:
                 method_facts.append(
                     MethodFactPayload(
-                        method_ref="section_process",
                         method_role="process",
                         method_name="sample preparation",
                         method_payload={
@@ -192,7 +191,6 @@ class FakeCoreLLMStructuredExtractor:
             for index, method_name in enumerate(methods, start=1):
                 method_facts.append(
                     MethodFactPayload(
-                        method_ref=f"section_char_{index}",
                         method_role="characterization",
                         method_name=method_name,
                         method_payload={
@@ -214,7 +212,6 @@ class FakeCoreLLMStructuredExtractor:
         if property_sentences:
             sample_variants.append(
                 SampleVariantPayload(
-                    variant_ref="default_variant",
                     variant_label=self._default_variant_label(
                         material_system.get("family"),
                         document_title,
@@ -238,7 +235,6 @@ class FakeCoreLLMStructuredExtractor:
             property_name = self._infer_property(property_sentences[0]) or "qualitative"
             test_conditions.append(
                 ExtractedTestConditionPayload(
-                    test_condition_ref="section_tc",
                     property_type=property_name,
                     condition_payload={
                         "method": methods[0] if len(methods) == 1 else None,
@@ -254,7 +250,6 @@ class FakeCoreLLMStructuredExtractor:
         if property_sentences and baseline_label:
             baseline_references.append(
                 BaselineReferencePayload(
-                    baseline_ref="section_base",
                     baseline_label=baseline_label,
                     confidence=0.8,
                     epistemic_status="normalized_from_evidence",
@@ -269,15 +264,13 @@ class FakeCoreLLMStructuredExtractor:
             result_type, value_payload, unit = parsed
             measurement_results.append(
                 MeasurementResultPayload(
-                    result_ref=f"section_result_{index}",
                     claim_text=sentence,
                     property_normalized=property_name,
                     result_type=result_type,
                     value_payload=value_payload,
                     unit=unit,
-                    variant_ref="default_variant",
-                    test_condition_ref="section_tc" if test_conditions else None,
-                    baseline_ref="section_base" if baseline_references else None,
+                    variant_label=sample_variants[0].variant_label if sample_variants else None,
+                    baseline_label=baseline_label if baseline_references else None,
                     anchors=[
                         EvidenceAnchorPayload(
                             quote=sentence,
@@ -356,7 +349,6 @@ class FakeCoreLLMStructuredExtractor:
         )
         sample_variants = [
             SampleVariantPayload(
-                variant_ref="table_variant",
                 variant_label=variant_label,
                 host_material_system=material_system,
                 composition=material_system.get("composition"),
@@ -371,7 +363,6 @@ class FakeCoreLLMStructuredExtractor:
 
         test_conditions = [
             ExtractedTestConditionPayload(
-                test_condition_ref="table_tc",
                 property_type=property_cells[0][0],
                 condition_payload={
                     "method": methods[0] if len(methods) == 1 else None,
@@ -390,7 +381,6 @@ class FakeCoreLLMStructuredExtractor:
 
         baseline_references = [
             BaselineReferencePayload(
-                baseline_ref="table_base",
                 baseline_label=baseline_label,
                 confidence=0.82,
                 epistemic_status="normalized_from_evidence",
@@ -415,15 +405,13 @@ class FakeCoreLLMStructuredExtractor:
                 result_type = "scalar"
             measurement_results.append(
                 MeasurementResultPayload(
-                    result_ref=f"table_result_{index}",
                     claim_text=f"{variant_label} reported {property_name} of {parsed_value} {unit or ''}".strip(),
                     property_normalized=property_name,
                     result_type=result_type,
                     value_payload=value_payload,
                     unit=unit,
-                    variant_ref="table_variant",
-                    test_condition_ref="table_tc" if test_conditions else None,
-                    baseline_ref="table_base" if baseline_references else None,
+                    variant_label=variant_label,
+                    baseline_label=baseline_label if baseline_references else None,
                     anchors=[
                         EvidenceAnchorPayload(
                             quote=row_summary,

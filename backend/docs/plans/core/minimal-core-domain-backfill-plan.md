@@ -22,6 +22,8 @@ Read this plan with:
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
 - [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
+- [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
+- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
 
 ## Context
 
@@ -147,6 +149,7 @@ backend/domain/
     document_profile.py
     paper_facts.py
     comparison.py
+    projection.py
   source/
     collection.py
     artifact_status.py
@@ -177,7 +180,11 @@ Stable research semantics:
 - `SampleVariant`
 - `MeasurementResult`
 - `EvidenceCardView`
-- `ComparisonRow`
+- `ComparableResult`
+- `CollectionComparableResult`
+- `ComparisonAssessment`
+- `ComparisonRowRecord` only when it is kept explicitly as a projection record
+  rather than as the semantic center
 
 Stable value and judgment semantics:
 
@@ -322,11 +329,20 @@ Acceptance:
 
 Objective:
 
-move comparability and review semantics into `domain/core/comparison.py`.
+move comparison semantics and scope-sensitive review semantics into
+`domain/core/comparison.py`, while keeping row projection downstream from the
+semantic center.
 
 Actions:
 
-- define `ComparisonRow`
+- follow the narrowed comparison child plan recorded in
+  [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
+- define `ComparableResult`
+- define `CollectionComparableResult`
+- define `ComparisonAssessment`
+- if a row record remains in domain ownership, keep it explicitly
+  projection-only in `domain/core/projection.py` or another equally narrow
+  projection home
 - define comparison judgment inputs and outputs
 - move:
   - comparability status rules
@@ -337,6 +353,8 @@ Actions:
 
 Acceptance:
 
+- comparison semantic logic is centered on comparable results rather than on
+  comparison rows
 - comparison judgment logic is testable without DataFrame-heavy setup
 - comparison service focuses on loading inputs, invoking rules, and writing
   outputs
@@ -369,6 +387,7 @@ The expected implementation slices are:
    - `backend/domain/core/document_profile.py`
    - `backend/domain/core/paper_facts.py`
    - `backend/domain/core/comparison.py`
+   - `backend/domain/core/projection.py`
    - later, if justified:
      - `backend/domain/source/collection.py`
      - `backend/domain/source/artifact_status.py`
@@ -438,6 +457,12 @@ This plan follows, but does not replace:
   which made the business-layer split visible in package layout
 - [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
   which established the stronger sample/result Core backbone
+- [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
+  which narrows the comparison slice so `ComparableResult` becomes the semantic
+  center and `ComparisonRowRecord` becomes a projection concern
+- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
+  which turns that corrected comparison model into a persistence, identity,
+  policy, read-path, and projection-cache roadmap
 
 Those plans made the runtime backbone clearer.
 This plan makes the code-level semantic center match that backbone.

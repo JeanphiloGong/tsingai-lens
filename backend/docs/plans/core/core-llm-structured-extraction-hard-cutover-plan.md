@@ -478,6 +478,7 @@ than expanding this page into an open-ended parser program.
 ## Related Docs
 
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
+- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`../backend-wide/goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)

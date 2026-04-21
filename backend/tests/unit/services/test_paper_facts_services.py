@@ -17,6 +17,7 @@ from application.core.semantic_build.paper_facts_service import PaperFactsServic
 from application.core.semantic_build.llm.schemas import (
     EvidenceAnchorPayload,
     MethodFactPayload,
+    SampleVariantPayload,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
 )
@@ -64,7 +65,6 @@ class EvidenceOnlyExtractor:
         return StructuredExtractionBundle(
             method_facts=[
                 MethodFactPayload(
-                    method_ref="process_1",
                     method_role="process",
                     method_name="sample preparation",
                     method_payload={"details": "Process conditions were reported."},
@@ -104,7 +104,19 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
         },
     )
     _, text_window_prompt = build_text_window_extraction_prompt(text_window_payload)
-    for field in ("document_id", "window_id", "text_unit_ids", "block_ids", "table_id", "row_index"):
+    for field in (
+        "document_id",
+        "window_id",
+        "text_unit_ids",
+        "block_ids",
+        "table_id",
+        "row_index",
+        "method_ref",
+        "variant_ref",
+        "test_condition_ref",
+        "baseline_ref",
+        "result_ref",
+    ):
         assert f'"{field}"' not in text_window_prompt
     assert '"page"' in text_window_prompt
 
@@ -148,7 +160,19 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
         ],
     )
     _, table_row_prompt = build_table_row_extraction_prompt(table_row_payload)
-    for field in ("document_id", "window_id", "text_unit_ids", "block_ids", "table_id", "row_index"):
+    for field in (
+        "document_id",
+        "window_id",
+        "text_unit_ids",
+        "block_ids",
+        "table_id",
+        "row_index",
+        "method_ref",
+        "variant_ref",
+        "test_condition_ref",
+        "baseline_ref",
+        "result_ref",
+    ):
         assert f'"{field}"' not in table_row_prompt
     assert '"page"' in table_row_prompt
 
@@ -228,6 +252,7 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     assert len(evidence) >= 2
     assert set(evidence["claim_type"]) >= {"process", "characterization", "property"}
     assert not comparisons.empty
+    assert "comparable_result_id" in comparisons.columns
     assert "comparability_status" in comparisons.columns
     assert "limited" in set(comparisons["comparability_status"]) or "comparable" in set(
         comparisons["comparability_status"]
@@ -476,6 +501,153 @@ def test_evidence_service_logs_warning_when_measurements_are_empty(monkeypatch, 
     )
 
 
+def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class SemanticLinkExtractor:
+        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                protocol_extractable="yes",
+                protocol_extractability_signals=[],
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+            text_window = payload.get("text_window") or {}
+            quote = "A0 reached 950 MPa while A1 reached 1010 MPa relative to A0."
+            if quote not in str(text_window.get("text") or ""):
+                return StructuredExtractionBundle()
+            return StructuredExtractionBundle(
+                sample_variants=[
+                    SampleVariantPayload(
+                        variant_label="A0",
+                        host_material_system={"family": "Ti alloy", "composition": None},
+                        confidence=0.8,
+                    ),
+                    SampleVariantPayload(
+                        variant_label="A1",
+                        host_material_system={"family": "Ti alloy", "composition": None},
+                        confidence=0.8,
+                    ),
+                ],
+                test_conditions=[
+                    {
+                        "property_type": "tensile_strength",
+                        "condition_payload": {"method": "tensile test", "methods": ["tensile test"]},
+                        "confidence": 0.8,
+                    }
+                ],
+                baseline_references=[
+                    {
+                        "baseline_label": "A0",
+                        "confidence": 0.8,
+                    }
+                ],
+                measurement_results=[
+                    {
+                        "claim_text": "A0 reached 950 MPa relative to A0.",
+                        "property_normalized": "tensile_strength",
+                        "result_type": "scalar",
+                        "value_payload": {"value": 950, "statement": "A0 reached 950 MPa."},
+                        "unit": "MPa",
+                        "variant_label": "A0",
+                        "baseline_label": "A0",
+                        "anchors": [{"quote": quote, "source_type": "text"}],
+                        "confidence": 0.84,
+                    },
+                    {
+                        "claim_text": "A1 reached 1010 MPa relative to A0.",
+                        "property_normalized": "tensile_strength",
+                        "result_type": "scalar",
+                        "value_payload": {"value": 1010, "statement": "A1 reached 1010 MPa."},
+                        "unit": "MPa",
+                        "variant_label": "A1",
+                        "baseline_label": "A0",
+                        "anchors": [{"quote": quote, "source_type": "text"}],
+                        "confidence": 0.84,
+                    },
+                ],
+            )
+
+        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
+            return StructuredExtractionBundle()
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = SemanticLinkExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+
+    collection = collection_service.create_collection("Semantic Link Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Semantic Link Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "A0 reached 950 MPa while A1 reached 1010 MPa relative to A0.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "A0 reached 950 MPa while A1 reached 1010 MPa relative to A0.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    paper_facts_service.build_evidence_cards(collection_id, output_dir)
+
+    sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
+    test_conditions = pd.read_parquet(output_dir / "test_conditions.parquet")
+    baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
+    measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
+
+    variant_lookup = {
+        row["variant_label"]: row["variant_id"]
+        for _, row in sample_variants.iterrows()
+    }
+    assert set(variant_lookup) == {"A0", "A1"}
+    assert len(test_conditions) == 1
+    assert len(baseline_references) == 1
+    assert len(measurement_results) == 2
+    assert set(measurement_results["variant_id"]) == {
+        variant_lookup["A0"],
+        variant_lookup["A1"],
+    }
+    assert measurement_results["test_condition_id"].nunique() == 1
+    assert measurement_results["baseline_id"].nunique() == 1
+
+
 def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
@@ -500,7 +672,6 @@ def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatc
             return StructuredExtractionBundle(
                 method_facts=[
                     MethodFactPayload(
-                        method_ref="process_1",
                         method_role="process",
                         method_name="sample preparation",
                         method_payload={"details": quote},
@@ -783,8 +954,7 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
         paper_facts_service,
     )
 
-    row = comparison_service._build_row_from_result(
-        collection_id="col-1",
+    comparable_result = comparison_service._assemble_comparable_result(
         result_row=pd.Series(
             {
                 "result_id": "res-1",
@@ -839,13 +1009,25 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
             }
         },
     )
+    assert comparable_result is not None
+    scoped_result = comparison_service._build_collection_comparable_result(
+        collection_id="col-1",
+        comparable_result=comparable_result,
+        sort_order=0,
+    )
+    row = comparison_service._project_comparison_row(
+        comparable_result=comparable_result,
+        scoped_result=scoped_result,
+    )
 
-    assert row["process_normalized"] == "80 C, 2 h, under Ar"
-    assert row["baseline_normalized"] == "untreated baseline"
-    assert row["test_condition_normalized"] == "SEM"
-    assert row["comparability_status"] == "comparable"
-    assert row["supporting_evidence_ids"] == ["ev_result_res-1"]
-    assert row["comparability_basis"] == [
+    assert row.row_id.startswith("cmp_")
+    assert row.comparable_result_id.startswith("cres_")
+    assert row.process_normalized == "80 C, 2 h, under Ar"
+    assert row.baseline_normalized == "untreated baseline"
+    assert row.test_condition_normalized == "SEM"
+    assert row.comparability_status == "comparable"
+    assert row.supporting_evidence_ids == ("ev_result_res-1",)
+    assert list(row.comparability_basis) == [
         "variant_linked",
         "baseline_resolved",
         "test_condition_resolved",
@@ -853,7 +1035,138 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
         "numeric_value_available",
         "result_type:scalar",
     ]
-    assert row["assessment_epistemic_status"] == "normalized_from_evidence"
+    assert row.assessment_epistemic_status == "normalized_from_evidence"
+
+
+def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
+    from application.source.collection_service import CollectionService
+    from application.source.artifact_registry_service import ArtifactRegistryService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        DocumentProfileService(collection_service, artifact_registry),
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        artifact_registry,
+        paper_facts_service,
+    )
+
+    sample_lookup = {
+        "var-1": {
+            "variant_id": "var-1",
+            "variant_label": "epoxy composite",
+            "variable_axis_type": None,
+            "variable_value": None,
+            "host_material_system": {
+                "family": "epoxy composite",
+                "composition": None,
+            },
+            "process_context": {
+                "temperatures_c": np.array([80.0]),
+                "durations": np.array(["2 h"], dtype=object),
+                "atmosphere": "Ar",
+            },
+        }
+    }
+    test_condition_lookup = {
+        "tc-1": {
+            "test_condition_id": "tc-1",
+            "condition_payload": {
+                "methods": np.array(["SEM"], dtype=object),
+                "method": None,
+            },
+        }
+    }
+    baseline_lookup = {
+        "base-1": {
+            "baseline_id": "base-1",
+            "baseline_label": "untreated baseline",
+        }
+    }
+
+    first = comparison_service._assemble_comparable_result(
+        result_row=pd.Series(
+            {
+                "result_id": "res-1",
+                "document_id": "paper-1",
+                "variant_id": "var-1",
+                "property_normalized": "flexural_strength",
+                "result_type": "scalar",
+                "value_payload": {
+                    "value": 97.0,
+                    "statement": "Flexural strength increased to 97 MPa.",
+                },
+                "unit": "MPa",
+                "test_condition_id": "tc-1",
+                "baseline_id": "base-1",
+                "structure_feature_ids": [],
+                "characterization_observation_ids": [],
+                "evidence_anchor_ids": ["anchor-1"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+            }
+        ),
+        sample_lookup=sample_lookup,
+        test_condition_lookup=test_condition_lookup,
+        baseline_lookup=baseline_lookup,
+    )
+    second = comparison_service._assemble_comparable_result(
+        result_row=pd.Series(
+            {
+                "result_id": "res-2",
+                "document_id": "paper-1",
+                "variant_id": "var-1",
+                "property_normalized": "flexural_strength",
+                "result_type": "scalar",
+                "value_payload": {
+                    "statement": "Flexural strength increased to 97 MPa.",
+                    "value": 97.0,
+                },
+                "unit": "MPa",
+                "test_condition_id": "tc-1",
+                "baseline_id": "base-1",
+                "structure_feature_ids": [],
+                "characterization_observation_ids": [],
+                "evidence_anchor_ids": ["anchor-2"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+            }
+        ),
+        sample_lookup=sample_lookup,
+        test_condition_lookup=test_condition_lookup,
+        baseline_lookup=baseline_lookup,
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.comparable_result_id == second.comparable_result_id
+
+    first_row = comparison_service._project_comparison_row(
+        comparable_result=first,
+        scoped_result=comparison_service._build_collection_comparable_result(
+            collection_id="col-1",
+            comparable_result=first,
+            sort_order=0,
+        ),
+    )
+    second_row = comparison_service._project_comparison_row(
+        comparable_result=second,
+        scoped_result=comparison_service._build_collection_comparable_result(
+            collection_id="col-1",
+            comparable_result=second,
+            sort_order=1,
+        ),
+    )
+
+    merged = comparison_service._merge_row_records(first_row, second_row)
+
+    assert first_row.row_id == second_row.row_id
+    assert merged.supporting_evidence_ids == ("ev_result_res-1", "ev_result_res-2")
+    assert merged.supporting_anchor_ids == ("anchor-1", "anchor-2")
 
 
 def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_path):
@@ -931,6 +1244,7 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert isinstance(stored_evidence.iloc[0]["evidence_anchors"], str)
     assert isinstance(stored_evidence.iloc[0]["material_system"], str)
     assert isinstance(stored_evidence.iloc[0]["condition_context"], str)
+    assert isinstance(stored_comparisons.iloc[0]["comparable_result_id"], str)
     assert isinstance(stored_comparisons.iloc[0]["supporting_evidence_ids"], str)
     assert isinstance(stored_comparisons.iloc[0]["supporting_anchor_ids"], str)
     assert isinstance(stored_comparisons.iloc[0]["comparability_warnings"], str)
@@ -942,6 +1256,7 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     assert isinstance(restored_evidence.iloc[0]["evidence_anchors"], list)
     assert isinstance(restored_evidence.iloc[0]["material_system"], dict)
     assert isinstance(restored_evidence.iloc[0]["condition_context"], dict)
+    assert restored_comparisons.iloc[0]["comparable_result_id"].startswith("cres_")
     assert isinstance(restored_comparisons.iloc[0]["supporting_evidence_ids"], list)
     assert isinstance(restored_comparisons.iloc[0]["supporting_anchor_ids"], list)
     assert isinstance(restored_comparisons.iloc[0]["comparability_warnings"], list)

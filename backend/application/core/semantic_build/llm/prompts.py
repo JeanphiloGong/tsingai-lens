@@ -16,6 +16,8 @@ Non-negotiable rules:
 - Reject literature-summary rows or review-summary rows that are not directly attributable.
 - Preserve anchors needed for downstream traceback using quoted evidence only.
 - Never emit backend-facing ids or locator fields such as `section_id`, `block_id`, `snippet_id`, or `figure_or_table`.
+- Never emit bundle ref fields such as `method_ref`, `variant_ref`, `test_condition_ref`, `baseline_ref`, or `result_ref`.
+- If a result needs to point to a variant or baseline, repeat the human-readable label instead.
 - Prefer fewer, higher-signal outputs over speculative coverage.
 """.strip()
 
@@ -51,7 +53,9 @@ def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, s
         "You may emit method facts, sample variants, test conditions, baseline "
         "references, and measurement results only if they are directly grounded in "
         "this text window. Anchors may include quote, source_type, and page only. "
-        "Do not emit backend locators or ids. Do not emit reader-facing summaries or cards."
+        "Do not emit backend locators, ids, or bundle refs. Use human-readable labels "
+        "instead of refs when a result must identify a variant or baseline. Do not emit "
+        "reader-facing summaries or cards."
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
 
@@ -62,7 +66,8 @@ def build_table_row_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "Use the row and header context only. Skip outputs when the row is a literature "
         "summary rather than a directly attributable study row. Anchors may include "
-        "quote, source_type, and page only. Do not emit backend locators or ids. "
-        "Return facts only, not reader-facing cards."
+        "quote, source_type, and page only. Do not emit backend locators, ids, or "
+        "bundle refs. Use human-readable labels instead of refs when a result must "
+        "identify a variant or baseline. Return facts only, not reader-facing cards."
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt

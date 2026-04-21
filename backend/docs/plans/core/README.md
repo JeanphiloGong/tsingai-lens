@@ -16,6 +16,10 @@ domain-semantic backfill.
 - [`core-semantic-build-packaging-alignment-plan.md`](core-semantic-build-packaging-alignment-plan.md)
   Child implementation plan for packaging the Source-to-Core semantic build
   slice into one explicit Core-owned submodule
+- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
+  Child implementation plan for removing backend/internal identifiers from the
+  Core LLM extraction contract and moving identity resolution back into the
+  backend
 - [`document-profile-lightweight-triage-plan.md`](document-profile-lightweight-triage-plan.md)
   Child plan for narrowing `document_profiles` to lightweight triage with
   enum-stable routing outputs
@@ -23,6 +27,12 @@ domain-semantic backfill.
   Core traceback vertical slice for reviewable evidence grounding
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
   Backfill stable Core research semantics into `backend/domain/`
+- [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
+  Child plan for re-centering comparison semantics on `ComparableResult`,
+  treating collection as scope, and demoting `ComparisonRow` to projection
+- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
+  Child roadmap plan for persistence, identity, policy, read-path, and
+  projection-cache evolution after the comparable-result model decision
 
 ## Boundary Rule
 

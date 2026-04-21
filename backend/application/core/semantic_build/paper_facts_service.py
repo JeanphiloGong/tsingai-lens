@@ -932,9 +932,12 @@ class PaperFactsService:
         measurement_rows: list[dict[str, Any]],
         document_state: dict[str, Any],
     ) -> None:
-        local_variant_ids: dict[str, str] = {}
-        local_test_condition_ids: dict[str, str] = {}
-        local_baseline_ids: dict[str, str] = {}
+        local_variant_records: list[dict[str, Any]] = []
+        local_variant_record_ids: set[str] = set()
+        local_test_condition_records: list[dict[str, Any]] = []
+        local_test_condition_record_ids: set[str] = set()
+        local_baseline_records: list[dict[str, Any]] = []
+        local_baseline_record_ids: set[str] = set()
         bundle_anchor_ids: list[str] = []
 
         for method_fact in bundle.method_facts:
@@ -971,9 +974,12 @@ class PaperFactsService:
                 rows=sample_variant_rows,
                 document_state=document_state,
             )
-            local_variant_ids[variant.variant_ref] = variant_id
             if created:
                 document_state["variant_records_by_id"][variant_id] = created
+            variant_record = created or document_state["variant_records_by_id"].get(variant_id)
+            if variant_record is not None and variant_id not in local_variant_record_ids:
+                local_variant_record_ids.add(variant_id)
+                local_variant_records.append(variant_record)
 
         for condition in bundle.test_conditions:
             condition_id, created = self._materialize_test_condition_row(
@@ -985,9 +991,12 @@ class PaperFactsService:
                 rows=test_condition_rows,
                 document_state=document_state,
             )
-            local_test_condition_ids[condition.test_condition_ref] = condition_id
             if created:
                 document_state["test_condition_records_by_id"][condition_id] = created
+            condition_record = created or document_state["test_condition_records_by_id"].get(condition_id)
+            if condition_record is not None and condition_id not in local_test_condition_record_ids:
+                local_test_condition_record_ids.add(condition_id)
+                local_test_condition_records.append(condition_record)
 
         for baseline in bundle.baseline_references:
             baseline_id, created = self._materialize_baseline_row(
@@ -999,9 +1008,12 @@ class PaperFactsService:
                 rows=baseline_rows,
                 document_state=document_state,
             )
-            local_baseline_ids[baseline.baseline_ref] = baseline_id
             if created:
                 document_state["baseline_records_by_id"][baseline_id] = created
+            baseline_record = created or document_state["baseline_records_by_id"].get(baseline_id)
+            if baseline_record is not None and baseline_id not in local_baseline_record_ids:
+                local_baseline_record_ids.add(baseline_id)
+                local_baseline_records.append(baseline_record)
 
         for result in bundle.measurement_results:
             anchors = self._materialize_anchor_payloads(
@@ -1016,17 +1028,17 @@ class PaperFactsService:
             bundle_anchor_ids.extend(
                 anchor_id for anchor_id in anchor_ids if anchor_id not in bundle_anchor_ids
             )
-            linked_variant_id = self._resolve_local_or_single_id(
-                result.variant_ref,
-                local_variant_ids,
+            linked_variant_id = self._resolve_result_variant_id(
+                result,
+                local_variant_records,
             )
-            linked_test_condition_id = self._resolve_local_or_single_id(
-                result.test_condition_ref,
-                local_test_condition_ids,
+            linked_test_condition_id = self._resolve_result_test_condition_id(
+                result,
+                local_test_condition_records,
             )
-            linked_baseline_id = self._resolve_local_or_single_id(
-                result.baseline_ref,
-                local_baseline_ids,
+            linked_baseline_id = self._resolve_result_baseline_id(
+                result,
+                local_baseline_records,
             )
 
             measurement_record = MeasurementResult.from_mapping(
@@ -1072,26 +1084,17 @@ class PaperFactsService:
                 continue
             measurement_rows.append(measurement_record)
 
-        for variant_id in local_variant_ids.values():
-            variant_record = document_state["variant_records_by_id"].get(variant_id)
-            if variant_record is None:
-                continue
+        for variant_record in local_variant_records:
             for anchor_id in bundle_anchor_ids:
                 if anchor_id not in variant_record["source_anchor_ids"]:
                     variant_record["source_anchor_ids"].append(anchor_id)
 
-        for condition_id in local_test_condition_ids.values():
-            condition_record = document_state["test_condition_records_by_id"].get(condition_id)
-            if condition_record is None:
-                continue
+        for condition_record in local_test_condition_records:
             for anchor_id in bundle_anchor_ids:
                 if anchor_id not in condition_record["evidence_anchor_ids"]:
                     condition_record["evidence_anchor_ids"].append(anchor_id)
 
-        for baseline_id in local_baseline_ids.values():
-            baseline_record = document_state["baseline_records_by_id"].get(baseline_id)
-            if baseline_record is None:
-                continue
+        for baseline_record in local_baseline_records:
             for anchor_id in bundle_anchor_ids:
                 if anchor_id not in baseline_record["evidence_anchor_ids"]:
                     baseline_record["evidence_anchor_ids"].append(anchor_id)
@@ -1393,15 +1396,86 @@ class PaperFactsService:
             payload.append(anchor_record)
         return payload
 
-    def _resolve_local_or_single_id(
+    def _resolve_result_variant_id(
         self,
-        reference: str | None,
-        lookup: dict[str, str],
+        result: MeasurementResultPayload,
+        local_variant_records: list[dict[str, Any]],
     ) -> str | None:
-        if reference and lookup.get(reference):
-            return lookup[reference]
-        if len(lookup) == 1:
-            return next(iter(lookup.values()))
+        if len(local_variant_records) == 1:
+            return self._normalize_scalar_text(local_variant_records[0].get("variant_id"))
+
+        label_hint = self._normalize_scalar_text(result.variant_label)
+        if label_hint:
+            matched = [
+                record
+                for record in local_variant_records
+                if self._normalize_scalar_text(record.get("variant_label"))
+                and self._normalize_scalar_text(record.get("variant_label")).lower()
+                == label_hint.lower()
+            ]
+            if len(matched) == 1:
+                return self._normalize_scalar_text(matched[0].get("variant_id"))
+
+        claim_text = str(result.claim_text or "").lower()
+        matched = [
+            record
+            for record in local_variant_records
+            if self._normalize_scalar_text(record.get("variant_label"))
+            and self._normalize_scalar_text(record.get("variant_label")).lower() in claim_text
+        ]
+        if len(matched) == 1:
+            return self._normalize_scalar_text(matched[0].get("variant_id"))
+        return None
+
+    def _resolve_result_test_condition_id(
+        self,
+        result: MeasurementResultPayload,
+        local_test_condition_records: list[dict[str, Any]],
+    ) -> str | None:
+        if len(local_test_condition_records) == 1:
+            return self._normalize_scalar_text(
+                local_test_condition_records[0].get("test_condition_id")
+            )
+
+        property_name = self._normalize_property_name(result.property_normalized)
+        matched = [
+            record
+            for record in local_test_condition_records
+            if self._normalize_property_name(record.get("property_type")) == property_name
+        ]
+        if len(matched) == 1:
+            return self._normalize_scalar_text(matched[0].get("test_condition_id"))
+        return None
+
+    def _resolve_result_baseline_id(
+        self,
+        result: MeasurementResultPayload,
+        local_baseline_records: list[dict[str, Any]],
+    ) -> str | None:
+        if len(local_baseline_records) == 1:
+            return self._normalize_scalar_text(local_baseline_records[0].get("baseline_id"))
+
+        label_hint = self._normalize_scalar_text(result.baseline_label)
+        if label_hint:
+            matched = [
+                record
+                for record in local_baseline_records
+                if self._normalize_scalar_text(record.get("baseline_label"))
+                and self._normalize_scalar_text(record.get("baseline_label")).lower()
+                == label_hint.lower()
+            ]
+            if len(matched) == 1:
+                return self._normalize_scalar_text(matched[0].get("baseline_id"))
+
+        claim_text = str(result.claim_text or "").lower()
+        matched = [
+            record
+            for record in local_baseline_records
+            if self._normalize_scalar_text(record.get("baseline_label"))
+            and self._normalize_scalar_text(record.get("baseline_label")).lower() in claim_text
+        ]
+        if len(matched) == 1:
+            return self._normalize_scalar_text(matched[0].get("baseline_id"))
         return None
 
     def _to_material_payload(self, value: Any) -> Any:

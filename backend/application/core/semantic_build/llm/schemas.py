@@ -50,7 +50,6 @@ class MethodPayloadModel(_StrictModel):
 
 
 class MethodFactPayload(_StrictModel):
-    method_ref: str
     method_role: Literal["process", "characterization", "test"] = "process"
     method_name: str
     method_payload: MethodPayloadModel = Field(default_factory=MethodPayloadModel)
@@ -60,7 +59,6 @@ class MethodFactPayload(_StrictModel):
 
 
 class SampleVariantPayload(_StrictModel):
-    variant_ref: str
     variant_label: str
     host_material_system: MaterialSystemPayload | None = None
     composition: str | None = None
@@ -81,7 +79,6 @@ class TestConditionPayloadModel(_StrictModel):
 
 
 class ExtractedTestConditionPayload(_StrictModel):
-    test_condition_ref: str
     property_type: str
     condition_payload: TestConditionPayloadModel = Field(default_factory=TestConditionPayloadModel)
     confidence: float = 0.0
@@ -89,7 +86,6 @@ class ExtractedTestConditionPayload(_StrictModel):
 
 
 class BaselineReferencePayload(_StrictModel):
-    baseline_ref: str
     baseline_label: str
     confidence: float = 0.0
     epistemic_status: str = "normalized_from_evidence"
@@ -105,15 +101,13 @@ class MeasurementValuePayload(_StrictModel):
 
 
 class MeasurementResultPayload(_StrictModel):
-    result_ref: str
     claim_text: str
     property_normalized: str
     result_type: str
     value_payload: MeasurementValuePayload = Field(default_factory=MeasurementValuePayload)
     unit: str | None = None
-    variant_ref: str | None = None
-    test_condition_ref: str | None = None
-    baseline_ref: str | None = None
+    variant_label: str | None = None
+    baseline_label: str | None = None
     anchors: list[EvidenceAnchorPayload] = Field(default_factory=list)
     confidence: float = 0.0
 

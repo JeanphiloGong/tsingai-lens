@@ -530,7 +530,6 @@ class PaperFactsService:
             for text_window in doc_text_windows:
                 bundle = extractor.extract_text_window_bundle(
                     self._build_text_window_extraction_payload(
-                        document_id=document_id,
                         title=title,
                         source_filename=source_filename,
                         profile=profile,
@@ -572,7 +571,6 @@ class PaperFactsService:
                     row_cells = grouped_row_cells.get((table_id, row_index), [])
                     bundle = extractor.extract_table_row_bundle(
                         self._build_table_row_extraction_payload(
-                            document_id=document_id,
                             title=title,
                             source_filename=source_filename,
                             profile=profile,
@@ -850,14 +848,12 @@ class PaperFactsService:
     def _build_text_window_extraction_payload(
         self,
         *,
-        document_id: str,
         title: str,
         source_filename: str | None,
         profile: dict[str, Any],
         text_window: dict[str, Any],
     ) -> dict[str, Any]:
         return {
-            "document_id": document_id,
             "document_title": title,
             "source_filename": source_filename,
             "document_profile": {
@@ -865,19 +861,16 @@ class PaperFactsService:
                 "protocol_extractable": str(profile.get("protocol_extractable") or ""),
             },
             "text_window": {
-                "window_id": str(text_window.get("window_id") or ""),
                 "heading": self._normalize_scalar_text(text_window.get("heading")),
                 "heading_path": self._normalize_scalar_text(text_window.get("heading_path")),
                 "text": str(text_window.get("text") or "")[:12000],
-                "text_unit_ids": self._normalize_list(text_window.get("text_unit_ids")),
-                "block_ids": self._normalize_list(text_window.get("block_ids")),
+                "page": self._safe_int(text_window.get("page")),
             },
         }
 
     def _build_table_row_extraction_payload(
         self,
         *,
-        document_id: str,
         title: str,
         source_filename: str | None,
         profile: dict[str, Any],
@@ -885,14 +878,11 @@ class PaperFactsService:
         row_cells: list[dict[str, Any]],
         text_windows: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        table_id = str(table_row.get("table_id") or "")
-        row_index = self._safe_int(table_row.get("row_index")) or 0
         supporting_text_windows = self._select_supporting_text_windows(
             text_windows=text_windows,
             table_row=table_row,
         )
         return {
-            "document_id": document_id,
             "document_title": title,
             "source_filename": source_filename,
             "document_profile": {
@@ -900,8 +890,6 @@ class PaperFactsService:
                 "protocol_extractable": str(profile.get("protocol_extractable") or ""),
             },
             "table_row": {
-                "table_id": table_id,
-                "row_index": row_index,
                 "row_summary": self._normalize_scalar_text(table_row.get("row_text"))
                 or self._build_table_row_summary(row_cells),
                 "cells": [
@@ -918,12 +906,10 @@ class PaperFactsService:
             },
             "supporting_text_windows": [
                 {
-                    "window_id": str(window.get("window_id") or ""),
                     "heading": self._normalize_scalar_text(window.get("heading")),
                     "heading_path": self._normalize_scalar_text(window.get("heading_path")),
                     "text": str(window.get("text") or "")[:4000],
-                    "text_unit_ids": self._normalize_list(window.get("text_unit_ids")),
-                    "block_ids": self._normalize_list(window.get("block_ids")),
+                    "page": self._safe_int(window.get("page")),
                 }
                 for window in supporting_text_windows
             ],
@@ -1337,6 +1323,13 @@ class PaperFactsService:
         window_block_ids = self._normalize_list(text_window.get("block_ids")) if text_window else []
         block_id = self._normalize_scalar_text(window_block_ids[0]) if window_block_ids else None
         snippet_ids = self._normalize_list(text_window.get("text_unit_ids")) if text_window else []
+        resolved_section_id = block_id or section_id
+        resolved_snippet_id = snippet_ids[0] if len(snippet_ids) == 1 else None
+        window_text = self._normalize_scalar_text(text_window.get("text")) if text_window else None
+        window_char_range = (
+            self._normalize_char_range_payload(text_window.get("char_range")) if text_window else None
+        )
+        scope_page = self._safe_int(text_window.get("page")) if text_window else None
         for anchor in anchors:
             quote = self._normalize_scalar_text(anchor.quote)
             source_type = (
@@ -1344,19 +1337,29 @@ class PaperFactsService:
                 if str(anchor.source_type or "text") in _EVIDENCE_SOURCE_TYPES
                 else ("table" if table_id else "text")
             )
-            resolved_section_id = self._normalize_scalar_text(anchor.section_id) or section_id
-            resolved_snippet_id = self._normalize_scalar_text(anchor.snippet_id) or (
-                snippet_ids[0] if snippet_ids else None
-            )
-            figure_or_table = self._normalize_scalar_text(anchor.figure_or_table) or table_id
+            page = self._safe_int(anchor.page) or scope_page
+            char_range = None
+            locator_type = "section"
+            locator_confidence = "low"
+            if quote and window_text and window_char_range is not None:
+                local_index = window_text.find(quote)
+                if local_index >= 0:
+                    char_range = {
+                        "start": window_char_range["start"] + local_index,
+                        "end": window_char_range["start"] + local_index + len(quote),
+                    }
+                    locator_type = "char_range"
+                    locator_confidence = "high"
             anchor_key = (
                 document_id,
                 source_type,
                 resolved_section_id,
                 resolved_snippet_id,
-                figure_or_table,
-                self._safe_int(anchor.page),
+                table_id,
+                page,
                 quote,
+                char_range["start"] if char_range is not None else None,
+                char_range["end"] if char_range is not None else None,
             )
             existing_id = document_state["anchor_ids_by_key"].get(anchor_key)
             if existing_id:
@@ -1369,18 +1372,18 @@ class PaperFactsService:
                 {
                     "anchor_id": f"anchor_{uuid4().hex[:12]}",
                     "document_id": document_id,
-                    "locator_type": "section",
-                    "locator_confidence": "low",
+                    "locator_type": locator_type,
+                    "locator_confidence": locator_confidence,
                     "source_type": source_type,
                     "section_id": resolved_section_id,
-                    "char_range": None,
+                    "char_range": char_range,
                     "bbox": None,
-                    "page": self._safe_int(anchor.page),
+                    "page": page,
                     "quote": quote,
                     "deep_link": None,
-                    "block_id": block_id or resolved_section_id,
+                    "block_id": block_id,
                     "snippet_id": resolved_snippet_id,
-                    "figure_or_table": figure_or_table,
+                    "figure_or_table": table_id,
                     "quote_span": quote,
                 }
             ).to_record()

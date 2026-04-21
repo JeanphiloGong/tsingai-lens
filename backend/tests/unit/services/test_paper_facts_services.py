@@ -9,6 +9,10 @@ import pytest
 
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.llm.prompts import (
+    build_table_row_extraction_prompt,
+    build_text_window_extraction_prompt,
+)
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.semantic_build.llm.schemas import (
     EvidenceAnchorPayload,
@@ -57,16 +61,6 @@ class EvidenceOnlyExtractor:
         )
 
     def extract_text_window_bundle(self, payload):  # noqa: ANN001
-        text_window = payload.get("text_window") or {}
-        window_id = str(text_window.get("window_id") or "") or None
-        block_ids = (
-            text_window.get("block_ids") if isinstance(text_window.get("block_ids"), list) else []
-        )
-        text_unit_ids = (
-            text_window.get("text_unit_ids")
-            if isinstance(text_window.get("text_unit_ids"), list)
-            else []
-        )
         return StructuredExtractionBundle(
             method_facts=[
                 MethodFactPayload(
@@ -78,9 +72,6 @@ class EvidenceOnlyExtractor:
                         EvidenceAnchorPayload(
                             quote="Process conditions were reported.",
                             source_type="text",
-                            section_id=window_id,
-                            block_id=str(block_ids[0]) if block_ids else None,
-                            snippet_id=text_unit_ids[0] if text_unit_ids else None,
                         )
                     ],
                     confidence=0.7,
@@ -90,6 +81,76 @@ class EvidenceOnlyExtractor:
 
     def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
         return StructuredExtractionBundle()
+
+
+def test_paper_facts_prompt_payloads_exclude_internal_ids():
+    service = PaperFactsService()
+
+    text_window_payload = service._build_text_window_extraction_payload(
+        title="Prompt Boundary Paper",
+        source_filename="prompt-boundary.pdf",
+        profile={
+            "doc_type": "experimental",
+            "protocol_extractable": "yes",
+        },
+        text_window={
+            "window_id": "win-1",
+            "heading": "Experimental Section",
+            "heading_path": "Methods > Experimental Section",
+            "text": "Powders were mixed and annealed under Ar.",
+            "text_unit_ids": ["tu-1"],
+            "block_ids": ["blk-1"],
+            "page": 4,
+        },
+    )
+    _, text_window_prompt = build_text_window_extraction_prompt(text_window_payload)
+    for field in ("document_id", "window_id", "text_unit_ids", "block_ids", "table_id", "row_index"):
+        assert f'"{field}"' not in text_window_prompt
+    assert '"page"' in text_window_prompt
+
+    table_row_payload = service._build_table_row_extraction_payload(
+        title="Prompt Boundary Paper",
+        source_filename="prompt-boundary.pdf",
+        profile={
+            "doc_type": "experimental",
+            "protocol_extractable": "yes",
+        },
+        table_row={
+            "table_id": "tbl-1",
+            "row_index": 2,
+            "row_text": "Sample A | 12 MPa | as-built",
+            "heading_path": "Results > Table 1",
+        },
+        row_cells=[
+            {
+                "header_path": "Sample",
+                "cell_text": "A",
+                "unit_hint": None,
+                "col_index": 0,
+            },
+            {
+                "header_path": "Strength",
+                "cell_text": "12",
+                "unit_hint": "MPa",
+                "col_index": 1,
+            },
+        ],
+        text_windows=[
+            {
+                "window_id": "win-2",
+                "heading": "Results",
+                "heading_path": "Results",
+                "text": "Annealed samples showed higher strength.",
+                "text_unit_ids": ["tu-2"],
+                "block_ids": ["blk-2"],
+                "page": 5,
+            }
+        ],
+    )
+    _, table_row_prompt = build_table_row_extraction_prompt(table_row_payload)
+    for field in ("document_id", "window_id", "text_unit_ids", "block_ids", "table_id", "row_index"):
+        assert f'"{field}"' not in table_row_prompt
+    assert '"page"' in table_row_prompt
 
 
 def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):
@@ -413,6 +474,113 @@ def test_evidence_service_logs_warning_when_measurements_are_empty(monkeypatch, 
         "Paper facts extraction produced zero measurement_results" in record.message
         for record in caplog.records
     )
+
+
+def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class QuoteOnlyScopeExtractor:
+        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                protocol_extractable="yes",
+                protocol_extractability_signals=[],
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+            text_window = payload.get("text_window") or {}
+            quote = "Process conditions were reported."
+            if quote not in str(text_window.get("text") or ""):
+                return StructuredExtractionBundle()
+            return StructuredExtractionBundle(
+                method_facts=[
+                    MethodFactPayload(
+                        method_ref="process_1",
+                        method_role="process",
+                        method_name="sample preparation",
+                        method_payload={"details": quote},
+                        anchors=[
+                            EvidenceAnchorPayload(
+                                quote=quote,
+                                source_type="text",
+                            )
+                        ],
+                        confidence=0.7,
+                    )
+                ]
+            )
+
+        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
+            return StructuredExtractionBundle()
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = QuoteOnlyScopeExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+
+    collection = collection_service.create_collection("Quote Only Anchor Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Quote Only Anchor Paper",
+                "text": "Process conditions were reported.",
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Process conditions were reported.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
+    evidence_anchors = pd.read_parquet(output_dir / "evidence_anchors.parquet")
+    blocks = build_blocks(documents, text_units)
+    methods_block = blocks[
+        blocks["text_unit_ids"].apply(lambda value: "tu-1" in (value or []))
+    ].iloc[0]
+
+    assert not evidence.empty
+    assert not evidence_anchors.empty
+    assert evidence_anchors.iloc[0]["section_id"] == methods_block["block_id"]
+    assert evidence_anchors.iloc[0]["block_id"] == methods_block["block_id"]
+    assert evidence_anchors.iloc[0]["char_range"] is not None
+
+    traceback = paper_facts_service.get_evidence_traceback(
+        collection_id,
+        str(evidence.iloc[0]["evidence_id"]),
+    )
+    assert traceback["traceback_status"] == "ready"
+    assert traceback["anchors"][0]["locator_type"] == "char_range"
+    assert traceback["anchors"][0]["block_id"] == methods_block["block_id"]
 
 
 def test_comparison_service_logs_warning_when_upstream_measurements_are_empty(

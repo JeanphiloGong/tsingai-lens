@@ -38,10 +38,6 @@ class ConditionContextPayload(_StrictModel):
 class EvidenceAnchorPayload(_StrictModel):
     quote: str | None = None
     source_type: Literal["text", "method", "table", "figure"] = "text"
-    section_id: str | None = None
-    block_id: str | None = None
-    snippet_id: str | None = None
-    figure_or_table: str | None = None
     page: int | None = None
 
 

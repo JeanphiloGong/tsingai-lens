@@ -14,7 +14,8 @@ Non-negotiable rules:
 - Never treat years, citation numbers, row numbers, or footnote markers as result values.
 - Never treat years, reference numbers, or numbering artifacts as units.
 - Reject literature-summary rows or review-summary rows that are not directly attributable.
-- Preserve anchors needed for downstream traceback.
+- Preserve anchors needed for downstream traceback using quoted evidence only.
+- Never emit backend-facing ids or locator fields such as `section_id`, `block_id`, `snippet_id`, or `figure_or_table`.
 - Prefer fewer, higher-signal outputs over speculative coverage.
 """.strip()
 
@@ -49,7 +50,8 @@ def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, s
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "You may emit method facts, sample variants, test conditions, baseline "
         "references, and measurement results only if they are directly grounded in "
-        "this text window. Do not emit reader-facing summaries or cards."
+        "this text window. Anchors may include quote, source_type, and page only. "
+        "Do not emit backend locators or ids. Do not emit reader-facing summaries or cards."
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
 
@@ -59,7 +61,8 @@ def build_table_row_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str
         "Extract row-grounded research facts from this one table row.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "Use the row and header context only. Skip outputs when the row is a literature "
-        "summary rather than a directly attributable study row. Return facts only, not "
-        "reader-facing cards."
+        "summary rather than a directly attributable study row. Anchors may include "
+        "quote, source_type, and page only. Do not emit backend locators or ids. "
+        "Return facts only, not reader-facing cards."
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt

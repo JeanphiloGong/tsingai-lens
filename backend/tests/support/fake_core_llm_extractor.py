@@ -139,16 +139,7 @@ class FakeCoreLLMStructuredExtractor:
         document_profile = payload.get("document_profile") or {}
         text_window = payload.get("text_window") or {}
         text = str(text_window.get("text") or "")
-        window_id = str(text_window.get("window_id") or "") or None
-        block_ids = (
-            text_window.get("block_ids") if isinstance(text_window.get("block_ids"), list) else []
-        )
         heading_path = str(text_window.get("heading_path") or "")
-        text_unit_ids = (
-            text_window.get("text_unit_ids")
-            if isinstance(text_window.get("text_unit_ids"), list)
-            else []
-        )
         window_role = self._classify_text_window_role(heading_path, text)
 
         if (
@@ -187,9 +178,6 @@ class FakeCoreLLMStructuredExtractor:
                             EvidenceAnchorPayload(
                                 quote=sentence,
                                 source_type="method",
-                                section_id=window_id,
-                                block_id=str(block_ids[0]) if block_ids else None,
-                                snippet_id=text_unit_ids[0] if text_unit_ids else None,
                             )
                         ],
                         confidence=0.82,
@@ -200,9 +188,6 @@ class FakeCoreLLMStructuredExtractor:
             anchor = EvidenceAnchorPayload(
                 quote=self._first_statement(text) or text[:160],
                 source_type="text",
-                section_id=window_id,
-                block_id=str(block_ids[0]) if block_ids else None,
-                snippet_id=text_unit_ids[0] if text_unit_ids else None,
             )
             for index, method_name in enumerate(methods, start=1):
                 method_facts.append(
@@ -293,15 +278,12 @@ class FakeCoreLLMStructuredExtractor:
                     variant_ref="default_variant",
                     test_condition_ref="section_tc" if test_conditions else None,
                     baseline_ref="section_base" if baseline_references else None,
-                        anchors=[
-                            EvidenceAnchorPayload(
-                                quote=sentence,
-                                source_type="text",
-                                section_id=window_id,
-                                block_id=str(block_ids[0]) if block_ids else None,
-                                snippet_id=text_unit_ids[0] if text_unit_ids else None,
-                            )
-                        ],
+                    anchors=[
+                        EvidenceAnchorPayload(
+                            quote=sentence,
+                            source_type="text",
+                        )
+                    ],
                     confidence=0.84,
                 )
             )
@@ -326,7 +308,6 @@ class FakeCoreLLMStructuredExtractor:
         if str(document_profile.get("doc_type") or "") == "review":
             return StructuredExtractionBundle()
 
-        table_id = str(row.get("table_id") or "") or None
         row_summary = str(row.get("row_summary") or "")
         cells = row.get("cells") if isinstance(row.get("cells"), list) else []
         support_text = "\n\n".join(
@@ -358,9 +339,7 @@ class FakeCoreLLMStructuredExtractor:
             if "baseline" in lowered_header or "control" in lowered_header or "reference" in lowered_header:
                 baseline_label = value
                 continue
-            property_name = self._infer_property(
-                f"{header} {row.get('table_id') or ''} {document_title}"
-            )
+            property_name = self._infer_property(f"{header} {document_title}")
             if property_name is not None:
                 property_cells.append((property_name, value, unit_hint or self._extract_unit(header)))
                 continue
@@ -449,7 +428,6 @@ class FakeCoreLLMStructuredExtractor:
                         EvidenceAnchorPayload(
                             quote=row_summary,
                             source_type="table",
-                            figure_or_table=table_id,
                         )
                     ],
                     confidence=0.9,

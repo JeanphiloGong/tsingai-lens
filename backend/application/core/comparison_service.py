@@ -19,7 +19,11 @@ from application.core.semantic_build.core_semantic_version import (
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.paper_facts_service import PaperFactsNotReadyError, PaperFactsService
 from application.source.artifact_registry_service import ArtifactRegistryService
-from domain.core.comparison import ComparisonRowRecord
+from domain.core.comparison import (
+    CollectionComparableResult,
+    ComparableResult,
+    ComparisonRowRecord,
+)
 from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
     restore_frame_from_storage,
@@ -182,6 +186,121 @@ class ComparisonService:
             output_dir,
         )
         return semantic_tables.collection_comparable_results
+
+    def inspect_document_comparison_semantics(
+        self,
+        collection_id: str,
+        source_document_id: str,
+        *,
+        include_row_projections: bool = False,
+    ) -> dict[str, Any]:
+        output_dir = self._resolve_output_dir(collection_id)
+        semantic_tables = self._read_semantic_comparison_artifacts(
+            collection_id,
+            output_dir,
+        )
+        document_id = self._safe_text(source_document_id) or ""
+        comparable_results = semantic_tables.comparable_results
+        document_results = comparable_results[
+            comparable_results["source_document_id"].apply(
+                lambda value: self._safe_text(value) == document_id
+            )
+        ].copy()
+        if document_results.empty:
+            return {
+                "collection_id": collection_id,
+                "source_document_id": document_id,
+                "total": 0,
+                "count": 0,
+                "items": [],
+            }
+
+        comparable_records = [
+            ComparableResult.from_mapping(dict(row))
+            for _, row in document_results.iterrows()
+        ]
+        comparable_result_ids = {
+            record.comparable_result_id
+            for record in comparable_records
+            if record.comparable_result_id
+        }
+        scoped_results = semantic_tables.collection_comparable_results.iloc[0:0].copy()
+        scoped_records_by_result_id: dict[str, list[CollectionComparableResult]] = {}
+        sort_order_by_result_id: dict[str, int] = {}
+        if comparable_result_ids:
+            scoped_results = semantic_tables.collection_comparable_results[
+                semantic_tables.collection_comparable_results["comparable_result_id"].apply(
+                    lambda value: self._safe_text(value) in comparable_result_ids
+                )
+            ].copy()
+            for _, row in scoped_results.iterrows():
+                scoped_record = CollectionComparableResult.from_mapping(dict(row))
+                if self._safe_text(scoped_record.collection_id) != collection_id:
+                    continue
+                scoped_records_by_result_id.setdefault(
+                    scoped_record.comparable_result_id,
+                    [],
+                ).append(scoped_record)
+                if scoped_record.sort_order is None:
+                    continue
+                existing_sort_order = sort_order_by_result_id.get(
+                    scoped_record.comparable_result_id
+                )
+                sort_order_by_result_id[scoped_record.comparable_result_id] = (
+                    scoped_record.sort_order
+                    if existing_sort_order is None
+                    else min(existing_sort_order, scoped_record.sort_order)
+                )
+
+        projected_rows_by_result_id: dict[str, list[dict[str, Any]]] = {}
+        if include_row_projections:
+            projected_rows = self.comparison_row_projector.project_rows_from_semantic_artifacts(
+                collection_id=collection_id,
+                comparable_results=document_results,
+                scoped_results=scoped_results,
+            )
+            for _, row in projected_rows.iterrows():
+                row_record = ComparisonRowRecord.from_mapping(dict(row))
+                projected_rows_by_result_id.setdefault(
+                    row_record.comparable_result_id,
+                    [],
+                ).append(self._serialize_row_record(row_record))
+
+        comparable_records.sort(
+            key=lambda record: (
+                sort_order_by_result_id.get(record.comparable_result_id, 1_000_000_000),
+                record.comparable_result_id,
+            )
+        )
+        items: list[dict[str, Any]] = []
+        for record in comparable_records:
+            item = self._serialize_comparable_result(record)
+            scoped_records = scoped_records_by_result_id.get(record.comparable_result_id, [])
+            item["collection_overlays"] = [
+                self._serialize_collection_comparable_result(scoped_record)
+                for scoped_record in sorted(
+                    scoped_records,
+                    key=lambda scoped_record: (
+                        1_000_000_000
+                        if scoped_record.sort_order is None
+                        else scoped_record.sort_order,
+                        scoped_record.comparable_result_id,
+                    ),
+                )
+            ]
+            if include_row_projections:
+                item["projected_rows"] = projected_rows_by_result_id.get(
+                    record.comparable_result_id,
+                    [],
+                )
+            items.append(item)
+        return {
+            "collection_id": collection_id,
+            "source_document_id": document_id,
+            "total": len(items),
+            "count": len(items),
+            "items": items,
+        }
 
     def _read_semantic_comparison_artifacts(
         self,
@@ -400,7 +519,9 @@ class ComparisonService:
         return filtered
 
     def _serialize_row(self, row: pd.Series) -> dict[str, Any]:
-        record = ComparisonRowRecord.from_mapping(dict(row))
+        return self._serialize_row_record(ComparisonRowRecord.from_mapping(dict(row)))
+
+    def _serialize_row_record(self, record: ComparisonRowRecord) -> dict[str, Any]:
         missing_critical_context = list(record.missing_critical_context)
         return {
             "row_id": record.row_id,
@@ -445,6 +566,15 @@ class ComparisonService:
                 "unresolved_condition_link": "test_condition" in missing_critical_context,
             },
         }
+
+    def _serialize_comparable_result(self, record: ComparableResult) -> dict[str, Any]:
+        return record.to_record()
+
+    def _serialize_collection_comparable_result(
+        self,
+        record: CollectionComparableResult,
+    ) -> dict[str, Any]:
+        return record.to_record()
 
     def _safe_text(self, value: Any) -> str | None:
         if value is None:

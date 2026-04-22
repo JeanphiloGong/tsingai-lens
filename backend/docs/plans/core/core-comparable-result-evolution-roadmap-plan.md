@@ -68,6 +68,9 @@ This roadmap does not attempt to complete the following in one wave:
 
 Current recommended engineering focus after the parent cutover is `Phase 1`.
 
+After `Phase 1` substrate closure, the first recommended `Phase 2` child wave
+is document-first semantic inspection.
+
 ## Layered Interpretation
 
 The intended layering remains:
@@ -238,6 +241,7 @@ This order prevents row cache from remaining the accidental source of truth.
 Later child docs should narrow this roadmap further instead of widening this
 page into an open-ended program log. The next likely candidates are:
 
+- [`core-comparable-result-phase2-document-first-semantic-inspection-plan.md`](core-comparable-result-phase2-document-first-semantic-inspection-plan.md)
 - comparison-policy versioning
 - collection assessment lifecycle
 - projection-substrate cutover

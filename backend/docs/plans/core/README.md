@@ -42,6 +42,9 @@ domain-semantic backfill.
 - [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
   Phase 1 child plan for clarifying assembly, assessment, projection, and
   orchestration ownership without adding a generic new service layer
+- [`core-comparable-result-phase2-document-first-semantic-inspection-plan.md`](core-comparable-result-phase2-document-first-semantic-inspection-plan.md)
+  Phase 2 child plan for making document-first semantic inspection explicit on
+  top of the comparable-result substrate
 
 ## Boundary Rule
 

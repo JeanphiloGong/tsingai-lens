@@ -24,6 +24,17 @@ from application.core.semantic_build.llm.schemas import (
     StructuredDocumentProfile,
     StructuredExtractionBundle,
 )
+from domain.core.comparison import (
+    COMPARABLE_RESULT_NORMALIZATION_VERSION,
+    CollectionComparableResult,
+    ComparableResult,
+    ComparisonAxis,
+    ContextBinding,
+    EvidenceTrace,
+    NormalizedComparisonContext,
+    ResultValue,
+    evaluate_comparison_assessment,
+)
 from infra.source.runtime.source_evidence import (
     build_blocks,
     build_table_cells,
@@ -52,6 +63,76 @@ def _write_source_artifacts(
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
+
+
+def _build_test_comparable_result(
+    *,
+    comparable_result_id: str,
+    source_document_id: str,
+    source_result_id: str,
+    property_normalized: str = "flexural_strength",
+    summary: str = "Flexural strength increased to 97 MPa.",
+    numeric_value: float | None = 97.0,
+) -> ComparableResult:
+    return ComparableResult(
+        comparable_result_id=comparable_result_id,
+        source_result_id=source_result_id,
+        source_document_id=source_document_id,
+        binding=ContextBinding(
+            variant_id="var-1",
+            baseline_id="base-1",
+            test_condition_id="tc-1",
+        ),
+        normalized_context=NormalizedComparisonContext(
+            material_system_normalized="epoxy composite",
+            process_normalized="80 C, 2 h, under Ar",
+            baseline_normalized="untreated baseline",
+            test_condition_normalized="SEM",
+        ),
+        axis=ComparisonAxis(
+            axis_name=None,
+            axis_value=None,
+            axis_unit=None,
+        ),
+        value=ResultValue(
+            property_normalized=property_normalized,
+            result_type="scalar",
+            numeric_value=numeric_value,
+            unit="MPa",
+            summary=summary,
+        ),
+        evidence=EvidenceTrace(
+            direct_anchor_ids=("anchor-1",),
+            contextual_anchor_ids=("anchor-2",),
+            evidence_ids=(f"ev_result_{source_result_id}",),
+            structure_feature_ids=(),
+            characterization_observation_ids=(),
+            traceability_status="direct",
+        ),
+        variant_label="epoxy composite",
+        baseline_reference="untreated baseline",
+        result_source_type="text",
+        epistemic_status="normalized_from_evidence",
+        normalization_version=COMPARABLE_RESULT_NORMALIZATION_VERSION,
+    )
+
+
+def _build_collection_overlay(
+    *,
+    collection_id: str,
+    comparable_result: ComparableResult,
+    included: bool = True,
+    sort_order: int | None = 0,
+) -> CollectionComparableResult:
+    assessment = evaluate_comparison_assessment(comparable_result)
+    return CollectionComparableResult(
+        collection_id=collection_id,
+        comparable_result_id=comparable_result.comparable_result_id,
+        assessment=assessment,
+        epistemic_status=assessment.assessment_epistemic_status,
+        included=included,
+        sort_order=sort_order,
+    )
 
 
 class EvidenceOnlyExtractor:
@@ -1418,6 +1499,145 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
         reprojected_comparisons.iloc[0]["comparable_result_id"]
         == restored_comparable_results.iloc[0]["comparable_result_id"]
     )
+
+
+def test_comparison_service_inspects_document_semantics_from_semantic_artifacts(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    comparison_service = ComparisonService(collection_service, artifact_registry)
+
+    collection = collection_service.create_collection("Document Semantic Inspection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    first = _build_test_comparable_result(
+        comparable_result_id="cres-doc-1-a",
+        source_document_id="paper-1",
+        source_result_id="res-1",
+    )
+    second = _build_test_comparable_result(
+        comparable_result_id="cres-doc-1-b",
+        source_document_id="paper-1",
+        source_result_id="res-2",
+        property_normalized="impact_strength",
+        summary="Impact strength increased to 61 MPa.",
+        numeric_value=61.0,
+    )
+    other_document = _build_test_comparable_result(
+        comparable_result_id="cres-doc-2-a",
+        source_document_id="paper-2",
+        source_result_id="res-3",
+    )
+    pd.DataFrame(
+        [
+            first.to_record(),
+            second.to_record(),
+            other_document.to_record(),
+        ]
+    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
+    pd.DataFrame(
+        [
+            _build_collection_overlay(
+                collection_id=collection_id,
+                comparable_result=first,
+                sort_order=2,
+            ).to_record(),
+            _build_collection_overlay(
+                collection_id=collection_id,
+                comparable_result=other_document,
+                sort_order=0,
+            ).to_record(),
+        ]
+    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = comparison_service.inspect_document_comparison_semantics(
+        collection_id,
+        "paper-1",
+    )
+
+    assert payload["collection_id"] == collection_id
+    assert payload["source_document_id"] == "paper-1"
+    assert payload["total"] == 2
+    assert payload["count"] == 2
+    assert [item["comparable_result_id"] for item in payload["items"]] == [
+        "cres-doc-1-a",
+        "cres-doc-1-b",
+    ]
+    assert payload["items"][0]["collection_overlays"] == [
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=first,
+            sort_order=2,
+        ).to_record()
+    ]
+    assert payload["items"][1]["collection_overlays"] == []
+    assert "projected_rows" not in payload["items"][0]
+    assert not (output_dir / "comparison_rows.parquet").exists()
+
+
+def test_comparison_service_document_semantic_inspection_can_project_rows_without_row_cache(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    comparison_service = ComparisonService(collection_service, artifact_registry)
+
+    collection = collection_service.create_collection("Document Semantic Projection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    comparable_result = _build_test_comparable_result(
+        comparable_result_id="cres-doc-1-a",
+        source_document_id="paper-1",
+        source_result_id="res-1",
+    )
+    pd.DataFrame([comparable_result.to_record()]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame(
+        [
+            _build_collection_overlay(
+                collection_id=collection_id,
+                comparable_result=comparable_result,
+                sort_order=0,
+            ).to_record()
+        ]
+    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = comparison_service.inspect_document_comparison_semantics(
+        collection_id,
+        "paper-1",
+        include_row_projections=True,
+    )
+
+    assert payload["total"] == 1
+    projected_rows = payload["items"][0]["projected_rows"]
+    assert len(projected_rows) == 1
+    assert projected_rows[0]["row_id"].startswith("cmp_")
+    assert projected_rows[0]["collection_id"] == collection_id
+    assert projected_rows[0]["source_document_id"] == "paper-1"
+    assert projected_rows[0]["display"]["property_normalized"] == "flexural_strength"
+    assert projected_rows[0]["assessment"]["comparability_status"] == "comparable"
+    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):

@@ -297,6 +297,7 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
     assert payload.count == 1
     item = payload.items[0]
     assert item.row_id == row_id
+    assert item.result_id == "cres-1"
     assert item.display.variant_id == "var-1"
     assert item.display.variant_label == "A1"
     assert item.display.variable_axis == "induction_current"
@@ -460,6 +461,7 @@ def test_comparison_route_returns_single_row(
     )
 
     assert payload.row_id == row_id
+    assert payload.result_id == "cres-1"
     assert payload.collection_id == collection_id
     assert payload.display.property_normalized == "conductivity"
 

@@ -89,6 +89,7 @@ class WorkspaceCapabilitiesResponse(BaseModel):
     """Feature gates exposed to the frontend workspace."""
 
     can_view_graph: bool = Field(default=False, description="是否可查看图谱")
+    can_view_results: bool = Field(default=False, description="是否可查看 collection 结果页")
     can_view_comparable_results: bool = Field(
         default=False,
         description="是否可查看 collection-filtered corpus comparable results",
@@ -110,9 +111,11 @@ class WorkspaceWorkflowResponse(BaseModel):
     """Primary workflow readiness model for Lens v1."""
 
     documents: WorkspaceStageResponse = Field(..., description="documents 阶段")
+    results: WorkspaceStageResponse = Field(..., description="results 阶段")
     evidence: WorkspaceStageResponse = Field(..., description="evidence 阶段")
     comparisons: WorkspaceStageResponse = Field(..., description="comparisons 阶段")
     protocol: WorkspaceStageResponse = Field(..., description="protocol 阶段")
+    graph: WorkspaceStageResponse = Field(..., description="graph 阶段")
 
 
 class WorkspaceDocumentSummaryResponse(BaseModel):
@@ -137,14 +140,19 @@ class WorkspaceWarningResponse(BaseModel):
 class WorkspaceLinksResponse(BaseModel):
     """Primary navigation links for the frontend workspace."""
 
+    documents: str | None = Field(default=None, description="documents 主路径")
     documents_profiles: str | None = Field(default=None, description="documents/profiles 路径")
+    evidence: str | None = Field(default=None, description="evidence 主路径")
     evidence_cards: str | None = Field(default=None, description="evidence/cards 路径")
     comparisons: str | None = Field(default=None, description="comparisons 路径")
+    results: str | None = Field(default=None, description="results 路径")
     comparable_results: str | None = Field(
         default=None,
         description="comparable-results 路径",
     )
+    protocol: str | None = Field(default=None, description="protocol 主路径")
     protocol_steps: str | None = Field(default=None, description="protocol/steps 路径")
+    graph: str | None = Field(default=None, description="graph 主路径")
 
 
 class WorkspaceOverviewResponse(BaseModel):

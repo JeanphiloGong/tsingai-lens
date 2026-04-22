@@ -82,6 +82,7 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     assert overview["status_summary"] == "processing"
     assert overview["latest_task"]["current_stage"] == "source_artifacts_started"
     assert overview["capabilities"]["can_view_graph"] is False
+    assert overview["capabilities"]["can_view_results"] is False
     assert overview["capabilities"]["can_view_comparable_results"] is False
     assert overview["capabilities"]["can_generate_sop"] is False
 
@@ -145,6 +146,7 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
 
     assert overview["status_summary"] == "document_profiled"
     assert overview["workflow"]["documents"]["status"] == "ready"
+    assert overview["workflow"]["results"]["status"] == "not_started"
     assert overview["workflow"]["protocol"]["status"] == "not_started"
     assert overview["artifacts"]["document_profiles_generated"] is True
     assert overview["artifacts"]["document_profiles_ready"] is True
@@ -187,11 +189,14 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert "graphml_generated" not in overview["artifacts"]
     assert overview["document_summary"]["total_documents"] == 1
     assert overview["document_summary"]["by_doc_type"]["experimental"] == 1
+    assert overview["links"]["documents"] == f"/api/v1/collections/{collection_id}/documents/profiles"
+    assert overview["links"]["results"] == f"/api/v1/collections/{collection_id}/results"
     assert overview["links"]["documents_profiles"] == f"/api/v1/collections/{collection_id}/documents/profiles"
     assert overview["links"]["comparisons"] == f"/api/v1/collections/{collection_id}/comparisons"
     assert overview["links"]["comparable_results"] == (
         f"/api/v1/comparable-results?collection_id={collection_id}"
     )
+    assert overview["capabilities"]["can_view_results"] is False
     assert overview["capabilities"]["can_view_comparable_results"] is False
 
 
@@ -359,6 +364,7 @@ def test_workspace_service_marks_comparisons_ready_from_semantic_artifacts_witho
     overview = workspace_service.get_workspace_overview(collection_id)
 
     assert overview["status_summary"] == "ready"
+    assert overview["workflow"]["results"]["status"] == "ready"
     assert overview["workflow"]["comparisons"]["status"] == "ready"
     assert overview["artifacts"]["comparison_rows_generated"] is False
     assert overview["artifacts"]["comparison_rows_ready"] is False
@@ -368,6 +374,7 @@ def test_workspace_service_marks_comparisons_ready_from_semantic_artifacts_witho
     assert overview["artifacts"]["graph_ready"] is True
     assert overview["artifacts"]["graph_stale"] is False
     assert overview["capabilities"]["can_view_graph"] is True
+    assert overview["capabilities"]["can_view_results"] is True
     assert overview["capabilities"]["can_view_comparable_results"] is True
     assert overview["capabilities"]["can_download_graphml"] is True
 
@@ -507,6 +514,7 @@ def test_workspace_service_marks_stale_comparisons_as_limited(
     overview = workspace_service.get_workspace_overview(collection_id)
 
     assert overview["status_summary"] == "comparison_pending"
+    assert overview["workflow"]["results"]["status"] == "limited"
     assert overview["workflow"]["comparisons"]["status"] == "limited"
     assert "stale" in overview["workflow"]["comparisons"]["detail"].lower()
     assert overview["artifacts"]["collection_comparable_results_generated"] is True
@@ -519,5 +527,6 @@ def test_workspace_service_marks_stale_comparisons_as_limited(
     assert overview["artifacts"]["graph_ready"] is False
     assert overview["artifacts"]["graph_stale"] is True
     assert overview["capabilities"]["can_view_graph"] is False
+    assert overview["capabilities"]["can_view_results"] is True
     assert overview["capabilities"]["can_view_comparable_results"] is True
     assert overview["capabilities"]["can_download_graphml"] is False

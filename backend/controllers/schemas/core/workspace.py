@@ -89,6 +89,10 @@ class WorkspaceCapabilitiesResponse(BaseModel):
     """Feature gates exposed to the frontend workspace."""
 
     can_view_graph: bool = Field(default=False, description="是否可查看图谱")
+    can_view_comparable_results: bool = Field(
+        default=False,
+        description="是否可查看 collection-filtered corpus comparable results",
+    )
     can_download_graphml: bool = Field(default=False, description="是否可导出 GraphML")
     can_view_protocol_steps: bool = Field(default=False, description="是否可查看 protocol steps")
     can_search_protocol: bool = Field(default=False, description="是否可检索 protocol steps")
@@ -136,6 +140,10 @@ class WorkspaceLinksResponse(BaseModel):
     documents_profiles: str | None = Field(default=None, description="documents/profiles 路径")
     evidence_cards: str | None = Field(default=None, description="evidence/cards 路径")
     comparisons: str | None = Field(default=None, description="comparisons 路径")
+    comparable_results: str | None = Field(
+        default=None,
+        description="comparable-results 路径",
+    )
     protocol_steps: str | None = Field(default=None, description="protocol/steps 路径")
 
 

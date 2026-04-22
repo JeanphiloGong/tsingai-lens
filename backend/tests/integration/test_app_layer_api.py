@@ -1064,7 +1064,11 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert workspace_body["artifacts"]["graph_ready"] is True
     assert workspace_body["artifacts"]["graph_stale"] is False
     assert workspace_body["capabilities"]["can_view_graph"] is True
+    assert workspace_body["capabilities"]["can_view_comparable_results"] is True
     assert workspace_body["capabilities"]["can_download_graphml"] is True
+    assert workspace_body["links"]["comparable_results"] == (
+        f"/api/v1/comparable-results?collection_id={collection_id}"
+    )
 
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
     assert graph.status_code == 200

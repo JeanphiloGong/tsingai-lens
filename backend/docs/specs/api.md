@@ -164,6 +164,9 @@
 - `warnings` 应表达 review-heavy、protocol-limited、comparison-limited、
   traceability-limited 等 collection 风险
 - `links` 应指向主资源页面，而不是让前端自己拼内部跳转语义
+- `links.comparable_results`
+  应直接给出当前 collection 对应的 filtered corpus retrieval 路径，即
+  `/api/v1/comparable-results?collection_id={collection_id}`
 - `artifacts` 对每类产物应同时提供
   `*_generated` 与 `*_ready` 两类布尔值：
   - `generated` 表示该阶段产物文件已生成（可能为空）
@@ -191,6 +194,11 @@
   因为 GraphML 已改为基于 Core graph 的按需导出能力，不再是构建阶段的 readiness 产物
 - `capabilities.can_download_graphml`
   应与 `graph_ready` 保持一致，表达当前 collection 是否可以导出按需生成的 GraphML
+- `capabilities.can_view_comparable_results`
+  应在 `comparable_results.parquet` 与 `collection_comparable_results.parquet`
+  已生成时为 `true`
+  - 它表达 collection-filtered corpus comparable-result surface 可被消费
+  - 不要求 `comparison_rows.parquet` 预先存在
 
 ### Document Profiles
 

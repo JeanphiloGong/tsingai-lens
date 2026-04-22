@@ -154,8 +154,10 @@ class WorkspaceService:
             "protocol_steps_generated",
             "protocol_steps.parquet",
         )
+        comparisons_generated = self._comparisons_generated(artifacts)
         return {
             "can_view_graph": graph_ready,
+            "can_view_comparable_results": comparisons_generated,
             "can_download_graphml": graph_ready,
             "can_view_protocol_steps": protocol_generated,
             "can_search_protocol": protocol_generated,
@@ -405,6 +407,7 @@ class WorkspaceService:
             "documents_profiles": f"/api/v1/collections/{collection_id}/documents/profiles",
             "evidence_cards": f"/api/v1/collections/{collection_id}/evidence/cards",
             "comparisons": f"/api/v1/collections/{collection_id}/comparisons",
+            "comparable_results": f"/api/v1/comparable-results?collection_id={collection_id}",
             "protocol_steps": None,
         }
         if self._artifact_generated(

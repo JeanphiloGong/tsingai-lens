@@ -45,6 +45,7 @@ export type ComparisonUncertainty = {
 
 export type ComparisonRow = {
 	row_id: string;
+	result_id: string;
 	collection_id: string;
 	source_document_id: string;
 	display: ComparisonDisplay;
@@ -189,6 +190,7 @@ function normalizeRow(value: unknown, collectionId: string): ComparisonRow | nul
 
 	return {
 		row_id,
+		result_id: String(record.result_id ?? record.comparable_result_id ?? row_id).trim() || row_id,
 		collection_id: String(record.collection_id ?? collectionId).trim() || collectionId,
 		source_document_id: String(record.source_document_id ?? record.document_id ?? '').trim(),
 		display: normalizeDisplay(record.display),
@@ -202,6 +204,7 @@ function buildFixture(collectionId: string): ComparisonsResponse {
 	const items: ComparisonRow[] = [
 		{
 			row_id: 'cmp_1',
+			result_id: 'cres_1',
 			collection_id: collectionId,
 			source_document_id: 'doc_a',
 			display: {
@@ -243,6 +246,7 @@ function buildFixture(collectionId: string): ComparisonsResponse {
 		},
 		{
 			row_id: 'cmp_2',
+			result_id: 'cres_2',
 			collection_id: collectionId,
 			source_document_id: 'doc_c',
 			display: {
@@ -284,6 +288,7 @@ function buildFixture(collectionId: string): ComparisonsResponse {
 		},
 		{
 			row_id: 'cmp_3',
+			result_id: 'cres_3',
 			collection_id: collectionId,
 			source_document_id: 'doc_b',
 			display: {
@@ -325,6 +330,7 @@ function buildFixture(collectionId: string): ComparisonsResponse {
 		},
 		{
 			row_id: 'cmp_4',
+			result_id: 'cres_4',
 			collection_id: collectionId,
 			source_document_id: 'doc_d',
 			display: {

@@ -39,6 +39,7 @@ export type WorkflowStageStatus =
 
 export type WorkspaceWorkflow = {
   documents: WorkflowStageStatus;
+  results: WorkflowStageStatus;
   evidence: WorkflowStageStatus;
   comparisons: WorkflowStageStatus;
   protocol: WorkflowStageStatus;
@@ -54,6 +55,7 @@ export type WorkspaceDocumentSummary = {
 export type WorkspaceLinks = {
   workspace: string;
   documents: string;
+  results: string;
   evidence: string;
   comparisons: string;
   protocol: string;
@@ -62,6 +64,7 @@ export type WorkspaceLinks = {
 
 export type WorkspaceCapabilities = {
   can_view_documents: boolean;
+  can_view_results: boolean;
   can_view_evidence: boolean;
   can_view_comparisons: boolean;
   can_view_graph: boolean;
@@ -104,7 +107,7 @@ export type WorkspaceSurfaceState =
 
 export type WorkspaceSurfaceKey = keyof WorkspaceWorkflow | 'graph';
 
-const PRIMARY_WORKFLOW_KEYS = ['documents', 'evidence', 'comparisons'] as const;
+const PRIMARY_WORKFLOW_KEYS = ['comparisons', 'results', 'documents'] as const;
 
 const DEFAULT_DOC_TYPE_COUNTS = {
   experimental: 0,
@@ -166,6 +169,7 @@ function defaultLinks(collectionId: string): WorkspaceLinks {
   return {
     workspace: `/collections/${encoded}`,
     documents: `/collections/${encoded}/documents`,
+    results: `/collections/${encoded}/results`,
     evidence: `/collections/${encoded}/evidence`,
     comparisons: `/collections/${encoded}/comparisons`,
     protocol: `/collections/${encoded}/protocol`,
@@ -177,7 +181,7 @@ function normalizeWorkspaceRoute(
   value: unknown,
   fallback: string,
   collectionId: string,
-  surface: 'workspace' | 'documents' | 'evidence' | 'comparisons' | 'protocol' | 'graph'
+  surface: 'workspace' | 'documents' | 'results' | 'evidence' | 'comparisons' | 'protocol' | 'graph'
 ) {
   if (typeof value !== 'string' || !value.trim()) return fallback;
 
@@ -191,6 +195,7 @@ function normalizeWorkspaceRoute(
   const routeMap = {
     workspace: `/collections/${encoded}`,
     documents: `/collections/${encoded}/documents`,
+    results: `/collections/${encoded}/results`,
     evidence: `/collections/${encoded}/evidence`,
     comparisons: `/collections/${encoded}/comparisons`,
     protocol: `/collections/${encoded}/protocol`,
@@ -202,6 +207,13 @@ function normalizeWorkspaceRoute(
   }
   if (surface === 'documents' && normalized === `${apiPrefix}/documents/profiles`) {
     return routeMap.documents;
+  }
+  if (
+    surface === 'results' &&
+    (normalized === `${apiPrefix}/results` ||
+      normalized === `/api/v1/comparable-results?collection_id=${encoded}`)
+  ) {
+    return routeMap.results;
   }
   if (surface === 'evidence' && normalized === `${apiPrefix}/evidence/cards`) {
     return routeMap.evidence;
@@ -232,6 +244,12 @@ function normalizeLinks(value: unknown, collectionId: string): WorkspaceLinks {
       collectionId,
       'documents'
     ),
+    results: normalizeWorkspaceRoute(
+      record.results ?? record.comparable_results,
+      defaults.results,
+      collectionId,
+      'results'
+    ),
     evidence: normalizeWorkspaceRoute(
       record.evidence ?? record.evidence_cards,
       defaults.evidence,
@@ -249,7 +267,9 @@ function normalizeLinks(value: unknown, collectionId: string): WorkspaceLinks {
   };
 }
 
-export function stageIsActionable(status: WorkflowStageStatus | null | undefined) {
+export function stageIsActionable(
+  status: WorkflowStageStatus | WorkspaceSurfaceState | null | undefined
+) {
   return status === 'ready' || status === 'limited';
 }
 
@@ -397,6 +417,17 @@ function deriveLegacyWorkflow(
 
   return {
     documents,
+    results:
+      artifacts.collection_comparable_results_ready ||
+      (USE_API_FIXTURES && documents === 'ready')
+        ? 'ready'
+        : artifacts.collection_comparable_results_stale
+          ? 'limited'
+        : activeTask
+          ? 'processing'
+          : failedTask
+            ? 'failed'
+            : 'not_started',
     evidence:
       artifacts.evidence_cards_ready || (USE_API_FIXTURES && documents === 'ready')
         ? 'ready'
@@ -408,7 +439,9 @@ function deriveLegacyWorkflow(
     // The comparisons page is still row-facing in the current frontend.
     // Keep that fallback local to workflow/comparison UI; graph readiness is separate.
     comparisons:
-      artifacts.comparison_rows_ready || (USE_API_FIXTURES && documents === 'ready')
+      artifacts.collection_comparable_results_ready ||
+      artifacts.comparison_rows_ready ||
+      (USE_API_FIXTURES && documents === 'ready')
         ? 'ready'
         : artifacts.collection_comparable_results_stale || artifacts.comparison_rows_stale
           ? 'limited'
@@ -440,6 +473,7 @@ function normalizeWorkflow(
 
   return {
     documents: normalizeStageEntry(record.documents, fallback.documents),
+    results: normalizeStageEntry(record.results, fallback.results),
     evidence: normalizeStageEntry(record.evidence, fallback.evidence),
     comparisons: normalizeStageEntry(record.comparisons, fallback.comparisons),
     protocol: normalizeStageEntry(record.protocol, fallback.protocol)
@@ -550,6 +584,9 @@ export async function fetchWorkspaceOverview(collectionId: string) {
       can_view_documents:
         Boolean((data.capabilities as Record<string, unknown> | undefined)?.can_view_documents) ||
         stageIsActionable(workflow.documents),
+      can_view_results:
+        Boolean((data.capabilities as Record<string, unknown> | undefined)?.can_view_results) ||
+        stageIsActionable(workflow.results),
       can_view_evidence:
         Boolean((data.capabilities as Record<string, unknown> | undefined)?.can_view_evidence) ||
         stageIsActionable(workflow.evidence),

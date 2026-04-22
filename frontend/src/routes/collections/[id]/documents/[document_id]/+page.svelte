@@ -5,6 +5,10 @@
   import { errorMessage } from '../../../../_shared/api';
   import { t } from '../../../../_shared/i18n';
   import {
+    fetchCollectionResults,
+    type ResultListItem
+  } from '../../../../_shared/results';
+  import {
     buildDocumentViewerHref,
     fetchDocumentContent,
     fetchEvidenceTraceback,
@@ -22,6 +26,9 @@
   let loadedKey = '';
   let selectedAnchorId = '';
   let resolvedDocumentId = '';
+  let relatedResults: ResultListItem[] = [];
+  let relatedResultsLoading = false;
+  let relatedResultsError = '';
 
   $: collectionId = $page.params.id ?? '';
   $: routeDocumentId = $page.params.document_id ?? '';
@@ -55,6 +62,9 @@
     traceback = null;
     selectedAnchorId = '';
     resolvedDocumentId = routeDocumentId;
+    relatedResults = [];
+    relatedResultsError = '';
+    relatedResultsLoading = false;
     let initialAnchor: TracebackAnchor | null = null;
 
     if (evidenceId) {
@@ -89,6 +99,21 @@
       contentError = errorMessage(err);
     } finally {
       loading = false;
+    }
+
+    if (!contentError && resolvedDocumentId) {
+      relatedResultsLoading = true;
+      try {
+        const resultResponse = await fetchCollectionResults(collectionId, {
+          source_document_id: resolvedDocumentId,
+          limit: 20
+        });
+        relatedResults = resultResponse.items;
+      } catch (err) {
+        relatedResultsError = errorMessage(err);
+      } finally {
+        relatedResultsLoading = false;
+      }
     }
 
     if (initialAnchor?.section_id) {
@@ -177,6 +202,10 @@
   function showTracebackPanel() {
     return Boolean(evidenceId || traceback || tracebackError);
   }
+
+  function resultHref(result: ResultListItem) {
+    return `/collections/${collectionId}/results/${encodeURIComponent(result.result_id)}`;
+  }
 </script>
 
 <svelte:head>
@@ -254,6 +283,29 @@
                 </div>
               {/if}
             </dl>
+          {/if}
+        </article>
+      {/if}
+
+      {#if relatedResultsLoading || relatedResults.length || relatedResultsError}
+        <article class="result-card">
+          <h3>{$t('results.relatedTitle')}</h3>
+          <p class="note">{$t('results.relatedLead')}</p>
+          {#if relatedResultsLoading}
+            <div class="status" role="status">{$t('results.loading')}</div>
+          {:else if relatedResultsError}
+            <div class="status status--error" role="alert">{relatedResultsError}</div>
+          {:else}
+            <ul class="result-list">
+              {#each relatedResults as result}
+                <li>
+                  <a href={resultHref(result)}>
+                    {result.material_label} · {result.property}
+                  </a>
+                  <span class="note"> ({result.comparability_status})</span>
+                </li>
+              {/each}
+            </ul>
           {/if}
         </article>
       {/if}

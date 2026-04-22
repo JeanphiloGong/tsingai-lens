@@ -31,6 +31,7 @@ function buildWorkspacePayload(
     warnings: [],
     workflow: {
       documents: 'ready',
+      results: 'ready',
       evidence: 'ready',
       comparisons: 'ready',
       protocol: 'not_started',
@@ -64,6 +65,7 @@ function buildWorkspacePayload(
     },
     capabilities: {
       can_view_documents: true,
+      can_view_results: true,
       can_view_evidence: true,
       can_view_comparisons: true,
       can_view_graph: false,
@@ -118,6 +120,23 @@ describe('workspace shared helpers', () => {
     });
   });
 
+  it('normalizes workspace results workflow, capability, and link fields', async () => {
+    requestJson.mockResolvedValue({
+      ...buildWorkspacePayload(),
+      links: {
+        results: '/api/v1/collections/col_123/results',
+        comparisons: '/api/v1/collections/col_123/comparisons',
+        documents: '/api/v1/collections/col_123/documents/profiles'
+      }
+    });
+
+    const workspace = await fetchWorkspaceOverview('col_123');
+
+    expect(workspace.workflow.results).toBe('ready');
+    expect(workspace.capabilities.can_view_results).toBe(true);
+    expect(workspace.links.results).toBe('/collections/col_123/results');
+  });
+
   it('treats stale comparison artifacts as limited in legacy workflow fallback', async () => {
     requestJson.mockResolvedValue({
       ...buildWorkspacePayload({
@@ -138,6 +157,7 @@ describe('workspace shared helpers', () => {
     const workspace = await fetchWorkspaceOverview('col_123');
 
     expect(workspace.artifacts.collection_comparable_results_stale).toBe(true);
+    expect(getWorkspaceSurfaceState(workspace, 'results')).toBe('limited');
     expect(getWorkspaceSurfaceState(workspace, 'comparisons')).toBe('limited');
     expect(getCollectionWorkspaceState(workspace)).toBe('ready_with_limits');
   });

@@ -1,5 +1,11 @@
 # Core Comparable Result Phase 3 Corpus Retrieval Plan
 
+Historical note: this page is retained lineage. Use
+[`../../../architecture/core-comparison/decision.md`](../../../architecture/core-comparison/decision.md)
+for the current semantic authority and
+[`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
+for the implemented substrate.
+
 ## Summary
 
 This child plan defines the first executable `Phase 3` wave after the

@@ -82,8 +82,8 @@ This plan does not cover:
 - keep one collection-backed Core artifact model for paper-first and goal-first
   entry
 - treat the paper-facts family as the primary Core domain model
-- treat `comparison_rows` and `evidence_cards` as Core-derived views rather
-  than the only primary research objects
+- treat `evidence_cards`, comparable-result artifacts, and row projection as
+  Core-derived views rather than the only primary research objects
 - do not allow Goal Brief logic to generate research judgments
 - do not allow Source & Collection Builder logic to bypass collection creation
   or Core pipelines
@@ -98,8 +98,8 @@ This plan does not cover:
 Goal:
 
 - finish the current in-flight rollout of `document_profiles`, the underlying
-  paper-facts family, and the derived `evidence_cards` and
-  `comparison_rows` surfaces for real collections
+  paper-facts family, the derived `evidence_cards`, the comparable-result
+  substrate, and row projection surfaces for real collections
 
 Current child execution entrypoint:
 
@@ -112,9 +112,10 @@ Primary changes:
 - stabilize collection-scoped artifact persistence for
   `document_profiles.parquet` plus the fact artifacts that back evidence and
   comparison views
-- keep `evidence_cards.parquet` and `comparison_rows.parquet` explicitly
-  derived from the paper-facts layer rather than treating cards as the only
-  semantic source
+- keep `evidence_cards.parquet`, `comparable_results.parquet`,
+  `collection_comparable_results.parquet`, and `comparison_rows.parquet`
+  explicitly derived from the paper-facts layer rather than treating rows or
+  cards as the only semantic source
 - make workspace readiness and warnings depend on Core artifact flags rather
   than on protocol by default
 - ensure artifact registry tracks `document_profiles_ready`,
@@ -165,8 +166,8 @@ Goal:
 Primary changes:
 
 - keep the post-index sequence as
-  `document_profiles -> paper facts family -> comparison_rows / evidence_cards
-  -> protocol branch`
+  `document_profiles -> paper facts family -> evidence_cards plus
+  comparable-result substrate -> row projection -> protocol branch`
 - ensure task stages and readiness fields mirror that order
 - make protocol execution depend on Core suitability and Core completion rather
   than on raw document presence alone

@@ -20,10 +20,11 @@ Read this plan with:
 
 - [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../architecture/core-comparison/README.md`](../../architecture/core-comparison/README.md)
 - [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
 - [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
-- [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
-- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
+- [`../historical/comparable-result/core-comparable-result-domain-model-plan.md`](../historical/comparable-result/core-comparable-result-domain-model-plan.md)
+- [`../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md`](../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md)
 
 ## Context
 
@@ -336,7 +337,7 @@ semantic center.
 Actions:
 
 - follow the narrowed comparison child plan recorded in
-  [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
+  [`../../architecture/core-comparison/decision.md`](../../architecture/core-comparison/decision.md)
 - define `ComparableResult`
 - define `CollectionComparableResult`
 - define `ComparisonAssessment`
@@ -457,12 +458,12 @@ This plan follows, but does not replace:
   which made the business-layer split visible in package layout
 - [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
   which established the stronger sample/result Core backbone
-- [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
-  which narrows the comparison slice so `ComparableResult` becomes the semantic
-  center and `ComparisonRowRecord` becomes a projection concern
-- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
-  which turns that corrected comparison model into a persistence, identity,
-  policy, read-path, and projection-cache roadmap
+- [`../../architecture/core-comparison/decision.md`](../../architecture/core-comparison/decision.md)
+  which is the current authority for `ComparableResult` as the semantic center
+  and `ComparisonRowRecord` as projection
+- [`../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md`](../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md)
+  which retains the original persistence, identity, policy, read-path, and
+  projection-cache rollout lineage
 
 Those plans made the runtime backbone clearer.
 This plan makes the code-level semantic center match that backbone.

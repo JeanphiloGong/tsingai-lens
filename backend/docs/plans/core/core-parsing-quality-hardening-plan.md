@@ -86,7 +86,8 @@ This child plan does not cover:
 
 Improve the quality of the existing Core backbone:
 
-`document_profiles -> paper facts family -> comparison_rows / evidence_cards`
+`document_profiles -> paper facts family -> evidence_cards plus
+comparable-result substrate -> row projection`
 
 without changing the five-layer architecture or introducing new product-facing
 layers first.

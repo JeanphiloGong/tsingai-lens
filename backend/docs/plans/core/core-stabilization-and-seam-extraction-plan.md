@@ -33,8 +33,8 @@ Current facts:
   application nodes
 - indexing already runs
   a Core-first route family that should now be interpreted as
-  `document_profiles -> paper facts family -> comparison_rows / evidence_cards
-  -> protocol`
+  `document_profiles -> paper facts family -> evidence_cards plus
+  comparable-result substrate -> row projection -> protocol`
 - workspace and artifact registry already expose Core-oriented readiness fields
 
 The remaining near-term architecture problem is not the absence of layers. The

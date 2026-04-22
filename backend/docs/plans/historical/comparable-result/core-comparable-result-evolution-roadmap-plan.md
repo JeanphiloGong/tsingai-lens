@@ -1,5 +1,11 @@
 # Core Comparable Result Evolution Roadmap Plan
 
+Historical note: this page is retained lineage. Use
+[`../../../architecture/core-comparison/decision.md`](../../../architecture/core-comparison/decision.md)
+for the current semantic authority and
+[`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
+for the implemented substrate.
+
 ## Summary
 
 This document records the delivery roadmap after the comparable-result
@@ -25,9 +31,9 @@ Read this plan with:
 - [`core-comparable-result-phase2-document-first-semantic-inspection-plan.md`](core-comparable-result-phase2-document-first-semantic-inspection-plan.md)
 - [`core-comparable-result-phase2-policy-lifecycle-plan.md`](core-comparable-result-phase2-policy-lifecycle-plan.md)
 - [`core-comparable-result-phase3-corpus-retrieval-plan.md`](core-comparable-result-phase3-corpus-retrieval-plan.md)
-- [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
-- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
+- [`../../core/minimal-core-domain-backfill-plan.md`](../../core/minimal-core-domain-backfill-plan.md)
+- [`../../core/core-llm-structured-extraction-hard-cutover-plan.md`](../../core/core-llm-structured-extraction-hard-cutover-plan.md)
+- [`../../core/core-llm-structured-extraction-id-boundary-plan.md`](../../core/core-llm-structured-extraction-id-boundary-plan.md)
 
 ## Purpose
 
@@ -344,6 +350,6 @@ should stay narrow:
 
 ### Companion Docs
 
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
-- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
-- [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
+- [`../../core/core-llm-structured-extraction-hard-cutover-plan.md`](../../core/core-llm-structured-extraction-hard-cutover-plan.md)
+- [`../../core/core-llm-structured-extraction-id-boundary-plan.md`](../../core/core-llm-structured-extraction-id-boundary-plan.md)
+- [`../../core/minimal-core-domain-backfill-plan.md`](../../core/minimal-core-domain-backfill-plan.md)

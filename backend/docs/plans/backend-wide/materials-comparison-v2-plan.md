@@ -75,8 +75,8 @@ As implemented in the backend runtime, this plan now yields:
 The current runtime still materializes `evidence_cards` during extraction for
 route compatibility, but the intended semantic Core order is now:
 
-- `document_profiles -> paper facts family -> comparison_rows /
-  evidence_cards -> protocol branch`
+- `document_profiles -> paper facts family -> evidence_cards plus
+  comparable-result substrate -> row projection -> protocol branch`
 
 No long-lived compatibility path remains from direct evidence-card projection
 to `comparison_rows.parquet`.
@@ -1008,8 +1008,8 @@ Primary changes:
 - split the consumer-facing comparison payload into display, evidence bundle,
   assessment, and uncertainty zones
 - update task orchestration so the semantic Core order becomes:
-  `document_profiles -> paper facts family -> comparison_rows /
-  evidence_cards -> protocol branch`
+  `document_profiles -> paper facts family -> evidence_cards plus
+  comparable-result substrate -> row projection -> protocol branch`
 
 Files expected to change:
 

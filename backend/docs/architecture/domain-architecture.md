@@ -95,9 +95,11 @@ Owns claim-centered evidence extraction and retrieval:
 
 ### Comparisons
 
-Owns collection-facing comparison views:
+Owns comparison-semantic substrate plus collection-facing comparison views:
 
-- `comparison_rows`
+- `comparable_results`
+- `collection_comparable_results`
+- `comparison_rows` projection
 - comparability judgments
 - comparison warnings
 - collection comparison filtering and sorting
@@ -217,7 +219,7 @@ Examples:
 - `application/evidence/`
   evidence card extraction and retrieval
 - `application/comparisons/`
-  comparison row generation and retrieval
+  comparable-result assembly, collection overlays, and row projection retrieval
 - `application/protocol/`
   protocol-specific parsing, search, and SOP flows
 - `application/indexing/`
@@ -312,7 +314,8 @@ The recommended backend order is:
 3. repair current protocol payload fidelity
 4. add `documents` domain support for `document_profiles`
 5. add `evidence` domain support for `evidence_cards`
-6. add `comparisons` domain support for `comparison_rows`
+6. add `comparisons` domain support for `ComparableResult`,
+   `CollectionComparableResult`, and row projection
 7. push protocol behind the evidence-first backbone
 
 ## Relationship To Root Docs

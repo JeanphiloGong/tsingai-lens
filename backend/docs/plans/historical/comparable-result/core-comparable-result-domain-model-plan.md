@@ -1,5 +1,11 @@
 # Core Comparable Result Domain Model Plan
 
+Historical note: this page is retained lineage. Use
+[`../../../architecture/core-comparison/decision.md`](../../../architecture/core-comparison/decision.md)
+for the current semantic authority and
+[`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
+for the implemented substrate.
+
 ## Summary
 
 This document records the stable Core comparison-domain decision after the
@@ -164,7 +170,7 @@ burden of primary domain identity.
 
 Owned by:
 
-- [`../../../domain/core/evidence_backbone.py`](../../../domain/core/evidence_backbone.py)
+- [`../../../../domain/core/evidence_backbone.py`](../../../../domain/core/evidence_backbone.py)
 
 Owned objects:
 
@@ -182,7 +188,7 @@ StructureFeature
 
 Owned by:
 
-- [`../../../domain/core/comparison.py`](../../../domain/core/comparison.py)
+- [`../../../../domain/core/comparison.py`](../../../../domain/core/comparison.py)
 
 Recommended shape:
 
@@ -277,7 +283,7 @@ class CollectionComparableResult:
 ### Projection Layer
 
 `ComparisonRowRecord` may live either in
-[`../../../domain/core/comparison.py`](../../../domain/core/comparison.py) or
+[`../../../../domain/core/comparison.py`](../../../../domain/core/comparison.py) or
 in a narrower `domain/core/projection.py` home if that file is introduced
 later. This page does not force a physical file split. It only fixes the
 semantic rule that row objects are projection records.
@@ -397,7 +403,7 @@ Guardrails:
 
 ### Parent Doc
 
-- [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
+- [`../../core/minimal-core-domain-backfill-plan.md`](../../core/minimal-core-domain-backfill-plan.md)
   remains the parent plan for the broader Core-domain backfill.
 
 ### Roadmap Doc
@@ -418,20 +424,20 @@ Guardrails:
 
 ### Companion Docs
 
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
+- [`../../core/core-llm-structured-extraction-hard-cutover-plan.md`](../../core/core-llm-structured-extraction-hard-cutover-plan.md)
   remains the extraction-contract and semantic-build companion plan.
-- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
+- [`../../core/core-llm-structured-extraction-id-boundary-plan.md`](../../core/core-llm-structured-extraction-id-boundary-plan.md)
   remains the boundary-cleanup companion plan that keeps backend ids out of the
   LLM contract.
 
 ## Related Docs
 
-- [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
+- [`../../core/minimal-core-domain-backfill-plan.md`](../../core/minimal-core-domain-backfill-plan.md)
 - [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
 - [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
 - [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
 - [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
-- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
-- [`../../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
-- [`../../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../../core/core-llm-structured-extraction-hard-cutover-plan.md`](../../core/core-llm-structured-extraction-hard-cutover-plan.md)
+- [`../../core/core-llm-structured-extraction-id-boundary-plan.md`](../../core/core-llm-structured-extraction-id-boundary-plan.md)
+- [`../../../architecture/domain-architecture.md`](../../../architecture/domain-architecture.md)
+- [`../../../architecture/goal-core-source-layering.md`](../../../architecture/goal-core-source-layering.md)

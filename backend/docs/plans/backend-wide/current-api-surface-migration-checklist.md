@@ -41,7 +41,8 @@ evidence-first/comparison-first implementation:
 1. indexing task runs
 2. `document_profiles` are generated
 3. the implemented fact artifacts are generated or refreshed
-4. `evidence_cards` and `comparison_rows` are served as derived Core views
+4. `evidence_cards`, comparable-result semantic reads, and `/comparisons` row
+   projection are served from Core artifacts
 5. `protocol` remains a conditional downstream branch
 
 Graph and report surfaces now consume the same Core artifacts as derived
@@ -66,6 +67,13 @@ carry old `community_*` vocabulary.
   Uses the real `PaperFactsService`.
 - `GET /api/v1/collections/{collection_id}/comparisons`
   Uses the real `ComparisonService`.
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
+  Uses the real `ComparisonService` for document-first comparable-result
+  inspection over semantic and scope artifacts.
+- `GET /api/v1/comparable-results`
+  and `GET /api/v1/comparable-results/{comparable_result_id}`
+  Use the real corpus comparable-result surface without promoting row cache back
+  into the semantic source of truth.
 
 These endpoints are the current Lens v1 primary acceptance backbone.
 
@@ -141,6 +149,8 @@ Collection pages that need task history should use
 - real document profile generation and listing
 - real evidence card generation and listing over Core facts
 - real comparison row generation and listing over Core facts
+- document-first comparison-semantic inspection over comparable-result artifacts
+- corpus comparable-result retrieval over current collection overlays
 - indexing orchestration reordered around the new backbone
 - protocol generation skipped for protocol-unsuitable collections
 - graph product surface cut over to Core-derived projection
@@ -187,6 +197,10 @@ workflow:
 - `evidence/cards`
 - `comparisons`
 
+Document-first comparison semantics and corpus comparable-result retrieval are
+now companion read surfaces over the same substrate. They do not replace the
+collection-facing `/comparisons` acceptance path.
+
 `protocol`, `graph`, and `reports` are not the primary acceptance center for
 this migration stage, but `graph` and `reports` now already consume Core
 artifacts rather than defining a competing product fact model.
@@ -200,6 +214,7 @@ semantic center of Core.
 - [`../specs/api.md`](../../specs/api.md)
 - [`../architecture/overview.md`](../../architecture/overview.md)
 - [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
+- [`../architecture/core-comparison/README.md`](../../architecture/core-comparison/README.md)
 - [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
 - [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
 - [`graph-surface-plan.md`](../derived/graph-surface-plan.md)

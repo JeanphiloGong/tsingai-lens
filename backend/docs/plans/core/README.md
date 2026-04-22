@@ -27,30 +27,13 @@ domain-semantic backfill.
   Core traceback vertical slice for reviewable evidence grounding
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
   Backfill stable Core research semantics into `backend/domain/`
-- [`core-comparable-result-domain-model-plan.md`](core-comparable-result-domain-model-plan.md)
-  Child plan for re-centering comparison semantics on `ComparableResult`,
-  treating collection as scope, and demoting `ComparisonRow` to projection
-- [`core-comparable-result-evolution-roadmap-plan.md`](core-comparable-result-evolution-roadmap-plan.md)
-  Child roadmap plan for persistence, identity, policy, read-path, and
-  projection-cache evolution after the comparable-result model decision
-- [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
-  Phase 1 child plan for introducing `comparable_results` and
-  `collection_comparable_results` as explicit Core artifacts
-- [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
-  Phase 1 child plan for making the collection-first comparison read path
-  explicitly consume semantic and scope artifacts
-- [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
-  Phase 1 child plan for clarifying assembly, assessment, projection, and
-  orchestration ownership without adding a generic new service layer
-- [`core-comparable-result-phase2-document-first-semantic-inspection-plan.md`](core-comparable-result-phase2-document-first-semantic-inspection-plan.md)
-  Phase 2 child plan for making document-first semantic inspection explicit on
-  top of the comparable-result substrate
-- [`core-comparable-result-phase2-policy-lifecycle-plan.md`](core-comparable-result-phase2-policy-lifecycle-plan.md)
-  Phase 2 child plan for attaching policy lineage and reassessment semantics
-  to `CollectionComparableResult`
-- [`core-comparable-result-phase3-corpus-retrieval-plan.md`](core-comparable-result-phase3-corpus-retrieval-plan.md)
-  Phase 3 child plan for making `ComparableResult` a corpus-level retrieval
-  surface across collection outputs without promoting row cache
+
+## Comparable-Result Family
+
+- Current architecture authority:
+  [`../../architecture/core-comparison/README.md`](../../architecture/core-comparison/README.md)
+- Historical rollout lineage:
+  [`../historical/comparable-result/README.md`](../historical/comparable-result/README.md)
 
 ## Boundary Rule
 

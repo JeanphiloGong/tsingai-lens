@@ -439,8 +439,9 @@ The implementation wave for this plan should verify three things explicitly.
 
 ### Backbone Verification
 
-- `document_profiles -> paper facts family -> comparison_rows / evidence_cards
-  -> protocol branch` still completes after the migration
+- `document_profiles -> paper facts family -> evidence_cards plus
+  comparable-result substrate -> row projection -> protocol branch` still
+  completes after the migration
 - task runner and app-layer integration continue to operate on the new
   artifact set without silent contract drift
 

@@ -9,7 +9,7 @@ and onto LLM structured extraction.
 This is not a new architecture layer and not a Source-owned parser expansion.
 It is a Core child plan inside the corrected Lens v1 Core flow:
 
-`document_profiles -> paper facts family -> comparison_rows / evidence_cards`
+`document_profiles -> paper facts family -> evidence_cards plus comparable-result substrate -> row projection`
 
 Read this plan with the accepted paper-facts RFC:
 
@@ -19,8 +19,9 @@ The purpose of this cutover is straightforward:
 
 - stop treating noisy heuristic inference as the primary semantic extractor
 - move Core fact extraction onto schema-bound LLM parsing
-- keep `comparison_rows` and `evidence_cards` as deterministic Core-derived
-  surfaces rather than opaque model-generated final artifacts
+- keep `evidence_cards`, comparable-result artifacts, and row projection as
+  deterministic Core-derived surfaces rather than opaque model-generated final
+  artifacts
 
 For the broader backend roadmap, read
 [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
@@ -72,8 +73,8 @@ That means:
 - Source remains a structural handoff layer
 - Core becomes an LLM-first semantic extraction layer
 - primary paper facts are extracted before views are assembled
-- `comparison_rows` and `evidence_cards` stay deterministic and assembled from
-  Core backbone artifacts
+- `evidence_cards`, comparable-result artifacts, and row projection stay
+  deterministic and assembled from Core backbone artifacts
 - the old heuristic extraction path is removed rather than retained as a
   fallback
 

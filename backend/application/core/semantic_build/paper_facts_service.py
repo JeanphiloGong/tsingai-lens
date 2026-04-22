@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
@@ -527,15 +528,44 @@ class PaperFactsService:
             doc_condition_start = len(test_condition_rows)
             doc_baseline_start = len(baseline_rows)
             doc_measurement_start = len(measurement_rows)
-            for text_window in doc_text_windows:
-                bundle = extractor.extract_text_window_bundle(
-                    self._build_text_window_extraction_payload(
-                        title=title,
-                        source_filename=source_filename,
-                        profile=profile,
-                        text_window=text_window,
-                    )
+            for text_window_position, text_window in enumerate(doc_text_windows, start=1):
+                window_id = self._normalize_scalar_text(text_window.get("window_id")) or ""
+                heading_path = self._normalize_scalar_text(text_window.get("heading_path"))
+                block_type = self._normalize_scalar_text(text_window.get("block_type"))
+                text_chars = len(str(text_window.get("text") or ""))
+                logger.info(
+                    "Paper facts text-window extraction started collection_id=%s document_id=%s window_position=%s window_count=%s window_id=%s block_type=%s chars=%s heading_path=%s",
+                    collection_id,
+                    document_id,
+                    text_window_position,
+                    len(doc_text_windows),
+                    window_id,
+                    block_type,
+                    text_chars,
+                    heading_path,
                 )
+                text_window_started_at = perf_counter()
+                try:
+                    bundle = extractor.extract_text_window_bundle(
+                        self._build_text_window_extraction_payload(
+                            title=title,
+                            source_filename=source_filename,
+                            profile=profile,
+                            text_window=text_window,
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "Paper facts text-window extraction failed collection_id=%s document_id=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f",
+                        collection_id,
+                        document_id,
+                        text_window_position,
+                        len(doc_text_windows),
+                        window_id,
+                        perf_counter() - text_window_started_at,
+                    )
+                    raise
+                text_window_elapsed_s = perf_counter() - text_window_started_at
                 self._materialize_bundle(
                     bundle=bundle,
                     collection_id=collection_id,
@@ -551,12 +581,14 @@ class PaperFactsService:
                     measurement_rows=measurement_rows,
                     document_state=document_state,
                 )
-                logger.debug(
-                    "Evidence text-window bundle extracted collection_id=%s document_id=%s window_id=%s heading_path=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                logger.info(
+                    "Paper facts text-window extraction finished collection_id=%s document_id=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
                     collection_id,
                     document_id,
-                    text_window.get("window_id"),
-                    text_window.get("heading_path"),
+                    text_window_position,
+                    len(doc_text_windows),
+                    window_id,
+                    text_window_elapsed_s,
                     len(bundle.method_facts),
                     len(bundle.sample_variants),
                     len(bundle.test_conditions),
@@ -565,20 +597,46 @@ class PaperFactsService:
                 )
 
             if str(profile.get("doc_type") or "") != DOC_TYPE_REVIEW:
-                for row in doc_table_rows:
+                for table_row_position, row in enumerate(doc_table_rows, start=1):
                     table_id = str(row.get("table_id") or "")
                     row_index = self._safe_int(row.get("row_index"))
                     row_cells = grouped_row_cells.get((table_id, row_index), [])
-                    bundle = extractor.extract_table_row_bundle(
-                        self._build_table_row_extraction_payload(
-                            title=title,
-                            source_filename=source_filename,
-                            profile=profile,
-                            table_row=row,
-                            row_cells=row_cells,
-                            text_windows=doc_text_windows,
-                        )
+                    logger.info(
+                        "Paper facts table-row extraction started collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s cell_count=%s heading_path=%s",
+                        collection_id,
+                        document_id,
+                        table_row_position,
+                        len(doc_table_rows),
+                        table_id,
+                        row_index,
+                        len(row_cells),
+                        self._normalize_scalar_text(row.get("heading_path")),
                     )
+                    table_row_started_at = perf_counter()
+                    try:
+                        bundle = extractor.extract_table_row_bundle(
+                            self._build_table_row_extraction_payload(
+                                title=title,
+                                source_filename=source_filename,
+                                profile=profile,
+                                table_row=row,
+                                row_cells=row_cells,
+                                text_windows=doc_text_windows,
+                            )
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Paper facts table-row extraction failed collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f",
+                            collection_id,
+                            document_id,
+                            table_row_position,
+                            len(doc_table_rows),
+                            table_id,
+                            row_index,
+                            perf_counter() - table_row_started_at,
+                        )
+                        raise
+                    table_row_elapsed_s = perf_counter() - table_row_started_at
                     self._materialize_bundle(
                         bundle=bundle,
                         collection_id=collection_id,
@@ -594,12 +652,15 @@ class PaperFactsService:
                         measurement_rows=measurement_rows,
                         document_state=document_state,
                     )
-                    logger.debug(
-                        "Evidence table-row bundle extracted collection_id=%s document_id=%s table_id=%s row_index=%s cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                    logger.info(
+                        "Paper facts table-row extraction finished collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
                         collection_id,
                         document_id,
+                        table_row_position,
+                        len(doc_table_rows),
                         table_id,
                         row_index,
+                        table_row_elapsed_s,
                         len(row_cells),
                         len(bundle.method_facts),
                         len(bundle.sample_variants),

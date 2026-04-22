@@ -612,6 +612,90 @@ def test_evidence_service_logs_warning_when_measurements_are_empty(monkeypatch, 
     )
 
 
+def test_paper_facts_service_logs_window_and_table_progress(monkeypatch, tmp_path, caplog):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = EvidenceOnlyExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+
+    collection = collection_service.create_collection("Paper Facts Logging Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Logging Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Process conditions were reported.",
+                        "Table 1 Mechanical Results",
+                        "Sample | Strength",
+                        "A1 | 12",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Process conditions were reported.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    with caplog.at_level("INFO"):
+        paper_facts_service.build_evidence_cards(collection_id, output_dir)
+
+    assert any(
+        "Paper facts text-window extraction started" in record.message
+        and "window_position=" in record.message
+        and "window_count=" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts text-window extraction finished" in record.message
+        and "elapsed_s=" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts table-row extraction started" in record.message
+        and "row_position=" in record.message
+        and "table_row_count=" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts table-row extraction finished" in record.message
+        and "elapsed_s=" in record.message
+        for record in caplog.records
+    )
+
+
 def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 

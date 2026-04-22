@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from application.core.comparison_assembly import ComparableResultAssembler
+from application.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.llm.prompts import (
@@ -947,23 +949,10 @@ def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
 
 
 def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_path):
-    from application.source.collection_service import CollectionService
-    from application.source.artifact_registry_service import ArtifactRegistryService
+    assembler = ComparableResultAssembler()
+    projector = ComparisonRowProjector()
 
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        DocumentProfileService(collection_service, artifact_registry),
-    )
-    comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
-    )
-
-    comparable_result = comparison_service._assemble_comparable_result(
+    comparable_result = assembler.assemble_comparable_result(
         result_row=pd.Series(
             {
                 "result_id": "res-1",
@@ -1019,12 +1008,12 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
         },
     )
     assert comparable_result is not None
-    scoped_result = comparison_service._build_collection_comparable_result(
+    scoped_result = assembler.build_collection_comparable_result(
         collection_id="col-1",
         comparable_result=comparable_result,
         sort_order=0,
     )
-    row = comparison_service._project_comparison_row(
+    row = projector.project_row(
         comparable_result=comparable_result,
         scoped_result=scoped_result,
     )
@@ -1048,21 +1037,8 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
 
 
 def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
-    from application.source.collection_service import CollectionService
-    from application.source.artifact_registry_service import ArtifactRegistryService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        DocumentProfileService(collection_service, artifact_registry),
-    )
-    comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
-    )
+    assembler = ComparableResultAssembler()
+    projector = ComparisonRowProjector()
 
     sample_lookup = {
         "var-1": {
@@ -1097,7 +1073,7 @@ def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
         }
     }
 
-    first = comparison_service._assemble_comparable_result(
+    first = assembler.assemble_comparable_result(
         result_row=pd.Series(
             {
                 "result_id": "res-1",
@@ -1123,7 +1099,7 @@ def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
         test_condition_lookup=test_condition_lookup,
         baseline_lookup=baseline_lookup,
     )
-    second = comparison_service._assemble_comparable_result(
+    second = assembler.assemble_comparable_result(
         result_row=pd.Series(
             {
                 "result_id": "res-2",
@@ -1154,24 +1130,24 @@ def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
     assert second is not None
     assert first.comparable_result_id == second.comparable_result_id
 
-    first_row = comparison_service._project_comparison_row(
+    first_row = projector.project_row(
         comparable_result=first,
-        scoped_result=comparison_service._build_collection_comparable_result(
+        scoped_result=assembler.build_collection_comparable_result(
             collection_id="col-1",
             comparable_result=first,
             sort_order=0,
         ),
     )
-    second_row = comparison_service._project_comparison_row(
+    second_row = projector.project_row(
         comparable_result=second,
-        scoped_result=comparison_service._build_collection_comparable_result(
+        scoped_result=assembler.build_collection_comparable_result(
             collection_id="col-1",
             comparable_result=second,
             sort_order=1,
         ),
     )
 
-    merged = comparison_service._merge_row_records(first_row, second_row)
+    merged = projector.merge_row_records(first_row, second_row)
 
     assert first_row.row_id == second_row.row_id
     assert merged.supporting_evidence_ids == ("ev_result_res-1", "ev_result_res-2")

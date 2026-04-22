@@ -1605,9 +1605,15 @@ def test_comparison_service_inspects_document_semantics_from_semantic_artifacts(
     assert payload["items"][0]["collection_overlays"][0]["policy_version"] == (
         COLLECTION_COMPARISON_POLICY_VERSION
     )
-    assert payload["items"][1]["collection_overlays"] == []
+    assert payload["items"][1]["collection_overlays"] == [
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=second,
+            sort_order=3,
+        ).to_record()
+    ]
     assert "projected_rows" not in payload["items"][0]
-    assert not (output_dir / "comparison_rows.parquet").exists()
+    assert (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_comparison_service_document_semantic_inspection_can_project_rows_without_row_cache(
@@ -1719,6 +1725,67 @@ def test_comparison_service_persists_policy_metadata_on_collection_overlays(
         COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
         COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
     ]
+
+
+def test_comparison_service_reassesses_stale_scope_artifacts_and_refreshes_row_cache(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    comparison_service = ComparisonService(
+        collection_service=collection_service,
+        artifact_registry_service=artifact_registry,
+    )
+    collection = collection_service.create_collection("Stale Scope Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    comparable_result = _build_test_comparable_result(
+        comparable_result_id="cres-stale-1",
+        source_document_id="paper-1",
+        source_result_id="res-stale-1",
+    )
+    pd.DataFrame([comparable_result.to_record()]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    stale_overlay = _build_collection_overlay(
+        collection_id=collection_id,
+        comparable_result=comparable_result,
+        sort_order=7,
+    ).to_record()
+    stale_overlay["policy_version"] = "comparison_policy_v0"
+    stale_overlay["assessment_input_fingerprint"] = "cafp_outdated"
+    pd.DataFrame([stale_overlay]).to_parquet(
+        output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+    artifact_registry.upsert(collection_id, output_dir)
+
+    overlays = comparison_service.read_collection_comparable_results(collection_id)
+
+    assert overlays.iloc[0]["policy_version"] == COLLECTION_COMPARISON_POLICY_VERSION
+    assert overlays.iloc[0]["assessment_input_fingerprint"].startswith("cafp_")
+    assert overlays.iloc[0]["assessment_input_fingerprint"] != "cafp_outdated"
+    assert overlays.iloc[0]["sort_order"] == 7
+    assert (output_dir / "comparison_rows.parquet").exists()
+
+    artifacts = artifact_registry.get(collection_id)
+    assert artifacts["collection_comparable_results_ready"] is True
+    assert artifacts["collection_comparable_results_stale"] is False
+    assert artifacts["comparison_rows_generated"] is True
+    assert artifacts["comparison_rows_ready"] is True
+    assert artifacts["comparison_rows_stale"] is False
+    assert artifacts["graph_generated"] is False
+    assert artifacts["graph_ready"] is False
+    assert artifacts["graph_stale"] is False
 
 
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):

@@ -48,10 +48,22 @@ class WorkspaceArtifactStatusResponse(BaseModel):
     comparable_results_ready: bool = Field(default=False, description="comparable_results.parquet 是否存在且非空")
     collection_comparable_results_generated: bool = Field(default=False, description="collection_comparable_results.parquet 是否存在")
     collection_comparable_results_ready: bool = Field(default=False, description="collection_comparable_results.parquet 是否存在且非空")
+    collection_comparable_results_stale: bool = Field(
+        default=False,
+        description="collection_comparable_results.parquet 是否已因 policy/version drift 而过期",
+    )
     comparison_rows_generated: bool = Field(default=False, description="comparison_rows.parquet 投影缓存是否存在")
     comparison_rows_ready: bool = Field(default=False, description="comparison_rows.parquet 投影缓存是否存在且非空")
+    comparison_rows_stale: bool = Field(
+        default=False,
+        description="comparison_rows.parquet 是否因上游 scope artifact 过期而失效",
+    )
     graph_generated: bool = Field(default=False, description="Core graph 所需 backbone 与 comparison semantic 输入是否均已生成")
     graph_ready: bool = Field(default=False, description="Core graph 视图是否可按需投影")
+    graph_stale: bool = Field(
+        default=False,
+        description="Core graph 语义输入是否因 collection scope artifact 过期而不再 current",
+    )
     blocks_generated: bool = Field(default=False, description="blocks.parquet 是否存在")
     blocks_ready: bool = Field(default=False, description="blocks.parquet 是否存在且非空")
     figures_generated: bool = Field(default=False, description="figures.parquet 是否存在")

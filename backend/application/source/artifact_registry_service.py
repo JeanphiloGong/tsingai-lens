@@ -5,9 +5,25 @@ from pathlib import Path
 
 import pandas as pd
 
+from domain.core.comparison import (
+    CollectionComparableResult,
+    ComparableResult,
+    evaluate_collection_reassessment_reasons,
+)
 from domain.ports import ArtifactRepository
 from domain.source import ArtifactStatusRecord
 from infra.persistence.factory import build_artifact_repository
+from infra.persistence.backbone_codec import restore_frame_from_storage
+
+
+_COMPARABLE_RESULT_JSON_COLUMNS = (
+    "binding",
+    "normalized_context",
+    "axis",
+    "value",
+    "evidence",
+)
+_COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS = ("assessment", "reassessment_triggers")
 
 
 def _now_iso() -> str:
@@ -25,7 +41,13 @@ class ArtifactRegistryService:
         self.repository = repository or build_artifact_repository(root_dir)
         self.root_dir = self.repository.root_dir
 
-    def build_registry(self, collection_id: str, output_dir: str | Path) -> dict:
+    def build_registry(
+        self,
+        collection_id: str,
+        output_dir: str | Path,
+        *,
+        previous_payload: dict | None = None,
+    ) -> dict:
         base_dir = Path(output_dir).expanduser().resolve()
         documents_path = base_dir / "documents.parquet"
         document_profiles_path = base_dir / "document_profiles.parquet"
@@ -49,7 +71,12 @@ class ArtifactRegistryService:
         table_cells_path = base_dir / "table_cells.parquet"
         procedure_blocks_path = base_dir / "procedure_blocks.parquet"
         protocol_steps_path = base_dir / "protocol_steps.parquet"
-        return ArtifactStatusRecord.build(
+        collection_scope_stale = self._collection_scope_artifacts_stale(
+            collection_id=collection_id,
+            comparable_results_path=comparable_results_path,
+            collection_comparable_results_path=collection_comparable_results_path,
+        )
+        payload = ArtifactStatusRecord.build(
             collection_id=collection_id,
             output_path=str(base_dir),
             documents_generated=documents_path.exists(),
@@ -82,8 +109,11 @@ class ArtifactRegistryService:
             collection_comparable_results_ready=self._parquet_has_rows(
                 collection_comparable_results_path
             ),
+            collection_comparable_results_stale=collection_scope_stale,
             comparison_rows_generated=comparison_rows_path.exists(),
             comparison_rows_ready=self._parquet_has_rows(comparison_rows_path),
+            comparison_rows_stale=collection_scope_stale and comparison_rows_path.exists(),
+            graph_stale=collection_scope_stale,
             blocks_generated=blocks_path.exists(),
             blocks_ready=self._parquet_has_rows(blocks_path),
             figures_generated=figures_path.exists(),
@@ -98,6 +128,17 @@ class ArtifactRegistryService:
             protocol_steps_ready=self._parquet_has_rows(protocol_steps_path),
             updated_at=_now_iso(),
         ).to_record()
+        if previous_payload is None:
+            return payload
+        normalized_previous = ArtifactStatusRecord.from_mapping(
+            previous_payload,
+            collection_id=collection_id,
+        ).to_record()
+        if self._payload_without_updated_at(normalized_previous) == self._payload_without_updated_at(
+            payload
+        ):
+            payload["updated_at"] = normalized_previous["updated_at"]
+        return payload
 
     def _parquet_has_rows(self, path: Path) -> bool:
         if not path.exists():
@@ -109,7 +150,12 @@ class ArtifactRegistryService:
         return not frame.empty
 
     def upsert(self, collection_id: str, output_dir: str | Path) -> dict:
-        payload = self.build_registry(collection_id, output_dir)
+        previous_payload = self.repository.read(collection_id)
+        payload = self.build_registry(
+            collection_id,
+            output_dir,
+            previous_payload=previous_payload,
+        )
         self.repository.write(collection_id, payload)
         return payload
 
@@ -121,6 +167,68 @@ class ArtifactRegistryService:
             payload,
             collection_id=collection_id,
         ).to_record()
+        output_path = normalized.get("output_path")
+        if output_path:
+            normalized = self.build_registry(
+                collection_id,
+                output_path,
+                previous_payload=normalized,
+            )
         if normalized != payload:
             self.repository.write(collection_id, normalized)
         return normalized
+
+    def _collection_scope_artifacts_stale(
+        self,
+        *,
+        collection_id: str,
+        comparable_results_path: Path,
+        collection_comparable_results_path: Path,
+    ) -> bool:
+        if not comparable_results_path.exists() or not collection_comparable_results_path.exists():
+            return False
+        try:
+            comparable_results = restore_frame_from_storage(
+                pd.read_parquet(comparable_results_path),
+                _COMPARABLE_RESULT_JSON_COLUMNS,
+            )
+            collection_comparable_results = restore_frame_from_storage(
+                pd.read_parquet(collection_comparable_results_path),
+                _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
+            )
+        except Exception:  # noqa: BLE001
+            return False
+        if comparable_results.empty or collection_comparable_results.empty:
+            return False
+
+        comparable_records: list[ComparableResult] = []
+        for _, row in comparable_results.iterrows():
+            comparable_record = ComparableResult.from_mapping(dict(row))
+            if comparable_record.comparable_result_id:
+                comparable_records.append(comparable_record)
+        scoped_records = [
+            CollectionComparableResult.from_mapping(dict(row))
+            for _, row in collection_comparable_results.iterrows()
+        ]
+        scoped_records_by_result_id = {
+            record.comparable_result_id: record
+            for record in scoped_records
+            if record.collection_id == collection_id and record.comparable_result_id
+        }
+        comparable_result_ids = {
+            record.comparable_result_id for record in comparable_records if record.comparable_result_id
+        }
+        if comparable_result_ids != set(scoped_records_by_result_id):
+            return True
+        for comparable_record in comparable_records:
+            scoped_record = scoped_records_by_result_id.get(
+                comparable_record.comparable_result_id
+            )
+            if scoped_record is None:
+                return True
+            if evaluate_collection_reassessment_reasons(scoped_record, comparable_record):
+                return True
+        return False
+
+    def _payload_without_updated_at(self, payload: dict) -> dict:
+        return {key: value for key, value in payload.items() if key != "updated_at"}

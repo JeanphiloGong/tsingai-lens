@@ -49,10 +49,13 @@ class ArtifactStatusRecord:
     comparable_results_ready: bool
     collection_comparable_results_generated: bool
     collection_comparable_results_ready: bool
+    collection_comparable_results_stale: bool
     comparison_rows_generated: bool
     comparison_rows_ready: bool
+    comparison_rows_stale: bool
     graph_generated: bool
     graph_ready: bool
+    graph_stale: bool
     blocks_generated: bool
     blocks_ready: bool
     figures_generated: bool
@@ -114,8 +117,11 @@ class ArtifactStatusRecord:
         comparable_results_ready: bool = False,
         collection_comparable_results_generated: bool = False,
         collection_comparable_results_ready: bool = False,
+        collection_comparable_results_stale: bool = False,
         comparison_rows_generated: bool = False,
         comparison_rows_ready: bool = False,
+        comparison_rows_stale: bool = False,
+        graph_stale: bool = False,
         blocks_generated: bool = False,
         blocks_ready: bool = False,
         figures_generated: bool = False,
@@ -129,6 +135,20 @@ class ArtifactStatusRecord:
         protocol_steps_generated: bool = False,
         protocol_steps_ready: bool = False,
     ) -> "ArtifactStatusRecord":
+        collection_comparable_results_generated = bool(
+            collection_comparable_results_generated
+        )
+        collection_comparable_results_stale = (
+            collection_comparable_results_generated
+            and bool(collection_comparable_results_stale)
+        )
+        collection_comparable_results_ready = bool(
+            collection_comparable_results_ready
+        ) and not collection_comparable_results_stale
+        comparison_rows_generated = bool(comparison_rows_generated)
+        comparison_rows_stale = comparison_rows_generated and bool(comparison_rows_stale)
+        comparison_rows_ready = bool(comparison_rows_ready) and not comparison_rows_stale
+
         graph_inputs = {
             "document_profiles_generated": bool(document_profiles_generated),
             "document_profiles_ready": bool(document_profiles_ready),
@@ -136,18 +156,21 @@ class ArtifactStatusRecord:
             "evidence_cards_ready": bool(evidence_cards_ready),
             "comparable_results_generated": bool(comparable_results_generated),
             "comparable_results_ready": bool(comparable_results_ready),
-            "collection_comparable_results_generated": bool(
-                collection_comparable_results_generated
-            ),
-            "collection_comparable_results_ready": bool(
-                collection_comparable_results_ready
-            ),
+            "collection_comparable_results_generated": collection_comparable_results_generated,
+            "collection_comparable_results_ready": collection_comparable_results_ready,
         }
         core_graph_generated = all(
             graph_inputs[key] for key in _CORE_GRAPH_GENERATED_KEYS
         )
-        core_graph_ready = core_graph_generated and any(
-            graph_inputs[key] for key in _CORE_GRAPH_READY_KEYS
+        derived_graph_stale = core_graph_generated and (
+            bool(graph_stale) or collection_comparable_results_stale
+        )
+        core_graph_ready = (
+            core_graph_generated
+            and any(
+                graph_inputs[key] for key in _CORE_GRAPH_READY_KEYS
+            )
+            and not derived_graph_stale
         )
         return cls(
             collection_id=str(collection_id),
@@ -180,16 +203,15 @@ class ArtifactStatusRecord:
             measurement_results_ready=bool(measurement_results_ready),
             comparable_results_generated=bool(comparable_results_generated),
             comparable_results_ready=bool(comparable_results_ready),
-            collection_comparable_results_generated=bool(
-                collection_comparable_results_generated
-            ),
-            collection_comparable_results_ready=bool(
-                collection_comparable_results_ready
-            ),
-            comparison_rows_generated=bool(comparison_rows_generated),
-            comparison_rows_ready=bool(comparison_rows_ready),
+            collection_comparable_results_generated=collection_comparable_results_generated,
+            collection_comparable_results_ready=collection_comparable_results_ready,
+            collection_comparable_results_stale=collection_comparable_results_stale,
+            comparison_rows_generated=comparison_rows_generated,
+            comparison_rows_ready=comparison_rows_ready,
+            comparison_rows_stale=comparison_rows_stale,
             graph_generated=core_graph_generated,
             graph_ready=core_graph_ready,
+            graph_stale=derived_graph_stale,
             blocks_generated=bool(blocks_generated),
             blocks_ready=bool(blocks_ready),
             figures_generated=bool(figures_generated),
@@ -265,10 +287,15 @@ class ArtifactStatusRecord:
             collection_comparable_results_ready=_normalize_bool(
                 source.get("collection_comparable_results_ready")
             ),
+            collection_comparable_results_stale=_normalize_bool(
+                source.get("collection_comparable_results_stale")
+            ),
             comparison_rows_generated=_normalize_bool(
                 source.get("comparison_rows_generated")
             ),
             comparison_rows_ready=_normalize_bool(source.get("comparison_rows_ready")),
+            comparison_rows_stale=_normalize_bool(source.get("comparison_rows_stale")),
+            graph_stale=_normalize_bool(source.get("graph_stale")),
             blocks_generated=_normalize_bool(source.get("blocks_generated")),
             blocks_ready=_normalize_bool(source.get("blocks_ready")),
             figures_generated=_normalize_bool(source.get("figures_generated")),
@@ -315,10 +342,13 @@ class ArtifactStatusRecord:
             "comparable_results_ready": self.comparable_results_ready,
             "collection_comparable_results_generated": self.collection_comparable_results_generated,
             "collection_comparable_results_ready": self.collection_comparable_results_ready,
+            "collection_comparable_results_stale": self.collection_comparable_results_stale,
             "comparison_rows_generated": self.comparison_rows_generated,
             "comparison_rows_ready": self.comparison_rows_ready,
+            "comparison_rows_stale": self.comparison_rows_stale,
             "graph_generated": self.graph_generated,
             "graph_ready": self.graph_ready,
+            "graph_stale": self.graph_stale,
             "blocks_generated": self.blocks_generated,
             "blocks_ready": self.blocks_ready,
             "figures_generated": self.figures_generated,

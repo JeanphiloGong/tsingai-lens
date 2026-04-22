@@ -116,6 +116,17 @@
   `documents.parquet`、`text_units.parquet`、`blocks.parquet`、
   `figures.parquet`、`table_rows.parquet`、`table_cells.parquet`
   以及 `image_assets/`
+- `GET /api/v1/tasks/{task_id}/artifacts`
+  与 workspace 内的 `artifacts` 都应对 comparison semantic 相关产物额外暴露
+  `*_stale` 字段，用来表达：
+  - `collection_comparable_results_stale`
+    表示 collection-scoped assessment 已因 policy/version drift 或 assessment
+    input drift 而失效
+  - `comparison_rows_stale`
+    表示 row cache 已因上游 scope artifact 失效而不再 current
+  - `graph_stale`
+    表示 graph 的 comparison semantic 输入不再 current
+  - stale 时对应的 `ready` 必须为 `false`，但 `generated` 可以保持 `true`
 
 ### Workspace
 
@@ -157,6 +168,14 @@
   `*_generated` 与 `*_ready` 两类布尔值：
   - `generated` 表示该阶段产物文件已生成（可能为空）
   - `ready` 表示该阶段产物可直接用于主界面消费（通常要求非空）
+- `artifacts`
+  对 comparison semantic 相关产物还应提供 `*_stale`：
+  - `collection_comparable_results_stale`
+  - `comparison_rows_stale`
+  - `graph_stale`
+- 对这些 comparison semantic 产物：
+  - `generated=true` 仅表示文件或投影前提存在
+  - `ready=true` 还要求它们当前没有 stale
 - `figures_generated` / `figures_ready`
   对应 Source 层 `figures.parquet` 的生成与可消费状态
   - figure 行可以存在而 `image_path` 为空

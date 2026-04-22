@@ -69,10 +69,13 @@ class WorkspaceService:
             "comparable_results_ready": False,
             "collection_comparable_results_generated": False,
             "collection_comparable_results_ready": False,
+            "collection_comparable_results_stale": False,
             "comparison_rows_generated": False,
             "comparison_rows_ready": False,
+            "comparison_rows_stale": False,
             "graph_generated": False,
             "graph_ready": False,
+            "graph_stale": False,
             "blocks_generated": False,
             "blocks_ready": False,
             "figures_generated": False,
@@ -111,6 +114,13 @@ class WorkspaceService:
     ) -> bool:
         return bool(artifacts.get(ready_key))
 
+    def _artifact_stale(
+        self,
+        artifacts: dict,
+        stale_key: str,
+    ) -> bool:
+        return bool(artifacts.get(stale_key))
+
     def _comparisons_generated(self, artifacts: dict) -> bool:
         return self._artifact_generated(
             artifacts,
@@ -129,6 +139,12 @@ class WorkspaceService:
         ) and self._artifact_ready(
             artifacts,
             "collection_comparable_results_ready",
+        )
+
+    def _comparisons_stale(self, artifacts: dict) -> bool:
+        return self._artifact_stale(
+            artifacts,
+            "collection_comparable_results_stale",
         )
 
     def _build_capabilities(self, artifacts: dict) -> dict:
@@ -231,7 +247,13 @@ class WorkspaceService:
             )
         )
 
-        if file_count == 0:
+        any_generated = (
+            documents_generated
+            or evidence_generated
+            or comparisons_generated
+            or protocol_generated
+        )
+        if file_count == 0 and not any_generated:
             return {
                 "documents": {"status": "not_started", "detail": "No files uploaded."},
                 "evidence": {"status": "not_started", "detail": "Evidence cards are not generated yet."},
@@ -283,10 +305,16 @@ class WorkspaceService:
                 "detail": "Evidence cards are not generated yet.",
             }
 
+        comparisons_stale = self._comparisons_stale(artifacts)
         if comparison_ready:
             comparisons_stage = {
                 "status": "ready",
                 "detail": "Collection-scoped comparisons are available.",
+            }
+        elif comparisons_stale:
+            comparisons_stage = {
+                "status": "limited",
+                "detail": "Collection-scoped comparisons are stale and require reassessment before they are current again.",
             }
         elif comparisons_generated:
             comparisons_stage = {
@@ -469,10 +497,15 @@ class WorkspaceService:
                 "collection_comparable_results_ready": bool(
                     artifacts.get("collection_comparable_results_ready")
                 ),
+                "collection_comparable_results_stale": bool(
+                    artifacts.get("collection_comparable_results_stale")
+                ),
                 "comparison_rows_generated": bool(artifacts.get("comparison_rows_generated")),
                 "comparison_rows_ready": bool(artifacts.get("comparison_rows_ready")),
+                "comparison_rows_stale": bool(artifacts.get("comparison_rows_stale")),
                 "graph_generated": bool(artifacts.get("graph_generated")),
                 "graph_ready": bool(artifacts.get("graph_ready")),
+                "graph_stale": bool(artifacts.get("graph_stale")),
                 "blocks_generated": bool(artifacts.get("blocks_generated")),
                 "blocks_ready": bool(artifacts.get("blocks_ready")),
                 "figures_generated": bool(artifacts.get("figures_generated")),

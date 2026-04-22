@@ -10,6 +10,7 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
 from application.core.workspace_overview_service import WorkspaceService
+from domain.core.comparison import ComparableResult, build_collection_assessment_input_fingerprint
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
@@ -24,6 +25,24 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+
+
+def _current_scope_metadata(comparable_result: dict) -> dict[str, object]:
+    comparable_record = ComparableResult.from_mapping(comparable_result)
+    return {
+        "policy_family": "default_collection_comparison_policy",
+        "policy_version": "comparison_policy_v1",
+        "comparable_result_normalization_version": comparable_record.normalization_version,
+        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
+            comparable_record
+        ),
+        "reassessment_triggers": [
+            "policy_family_changed",
+            "policy_version_changed",
+            "comparable_result_normalization_version_changed",
+            "assessment_input_fingerprint_changed",
+        ],
+    }
 
 
 def _write_source_artifacts(
@@ -150,8 +169,11 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["artifacts"]["comparable_results_ready"] is False
     assert overview["artifacts"]["collection_comparable_results_generated"] is False
     assert overview["artifacts"]["collection_comparable_results_ready"] is False
+    assert overview["artifacts"]["collection_comparable_results_stale"] is False
     assert overview["artifacts"]["comparison_rows_generated"] is False
     assert overview["artifacts"]["comparison_rows_ready"] is False
+    assert overview["artifacts"]["comparison_rows_stale"] is False
+    assert overview["artifacts"]["graph_stale"] is False
     assert overview["artifacts"]["blocks_generated"] is True
     assert overview["artifacts"]["blocks_ready"] is True
     assert overview["artifacts"]["figures_generated"] is True
@@ -265,6 +287,182 @@ def test_workspace_service_marks_comparisons_ready_from_semantic_artifacts_witho
             }
         ]
     ).to_parquet(output_dir / "comparable_results.parquet", index=False)
+    current_scope_record = {
+        "collection_id": collection_id,
+        "comparable_result_id": "cres-1",
+        "assessment": {
+            "missing_critical_context": [],
+            "comparability_basis": ["baseline_resolved"],
+            "comparability_warnings": [],
+            "comparability_status": "comparable",
+            "requires_expert_review": False,
+            "assessment_epistemic_status": "normalized_from_evidence",
+        },
+        "epistemic_status": "normalized_from_evidence",
+        "included": True,
+        "sort_order": 0,
+        **_current_scope_metadata(
+            {
+                "comparable_result_id": "cres-1",
+                "source_result_id": "res-1",
+                "source_document_id": "paper-1",
+                "binding": {
+                    "variant_id": None,
+                    "baseline_id": None,
+                    "test_condition_id": None,
+                },
+                "normalized_context": {
+                    "material_system_normalized": "oxide cathode",
+                    "process_normalized": "700 C",
+                    "baseline_normalized": "as-prepared",
+                    "test_condition_normalized": "EIS",
+                },
+                "axis": {
+                    "axis_name": None,
+                    "axis_value": None,
+                    "axis_unit": None,
+                },
+                "value": {
+                    "property_normalized": "conductivity",
+                    "result_type": "scalar",
+                    "numeric_value": 12.0,
+                    "unit": "mS/cm",
+                    "summary": "12 mS/cm",
+                },
+                "evidence": {
+                    "direct_anchor_ids": ["anchor-1"],
+                    "contextual_anchor_ids": [],
+                    "evidence_ids": ["ev-1"],
+                    "structure_feature_ids": [],
+                    "characterization_observation_ids": [],
+                    "traceability_status": "direct",
+                },
+                "variant_label": None,
+                "baseline_reference": "as-prepared",
+                "result_source_type": "text",
+                "epistemic_status": "normalized_from_evidence",
+                "normalization_version": "comparable_result_v1",
+            }
+        ),
+    }
+    pd.DataFrame([current_scope_record]).to_parquet(
+        output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+    artifact_registry.upsert(collection_id, output_dir)
+
+    overview = workspace_service.get_workspace_overview(collection_id)
+
+    assert overview["status_summary"] == "ready"
+    assert overview["workflow"]["comparisons"]["status"] == "ready"
+    assert overview["artifacts"]["comparison_rows_generated"] is False
+    assert overview["artifacts"]["comparison_rows_ready"] is False
+    assert overview["artifacts"]["collection_comparable_results_stale"] is False
+    assert overview["artifacts"]["comparison_rows_stale"] is False
+    assert overview["artifacts"]["graph_generated"] is True
+    assert overview["artifacts"]["graph_ready"] is True
+    assert overview["artifacts"]["graph_stale"] is False
+    assert overview["capabilities"]["can_view_graph"] is True
+    assert overview["capabilities"]["can_download_graphml"] is True
+
+
+def test_workspace_service_marks_stale_comparisons_as_limited(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    workspace_service = WorkspaceService(collection_service, task_service, artifact_registry)
+
+    collection = collection_service.create_collection("Stale Semantic Workspace")
+    collection_id = collection["collection_id"]
+    collection_service.add_file(
+        collection_id,
+        "paper.txt",
+        b"Experimental Section\nConductivity increased after annealing.",
+    )
+
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Semantic Graph Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.9,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "evidence_id": "ev-1",
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "claim_text": "Conductivity increased after annealing.",
+                "claim_type": "property",
+                "evidence_source_type": "text",
+                "evidence_anchors": [],
+                "material_system": {"family": "oxide cathode"},
+                "condition_context": {"process": {}, "baseline": {}, "test": {}},
+                "confidence": 0.82,
+                "traceability_status": "direct",
+            }
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "comparable_result_id": "cres-1",
+                "source_result_id": "res-1",
+                "source_document_id": "paper-1",
+                "binding": {
+                    "variant_id": None,
+                    "baseline_id": None,
+                    "test_condition_id": None,
+                },
+                "normalized_context": {
+                    "material_system_normalized": "oxide cathode",
+                    "process_normalized": "700 C",
+                    "baseline_normalized": "as-prepared",
+                    "test_condition_normalized": "EIS",
+                },
+                "axis": {
+                    "axis_name": None,
+                    "axis_value": None,
+                    "axis_unit": None,
+                },
+                "value": {
+                    "property_normalized": "conductivity",
+                    "result_type": "scalar",
+                    "numeric_value": 12.0,
+                    "unit": "mS/cm",
+                    "summary": "12 mS/cm",
+                },
+                "evidence": {
+                    "direct_anchor_ids": ["anchor-1"],
+                    "contextual_anchor_ids": [],
+                    "evidence_ids": ["ev-1"],
+                    "structure_feature_ids": [],
+                    "characterization_observation_ids": [],
+                    "traceability_status": "direct",
+                },
+                "variant_label": None,
+                "baseline_reference": "as-prepared",
+                "result_source_type": "text",
+                "epistemic_status": "normalized_from_evidence",
+                "normalization_version": "comparable_result_v1",
+            }
+        ]
+    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
     pd.DataFrame(
         [
             {
@@ -281,18 +479,38 @@ def test_workspace_service_marks_comparisons_ready_from_semantic_artifacts_witho
                 "epistemic_status": "normalized_from_evidence",
                 "included": True,
                 "sort_order": 0,
+                "policy_family": "default_collection_comparison_policy",
+                "policy_version": "comparison_policy_v0",
+                "comparable_result_normalization_version": "comparable_result_v1",
+                "assessment_input_fingerprint": "cafp_outdated",
+                "reassessment_triggers": [
+                    "policy_family_changed",
+                    "policy_version_changed",
+                    "comparable_result_normalization_version_changed",
+                    "assessment_input_fingerprint_changed",
+                ],
             }
         ]
     ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
+    pd.DataFrame([{"row_id": "cmp-1"}]).to_parquet(
+        output_dir / "comparison_rows.parquet",
+        index=False,
+    )
     artifact_registry.upsert(collection_id, output_dir)
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
-    assert overview["status_summary"] == "ready"
-    assert overview["workflow"]["comparisons"]["status"] == "ready"
-    assert overview["artifacts"]["comparison_rows_generated"] is False
+    assert overview["status_summary"] == "comparison_pending"
+    assert overview["workflow"]["comparisons"]["status"] == "limited"
+    assert "stale" in overview["workflow"]["comparisons"]["detail"].lower()
+    assert overview["artifacts"]["collection_comparable_results_generated"] is True
+    assert overview["artifacts"]["collection_comparable_results_ready"] is False
+    assert overview["artifacts"]["collection_comparable_results_stale"] is True
+    assert overview["artifacts"]["comparison_rows_generated"] is True
     assert overview["artifacts"]["comparison_rows_ready"] is False
+    assert overview["artifacts"]["comparison_rows_stale"] is True
     assert overview["artifacts"]["graph_generated"] is True
-    assert overview["artifacts"]["graph_ready"] is True
-    assert overview["capabilities"]["can_view_graph"] is True
-    assert overview["capabilities"]["can_download_graphml"] is True
+    assert overview["artifacts"]["graph_ready"] is False
+    assert overview["artifacts"]["graph_stale"] is True
+    assert overview["capabilities"]["can_view_graph"] is False
+    assert overview["capabilities"]["can_download_graphml"] is False

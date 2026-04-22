@@ -11,7 +11,11 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
-from domain.core.comparison import build_comparison_row_id
+from domain.core.comparison import (
+    ComparableResult,
+    build_collection_assessment_input_fingerprint,
+    build_comparison_row_id,
+)
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 try:
@@ -266,6 +270,7 @@ def _build_semantic_comparison_record(
         "epistemic_status": assessment_epistemic_status,
         "normalization_version": "comparable_result_v1",
     }
+    comparable_record = ComparableResult.from_mapping(comparable_result)
     scoped_result = {
         "collection_id": collection_id,
         "comparable_result_id": comparable_result_id,
@@ -283,7 +288,9 @@ def _build_semantic_comparison_record(
         "policy_family": "default_collection_comparison_policy",
         "policy_version": "comparison_policy_v1",
         "comparable_result_normalization_version": "comparable_result_v1",
-        "assessment_input_fingerprint": f"cafp-{comparable_result_id}",
+        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
+            comparable_record
+        ),
         "reassessment_triggers": [
             "policy_family_changed",
             "policy_version_changed",
@@ -575,10 +582,13 @@ def test_collection_task_flow(app_client):
     assert body["comparable_results_ready"] is True
     assert body["collection_comparable_results_generated"] is True
     assert body["collection_comparable_results_ready"] is True
+    assert body["collection_comparable_results_stale"] is False
     assert body["comparison_rows_generated"] is True
     assert body["comparison_rows_ready"] is True
+    assert body["comparison_rows_stale"] is False
     assert body["graph_generated"] is True
     assert body["graph_ready"] is True
+    assert body["graph_stale"] is False
     assert body["blocks_generated"] is True
     assert body["blocks_ready"] is True
     assert body["figures_generated"] is True
@@ -887,8 +897,11 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
     assert workspace_body["artifacts"]["comparison_rows_generated"] is False
     assert workspace_body["artifacts"]["comparison_rows_ready"] is False
+    assert workspace_body["artifacts"]["collection_comparable_results_stale"] is False
+    assert workspace_body["artifacts"]["comparison_rows_stale"] is False
     assert workspace_body["artifacts"]["graph_generated"] is True
     assert workspace_body["artifacts"]["graph_ready"] is True
+    assert workspace_body["artifacts"]["graph_stale"] is False
     assert workspace_body["capabilities"]["can_view_graph"] is True
     assert workspace_body["capabilities"]["can_download_graphml"] is True
 
@@ -1051,6 +1064,9 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     assert workspace_body["artifacts"]["protocol_steps_ready"] is False
     assert workspace_body["artifacts"]["comparable_results_generated"] is False
     assert workspace_body["artifacts"]["collection_comparable_results_generated"] is False
+    assert workspace_body["artifacts"]["collection_comparable_results_stale"] is False
+    assert workspace_body["artifacts"]["comparison_rows_stale"] is False
+    assert workspace_body["artifacts"]["graph_stale"] is False
     assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
 
     steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")

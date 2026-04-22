@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from application.core.comparison_assembly import (
+    COLLECTION_COMPARABLE_RESULT_COLUMNS,
     ComparableResultAssembler,
     ComparisonInputFrames,
     ComparisonSemanticTables,
@@ -23,6 +24,7 @@ from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
     ComparisonRowRecord,
+    evaluate_collection_reassessment_reasons,
 )
 from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
@@ -316,13 +318,18 @@ class ComparisonService:
             pd.read_parquet(output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE),
             _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
         )
-        return ComparisonSemanticTables(
+        semantic_tables = ComparisonSemanticTables(
             comparable_results=self.comparable_result_assembler.normalize_comparable_results_table(
                 comparable_results
             ),
             collection_comparable_results=self.comparable_result_assembler.normalize_collection_comparable_results_table(
                 scoped_results
             ),
+        )
+        return self._refresh_scope_artifacts_if_stale(
+            collection_id=collection_id,
+            output_dir=output_dir,
+            semantic_tables=semantic_tables,
         )
 
     def _ensure_semantic_comparison_artifacts_ready(
@@ -359,6 +366,167 @@ class ComparisonService:
             _COMPARISON_JSON_COLUMNS,
         ).to_parquet(path, index=False)
         self.artifact_registry_service.upsert(collection_id, output_dir)
+
+    def _refresh_scope_artifacts_if_stale(
+        self,
+        *,
+        collection_id: str,
+        output_dir: Path,
+        semantic_tables: ComparisonSemanticTables,
+    ) -> ComparisonSemanticTables:
+        comparable_results = semantic_tables.comparable_results
+        scoped_results = semantic_tables.collection_comparable_results
+        if comparable_results.empty:
+            return semantic_tables
+
+        comparable_records = [
+            ComparableResult.from_mapping(dict(row))
+            for _, row in comparable_results.iterrows()
+        ]
+        scoped_records_by_result_id = {
+            record.comparable_result_id: record
+            for record in (
+                CollectionComparableResult.from_mapping(dict(row))
+                for _, row in scoped_results.iterrows()
+            )
+            if self._safe_text(record.collection_id) == collection_id
+            and self._safe_text(record.comparable_result_id)
+        }
+        comparable_result_ids = {
+            record.comparable_result_id
+            for record in comparable_records
+            if self._safe_text(record.comparable_result_id)
+        }
+        if comparable_result_ids != set(scoped_records_by_result_id):
+            logger.info(
+                "Comparison scope artifact refresh triggered by membership drift collection_id=%s comparable_results=%s scoped_results=%s",
+                collection_id,
+                len(comparable_result_ids),
+                len(scoped_records_by_result_id),
+            )
+            return self._rebuild_scope_and_row_artifacts(
+                collection_id=collection_id,
+                output_dir=output_dir,
+                comparable_records=comparable_records,
+                comparable_results=comparable_results,
+                scoped_records_by_result_id=scoped_records_by_result_id,
+            )
+        for comparable_record in comparable_records:
+            scoped_record = scoped_records_by_result_id.get(comparable_record.comparable_result_id)
+            if scoped_record is None:
+                return self._rebuild_scope_and_row_artifacts(
+                    collection_id=collection_id,
+                    output_dir=output_dir,
+                    comparable_records=comparable_records,
+                    comparable_results=comparable_results,
+                    scoped_records_by_result_id=scoped_records_by_result_id,
+                )
+            reassessment_reasons = evaluate_collection_reassessment_reasons(
+                scoped_record,
+                comparable_record,
+            )
+            if reassessment_reasons:
+                logger.info(
+                    "Comparison scope artifact refresh triggered collection_id=%s comparable_result_id=%s reasons=%s",
+                    collection_id,
+                    comparable_record.comparable_result_id,
+                    ",".join(reassessment_reasons),
+                )
+                return self._rebuild_scope_and_row_artifacts(
+                    collection_id=collection_id,
+                    output_dir=output_dir,
+                    comparable_records=comparable_records,
+                    comparable_results=comparable_results,
+                    scoped_records_by_result_id=scoped_records_by_result_id,
+                )
+        return semantic_tables
+
+    def _rebuild_scope_and_row_artifacts(
+        self,
+        *,
+        collection_id: str,
+        output_dir: Path,
+        comparable_records: list[ComparableResult],
+        comparable_results: pd.DataFrame,
+        scoped_records_by_result_id: dict[str, CollectionComparableResult],
+    ) -> ComparisonSemanticTables:
+        refreshed_scoped_records: list[CollectionComparableResult] = []
+        next_generated_sort_order = (
+            max(
+                (
+                    scoped_record.sort_order
+                    for scoped_record in scoped_records_by_result_id.values()
+                    if scoped_record.sort_order is not None
+                ),
+                default=-1,
+            )
+            + 1
+        )
+        for comparable_record in comparable_records:
+            existing_scoped_record = scoped_records_by_result_id.get(
+                comparable_record.comparable_result_id
+            )
+            effective_sort_order = (
+                existing_scoped_record.sort_order
+                if existing_scoped_record is not None
+                and existing_scoped_record.sort_order is not None
+                else next_generated_sort_order
+            )
+            if (
+                existing_scoped_record is None
+                or existing_scoped_record.sort_order is None
+            ):
+                next_generated_sort_order += 1
+            refreshed_scoped_record = self.comparable_result_assembler.build_collection_comparable_result(
+                collection_id=collection_id,
+                comparable_result=comparable_record,
+                sort_order=effective_sort_order,
+            )
+            if existing_scoped_record is not None:
+                refreshed_scoped_record = CollectionComparableResult(
+                    collection_id=refreshed_scoped_record.collection_id,
+                    comparable_result_id=refreshed_scoped_record.comparable_result_id,
+                    assessment=refreshed_scoped_record.assessment,
+                    epistemic_status=refreshed_scoped_record.epistemic_status,
+                    included=existing_scoped_record.included,
+                    sort_order=effective_sort_order,
+                    policy_family=refreshed_scoped_record.policy_family,
+                    policy_version=refreshed_scoped_record.policy_version,
+                    comparable_result_normalization_version=(
+                        refreshed_scoped_record.comparable_result_normalization_version
+                    ),
+                    assessment_input_fingerprint=(
+                        refreshed_scoped_record.assessment_input_fingerprint
+                    ),
+                    reassessment_triggers=refreshed_scoped_record.reassessment_triggers,
+                )
+            refreshed_scoped_records.append(refreshed_scoped_record)
+
+        refreshed_scoped_results = self.comparable_result_assembler.normalize_collection_comparable_results_table(
+            pd.DataFrame(
+                [record.to_record() for record in refreshed_scoped_records],
+                columns=COLLECTION_COMPARABLE_RESULT_COLUMNS,
+            )
+        )
+        row_table = self.comparison_row_projector.project_rows_from_semantic_artifacts(
+            collection_id=collection_id,
+            comparable_results=comparable_results,
+            scoped_results=refreshed_scoped_results,
+        )
+        prepare_frame_for_storage(
+            refreshed_scoped_results,
+            _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
+        ).to_parquet(output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE, index=False)
+        prepare_frame_for_storage(
+            row_table,
+            _COMPARISON_JSON_COLUMNS,
+        ).to_parquet(output_dir / _COMPARISON_ROWS_FILE, index=False)
+        write_core_semantic_manifest(output_dir)
+        self.artifact_registry_service.upsert(collection_id, output_dir)
+        return ComparisonSemanticTables(
+            comparable_results=comparable_results,
+            collection_comparable_results=refreshed_scoped_results,
+        )
 
     def build_comparison_rows(
         self,

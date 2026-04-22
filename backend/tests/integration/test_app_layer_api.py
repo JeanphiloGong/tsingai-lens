@@ -385,6 +385,7 @@ def app_client(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
     from controllers.source import collections as collections_controller
+    from controllers.core import comparable_results as comparable_results_controller
     from controllers.core import comparisons as comparisons_controller
     from controllers.core import documents as documents_controller
     from controllers.core import evidence as evidence_controller
@@ -516,6 +517,7 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
     monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
+    monkeypatch.setattr(comparable_results_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(
@@ -806,6 +808,165 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
     assert payload["count"] == 1
     assert payload["total"] == 1
     assert payload["items"][0]["row_id"] == row_id_1
+
+
+def test_comparable_results_endpoint_deduplicates_across_collections_without_row_cache(
+    app_client,
+):
+    from controllers.core import comparable_results as comparable_results_controller
+
+    first_create = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Corpus Route A"},
+    )
+    assert first_create.status_code == 200
+    first_collection_id = first_create.json()["collection_id"]
+
+    second_create = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Corpus Route B"},
+    )
+    assert second_create.status_code == 200
+    second_collection_id = second_create.json()["collection_id"]
+
+    first_workspace = app_client.get(
+        f"{API_V1_PREFIX}/collections/{first_collection_id}/workspace"
+    )
+    second_workspace = app_client.get(
+        f"{API_V1_PREFIX}/collections/{second_collection_id}/workspace"
+    )
+    assert first_workspace.status_code == 200
+    assert second_workspace.status_code == 200
+
+    first_output_dir = Path(first_workspace.json()["artifacts"]["output_path"])
+    second_output_dir = Path(second_workspace.json()["artifacts"]["output_path"])
+    first_output_dir.mkdir(parents=True, exist_ok=True)
+    second_output_dir.mkdir(parents=True, exist_ok=True)
+
+    shared_result, first_shared_overlay, _shared_row_id = _build_semantic_comparison_record(
+        collection_id=first_collection_id,
+        comparable_result_id="cres-corpus-shared-1",
+        source_document_id="paper-shared",
+        variant_id="var-1",
+        variant_label="A1",
+        variable_axis=None,
+        variable_value=None,
+        baseline_reference="as-prepared",
+        result_source_type="text",
+        result_type="scalar",
+        result_summary="12 mS/cm",
+        supporting_evidence_ids=["ev-shared-1"],
+        supporting_anchor_ids=["anchor-shared-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="700 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=12.0,
+        unit="mS/cm",
+        sort_order=0,
+    )
+    unique_result, unique_overlay, _unique_row_id = _build_semantic_comparison_record(
+        collection_id=first_collection_id,
+        comparable_result_id="cres-corpus-unique-1",
+        source_document_id="paper-unique",
+        variant_id="var-2",
+        variant_label="B1",
+        variable_axis=None,
+        variable_value=None,
+        baseline_reference="as-prepared",
+        result_source_type="text",
+        result_type="scalar",
+        result_summary="15 mS/cm",
+        supporting_evidence_ids=["ev-unique-1"],
+        supporting_anchor_ids=["anchor-unique-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="750 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=15.0,
+        unit="mS/cm",
+        sort_order=1,
+    )
+    pd.DataFrame([shared_result, unique_result]).to_parquet(
+        first_output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame([first_shared_overlay, unique_overlay]).to_parquet(
+        first_output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+    comparable_results_controller.comparison_service.artifact_registry_service.upsert(
+        first_collection_id,
+        first_output_dir,
+    )
+
+    pd.DataFrame([shared_result]).to_parquet(
+        second_output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    second_shared_overlay = dict(first_shared_overlay)
+    second_shared_overlay["collection_id"] = second_collection_id
+    second_shared_overlay["sort_order"] = 4
+    pd.DataFrame([second_shared_overlay]).to_parquet(
+        second_output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+    comparable_results_controller.comparison_service.artifact_registry_service.upsert(
+        second_collection_id,
+        second_output_dir,
+    )
+
+    response = app_client.get(
+        f"{API_V1_PREFIX}/comparable-results",
+        params={"property_normalized": "conductivity"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert payload["count"] == 2
+    items_by_id = {
+        item["comparable_result_id"]: item
+        for item in payload["items"]
+    }
+    assert items_by_id["cres-corpus-shared-1"]["observed_collection_ids"] == sorted(
+        [first_collection_id, second_collection_id]
+    )
+    assert len(items_by_id["cres-corpus-shared-1"]["collection_overlays"]) == 2
+    assert items_by_id["cres-corpus-unique-1"]["observed_collection_ids"] == [
+        first_collection_id
+    ]
+    assert not (first_output_dir / "comparison_rows.parquet").exists()
+    assert not (second_output_dir / "comparison_rows.parquet").exists()
+
+    detail = app_client.get(
+        f"{API_V1_PREFIX}/comparable-results/cres-corpus-shared-1",
+        params={"collection_id": second_collection_id},
+    )
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["comparable_result_id"] == "cres-corpus-shared-1"
+    assert detail_payload["observed_collection_ids"] == [second_collection_id]
+    assert len(detail_payload["collection_overlays"]) == 1
+    assert detail_payload["collection_overlays"][0]["collection_id"] == second_collection_id
 
 
 def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):

@@ -340,6 +340,87 @@
   - `false` 时不要求返回 row projection
   - `true` 时允许为 document-facing drilldown 附带按需生成的 row payload
 
+### Corpus Comparable Results
+
+- `GET /api/v1/comparable-results`
+- `GET /api/v1/comparable-results/{comparable_result_id}`
+
+这是 `ComparableResult` 的 corpus-level retrieval surface。
+
+它的语义顺序必须是：
+
+`collection outputs -> comparable_results -> current collection_comparable_results overlays`
+
+而不是从 `comparison_rows` 回推语义。
+
+列表接口支持这些可选过滤参数：
+
+- `material_system_normalized`
+- `property_normalized`
+- `test_condition_normalized`
+- `baseline_normalized`
+- `source_document_id`
+- `collection_id`
+
+最小返回结构：
+
+- `collection_id`
+- `total`
+- `count`
+- `items`
+
+每个 item 至少应包含：
+
+- `comparable_result_id`
+- `source_result_id`
+- `source_document_id`
+- `binding`
+- `normalized_context`
+- `axis`
+- `value`
+- `evidence`
+- `variant_label`
+- `baseline_reference`
+- `result_source_type`
+- `epistemic_status`
+- `normalization_version`
+- `observed_collection_ids`
+- `collection_overlays`
+
+每个 `collection_overlays` item 至少应包含：
+
+- `collection_id`
+- `comparable_result_id`
+- `assessment`
+- `epistemic_status`
+- `included`
+- `sort_order`
+- `policy_family`
+- `policy_version`
+- `comparable_result_normalization_version`
+- `assessment_input_fingerprint`
+- `reassessment_triggers`
+
+语义要求：
+
+- 这是 `ComparableResult` 的 corpus retrieval surface，不是 collection row list
+- 基础 item 必须按 deterministic `comparable_result_id` 去重
+- `observed_collection_ids` 表达该 semantic unit 当前在哪些 collection 中被观测到
+- `collection_overlays`
+  只能附着 current 的 `CollectionComparableResult`，不能直接回传 stale overlay
+- 如果 `collection_id` 存在：
+  - 结果集只保留该 collection 当前观测到的 comparable results
+  - `collection_overlays` 也只返回该 collection 的 current overlay
+- 如果 `collection_id` 不存在：
+  - 结果集按 corpus-wide scan 返回
+  - 可附带所有匹配 collection 的 current overlays
+- 该接口不应要求 `comparison_rows.parquet` 预先存在
+- `GET /api/v1/comparable-results/{comparable_result_id}`
+  读取单个 corpus comparable result；如果同时传 `collection_id`，则按该 collection 的
+  current scope 解释是否命中
+- 如果 `collection_id` 指向的 collection 尚未生成 comparable result semantic
+  artifacts，应返回 `409 comparable_results_not_ready`
+
 ### Evidence Cards
 
 - `GET /api/v1/collections/{collection_id}/evidence/cards`

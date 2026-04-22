@@ -48,6 +48,9 @@ domain-semantic backfill.
 - [`core-comparable-result-phase2-policy-lifecycle-plan.md`](core-comparable-result-phase2-policy-lifecycle-plan.md)
   Phase 2 child plan for attaching policy lineage and reassessment semantics
   to `CollectionComparableResult`
+- [`core-comparable-result-phase3-corpus-retrieval-plan.md`](core-comparable-result-phase3-corpus-retrieval-plan.md)
+  Phase 3 child plan for making `ComparableResult` a corpus-level retrieval
+  surface across collection outputs without promoting row cache
 
 ## Boundary Rule
 

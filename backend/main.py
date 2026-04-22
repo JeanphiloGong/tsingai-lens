@@ -1,7 +1,7 @@
 import os
 from time import perf_counter
 
-from controllers.core import comparisons, documents, evidence, workspace
+from controllers.core import comparable_results, comparisons, documents, evidence, workspace
 from controllers.derived import graph, protocol, reports
 from controllers.goal import intake as goals
 from controllers.source import collections, tasks
@@ -105,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(comparisons.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(comparable_results.router, prefix=PUBLIC_API_V1_PREFIX)
     return app
 
 

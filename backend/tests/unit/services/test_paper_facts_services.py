@@ -1801,6 +1801,189 @@ def test_comparison_service_reassesses_stale_scope_artifacts_and_refreshes_row_c
     assert artifacts["graph_stale"] is False
 
 
+def test_comparison_service_lists_corpus_comparable_results_across_collections_without_row_cache(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    comparison_service = ComparisonService(
+        collection_service=collection_service,
+        artifact_registry_service=artifact_registry,
+    )
+
+    first_collection = collection_service.create_collection("Corpus Collection A")
+    second_collection = collection_service.create_collection("Corpus Collection B")
+    first_collection_id = first_collection["collection_id"]
+    second_collection_id = second_collection["collection_id"]
+
+    first_output_dir = collection_service.get_paths(first_collection_id).output_dir
+    second_output_dir = collection_service.get_paths(second_collection_id).output_dir
+    first_output_dir.mkdir(parents=True, exist_ok=True)
+    second_output_dir.mkdir(parents=True, exist_ok=True)
+
+    shared_result = _build_test_comparable_result(
+        comparable_result_id="cres-shared-1",
+        source_document_id="paper-shared",
+        source_result_id="res-shared-1",
+    )
+    unique_result = _build_test_comparable_result(
+        comparable_result_id="cres-unique-1",
+        source_document_id="paper-unique",
+        source_result_id="res-unique-1",
+        property_normalized="impact_strength",
+        summary="Impact strength increased to 61 MPa.",
+        numeric_value=61.0,
+    )
+
+    pd.DataFrame(
+        [
+            shared_result.to_record(),
+            unique_result.to_record(),
+        ]
+    ).to_parquet(first_output_dir / "comparable_results.parquet", index=False)
+    pd.DataFrame(
+        [
+            _build_collection_overlay(
+                collection_id=first_collection_id,
+                comparable_result=shared_result,
+                sort_order=0,
+            ).to_record(),
+            _build_collection_overlay(
+                collection_id=first_collection_id,
+                comparable_result=unique_result,
+                sort_order=1,
+            ).to_record(),
+        ]
+    ).to_parquet(first_output_dir / "collection_comparable_results.parquet", index=False)
+    artifact_registry.upsert(first_collection_id, first_output_dir)
+
+    pd.DataFrame([shared_result.to_record()]).to_parquet(
+        second_output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame(
+        [
+            _build_collection_overlay(
+                collection_id=second_collection_id,
+                comparable_result=shared_result,
+                sort_order=4,
+            ).to_record()
+        ]
+    ).to_parquet(second_output_dir / "collection_comparable_results.parquet", index=False)
+    artifact_registry.upsert(second_collection_id, second_output_dir)
+
+    payload = comparison_service.list_corpus_comparable_results()
+
+    assert payload["total"] == 2
+    assert payload["count"] == 2
+    items_by_id = {
+        item["comparable_result_id"]: item
+        for item in payload["items"]
+    }
+    assert set(items_by_id) == {"cres-shared-1", "cres-unique-1"}
+    assert items_by_id["cres-shared-1"]["observed_collection_ids"] == sorted(
+        [first_collection_id, second_collection_id]
+    )
+    assert len(items_by_id["cres-shared-1"]["collection_overlays"]) == 2
+    assert {
+        overlay["collection_id"]
+        for overlay in items_by_id["cres-shared-1"]["collection_overlays"]
+    } == {first_collection_id, second_collection_id}
+    assert items_by_id["cres-unique-1"]["observed_collection_ids"] == [first_collection_id]
+    assert len(items_by_id["cres-unique-1"]["collection_overlays"]) == 1
+    assert not (first_output_dir / "comparison_rows.parquet").exists()
+    assert not (second_output_dir / "comparison_rows.parquet").exists()
+
+
+def test_comparison_service_filters_corpus_results_to_one_collection_and_refreshes_stale_overlay(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    comparison_service = ComparisonService(
+        collection_service=collection_service,
+        artifact_registry_service=artifact_registry,
+    )
+
+    first_collection = collection_service.create_collection("Policy Current A")
+    second_collection = collection_service.create_collection("Policy Current B")
+    first_collection_id = first_collection["collection_id"]
+    second_collection_id = second_collection["collection_id"]
+
+    first_output_dir = collection_service.get_paths(first_collection_id).output_dir
+    second_output_dir = collection_service.get_paths(second_collection_id).output_dir
+    first_output_dir.mkdir(parents=True, exist_ok=True)
+    second_output_dir.mkdir(parents=True, exist_ok=True)
+
+    shared_result = _build_test_comparable_result(
+        comparable_result_id="cres-policy-shared-1",
+        source_document_id="paper-shared",
+        source_result_id="res-policy-shared-1",
+    )
+
+    pd.DataFrame([shared_result.to_record()]).to_parquet(
+        first_output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame(
+        [
+            _build_collection_overlay(
+                collection_id=first_collection_id,
+                comparable_result=shared_result,
+                sort_order=0,
+            ).to_record()
+        ]
+    ).to_parquet(first_output_dir / "collection_comparable_results.parquet", index=False)
+    artifact_registry.upsert(first_collection_id, first_output_dir)
+
+    pd.DataFrame([shared_result.to_record()]).to_parquet(
+        second_output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    stale_overlay = _build_collection_overlay(
+        collection_id=second_collection_id,
+        comparable_result=shared_result,
+        sort_order=7,
+    ).to_record()
+    stale_overlay["policy_version"] = "comparison_policy_v0"
+    stale_overlay["assessment_input_fingerprint"] = "cafp_stale"
+    pd.DataFrame([stale_overlay]).to_parquet(
+        second_output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+    artifact_registry.upsert(second_collection_id, second_output_dir)
+
+    payload = comparison_service.list_corpus_comparable_results(
+        collection_id=second_collection_id,
+    )
+
+    assert payload["collection_id"] == second_collection_id
+    assert payload["total"] == 1
+    assert payload["count"] == 1
+    item = payload["items"][0]
+    assert item["comparable_result_id"] == "cres-policy-shared-1"
+    assert item["observed_collection_ids"] == [second_collection_id]
+    assert len(item["collection_overlays"]) == 1
+    assert item["collection_overlays"][0]["collection_id"] == second_collection_id
+    assert item["collection_overlays"][0]["policy_version"] == (
+        COLLECTION_COMPARISON_POLICY_VERSION
+    )
+    assert item["collection_overlays"][0]["assessment_input_fingerprint"] != "cafp_stale"
+    assert (second_output_dir / "comparison_rows.parquet").exists()
+
+
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 

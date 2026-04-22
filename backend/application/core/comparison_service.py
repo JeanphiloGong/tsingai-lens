@@ -100,6 +100,21 @@ class ComparisonRowNotFoundError(FileNotFoundError):
         super().__init__(f"comparison row not found: {collection_id}/{row_id}")
 
 
+class ComparableResultNotFoundError(FileNotFoundError):
+    """Raised when one corpus comparable result cannot be found."""
+
+    def __init__(
+        self,
+        comparable_result_id: str,
+        *,
+        collection_id: str | None = None,
+    ) -> None:
+        self.comparable_result_id = comparable_result_id
+        self.collection_id = collection_id
+        scope = f"{collection_id}/" if collection_id else ""
+        super().__init__(f"comparable result not found: {scope}{comparable_result_id}")
+
+
 class ComparisonService:
     """Generate and serve collection-scoped comparison artifacts."""
 
@@ -159,6 +174,52 @@ class ComparisonService:
         if matched.empty:
             raise ComparisonRowNotFoundError(collection_id, row_id)
         return self._serialize_row(matched.iloc[0])
+
+    def list_corpus_comparable_results(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+        material_system_normalized: str | None = None,
+        property_normalized: str | None = None,
+        test_condition_normalized: str | None = None,
+        baseline_normalized: str | None = None,
+        source_document_id: str | None = None,
+        collection_id: str | None = None,
+    ) -> dict[str, Any]:
+        items = self._collect_corpus_comparable_result_items(
+            material_system_normalized=material_system_normalized,
+            property_normalized=property_normalized,
+            test_condition_normalized=test_condition_normalized,
+            baseline_normalized=baseline_normalized,
+            source_document_id=source_document_id,
+            collection_id=collection_id,
+        )
+        paged_items = items[offset : offset + limit]
+        return {
+            "collection_id": self._safe_text(collection_id),
+            "total": len(items),
+            "count": len(paged_items),
+            "items": paged_items,
+        }
+
+    def get_corpus_comparable_result(
+        self,
+        comparable_result_id: str,
+        *,
+        collection_id: str | None = None,
+    ) -> dict[str, Any]:
+        comparable_result_key = self._safe_text(comparable_result_id) or ""
+        items = self._collect_corpus_comparable_result_items(
+            collection_id=collection_id,
+            comparable_result_id=comparable_result_key,
+        )
+        if not items:
+            raise ComparableResultNotFoundError(
+                comparable_result_key,
+                collection_id=self._safe_text(collection_id),
+            )
+        return items[0]
 
     def read_comparison_rows(self, collection_id: str) -> pd.DataFrame:
         return self.read_comparison_projection(
@@ -679,6 +740,149 @@ class ComparisonService:
             return Path(str(artifacts["output_path"])).expanduser().resolve()
         return self.collection_service.get_paths(collection_id).output_dir.resolve()
 
+    def _collect_corpus_comparable_result_items(
+        self,
+        *,
+        material_system_normalized: str | None = None,
+        property_normalized: str | None = None,
+        test_condition_normalized: str | None = None,
+        baseline_normalized: str | None = None,
+        source_document_id: str | None = None,
+        collection_id: str | None = None,
+        comparable_result_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        scoped_collection_id = self._safe_text(collection_id)
+        collection_ids = self._list_corpus_collection_ids(scoped_collection_id)
+        base_records_by_result_id: dict[str, ComparableResult] = {}
+        observed_collection_ids_by_result_id: dict[str, set[str]] = {}
+        scoped_records_by_result_id: dict[str, dict[str, CollectionComparableResult]] = {}
+
+        for current_collection_id in collection_ids:
+            try:
+                semantic_tables = self._read_semantic_comparison_artifacts(
+                    current_collection_id,
+                    self._resolve_output_dir(current_collection_id),
+                )
+            except ComparisonRowsNotReadyError:
+                if scoped_collection_id:
+                    raise
+                continue
+            comparable_records: list[ComparableResult] = []
+            matching_result_ids: set[str] = set()
+            for _, row in semantic_tables.comparable_results.iterrows():
+                record = ComparableResult.from_mapping(dict(row))
+                if not self._comparable_result_matches_filters(
+                    record,
+                    material_system_normalized=material_system_normalized,
+                    property_normalized=property_normalized,
+                    test_condition_normalized=test_condition_normalized,
+                    baseline_normalized=baseline_normalized,
+                    source_document_id=source_document_id,
+                    comparable_result_id=comparable_result_id,
+                ):
+                    continue
+                comparable_records.append(record)
+                if record.comparable_result_id:
+                    matching_result_ids.add(record.comparable_result_id)
+            if not comparable_records:
+                continue
+            for record in comparable_records:
+                if not record.comparable_result_id:
+                    continue
+                base_records_by_result_id.setdefault(record.comparable_result_id, record)
+                observed_collection_ids_by_result_id.setdefault(
+                    record.comparable_result_id,
+                    set(),
+                ).add(current_collection_id)
+            for _, row in semantic_tables.collection_comparable_results.iterrows():
+                scoped_record = CollectionComparableResult.from_mapping(dict(row))
+                if scoped_record.collection_id != current_collection_id:
+                    continue
+                if scoped_record.comparable_result_id not in matching_result_ids:
+                    continue
+                scoped_records_by_result_id.setdefault(
+                    scoped_record.comparable_result_id,
+                    {},
+                )[current_collection_id] = scoped_record
+
+        items: list[dict[str, Any]] = []
+        for result_id in sorted(base_records_by_result_id):
+            record = base_records_by_result_id[result_id]
+            observed_collection_ids = sorted(
+                observed_collection_ids_by_result_id.get(result_id, set())
+            )
+            collection_overlays = sorted(
+                scoped_records_by_result_id.get(result_id, {}).values(),
+                key=lambda scoped_record: (
+                    scoped_record.collection_id,
+                    1_000_000_000
+                    if scoped_record.sort_order is None
+                    else scoped_record.sort_order,
+                    scoped_record.comparable_result_id,
+                ),
+            )
+            items.append(
+                self._serialize_corpus_comparable_result(
+                    record,
+                    observed_collection_ids=observed_collection_ids,
+                    collection_overlays=collection_overlays,
+                )
+            )
+        return items
+
+    def _list_corpus_collection_ids(self, collection_id: str | None) -> list[str]:
+        if collection_id:
+            self.collection_service.get_collection(collection_id)
+            return [collection_id]
+        collection_ids: list[str] = []
+        for record in self.collection_service.list_collections():
+            current_collection_id = self._safe_text(record.get("collection_id"))
+            if current_collection_id:
+                collection_ids.append(current_collection_id)
+        return collection_ids
+
+    def _comparable_result_matches_filters(
+        self,
+        record: ComparableResult,
+        *,
+        material_system_normalized: str | None = None,
+        property_normalized: str | None = None,
+        test_condition_normalized: str | None = None,
+        baseline_normalized: str | None = None,
+        source_document_id: str | None = None,
+        comparable_result_id: str | None = None,
+    ) -> bool:
+        filters = (
+            (
+                self._safe_text(record.normalized_context.material_system_normalized),
+                self._safe_text(material_system_normalized),
+            ),
+            (
+                self._safe_text(record.value.property_normalized),
+                self._safe_text(property_normalized),
+            ),
+            (
+                self._safe_text(record.normalized_context.test_condition_normalized),
+                self._safe_text(test_condition_normalized),
+            ),
+            (
+                self._safe_text(record.normalized_context.baseline_normalized),
+                self._safe_text(baseline_normalized),
+            ),
+            (
+                self._safe_text(record.source_document_id),
+                self._safe_text(source_document_id),
+            ),
+            (
+                self._safe_text(record.comparable_result_id),
+                self._safe_text(comparable_result_id),
+            ),
+        )
+        for actual, expected in filters:
+            if expected and actual != expected:
+                return False
+        return True
+
     def _filter_rows(
         self,
         rows: pd.DataFrame,
@@ -761,6 +965,21 @@ class ComparisonService:
     ) -> dict[str, Any]:
         return record.to_record()
 
+    def _serialize_corpus_comparable_result(
+        self,
+        record: ComparableResult,
+        *,
+        observed_collection_ids: list[str],
+        collection_overlays: list[CollectionComparableResult],
+    ) -> dict[str, Any]:
+        payload = self._serialize_comparable_result(record)
+        payload["observed_collection_ids"] = observed_collection_ids
+        payload["collection_overlays"] = [
+            self._serialize_collection_comparable_result(scoped_record)
+            for scoped_record in collection_overlays
+        ]
+        return payload
+
     def _safe_text(self, value: Any) -> str | None:
         if value is None:
             return None
@@ -771,6 +990,7 @@ class ComparisonService:
 
 
 __all__ = [
+    "ComparableResultNotFoundError",
     "ComparisonRowNotFoundError",
     "ComparisonRowsNotReadyError",
     "ComparisonService",

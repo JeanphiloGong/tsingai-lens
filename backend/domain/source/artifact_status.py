@@ -5,6 +5,20 @@ import math
 from typing import Any, Mapping
 
 
+_CORE_GRAPH_GENERATED_KEYS = (
+    "document_profiles_generated",
+    "evidence_cards_generated",
+    "comparable_results_generated",
+    "collection_comparable_results_generated",
+)
+_CORE_GRAPH_READY_KEYS = (
+    "document_profiles_ready",
+    "evidence_cards_ready",
+    "comparable_results_ready",
+    "collection_comparable_results_ready",
+)
+
+
 @dataclass(frozen=True)
 class ArtifactStatusRecord:
     collection_id: str
@@ -115,15 +129,25 @@ class ArtifactStatusRecord:
         protocol_steps_generated: bool = False,
         protocol_steps_ready: bool = False,
     ) -> "ArtifactStatusRecord":
-        core_graph_generated = (
-            bool(document_profiles_generated)
-            and bool(evidence_cards_generated)
-            and bool(comparison_rows_generated)
+        graph_inputs = {
+            "document_profiles_generated": bool(document_profiles_generated),
+            "document_profiles_ready": bool(document_profiles_ready),
+            "evidence_cards_generated": bool(evidence_cards_generated),
+            "evidence_cards_ready": bool(evidence_cards_ready),
+            "comparable_results_generated": bool(comparable_results_generated),
+            "comparable_results_ready": bool(comparable_results_ready),
+            "collection_comparable_results_generated": bool(
+                collection_comparable_results_generated
+            ),
+            "collection_comparable_results_ready": bool(
+                collection_comparable_results_ready
+            ),
+        }
+        core_graph_generated = all(
+            graph_inputs[key] for key in _CORE_GRAPH_GENERATED_KEYS
         )
-        core_graph_ready = core_graph_generated and (
-            bool(document_profiles_ready)
-            or bool(evidence_cards_ready)
-            or bool(comparison_rows_ready)
+        core_graph_ready = core_graph_generated and any(
+            graph_inputs[key] for key in _CORE_GRAPH_READY_KEYS
         )
         return cls(
             collection_id=str(collection_id),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 from pathlib import Path
 from typing import Any
@@ -135,6 +136,22 @@ _COMPARISON_ROW_COLUMNS = [
     "value",
     "unit",
 ]
+
+
+@dataclass(frozen=True)
+class _ComparisonInputFrames:
+    sample_variants: pd.DataFrame
+    measurement_results: pd.DataFrame
+    test_conditions: pd.DataFrame
+    baseline_references: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class _ComparisonSemanticTables:
+    comparable_results: pd.DataFrame
+    collection_comparable_results: pd.DataFrame
+
+
 class ComparisonRowsNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve comparison rows."""
 
@@ -215,39 +232,39 @@ class ComparisonService:
         output_dir = self._resolve_output_dir(collection_id)
         # `comparison_rows.parquet` is a materialized projection cache; semantic truth lives
         # in comparable results plus collection-scoped assessments.
-        comparable_results, scoped_results = self._read_semantic_comparison_artifacts(
+        semantic_tables = self._read_semantic_comparison_artifacts(
             collection_id,
             output_dir,
         )
         rows = self._project_rows_from_semantic_artifacts(
             collection_id=collection_id,
-            comparable_results=comparable_results,
-            scoped_results=scoped_results,
+            comparable_results=semantic_tables.comparable_results,
+            scoped_results=semantic_tables.collection_comparable_results,
         )
         self._materialize_row_cache_if_missing(collection_id, output_dir, rows)
         return rows
 
     def read_comparable_results(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
-        comparable_results, _ = self._read_semantic_comparison_artifacts(
+        semantic_tables = self._read_semantic_comparison_artifacts(
             collection_id,
             output_dir,
         )
-        return comparable_results
+        return semantic_tables.comparable_results
 
     def read_collection_comparable_results(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
-        _, scoped_results = self._read_semantic_comparison_artifacts(
+        semantic_tables = self._read_semantic_comparison_artifacts(
             collection_id,
             output_dir,
         )
-        return scoped_results
+        return semantic_tables.collection_comparable_results
 
     def _read_semantic_comparison_artifacts(
         self,
         collection_id: str,
         output_dir: Path,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> _ComparisonSemanticTables:
         self._ensure_semantic_comparison_artifacts_ready(collection_id, output_dir)
         comparable_results = restore_frame_from_storage(
             pd.read_parquet(output_dir / _COMPARABLE_RESULTS_FILE),
@@ -257,9 +274,13 @@ class ComparisonService:
             pd.read_parquet(output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE),
             _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
         )
-        return (
-            self._normalize_comparable_results_table(comparable_results),
-            self._normalize_collection_comparable_results_table(scoped_results),
+        return _ComparisonSemanticTables(
+            comparable_results=self._normalize_comparable_results_table(
+                comparable_results
+            ),
+            collection_comparable_results=self._normalize_collection_comparable_results_table(
+                scoped_results
+            ),
         )
 
     def _ensure_semantic_comparison_artifacts_ready(
@@ -381,33 +402,79 @@ class ComparisonService:
             else self._resolve_output_dir(collection_id)
         )
         frames = self._load_comparison_inputs(collection_id, base_dir)
-
-        sample_variants = frames["sample_variants"]
-        measurement_results = frames["measurement_results"]
-        test_conditions = frames["test_conditions"]
-        baseline_references = frames["baseline_references"]
         logger.info(
             "Comparison assembly started collection_id=%s measurement_results=%s sample_variants=%s test_conditions=%s baselines=%s",
             collection_id,
-            len(measurement_results),
-            len(sample_variants),
-            len(test_conditions),
-            len(baseline_references),
+            len(frames.measurement_results),
+            len(frames.sample_variants),
+            len(frames.test_conditions),
+            len(frames.baseline_references),
         )
-        if measurement_results.empty:
+        if frames.measurement_results.empty:
             logger.warning(
                 "Comparison assembly skipped due to empty measurement_results collection_id=%s",
                 collection_id,
             )
 
-        sample_lookup = self._index_by_id(sample_variants, "variant_id")
-        test_condition_lookup = self._index_by_id(test_conditions, "test_condition_id")
-        baseline_lookup = self._index_by_id(baseline_references, "baseline_id")
+        semantic_tables = self._assemble_semantic_comparison_tables(
+            collection_id=collection_id,
+            frames=frames,
+        )
+        row_table = self._normalize_rows_table(
+            self._project_rows_from_semantic_artifacts(
+                collection_id=collection_id,
+                comparable_results=semantic_tables.comparable_results,
+                scoped_results=semantic_tables.collection_comparable_results,
+            ),
+            collection_id,
+        )
+        if frames.measurement_results.empty:
+            logger.warning(
+                "Comparison assembly produced zero rows because upstream measurement_results were empty collection_id=%s",
+                collection_id,
+            )
+        elif row_table.empty:
+            logger.warning(
+                "Comparison assembly produced zero rows after filtering collection_id=%s measurement_results=%s",
+                collection_id,
+                len(frames.measurement_results),
+            )
+        self._write_comparison_artifacts(
+            collection_id=collection_id,
+            base_dir=base_dir,
+            semantic_tables=semantic_tables,
+            row_table=row_table,
+        )
+        logger.info(
+            "Comparison assembly finished collection_id=%s comparable_results=%s collection_comparable_results=%s comparison_rows=%s",
+            collection_id,
+            len(semantic_tables.comparable_results),
+            len(semantic_tables.collection_comparable_results),
+            len(row_table),
+        )
+        return row_table
+
+    def _assemble_semantic_comparison_tables(
+        self,
+        *,
+        collection_id: str,
+        frames: _ComparisonInputFrames,
+    ) -> _ComparisonSemanticTables:
+        sample_lookup = self._index_by_id(frames.sample_variants, "variant_id")
+        test_condition_lookup = self._index_by_id(
+            frames.test_conditions,
+            "test_condition_id",
+        )
+        baseline_lookup = self._index_by_id(
+            frames.baseline_references,
+            "baseline_id",
+        )
 
         comparable_results_by_id: dict[str, ComparableResult] = {}
         scoped_results_by_id: dict[str, CollectionComparableResult] = {}
-        row_records_by_id: dict[str, ComparisonRowRecord] = {}
-        for sort_order, (_, result_row) in enumerate(measurement_results.iterrows()):
+        for sort_order, (_, result_row) in enumerate(
+            frames.measurement_results.iterrows()
+        ):
             comparable_result = self._assemble_comparable_result(
                 result_row=result_row,
                 sample_lookup=sample_lookup,
@@ -425,7 +492,10 @@ class ComparisonService:
                 comparable_result.comparable_result_id
             )
             comparable_results_by_id[comparable_result.comparable_result_id] = (
-                self._merge_comparable_results(existing_comparable_result, comparable_result)
+                self._merge_comparable_results(
+                    existing_comparable_result,
+                    comparable_result,
+                )
                 if existing_comparable_result is not None
                 else comparable_result
             )
@@ -433,80 +503,37 @@ class ComparisonService:
                 comparable_result.comparable_result_id
             )
             scoped_results_by_id[comparable_result.comparable_result_id] = (
-                self._merge_collection_comparable_results(existing_scoped_result, scoped_result)
+                self._merge_collection_comparable_results(
+                    existing_scoped_result,
+                    scoped_result,
+                )
                 if existing_scoped_result is not None
                 else scoped_result
             )
-            row_record = self._project_comparison_row(
-                comparable_result=comparable_result,
-                scoped_result=scoped_result,
-            )
-            existing_row = row_records_by_id.get(row_record.row_id)
-            row_records_by_id[row_record.row_id] = (
-                self._merge_row_records(existing_row, row_record)
-                if existing_row is not None
-                else row_record
-            )
 
-        comparable_results_table = self._normalize_comparable_results_table(
-            pd.DataFrame(
-                [record.to_record() for record in comparable_results_by_id.values()],
-                columns=_COMPARABLE_RESULT_COLUMNS,
-            )
-        )
-        collection_comparable_results_table = self._normalize_collection_comparable_results_table(
-            pd.DataFrame(
-                [record.to_record() for record in scoped_results_by_id.values()],
-                columns=_COLLECTION_COMPARABLE_RESULT_COLUMNS,
-            )
-        )
-        row_table = self._normalize_rows_table(
-            pd.DataFrame(
-                [record.to_record() for record in row_records_by_id.values()],
-                columns=_COMPARISON_ROW_COLUMNS,
+        return _ComparisonSemanticTables(
+            comparable_results=self._normalize_comparable_results_table(
+                pd.DataFrame(
+                    [
+                        record.to_record()
+                        for record in comparable_results_by_id.values()
+                    ],
+                    columns=_COMPARABLE_RESULT_COLUMNS,
+                )
             ),
-            collection_id,
+            collection_comparable_results=self._normalize_collection_comparable_results_table(
+                pd.DataFrame(
+                    [record.to_record() for record in scoped_results_by_id.values()],
+                    columns=_COLLECTION_COMPARABLE_RESULT_COLUMNS,
+                )
+            ),
         )
-        if measurement_results.empty:
-            logger.warning(
-                "Comparison assembly produced zero rows because upstream measurement_results were empty collection_id=%s",
-                collection_id,
-            )
-        elif row_table.empty:
-            logger.warning(
-                "Comparison assembly produced zero rows after filtering collection_id=%s measurement_results=%s",
-                collection_id,
-                len(measurement_results),
-            )
-        base_dir.mkdir(parents=True, exist_ok=True)
-        prepare_frame_for_storage(
-            comparable_results_table,
-            _COMPARABLE_RESULT_JSON_COLUMNS,
-        ).to_parquet(base_dir / _COMPARABLE_RESULTS_FILE, index=False)
-        prepare_frame_for_storage(
-            collection_comparable_results_table,
-            _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
-        ).to_parquet(base_dir / _COLLECTION_COMPARABLE_RESULTS_FILE, index=False)
-        prepare_frame_for_storage(
-            row_table,
-            _COMPARISON_JSON_COLUMNS,
-        ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
-        write_core_semantic_manifest(base_dir)
-        self.artifact_registry_service.upsert(collection_id, base_dir)
-        logger.info(
-            "Comparison assembly finished collection_id=%s comparable_results=%s collection_comparable_results=%s comparison_rows=%s",
-            collection_id,
-            len(comparable_results_table),
-            len(collection_comparable_results_table),
-            len(row_table),
-        )
-        return row_table
 
     def _load_comparison_inputs(
         self,
         collection_id: str,
         base_dir: Path,
-    ) -> dict[str, pd.DataFrame]:
+    ) -> _ComparisonInputFrames:
         required = (
             _SAMPLE_VARIANTS_FILE,
             _MEASUREMENT_RESULTS_FILE,
@@ -523,24 +550,48 @@ class ComparisonService:
         if missing:
             raise ComparisonRowsNotReadyError(collection_id, base_dir)
 
-        return {
-            "sample_variants": restore_frame_from_storage(
+        return _ComparisonInputFrames(
+            sample_variants=restore_frame_from_storage(
                 pd.read_parquet(base_dir / _SAMPLE_VARIANTS_FILE),
                 _SAMPLE_VARIANT_JSON_COLUMNS,
             ),
-            "measurement_results": restore_frame_from_storage(
+            measurement_results=restore_frame_from_storage(
                 pd.read_parquet(base_dir / _MEASUREMENT_RESULTS_FILE),
                 _MEASUREMENT_RESULT_JSON_COLUMNS,
             ),
-            "test_conditions": restore_frame_from_storage(
+            test_conditions=restore_frame_from_storage(
                 pd.read_parquet(base_dir / _TEST_CONDITIONS_FILE),
                 _TEST_CONDITION_JSON_COLUMNS,
             ),
-            "baseline_references": restore_frame_from_storage(
+            baseline_references=restore_frame_from_storage(
                 pd.read_parquet(base_dir / _BASELINE_REFERENCES_FILE),
                 _BASELINE_REFERENCE_JSON_COLUMNS,
             ),
-        }
+        )
+
+    def _write_comparison_artifacts(
+        self,
+        *,
+        collection_id: str,
+        base_dir: Path,
+        semantic_tables: _ComparisonSemanticTables,
+        row_table: pd.DataFrame,
+    ) -> None:
+        base_dir.mkdir(parents=True, exist_ok=True)
+        prepare_frame_for_storage(
+            semantic_tables.comparable_results,
+            _COMPARABLE_RESULT_JSON_COLUMNS,
+        ).to_parquet(base_dir / _COMPARABLE_RESULTS_FILE, index=False)
+        prepare_frame_for_storage(
+            semantic_tables.collection_comparable_results,
+            _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
+        ).to_parquet(base_dir / _COLLECTION_COMPARABLE_RESULTS_FILE, index=False)
+        prepare_frame_for_storage(
+            row_table,
+            _COMPARISON_JSON_COLUMNS,
+        ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
+        write_core_semantic_manifest(base_dir)
+        self.artifact_registry_service.upsert(collection_id, base_dir)
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)

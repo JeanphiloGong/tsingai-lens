@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -1286,12 +1287,12 @@ def test_comparison_service_persists_semantic_and_scope_artifacts_for_duplicate_
     monkeypatch.setattr(
         comparison_service,
         "_load_comparison_inputs",
-        lambda collection_id, base_dir: {
-            "sample_variants": sample_variants,
-            "measurement_results": measurement_results,
-            "test_conditions": test_conditions,
-            "baseline_references": baseline_references,
-        },
+        lambda collection_id, base_dir: SimpleNamespace(
+            sample_variants=sample_variants,
+            measurement_results=measurement_results,
+            test_conditions=test_conditions,
+            baseline_references=baseline_references,
+        ),
     )
 
     comparison_rows = comparison_service.build_comparison_rows(collection_id, output_dir)

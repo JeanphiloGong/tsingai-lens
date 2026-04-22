@@ -846,6 +846,17 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     )
     assert not output_dir.joinpath("comparison_rows.parquet").exists()
 
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    workspace_body = workspace.json()
+    assert workspace_body["status_summary"] == "graph_ready"
+    assert workspace_body["artifacts"]["comparison_rows_generated"] is False
+    assert workspace_body["artifacts"]["comparison_rows_ready"] is False
+    assert workspace_body["artifacts"]["graph_generated"] is True
+    assert workspace_body["artifacts"]["graph_ready"] is True
+    assert workspace_body["capabilities"]["can_view_graph"] is True
+    assert workspace_body["capabilities"]["can_download_graphml"] is True
+
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
     assert graph.status_code == 200
     payload = graph.json()

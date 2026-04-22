@@ -156,9 +156,10 @@
   - 这种情况下仍应保留 figure traceability 行，不应直接丢弃
 - `graph_generated`
   表示 `document_profiles.parquet`、`evidence_cards.parquet`、
-  `comparison_rows.parquet` 三个 Core graph 输入文件都已生成
+  `comparable_results.parquet`、`collection_comparable_results.parquet`
+  四个 Core graph 语义输入文件都已生成
 - `graph_ready`
-  表示上述 Core graph 输入已具备图投影消费条件，而不是
+  表示上述 Core graph 语义输入已具备图投影消费条件，而不是
   `entities.parquet` / `relationships.parquet` 是否存在
 - `artifacts` 不再暴露 `graphml_generated` / `graphml_ready`
   因为 GraphML 已改为基于 Core graph 的按需导出能力，不再是构建阶段的 readiness 产物
@@ -423,10 +424,12 @@ Graph 语义约束：
 
 - `/graph` 与 `/graphml` 只消费
   `document_profiles.parquet`、`evidence_cards.parquet`、
-  `comparison_rows.parquet`
+  `comparable_results.parquet`、`collection_comparable_results.parquet`
 - 它们当前是 Core-derived graph projection，不再以
   `entities.parquet`、`relationships.parquet`、`communities.parquet`
   作为产品语义前提
+- `comparison_rows.parquet` 在这条链路里只是可重建的 projection/cache，
+  graph 请求会按需从 semantic artifacts 重投影它
 - `/graph` 返回结构字段：
   `collection_id / nodes / edges / truncated`
 - graph node 只保留：
@@ -446,6 +449,8 @@ Graph 语义约束：
   前端应回到 `/comparisons` 并使用对应过滤参数做 canonical drilldown
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码
   `graph_not_ready`
+- `graph_not_ready.detail.missing_artifacts` 应返回缺失的 graph 语义输入文件名，
+  而不是要求旧的 graph cache 文件
 
 Reports 语义约束：
 

@@ -52,7 +52,7 @@ def test_artifact_registry_ignores_legacy_graph_outputs_for_core_readiness(
     assert payload["figures_ready"] is False
 
 
-def test_artifact_registry_marks_graph_ready_from_core_inputs_without_legacy_graph_outputs(
+def test_artifact_registry_marks_graph_ready_from_semantic_inputs_without_row_cache(
     monkeypatch,
     tmp_path,
 ):
@@ -158,32 +158,17 @@ def test_artifact_registry_marks_graph_ready_from_core_inputs_without_legacy_gra
             }
         ]
     ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": "col_demo",
-                "source_document_id": "paper-1",
-                "supporting_evidence_ids": ["ev-1"],
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "property_normalized": "conductivity",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-            }
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
-
     payload = artifact_registry.build_registry("col_demo", output_dir)
 
     assert payload["comparable_results_generated"] is True
     assert payload["comparable_results_ready"] is True
     assert payload["collection_comparable_results_generated"] is True
     assert payload["collection_comparable_results_ready"] is True
+    assert payload["comparison_rows_generated"] is False
+    assert payload["comparison_rows_ready"] is False
     assert payload["graph_generated"] is True
     assert payload["graph_ready"] is True
+    assert (output_dir / "comparison_rows.parquet").exists() is False
     assert (output_dir / "entities.parquet").exists() is False
     assert (output_dir / "relationships.parquet").exists() is False
 

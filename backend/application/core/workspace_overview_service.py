@@ -148,12 +148,12 @@ class WorkspaceService:
                 return "partial_ready"
         if self._artifact_ready(artifacts, "comparison_rows_ready"):
             return "ready"
+        if self._artifact_ready(artifacts, "graph_ready"):
+            return "graph_ready"
         if self._artifact_ready(artifacts, "evidence_cards_ready"):
             return "comparison_pending"
         if self._artifact_ready(artifacts, "document_profiles_ready") or document_profiles_generated:
             return "document_profiled"
-        if self._artifact_ready(artifacts, "graph_ready"):
-            return "graph_ready"
         if file_count > 0:
             return "uploaded"
         return "empty"

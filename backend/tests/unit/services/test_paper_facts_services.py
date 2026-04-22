@@ -1511,6 +1511,19 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     comparison_rows_path = output_dir / "comparison_rows.parquet"
     comparison_rows_path.unlink()
 
+    projection_tables = comparison_service.read_comparison_projection(
+        collection_id,
+        materialize_row_cache=False,
+    )
+    assert not comparison_rows_path.exists()
+    assert not projection_tables.comparable_results.empty
+    assert not projection_tables.collection_comparable_results.empty
+    assert not projection_tables.comparison_rows.empty
+    assert (
+        projection_tables.comparison_rows.iloc[0]["comparable_result_id"]
+        == restored_comparable_results.iloc[0]["comparable_result_id"]
+    )
+
     reprojected_comparisons = comparison_service.read_comparison_rows(collection_id)
     assert comparison_rows_path.exists()
     assert not reprojected_comparisons.empty

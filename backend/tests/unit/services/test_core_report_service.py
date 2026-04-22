@@ -6,6 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+from domain.core.comparison import (
+    ComparableResult,
+    build_collection_assessment_input_fingerprint,
+)
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -36,6 +40,24 @@ def _ensure_fastapi_stub(monkeypatch) -> None:  # noqa: ANN001
             "fastapi",
             SimpleNamespace(HTTPException=_HTTPException),
         )
+
+
+def _current_scope_metadata(comparable_result: dict) -> dict[str, object]:
+    comparable_record = ComparableResult.from_mapping(comparable_result)
+    return {
+        "policy_family": "default_collection_comparison_policy",
+        "policy_version": "comparison_policy_v1",
+        "comparable_result_normalization_version": comparable_record.normalization_version,
+        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
+            comparable_record
+        ),
+        "reassessment_triggers": [
+            "policy_family_changed",
+            "policy_version_changed",
+            "comparable_result_normalization_version_changed",
+            "assessment_input_fingerprint_changed",
+        ],
+    }
 
 
 def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
@@ -98,53 +120,53 @@ def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
             }
         ]
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "comparable_result_id": "cres-1",
-                "source_result_id": "res-1",
-                "source_document_id": "paper-1",
-                "binding": {
-                    "variant_id": None,
-                    "baseline_id": "base-1",
-                    "test_condition_id": "tc-1",
-                },
-                "normalized_context": {
-                    "material_system_normalized": "oxide cathode",
-                    "process_normalized": "700 C",
-                    "baseline_normalized": "as-prepared",
-                    "test_condition_normalized": "EIS",
-                },
-                "axis": {
-                    "axis_name": None,
-                    "axis_value": None,
-                    "axis_unit": None,
-                },
-                "value": {
-                    "property_normalized": "conductivity",
-                    "result_type": "scalar",
-                    "numeric_value": 12.0,
-                    "unit": "mS/cm",
-                    "summary": "12 mS/cm",
-                    "statistic_type": None,
-                    "uncertainty": None,
-                },
-                "evidence": {
-                    "direct_anchor_ids": ["anchor-1"],
-                    "contextual_anchor_ids": [],
-                    "evidence_ids": ["ev-1"],
-                    "structure_feature_ids": [],
-                    "characterization_observation_ids": [],
-                    "traceability_status": "direct",
-                },
-                "variant_label": None,
-                "baseline_reference": "as-prepared",
-                "result_source_type": "text",
-                "epistemic_status": "normalized_from_evidence",
-                "normalization_version": "comparable_result_v1",
-            }
-        ]
-    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
+    comparable_result = {
+        "comparable_result_id": "cres-1",
+        "source_result_id": "res-1",
+        "source_document_id": "paper-1",
+        "binding": {
+            "variant_id": None,
+            "baseline_id": "base-1",
+            "test_condition_id": "tc-1",
+        },
+        "normalized_context": {
+            "material_system_normalized": "oxide cathode",
+            "process_normalized": "700 C",
+            "baseline_normalized": "as-prepared",
+            "test_condition_normalized": "EIS",
+        },
+        "axis": {
+            "axis_name": None,
+            "axis_value": None,
+            "axis_unit": None,
+        },
+        "value": {
+            "property_normalized": "conductivity",
+            "result_type": "scalar",
+            "numeric_value": 12.0,
+            "unit": "mS/cm",
+            "summary": "12 mS/cm",
+            "statistic_type": None,
+            "uncertainty": None,
+        },
+        "evidence": {
+            "direct_anchor_ids": ["anchor-1"],
+            "contextual_anchor_ids": [],
+            "evidence_ids": ["ev-1"],
+            "structure_feature_ids": [],
+            "characterization_observation_ids": [],
+            "traceability_status": "direct",
+        },
+        "variant_label": None,
+        "baseline_reference": "as-prepared",
+        "result_source_type": "text",
+        "epistemic_status": "normalized_from_evidence",
+        "normalization_version": "comparable_result_v1",
+    }
+    pd.DataFrame([comparable_result]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
     pd.DataFrame(
         [
             {
@@ -161,6 +183,7 @@ def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
                 "epistemic_status": "normalized_from_evidence",
                 "included": True,
                 "sort_order": 0,
+                **_current_scope_metadata(comparable_result),
             }
         ]
     ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
@@ -219,4 +242,4 @@ def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
     assert patterns.total_relationships == 2
     assert patterns.total_documents == 1
     assert patterns.items[0].community_id == 1
-    assert (output_dir / "comparison_rows.parquet").exists()
+    assert not (output_dir / "comparison_rows.parquet").exists()

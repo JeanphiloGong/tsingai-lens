@@ -9,7 +9,11 @@ from types import SimpleNamespace
 import pandas as pd
 
 from application.derived.graph_projection_service import load_core_graph_payload
-from domain.core.comparison import build_comparison_row_id
+from domain.core.comparison import (
+    ComparableResult,
+    build_collection_assessment_input_fingerprint,
+    build_comparison_row_id,
+)
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -33,6 +37,24 @@ def _comparison_rows_frame(*records: dict) -> pd.DataFrame:
     return pd.DataFrame(list(records))
 
 
+def _current_scope_metadata(comparable_result: dict) -> dict[str, object]:
+    comparable_record = ComparableResult.from_mapping(comparable_result)
+    return {
+        "policy_family": "default_collection_comparison_policy",
+        "policy_version": "comparison_policy_v1",
+        "comparable_result_normalization_version": comparable_record.normalization_version,
+        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
+            comparable_record
+        ),
+        "reassessment_triggers": [
+            "policy_family_changed",
+            "policy_version_changed",
+            "comparable_result_normalization_version_changed",
+            "assessment_input_fingerprint_changed",
+        ],
+    }
+
+
 def _write_semantic_comparison_artifacts(
     output_dir: Path,
     collection_id: str,
@@ -42,53 +64,53 @@ def _write_semantic_comparison_artifacts(
     supporting_evidence_ids: list[str] | None = None,
 ) -> str:
     evidence_ids = supporting_evidence_ids or ["ev-1"]
-    pd.DataFrame(
-        [
-            {
-                "comparable_result_id": comparable_result_id,
-                "source_result_id": f"res-{comparable_result_id}",
-                "source_document_id": source_document_id,
-                "binding": {
-                    "variant_id": None,
-                    "baseline_id": f"base-{comparable_result_id}",
-                    "test_condition_id": f"tc-{comparable_result_id}",
-                },
-                "normalized_context": {
-                    "material_system_normalized": "oxide cathode",
-                    "process_normalized": "700 C",
-                    "baseline_normalized": "as-prepared",
-                    "test_condition_normalized": "EIS",
-                },
-                "axis": {
-                    "axis_name": None,
-                    "axis_value": None,
-                    "axis_unit": None,
-                },
-                "value": {
-                    "property_normalized": "conductivity",
-                    "result_type": "scalar",
-                    "numeric_value": 12.0,
-                    "unit": "mS/cm",
-                    "summary": "12 mS/cm",
-                    "statistic_type": None,
-                    "uncertainty": None,
-                },
-                "evidence": {
-                    "direct_anchor_ids": ["anchor-1"],
-                    "contextual_anchor_ids": [],
-                    "evidence_ids": evidence_ids,
-                    "structure_feature_ids": [],
-                    "characterization_observation_ids": [],
-                    "traceability_status": "direct",
-                },
-                "variant_label": None,
-                "baseline_reference": "as-prepared",
-                "result_source_type": "text",
-                "epistemic_status": "normalized_from_evidence",
-                "normalization_version": "comparable_result_v1",
-            }
-        ]
-    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
+    comparable_result = {
+        "comparable_result_id": comparable_result_id,
+        "source_result_id": f"res-{comparable_result_id}",
+        "source_document_id": source_document_id,
+        "binding": {
+            "variant_id": None,
+            "baseline_id": f"base-{comparable_result_id}",
+            "test_condition_id": f"tc-{comparable_result_id}",
+        },
+        "normalized_context": {
+            "material_system_normalized": "oxide cathode",
+            "process_normalized": "700 C",
+            "baseline_normalized": "as-prepared",
+            "test_condition_normalized": "EIS",
+        },
+        "axis": {
+            "axis_name": None,
+            "axis_value": None,
+            "axis_unit": None,
+        },
+        "value": {
+            "property_normalized": "conductivity",
+            "result_type": "scalar",
+            "numeric_value": 12.0,
+            "unit": "mS/cm",
+            "summary": "12 mS/cm",
+            "statistic_type": None,
+            "uncertainty": None,
+        },
+        "evidence": {
+            "direct_anchor_ids": ["anchor-1"],
+            "contextual_anchor_ids": [],
+            "evidence_ids": evidence_ids,
+            "structure_feature_ids": [],
+            "characterization_observation_ids": [],
+            "traceability_status": "direct",
+        },
+        "variant_label": None,
+        "baseline_reference": "as-prepared",
+        "result_source_type": "text",
+        "epistemic_status": "normalized_from_evidence",
+        "normalization_version": "comparable_result_v1",
+    }
+    pd.DataFrame([comparable_result]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
     pd.DataFrame(
         [
             {
@@ -105,6 +127,7 @@ def _write_semantic_comparison_artifacts(
                 "epistemic_status": "normalized_from_evidence",
                 "included": True,
                 "sort_order": 0,
+                **_current_scope_metadata(comparable_result),
             }
         ]
     ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
@@ -487,7 +510,7 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
     assert payload["collection_id"] == collection_id
     assert len(payload["nodes"]) == 7
     assert len(payload["edges"]) == 6
-    assert (output_dir / "comparison_rows.parquet").exists()
+    assert not (output_dir / "comparison_rows.parquet").exists()
 
     graphml_bytes, filename = graph_service.build_graphml(
         collection_id=collection_id,
@@ -497,6 +520,7 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
+    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):

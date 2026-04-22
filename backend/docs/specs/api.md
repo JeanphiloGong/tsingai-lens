@@ -526,11 +526,13 @@ Graph 语义约束：
 - `/graph` 与 `/graphml` 只消费
   `document_profiles.parquet`、`evidence_cards.parquet`、
   `comparable_results.parquet`、`collection_comparable_results.parquet`
+- graph 与 report 派生读路径应通过共享的 in-memory projection substrate
+  从这些 semantic artifacts 投影，不要求 `comparison_rows.parquet` 预先存在
 - 它们当前是 Core-derived graph projection，不再以
   `entities.parquet`、`relationships.parquet`、`communities.parquet`
   作为产品语义前提
 - `comparison_rows.parquet` 在这条链路里只是可重建的 projection/cache，
-  graph 请求会按需从 semantic artifacts 重投影它
+  graph/report 请求不应把它当成必需输入，也不应为了只读访问而要求先物化它
 - `/graph` 返回结构字段：
   `collection_id / nodes / edges / truncated`
 - graph node 只保留：

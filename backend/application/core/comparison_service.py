@@ -12,7 +12,10 @@ from application.core.comparison_assembly import (
     ComparisonInputFrames,
     ComparisonSemanticTables,
 )
-from application.core.comparison_projection import ComparisonRowProjector
+from application.core.comparison_projection import (
+    ComparisonProjectionTables,
+    ComparisonRowProjector,
+)
 from application.core.semantic_build.core_semantic_version import (
     core_semantic_rebuild_required,
     write_core_semantic_manifest,
@@ -158,9 +161,18 @@ class ComparisonService:
         return self._serialize_row(matched.iloc[0])
 
     def read_comparison_rows(self, collection_id: str) -> pd.DataFrame:
+        return self.read_comparison_projection(
+            collection_id,
+            materialize_row_cache=True,
+        ).comparison_rows
+
+    def read_comparison_projection(
+        self,
+        collection_id: str,
+        *,
+        materialize_row_cache: bool = False,
+    ) -> ComparisonProjectionTables:
         output_dir = self._resolve_output_dir(collection_id)
-        # `comparison_rows.parquet` is a materialized projection cache; semantic truth lives
-        # in comparable results plus collection-scoped assessments.
         semantic_tables = self._read_semantic_comparison_artifacts(
             collection_id,
             output_dir,
@@ -170,8 +182,13 @@ class ComparisonService:
             comparable_results=semantic_tables.comparable_results,
             scoped_results=semantic_tables.collection_comparable_results,
         )
-        self._materialize_row_cache_if_missing(collection_id, output_dir, rows)
-        return rows
+        if materialize_row_cache:
+            self._materialize_row_cache_if_missing(collection_id, output_dir, rows)
+        return ComparisonProjectionTables(
+            comparable_results=semantic_tables.comparable_results,
+            collection_comparable_results=semantic_tables.collection_comparable_results,
+            comparison_rows=rows,
+        )
 
     def read_comparable_results(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)

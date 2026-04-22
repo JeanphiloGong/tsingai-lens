@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 from typing import Any
 
@@ -47,6 +48,13 @@ COMPARISON_ROW_COLUMNS = [
     "value",
     "unit",
 ]
+
+
+@dataclass(frozen=True)
+class ComparisonProjectionTables:
+    comparable_results: pd.DataFrame
+    collection_comparable_results: pd.DataFrame
+    comparison_rows: pd.DataFrame
 
 
 class ComparisonRowProjector:

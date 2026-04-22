@@ -101,10 +101,13 @@ def load_graph_payload(
         )
 
     try:
-        comparison_rows = ComparisonService(
+        comparison_projection = ComparisonService(
             collection_service=collection_service,
             artifact_registry_service=artifact_registry_service,
-        ).read_comparison_rows(collection_id)
+        ).read_comparison_projection(
+            collection_id,
+            materialize_row_cache=False,
+        )
     except ComparisonRowsNotReadyError as exc:
         raise GraphNotReadyError(
             collection_id=collection_id,
@@ -114,7 +117,7 @@ def load_graph_payload(
 
     return load_core_graph_payload(
         base_dir=base_dir,
-        comparison_rows=comparison_rows,
+        comparison_rows=comparison_projection.comparison_rows,
         max_nodes=max_nodes,
         min_weight=min_weight,
     )

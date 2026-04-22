@@ -114,7 +114,10 @@ def _read_comparison_rows(collection_id: str) -> pd.DataFrame:
         return ComparisonService(
             collection_service=collection_service,
             artifact_registry_service=artifact_registry_service,
-        ).read_comparison_rows(collection_id)
+        ).read_comparison_projection(
+            collection_id,
+            materialize_row_cache=False,
+        ).comparison_rows
     except ComparisonRowsNotReadyError:
         return pd.DataFrame()
 

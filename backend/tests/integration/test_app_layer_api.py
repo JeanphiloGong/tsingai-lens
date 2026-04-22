@@ -909,7 +909,7 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert graph.status_code == 200
     payload = graph.json()
     assert payload["collection_id"] == collection_id
-    assert output_dir.joinpath("comparison_rows.parquet").exists()
+    assert not output_dir.joinpath("comparison_rows.parquet").exists()
     assert len(payload["nodes"]) == 7
     assert len(payload["edges"]) == 6
     assert {item["type"] for item in payload["nodes"]} == {

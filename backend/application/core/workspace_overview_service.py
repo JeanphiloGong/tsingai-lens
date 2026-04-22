@@ -111,6 +111,26 @@ class WorkspaceService:
     ) -> bool:
         return bool(artifacts.get(ready_key))
 
+    def _comparisons_generated(self, artifacts: dict) -> bool:
+        return self._artifact_generated(
+            artifacts,
+            "comparable_results_generated",
+            "comparable_results.parquet",
+        ) and self._artifact_generated(
+            artifacts,
+            "collection_comparable_results_generated",
+            "collection_comparable_results.parquet",
+        )
+
+    def _comparisons_ready(self, artifacts: dict) -> bool:
+        return self._artifact_ready(
+            artifacts,
+            "comparable_results_ready",
+        ) and self._artifact_ready(
+            artifacts,
+            "collection_comparable_results_ready",
+        )
+
     def _build_capabilities(self, artifacts: dict) -> dict:
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
         protocol_generated = self._artifact_generated(
@@ -138,6 +158,7 @@ class WorkspaceService:
             "document_profiles_generated",
             "document_profiles.parquet",
         )
+        comparisons_ready = self._comparisons_ready(artifacts)
         if latest_task:
             status = str(latest_task.get("status") or "")
             if status == "running":
@@ -146,7 +167,7 @@ class WorkspaceService:
                 return "attention_required"
             if status == "partial_success":
                 return "partial_ready"
-        if self._artifact_ready(artifacts, "comparison_rows_ready"):
+        if comparisons_ready:
             return "ready"
         if self._artifact_ready(artifacts, "graph_ready"):
             return "graph_ready"
@@ -188,11 +209,7 @@ class WorkspaceService:
             "evidence_cards_generated",
             "evidence_cards.parquet",
         )
-        comparisons_generated = self._artifact_generated(
-            artifacts,
-            "comparison_rows_generated",
-            "comparison_rows.parquet",
-        )
+        comparisons_generated = self._comparisons_generated(artifacts)
         protocol_generated = self._artifact_generated(
             artifacts,
             "protocol_steps_generated",
@@ -203,7 +220,7 @@ class WorkspaceService:
             "document_profiles_ready",
         ) or document_summary.get("total_documents", 0) > 0
         evidence_ready = self._artifact_ready(artifacts, "evidence_cards_ready")
-        comparison_ready = self._artifact_ready(artifacts, "comparison_rows_ready")
+        comparison_ready = self._comparisons_ready(artifacts)
         protocol_ready = self._artifact_ready(artifacts, "protocol_steps_ready")
         protocol_candidates = (
             document_summary.get("by_protocol_extractable", {}).get(
@@ -218,14 +235,14 @@ class WorkspaceService:
             return {
                 "documents": {"status": "not_started", "detail": "No files uploaded."},
                 "evidence": {"status": "not_started", "detail": "Evidence cards are not generated yet."},
-                "comparisons": {"status": "not_started", "detail": "Comparison rows are not generated yet."},
+                "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
                 "protocol": {"status": "not_applicable", "detail": "Protocol branch is unavailable before collection build."},
             }
         if task_status == "running":
             return {
                 "documents": {"status": "processing", "detail": "Document profiling is in progress."},
                 "evidence": {"status": "not_started", "detail": "Paper facts extraction has not started yet."},
-                "comparisons": {"status": "not_started", "detail": "Comparison rows are not generated yet."},
+                "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
                 "protocol": {"status": "not_started", "detail": "Protocol branch has not started yet."},
             }
 
@@ -269,22 +286,22 @@ class WorkspaceService:
         if comparison_ready:
             comparisons_stage = {
                 "status": "ready",
-                "detail": "Comparison rows are available.",
+                "detail": "Collection-scoped comparisons are available.",
             }
         elif comparisons_generated:
             comparisons_stage = {
                 "status": "limited",
-                "detail": "Comparison generation completed, but no rows were suitable for structured comparison.",
+                "detail": "Comparison semantics were generated, but no collection-scoped results were suitable for structured comparison.",
             }
         elif evidence_ready or evidence_generated or documents_ready or documents_generated:
             comparisons_stage = {
                 "status": "not_started",
-                "detail": "Comparison rows are not generated yet.",
+                "detail": "Collection-scoped comparisons are not generated yet.",
             }
         else:
             comparisons_stage = {
                 "status": "not_started",
-                "detail": "Comparison rows are not generated yet.",
+                "detail": "Collection-scoped comparisons are not generated yet.",
             }
 
         if protocol_ready:

@@ -168,7 +168,7 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["links"]["comparisons"] == f"/api/v1/collections/{collection_id}/comparisons"
 
 
-def test_workspace_service_marks_graph_ready_from_semantic_artifacts_without_row_cache(
+def test_workspace_service_marks_comparisons_ready_from_semantic_artifacts_without_row_cache(
     monkeypatch,
     tmp_path,
 ):
@@ -288,7 +288,8 @@ def test_workspace_service_marks_graph_ready_from_semantic_artifacts_without_row
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
-    assert overview["status_summary"] == "graph_ready"
+    assert overview["status_summary"] == "ready"
+    assert overview["workflow"]["comparisons"]["status"] == "ready"
     assert overview["artifacts"]["comparison_rows_generated"] is False
     assert overview["artifacts"]["comparison_rows_ready"] is False
     assert overview["artifacts"]["graph_generated"] is True

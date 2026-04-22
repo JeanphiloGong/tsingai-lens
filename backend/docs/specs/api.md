@@ -35,7 +35,7 @@
 3. `POST /api/v1/collections/{collection_id}/tasks/build`
 4. 轮询 `GET /api/v1/tasks/{task_id}`
 5. 打开 `GET /api/v1/collections/{collection_id}/workspace`
-6. 从 workspace 跳转到 document profiles、evidence cards、comparison rows
+6. 从 workspace 跳转到 document profiles、evidence cards、comparisons
 7. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
 8. 在 comparison/evidence 中点击“查看原文证据”时，调用 traceback 接口并跳转文档查看器
 
@@ -142,6 +142,13 @@
   四个阶段的状态
 - 状态值应使用显式语义，例如
   `not_started | processing | ready | limited | not_applicable | failed`
+- `workflow.comparisons`
+  应以 `comparable_results.parquet` 与
+  `collection_comparable_results.parquet` 作为 readiness 语义判断
+  - `comparison_rows.parquet` 只是可重建 projection/cache，不是 comparisons
+    或 graph 的 contract 前提
+- `status_summary=ready`
+  应表示 collection-scoped comparison read model 已就绪，即使 row cache 尚未预生成
 - `document_summary` 应来自 `document_profiles` 的 collection 级汇总
 - `warnings` 应表达 review-heavy、protocol-limited、comparison-limited、
   traceability-limited 等 collection 风险
@@ -391,6 +398,9 @@ comparison 对 traceback 的依赖约定：
 语义要求：
 
 - 一行表示一个可供 collection 级检查的 normalized result，不是 pairwise 对比对象
+- `/comparisons`
+  当前以 `comparable_results.parquet` +
+  `collection_comparable_results.parquet` 为语义真源，并可按需重投影 row cache
 - `comparability_status` 使用
   `comparable | limited | not_comparable | insufficient`
 - 前端应把 comparison rows 作为主比较表，而不是把 protocol steps 当主表

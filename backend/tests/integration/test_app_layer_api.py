@@ -849,7 +849,8 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()
-    assert workspace_body["status_summary"] == "graph_ready"
+    assert workspace_body["status_summary"] == "ready"
+    assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
     assert workspace_body["artifacts"]["comparison_rows_generated"] is False
     assert workspace_body["artifacts"]["comparison_rows_ready"] is False
     assert workspace_body["artifacts"]["graph_generated"] is True

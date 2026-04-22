@@ -912,7 +912,8 @@ const translations: Record<Language, Translations> = {
 		error: {
 			unexpected: 'Unexpected error.',
 			collectionNotFound: 'This collection does not exist.',
-			graphNotReady: 'Graph artifacts are not ready yet. Finish processing first.',
+			graphNotReady:
+				'Graph projection is not ready yet. Finish processing until the collection graph becomes available.',
 			communityNotFound: 'The requested community filter could not be found for this collection.'
 		}
 	},
@@ -1764,7 +1765,7 @@ const translations: Record<Language, Translations> = {
 		error: {
 			unexpected: '发生未知错误。',
 			collectionNotFound: '该集合不存在。',
-			graphNotReady: '图谱产物尚未就绪，请先完成处理。',
+			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',
 			communityNotFound: '当前集合中找不到指定的社区过滤条件。'
 		}
 	}

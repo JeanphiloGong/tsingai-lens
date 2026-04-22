@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from application.core.comparison_projection import (
     ComparisonRowProjector,
 )
 from application.core.semantic_build.core_semantic_version import (
+    CURRENT_CORE_SEMANTIC_VERSION,
     core_semantic_rebuild_required,
     write_core_semantic_manifest,
 )
@@ -79,6 +81,19 @@ _COMPARISON_JSON_COLUMNS = (
     "comparability_warnings",
     "comparability_basis",
     "missing_critical_context",
+)
+_CORPUS_COMPARABLE_RESULTS_CACHE_DIR = "_core_cache"
+_CORPUS_COMPARABLE_RESULTS_CACHE_FILE = "corpus_comparable_results_cache.parquet"
+_CORPUS_COMPARABLE_RESULTS_CACHE_META_FILE = "corpus_comparable_results_cache_meta.json"
+_CORPUS_COMPARABLE_RESULTS_CACHE_SCHEMA_VERSION = 1
+_CORPUS_COMPARABLE_RESULTS_CACHE_JSON_COLUMNS = (
+    "binding",
+    "normalized_context",
+    "axis",
+    "value",
+    "evidence",
+    "observed_collection_ids",
+    "collection_overlays",
 )
 
 
@@ -600,6 +615,7 @@ class ComparisonService:
             _COMPARISON_JSON_COLUMNS,
         ).to_parquet(output_dir / _COMPARISON_ROWS_FILE, index=False)
         write_core_semantic_manifest(output_dir)
+        self._invalidate_corpus_comparable_results_cache()
         self.artifact_registry_service.upsert(collection_id, output_dir)
         return ComparisonSemanticTables(
             comparable_results=comparable_results,
@@ -728,6 +744,7 @@ class ComparisonService:
             _COMPARISON_JSON_COLUMNS,
         ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
         write_core_semantic_manifest(base_dir)
+        self._invalidate_corpus_comparable_results_cache()
         self.artifact_registry_service.upsert(collection_id, base_dir)
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
@@ -752,7 +769,26 @@ class ComparisonService:
         comparable_result_id: str | None = None,
     ) -> list[dict[str, Any]]:
         scoped_collection_id = self._safe_text(collection_id)
-        collection_ids = self._list_corpus_collection_ids(scoped_collection_id)
+        if scoped_collection_id:
+            items = self._scan_corpus_comparable_result_items(collection_id=scoped_collection_id)
+        else:
+            items = self._load_or_rebuild_corpus_comparable_results_cache()
+        return self._filter_corpus_comparable_result_items(
+            items,
+            material_system_normalized=material_system_normalized,
+            property_normalized=property_normalized,
+            test_condition_normalized=test_condition_normalized,
+            baseline_normalized=baseline_normalized,
+            source_document_id=source_document_id,
+            comparable_result_id=comparable_result_id,
+        )
+
+    def _scan_corpus_comparable_result_items(
+        self,
+        *,
+        collection_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        collection_ids = self._list_corpus_collection_ids(collection_id)
         base_records_by_result_id: dict[str, ComparableResult] = {}
         observed_collection_ids_by_result_id: dict[str, set[str]] = {}
         scoped_records_by_result_id: dict[str, dict[str, CollectionComparableResult]] = {}
@@ -764,26 +800,18 @@ class ComparisonService:
                     self._resolve_output_dir(current_collection_id),
                 )
             except ComparisonRowsNotReadyError:
-                if scoped_collection_id:
+                if collection_id:
                     raise
                 continue
-            comparable_records: list[ComparableResult] = []
-            matching_result_ids: set[str] = set()
-            for _, row in semantic_tables.comparable_results.iterrows():
-                record = ComparableResult.from_mapping(dict(row))
-                if not self._comparable_result_matches_filters(
-                    record,
-                    material_system_normalized=material_system_normalized,
-                    property_normalized=property_normalized,
-                    test_condition_normalized=test_condition_normalized,
-                    baseline_normalized=baseline_normalized,
-                    source_document_id=source_document_id,
-                    comparable_result_id=comparable_result_id,
-                ):
-                    continue
-                comparable_records.append(record)
-                if record.comparable_result_id:
-                    matching_result_ids.add(record.comparable_result_id)
+            comparable_records = [
+                ComparableResult.from_mapping(dict(row))
+                for _, row in semantic_tables.comparable_results.iterrows()
+            ]
+            matching_result_ids = {
+                record.comparable_result_id
+                for record in comparable_records
+                if record.comparable_result_id
+            }
             if not comparable_records:
                 continue
             for record in comparable_records:
@@ -830,6 +858,85 @@ class ComparisonService:
             )
         return items
 
+    def _load_or_rebuild_corpus_comparable_results_cache(self) -> list[dict[str, Any]]:
+        cache_table_path, cache_meta_path = self._resolve_corpus_comparable_results_cache_paths()
+        current_snapshot = self._build_corpus_comparable_results_cache_snapshot()
+        if cache_table_path.is_file() and cache_meta_path.is_file():
+            try:
+                cache_meta = json.loads(cache_meta_path.read_text(encoding="utf-8"))
+                if self._corpus_comparable_results_cache_is_current(
+                    cache_meta,
+                    current_snapshot,
+                ):
+                    cached_frame = restore_frame_from_storage(
+                        pd.read_parquet(cache_table_path),
+                        _CORPUS_COMPARABLE_RESULTS_CACHE_JSON_COLUMNS,
+                    )
+                    return [
+                        dict(row)
+                        for _, row in cached_frame.iterrows()
+                    ]
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Corpus comparable-result cache read failed; rebuilding cache path=%s",
+                    cache_table_path,
+                )
+        items = self._scan_corpus_comparable_result_items()
+        self._write_corpus_comparable_results_cache(
+            items=items,
+            collection_snapshot=current_snapshot,
+        )
+        return items
+
+    def _filter_corpus_comparable_result_items(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        material_system_normalized: str | None = None,
+        property_normalized: str | None = None,
+        test_condition_normalized: str | None = None,
+        baseline_normalized: str | None = None,
+        source_document_id: str | None = None,
+        comparable_result_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        filtered_items: list[dict[str, Any]] = []
+        expected_material_system = self._safe_text(material_system_normalized)
+        expected_property = self._safe_text(property_normalized)
+        expected_test_condition = self._safe_text(test_condition_normalized)
+        expected_baseline = self._safe_text(baseline_normalized)
+        expected_source_document_id = self._safe_text(source_document_id)
+        expected_comparable_result_id = self._safe_text(comparable_result_id)
+
+        for item in items:
+            normalized_context = item.get("normalized_context") or {}
+            value = item.get("value") or {}
+            if expected_material_system and self._safe_text(
+                normalized_context.get("material_system_normalized")
+            ) != expected_material_system:
+                continue
+            if expected_property and self._safe_text(
+                value.get("property_normalized")
+            ) != expected_property:
+                continue
+            if expected_test_condition and self._safe_text(
+                normalized_context.get("test_condition_normalized")
+            ) != expected_test_condition:
+                continue
+            if expected_baseline and self._safe_text(
+                normalized_context.get("baseline_normalized")
+            ) != expected_baseline:
+                continue
+            if expected_source_document_id and self._safe_text(
+                item.get("source_document_id")
+            ) != expected_source_document_id:
+                continue
+            if expected_comparable_result_id and self._safe_text(
+                item.get("comparable_result_id")
+            ) != expected_comparable_result_id:
+                continue
+            filtered_items.append(item)
+        return filtered_items
+
     def _list_corpus_collection_ids(self, collection_id: str | None) -> list[str]:
         if collection_id:
             self.collection_service.get_collection(collection_id)
@@ -841,47 +948,82 @@ class ComparisonService:
                 collection_ids.append(current_collection_id)
         return collection_ids
 
-    def _comparable_result_matches_filters(
-        self,
-        record: ComparableResult,
-        *,
-        material_system_normalized: str | None = None,
-        property_normalized: str | None = None,
-        test_condition_normalized: str | None = None,
-        baseline_normalized: str | None = None,
-        source_document_id: str | None = None,
-        comparable_result_id: str | None = None,
-    ) -> bool:
-        filters = (
-            (
-                self._safe_text(record.normalized_context.material_system_normalized),
-                self._safe_text(material_system_normalized),
-            ),
-            (
-                self._safe_text(record.value.property_normalized),
-                self._safe_text(property_normalized),
-            ),
-            (
-                self._safe_text(record.normalized_context.test_condition_normalized),
-                self._safe_text(test_condition_normalized),
-            ),
-            (
-                self._safe_text(record.normalized_context.baseline_normalized),
-                self._safe_text(baseline_normalized),
-            ),
-            (
-                self._safe_text(record.source_document_id),
-                self._safe_text(source_document_id),
-            ),
-            (
-                self._safe_text(record.comparable_result_id),
-                self._safe_text(comparable_result_id),
-            ),
+    def _resolve_corpus_comparable_results_cache_paths(self) -> tuple[Path, Path]:
+        cache_dir = self.collection_service.root_dir / _CORPUS_COMPARABLE_RESULTS_CACHE_DIR
+        return (
+            cache_dir / _CORPUS_COMPARABLE_RESULTS_CACHE_FILE,
+            cache_dir / _CORPUS_COMPARABLE_RESULTS_CACHE_META_FILE,
         )
-        for actual, expected in filters:
-            if expected and actual != expected:
-                return False
-        return True
+
+    def _build_corpus_comparable_results_cache_snapshot(self) -> dict[str, dict[str, int | None]]:
+        snapshot: dict[str, dict[str, int | None]] = {}
+        for collection_id in self._list_corpus_collection_ids(None):
+            output_dir = self.collection_service.get_paths(collection_id).output_dir.resolve()
+            documents_path = output_dir / "documents.parquet"
+            comparable_results_path = output_dir / _COMPARABLE_RESULTS_FILE
+            scoped_results_path = output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE
+            if not (
+                documents_path.is_file()
+                or comparable_results_path.is_file()
+                or scoped_results_path.is_file()
+            ):
+                continue
+            snapshot[collection_id] = {
+                "documents_mtime_ns": self._path_mtime_ns(documents_path),
+                "comparable_results_mtime_ns": self._path_mtime_ns(comparable_results_path),
+                "collection_comparable_results_mtime_ns": self._path_mtime_ns(
+                    scoped_results_path
+                ),
+            }
+        return snapshot
+
+    def _corpus_comparable_results_cache_is_current(
+        self,
+        cache_meta: dict[str, Any],
+        current_snapshot: dict[str, dict[str, int | None]],
+    ) -> bool:
+        if cache_meta.get("schema_version") != _CORPUS_COMPARABLE_RESULTS_CACHE_SCHEMA_VERSION:
+            return False
+        if cache_meta.get("core_semantic_version") != CURRENT_CORE_SEMANTIC_VERSION:
+            return False
+        return cache_meta.get("collection_snapshot") == current_snapshot
+
+    def _write_corpus_comparable_results_cache(
+        self,
+        *,
+        items: list[dict[str, Any]],
+        collection_snapshot: dict[str, dict[str, int | None]],
+    ) -> None:
+        cache_table_path, cache_meta_path = self._resolve_corpus_comparable_results_cache_paths()
+        cache_table_path.parent.mkdir(parents=True, exist_ok=True)
+        prepare_frame_for_storage(
+            pd.DataFrame(items),
+            _CORPUS_COMPARABLE_RESULTS_CACHE_JSON_COLUMNS,
+        ).to_parquet(cache_table_path, index=False)
+        cache_meta_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": _CORPUS_COMPARABLE_RESULTS_CACHE_SCHEMA_VERSION,
+                    "core_semantic_version": CURRENT_CORE_SEMANTIC_VERSION,
+                    "collection_snapshot": collection_snapshot,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    def _invalidate_corpus_comparable_results_cache(self) -> None:
+        cache_table_path, cache_meta_path = self._resolve_corpus_comparable_results_cache_paths()
+        for path in (cache_table_path, cache_meta_path):
+            if path.is_file():
+                path.unlink()
+
+    def _path_mtime_ns(self, path: Path) -> int | None:
+        if not path.is_file():
+            return None
+        return path.stat().st_mtime_ns
 
     def _filter_rows(
         self,

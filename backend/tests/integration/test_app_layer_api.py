@@ -280,6 +280,16 @@ def _build_semantic_comparison_record(
         "epistemic_status": assessment_epistemic_status,
         "included": True,
         "sort_order": sort_order,
+        "policy_family": "default_collection_comparison_policy",
+        "policy_version": "comparison_policy_v1",
+        "comparable_result_normalization_version": "comparable_result_v1",
+        "assessment_input_fingerprint": f"cafp-{comparable_result_id}",
+        "reassessment_triggers": [
+            "policy_family_changed",
+            "policy_version_changed",
+            "comparable_result_normalization_version_changed",
+            "assessment_input_fingerprint_changed",
+        ],
     }
     row_id = build_comparison_row_id(
         collection_id=collection_id,
@@ -652,6 +662,18 @@ def test_collection_task_flow(app_client):
     assert document_comparison_semantics_body["count"] >= 1
     assert document_comparison_semantics_body["items"][0]["source_document_id"] == document_id
     assert "collection_overlays" in document_comparison_semantics_body["items"][0]
+    assert (
+        document_comparison_semantics_body["items"][0]["collection_overlays"][0]["policy_version"]
+        == "comparison_policy_v1"
+    )
+    assert document_comparison_semantics_body["items"][0]["collection_overlays"][0][
+        "reassessment_triggers"
+    ] == [
+        "policy_family_changed",
+        "policy_version_changed",
+        "comparable_result_normalization_version_changed",
+        "assessment_input_fingerprint_changed",
+    ]
     assert document_comparison_semantics_body["items"][0]["projected_rows"] is None
 
     evidence_id = evidence_body["items"][0]["evidence_id"]

@@ -26,6 +26,12 @@ from application.core.semantic_build.llm.schemas import (
 )
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
+    COLLECTION_COMPARISON_POLICY_FAMILY,
+    COLLECTION_COMPARISON_POLICY_VERSION,
+    COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
     CollectionComparableResult,
     ComparableResult,
     ComparisonAxis,
@@ -33,6 +39,7 @@ from domain.core.comparison import (
     EvidenceTrace,
     NormalizedComparisonContext,
     ResultValue,
+    build_collection_assessment_input_fingerprint,
     evaluate_comparison_assessment,
 )
 from infra.source.runtime.source_evidence import (
@@ -132,6 +139,18 @@ def _build_collection_overlay(
         epistemic_status=assessment.assessment_epistemic_status,
         included=included,
         sort_order=sort_order,
+        policy_family=COLLECTION_COMPARISON_POLICY_FAMILY,
+        policy_version=COLLECTION_COMPARISON_POLICY_VERSION,
+        comparable_result_normalization_version=comparable_result.normalization_version,
+        assessment_input_fingerprint=build_collection_assessment_input_fingerprint(
+            comparable_result
+        ),
+        reassessment_triggers=(
+            COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+        ),
     )
 
 
@@ -1580,6 +1599,12 @@ def test_comparison_service_inspects_document_semantics_from_semantic_artifacts(
             sort_order=2,
         ).to_record()
     ]
+    assert payload["items"][0]["collection_overlays"][0]["policy_family"] == (
+        COLLECTION_COMPARISON_POLICY_FAMILY
+    )
+    assert payload["items"][0]["collection_overlays"][0]["policy_version"] == (
+        COLLECTION_COMPARISON_POLICY_VERSION
+    )
     assert payload["items"][1]["collection_overlays"] == []
     assert "projected_rows" not in payload["items"][0]
     assert not (output_dir / "comparison_rows.parquet").exists()
@@ -1638,6 +1663,62 @@ def test_comparison_service_document_semantic_inspection_can_project_rows_withou
     assert projected_rows[0]["display"]["property_normalized"] == "flexural_strength"
     assert projected_rows[0]["assessment"]["comparability_status"] == "comparable"
     assert not (output_dir / "comparison_rows.parquet").exists()
+
+
+def test_comparison_service_persists_policy_metadata_on_collection_overlays(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    comparison_service = ComparisonService(
+        collection_service=collection_service,
+        artifact_registry_service=artifact_registry,
+    )
+    collection = collection_service.create_collection("Policy Metadata Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    comparable_result = _build_test_comparable_result(
+        comparable_result_id="cres-policy-1",
+        source_document_id="paper-1",
+        source_result_id="res-policy-1",
+    )
+    pd.DataFrame([comparable_result.to_record()]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame(
+        [
+            _build_collection_overlay(
+                collection_id=collection_id,
+                comparable_result=comparable_result,
+                sort_order=0,
+            ).to_record()
+        ]
+    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    overlays = comparison_service.read_collection_comparable_results(collection_id)
+
+    assert overlays.iloc[0]["policy_family"] == COLLECTION_COMPARISON_POLICY_FAMILY
+    assert overlays.iloc[0]["policy_version"] == COLLECTION_COMPARISON_POLICY_VERSION
+    assert overlays.iloc[0]["comparable_result_normalization_version"] == (
+        COMPARABLE_RESULT_NORMALIZATION_VERSION
+    )
+    assert overlays.iloc[0]["assessment_input_fingerprint"].startswith("cafp_")
+    assert overlays.iloc[0]["reassessment_triggers"] == [
+        COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+        COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
+        COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
+        COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+    ]
 
 
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):

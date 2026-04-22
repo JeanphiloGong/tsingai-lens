@@ -24,6 +24,26 @@ SCALAR_LIKE_RESULT_TYPES: Final[frozenset[str]] = frozenset(
 )
 COMPARABLE_RESULT_NORMALIZATION_VERSION: Final[str] = "comparable_result_v1"
 COMPARISON_ROW_PROJECTION_VERSION: Final[str] = "comparison_row_v1"
+COLLECTION_COMPARISON_POLICY_FAMILY: Final[str] = "default_collection_comparison_policy"
+COLLECTION_COMPARISON_POLICY_VERSION: Final[str] = "comparison_policy_v1"
+COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED: Final[str] = (
+    "policy_family_changed"
+)
+COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED: Final[str] = (
+    "policy_version_changed"
+)
+COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED: Final[str] = (
+    "comparable_result_normalization_version_changed"
+)
+COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED: Final[str] = (
+    "assessment_input_fingerprint_changed"
+)
+DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS: Final[tuple[str, ...]] = (
+    COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+)
 
 
 @dataclass(frozen=True)
@@ -249,6 +269,11 @@ class CollectionComparableResult:
     epistemic_status: str
     included: bool
     sort_order: int | None = None
+    policy_family: str = COLLECTION_COMPARISON_POLICY_FAMILY
+    policy_version: str = COLLECTION_COMPARISON_POLICY_VERSION
+    comparable_result_normalization_version: str = COMPARABLE_RESULT_NORMALIZATION_VERSION
+    assessment_input_fingerprint: str = ""
+    reassessment_triggers: tuple[str, ...] = DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "CollectionComparableResult":
@@ -262,6 +287,20 @@ class CollectionComparableResult:
             or EPISTEMIC_UNRESOLVED,
             included=_normalize_bool(payload.get("included")),
             sort_order=_normalize_optional_int(payload.get("sort_order")),
+            policy_family=_normalize_text(payload.get("policy_family"))
+            or COLLECTION_COMPARISON_POLICY_FAMILY,
+            policy_version=_normalize_text(payload.get("policy_version"))
+            or COLLECTION_COMPARISON_POLICY_VERSION,
+            comparable_result_normalization_version=_normalize_text(
+                payload.get("comparable_result_normalization_version")
+            )
+            or COMPARABLE_RESULT_NORMALIZATION_VERSION,
+            assessment_input_fingerprint=_normalize_text(
+                payload.get("assessment_input_fingerprint")
+            )
+            or "",
+            reassessment_triggers=_normalize_string_tuple(payload.get("reassessment_triggers"))
+            or DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS,
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -272,6 +311,11 @@ class CollectionComparableResult:
             "epistemic_status": self.epistemic_status,
             "included": self.included,
             "sort_order": self.sort_order,
+            "policy_family": self.policy_family,
+            "policy_version": self.policy_version,
+            "comparable_result_normalization_version": self.comparable_result_normalization_version,
+            "assessment_input_fingerprint": self.assessment_input_fingerprint,
+            "reassessment_triggers": list(self.reassessment_triggers),
         }
 
 
@@ -430,6 +474,65 @@ def build_comparison_row_id(
             "projection_version": projection_version,
         },
     )
+
+
+def build_collection_assessment_input_fingerprint(
+    comparable_result: ComparableResult,
+) -> str:
+    return _build_deterministic_id(
+        "cafp",
+        {
+            "comparable_result_id": comparable_result.comparable_result_id,
+            "source_result_id": comparable_result.source_result_id,
+            "source_document_id": comparable_result.source_document_id,
+            "binding": {
+                "variant_id": comparable_result.binding.variant_id,
+                "baseline_id": comparable_result.binding.baseline_id,
+                "test_condition_id": comparable_result.binding.test_condition_id,
+            },
+            "baseline_reference": comparable_result.baseline_reference,
+            "result_type": comparable_result.value.result_type,
+            "numeric_value": comparable_result.value.numeric_value,
+            "summary": comparable_result.value.summary,
+            "traceability_status": comparable_result.evidence.traceability_status,
+            "structure_feature_ids": comparable_result.evidence.structure_feature_ids,
+            "characterization_observation_ids": comparable_result.evidence.characterization_observation_ids,
+        },
+    )
+
+
+def evaluate_collection_reassessment_reasons(
+    scoped_result: CollectionComparableResult,
+    comparable_result: ComparableResult,
+    *,
+    policy_family: str = COLLECTION_COMPARISON_POLICY_FAMILY,
+    policy_version: str = COLLECTION_COMPARISON_POLICY_VERSION,
+) -> tuple[str, ...]:
+    active_triggers = scoped_result.reassessment_triggers or DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS
+    current_fingerprint = build_collection_assessment_input_fingerprint(comparable_result)
+    reasons: list[str] = []
+    if (
+        COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED in active_triggers
+        and scoped_result.policy_family != policy_family
+    ):
+        reasons.append(COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED)
+    if (
+        COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED in active_triggers
+        and scoped_result.policy_version != policy_version
+    ):
+        reasons.append(COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED)
+    if (
+        COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED in active_triggers
+        and scoped_result.comparable_result_normalization_version
+        != comparable_result.normalization_version
+    ):
+        reasons.append(COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED)
+    if (
+        COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED in active_triggers
+        and scoped_result.assessment_input_fingerprint != current_fingerprint
+    ):
+        reasons.append(COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED)
+    return tuple(reasons)
 
 
 def evaluate_comparison_assessment(comparable_result: ComparableResult) -> ComparisonAssessment:
@@ -699,6 +802,13 @@ def _normalize_mapping(value: Any) -> Mapping[str, Any]:
 __all__ = [
     "COMPARABLE_RESULT_NORMALIZATION_VERSION",
     "COMPARISON_ROW_PROJECTION_VERSION",
+    "COLLECTION_COMPARISON_POLICY_FAMILY",
+    "COLLECTION_COMPARISON_POLICY_VERSION",
+    "COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED",
+    "COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED",
+    "COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED",
+    "COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED",
+    "DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS",
     "CollectionComparableResult",
     "ComparableResult",
     "ComparisonAssessment",
@@ -709,7 +819,9 @@ __all__ = [
     "NormalizedComparisonContext",
     "ResultValue",
     "SCALAR_LIKE_RESULT_TYPES",
+    "build_collection_assessment_input_fingerprint",
     "build_comparable_result_id",
     "build_comparison_row_id",
+    "evaluate_collection_reassessment_reasons",
     "evaluate_comparison_assessment",
 ]

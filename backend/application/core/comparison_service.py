@@ -65,7 +65,7 @@ _COMPARABLE_RESULT_JSON_COLUMNS = (
     "value",
     "evidence",
 )
-_COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS = ("assessment",)
+_COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS = ("assessment", "reassessment_triggers")
 _COMPARISON_JSON_COLUMNS = (
     "supporting_evidence_ids",
     "supporting_anchor_ids",

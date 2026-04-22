@@ -288,12 +288,29 @@
 - `collection_overlays`
 - `projected_rows`
 
+每个 `collection_overlays` item 至少应包含：
+
+- `collection_id`
+- `comparable_result_id`
+- `assessment`
+- `epistemic_status`
+- `included`
+- `sort_order`
+- `policy_family`
+- `policy_version`
+- `comparable_result_normalization_version`
+- `assessment_input_fingerprint`
+- `reassessment_triggers`
+
 语义要求：
 
 - 这是 `ComparableResult` 的 document-scoped inspection surface，不是 row list
 - `collection_overlays`
   必须来自 `collection_comparable_results.parquet`，按 `comparable_result_id`
   关联
+- `collection_overlays`
+  必须显式带出评估策略元数据与 reassessment trigger，而不是只返回裸
+  assessment 结果
 - `projected_rows`
   只是按需附带的 projection/cache 视图，默认可为空或 `null`
 - 该接口不应要求 `comparison_rows.parquet` 预先存在

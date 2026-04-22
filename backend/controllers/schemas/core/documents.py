@@ -145,6 +145,17 @@ class DocumentCollectionComparableResultResponse(BaseModel):
     epistemic_status: str = Field(..., description="collection 语境下的认识论状态")
     included: bool = Field(default=True, description="当前 collection 是否纳入该结果")
     sort_order: int | None = Field(default=None, description="collection 内排序值")
+    policy_family: str = Field(..., description="评估策略族标识")
+    policy_version: str = Field(..., description="评估策略版本")
+    comparable_result_normalization_version: str = Field(
+        ...,
+        description="该评估绑定的 comparable result normalization 版本",
+    )
+    assessment_input_fingerprint: str = Field(..., description="评估输入指纹")
+    reassessment_triggers: list[str] = Field(
+        default_factory=list,
+        description="需要触发重新评估的变更类别",
+    )
 
 
 class DocumentComparisonSemanticItemResponse(BaseModel):

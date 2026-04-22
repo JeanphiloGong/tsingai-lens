@@ -8,6 +8,9 @@ import pandas as pd
 
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
+    COLLECTION_COMPARISON_POLICY_FAMILY,
+    COLLECTION_COMPARISON_POLICY_VERSION,
+    DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS,
     CollectionComparableResult,
     ComparableResult,
     ComparisonAxis,
@@ -15,6 +18,7 @@ from domain.core.comparison import (
     EvidenceTrace,
     NormalizedComparisonContext,
     ResultValue,
+    build_collection_assessment_input_fingerprint,
     build_comparable_result_id,
     evaluate_comparison_assessment,
 )
@@ -46,6 +50,11 @@ COLLECTION_COMPARABLE_RESULT_COLUMNS = [
     "epistemic_status",
     "included",
     "sort_order",
+    "policy_family",
+    "policy_version",
+    "comparable_result_normalization_version",
+    "assessment_input_fingerprint",
+    "reassessment_triggers",
 ]
 
 
@@ -300,6 +309,13 @@ class ComparableResultAssembler:
             epistemic_status=assessment.assessment_epistemic_status,
             included=True,
             sort_order=sort_order,
+            policy_family=COLLECTION_COMPARISON_POLICY_FAMILY,
+            policy_version=COLLECTION_COMPARISON_POLICY_VERSION,
+            comparable_result_normalization_version=comparable_result.normalization_version,
+            assessment_input_fingerprint=build_collection_assessment_input_fingerprint(
+                comparable_result
+            ),
+            reassessment_triggers=DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS,
         )
 
     def normalize_comparable_results_table(self, results: pd.DataFrame) -> pd.DataFrame:
@@ -431,6 +447,19 @@ class ComparableResultAssembler:
             epistemic_status=existing.epistemic_status or incoming.epistemic_status,
             included=existing.included or incoming.included,
             sort_order=sort_order,
+            policy_family=existing.policy_family or incoming.policy_family,
+            policy_version=existing.policy_version or incoming.policy_version,
+            comparable_result_normalization_version=(
+                existing.comparable_result_normalization_version
+                or incoming.comparable_result_normalization_version
+            ),
+            assessment_input_fingerprint=(
+                existing.assessment_input_fingerprint
+                or incoming.assessment_input_fingerprint
+            ),
+            reassessment_triggers=(
+                existing.reassessment_triggers or incoming.reassessment_triggers
+            ),
         )
 
     def summarize_result(

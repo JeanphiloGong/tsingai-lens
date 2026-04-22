@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
+    COLLECTION_COMPARISON_POLICY_FAMILY,
+    COLLECTION_COMPARISON_POLICY_VERSION,
+    COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+    COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
     CollectionComparableResult,
     ComparableResult,
     ComparisonAssessment,
@@ -11,7 +17,9 @@ from domain.core.comparison import (
     EvidenceTrace,
     NormalizedComparisonContext,
     ResultValue,
+    build_collection_assessment_input_fingerprint,
     build_comparable_result_id,
+    evaluate_collection_reassessment_reasons,
     evaluate_comparison_assessment,
 )
 from domain.shared.enums import (
@@ -222,6 +230,18 @@ def test_collection_comparable_result_round_trips_through_record_payload() -> No
         epistemic_status=assessment.assessment_epistemic_status,
         included=True,
         sort_order=3,
+        policy_family=COLLECTION_COMPARISON_POLICY_FAMILY,
+        policy_version=COLLECTION_COMPARISON_POLICY_VERSION,
+        comparable_result_normalization_version=comparable_result.normalization_version,
+        assessment_input_fingerprint=build_collection_assessment_input_fingerprint(
+            comparable_result
+        ),
+        reassessment_triggers=(
+            COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+        ),
     )
 
     restored = CollectionComparableResult.from_mapping(scoped_result.to_record())
@@ -242,3 +262,71 @@ def test_comparison_assessment_round_trips_through_record_payload() -> None:
     restored = ComparisonAssessment.from_mapping(assessment.to_record())
 
     assert restored == assessment
+
+
+def test_evaluate_collection_reassessment_reasons_detects_policy_and_input_drift() -> None:
+    comparable_result = _build_comparable_result()
+    assessment = evaluate_comparison_assessment(comparable_result)
+    scoped_result = CollectionComparableResult(
+        collection_id="col-1",
+        comparable_result_id=comparable_result.comparable_result_id,
+        assessment=assessment,
+        epistemic_status=assessment.assessment_epistemic_status,
+        included=True,
+        sort_order=0,
+        policy_family=COLLECTION_COMPARISON_POLICY_FAMILY,
+        policy_version=COLLECTION_COMPARISON_POLICY_VERSION,
+        comparable_result_normalization_version=comparable_result.normalization_version,
+        assessment_input_fingerprint="cafp_outdated",
+        reassessment_triggers=(
+            COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+        ),
+    )
+
+    reasons = evaluate_collection_reassessment_reasons(
+        scoped_result,
+        comparable_result,
+        policy_family="alternate_policy_family",
+        policy_version="comparison_policy_v2",
+    )
+
+    assert reasons == (
+        COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+        COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
+        COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+    )
+
+
+def test_evaluate_collection_reassessment_reasons_returns_empty_when_scope_record_is_current() -> None:
+    comparable_result = _build_comparable_result()
+    assessment = evaluate_comparison_assessment(comparable_result)
+    scoped_result = CollectionComparableResult(
+        collection_id="col-1",
+        comparable_result_id=comparable_result.comparable_result_id,
+        assessment=assessment,
+        epistemic_status=assessment.assessment_epistemic_status,
+        included=True,
+        sort_order=0,
+        policy_family=COLLECTION_COMPARISON_POLICY_FAMILY,
+        policy_version=COLLECTION_COMPARISON_POLICY_VERSION,
+        comparable_result_normalization_version=comparable_result.normalization_version,
+        assessment_input_fingerprint=build_collection_assessment_input_fingerprint(
+            comparable_result
+        ),
+        reassessment_triggers=(
+            COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
+            COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+        ),
+    )
+
+    reasons = evaluate_collection_reassessment_reasons(
+        scoped_result,
+        comparable_result,
+    )
+
+    assert reasons == ()

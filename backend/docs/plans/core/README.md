@@ -45,6 +45,9 @@ domain-semantic backfill.
 - [`core-comparable-result-phase2-document-first-semantic-inspection-plan.md`](core-comparable-result-phase2-document-first-semantic-inspection-plan.md)
   Phase 2 child plan for making document-first semantic inspection explicit on
   top of the comparable-result substrate
+- [`core-comparable-result-phase2-policy-lifecycle-plan.md`](core-comparable-result-phase2-policy-lifecycle-plan.md)
+  Phase 2 child plan for attaching policy lineage and reassessment semantics
+  to `CollectionComparableResult`
 
 ## Boundary Rule
 

@@ -127,6 +127,16 @@ def _build_semantic_comparison_record(
         "epistemic_status": "normalized_from_evidence",
         "included": True,
         "sort_order": sort_order,
+        "policy_family": "default_collection_comparison_policy",
+        "policy_version": "comparison_policy_v1",
+        "comparable_result_normalization_version": "comparable_result_v1",
+        "assessment_input_fingerprint": f"cafp-{comparable_result_id}",
+        "reassessment_triggers": [
+            "policy_family_changed",
+            "policy_version_changed",
+            "comparable_result_normalization_version_changed",
+            "assessment_input_fingerprint_changed",
+        ],
     }
     return comparable_result, scoped_result
 
@@ -373,6 +383,13 @@ def test_document_comparison_semantics_route_returns_semantic_items_for_document
     assert payload.items[0].comparable_result_id == "cres-1"
     assert payload.items[0].source_document_id == "paper-1"
     assert payload.items[0].collection_overlays[0].collection_id == collection_id
+    assert payload.items[0].collection_overlays[0].policy_version == "comparison_policy_v1"
+    assert payload.items[0].collection_overlays[0].reassessment_triggers == [
+        "policy_family_changed",
+        "policy_version_changed",
+        "comparable_result_normalization_version_changed",
+        "assessment_input_fingerprint_changed",
+    ]
     assert payload.items[0].projected_rows is None
 
 

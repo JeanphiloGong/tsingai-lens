@@ -245,9 +245,64 @@
 
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
 
 其中 `/profile` 返回与 list item 同语义的单项 document profile，`/content`
 返回原文阅读器内容与 section 结构。
+
+### Document Comparison Semantics
+
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
+
+这是 document-first 的 comparison semantic drilldown 路径。
+
+它的语义顺序必须是：
+
+`document -> comparable_results -> collection_comparable_results -> optional row projection`
+
+而不是从 `comparison_rows` 反推语义。
+
+最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `total`
+- `count`
+- `items`
+
+每个 item 至少应包含：
+
+- `comparable_result_id`
+- `source_result_id`
+- `source_document_id`
+- `binding`
+- `normalized_context`
+- `axis`
+- `value`
+- `evidence`
+- `variant_label`
+- `baseline_reference`
+- `result_source_type`
+- `epistemic_status`
+- `normalization_version`
+- `collection_overlays`
+- `projected_rows`
+
+语义要求：
+
+- 这是 `ComparableResult` 的 document-scoped inspection surface，不是 row list
+- `collection_overlays`
+  必须来自 `collection_comparable_results.parquet`，按 `comparable_result_id`
+  关联
+- `projected_rows`
+  只是按需附带的 projection/cache 视图，默认可为空或 `null`
+- 该接口不应要求 `comparison_rows.parquet` 预先存在
+
+查询参数：
+
+- `include_row_projections=true|false`
+  - `false` 时不要求返回 row projection
+  - `true` 时允许为 document-facing drilldown 附带按需生成的 row payload
 
 ### Evidence Cards
 

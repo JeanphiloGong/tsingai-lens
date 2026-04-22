@@ -498,6 +498,7 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
+    monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(
@@ -641,6 +642,17 @@ def test_collection_task_flow(app_client):
     )
     assert profile.status_code == 200
     assert profile.json()["document_id"] == document_id
+
+    document_comparison_semantics = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/{document_id}/comparison-semantics"
+    )
+    assert document_comparison_semantics.status_code == 200
+    document_comparison_semantics_body = document_comparison_semantics.json()
+    assert document_comparison_semantics_body["document_id"] == document_id
+    assert document_comparison_semantics_body["count"] >= 1
+    assert document_comparison_semantics_body["items"][0]["source_document_id"] == document_id
+    assert "collection_overlays" in document_comparison_semantics_body["items"][0]
+    assert document_comparison_semantics_body["items"][0]["projected_rows"] is None
 
     evidence_id = evidence_body["items"][0]["evidence_id"]
     evidence_detail = app_client.get(

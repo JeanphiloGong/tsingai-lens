@@ -27,6 +27,9 @@ This node owns the collection workspace route family in the frontend.
 - [`comparable-result-semantic-artifact-frontend-alignment-plan.md`](comparable-result-semantic-artifact-frontend-alignment-plan.md)
   Frontend-local plan for preserving semantic comparison artifact state and
   graph readiness semantics during the comparable-result rollout
+- [`comparable-result-stale-semantics-frontend-correctness-plan.md`](comparable-result-stale-semantics-frontend-correctness-plan.md)
+  Frontend-local child plan for preserving backend stale artifact semantics in
+  workspace normalization and fallback surface-state logic
 - [`materials-comparison-v2-frontend-alignment-plan.md`](materials-comparison-v2-frontend-alignment-plan.md)
   Frontend-local contract cutover plan for the nested comparisons response
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)

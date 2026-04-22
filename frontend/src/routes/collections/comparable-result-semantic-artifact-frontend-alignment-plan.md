@@ -45,6 +45,9 @@ Out of scope:
   Backend-owned Phase 1 read-path plan for semantic and scope artifacts
 - [`../../../../backend/docs/plans/core/core-comparable-result-phase1-service-boundary-plan.md`](../../../../backend/docs/plans/core/core-comparable-result-phase1-service-boundary-plan.md)
   Backend-owned Phase 1 service-boundary plan for `ComparisonService`
+- [`comparable-result-stale-semantics-frontend-correctness-plan.md`](comparable-result-stale-semantics-frontend-correctness-plan.md)
+  Frontend-local child plan for stale artifact preservation and fallback
+  correctness after backend staleness semantics landed
 - [`../../../docs/frontend-plan.md`](../../../docs/frontend-plan.md)
   Frontend same-origin contract guide
 - [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)

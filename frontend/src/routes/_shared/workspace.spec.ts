@@ -48,10 +48,13 @@ function buildWorkspacePayload(
       comparable_results_ready: false,
       collection_comparable_results_generated: false,
       collection_comparable_results_ready: false,
+      collection_comparable_results_stale: false,
       comparison_rows_generated: false,
       comparison_rows_ready: false,
+      comparison_rows_stale: false,
       graph_generated: false,
       graph_ready: false,
+      graph_stale: false,
       procedure_blocks_generated: false,
       procedure_blocks_ready: false,
       protocol_steps_generated: false,
@@ -87,10 +90,13 @@ describe('workspace shared helpers', () => {
           comparable_results_ready: true,
           collection_comparable_results_generated: true,
           collection_comparable_results_ready: true,
+          collection_comparable_results_stale: true,
           comparison_rows_generated: false,
           comparison_rows_ready: false,
+          comparison_rows_stale: true,
           graph_generated: true,
-          graph_ready: true
+          graph_ready: false,
+          graph_stale: true
         }
       })
     );
@@ -102,11 +108,38 @@ describe('workspace shared helpers', () => {
       comparable_results_ready: true,
       collection_comparable_results_generated: true,
       collection_comparable_results_ready: true,
+      collection_comparable_results_stale: true,
       comparison_rows_generated: false,
       comparison_rows_ready: false,
+      comparison_rows_stale: true,
       graph_generated: true,
-      graph_ready: true
+      graph_ready: false,
+      graph_stale: true
     });
+  });
+
+  it('treats stale comparison artifacts as limited in legacy workflow fallback', async () => {
+    requestJson.mockResolvedValue({
+      ...buildWorkspacePayload({
+        artifacts: {
+          comparable_results_generated: true,
+          comparable_results_ready: true,
+          collection_comparable_results_generated: true,
+          collection_comparable_results_ready: false,
+          collection_comparable_results_stale: true,
+          comparison_rows_generated: false,
+          comparison_rows_ready: false,
+          comparison_rows_stale: false
+        }
+      }),
+      workflow: null
+    });
+
+    const workspace = await fetchWorkspaceOverview('col_123');
+
+    expect(workspace.artifacts.collection_comparable_results_stale).toBe(true);
+    expect(getWorkspaceSurfaceState(workspace, 'comparisons')).toBe('limited');
+    expect(getCollectionWorkspaceState(workspace)).toBe('ready_with_limits');
   });
 
   it('keeps the graph surface ready when graph artifacts are ready but row cache is not', async () => {
@@ -130,6 +163,28 @@ describe('workspace shared helpers', () => {
     expect(workspace.artifacts.comparison_rows_ready).toBe(false);
     expect(workspace.artifacts.graph_ready).toBe(true);
     expect(getWorkspaceSurfaceState(workspace, 'graph')).toBe('ready');
+  });
+
+  it('treats stale graph artifacts as limited instead of not_applicable', async () => {
+    requestJson.mockResolvedValue(
+      buildWorkspacePayload({
+        artifacts: {
+          comparable_results_generated: true,
+          comparable_results_ready: true,
+          collection_comparable_results_generated: true,
+          collection_comparable_results_ready: false,
+          collection_comparable_results_stale: true,
+          graph_generated: true,
+          graph_ready: false,
+          graph_stale: true
+        }
+      })
+    );
+
+    const workspace = await fetchWorkspaceOverview('col_123');
+
+    expect(workspace.artifacts.graph_stale).toBe(true);
+    expect(getWorkspaceSurfaceState(workspace, 'graph')).toBe('limited');
   });
 
   it('does not regress the collection workspace state when semantic artifact fields are present', async () => {

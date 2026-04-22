@@ -15,10 +15,13 @@ export type WorkspaceArtifactStatus = {
   comparable_results_ready: boolean;
   collection_comparable_results_generated: boolean;
   collection_comparable_results_ready: boolean;
+  collection_comparable_results_stale: boolean;
   comparison_rows_generated: boolean;
   comparison_rows_ready: boolean;
+  comparison_rows_stale: boolean;
   graph_generated: boolean;
   graph_ready: boolean;
+  graph_stale: boolean;
   procedure_blocks_generated: boolean;
   procedure_blocks_ready: boolean;
   protocol_steps_generated: boolean;
@@ -292,6 +295,10 @@ export function getWorkspaceSurfaceState(
   }
 
   if (surface === 'graph') {
+    if (workspace.artifacts.graph_stale) {
+      return 'limited';
+    }
+
     // Graph readiness is semantic-artifact-driven. Do not fall back to row cache here.
     if (
       workspace.capabilities.can_view_graph ||
@@ -403,6 +410,8 @@ function deriveLegacyWorkflow(
     comparisons:
       artifacts.comparison_rows_ready || (USE_API_FIXTURES && documents === 'ready')
         ? 'ready'
+        : artifacts.collection_comparable_results_stale || artifacts.comparison_rows_stale
+          ? 'limited'
         : activeTask
           ? 'processing'
           : failedTask
@@ -488,10 +497,13 @@ function normalizeArtifacts(value: unknown): WorkspaceArtifactStatus {
     comparable_results_ready: Boolean(record?.comparable_results_ready),
     collection_comparable_results_generated: Boolean(record?.collection_comparable_results_generated),
     collection_comparable_results_ready: Boolean(record?.collection_comparable_results_ready),
+    collection_comparable_results_stale: Boolean(record?.collection_comparable_results_stale),
     comparison_rows_generated: Boolean(record?.comparison_rows_generated),
     comparison_rows_ready: Boolean(record?.comparison_rows_ready),
+    comparison_rows_stale: Boolean(record?.comparison_rows_stale),
     graph_generated: Boolean(record?.graph_generated),
     graph_ready: Boolean(record?.graph_ready),
+    graph_stale: Boolean(record?.graph_stale),
     procedure_blocks_generated: Boolean(record?.procedure_blocks_generated),
     procedure_blocks_ready: Boolean(record?.procedure_blocks_ready),
     protocol_steps_generated: Boolean(record?.protocol_steps_generated),

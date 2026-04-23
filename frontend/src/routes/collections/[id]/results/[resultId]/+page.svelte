@@ -24,6 +24,33 @@
 	let notFound = false;
 
 	$: surfaceState = getWorkspaceSurfaceState(workspace, 'results');
+	$: stateCardTitle = $t(`overview.surfaceStateCards.${surfaceState}.title`);
+	$: stateCardBody = $t(`overview.surfaceStateCards.${surfaceState}.body`);
+	$: resultTitleText = !result ? resultId : `${result.material.label} · ${result.measurement.property}`;
+	$: comparisonLinkHref = (() => {
+		const actionHref = result?.actions.open_comparisons?.trim();
+		if (actionHref) return actionHref;
+		if (!result) return `/collections/${collectionId}/comparisons`;
+
+		const params = new URLSearchParams();
+		const property = result.measurement.property.trim();
+		if (property) {
+			params.set('property_normalized', property);
+		}
+
+		const query = params.toString();
+		return query
+			? `/collections/${collectionId}/comparisons?${query}`
+			: `/collections/${collectionId}/comparisons`;
+	})();
+	$: sourceLinkHref = (() => {
+		if (!result) return `/collections/${collectionId}/documents`;
+		const evidenceId = result.evidence[0]?.evidence_id ?? null;
+		return buildDocumentViewerHref(collectionId, result.document.document_id, {
+			evidenceId,
+			returnTo: $page.url.pathname
+		});
+	})();
 	$: showFallbackState =
 		Boolean(workspace) && !loading && !result && (surfaceState !== 'ready' || notFound);
 	$: requestKey = collectionId && resultId ? `${collectionId}:${resultId}` : '';
@@ -56,31 +83,6 @@
 		loading = false;
 	}
 
-	function stateCardTitle() {
-		return $t(`overview.surfaceStateCards.${surfaceState}.title`);
-	}
-
-	function stateCardBody() {
-		return $t(`overview.surfaceStateCards.${surfaceState}.body`);
-	}
-
-	function titleText() {
-		if (!result) return resultId;
-		return `${result.material.label} · ${result.measurement.property}`;
-	}
-
-	function comparisonHref() {
-		return result?.actions.open_comparisons || `/collections/${collectionId}/comparisons`;
-	}
-
-	function sourceHref() {
-		if (!result) return `/collections/${collectionId}/documents`;
-		const evidenceId = result.evidence[0]?.evidence_id ?? null;
-		return buildDocumentViewerHref(collectionId, result.document.document_id, {
-			evidenceId,
-			returnTo: $page.url.pathname
-		});
-	}
 </script>
 
 <svelte:head>
@@ -91,16 +93,16 @@
 	<div class="card-header-inline">
 		<div>
 			<h2>{$t('results.detailTitle')}</h2>
-			<p class="lead">{titleText()}</p>
+			<p class="lead">{resultTitleText}</p>
 		</div>
 		<div class="table-actions">
 			<a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/results`}>
 				{$t('results.backToList')}
 			</a>
-			<a class="btn btn--ghost btn--small" href={comparisonHref()}>
+			<a class="btn btn--ghost btn--small" href={comparisonLinkHref}>
 				{$t('results.openComparisons')}
 			</a>
-			<a class="btn btn--ghost btn--small" href={sourceHref()}>
+			<a class="btn btn--ghost btn--small" href={sourceLinkHref}>
 				{$t('traceback.viewSource')}
 			</a>
 		</div>
@@ -112,8 +114,8 @@
 		<div class="status" role="status">{$t('results.loading')}</div>
 	{:else if showFallbackState}
 		<article class="result-card">
-			<h3>{stateCardTitle()}</h3>
-			<p class="result-text">{stateCardBody()}</p>
+			<h3>{stateCardTitle}</h3>
+			<p class="result-text">{stateCardBody}</p>
 			<div class="table-actions">
 				<a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
 					{$t('overview.goToWorkspace')}

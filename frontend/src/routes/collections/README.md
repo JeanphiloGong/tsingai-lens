@@ -32,6 +32,9 @@ This node owns the collection workspace route family in the frontend.
   workspace normalization and fallback surface-state logic
 - [`materials-comparison-v2-frontend-alignment-plan.md`](materials-comparison-v2-frontend-alignment-plan.md)
   Frontend-local contract cutover plan for the nested comparisons response
+- [`collection-main-flow-frontend-test-plan.md`](collection-main-flow-frontend-test-plan.md)
+  Frontend-local child plan for page-level coverage of the collection main flow
+  from workspace through result and document drilldown
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)
   Follow-on collection UI restructuring proposal for state hierarchy and page
   information architecture

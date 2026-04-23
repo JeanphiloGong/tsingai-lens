@@ -1,0 +1,4 @@
+interface:
+  display_name: "TsingAI-Lens Release"
+  short_description: "v0.1.0 - Draft and execute TsingAI-Lens releases"
+  default_prompt: "Use $tsingai-lens-release-skill to inspect TsingAI-Lens release evidence, align the repo version surfaces, draft release notes in the repository's current public style, create and push the release tag that triggers image publishing, watch the release-images workflow, and create or update the GitHub Release page without inventing new version or publish rules."

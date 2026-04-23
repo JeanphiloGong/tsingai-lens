@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import Type
 
 from openai import OpenAI
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIStructuredClient:
@@ -30,18 +33,26 @@ class OpenAIStructuredClient:
         user_prompt: str,
         response_model: Type[BaseModel],
     ) -> BaseModel:
-        completion = self.client.beta.chat.completions.parse(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format=response_model,
-        )
-        parsed = completion.choices[0].message.parsed
-        if parsed is None:
-            raise RuntimeError("structured extraction returned no parsed payload")
-        return parsed
+        try:
+            completion = self.client.beta.chat.completions.parse(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format=response_model,
+            )
+            parsed = completion.choices[0].message.parsed
+            if parsed is None:
+                raise RuntimeError("structured extraction returned no parsed payload")
+            return parsed
+        except Exception:
+            logger.exception(
+                "Structured LLM parse failed model=%s response_model=%s",
+                self.model,
+                response_model.__name__,
+            )
+            raise
 
 
 def build_openai_structured_client() -> OpenAIStructuredClient:

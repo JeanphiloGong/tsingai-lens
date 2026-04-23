@@ -14,9 +14,10 @@ except ImportError:  # pragma: no cover
 
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
-from application.core.document_profile_service import DocumentProfileService
+from application.core.comparison_service import ComparisonService
+from application.core.semantic_build.document_profile_service import DocumentProfileService
 from controllers.core import documents as documents_controller
-from infra.source.runtime.source_evidence import build_sections
+from infra.source.runtime.source_evidence import build_blocks
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -36,8 +37,108 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
 
 
-def _write_sections(output_dir: Path, documents: pd.DataFrame) -> None:
-    build_sections(documents, None).to_parquet(output_dir / "sections.parquet", index=False)
+def _write_blocks(output_dir: Path, documents: pd.DataFrame) -> None:
+    build_blocks(documents, None).to_parquet(output_dir / "blocks.parquet", index=False)
+
+
+def _write_semantic_comparison_artifacts(
+    output_dir: Path,
+    comparable_results: list[dict],
+    scoped_results: list[dict],
+) -> None:
+    pd.DataFrame(comparable_results).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame(scoped_results).to_parquet(
+        output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+
+
+def _build_semantic_comparison_record(
+    *,
+    collection_id: str,
+    comparable_result_id: str,
+    source_document_id: str,
+    sort_order: int = 0,
+) -> tuple[dict, dict]:
+    comparable_result = {
+        "comparable_result_id": comparable_result_id,
+        "source_result_id": f"res-{comparable_result_id}",
+        "source_document_id": source_document_id,
+        "binding": {
+            "variant_id": "var-1",
+            "baseline_id": "base-1",
+            "test_condition_id": "tc-1",
+        },
+        "normalized_context": {
+            "material_system_normalized": "epoxy composite",
+            "process_normalized": "80 C, 2 h, under Ar",
+            "baseline_normalized": "untreated baseline",
+            "test_condition_normalized": "SEM",
+        },
+        "axis": {
+            "axis_name": None,
+            "axis_value": None,
+            "axis_unit": None,
+        },
+        "value": {
+            "property_normalized": "flexural_strength",
+            "result_type": "scalar",
+            "numeric_value": 97.0,
+            "unit": "MPa",
+            "summary": "Flexural strength increased to 97 MPa.",
+            "statistic_type": None,
+            "uncertainty": None,
+        },
+        "evidence": {
+            "direct_anchor_ids": ["anchor-1"],
+            "contextual_anchor_ids": ["anchor-2"],
+            "evidence_ids": ["ev-result-1"],
+            "structure_feature_ids": [],
+            "characterization_observation_ids": [],
+            "traceability_status": "direct",
+        },
+        "variant_label": "epoxy composite",
+        "baseline_reference": "untreated baseline",
+        "result_source_type": "text",
+        "epistemic_status": "normalized_from_evidence",
+        "normalization_version": "comparable_result_v1",
+    }
+    scoped_result = {
+        "collection_id": collection_id,
+        "comparable_result_id": comparable_result_id,
+        "assessment": {
+            "missing_critical_context": [],
+            "comparability_basis": [
+                "variant_linked",
+                "baseline_resolved",
+                "test_condition_resolved",
+                "direct_traceability",
+                "numeric_value_available",
+                "result_type:scalar",
+            ],
+            "comparability_warnings": [],
+            "comparability_status": "comparable",
+            "requires_expert_review": False,
+            "assessment_epistemic_status": "normalized_from_evidence",
+        },
+        "epistemic_status": "normalized_from_evidence",
+        "included": True,
+        "sort_order": sort_order,
+        "policy_family": "default_collection_comparison_policy",
+        "policy_version": "comparison_policy_v1",
+        "comparable_result_normalization_version": "comparable_result_v1",
+        "assessment_input_fingerprint": f"cafp-{comparable_result_id}",
+        "reassessment_triggers": [
+            "policy_family_changed",
+            "policy_version_changed",
+            "comparable_result_normalization_version_changed",
+            "assessment_input_fingerprint_changed",
+        ],
+    }
+    return comparable_result, scoped_result
 
 
 @pytest.fixture()
@@ -45,14 +146,16 @@ def document_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    comparison_service = ComparisonService(collection_service, artifact_registry)
 
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
+    monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
 
-    return collection_service, artifact_registry, document_profile_service
+    return collection_service, artifact_registry, document_profile_service, comparison_service
 
 
 def test_documents_route_returns_409_when_profiles_are_not_ready(document_services):
-    collection_service, _artifact_registry, _document_profile_service = document_services
+    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -67,7 +170,7 @@ def test_documents_route_returns_409_when_profiles_are_not_ready(document_servic
 
 
 def test_documents_route_returns_404_for_missing_collection(document_services):
-    _collection_service, _artifact_registry, _document_profile_service = document_services
+    _collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
@@ -85,7 +188,7 @@ def test_documents_route_returns_200_with_empty_profiles_after_stage_generated(
 ):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _document_profile_service = document_services
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Empty Profiles Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
@@ -94,7 +197,7 @@ def test_documents_route_returns_200_with_empty_profiles_after_stage_generated(
         output_dir / "documents.parquet",
         index=False,
     )
-    _write_sections(output_dir, pd.DataFrame(columns=["id", "title", "text"]))
+    _write_blocks(output_dir, pd.DataFrame(columns=["id", "title", "text"]))
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
@@ -109,7 +212,7 @@ def test_documents_route_returns_200_with_empty_profiles_after_stage_generated(
 def test_document_profile_route_returns_single_profile(document_services, monkeypatch):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _document_profile_service = document_services
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Single Profile Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
@@ -138,3 +241,191 @@ def test_document_profile_route_returns_single_profile(document_services, monkey
     assert payload.document_id == "paper-1"
     assert payload.collection_id == collection_id
     assert payload.title == "Single Paper"
+
+
+def test_document_profile_route_normalizes_invalid_profile_status_values(
+    document_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Invalid Profile Collection")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Single Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "research_article",
+                "protocol_extractable": "Laser-TIG hybrid additive manufacturing produced finer grains.",
+                "protocol_extractability_signals": [
+                    "methods_section_detected",
+                    "procedural_actions_detected",
+                    "condition_markers_detected",
+                ],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        documents_controller.get_collection_document_profile(collection_id, "paper-1")
+    )
+
+    assert payload.doc_type == "experimental"
+    assert payload.protocol_extractable == "uncertain"
+
+
+def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_ready(
+    document_services,
+):
+    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Pending Semantic Collection")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_comparison_semantics(
+                record["collection_id"],
+                "paper-1",
+            )
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.detail["code"] == "document_comparison_semantics_not_ready"
+    assert exc.detail["collection_id"] == record["collection_id"]
+
+
+def test_document_comparison_semantics_route_returns_404_for_missing_document(
+    document_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Missing Document Semantics")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    _write_semantic_comparison_artifacts(output_dir, [], [])
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-2",
+                "collection_id": collection_id,
+                "title": "Other Paper",
+                "source_filename": "other.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.9,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_comparison_semantics(
+                collection_id,
+                "paper-1",
+            )
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 404
+    assert exc.detail["code"] == "document_not_found"
+    assert exc.detail["document_id"] == "paper-1"
+
+
+def test_document_comparison_semantics_route_returns_semantic_items_for_document(
+    document_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Document Semantic Drilldown")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    comparable_result, scoped_result = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-1",
+        source_document_id="paper-1",
+    )
+    _write_semantic_comparison_artifacts(
+        output_dir,
+        [comparable_result],
+        [scoped_result],
+    )
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        documents_controller.get_collection_document_comparison_semantics(
+            collection_id,
+            "paper-1",
+        )
+    )
+
+    assert payload.collection_id == collection_id
+    assert payload.document_id == "paper-1"
+    assert payload.total == 1
+    assert payload.count == 1
+    assert payload.items[0].comparable_result_id == "cres-1"
+    assert payload.items[0].source_document_id == "paper-1"
+    assert payload.items[0].collection_overlays[0].collection_id == collection_id
+    assert payload.items[0].collection_overlays[0].policy_version == "comparison_policy_v1"
+    assert payload.items[0].collection_overlays[0].reassessment_triggers == [
+        "policy_family_changed",
+        "policy_version_changed",
+        "comparable_result_normalization_version_changed",
+        "assessment_input_fingerprint_changed",
+    ]
+    assert payload.items[0].projected_rows is None
+
+
+def test_document_comparison_semantics_route_can_include_projected_rows(
+    document_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Document Semantic Projection")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    comparable_result, scoped_result = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-1",
+        source_document_id="paper-1",
+    )
+    _write_semantic_comparison_artifacts(
+        output_dir,
+        [comparable_result],
+        [scoped_result],
+    )
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        documents_controller.get_collection_document_comparison_semantics(
+            collection_id,
+            "paper-1",
+            include_row_projections=True,
+        )
+    )
+
+    assert payload.total == 1
+    assert payload.items[0].projected_rows is not None
+    assert len(payload.items[0].projected_rows) == 1
+    assert payload.items[0].projected_rows[0].row_id.startswith("cmp_")
+    assert payload.items[0].projected_rows[0].source_document_id == "paper-1"

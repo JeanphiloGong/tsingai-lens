@@ -2,15 +2,17 @@
 
 ## Scope
 
-This document defines the minimum shared contracts for the three core Lens v1
-artifacts:
+This document defines the minimum shared contracts for the Lens v1 Core
+artifacts after the paper-facts domain-model correction.
 
-- `document_profiles`
-- `evidence_cards`
-- `comparison_rows`
+The shared contract now distinguishes between:
 
-These contracts exist to keep the evidence backbone strict before backend and
-frontend implementations spread across more surfaces.
+- primary domain artifacts:
+  - `document_profiles`
+  - the `paper_facts` family
+- derived Core views:
+  - `comparison_rows`
+  - `evidence_cards`
 
 This document does not define:
 
@@ -18,41 +20,47 @@ This document does not define:
 - final API payload shapes
 - every optional derived field
 
+For the decision that changed Lens from an evidence-card-centered primary model
+to a paper-facts-centered primary model, read
+[`rfc-paper-facts-primary-domain-model.md`](../decisions/rfc-paper-facts-primary-domain-model.md).
+
 ## Business Flow Interpretation
 
-These artifact contracts describe the main Lens v1 business flow rather than a
+These contracts describe the main Lens v1 business flow rather than a
 protocol-first extraction flow.
 
 In business terms, the system should work like this:
 
 1. papers enter a collection
-2. `document_profiles` decides how each paper should be treated
-3. `evidence_cards` stores the core research judgment units for each paper
-4. `comparison_rows` turns those evidence units into collection-facing
-   comparison rows
-5. `protocol_candidates` and `protocol_steps` are optional downstream outputs
-   used only when the source material is suitable
+2. `document_profiles` decides coarse document routing and warnings
+3. the Core extracts the `paper_facts` family for each paper
+4. `comparison_rows` turns those facts into collection-facing comparison views
+5. `evidence_cards` turns those facts into traceback-ready reader views
+6. `protocol_candidates` and `protocol_steps` remain optional downstream
+   outputs used only when the source material is suitable
 
 In that flow:
 
-- `document_profiles` is the gating layer
-- `evidence_cards` is the core research object layer
-- `comparison_rows` is the primary collection-facing workspace layer
+- `document_profiles` is the coarse routing layer
+- the `paper_facts` family is the primary research object layer
+- `comparison_rows` is the primary collection-facing comparison view
+- `evidence_cards` is an evidence-facing and traceback-facing projection
 - `protocol_*` artifacts are downstream branches rather than the business
   backbone
 
-Lens v1 therefore organizes papers into research objects that are comparable,
-traceable, and reviewable before it decides whether any protocol-like output
-should exist.
+Lens v1 therefore organizes papers into durable paper facts first, then builds
+comparison and evidence views over those facts.
 
 ## Contract Rules
 
-The following rules apply across all three artifacts:
+The following rules apply across the Core artifact set:
 
+- primary domain objects must represent durable paper facts rather than only
+  UI-facing summaries
+- derived views must declare the primary objects they depend on
 - required fields cannot be omitted silently
 - enumerated states must stay explicit rather than collapsing into vague text
 - traceability fields must exist even when the status is partial or weak
-- downstream artifacts must declare their upstream dependency
 
 ## Document Profiles
 
@@ -65,6 +73,9 @@ Collection-level suitability states should be derived from
 `document_profiles` rather than introduced as an unrelated parallel source of
 truth.
 
+`document_profiles` is not a paper-summary layer. It is a coarse routing and
+warning object.
+
 ### Minimum Required Fields
 
 - `document_id`
@@ -74,7 +85,6 @@ truth.
 - `protocol_extractable`
   Allowed values: `yes | partial | no | uncertain`
 - `protocol_extractability_signals`
-  Must expose the current reasons or signals behind the decision.
 - `parsing_warnings`
 - `confidence`
 
@@ -82,11 +92,11 @@ truth.
 
 | Field | Purpose | Notes |
 | --- | --- | --- |
-| `document_id` | Unique identity for one source document | Used to bind the profile to downstream evidence and comparison artifacts |
+| `document_id` | Unique identity for one source document | Used to bind the profile to downstream fact and view artifacts |
 | `collection_id` | Binds the profile to the collection that owns the document | Keeps profiling collection-scoped rather than global |
 | `doc_type` | Stores the document's coarse literature type | Drives downstream routing, warnings, and suitability decisions |
 | `protocol_extractable` | Stores whether protocol derivation is likely to be usable | Should not collapse into a bare boolean because partial or uncertain cases matter |
-| `protocol_extractability_signals` | Preserves the concrete reasons behind the protocol judgment | Makes gating explainable instead of opaque |
+| `protocol_extractability_signals` | Preserves the controlled reasons behind the protocol judgment | May remain empty in narrow triage waves, but when populated it must stay enum-like rather than free-form |
 | `parsing_warnings` | Carries early warnings about ambiguity, missing structure, or review contamination | Should be surfaced to workspace and downstream review flows |
 | `confidence` | Stores the system's confidence in the profile judgment | Helps distinguish firm routing from weak heuristics |
 
@@ -94,7 +104,7 @@ truth.
 
 - `experimental`
   The document is primarily methods- and results-bearing and is suitable for
-  evidence extraction with stronger procedural potential.
+  deeper paper-facts extraction.
 - `review`
   The document is primarily synthetic or narrative and should not be treated as
   a default protocol source.
@@ -119,21 +129,11 @@ truth.
   The system does not yet have enough signal to make a reliable protocol
   routing decision.
 
-### Signal Expectations
-
-`protocol_extractability_signals` should preserve explicit signals such as:
-
-- methods density
-- procedural continuity
-- condition completeness
-- critical parameter missingness
-- review contamination
-
 ### Upstream And Downstream
 
 - Upstream: raw documents and parsed text/layout units
-- Downstream: workspace suitability messaging, protocol gating, and comparison
-  quality review
+- Downstream: workspace suitability messaging, protocol gating, and fact-layer
+  extraction routing
 
 ### Missingness Rules
 
@@ -141,22 +141,94 @@ truth.
   omitted
 - `parsing_warnings` may be empty, but the field must exist
 
+## Paper Facts Family
+
+### Role
+
+The `paper_facts` family is the primary Lens research object layer.
+
+It should preserve what one paper says about:
+
+- samples or variants
+- methods
+- conditions
+- baselines
+- measurements or results
+- characterization findings
+- evidence anchors
+- optional structure-level enrichment
+
+The minimum shared family members are:
+
+- `sample_variants`
+- `method_facts`
+- `test_conditions`
+- `baseline_references`
+- `measurement_results`
+- `characterization_observations`
+- `evidence_anchors`
+- `structure_features` as optional enrichment
+
+### Common Contract Rules
+
+Every primary fact object should preserve:
+
+- a stable object id
+- `document_id`
+- `collection_id`
+- traceability back to source anchors or source-locator fields
+- `confidence`
+
+Whenever the object is normalized or inferred rather than directly copied from
+the paper, it should also preserve an explicit epistemic or derivation status.
+
+### Family Member Roles
+
+- `sample_variants`
+  Identifies the sample or experimental variant that later facts belong to.
+- `method_facts`
+  Preserves process, characterization, and test methods as first-class facts.
+- `test_conditions`
+  Preserves structured condition payloads rather than flattening them into one
+  opaque summary string.
+- `baseline_references`
+  Preserves explicit control or baseline semantics.
+- `measurement_results`
+  Acts as the main comparison input object and preserves links to sample,
+  condition, baseline, and evidence.
+- `characterization_observations`
+  Preserves characterization findings as first-class facts rather than
+  incidental prose.
+- `evidence_anchors`
+  Preserves the shared traceback surface across facts and derived views.
+- `structure_features`
+  Adds optional structure-level enrichment when the evidence is strong enough.
+
+### Family Dependency Rule
+
+The `paper_facts` family should be extracted before comparison and evidence
+views are assembled.
+
+No single derived view may become the only semantic source of truth for those
+facts.
+
 ## Evidence Cards
 
 ### Role
 
-`evidence_cards` is the primary claim-centered evidence artifact in Lens v1.
+`evidence_cards` is a derived evidence-facing and reader-facing view in Lens
+v1.
 
-Each card has one primary claim-bearing unit and one or more supporting
-evidence anchors plus its associated condition context.
+An evidence card may present one narrow claim, observation, or result-focused
+reading unit, but that unit should be understood as a projection over paper
+facts plus anchors rather than the only primary research object in the system.
 
-An evidence card is therefore a claim object with evidence attached, not an
-evidence cluster with claims attached.
-
-The same evidence anchor may support more than one evidence card when multiple
-distinct claims depend on the same figure, table, method, or text span.
+The same evidence anchor or the same fact may support more than one evidence
+card when multiple reader-facing views are useful.
 
 ### Minimum Required Fields
+
+The current shared compatibility surface should preserve:
 
 - `evidence_id`
 - `document_id`
@@ -175,16 +247,16 @@ distinct claims depend on the same figure, table, method, or text span.
 
 | Field | Purpose | Notes |
 | --- | --- | --- |
-| `evidence_id` | Unique identity for one evidence card | Used by comparison rows, traceback, and review workflows |
+| `evidence_id` | Unique identity for one evidence card | Used by UI selection, traceback, and narrow evidence review workflows |
 | `document_id` | Binds the card to its source document | Supports source inspection and paper-level grouping |
-| `collection_id` | Binds the card to the owning collection | Keeps evidence objects aligned with collection-level workflows |
-| `claim_text` | Stores the claim-bearing text or normalized claim statement | This is the central meaning-bearing payload of the card |
-| `claim_type` | Classifies what kind of claim this is | Helps separate property, mechanism, process, or qualitative claims |
-| `evidence_source_type` | Stores what kind of source supports the claim | Important for judging evidence strength and UI presentation |
+| `collection_id` | Binds the card to the owning collection | Keeps evidence views aligned with collection-level workflows |
+| `claim_text` | Stores the card's reader-facing claim or summary phrase | This is a display-oriented meaning shell, not the only canonical research fact |
+| `claim_type` | Classifies what kind of reader-facing unit this is | Helps separate property, mechanism, process, or qualitative views |
+| `evidence_source_type` | Stores what kind of source supports the card | Important for judging evidence strength and UI presentation |
 | `evidence_anchors` | Points back to spans, figures, tables, or methods sections | This is the main traceback hook |
-| `material_system` | Records the material system or composition discussed by the claim | Needed for later normalization and comparison |
-| `condition_context` | Records the process, baseline, and test context that constrain the claim | Prevents the claim from floating free of its conditions; should not collapse into one opaque blob |
-| `confidence` | Stores the system's confidence in the card | Helps downstream ranking and review |
+| `material_system` | Records the material system discussed by the card | Useful for reader orientation, but canonical sample identity should still live in paper facts |
+| `condition_context` | Records process, baseline, and test context shown on the card | This should be derived from structured facts rather than invented as one opaque blob |
+| `confidence` | Stores the system's confidence in the card projection | Helps downstream ranking and review |
 | `traceability_status` | States whether the card has usable evidence anchors | Keeps downstream consumers from assuming all cards are equally grounded |
 
 ### Condition Context Structure
@@ -218,29 +290,28 @@ survive normalization.
 - `partial`
   The card has some traceback signal, but the anchor is incomplete or weak.
 - `missing`
-  The card exists as a provisional extraction, but it should not be treated as
+  The card exists as a provisional projection, but it should not be treated as
   well-grounded evidence until traceback improves.
 
-### Recommended Normalized Fields
+### Recommended Linkage Fields
 
-These fields should be present whenever the source supports them:
+When the runtime is ready, evidence cards should also preserve linkage back to
+the primary fact layer, for example:
 
-- `property_metric`
-- `value`
-- `unit`
-- `test_conditions`
-- `baseline`
+- `related_fact_ids`
+- `sample_variant_ids`
+- `measurement_result_ids`
 
 ### Upstream And Downstream
 
-- Upstream: document profiles and parsed source units
-- Downstream: comparison row generation, traceback UI, and protocol candidate
-  derivation
+- Upstream: paper facts plus evidence anchors
+- Downstream: traceback UI, narrow claim inspection, evidence-oriented reading,
+  and protocol candidate derivation
 
 ### Missingness Rules
 
-- an evidence card may omit numeric `value` or `unit` when the claim is
-  qualitative
+- an evidence card may omit numeric `value` or `unit` when the projected view
+  is qualitative
 - an evidence card may not omit `claim_text`, `evidence_source_type`,
   `evidence_anchors`, or `traceability_status`
 
@@ -251,8 +322,18 @@ These fields should be present whenever the source supports them:
 `comparison_rows` is the primary collection-facing comparison artifact in Lens
 v1.
 
-Each row represents one normalized result or claim candidate ready for
-collection-level inspection. It is not a pairwise comparison object.
+Each row represents one normalized result candidate derived from paper facts.
+It is not a pairwise comparison object.
+
+Each row should be understood as a deterministic comparison view assembled
+over:
+
+- one measurement-result-like fact
+- its linked sample identity
+- its linked test condition when resolved
+- its linked baseline when resolved
+- its supporting evidence and traceback anchors
+- comparability assessment outputs
 
 ### Minimum Required Fields
 
@@ -275,8 +356,8 @@ collection-level inspection. It is not a pairwise comparison object.
 | --- | --- | --- |
 | `row_id` | Unique identity for one comparison row | Used by UI selection, pagination, sorting, and traceback jumps |
 | `collection_id` | Binds the row to one collection-level comparison workspace | Comparison rows are collection-scoped rather than global |
-| `source_document_id` | Preserves which document produced the normalized row | Supports source filtering and paper-level drill-down |
-| `supporting_evidence_ids` | Anchors the row to the evidence cards that justify it | Prevents the row from becoming an ungrounded summary |
+| `source_document_id` | Preserves which document produced the row | Supports source filtering and paper-level drill-down |
+| `supporting_evidence_ids` | Anchors the row to traceback-ready evidence views that justify it | Prevents the row from becoming an ungrounded summary while public compatibility still uses evidence ids |
 | `material_system_normalized` | Normalizes the material system into a comparison-ready label | Used to group or filter rows that refer to the same system family |
 | `process_normalized` | Normalizes the process or treatment route | Keeps fabrication or treatment differences explicit during comparison |
 | `property_normalized` | Normalizes the property or metric being discussed | Ensures the workspace compares the same type of result |
@@ -302,14 +383,11 @@ collection-level inspection. It is not a pairwise comparison object.
 
 ### Comparability Judgment Provenance
 
-Comparability judgments may be:
+Comparability judgments should remain inspectable.
 
-- rule-derived
-- model-derived
-- hybrid
-
-That provenance should remain inspectable so the system can explain whether a
-row was limited by explicit normalization rules, model judgment, or both.
+The default expectation is deterministic or rule-derived assessment over the
+fact layer. If any hybrid judgment is later introduced, the basis must still
+remain explicit and reviewable.
 
 ### Recommended Value Fields
 
@@ -318,13 +396,13 @@ row was limited by explicit normalization rules, model judgment, or both.
 
 ### Upstream And Downstream
 
-- Upstream: evidence cards and document profiles
+- Upstream: paper facts, document profiles, and traceback-ready evidence views
 - Downstream: collection comparison workspace, conflict review, and derived
   graph or report views
 
 ### Missingness Rules
 
-- a comparison row may omit `value` or `unit` when the source claim is
+- a comparison row may omit `value` or `unit` when the source result is
   qualitative
 - a row may not be labeled `comparable` if its normalized baseline or test
   condition is missing or contradicted
@@ -332,18 +410,20 @@ row was limited by explicit normalization rules, model judgment, or both.
 
 ## Dependency Rule
 
-The Lens v1 backbone should flow in this order:
+The Lens v1 Core flow should follow this order:
 
 1. `document_profiles`
-2. `evidence_cards`
+2. the `paper_facts` family
 3. `comparison_rows`
+4. `evidence_cards`
 
 `protocol_candidates` and `protocol_steps` are downstream branches and should
-not bypass this backbone.
+not bypass this flow.
 
 ## Related Docs
 
 - [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
 - [Lens V1 Definition](lens-v1-definition.md)
 - [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
+- [RFC Paper-Facts Primary Domain Model and Derived Comparison Views](../decisions/rfc-paper-facts-primary-domain-model.md)
 - [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/historical/evidence-first-parsing-plan.md)

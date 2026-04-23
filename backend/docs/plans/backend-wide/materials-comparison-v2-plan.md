@@ -56,9 +56,10 @@ Status as of 2026-04-18:
 
 As implemented in the backend runtime, this plan now yields:
 
-- Source-owned persisted handoff artifacts for `sections.parquet` and
-  `table_cells.parquet`, which are consumed directly by documents and evidence
-  flows rather than being rebuilt at read time
+- Source-owned persisted handoff artifacts for `blocks.parquet`,
+  `table_rows.parquet`, and `table_cells.parquet`, which are consumed directly
+  by documents, evidence, and protocol flows rather than being rebuilt at read
+  time
 - Core-owned `characterization_observations.parquet`,
   `structure_features.parquet`, `test_conditions.parquet`, and
   `baseline_references.parquet`
@@ -71,10 +72,11 @@ As implemented in the backend runtime, this plan now yields:
 - downstream graph and report projections continuing to consume Core-derived
   comparison rows without reverting to legacy GraphRAG-era semantics
 
-The implemented Core order is now:
+The current runtime still materializes `evidence_cards` during extraction for
+route compatibility, but the intended semantic Core order is now:
 
-- `document_profiles -> evidence_cards -> sample_variants /
-  measurement_results -> comparison_rows -> protocol branch`
+- `document_profiles -> paper facts family -> evidence_cards plus
+  comparable-result substrate -> row projection -> protocol branch`
 
 No long-lived compatibility path remains from direct evidence-card projection
 to `comparison_rows.parquet`.
@@ -383,11 +385,19 @@ objects as if they had been stated directly in the source paper.
 
 ### Source Evidence Surface
 
+Historical note:
+this retained plan originally targeted a `sections.parquet` handoff. The active
+runtime contract is now `documents.parquet`, `text_units.parquet`,
+`blocks.parquet`, `table_rows.parquet`, and `table_cells.parquet`. Remaining
+`sections.parquet` references in this section are lineage notes, not the
+current runtime contract.
+
 The Source layer should emit the following collection-local artifacts:
 
 - `documents.parquet`
 - `text_units.parquet`
-- `sections.parquet`
+- `blocks.parquet`
+- `table_rows.parquet`
 - `table_cells.parquet`
 - `figure_captions.parquet`
 
@@ -997,8 +1007,9 @@ Primary changes:
   it over in place
 - split the consumer-facing comparison payload into display, evidence bundle,
   assessment, and uncertainty zones
-- update task orchestration so the Core order becomes:
-  `document_profiles -> evidence_cards -> sample_variants/measurement_results -> comparison_rows -> protocol branch`
+- update task orchestration so the semantic Core order becomes:
+  `document_profiles -> paper facts family -> evidence_cards plus
+  comparable-result substrate -> row projection -> protocol branch`
 
 Files expected to change:
 

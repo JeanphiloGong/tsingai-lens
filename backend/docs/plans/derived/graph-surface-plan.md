@@ -28,7 +28,8 @@ This plan does not:
 - make `graph` part of the primary Lens v1 acceptance backbone
 - replace the current comparison-first primary workflow
 - force an immediate redesign of graph as a derived view over
-  `document_profiles`, `evidence_cards`, and `comparison_rows`
+  `document_profiles`, `evidence_cards`, and the comparable-result substrate
+  with row projection downstream
 
 ## Current State
 

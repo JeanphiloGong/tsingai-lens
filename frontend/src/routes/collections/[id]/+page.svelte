@@ -5,7 +5,7 @@
   import { listCollectionFiles, uploadCollectionFiles, type CollectionFile } from '../../_shared/files';
   import { t } from '../../_shared/i18n';
   import {
-    createIndexTask,
+    createBuildTask,
     getTask,
     isTaskActive,
     type Task
@@ -30,7 +30,7 @@
 
   let selectedFiles: File[] = [];
   let isDragging = false;
-  let indexAfterUpload = true;
+  let buildAfterUpload = true;
   let uploadLoading = false;
   let uploadError = '';
   let uploadResult: { count: number; items: CollectionFile[] } | null = null;
@@ -40,8 +40,8 @@
   let filesError = '';
 
   let advancedOpen = false;
-  const primaryViewKeys = ['comparisons', 'evidence', 'documents'] as const;
-  const setupPreviewKeys = ['comparisons', 'evidence', 'documents', 'protocol'] as const;
+  const primaryViewKeys = ['comparisons', 'results', 'documents'] as const;
+  const setupPreviewKeys = ['comparisons', 'results', 'documents', 'protocol'] as const;
 
   $: collectionId = $page.params.id ?? '';
   $: if ($page.url.hash.startsWith('#advanced')) {
@@ -51,6 +51,7 @@
   $: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
   $: workspaceState = getCollectionWorkspaceState(stateWorkspace);
   $: actionablePrimaryViews = countActionablePrimaryViews(stateWorkspace);
+  $: evidenceState = getWorkspaceSurfaceState(stateWorkspace, 'evidence');
   $: protocolState = getWorkspaceSurfaceState(stateWorkspace, 'protocol');
   $: graphState = getWorkspaceSurfaceState(stateWorkspace, 'graph');
   $: isEmptyState = workspaceState === 'empty';
@@ -63,7 +64,7 @@
   $: showAdditionalViews = Boolean(
     workspace &&
       isAnalysisState &&
-      (protocolState !== 'not_applicable' || graphState === 'ready')
+      (stageIsActionable(evidenceState) || protocolState !== 'not_applicable' || graphState === 'ready')
   );
   $: if (collectionId && collectionId !== loadedCollectionId) {
     loadedCollectionId = collectionId;
@@ -230,9 +231,9 @@
   function workflowRows() {
     if (!workspace) return [];
     return [
-      ['documents', workspace.workflow.documents],
-      ['evidence', workspace.workflow.evidence],
       ['comparisons', workspace.workflow.comparisons],
+      ['results', workspace.workflow.results],
+      ['documents', workspace.workflow.documents],
       ['protocol', workspace.workflow.protocol]
     ] as Array<[string, string]>;
   }
@@ -277,7 +278,7 @@
     if (!effectiveFileCount) return $t('overview.primaryActionUpload');
     if (workspace.latest_task && isTaskActive(workspace.latest_task)) return $t('overview.primaryActionTrack');
     if (workspace.capabilities.can_view_comparisons) return $t('overview.primaryActionComparisons');
-    if (workspace.capabilities.can_view_evidence) return $t('overview.primaryActionEvidence');
+    if (workspace.capabilities.can_view_results) return $t('overview.primaryActionResults');
     if (workspace.capabilities.can_view_documents) return $t('overview.primaryActionDocuments');
     if (workspace.capabilities.can_generate_sop || workspace.capabilities.can_view_protocol_steps) {
       return $t('overview.primaryActionProtocol');
@@ -304,8 +305,8 @@
       return;
     }
 
-    if (workspace.capabilities.can_view_evidence) {
-      location.href = workspace.links.evidence;
+    if (workspace.capabilities.can_view_results) {
+      location.href = workspace.links.results;
       return;
     }
 
@@ -319,10 +320,10 @@
       return;
     }
 
-    void startIndexRun();
+    void startBuildRun();
   }
 
-  async function startIndexRun() {
+  async function startBuildRun() {
     if (!effectiveFileCount) {
       actionStatus = $t('overview.indexNoFiles');
       return;
@@ -330,7 +331,7 @@
 
     actionStatus = '';
     try {
-      const task = await createIndexTask(collectionId);
+      const task = await createBuildTask(collectionId);
       mergeTask(task);
       actionStatus = $t('documents.indexing');
       schedulePoll(task.task_id);
@@ -355,8 +356,8 @@
       if (fileInput) fileInput.value = '';
       await Promise.all([loadFiles(false), loadWorkspace(false)]);
       actionStatus = $t('documents.uploadDone');
-      if (indexAfterUpload) {
-        await startIndexRun();
+      if (buildAfterUpload) {
+        await startBuildRun();
       }
     } catch (err) {
       uploadError = errorMessage(err);
@@ -393,7 +394,7 @@
 
   function viewLead(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
     if (key === 'comparisons') return $t('overview.resultComparisonsLead');
-    if (key === 'evidence') return $t('overview.resultEvidenceLead');
+    if (key === 'results') return $t('overview.resultResultsLead');
     if (key === 'documents') return $t('overview.resultDocumentsLead');
     if (key === 'protocol') return $t('overview.resultProtocolLead');
     return $t('overview.resultGraphLead');
@@ -411,7 +412,7 @@
 
   function viewActionLabel(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
     if (key === 'comparisons') return $t('overview.nextComparisons');
-    if (key === 'evidence') return $t('overview.nextEvidence');
+    if (key === 'results') return $t('overview.nextResults');
     if (key === 'documents') return $t('overview.nextDocuments');
     if (key === 'protocol') return $t('overview.nextProtocol');
     return $t('overview.nextGraph');
@@ -423,7 +424,7 @@
 
   function compactPreviewLead(key: (typeof setupPreviewKeys)[number]) {
     if (key === 'comparisons') return $t('overview.previewComparisonsLead');
-    if (key === 'evidence') return $t('overview.previewEvidenceLead');
+    if (key === 'results') return $t('overview.previewResultsLead');
     if (key === 'documents') return $t('overview.previewDocumentsLead');
     return $t('overview.previewProtocolLead');
   }
@@ -462,7 +463,7 @@
       return;
     }
     if (isReadyToProcessState) {
-      await startIndexRun();
+      await startBuildRun();
       return;
     }
     browseFiles();
@@ -553,7 +554,7 @@
           {#if !isReadyToProcessState}
             <div class="toggle-row">
               <label>
-                <input type="checkbox" bind:checked={indexAfterUpload} />
+                <input type="checkbox" bind:checked={buildAfterUpload} />
                 {$t('documents.indexAfterLabel')}
               </label>
             </div>
@@ -883,6 +884,29 @@
         </div>
 
         <div class="result-grid result-grid--tasks">
+          {#if stageIsActionable(evidenceState)}
+            <article class="result-card">
+              <div class="table-main">
+                <div class="table-title">{$t('overview.capabilities.evidence')}</div>
+                <div class="table-sub">{$t('overview.resultEvidenceLead')}</div>
+              </div>
+              <div class="detail-section">
+                <div class="detail-section__title">{$t('overview.viewStatusTitle')}</div>
+                <div class="detail-chips">
+                  <span class={`detail-chip ${stageIsActionable(evidenceState) ? '' : 'detail-chip--muted'}`}>
+                    {surfaceStatusLabel(evidenceState)}
+                  </span>
+                </div>
+                <p class="note">{surfaceStatusNote(evidenceState)}</p>
+              </div>
+              <div class="table-actions">
+                <a class="btn btn--ghost btn--small" href={workspace.links.evidence}>
+                  {$t('overview.nextEvidence')}
+                </a>
+              </div>
+            </article>
+          {/if}
+
           {#if protocolState !== 'not_applicable'}
             <article class="result-card">
               <div class="table-main">

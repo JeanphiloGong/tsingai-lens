@@ -22,8 +22,8 @@ produced by one collection-backed Core backbone.
 Current backend docs already establish that:
 
 - `workspace` is the primary collection-facing entry surface
-- `document_profiles`, `evidence_cards`, and `comparison_rows` are the
-  intended backbone
+- `document_profiles`, the paper-facts family, `evidence_cards`, and the
+  comparable-result substrate are the intended backbone
 - `protocol/*` is a conditional downstream branch rather than the default
   center of the workflow
 
@@ -113,8 +113,11 @@ Responsibilities:
 Primary artifacts:
 
 - `document_profiles`
+- paper-facts family
 - `evidence_cards`
-- `comparison_rows`
+- `comparable_results`
+- `collection_comparable_results`
+- downstream `comparison_rows` projection
 - optional downstream `protocol_candidates`
 - optional downstream `protocol_steps`
 
@@ -181,8 +184,9 @@ Current contract-freeze target for the five-layer model:
 - Source & Collection Builder handoff should converge on normalized import
   units such as `documents`, `text_units`, and `source_metadata`
 - Core remains the only layer that may emit:
-  `document_profiles`, `evidence_cards`, `comparison_rows`, and downstream
-  protocol artifacts
+  `document_profiles`, paper facts, `evidence_cards`,
+  `comparable_results`, `collection_comparable_results`, downstream
+  `comparison_rows` projection, and downstream protocol artifacts
 - Goal Consumer may read Core outputs and emit filtered, ranked, gap, and
   next-step views only
 - Derived Views must consume or derive from Core outputs rather than inventing
@@ -252,7 +256,8 @@ Controller implications:
 ## File Change Plan
 
 1. Keep hardening the Core backbone so real collections reliably emit
-   `document_profiles`, `evidence_cards`, and `comparison_rows`.
+   `document_profiles`, `evidence_cards`, and the comparable-result substrate
+   with row projection downstream.
 2. Harden the Source & Collection Builder seam so upload, search, crawler, and
    goal seeding converge on one collection handoff shape.
 3. Keep Goal Brief / Intake intentionally thin and explicit.
@@ -287,6 +292,7 @@ Controller implications:
 - [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-core-source-contract-follow-up-plan.md)
 - [`overview.md`](overview.md)
 - [`domain-architecture.md`](domain-architecture.md)
+- [`core-comparison/README.md`](core-comparison/README.md)
 - [`../plans/v1-api-migration-notes.md`](../plans/historical/v1-api-migration-notes.md)
 - [`../plans/evidence-first-parsing-plan.md`](../plans/historical/evidence-first-parsing-plan.md)
 - [`../specs/api.md`](../specs/api.md)

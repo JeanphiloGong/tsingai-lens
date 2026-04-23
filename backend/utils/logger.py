@@ -1,12 +1,13 @@
+import contextvars
 import logging
-import os
+import re
+import secrets
 import sys
-from pathlib import Path
-from dotenv import load_dotenv
 from logging.handlers import TimedRotatingFileHandler
+
 from config import LOG_DIR
 
-# 创建目录
+
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _QUIET_LIBRARY_LOGGERS = (
@@ -16,36 +17,75 @@ _QUIET_LIBRARY_LOGGERS = (
     "httpx",
     "httpcore",
 )
+REQUEST_ID_HEADER = "X-Request-ID"
+_REQUEST_ID_CONTEXT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "request_id",
+    default=None,
+)
+_REQUEST_ID_FORMAT_PLACEHOLDER = "-"
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+class _RequestIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = get_request_id() or _REQUEST_ID_FORMAT_PLACEHOLDER
+        return True
+
+
+_REQUEST_ID_FILTER = _RequestIdFilter()
 
 
 def _configure_library_loggers() -> None:
     for logger_name in _QUIET_LIBRARY_LOGGERS:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
-def setup_logger(name=__name__):
-    """
-    创建并配置日志记录器，每天生成新的日志文件
-    
-    Args:
-        name (str): 记录器名称（通常使用 __name__）
-    
-    Returns:
-        logging.Logger: 配置好的日志记录器
-    """
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
 
-    # 日志格式
+def generate_request_id() -> str:
+    return f"req_{secrets.token_hex(8)}"
+
+
+def get_request_id() -> str | None:
+    return _REQUEST_ID_CONTEXT.get()
+
+
+def bind_request_id(request_id: str) -> contextvars.Token[str | None]:
+    return _REQUEST_ID_CONTEXT.set(request_id)
+
+
+def clear_request_id(token: contextvars.Token[str | None] | None = None) -> None:
+    if token is None:
+        _REQUEST_ID_CONTEXT.set(None)
+        return
+    _REQUEST_ID_CONTEXT.reset(token)
+
+
+def is_valid_request_id(value: str | None) -> bool:
+    if value is None:
+        return False
+    candidate = value.strip()
+    return bool(candidate) and bool(_REQUEST_ID_PATTERN.fullmatch(candidate))
+
+
+def resolve_request_id(value: str | None) -> tuple[str, bool]:
+    if is_valid_request_id(value):
+        return value.strip(), True
+    return generate_request_id(), False
+
+
+def setup_logger(name: str = __name__) -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+
     formatter = logging.Formatter(
-        "%(asctime)s | %(name)-24s | %(levelname)-8s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+        "%(asctime)s | %(name)-24s | %(levelname)-8s | %(request_id)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
     debug_file_handler = TimedRotatingFileHandler(
         filename=LOG_DIR / "app_debug.log",
         when="midnight",
         interval=1,
-        encoding="utf-8"
+        encoding="utf-8",
     )
     debug_file_handler.setLevel(logging.DEBUG)
     debug_file_handler.setFormatter(formatter)
@@ -55,7 +95,7 @@ def setup_logger(name=__name__):
         filename=LOG_DIR / "app_info.log",
         when="midnight",
         interval=1,
-        encoding="utf-8"
+        encoding="utf-8",
     )
     info_file_handler.setLevel(logging.INFO)
     info_file_handler.setFormatter(formatter)
@@ -67,16 +107,19 @@ def setup_logger(name=__name__):
 
     handlers = [debug_file_handler, info_file_handler, console_handler]
 
-    # 将处理器挂到 root，保证所有子 logger（如 controllers.*）的日志都能输出
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(logging.DEBUG)
 
     def _handler_exists(candidate: logging.Handler) -> bool:
         for existing in root_logger.handlers:
             if type(existing) is not type(candidate):
                 continue
             if isinstance(candidate, TimedRotatingFileHandler):
-                if getattr(existing, "baseFilename", None) == getattr(candidate, "baseFilename", None):
+                if getattr(existing, "baseFilename", None) == getattr(
+                    candidate,
+                    "baseFilename",
+                    None,
+                ):
                     return True
             elif isinstance(candidate, logging.StreamHandler):
                 if getattr(existing, "stream", None) is getattr(candidate, "stream", None):
@@ -84,13 +127,17 @@ def setup_logger(name=__name__):
         return False
 
     for handler in handlers:
+        if _REQUEST_ID_FILTER not in handler.filters:
+            handler.addFilter(_REQUEST_ID_FILTER)
         if not _handler_exists(handler):
             root_logger.addHandler(handler)
+            continue
+        handler.close()
 
     _configure_library_loggers()
     logging.captureWarnings(True)
 
     return logger
 
-# 创建全局默认记录器
+
 logger = setup_logger("main")

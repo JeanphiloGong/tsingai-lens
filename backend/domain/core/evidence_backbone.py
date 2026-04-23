@@ -214,6 +214,49 @@ class TestCondition:
 
 
 @dataclass(frozen=True)
+class MethodFact:
+    method_id: str
+    document_id: str
+    collection_id: str
+    domain_profile: str
+    method_role: str
+    method_name: str
+    method_payload: dict[str, Any]
+    evidence_anchor_ids: tuple[str, ...]
+    confidence: float
+    epistemic_status: str
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "MethodFact":
+        return cls(
+            method_id=_normalize_text(payload.get("method_id")) or "",
+            document_id=_normalize_text(payload.get("document_id")) or "",
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            domain_profile=_normalize_text(payload.get("domain_profile")) or CORE_NEUTRAL_DOMAIN_PROFILE,
+            method_role=_normalize_text(payload.get("method_role")) or "",
+            method_name=_normalize_text(payload.get("method_name")) or "",
+            method_payload=_normalize_mapping(payload.get("method_payload")),
+            evidence_anchor_ids=_normalize_string_tuple(payload.get("evidence_anchor_ids")),
+            confidence=_normalize_confidence(payload.get("confidence")),
+            epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "method_id": self.method_id,
+            "document_id": self.document_id,
+            "collection_id": self.collection_id,
+            "domain_profile": self.domain_profile,
+            "method_role": self.method_role,
+            "method_name": self.method_name,
+            "method_payload": dict(self.method_payload),
+            "evidence_anchor_ids": list(self.evidence_anchor_ids),
+            "confidence": self.confidence,
+            "epistemic_status": self.epistemic_status,
+        }
+
+
+@dataclass(frozen=True)
 class BaselineReference:
     baseline_id: str
     document_id: str
@@ -491,6 +534,7 @@ __all__ = [
     "CORE_NEUTRAL_DOMAIN_PROFILE",
     "CharacterizationObservation",
     "EvidenceAnchor",
+    "MethodFact",
     "MeasurementResult",
     "SampleVariant",
     "StructureFeature",

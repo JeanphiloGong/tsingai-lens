@@ -11,7 +11,7 @@
   } from './_shared/collections';
   import { buildCollectionGraphmlUrl } from './_shared/graph';
   import { language, t } from './_shared/i18n';
-  import { createIndexTask } from './_shared/tasks';
+  import { createBuildTask } from './_shared/tasks';
 
   let loading = false;
   let error = '';
@@ -163,7 +163,7 @@
     }
   }
 
-  async function runIndex(collection: Collection) {
+  async function runBuild(collection: Collection) {
     if (!collection.paper_count) {
       setRowMessage(collection.id, $t('home.indexNoFiles'), 'error');
       return;
@@ -171,7 +171,7 @@
 
     try {
       setRowMessage(collection.id, $t('home.indexing'));
-      await createIndexTask(collection.id);
+      await createBuildTask(collection.id);
       setRowMessage(collection.id, $t('home.indexStarted'));
     } catch (err) {
       setRowMessage(collection.id, errorMessage(err), 'error');
@@ -284,7 +284,7 @@
                   <button
                     class="btn btn--ghost btn--small"
                     type="button"
-                    on:click|stopPropagation={() => runIndex(collection)}
+                    on:click|stopPropagation={() => runBuild(collection)}
                   >
                     {$t('home.actionIndex')}
                   </button>

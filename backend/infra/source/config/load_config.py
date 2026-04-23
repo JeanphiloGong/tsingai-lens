@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 
 _default_config_files = ["settings.yaml", "settings.yml", "settings.json"]
 
@@ -146,7 +146,7 @@ def load_config(
     root_dir: Path,
     config_filepath: Path | None = None,
     cli_overrides: dict[str, Any] | None = None,
-) -> GraphRagConfig:
+) -> SourceRuntimeConfig:
     """Load configuration from a file.
 
     Parameters
@@ -162,7 +162,7 @@ def load_config(
 
     Returns
     -------
-    GraphRagConfig
+    SourceRuntimeConfig
         The loaded configuration.
 
     Raises
@@ -188,4 +188,4 @@ def load_config(
     if cli_overrides:
         _apply_overrides(config_data, cli_overrides)
     config_data["root_dir"] = str(root)
-    return GraphRagConfig.model_validate(config_data)
+    return SourceRuntimeConfig.model_validate(config_data)

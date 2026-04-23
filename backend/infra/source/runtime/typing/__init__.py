@@ -1,4 +1,4 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Root typings for GraphRAG."""
+"""Root typings for the Source runtime."""

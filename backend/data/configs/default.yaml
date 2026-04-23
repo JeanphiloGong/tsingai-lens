@@ -1,4 +1,4 @@
-# Basic GraphRAG config for file-based indexing.
+# Basic Source runtime config for file-based indexing.
 # Secrets are read from environment or .env alongside this file.
 
 root_dir: "../../"
@@ -22,9 +22,9 @@ input:
   storage:
     type: file
     base_dir: "../documents"
-  file_type: text
+  file_type: document
   encoding: "utf-8"
-  file_pattern: ".*\\.txt$$"
+  file_pattern: ".*\\.(txt|pdf)$$"
 
 output:
   type: file

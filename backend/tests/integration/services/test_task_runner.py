@@ -13,13 +13,13 @@ if "devtools" not in sys.modules:
 
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
-from application.source.index_task_runner import IndexTaskRunner
+from application.source.collection_build_task_runner import CollectionBuildTaskRunner
 from application.source.task_service import TaskService
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
 class DummyWorkflowOutput:
-    def __init__(self, workflow: str = "index", errors: list[str] | None = None):
+    def __init__(self, workflow: str = "build", errors: list[str] | None = None):
         self.workflow = workflow
         self.errors = errors
 
@@ -45,7 +45,7 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
-def _write_index_outputs(output_dir: Path) -> None:
+def _write_source_artifact_outputs(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     documents = pd.DataFrame(
         [
@@ -86,7 +86,9 @@ def _write_index_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
@@ -112,19 +114,21 @@ def _write_review_only_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
-def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
+def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    import application.source.index_task_runner as task_runner_module
+    import application.source.collection_build_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
+    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Composite Papers")
     paths = collection_service.get_paths(collection["collection_id"])
@@ -136,17 +140,17 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     captured: dict[str, object] = {}
 
-    async def fake_build_index(**kwargs):  # noqa: ANN003
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
-        _write_index_outputs(paths.output_dir)
+        _write_source_artifact_outputs(paths.output_dir)
         return [DummyWorkflowOutput()]
 
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
-    task = task_service.create_task(collection["collection_id"], "index")
-    result = asyncio.run(runner.run_index_task(task["task_id"], collection["collection_id"]))
+    task = task_service.create_task(collection["collection_id"], "build")
+    result = asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
 
     assert result["status"] == "completed"
     assert result["current_stage"] == "artifacts_ready"
@@ -164,19 +168,27 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["structure_features_generated"] is True
     assert artifacts["structure_features_ready"] is False
     assert artifacts["test_conditions_generated"] is True
-    assert artifacts["test_conditions_ready"] is True
+    assert artifacts["test_conditions_ready"] is False
     assert artifacts["baseline_references_generated"] is True
     assert artifacts["baseline_references_ready"] is True
     assert artifacts["sample_variants_generated"] is True
     assert artifacts["sample_variants_ready"] is True
     assert artifacts["measurement_results_generated"] is True
     assert artifacts["measurement_results_ready"] is True
+    assert artifacts["comparable_results_generated"] is True
+    assert artifacts["comparable_results_ready"] is True
+    assert artifacts["collection_comparable_results_generated"] is True
+    assert artifacts["collection_comparable_results_ready"] is True
     assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is True
     assert artifacts["graph_generated"] is True
     assert artifacts["graph_ready"] is True
-    assert artifacts["sections_generated"] is True
-    assert artifacts["sections_ready"] is True
+    assert artifacts["blocks_generated"] is True
+    assert artifacts["blocks_ready"] is True
+    assert artifacts["figures_generated"] is True
+    assert artifacts["figures_ready"] is False
+    assert artifacts["table_rows_generated"] is True
+    assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
     assert artifacts["procedure_blocks_generated"] is True
@@ -185,22 +197,24 @@ def test_index_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["protocol_steps_ready"] is True
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
     assert paths.output_dir.joinpath("evidence_cards.parquet").exists()
+    assert paths.output_dir.joinpath("comparable_results.parquet").exists()
+    assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()
     assert paths.output_dir.joinpath("comparison_rows.parquet").exists()
     assert paths.output_dir.joinpath("entities.parquet").exists() is False
     assert paths.output_dir.joinpath("relationships.parquet").exists() is False
 
 
-def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
+def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
     monkeypatch, tmp_path
 ):
     _patch_parquet(monkeypatch)
 
-    import application.source.index_task_runner as task_runner_module
+    import application.source.collection_build_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = IndexTaskRunner(collection_service, task_service, artifact_registry)
+    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Review Papers")
     paths = collection_service.get_paths(collection["collection_id"])
@@ -214,7 +228,7 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     default_config.parent.mkdir(parents=True, exist_ok=True)
     default_config.write_text("dummy: true\n", encoding="utf-8")
 
-    async def fake_build_index(**kwargs):  # noqa: ANN003
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         _write_review_only_outputs(paths.output_dir)
         return [DummyWorkflowOutput()]
 
@@ -224,10 +238,10 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
         "load_config",
         lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
     )
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
-    task = task_service.create_task(collection["collection_id"], "index")
-    result = asyncio.run(runner.run_index_task(task["task_id"], collection["collection_id"]))
+    task = task_service.create_task(collection["collection_id"], "build")
+    result = asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
 
     assert result["status"] == "completed"
     assert "未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。" in result["warnings"]
@@ -238,6 +252,12 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert artifacts["document_profiles_ready"] is True
     assert artifacts["graph_generated"] is True
     assert artifacts["graph_ready"] is True
+    assert artifacts["blocks_generated"] is True
+    assert artifacts["blocks_ready"] is True
+    assert artifacts["figures_generated"] is True
+    assert artifacts["figures_ready"] is False
+    assert artifacts["table_rows_generated"] is True
+    assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
     assert artifacts["evidence_cards_generated"] is True
@@ -254,8 +274,14 @@ def test_index_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert artifacts["sample_variants_ready"] is False
     assert artifacts["measurement_results_generated"] is True
     assert artifacts["measurement_results_ready"] is False
+    assert artifacts["comparable_results_generated"] is True
+    assert artifacts["comparable_results_ready"] is False
+    assert artifacts["collection_comparable_results_generated"] is True
+    assert artifacts["collection_comparable_results_ready"] is False
     assert artifacts["comparison_rows_generated"] is True
     assert artifacts["comparison_rows_ready"] is False
     assert artifacts["protocol_steps_generated"] is False
     assert artifacts["protocol_steps_ready"] is False
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
+    assert paths.output_dir.joinpath("comparable_results.parquet").exists()
+    assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()

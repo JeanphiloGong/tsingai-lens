@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.typing.context import PipelineRunContext
 
 
@@ -22,7 +22,7 @@ class WorkflowFunctionOutput:
 
 
 WorkflowFunction = Callable[
-    [GraphRagConfig, PipelineRunContext],
+    [SourceRuntimeConfig, PipelineRunContext],
     Awaitable[WorkflowFunctionOutput],
 ]
 Workflow = tuple[str, WorkflowFunction]

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
-
-from infra.source.ingestion.pdf_ingest import pdf_to_text
 
 
 def _now_iso() -> str:
@@ -24,6 +23,7 @@ class NormalizedImportDocument:
     media_type: str | None
     stored_filename: str | None = None
     storage_relpath: str | None = None
+    storage_payload_base64: str | None = None
     checksum: str | None = None
     language: str | None = None
     ingest_status: str = "normalized"
@@ -84,16 +84,27 @@ def normalize_upload(
     normalized_media_type = str(media_type).strip() or None if media_type else None
     warnings: list[str] = []
 
-    text = _normalize_upload_text(
-        filename=normalized_filename,
-        content=content,
-        media_type=normalized_media_type,
-    )
-    if not text.strip():
-        warnings.append("normalized_text_empty")
-
     source_document_id = f"srcdoc_{uuid4().hex[:12]}"
     checksum = hashlib.sha256(content).hexdigest()
+    text_units: tuple[NormalizedImportTextUnit, ...] = ()
+
+    if _is_text_upload(filename=normalized_filename, media_type=normalized_media_type):
+        text = _decode_text_upload(content)
+        if not text.strip():
+            warnings.append("normalized_text_empty")
+        text_units = (
+            NormalizedImportTextUnit(
+                text_unit_id=f"textu_{uuid4().hex[:12]}",
+                source_document_id=source_document_id,
+                sequence=0,
+                text=text,
+                page_ref=None,
+                char_count=len(text),
+            ),
+        )
+    elif suffix != ".pdf":
+        raise ValueError(f"unsupported upload type for normalization: {normalized_filename}")
+
     document = NormalizedImportDocument(
         source_document_id=source_document_id,
         origin_channel=channel,
@@ -101,17 +112,10 @@ def normalize_upload(
         media_type=normalized_media_type,
         stored_filename=_build_normalized_storage_name(normalized_filename, suffix),
         storage_relpath=None,
+        storage_payload_base64=base64.b64encode(content).decode("ascii"),
         checksum=checksum,
         language=None,
         ingest_status="normalized",
-    )
-    text_unit = NormalizedImportTextUnit(
-        text_unit_id=f"textu_{uuid4().hex[:12]}",
-        source_document_id=source_document_id,
-        sequence=0,
-        text=text,
-        page_ref=None,
-        char_count=len(text),
     )
     metadata = NormalizedImportSourceMetadata(
         channel=channel,
@@ -124,28 +128,16 @@ def normalize_upload(
     )
     return NormalizedImportBatch(
         documents=(document,),
-        text_units=(text_unit,),
+        text_units=text_units,
         source_metadata=metadata,
     )
 
 
-def _normalize_upload_text(
-    *,
-    filename: str,
-    content: bytes,
-    media_type: str | None,
-) -> str:
-    suffix = Path(filename).suffix.lower()
-    if suffix == ".pdf":
-        return pdf_to_text(content)
-
-    if _is_text_upload(filename=filename, media_type=media_type):
-        try:
-            return content.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("text upload must be valid UTF-8") from exc
-
-    raise ValueError(f"unsupported upload type for normalization: {filename}")
+def _decode_text_upload(content: bytes) -> str:
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("text upload must be valid UTF-8") from exc
 
 
 def _is_text_upload(*, filename: str, media_type: str | None) -> bool:
@@ -161,5 +153,5 @@ def _is_text_upload(*, filename: str, media_type: str | None) -> bool:
 
 def _build_normalized_storage_name(filename: str, suffix: str) -> str:
     base_name = Path(filename).stem
-    normalized_suffix = ".txt" if suffix == ".pdf" else Path(filename).suffix
+    normalized_suffix = suffix or Path(filename).suffix or ".bin"
     return f"{uuid4().hex}_{base_name}{normalized_suffix}"

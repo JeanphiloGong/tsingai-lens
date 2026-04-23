@@ -40,6 +40,42 @@ def test_document_profile_from_mapping_normalizes_identity_and_lists() -> None:
     )
 
 
+def test_document_profile_from_mapping_coerces_invalid_llm_status_values() -> None:
+    profile = DocumentProfile.from_mapping(
+        {
+            "document_id": "doc-bad",
+            "collection_id": "col-1",
+            "doc_type": "research_article",
+            "protocol_extractable": "Laser-TIG hybrid additive manufacturing produced finer grains.",
+            "protocol_extractability_signals": [
+                "methods_section_detected",
+                "procedural_actions_detected",
+                "condition_markers_detected",
+            ],
+            "parsing_warnings": [],
+        }
+    )
+
+    assert profile.doc_type == DOC_TYPE_EXPERIMENTAL
+    assert profile.protocol_extractable == PROTOCOL_EXTRACTABLE_UNCERTAIN
+
+
+def test_document_profile_from_mapping_does_not_infer_status_from_signals_or_warnings() -> None:
+    profile = DocumentProfile.from_mapping(
+        {
+            "document_id": "doc-mixed",
+            "collection_id": "col-1",
+            "doc_type": "article",
+            "protocol_extractable": "not_a_status",
+            "protocol_extractability_signals": ["methods_section_detected"],
+            "parsing_warnings": ["review_contamination_detected"],
+        }
+    )
+
+    assert profile.doc_type == DOC_TYPE_UNCERTAIN
+    assert profile.protocol_extractable == PROTOCOL_EXTRACTABLE_UNCERTAIN
+
+
 def test_summarize_document_profile_collection_emits_collection_warnings() -> None:
     review_profile = DocumentProfile.from_mapping(
         {

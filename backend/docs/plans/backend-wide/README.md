@@ -27,6 +27,11 @@ Use this family for:
   Backend-wide closure page for the Core-first graph/report/product-surface cut
 - [`frontend-facing-contract-cleanup-plan.md`](frontend-facing-contract-cleanup-plan.md)
   Backend-wide frontend-contract cleanup lineage
+- [`index-to-build-contract-cutover-plan.md`](index-to-build-contract-cutover-plan.md)
+  Coordinated backend/frontend hard-cut plan for renaming collection
+  processing from `index` to `build`
+- [`backend-request-id-and-extraction-observability-plan.md`](backend-request-id-and-extraction-observability-plan.md)
+  Backend-wide request correlation and Core extraction diagnostics plan
 
 ## Boundary Rule
 

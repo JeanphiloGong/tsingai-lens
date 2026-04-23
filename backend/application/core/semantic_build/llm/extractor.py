@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.core.llm_extraction_models import (
+from .schemas import (
     StructuredDocumentProfile,
     StructuredExtractionBundle,
 )
-from application.core.llm_extraction_prompts import (
+from .prompts import (
     build_document_profile_prompt,
-    build_section_extraction_prompt,
+    build_text_window_extraction_prompt,
     build_table_row_extraction_prompt,
 )
 from infra.llm.openai_structured_client import (
@@ -37,15 +37,15 @@ class CoreLLMStructuredExtractor:
             raise TypeError("unexpected document profile response type")
         return response
 
-    def extract_section_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
-        system_prompt, user_prompt = build_section_extraction_prompt(payload)
+    def extract_text_window_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
+        system_prompt, user_prompt = build_text_window_extraction_prompt(payload)
         response = self.client.parse(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredExtractionBundle,
         )
         if not isinstance(response, StructuredExtractionBundle):
-            raise TypeError("unexpected section extraction response type")
+            raise TypeError("unexpected text window extraction response type")
         return response
 
     def extract_table_row_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:

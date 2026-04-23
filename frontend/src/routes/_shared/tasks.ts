@@ -5,10 +5,10 @@ export type TaskStatus = 'queued' | 'running' | 'completed' | 'partial_success' 
 export type TaskStage =
   | 'queued'
   | 'files_registered'
-  | 'graphrag_index_started'
-  | 'graphrag_index_completed'
+  | 'source_artifacts_started'
+  | 'source_artifacts_completed'
   | 'document_profiles_started'
-  | 'evidence_cards_started'
+  | 'paper_facts_started'
   | 'comparison_rows_started'
   | 'protocol_artifacts_started'
   | 'artifacts_ready'
@@ -30,29 +30,13 @@ export type Task = {
   finished_at?: string | null;
 };
 
-export type ArtifactStatus = {
-  task_id: string;
-  collection_id: string;
-  output_path: string;
-  documents_ready: boolean;
-  document_profiles_ready: boolean;
-  evidence_cards_ready: boolean;
-  comparison_rows_ready: boolean;
-  graph_ready: boolean;
-  sections_ready: boolean;
-  procedure_blocks_ready: boolean;
-  protocol_steps_ready: boolean;
-  graphml_ready: boolean;
-  updated_at: string;
-};
-
 export type TaskListResponse = {
   collection_id: string;
   count: number;
   items: Task[];
 };
 
-export type CreateIndexTaskPayload = {
+export type CreateBuildTaskPayload = {
   additionalContext?: Record<string, unknown> | null;
 };
 
@@ -66,7 +50,7 @@ function normalizeTask(item: unknown): Task | null {
   return {
     task_id: taskId,
     collection_id: collectionId,
-    task_type: String(record.task_type ?? 'index'),
+    task_type: String(record.task_type ?? 'build'),
     status: String(record.status ?? 'queued') as TaskStatus,
     current_stage: String(record.current_stage ?? 'queued') as TaskStage,
     progress_percent:
@@ -83,32 +67,6 @@ function normalizeTask(item: unknown): Task | null {
   };
 }
 
-function normalizeArtifactStatus(item: unknown): ArtifactStatus | null {
-  if (!item || typeof item !== 'object') return null;
-  const record = item as Record<string, unknown>;
-  const taskId = String(record.task_id ?? '').trim();
-  const collectionId = String(record.collection_id ?? '').trim();
-  const outputPath = String(record.output_path ?? '').trim();
-
-  if (!taskId || !collectionId || !outputPath) return null;
-
-  return {
-    task_id: taskId,
-    collection_id: collectionId,
-    output_path: outputPath,
-    documents_ready: Boolean(record.documents_ready),
-    document_profiles_ready: Boolean(record.document_profiles_ready),
-    evidence_cards_ready: Boolean(record.evidence_cards_ready),
-    comparison_rows_ready: Boolean(record.comparison_rows_ready),
-    graph_ready: Boolean(record.graph_ready),
-    sections_ready: Boolean(record.sections_ready),
-    procedure_blocks_ready: Boolean(record.procedure_blocks_ready),
-    protocol_steps_ready: Boolean(record.protocol_steps_ready),
-    graphml_ready: Boolean(record.graphml_ready),
-    updated_at: String(record.updated_at ?? '')
-  };
-}
-
 export function isTaskActive(task: Task | null | undefined) {
   if (!task) return false;
   return task.status === 'queued' || task.status === 'running';
@@ -119,14 +77,14 @@ export function isTaskFinished(task: Task | null | undefined) {
   return task.status === 'completed' || task.status === 'partial_success' || task.status === 'failed';
 }
 
-export async function createIndexTask(collectionId: string, payload: CreateIndexTaskPayload = {}) {
+export async function createBuildTask(collectionId: string, payload: CreateBuildTaskPayload = {}) {
   const body: Record<string, unknown> = {};
 
   if (payload.additionalContext !== undefined) {
     body.additional_context = payload.additionalContext ?? null;
   }
 
-  const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}/tasks/index`, {
+  const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}/tasks/build`, {
     method: 'POST',
     body: JSON.stringify(body)
   });
@@ -171,13 +129,4 @@ export async function listCollectionTasks(
     count: typeof record?.count === 'number' ? record.count : items.length,
     items
   } satisfies TaskListResponse;
-}
-
-export async function getTaskArtifacts(taskId: string) {
-  const data = await requestJson(`/tasks/${encodeURIComponent(taskId)}/artifacts`, { method: 'GET' });
-  const artifacts = normalizeArtifactStatus(data);
-  if (!artifacts) {
-    throw new Error('Artifacts response is missing task_id.');
-  }
-  return artifacts;
 }

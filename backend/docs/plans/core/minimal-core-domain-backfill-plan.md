@@ -20,8 +20,11 @@ Read this plan with:
 
 - [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`../architecture/core-comparison/README.md`](../../architecture/core-comparison/README.md)
 - [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
 - [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
+- [`../historical/comparable-result/core-comparable-result-domain-model-plan.md`](../historical/comparable-result/core-comparable-result-domain-model-plan.md)
+- [`../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md`](../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md)
 
 ## Context
 
@@ -48,9 +51,9 @@ Today the `domain/` package is very small:
 Meanwhile, stable Core semantics currently live elsewhere:
 
 - document-profile classification and suitability heuristics live in
-  [`../../application/core/document_profile_service.py`](../../../application/core/document_profile_service.py)
+  [`../../application/core/semantic_build/document_profile_service.py`](../../../application/core/semantic_build/document_profile_service.py)
 - sample/result/test-condition/baseline semantics live in
-  [`../../application/core/evidence_card_service.py`](../../../application/core/evidence_card_service.py)
+  [`../../application/core/semantic_build/paper_facts_service.py`](../../../application/core/semantic_build/paper_facts_service.py)
 - comparison-row semantics and comparability judgments live in
   [`../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
 - collection and handoff state normalization lives in
@@ -145,8 +148,9 @@ backend/domain/
     values.py
   core/
     document_profile.py
-    evidence_backbone.py
+    paper_facts.py
     comparison.py
+    projection.py
   source/
     collection.py
     artifact_status.py
@@ -168,6 +172,7 @@ That means:
 Stable research semantics:
 
 - `DocumentProfile`
+- `MethodFact`
 - `EvidenceAnchor`
 - `CharacterizationObservation`
 - `StructureFeature`
@@ -175,7 +180,12 @@ Stable research semantics:
 - `BaselineReference`
 - `SampleVariant`
 - `MeasurementResult`
-- `ComparisonRow`
+- `EvidenceCardView`
+- `ComparableResult`
+- `CollectionComparableResult`
+- `ComparisonAssessment`
+- `ComparisonRowRecord` only when it is kept explicitly as a projection record
+  rather than as the semantic center
 
 Stable value and judgment semantics:
 
@@ -209,18 +219,18 @@ blocks into:
 Candidates include:
 
 - epistemic statuses now defined inside
-  [`../../application/core/evidence_card_service.py`](../../../application/core/evidence_card_service.py)
+  [`../../application/core/semantic_build/paper_facts_service.py`](../../../application/core/semantic_build/paper_facts_service.py)
 - comparability and review status literals now defined inside
   [`../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
 - document-kind and suitability classifications now inferred inside
-  [`../../application/core/document_profile_service.py`](../../../application/core/document_profile_service.py)
+  [`../../application/core/semantic_build/document_profile_service.py`](../../../application/core/semantic_build/document_profile_service.py)
 
 ### Core Domain Objects
 
 Move stable Core object definitions into:
 
 - `domain/core/document_profile.py`
-- `domain/core/evidence_backbone.py`
+- `domain/core/paper_facts.py`
 - `domain/core/comparison.py`
 
 The application layer should continue to:
@@ -282,7 +292,7 @@ Actions:
 - add `domain/core/document_profile.py`
 - define a `DocumentProfile` object and supporting classifications
 - move review/protocol-suitability rules out of
-  `application/core/document_profile_service.py`
+  `application/core/semantic_build/document_profile_service.py`
 - keep the service responsible for artifact IO and collection-scoped assembly
 
 Acceptance:
@@ -290,7 +300,7 @@ Acceptance:
 - document-profile decision rules are testable independently of artifact IO
 - application service becomes primarily orchestration and serialization logic
 
-### Wave C: Evidence Backbone Domainization
+### Wave C: Paper-Facts Domainization
 
 Objective:
 
@@ -298,9 +308,10 @@ introduce explicit Core objects for the stable sample/result backbone.
 
 Actions:
 
-- add `domain/core/evidence_backbone.py`
+- add `domain/core/paper_facts.py`
 - define stable dataclasses for:
   - `EvidenceAnchor`
+  - `MethodFact`
   - `CharacterizationObservation`
   - `StructureFeature`
   - `TestCondition`
@@ -311,7 +322,7 @@ Actions:
 
 Acceptance:
 
-- `application/core/evidence_card_service.py` no longer acts as the only
+- `application/core/semantic_build/paper_facts_service.py` no longer acts as the only
   canonical home of these object definitions
 - artifact writers build domain objects before storage normalization
 
@@ -319,11 +330,20 @@ Acceptance:
 
 Objective:
 
-move comparability and review semantics into `domain/core/comparison.py`.
+move comparison semantics and scope-sensitive review semantics into
+`domain/core/comparison.py`, while keeping row projection downstream from the
+semantic center.
 
 Actions:
 
-- define `ComparisonRow`
+- follow the narrowed comparison child plan recorded in
+  [`../../architecture/core-comparison/decision.md`](../../architecture/core-comparison/decision.md)
+- define `ComparableResult`
+- define `CollectionComparableResult`
+- define `ComparisonAssessment`
+- if a row record remains in domain ownership, keep it explicitly
+  projection-only in `domain/core/projection.py` or another equally narrow
+  projection home
 - define comparison judgment inputs and outputs
 - move:
   - comparability status rules
@@ -334,6 +354,8 @@ Actions:
 
 Acceptance:
 
+- comparison semantic logic is centered on comparable results rather than on
+  comparison rows
 - comparison judgment logic is testable without DataFrame-heavy setup
 - comparison service focuses on loading inputs, invoking rules, and writing
   outputs
@@ -364,15 +386,16 @@ The expected implementation slices are:
    - `backend/domain/shared/enums.py`
    - `backend/domain/shared/values.py`
    - `backend/domain/core/document_profile.py`
-   - `backend/domain/core/evidence_backbone.py`
+   - `backend/domain/core/paper_facts.py`
    - `backend/domain/core/comparison.py`
+   - `backend/domain/core/projection.py`
    - later, if justified:
      - `backend/domain/source/collection.py`
      - `backend/domain/source/artifact_status.py`
 
 2. Rewrite application callers:
-   - `backend/application/core/document_profile_service.py`
-   - `backend/application/core/evidence_card_service.py`
+   - `backend/application/core/semantic_build/document_profile_service.py`
+   - `backend/application/core/semantic_build/paper_facts_service.py`
    - `backend/application/core/comparison_service.py`
    - later:
      - `backend/application/source/collection_service.py`
@@ -435,6 +458,12 @@ This plan follows, but does not replace:
   which made the business-layer split visible in package layout
 - [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
   which established the stronger sample/result Core backbone
+- [`../../architecture/core-comparison/decision.md`](../../architecture/core-comparison/decision.md)
+  which is the current authority for `ComparableResult` as the semantic center
+  and `ComparisonRowRecord` as projection
+- [`../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md`](../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md)
+  which retains the original persistence, identity, policy, read-path, and
+  projection-cache rollout lineage
 
 Those plans made the runtime backbone clearer.
 This plan makes the code-level semantic center match that backbone.

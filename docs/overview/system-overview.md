@@ -3,9 +3,10 @@
 ## Purpose
 
 TsingAI-Lens is a collection-oriented literature intelligence system for
-ingesting papers, producing document profiles, evidence cards, comparison
-rows, retained graph/report artifacts, and conditional protocol outputs, and
-exposing those results through a browser-facing API and frontend.
+ingesting papers, producing document profiles, a paper-facts layer, derived
+evidence cards, derived comparison rows, retained graph/report artifacts, and
+conditional protocol outputs, and exposing those results through a
+browser-facing API and frontend.
 
 ## Primary Modules
 
@@ -23,10 +24,10 @@ exposing those results through a browser-facing API and frontend.
 1. Create a collection.
 2. Upload PDF or TXT files into the collection.
 3. Start an index task.
-4. Wait for document profiling, evidence, comparison, and retained downstream
-   artifacts to be generated.
-5. Browse workspace, evidence, comparison, graph, protocol, and report outputs
-   through the frontend or API.
+4. Wait for document profiling, paper-facts extraction, derived evidence and
+   comparison views, and retained downstream artifacts to be generated.
+5. Browse workspace, single-paper facts, evidence, comparison, graph,
+   protocol, and report outputs through the frontend or API.
 
 ## Current Product Direction
 
@@ -34,6 +35,8 @@ The current shared direction for Lens v1 is evidence-first and
 comparison-first:
 
 - evidence and comparison outputs are the primary product value
+- those outputs should be backed by a first-class paper-facts layer rather
+  than by cards alone
 - protocol generation is a conditional branch for suitable collections
 - mixed or review-heavy literature may still produce useful outputs even when
   no final protocol steps are emitted

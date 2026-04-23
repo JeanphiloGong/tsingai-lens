@@ -83,7 +83,8 @@ approval gates, and verification rules.
 ## Product & Module Standards
 
 - The backend should keep the Lens v1 backbone order
-  `document_profiles -> evidence_cards -> comparison_rows -> protocol branch`.
+  `document_profiles -> paper facts family -> comparison_rows /
+  evidence_cards -> protocol branch`.
 - Collection-facing behavior should stay explicit through
   `controllers/source/*`, `controllers/core/*`, `controllers/derived/*`, and
   `controllers/goal/*`.
@@ -211,7 +212,8 @@ approval gates, and verification rules.
   `python3 ../scripts/check_docs_governance.py` from `backend/` or the
   equivalent root command.
 - When changing backend Python code, run the smallest relevant verification
-  available from `backend/`, usually targeted `pytest` or another scoped check.
+  available from `backend/`, usually targeted `pytest` via `uv run` or
+  `./.venv/bin/python -m pytest`, or another scoped check.
 - If the backend environment or dependencies block verification, report
   `not run` and name the blocker precisely.
 

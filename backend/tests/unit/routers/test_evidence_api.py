@@ -14,10 +14,10 @@ except ImportError:  # pragma: no cover
 
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
-from application.core.document_profile_service import DocumentProfileService
-from application.core.evidence_card_service import EvidenceCardService
+from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import evidence as evidence_controller
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -42,7 +42,8 @@ def _write_source_artifacts(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> None:
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
@@ -51,19 +52,19 @@ def evidence_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
     )
 
-    monkeypatch.setattr(evidence_controller, "evidence_card_service", evidence_card_service)
+    monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
 
-    return collection_service, artifact_registry, evidence_card_service
+    return collection_service, artifact_registry, paper_facts_service
 
 
 def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
-    collection_service, _artifact_registry, _evidence_card_service = evidence_services
+    collection_service, _artifact_registry, _paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -76,7 +77,7 @@ def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
 
 
 def test_evidence_route_returns_404_for_missing_collection(evidence_services):
-    _collection_service, _artifact_registry, _evidence_card_service = evidence_services
+    _collection_service, _artifact_registry, _paper_facts_service = evidence_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(evidence_controller.list_collection_evidence_cards("col_missing"))
@@ -92,7 +93,7 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
 ):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _evidence_card_service = evidence_services
+    collection_service, artifact_registry, _paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Empty Evidence Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
@@ -133,7 +134,7 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
 def test_evidence_card_route_returns_single_card(evidence_services, monkeypatch):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _evidence_card_service = evidence_services
+    collection_service, artifact_registry, _paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Single Evidence Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir

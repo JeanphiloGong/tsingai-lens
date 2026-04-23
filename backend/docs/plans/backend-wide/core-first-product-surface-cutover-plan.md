@@ -126,9 +126,16 @@ The current backend state should be read as follows.
 
 ### 1. Core Fact Ownership
 
-Only the Research Intelligence Core may produce stable research fact objects:
+Only the Research Intelligence Core may produce the primary paper-facts layer
+and the Core-derived views built over it.
+
+Primary Core fact objects:
 
 - `document_profiles`
+- the paper-facts family
+
+Core-derived view objects:
+
 - `evidence_cards`
 - `comparison_rows`
 

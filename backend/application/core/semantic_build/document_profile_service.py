@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,21 +23,23 @@ from infra.persistence.backbone_codec import (
     restore_frame_from_storage,
 )
 from application.source.collection_service import CollectionService
-from application.core.core_semantic_version import (
+from .core_semantic_version import (
     core_semantic_rebuild_required,
     purge_stale_core_semantic_artifacts,
     write_core_semantic_manifest,
 )
-from application.core.llm_structured_extractor import (
+from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
 )
 from application.source.artifact_input_service import (
     build_document_records,
+    load_blocks_artifact,
     load_collection_inputs,
-    load_sections_artifact,
 )
 from application.source.artifact_registry_service import ArtifactRegistryService
+
+logger = logging.getLogger(__name__)
 
 
 _DOCUMENT_PROFILES_FILE = "document_profiles.parquet"
@@ -66,6 +69,16 @@ _SOURCE_PATH_FIELD_CANDIDATES = (
     "filename",
     "file_name",
     "name",
+)
+
+_PROFILE_HEADINGS_LIMIT = 8
+_PROFILE_LEAD_SECTION_LIMIT = 3
+_PROFILE_LEAD_TEXT_LIMIT = 3000
+_PROFILE_FRONT_MATTER_HEADINGS = (
+    "abstract",
+    "summary",
+    "introduction",
+    "background",
 )
 
 
@@ -158,7 +171,7 @@ class DocumentProfileService:
 
         documents, text_units = load_collection_inputs(output_dir)
         try:
-            sections = load_sections_artifact(output_dir)
+            blocks = load_blocks_artifact(output_dir)
         except FileNotFoundError as exc:
             raise DocumentContentNotReadyError(collection_id, output_dir) from exc
         document_records = build_document_records(documents, text_units)
@@ -169,18 +182,18 @@ class DocumentProfileService:
             raise DocumentNotFoundError(collection_id, document_id)
 
         row = matched.iloc[0]
-        sections_by_doc = self._group_sections_by_document(sections)
+        blocks_by_doc = self._group_blocks_by_document(blocks)
         profile = self._find_profile_row(collection_id, document_id)
         file_lookup = self._build_collection_file_lookup(collection_id)
 
         full_text = str(row.get("text") or "").strip()
-        section_payload = self._build_document_content_sections(
+        block_payload = self._build_document_content_blocks(
             full_text=full_text,
-            sections=sections_by_doc.get(str(document_id), []),
+            blocks=blocks_by_doc.get(str(document_id), []),
         )
-        if not full_text and section_payload:
+        if not full_text and block_payload:
             full_text = "\n\n".join(
-                section["text"] for section in section_payload if str(section.get("text") or "").strip()
+                block["text"] for block in block_payload if str(block.get("text") or "").strip()
             ).strip()
 
         title = self._normalize_optional_text(profile.get("title")) if profile else None
@@ -195,8 +208,8 @@ class DocumentProfileService:
         warnings: list[str] = []
         if not full_text:
             warnings.append("missing_document_text")
-        if not section_payload:
-            warnings.append("section_structure_missing")
+        if not block_payload:
+            warnings.append("block_structure_missing")
 
         return {
             "collection_id": collection_id,
@@ -204,7 +217,7 @@ class DocumentProfileService:
             "title": title,
             "source_filename": source_filename,
             "content_text": full_text,
-            "sections": section_payload,
+            "blocks": block_payload,
             "warnings": warnings,
         }
 
@@ -242,22 +255,39 @@ class DocumentProfileService:
 
         documents, text_units = load_collection_inputs(base_dir)
         try:
-            sections = load_sections_artifact(base_dir)
+            blocks = load_blocks_artifact(base_dir)
         except FileNotFoundError as exc:
             raise DocumentProfilesNotReadyError(collection_id, base_dir) from exc
         document_records = build_document_records(documents, text_units)
-        sections_by_doc = self._group_sections_by_document(sections)
+        blocks_by_doc = self._group_blocks_by_document(blocks)
         file_lookup = self._build_collection_file_lookup(collection_id)
+        logger.info(
+            "Document profile build started collection_id=%s document_count=%s block_count=%s",
+            collection_id,
+            len(document_records),
+            len(blocks),
+        )
 
-        rows = [
-            self._profile_document_row(
+        rows: list[dict[str, Any]] = []
+        for _, row in document_records.iterrows():
+            document_id = str(row.get("paper_id") or row.get("document_id") or "")
+            document_blocks = blocks_by_doc.get(document_id, [])
+            profiled = self._profile_document_row(
                 collection_id=collection_id,
                 row=row,
-                sections=sections_by_doc.get(str(row.get("paper_id")), []),
+                blocks=document_blocks,
                 file_lookup=file_lookup,
             )
-            for _, row in document_records.iterrows()
-        ]
+            logger.info(
+                "Document profile extracted collection_id=%s document_id=%s doc_type=%s protocol_extractable=%s block_count=%s warning_count=%s",
+                collection_id,
+                document_id,
+                profiled.get("doc_type"),
+                profiled.get("protocol_extractable"),
+                len(document_blocks),
+                len(profiled.get("parsing_warnings", [])),
+            )
+            rows.append(profiled)
         profiles = pd.DataFrame(
             rows,
             columns=[
@@ -280,6 +310,12 @@ class DocumentProfileService:
         ).to_parquet(base_dir / _DOCUMENT_PROFILES_FILE, index=False)
         write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
+        logger.info(
+            "Document profile build finished collection_id=%s profile_count=%s protocol_candidate_count=%s",
+            collection_id,
+            len(profiles),
+            self.count_protocol_suitable(profiles),
+        )
         return profiles
 
     def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
@@ -307,7 +343,7 @@ class DocumentProfileService:
         self,
         collection_id: str,
         row: pd.Series,
-        sections: list[dict[str, Any]],
+        blocks: list[dict[str, Any]],
         file_lookup: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         document_id = str(row.get("paper_id") or row.get("document_id") or "")
@@ -322,29 +358,36 @@ class DocumentProfileService:
             source_filename=source_filename,
             file_lookup=file_lookup or {},
         )
-        analysis_title = str(row.get("title") or document_id)
-        text = str(row.get("text") or "")
-        profile_payload = {
-            "collection_id": collection_id,
-            "document_id": document_id,
-            "title": title,
-            "source_filename": source_filename,
-            "analysis_title": analysis_title,
-            "representative_text": text[:12000],
-            "sections": [
+        profile_payload = self._build_document_profile_payload(
+            title=title,
+            source_filename=source_filename,
+            full_text=str(row.get("text") or ""),
+            blocks=blocks,
+        )
+        if self._document_profile_payload_is_insufficient(profile_payload):
+            return DocumentProfile.from_mapping(
                 {
-                    "section_id": str(section.get("section_id") or ""),
-                    "section_type": str(section.get("section_type") or ""),
-                    "heading": self._normalize_optional_text(section.get("heading")),
-                    "text": str(section.get("text") or "")[:4000],
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                    "title": title,
+                    "source_filename": source_filename,
+                    "doc_type": DOC_TYPE_UNCERTAIN,
+                    "protocol_extractable": PROTOCOL_EXTRACTABLE_UNCERTAIN,
+                    "protocol_extractability_signals": [],
+                    "parsing_warnings": ["insufficient_content"],
+                    "confidence": 0.0,
                 }
-                for section in sections
-                if isinstance(section, dict)
-            ],
-        }
+            ).to_record()
+
         extracted = self._get_structured_extractor().extract_document_profile(
             profile_payload
         )
+        parsing_warnings = list(extracted.parsing_warnings)
+        if (
+            extracted.doc_type == DOC_TYPE_UNCERTAIN
+            or extracted.protocol_extractable == PROTOCOL_EXTRACTABLE_UNCERTAIN
+        ) and "classification_uncertain" not in parsing_warnings:
+            parsing_warnings.append("classification_uncertain")
         normalized = DocumentProfile.from_mapping(
             {
                 "document_id": document_id,
@@ -358,11 +401,111 @@ class DocumentProfileService:
                 "protocol_extractability_signals": list(
                     extracted.protocol_extractability_signals
                 ),
-                "parsing_warnings": list(extracted.parsing_warnings),
+                "parsing_warnings": parsing_warnings,
                 "confidence": extracted.confidence,
             }
         )
         return normalized.to_record()
+
+    def _build_document_profile_payload(
+        self,
+        *,
+        title: str | None,
+        source_filename: str | None,
+        full_text: str,
+        blocks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "title": title,
+            "source_filename": source_filename,
+            "abstract_or_lead_text": self._select_document_profile_lead_text(
+                blocks,
+                full_text,
+            ),
+            "headings": self._collect_document_profile_headings(blocks),
+        }
+
+    def _document_profile_payload_is_insufficient(
+        self,
+        payload: dict[str, Any],
+    ) -> bool:
+        lead_text = self._normalize_optional_text(payload.get("abstract_or_lead_text"))
+        headings = [
+            str(item).strip()
+            for item in payload.get("headings", [])
+            if str(item).strip()
+        ]
+        return lead_text is None and not headings
+
+    def _collect_document_profile_headings(
+        self,
+        blocks: list[dict[str, Any]],
+    ) -> list[str]:
+        headings: list[str] = []
+        seen: set[str] = set()
+        for block in self._ordered_profile_blocks(blocks):
+            if str(block.get("block_type") or "") != "heading":
+                continue
+            heading = self._normalize_optional_text(block.get("text"))
+            if heading is None:
+                continue
+            normalized_heading = heading.casefold()
+            if normalized_heading in seen:
+                continue
+            seen.add(normalized_heading)
+            headings.append(heading)
+            if len(headings) >= _PROFILE_HEADINGS_LIMIT:
+                break
+        return headings
+
+    def _select_document_profile_lead_text(
+        self,
+        blocks: list[dict[str, Any]],
+        full_text: str,
+    ) -> str | None:
+        ordered_blocks = self._ordered_profile_blocks(blocks)
+        for block in ordered_blocks:
+            if str(block.get("block_type") or "") in {"heading", "title"}:
+                continue
+            heading_path = self._normalize_optional_text(block.get("heading_path")) or ""
+            block_text = self._normalize_optional_text(block.get("text"))
+            if block_text is None:
+                continue
+            if any(marker in heading_path.casefold() for marker in _PROFILE_FRONT_MATTER_HEADINGS):
+                return block_text[:_PROFILE_LEAD_TEXT_LIMIT]
+
+        lead_chunks: list[str] = []
+        total_length = 0
+        for block in ordered_blocks:
+            if str(block.get("block_type") or "") in {"heading", "title"}:
+                continue
+            block_text = self._normalize_optional_text(block.get("text"))
+            if block_text is None:
+                continue
+            lead_chunks.append(block_text)
+            total_length += len(block_text)
+            if (
+                len(lead_chunks) >= _PROFILE_LEAD_SECTION_LIMIT
+                or total_length >= _PROFILE_LEAD_TEXT_LIMIT
+            ):
+                break
+
+        if lead_chunks:
+            return "\n\n".join(lead_chunks)[:_PROFILE_LEAD_TEXT_LIMIT]
+
+        normalized_full_text = self._normalize_optional_text(full_text)
+        if normalized_full_text is None:
+            return None
+        return normalized_full_text[:_PROFILE_LEAD_TEXT_LIMIT]
+
+    def _ordered_profile_blocks(
+        self,
+        blocks: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return sorted(
+            (block for block in blocks if isinstance(block, dict)),
+            key=lambda item: self._safe_int(item.get("block_order"), default=0),
+        )
 
     def summarize_document_profiles(self, profiles: pd.DataFrame) -> dict[str, Any]:
         normalized = self._normalize_profiles_table(profiles, None)
@@ -393,67 +536,40 @@ class DocumentProfileService:
             )
 
         normalized = profiles.copy()
-        for column in ("title", "source_filename"):
-            if column not in normalized.columns:
-                normalized[column] = None
         if collection_id is not None and "collection_id" not in normalized.columns:
             normalized["collection_id"] = collection_id
-        for column in ("title", "source_filename"):
-            normalized[column] = normalized[column].apply(self._normalize_optional_text)
-        if "protocol_extractability_signals" in normalized.columns:
-            normalized["protocol_extractability_signals"] = normalized[
-                "protocol_extractability_signals"
-            ].apply(self._normalize_string_list)
-        if "parsing_warnings" in normalized.columns:
-            normalized["parsing_warnings"] = normalized["parsing_warnings"].apply(
-                self._normalize_string_list
-            )
-        if "confidence" in normalized.columns:
-            normalized["confidence"] = normalized["confidence"].apply(
-                lambda value: round(float(value or 0.0), 2)
-            )
-        return normalized[
-            [
-                "document_id",
-                "collection_id",
-                "title",
-                "source_filename",
-                "doc_type",
-                "protocol_extractable",
-                "protocol_extractability_signals",
-                "parsing_warnings",
-                "confidence",
-            ]
+
+        columns = [
+            "document_id",
+            "collection_id",
+            "title",
+            "source_filename",
+            "doc_type",
+            "protocol_extractable",
+            "protocol_extractability_signals",
+            "parsing_warnings",
+            "confidence",
         ]
+        records = [
+            DocumentProfile.from_mapping(dict(row)).to_record()
+            for _, row in normalized.iterrows()
+        ]
+        return pd.DataFrame(records, columns=columns)
 
     def _serialize_profile_row(self, row: pd.Series) -> dict[str, Any]:
-        return {
-            "document_id": str(row.get("document_id") or ""),
-            "collection_id": str(row.get("collection_id") or ""),
-            "title": self._normalize_optional_text(row.get("title")),
-            "source_filename": self._normalize_optional_text(row.get("source_filename")),
-            "doc_type": str(row.get("doc_type") or DOC_TYPE_UNCERTAIN),
-            "protocol_extractable": str(
-                row.get("protocol_extractable") or PROTOCOL_EXTRACTABLE_UNCERTAIN
-            ),
-            "protocol_extractability_signals": self._normalize_string_list(
-                row.get("protocol_extractability_signals")
-            ),
-            "parsing_warnings": self._normalize_string_list(row.get("parsing_warnings")),
-            "confidence": round(float(row.get("confidence") or 0.0), 2),
-        }
+        return DocumentProfile.from_mapping(dict(row)).to_record()
 
-    def _group_sections_by_document(
+    def _group_blocks_by_document(
         self,
-        sections: pd.DataFrame,
+        blocks: pd.DataFrame,
     ) -> dict[str, list[dict[str, Any]]]:
-        if sections is None or sections.empty:
+        if blocks is None or blocks.empty:
             return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for _, row in sections.iterrows():
+        for _, row in blocks.iterrows():
             document_id = str(
-                row.get("paper_id")
-                or row.get("document_id")
+                row.get("document_id")
+                or row.get("paper_id")
                 or row.get("id")
                 or ""
             )
@@ -497,26 +613,26 @@ class DocumentProfileService:
             return None
         return dict(matched.iloc[0])
 
-    def _build_document_content_sections(
+    def _build_document_content_blocks(
         self,
         full_text: str,
-        sections: list[dict[str, Any]],
+        blocks: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        ordered_sections = sorted(
-            (section for section in sections if isinstance(section, dict)),
-            key=lambda item: self._safe_int(item.get("order"), default=0),
+        ordered_blocks = sorted(
+            (block for block in blocks if isinstance(block, dict)),
+            key=lambda item: self._safe_int(item.get("block_order"), default=0),
         )
         payload: list[dict[str, Any]] = []
         cursor = 0
 
-        for index, section in enumerate(ordered_sections, start=1):
-            section_text = str(section.get("text") or "").strip()
-            if not section_text:
+        for index, block in enumerate(ordered_blocks, start=1):
+            block_text = str(block.get("text") or "").strip()
+            if not block_text:
                 continue
 
             start_offset, end_offset = self._locate_text_span(
                 full_text,
-                section_text,
+                block_text,
                 cursor,
             )
             if end_offset is not None:
@@ -524,12 +640,13 @@ class DocumentProfileService:
 
             payload.append(
                 {
-                    "section_id": str(section.get("section_id") or f"section_{index}"),
-                    "heading": self._normalize_optional_text(section.get("heading")),
-                    "section_type": self._normalize_optional_text(section.get("section_type")),
-                    "order": self._safe_int(section.get("order"), default=index),
-                    "text": section_text,
-                    "text_unit_ids": self._normalize_string_list(section.get("text_unit_ids")),
+                    "block_id": str(block.get("block_id") or f"block_{index}"),
+                    "block_type": self._normalize_optional_text(block.get("block_type")),
+                    "heading_path": self._normalize_optional_text(block.get("heading_path")),
+                    "heading_level": self._safe_int(block.get("heading_level"), default=0),
+                    "order": self._safe_int(block.get("block_order"), default=index),
+                    "text": block_text,
+                    "text_unit_ids": self._normalize_string_list(block.get("text_unit_ids")),
                     "start_offset": start_offset,
                     "end_offset": end_offset,
                 }
@@ -541,9 +658,10 @@ class DocumentProfileService:
         if full_text.strip():
             return [
                 {
-                    "section_id": "document_body",
-                    "heading": "Document body",
-                    "section_type": "full_text",
+                    "block_id": "document_body",
+                    "block_type": "full_text",
+                    "heading_path": None,
+                    "heading_level": 0,
                     "order": 1,
                     "text": full_text,
                     "text_unit_ids": [],

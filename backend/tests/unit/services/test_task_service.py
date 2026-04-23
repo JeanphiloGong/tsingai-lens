@@ -6,9 +6,9 @@ from application.source.task_service import TaskService
 def test_task_service_lists_collection_tasks_with_status_and_offset(tmp_path):
     task_service = TaskService(tmp_path / "tasks")
 
-    task_a = task_service.create_task("col_a", "index")
-    task_b = task_service.create_task("col_a", "index")
-    task_c = task_service.create_task("col_b", "index")
+    task_a = task_service.create_task("col_a", "build")
+    task_b = task_service.create_task("col_a", "build")
+    task_c = task_service.create_task("col_b", "build")
 
     task_service.update_task(task_a["task_id"], status="completed", progress_percent=100)
     task_service.update_task(task_b["task_id"], status="failed", progress_percent=35)
@@ -24,10 +24,10 @@ def test_task_service_lists_collection_tasks_with_status_and_offset(tmp_path):
     assert [item["task_id"] for item in paged] == [task_a["task_id"]]
 
 
-def test_task_service_normalizes_legacy_public_stage_aliases(tmp_path):
+def test_task_service_preserves_source_build_stage_values_without_aliases(tmp_path):
     task_service = TaskService(tmp_path / "tasks")
 
-    task = task_service.create_task("col_a", "index")
+    task = task_service.create_task("col_a", "build")
     stored = task_service.repository.read_task(task["task_id"])
     assert stored is not None
 
@@ -35,22 +35,22 @@ def test_task_service_normalizes_legacy_public_stage_aliases(tmp_path):
         task["task_id"],
         {
             **stored,
-            "current_stage": "graphrag_index_started",
+            "current_stage": "source_artifacts_started",
         },
     )
 
     fetched = task_service.get_task(task["task_id"])
-    assert fetched["current_stage"] == "source_index_started"
+    assert fetched["current_stage"] == "source_artifacts_started"
 
     listed = task_service.list_tasks(collection_id="col_a")
-    assert listed[0]["current_stage"] == "source_index_started"
+    assert listed[0]["current_stage"] == "source_artifacts_started"
 
     updated = task_service.update_task(
         task["task_id"],
-        current_stage="graphrag_index_completed",
+        current_stage="source_artifacts_completed",
     )
-    assert updated["current_stage"] == "source_index_completed"
+    assert updated["current_stage"] == "source_artifacts_completed"
 
     persisted = task_service.repository.read_task(task["task_id"])
     assert persisted is not None
-    assert persisted["current_stage"] == "source_index_completed"
+    assert persisted["current_stage"] == "source_artifacts_completed"

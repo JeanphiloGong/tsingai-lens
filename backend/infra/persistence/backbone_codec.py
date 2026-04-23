@@ -72,4 +72,13 @@ def _encode_json_value(value: Any) -> str:
 
 
 def _decode_json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                return normalize_backbone_value(parser(text))
+            except (ValueError, SyntaxError, json.JSONDecodeError, TypeError):
+                continue
     return normalize_backbone_value(value)

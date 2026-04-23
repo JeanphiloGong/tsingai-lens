@@ -179,7 +179,7 @@ Core:
 - `application/documents/service.py`
   -> `application/core/document_profile_service.py`
 - `application/evidence/service.py`
-  -> `application/core/evidence_card_service.py`
+  -> `application/core/paper_facts_service.py`
 - `application/comparisons/service.py`
   -> `application/core/comparison_service.py`
 - `application/workspace/service.py`

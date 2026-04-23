@@ -11,7 +11,12 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
-from infra.source.runtime.source_evidence import build_sections, build_table_cells
+from domain.core.comparison import (
+    ComparableResult,
+    build_collection_assessment_input_fingerprint,
+    build_comparison_row_id,
+)
+from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 try:
     from fastapi.testclient import TestClient
@@ -26,7 +31,7 @@ API_V1_PREFIX = "/api/v1"
 
 
 class DummyWorkflowOutput:
-    def __init__(self, workflow: str = "index", errors: list[str] | None = None):
+    def __init__(self, workflow: str = "build", errors: list[str] | None = None):
         self.workflow = workflow
         self.errors = errors
 
@@ -52,7 +57,7 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
-def _write_index_outputs(output_dir: Path) -> None:
+def _write_source_artifact_outputs(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     documents = pd.DataFrame(
         [
@@ -93,7 +98,9 @@ def _write_index_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
+    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
@@ -145,28 +152,160 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
             }
         ]
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": collection_id,
-                "source_document_id": "paper-1",
-                "supporting_evidence_ids": ["ev-1"],
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "property_normalized": "conductivity",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-                "value": 12.0,
-                "unit": "mS/cm",
-            }
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    comparable_result, scoped_result, _row_id = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-graph-1",
+        source_document_id="paper-1",
+        variant_id=None,
+        variant_label=None,
+        variable_axis=None,
+        variable_value=None,
+        baseline_reference="as-prepared",
+        result_source_type="text",
+        result_type="scalar",
+        result_summary="12 mS/cm",
+        supporting_evidence_ids=["ev-1"],
+        supporting_anchor_ids=["anchor-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="700 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=12.0,
+        unit="mS/cm",
+        sort_order=0,
+    )
+    pd.DataFrame([comparable_result]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame([scoped_result]).to_parquet(
+        output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
 
 
-def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
+def _build_semantic_comparison_record(
+    *,
+    collection_id: str,
+    comparable_result_id: str,
+    source_document_id: str,
+    variant_id: str | None,
+    variant_label: str | None,
+    variable_axis: str | None,
+    variable_value,
+    baseline_reference: str | None,
+    result_source_type: str | None,
+    result_type: str,
+    result_summary: str,
+    supporting_evidence_ids: list[str],
+    supporting_anchor_ids: list[str],
+    characterization_observation_ids: list[str],
+    structure_feature_ids: list[str],
+    material_system_normalized: str,
+    process_normalized: str,
+    property_normalized: str,
+    baseline_normalized: str,
+    test_condition_normalized: str,
+    comparability_status: str,
+    comparability_warnings: list[str],
+    comparability_basis: list[str],
+    requires_expert_review: bool,
+    assessment_epistemic_status: str,
+    missing_critical_context: list[str],
+    value: float | None,
+    unit: str | None,
+    sort_order: int,
+) -> tuple[dict, dict, str]:
+    comparable_result = {
+        "comparable_result_id": comparable_result_id,
+        "source_result_id": f"res-{comparable_result_id}",
+        "source_document_id": source_document_id,
+        "binding": {
+            "variant_id": variant_id,
+            "baseline_id": f"base-{comparable_result_id}" if baseline_reference else None,
+            "test_condition_id": (
+                f"tc-{comparable_result_id}" if test_condition_normalized else None
+            ),
+        },
+        "normalized_context": {
+            "material_system_normalized": material_system_normalized,
+            "process_normalized": process_normalized,
+            "baseline_normalized": baseline_normalized,
+            "test_condition_normalized": test_condition_normalized,
+        },
+        "axis": {
+            "axis_name": variable_axis,
+            "axis_value": variable_value,
+            "axis_unit": None,
+        },
+        "value": {
+            "property_normalized": property_normalized,
+            "result_type": result_type,
+            "numeric_value": value,
+            "unit": unit,
+            "summary": result_summary,
+            "statistic_type": None,
+            "uncertainty": None,
+        },
+        "evidence": {
+            "direct_anchor_ids": supporting_anchor_ids,
+            "contextual_anchor_ids": [],
+            "evidence_ids": supporting_evidence_ids,
+            "structure_feature_ids": structure_feature_ids,
+            "characterization_observation_ids": characterization_observation_ids,
+            "traceability_status": "direct",
+        },
+        "variant_label": variant_label,
+        "baseline_reference": baseline_reference,
+        "result_source_type": result_source_type,
+        "epistemic_status": assessment_epistemic_status,
+        "normalization_version": "comparable_result_v1",
+    }
+    comparable_record = ComparableResult.from_mapping(comparable_result)
+    scoped_result = {
+        "collection_id": collection_id,
+        "comparable_result_id": comparable_result_id,
+        "assessment": {
+            "missing_critical_context": missing_critical_context,
+            "comparability_basis": comparability_basis,
+            "comparability_warnings": comparability_warnings,
+            "comparability_status": comparability_status,
+            "requires_expert_review": requires_expert_review,
+            "assessment_epistemic_status": assessment_epistemic_status,
+        },
+        "epistemic_status": assessment_epistemic_status,
+        "included": True,
+        "sort_order": sort_order,
+        "policy_family": "default_collection_comparison_policy",
+        "policy_version": "comparison_policy_v1",
+        "comparable_result_normalization_version": "comparable_result_v1",
+        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
+            comparable_record
+        ),
+        "reassessment_triggers": [
+            "policy_family_changed",
+            "policy_version_changed",
+            "comparable_result_normalization_version_changed",
+            "assessment_input_fingerprint_changed",
+        ],
+    }
+    row_id = build_comparison_row_id(
+        collection_id=collection_id,
+        comparable_result_id=comparable_result_id,
+    )
+    return comparable_result, scoped_result, row_id
+
+
+def _create_built_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": name})
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
@@ -177,21 +316,80 @@ def _create_indexed_collection(app_client, name: str = "Composite Set") -> tuple
     )
     assert upload_resp.status_code == 200
 
-    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={})
+    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
     assert task_resp.status_code == 200
     task_id = task_resp.json()["task_id"]
     return collection_id, task_id
+
+
+def test_request_id_is_generated_and_echoed(app_client):
+    response = app_client.get(f"{API_V1_PREFIX}/collections")
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"].startswith("req_")
+
+
+def test_request_id_is_echoed_and_propagated_to_background_build(app_client, monkeypatch):
+    import application.source.collection_build_task_runner as task_runner_module
+    from utils.logger import REQUEST_ID_HEADER, get_request_id
+
+    captured: dict[str, str | None] = {}
+
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
+        captured["bound_request_id"] = get_request_id()
+        output_dir = Path(kwargs["config"].output.base_dir)
+        _write_source_artifact_outputs(output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
+
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Request ID Set"})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    request_id = "client-request-123"
+    task_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
+        json={},
+        headers={REQUEST_ID_HEADER: request_id},
+    )
+
+    assert task_resp.status_code == 200
+    assert task_resp.headers[REQUEST_ID_HEADER] == request_id
+    assert captured["bound_request_id"] == request_id
+
+
+def test_legacy_index_task_route_is_not_registered(app_client):
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Legacy Route"})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={})
+    assert task_resp.status_code == 404
 
 
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
-    from fastapi import FastAPI
     from controllers.source import collections as collections_controller
+    from controllers.core import comparable_results as comparable_results_controller
     from controllers.core import comparisons as comparisons_controller
     from controllers.core import documents as documents_controller
     from controllers.core import evidence as evidence_controller
+    from controllers.core import results as results_controller
     from controllers.goal import intake as goals_controller
     from controllers.derived import graph as graph_controller
     from controllers.derived import protocol as protocol_controller
@@ -204,23 +402,24 @@ def app_client(monkeypatch, tmp_path):
         ReportPatternsResponse,
     )
     import application.derived.graph_service as graph_service_module
-    import application.source.index_task_runner as task_runner_module
+    import application.source.collection_build_task_runner as task_runner_module
     import application.derived.report_service as report_service_module
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
     from application.core.comparison_service import ComparisonService
-    from application.core.document_profile_service import DocumentProfileService
-    from application.core.evidence_card_service import EvidenceCardService
+    from application.core.semantic_build.document_profile_service import DocumentProfileService
+    from application.core.semantic_build.paper_facts_service import PaperFactsService
     from application.goal.brief_service import GoalService
-    from application.source.index_task_runner import IndexTaskRunner
+    from application.source.collection_build_task_runner import CollectionBuildTaskRunner
     from application.source.task_service import TaskService
     from application.core.workspace_overview_service import WorkspaceService
+    from main import create_app
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    evidence_card_service = EvidenceCardService(
+    paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
@@ -228,14 +427,14 @@ def app_client(monkeypatch, tmp_path):
     comparison_service = ComparisonService(
         collection_service,
         artifact_registry,
-        evidence_card_service,
+        paper_facts_service,
     )
-    runner = IndexTaskRunner(
+    runner = CollectionBuildTaskRunner(
         collection_service,
         task_service,
         artifact_registry,
         document_profile_service,
-        evidence_card_service,
+        paper_facts_service,
         comparison_service,
     )
     workspace_service = WorkspaceService(
@@ -250,9 +449,9 @@ def app_client(monkeypatch, tmp_path):
     default_config.parent.mkdir(parents=True, exist_ok=True)
     default_config.write_text("dummy: true\n", encoding="utf-8")
 
-    async def fake_build_index(**kwargs):  # noqa: ANN003
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_index_outputs(output_dir)
+        _write_source_artifact_outputs(output_dir)
         return [DummyWorkflowOutput()]
 
     def fake_list_community_reports(  # noqa: ANN001
@@ -310,16 +509,19 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
-    monkeypatch.setattr(tasks_controller, "index_task_runner", runner)
+    monkeypatch.setattr(tasks_controller, "build_task_runner", runner)
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(Path("placeholder-output"), Path("placeholder-input")))
-    monkeypatch.setattr(task_runner_module, "build_index", fake_build_index)
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
     monkeypatch.setattr(graph_service_module, "collection_service", collection_service)
     monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
-    monkeypatch.setattr(evidence_controller, "evidence_card_service", evidence_card_service)
+    monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
+    monkeypatch.setattr(comparable_results_controller, "comparison_service", comparison_service)
+    monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
+    monkeypatch.setattr(results_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(
         report_service_module,
         "list_community_reports",
@@ -332,25 +534,15 @@ def app_client(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(report_service_module, "list_patterns", fake_list_patterns)
 
-    app = FastAPI()
-    app.include_router(reports_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(collections_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(goals_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(graph_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(protocol_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(tasks_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(workspace_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(documents_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(evidence_controller.router, prefix=API_V1_PREFIX)
-    app.include_router(comparisons_controller.router, prefix=API_V1_PREFIX)
-    return TestClient(app)
+    return TestClient(create_app())
 
 
 def test_collection_task_flow(app_client):
-    collection_id, task_id = _create_indexed_collection(app_client)
+    collection_id, task_id = _create_built_collection(app_client)
 
     task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
     assert task_status.status_code == 200
+    assert task_status.json()["task_type"] == "build"
     assert task_status.json()["status"] == "completed"
     assert task_status.json()["current_stage"] == "artifacts_ready"
 
@@ -360,6 +552,7 @@ def test_collection_task_flow(app_client):
     assert tasks_body["collection_id"] == collection_id
     assert tasks_body["count"] >= 1
     assert tasks_body["items"][0]["task_id"] == task_id
+    assert tasks_body["items"][0]["task_type"] == "build"
 
     completed_tasks = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/tasks",
@@ -382,19 +575,30 @@ def test_collection_task_flow(app_client):
     assert body["structure_features_generated"] is True
     assert body["structure_features_ready"] is False
     assert body["test_conditions_generated"] is True
-    assert body["test_conditions_ready"] is True
+    assert body["test_conditions_ready"] is False
     assert body["baseline_references_generated"] is True
     assert body["baseline_references_ready"] is True
     assert body["sample_variants_generated"] is True
     assert body["sample_variants_ready"] is True
     assert body["measurement_results_generated"] is True
     assert body["measurement_results_ready"] is True
+    assert body["comparable_results_generated"] is True
+    assert body["comparable_results_ready"] is True
+    assert body["collection_comparable_results_generated"] is True
+    assert body["collection_comparable_results_ready"] is True
+    assert body["collection_comparable_results_stale"] is False
     assert body["comparison_rows_generated"] is True
     assert body["comparison_rows_ready"] is True
+    assert body["comparison_rows_stale"] is False
     assert body["graph_generated"] is True
     assert body["graph_ready"] is True
-    assert body["sections_generated"] is True
-    assert body["sections_ready"] is True
+    assert body["graph_stale"] is False
+    assert body["blocks_generated"] is True
+    assert body["blocks_ready"] is True
+    assert body["figures_generated"] is True
+    assert body["figures_ready"] is False
+    assert body["table_rows_generated"] is True
+    assert body["table_rows_ready"] is False
     assert body["table_cells_generated"] is True
     assert body["table_cells_ready"] is False
     assert body["protocol_steps_generated"] is True
@@ -463,6 +667,29 @@ def test_collection_task_flow(app_client):
     assert profile.status_code == 200
     assert profile.json()["document_id"] == document_id
 
+    document_comparison_semantics = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/{document_id}/comparison-semantics"
+    )
+    assert document_comparison_semantics.status_code == 200
+    document_comparison_semantics_body = document_comparison_semantics.json()
+    assert document_comparison_semantics_body["document_id"] == document_id
+    assert document_comparison_semantics_body["count"] >= 1
+    assert document_comparison_semantics_body["items"][0]["source_document_id"] == document_id
+    assert "collection_overlays" in document_comparison_semantics_body["items"][0]
+    assert (
+        document_comparison_semantics_body["items"][0]["collection_overlays"][0]["policy_version"]
+        == "comparison_policy_v1"
+    )
+    assert document_comparison_semantics_body["items"][0]["collection_overlays"][0][
+        "reassessment_triggers"
+    ] == [
+        "policy_family_changed",
+        "policy_version_changed",
+        "comparable_result_normalization_version_changed",
+        "assessment_input_fingerprint_changed",
+    ]
+    assert document_comparison_semantics_body["items"][0]["projected_rows"] is None
+
     evidence_id = evidence_body["items"][0]["evidence_id"]
     evidence_detail = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/evidence/{evidence_id}"
@@ -493,70 +720,76 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
     output_dir = Path(workspace.json()["artifacts"]["output_path"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": collection_id,
-                "source_document_id": "paper-1",
-                "variant_id": "var-1",
-                "variant_label": "A1",
-                "variable_axis": "anneal_temp",
-                "variable_value": 700,
-                "baseline_reference": "as-prepared",
-                "result_source_type": "table",
-                "result_type": "scalar",
-                "result_summary": "12 mS/cm",
-                "supporting_evidence_ids": ["ev-1"],
-                "supporting_anchor_ids": ["anchor-1"],
-                "characterization_observation_ids": [],
-                "structure_feature_ids": [],
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "property_normalized": "conductivity",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-                "comparability_basis": ["baseline_resolved"],
-                "requires_expert_review": False,
-                "assessment_epistemic_status": "normalized_from_evidence",
-                "missing_critical_context": [],
-                "value": 12.0,
-                "unit": "mS/cm",
-            },
-            {
-                "row_id": "cmp-2",
-                "collection_id": collection_id,
-                "source_document_id": "paper-2",
-                "variant_id": "var-2",
-                "variant_label": "B1",
-                "variable_axis": "atmosphere",
-                "variable_value": "air",
-                "baseline_reference": "air annealed",
-                "result_source_type": "text",
-                "result_type": "trend",
-                "result_summary": "Trend reported",
-                "supporting_evidence_ids": ["ev-2"],
-                "supporting_anchor_ids": ["anchor-2"],
-                "characterization_observation_ids": [],
-                "structure_feature_ids": [],
-                "material_system_normalized": "layered oxide",
-                "process_normalized": "air anneal",
-                "property_normalized": "cycle retention",
-                "baseline_normalized": "air annealed",
-                "test_condition_normalized": "cycling",
-                "comparability_status": "limited",
-                "comparability_warnings": [],
-                "comparability_basis": ["baseline_partial"],
-                "requires_expert_review": True,
-                "assessment_epistemic_status": "provisional",
-                "missing_critical_context": [],
-                "value": None,
-                "unit": None,
-            },
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    comparable_result_1, scoped_result_1, row_id_1 = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-1",
+        source_document_id="paper-1",
+        variant_id="var-1",
+        variant_label="A1",
+        variable_axis="anneal_temp",
+        variable_value=700,
+        baseline_reference="as-prepared",
+        result_source_type="table",
+        result_type="scalar",
+        result_summary="12 mS/cm",
+        supporting_evidence_ids=["ev-1"],
+        supporting_anchor_ids=["anchor-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="700 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=12.0,
+        unit="mS/cm",
+        sort_order=0,
+    )
+    comparable_result_2, scoped_result_2, _row_id_2 = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-2",
+        source_document_id="paper-2",
+        variant_id="var-2",
+        variant_label="B1",
+        variable_axis="atmosphere",
+        variable_value="air",
+        baseline_reference="air annealed",
+        result_source_type="text",
+        result_type="trend",
+        result_summary="Trend reported",
+        supporting_evidence_ids=["ev-2"],
+        supporting_anchor_ids=["anchor-2"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="layered oxide",
+        process_normalized="air anneal",
+        property_normalized="cycle retention",
+        baseline_normalized="air annealed",
+        test_condition_normalized="cycling",
+        comparability_status="limited",
+        comparability_warnings=[],
+        comparability_basis=["baseline_partial"],
+        requires_expert_review=True,
+        assessment_epistemic_status="provisional",
+        missing_critical_context=[],
+        value=None,
+        unit=None,
+        sort_order=1,
+    )
+    pd.DataFrame([comparable_result_1, comparable_result_2]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame([scoped_result_1, scoped_result_2]).to_parquet(
+        output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
     comparisons_controller.comparison_service.artifact_registry_service.upsert(
         collection_id,
         output_dir,
@@ -576,7 +809,336 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
     payload = response.json()
     assert payload["count"] == 1
     assert payload["total"] == 1
-    assert payload["items"][0]["row_id"] == "cmp-1"
+    assert payload["items"][0]["row_id"] == row_id_1
+
+
+def test_comparable_results_endpoint_deduplicates_across_collections_without_row_cache(
+    app_client,
+):
+    from controllers.core import comparable_results as comparable_results_controller
+
+    first_create = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Corpus Route A"},
+    )
+    assert first_create.status_code == 200
+    first_collection_id = first_create.json()["collection_id"]
+
+    second_create = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Corpus Route B"},
+    )
+    assert second_create.status_code == 200
+    second_collection_id = second_create.json()["collection_id"]
+
+    first_workspace = app_client.get(
+        f"{API_V1_PREFIX}/collections/{first_collection_id}/workspace"
+    )
+    second_workspace = app_client.get(
+        f"{API_V1_PREFIX}/collections/{second_collection_id}/workspace"
+    )
+    assert first_workspace.status_code == 200
+    assert second_workspace.status_code == 200
+
+    first_output_dir = Path(first_workspace.json()["artifacts"]["output_path"])
+    second_output_dir = Path(second_workspace.json()["artifacts"]["output_path"])
+    first_output_dir.mkdir(parents=True, exist_ok=True)
+    second_output_dir.mkdir(parents=True, exist_ok=True)
+
+    shared_result, first_shared_overlay, _shared_row_id = _build_semantic_comparison_record(
+        collection_id=first_collection_id,
+        comparable_result_id="cres-corpus-shared-1",
+        source_document_id="paper-shared",
+        variant_id="var-1",
+        variant_label="A1",
+        variable_axis=None,
+        variable_value=None,
+        baseline_reference="as-prepared",
+        result_source_type="text",
+        result_type="scalar",
+        result_summary="12 mS/cm",
+        supporting_evidence_ids=["ev-shared-1"],
+        supporting_anchor_ids=["anchor-shared-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="700 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=12.0,
+        unit="mS/cm",
+        sort_order=0,
+    )
+    unique_result, unique_overlay, _unique_row_id = _build_semantic_comparison_record(
+        collection_id=first_collection_id,
+        comparable_result_id="cres-corpus-unique-1",
+        source_document_id="paper-unique",
+        variant_id="var-2",
+        variant_label="B1",
+        variable_axis=None,
+        variable_value=None,
+        baseline_reference="as-prepared",
+        result_source_type="text",
+        result_type="scalar",
+        result_summary="15 mS/cm",
+        supporting_evidence_ids=["ev-unique-1"],
+        supporting_anchor_ids=["anchor-unique-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="750 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=15.0,
+        unit="mS/cm",
+        sort_order=1,
+    )
+    pd.DataFrame([shared_result, unique_result]).to_parquet(
+        first_output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame([first_shared_overlay, unique_overlay]).to_parquet(
+        first_output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+    comparable_results_controller.comparison_service.artifact_registry_service.upsert(
+        first_collection_id,
+        first_output_dir,
+    )
+
+    pd.DataFrame([shared_result]).to_parquet(
+        second_output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    second_shared_overlay = dict(first_shared_overlay)
+    second_shared_overlay["collection_id"] = second_collection_id
+    second_shared_overlay["sort_order"] = 4
+    pd.DataFrame([second_shared_overlay]).to_parquet(
+        second_output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+    comparable_results_controller.comparison_service.artifact_registry_service.upsert(
+        second_collection_id,
+        second_output_dir,
+    )
+
+    response = app_client.get(
+        f"{API_V1_PREFIX}/comparable-results",
+        params={"property_normalized": "conductivity"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert payload["count"] == 2
+    items_by_id = {
+        item["comparable_result_id"]: item
+        for item in payload["items"]
+    }
+    assert items_by_id["cres-corpus-shared-1"]["observed_collection_ids"] == sorted(
+        [first_collection_id, second_collection_id]
+    )
+    assert len(items_by_id["cres-corpus-shared-1"]["collection_overlays"]) == 2
+    assert items_by_id["cres-corpus-unique-1"]["observed_collection_ids"] == [
+        first_collection_id
+    ]
+    assert not (first_output_dir / "comparison_rows.parquet").exists()
+    assert not (second_output_dir / "comparison_rows.parquet").exists()
+
+    detail = app_client.get(
+        f"{API_V1_PREFIX}/comparable-results/cres-corpus-shared-1",
+        params={"collection_id": second_collection_id},
+    )
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["comparable_result_id"] == "cres-corpus-shared-1"
+    assert detail_payload["observed_collection_ids"] == [second_collection_id]
+    assert len(detail_payload["collection_overlays"]) == 1
+    assert detail_payload["collection_overlays"][0]["collection_id"] == second_collection_id
+
+
+def test_collection_results_endpoints_project_product_results_and_workspace_exposes_results(
+    app_client,
+):
+    from controllers.core import workspace as workspace_controller
+
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Result Projection Collection"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    output_dir = Path(workspace.json()["artifacts"]["output_path"])
+
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Result Projection Paper",
+                "source_filename": "paper-1.pdf",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+
+    first_result, first_scoped_result, _ = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-result-1",
+        source_document_id="paper-1",
+        variant_id="var-1",
+        variant_label="Sample A",
+        variable_axis=None,
+        variable_value=None,
+        baseline_reference="as-prepared",
+        result_source_type="text",
+        result_type="scalar",
+        result_summary="12 mS/cm",
+        supporting_evidence_ids=["ev-1"],
+        supporting_anchor_ids=["anchor-1"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="700 C",
+        property_normalized="conductivity",
+        baseline_normalized="as-prepared",
+        test_condition_normalized="EIS",
+        comparability_status="comparable",
+        comparability_warnings=[],
+        comparability_basis=["baseline_resolved"],
+        requires_expert_review=False,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=[],
+        value=12.0,
+        unit="mS/cm",
+        sort_order=0,
+    )
+    second_result, second_scoped_result, _ = _build_semantic_comparison_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-result-2",
+        source_document_id="paper-1",
+        variant_id="var-2",
+        variant_label="Sample B",
+        variable_axis="temperature",
+        variable_value="750 C",
+        baseline_reference="air-annealed",
+        result_source_type="table",
+        result_type="scalar",
+        result_summary="15 mS/cm",
+        supporting_evidence_ids=["ev-2"],
+        supporting_anchor_ids=["anchor-2"],
+        characterization_observation_ids=[],
+        structure_feature_ids=[],
+        material_system_normalized="oxide cathode",
+        process_normalized="750 C",
+        property_normalized="conductivity",
+        baseline_normalized="air-annealed",
+        test_condition_normalized="EIS",
+        comparability_status="limited",
+        comparability_warnings=["baseline drift"],
+        comparability_basis=["test_condition_resolved"],
+        requires_expert_review=True,
+        assessment_epistemic_status="normalized_from_evidence",
+        missing_critical_context=["baseline_reference"],
+        value=15.0,
+        unit="mS/cm",
+        sort_order=1,
+    )
+    pd.DataFrame([first_result, second_result]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame([first_scoped_result, second_scoped_result]).to_parquet(
+        output_dir / "collection_comparable_results.parquet",
+        index=False,
+    )
+    workspace_controller.workspace_service.artifact_registry_service.upsert(
+        collection_id,
+        output_dir,
+    )
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    workspace_body = workspace.json()
+    assert workspace_body["workflow"]["results"]["status"] == "ready"
+    assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
+    assert workspace_body["capabilities"]["can_view_results"] is True
+    assert workspace_body["links"]["results"] == (
+        f"/api/v1/collections/{collection_id}/results"
+    )
+
+    results = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/results",
+        params={"property_normalized": "conductivity"},
+    )
+    assert results.status_code == 200
+    results_payload = results.json()
+    assert results_payload["collection_id"] == collection_id
+    assert results_payload["total"] == 2
+    assert results_payload["count"] == 2
+    assert results_payload["items"][0] == {
+        "result_id": "cres-result-1",
+        "document_id": "paper-1",
+        "document_title": "Result Projection Paper",
+        "material_label": "oxide cathode",
+        "variant_label": "Sample A",
+        "property": "conductivity",
+        "value": 12.0,
+        "unit": "mS/cm",
+        "summary": "12 mS/cm",
+        "baseline": "as-prepared",
+        "test_condition": "EIS",
+        "process": "700 C",
+        "traceability_status": "direct",
+        "comparability_status": "comparable",
+        "requires_expert_review": False,
+    }
+
+    detail = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/results/cres-result-2"
+    )
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["result_id"] == "cres-result-2"
+    assert detail_payload["document"]["title"] == "Result Projection Paper"
+    assert detail_payload["material"]["variant_label"] == "Sample B"
+    assert detail_payload["measurement"]["property"] == "conductivity"
+    assert detail_payload["context"]["baseline"] == "air-annealed"
+    assert detail_payload["assessment"]["comparability_status"] == "limited"
+    assert detail_payload["assessment"]["missing_context"] == ["baseline_reference"]
+    assert detail_payload["evidence"][0]["evidence_id"] == "ev-2"
+    assert detail_payload["actions"]["open_document"] == (
+        f"/collections/{collection_id}/documents/paper-1"
+    )
+    assert detail_payload["actions"]["open_comparisons"].startswith(
+        f"/collections/{collection_id}/comparisons?"
+    )
+
+    comparisons = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/comparisons")
+    assert comparisons.status_code == 200
+    comparison_payload = comparisons.json()
+    assert comparison_payload["items"][0]["result_id"] == "cres-result-1"
 
 
 def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):
@@ -628,7 +1190,8 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     assert graph_detail["collection_id"] == collection_id
     assert "document_profiles.parquet" in graph_detail["missing_artifacts"]
     assert "evidence_cards.parquet" in graph_detail["missing_artifacts"]
-    assert "comparison_rows.parquet" in graph_detail["missing_artifacts"]
+    assert "comparable_results.parquet" in graph_detail["missing_artifacts"]
+    assert "collection_comparable_results.parquet" in graph_detail["missing_artifacts"]
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 409
@@ -658,11 +1221,32 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
         collection_id,
         output_dir,
     )
+    assert not output_dir.joinpath("comparison_rows.parquet").exists()
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    workspace_body = workspace.json()
+    assert workspace_body["status_summary"] == "ready"
+    assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
+    assert workspace_body["artifacts"]["comparison_rows_generated"] is False
+    assert workspace_body["artifacts"]["comparison_rows_ready"] is False
+    assert workspace_body["artifacts"]["collection_comparable_results_stale"] is False
+    assert workspace_body["artifacts"]["comparison_rows_stale"] is False
+    assert workspace_body["artifacts"]["graph_generated"] is True
+    assert workspace_body["artifacts"]["graph_ready"] is True
+    assert workspace_body["artifacts"]["graph_stale"] is False
+    assert workspace_body["capabilities"]["can_view_graph"] is True
+    assert workspace_body["capabilities"]["can_view_comparable_results"] is True
+    assert workspace_body["capabilities"]["can_download_graphml"] is True
+    assert workspace_body["links"]["comparable_results"] == (
+        f"/api/v1/comparable-results?collection_id={collection_id}"
+    )
 
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
     assert graph.status_code == 200
     payload = graph.json()
     assert payload["collection_id"] == collection_id
+    assert not output_dir.joinpath("comparison_rows.parquet").exists()
     assert len(payload["nodes"]) == 7
     assert len(payload["edges"]) == 6
     assert {item["type"] for item in payload["nodes"]} == {
@@ -746,18 +1330,22 @@ def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app
     assert "default_method" not in created_item
 
 
-def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
-    import application.source.index_task_runner as task_runner_module
+def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
+    import application.source.collection_build_task_runner as task_runner_module
 
     captured: dict[str, object] = {}
 
-    async def capturing_build_index(**kwargs):  # noqa: ANN003
+    async def capturing_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_index_outputs(output_dir)
+        _write_source_artifact_outputs(output_dir)
         return [DummyWorkflowOutput()]
 
-    monkeypatch.setattr(task_runner_module, "build_index", capturing_build_index)
+    monkeypatch.setattr(
+        task_runner_module,
+        "build_source_artifacts",
+        capturing_build_source_artifacts,
+    )
 
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
@@ -773,7 +1361,7 @@ def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert upload_resp.status_code == 200
 
     task_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index",
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
         json={
             "method": "fast",
             "is_update_run": True,
@@ -786,6 +1374,7 @@ def test_index_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     task_id = task_resp.json()["task_id"]
     task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
     assert task_status.status_code == 200
+    assert task_status.json()["task_type"] == "build"
     assert task_status.json()["status"] == "completed"
 
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
@@ -810,6 +1399,11 @@ def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_ex
     workspace_body = workspace.json()
     assert workspace_body["artifacts"]["protocol_steps_generated"] is False
     assert workspace_body["artifacts"]["protocol_steps_ready"] is False
+    assert workspace_body["artifacts"]["comparable_results_generated"] is False
+    assert workspace_body["artifacts"]["collection_comparable_results_generated"] is False
+    assert workspace_body["artifacts"]["collection_comparable_results_stale"] is False
+    assert workspace_body["artifacts"]["comparison_rows_stale"] is False
+    assert workspace_body["artifacts"]["graph_stale"] is False
     assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
 
     steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")

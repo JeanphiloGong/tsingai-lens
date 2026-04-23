@@ -68,7 +68,7 @@ This child plan covers:
 
 - document input parsing quality under the current Core path
 - title, source filename, and section fidelity needed by document profiles
-- evidence card extraction quality and traceback quality
+- paper-facts extraction quality, evidence-view quality, and traceback quality
 - comparison row quality, comparability gating, and low-value-row suppression
 - a small benchmark corpus and regression checks for the Core path
 
@@ -86,7 +86,8 @@ This child plan does not cover:
 
 Improve the quality of the existing Core backbone:
 
-`document_profiles -> evidence_cards -> comparison_rows`
+`document_profiles -> paper facts family -> evidence_cards plus
+comparable-result substrate -> row projection`
 
 without changing the five-layer architecture or introducing new product-facing
 layers first.
@@ -118,29 +119,32 @@ Exit criteria:
   title/source fidelity
 - section and text-unit behavior no longer blocks downstream evidence parsing
 
-### Workstream 2: Improve Evidence Card Extraction Quality
+### Workstream 2: Improve Paper-Facts And Evidence-View Quality
 
 Goal:
 
-- increase claim/evidence/condition usefulness without inventing a new fact
-  model
+- improve sample, method, condition, baseline, result, and traceback quality
+  so evidence views stop carrying primary-fact responsibilities they should not
+  own
 
 Primary changes:
 
-- improve claim extraction heuristics
-- improve condition capture and baseline handling
-- tighten traceback requirements for evidence cards
+- improve sample, method, result, condition, and baseline extraction
+- tighten traceback requirements for the fact layer and for evidence cards
+- improve how evidence cards are projected from stronger underlying facts
 - reduce weak cards that do not support collection-facing review
 
 Focus symptoms:
 
 - cards with vague claim text
+- weak or missing sample/result linkage
 - weak or missing condition capture
 - poor linkage back to source text
 - too many cards that add little review value
 
 Exit criteria:
 
+- paper facts are grounded enough to inspect one paper coherently
 - evidence cards are more grounded and collection-reviewable
 - traceback quality is good enough for comparison assembly to trust
 
@@ -155,7 +159,8 @@ Primary changes:
 
 - tighten comparison inclusion rules
 - improve comparability gating
-- normalize condition fields where current heuristics are too loose
+- improve result-to-sample, condition, and baseline linkage before row
+  projection
 - suppress rows that are traceability-poor or structurally low value
 
 Focus symptoms:
@@ -180,8 +185,8 @@ Goal:
 Primary changes:
 
 - define a small representative benchmark corpus
-- add expectation-oriented tests for document profiles, evidence cards, and
-  comparison rows
+- add expectation-oriented tests for document profiles, paper facts, evidence
+  cards, and comparison rows
 - add regression assertions around known failure modes
 - track a short failure taxonomy to guide iteration order
 
@@ -189,7 +194,7 @@ Initial failure taxonomy should at least cover:
 
 - title/source identity errors
 - section boundary errors
-- claim grounding errors
+- fact grounding and anchor errors
 - missing or weak condition capture
 - noisy comparison assembly
 
@@ -202,8 +207,9 @@ Exit criteria:
 
 1. Build a small benchmark corpus and failure taxonomy.
 2. Fix document parsing and identity fidelity first.
-3. Improve evidence extraction over the cleaner parsing output.
-4. Improve comparison assembly over the stronger evidence output.
+3. Improve paper-facts extraction over the cleaner parsing output.
+4. Improve evidence-view projection and comparison assembly over the stronger
+   fact output.
 5. Lock in regression checks before resuming adapter or Goal Consumer work.
 
 ## File Change Plan

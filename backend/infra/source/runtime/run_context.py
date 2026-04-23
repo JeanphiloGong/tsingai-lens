@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Utility functions for the GraphRAG run module."""
+"""Utility functions for the Source runtime."""
 
 from infra.source.runtime.cache.memory_pipeline_cache import InMemoryCache
 from infra.source.runtime.cache.pipeline_cache import PipelineCache

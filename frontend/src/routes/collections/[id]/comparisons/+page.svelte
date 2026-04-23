@@ -160,11 +160,19 @@
 		return Boolean(row.source_document_id && row.evidence_bundle.supporting_evidence_ids.length);
 	}
 
+	function canViewResult(row: ComparisonRow) {
+		return Boolean(row.result_id);
+	}
+
 	function viewSourceHref(row: ComparisonRow) {
 		return buildDocumentViewerHref(collectionId, row.source_document_id, {
 			evidenceId: row.evidence_bundle.supporting_evidence_ids[0] ?? null,
 			returnTo: `${$page.url.pathname}${$page.url.search}`
 		});
+	}
+
+	function viewResultHref(row: ComparisonRow) {
+		return `/collections/${collectionId}/results/${encodeURIComponent(row.result_id)}`;
 	}
 
 	async function updateRouteFilter(name: ComparisonRouteFilterName, value: string) {
@@ -404,6 +412,11 @@
 							<td>{warningText(item)}</td>
 							<td>
 								<div class="table-actions">
+									{#if canViewResult(item)}
+										<a class="btn btn--ghost btn--small" href={viewResultHref(item)}>
+											{$t('overview.nextResults')}
+										</a>
+									{/if}
 									{#if canViewSource(item)}
 										<a class="btn btn--ghost btn--small" href={viewSourceHref(item)}>
 											{$t('traceback.viewSource')}

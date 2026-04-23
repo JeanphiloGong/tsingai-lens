@@ -4,7 +4,7 @@ import logging
 
 import pandas as pd
 
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.input import create_input
 from infra.source.runtime.storage.pipeline_storage import PipelineStorage
 from infra.source.runtime.storage.table_io import write_table_to_storage
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_workflow(
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
     context: PipelineRunContext,
 ) -> WorkflowFunctionOutput:
     """Load and parse input documents into a standard format."""

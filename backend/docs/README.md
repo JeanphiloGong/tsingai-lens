@@ -43,6 +43,9 @@ authority page, current-state page, or implementation lineage.
   Target backend business-domain packaging and controller boundaries
 - [`architecture/goal-core-source-layering.md`](architecture/goal-core-source-layering.md)
   Backend-local five-layer research architecture centered on the Core backbone
+- [`architecture/core-comparison/README.md`](architecture/core-comparison/README.md)
+  Current backend-local authority for the comparison-semantic center and
+  comparable-result substrate
 - [`architecture/application-layer-boundary.md`](architecture/application-layer-boundary.md)
   Backend ADR for HTTP and application ownership separation
 - [`runbooks/backend-ops.md`](runbooks/backend-ops.md)

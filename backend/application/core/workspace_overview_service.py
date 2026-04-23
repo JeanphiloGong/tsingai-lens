@@ -10,7 +10,7 @@ from domain.shared.enums import (
     PROTOCOL_EXTRACTABLE_YES,
 )
 from application.source.collection_service import CollectionService
-from application.core.document_profile_service import (
+from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
@@ -47,6 +47,10 @@ class WorkspaceService:
             "documents_ready": False,
             "document_profiles_generated": False,
             "document_profiles_ready": False,
+            "evidence_anchors_generated": False,
+            "evidence_anchors_ready": False,
+            "method_facts_generated": False,
+            "method_facts_ready": False,
             "evidence_cards_generated": False,
             "evidence_cards_ready": False,
             "characterization_observations_generated": False,
@@ -61,20 +65,29 @@ class WorkspaceService:
             "sample_variants_ready": False,
             "measurement_results_generated": False,
             "measurement_results_ready": False,
+            "comparable_results_generated": False,
+            "comparable_results_ready": False,
+            "collection_comparable_results_generated": False,
+            "collection_comparable_results_ready": False,
+            "collection_comparable_results_stale": False,
             "comparison_rows_generated": False,
             "comparison_rows_ready": False,
+            "comparison_rows_stale": False,
             "graph_generated": False,
             "graph_ready": False,
-            "sections_generated": False,
-            "sections_ready": False,
+            "graph_stale": False,
+            "blocks_generated": False,
+            "blocks_ready": False,
+            "figures_generated": False,
+            "figures_ready": False,
+            "table_rows_generated": False,
+            "table_rows_ready": False,
             "table_cells_generated": False,
             "table_cells_ready": False,
             "procedure_blocks_generated": False,
             "procedure_blocks_ready": False,
             "protocol_steps_generated": False,
             "protocol_steps_ready": False,
-            "graphml_generated": False,
-            "graphml_ready": False,
             "updated_at": self.collection_service.get_collection(collection_id)["updated_at"],
         }
 
@@ -101,6 +114,39 @@ class WorkspaceService:
     ) -> bool:
         return bool(artifacts.get(ready_key))
 
+    def _artifact_stale(
+        self,
+        artifacts: dict,
+        stale_key: str,
+    ) -> bool:
+        return bool(artifacts.get(stale_key))
+
+    def _comparisons_generated(self, artifacts: dict) -> bool:
+        return self._artifact_generated(
+            artifacts,
+            "comparable_results_generated",
+            "comparable_results.parquet",
+        ) and self._artifact_generated(
+            artifacts,
+            "collection_comparable_results_generated",
+            "collection_comparable_results.parquet",
+        )
+
+    def _comparisons_ready(self, artifacts: dict) -> bool:
+        return self._artifact_ready(
+            artifacts,
+            "comparable_results_ready",
+        ) and self._artifact_ready(
+            artifacts,
+            "collection_comparable_results_ready",
+        )
+
+    def _comparisons_stale(self, artifacts: dict) -> bool:
+        return self._artifact_stale(
+            artifacts,
+            "collection_comparable_results_stale",
+        )
+
     def _build_capabilities(self, artifacts: dict) -> dict:
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
         protocol_generated = self._artifact_generated(
@@ -108,8 +154,11 @@ class WorkspaceService:
             "protocol_steps_generated",
             "protocol_steps.parquet",
         )
+        comparisons_generated = self._comparisons_generated(artifacts)
         return {
             "can_view_graph": graph_ready,
+            "can_view_results": comparisons_generated,
+            "can_view_comparable_results": comparisons_generated,
             "can_download_graphml": graph_ready,
             "can_view_protocol_steps": protocol_generated,
             "can_search_protocol": protocol_generated,
@@ -128,6 +177,7 @@ class WorkspaceService:
             "document_profiles_generated",
             "document_profiles.parquet",
         )
+        comparisons_ready = self._comparisons_ready(artifacts)
         if latest_task:
             status = str(latest_task.get("status") or "")
             if status == "running":
@@ -136,14 +186,14 @@ class WorkspaceService:
                 return "attention_required"
             if status == "partial_success":
                 return "partial_ready"
-        if self._artifact_ready(artifacts, "comparison_rows_ready"):
+        if comparisons_ready:
             return "ready"
+        if self._artifact_ready(artifacts, "graph_ready"):
+            return "graph_ready"
         if self._artifact_ready(artifacts, "evidence_cards_ready"):
             return "comparison_pending"
         if self._artifact_ready(artifacts, "document_profiles_ready") or document_profiles_generated:
             return "document_profiled"
-        if self._artifact_ready(artifacts, "graph_ready"):
-            return "graph_ready"
         if file_count > 0:
             return "uploaded"
         return "empty"
@@ -178,9 +228,10 @@ class WorkspaceService:
             "evidence_cards_generated",
             "evidence_cards.parquet",
         )
-        comparisons_generated = self._artifact_generated(
+        comparisons_generated = self._comparisons_generated(artifacts)
+        graph_generated = self._artifact_generated(
             artifacts,
-            "comparison_rows_generated",
+            "graph_generated",
             "comparison_rows.parquet",
         )
         protocol_generated = self._artifact_generated(
@@ -193,7 +244,9 @@ class WorkspaceService:
             "document_profiles_ready",
         ) or document_summary.get("total_documents", 0) > 0
         evidence_ready = self._artifact_ready(artifacts, "evidence_cards_ready")
-        comparison_ready = self._artifact_ready(artifacts, "comparison_rows_ready")
+        comparison_ready = self._comparisons_ready(artifacts)
+        graph_ready = self._artifact_ready(artifacts, "graph_ready")
+        graph_stale = self._artifact_stale(artifacts, "graph_stale")
         protocol_ready = self._artifact_ready(artifacts, "protocol_steps_ready")
         protocol_candidates = (
             document_summary.get("by_protocol_extractable", {}).get(
@@ -204,19 +257,30 @@ class WorkspaceService:
             )
         )
 
-        if file_count == 0:
+        any_generated = (
+            documents_generated
+            or evidence_generated
+            or comparisons_generated
+            or graph_generated
+            or protocol_generated
+        )
+        if file_count == 0 and not any_generated:
             return {
                 "documents": {"status": "not_started", "detail": "No files uploaded."},
+                "results": {"status": "not_started", "detail": "Collection results are not generated yet."},
                 "evidence": {"status": "not_started", "detail": "Evidence cards are not generated yet."},
-                "comparisons": {"status": "not_started", "detail": "Comparison rows are not generated yet."},
-                "protocol": {"status": "not_applicable", "detail": "Protocol branch is unavailable before indexing."},
+                "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
+                "protocol": {"status": "not_applicable", "detail": "Protocol branch is unavailable before collection build."},
+                "graph": {"status": "not_started", "detail": "Graph projection is not generated yet."},
             }
         if task_status == "running":
             return {
                 "documents": {"status": "processing", "detail": "Document profiling is in progress."},
-                "evidence": {"status": "not_started", "detail": "Evidence extraction has not started yet."},
-                "comparisons": {"status": "not_started", "detail": "Comparison rows are not generated yet."},
+                "results": {"status": "not_started", "detail": "Collection results have not been prepared yet."},
+                "evidence": {"status": "not_started", "detail": "Paper facts extraction has not started yet."},
+                "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
                 "protocol": {"status": "not_started", "detail": "Protocol branch has not started yet."},
+                "graph": {"status": "not_started", "detail": "Graph projection has not started yet."},
             }
 
         if documents_ready:
@@ -243,7 +307,7 @@ class WorkspaceService:
         elif evidence_generated:
             evidence_stage = {
                 "status": "limited",
-                "detail": "Evidence extraction completed, but no evidence cards were extracted from this collection.",
+                "detail": "Paper facts extraction completed, but no evidence cards were derived from this collection.",
             }
         elif documents_ready or documents_generated:
             evidence_stage = {
@@ -256,25 +320,57 @@ class WorkspaceService:
                 "detail": "Evidence cards are not generated yet.",
             }
 
+        comparisons_stale = self._comparisons_stale(artifacts)
+        if comparison_ready:
+            results_stage = {
+                "status": "ready",
+                "detail": "Collection results are available.",
+            }
+        elif comparisons_stale:
+            results_stage = {
+                "status": "limited",
+                "detail": "Collection results are stale and require reassessment before they are current again.",
+            }
+        elif comparisons_generated:
+            results_stage = {
+                "status": "limited",
+                "detail": "Result semantics were generated, but no collection-scoped results are currently available.",
+            }
+        elif documents_ready or documents_generated:
+            results_stage = {
+                "status": "not_started",
+                "detail": "Collection results are not generated yet.",
+            }
+        else:
+            results_stage = {
+                "status": "not_started",
+                "detail": "Collection results are not generated yet.",
+            }
+
         if comparison_ready:
             comparisons_stage = {
                 "status": "ready",
-                "detail": "Comparison rows are available.",
+                "detail": "Collection-scoped comparisons are available.",
+            }
+        elif comparisons_stale:
+            comparisons_stage = {
+                "status": "limited",
+                "detail": "Collection-scoped comparisons are stale and require reassessment before they are current again.",
             }
         elif comparisons_generated:
             comparisons_stage = {
                 "status": "limited",
-                "detail": "Comparison generation completed, but no rows were suitable for structured comparison.",
+                "detail": "Comparison semantics were generated, but no collection-scoped results were suitable for structured comparison.",
             }
         elif evidence_ready or evidence_generated or documents_ready or documents_generated:
             comparisons_stage = {
                 "status": "not_started",
-                "detail": "Comparison rows are not generated yet.",
+                "detail": "Collection-scoped comparisons are not generated yet.",
             }
         else:
             comparisons_stage = {
                 "status": "not_started",
-                "detail": "Comparison rows are not generated yet.",
+                "detail": "Collection-scoped comparisons are not generated yet.",
             }
 
         if protocol_ready:
@@ -300,11 +396,39 @@ class WorkspaceService:
                 "detail": "Protocol branch has not started yet.",
             }
 
+        if graph_ready:
+            graph_stage = {
+                "status": "ready",
+                "detail": "Graph view is available.",
+            }
+        elif graph_stale:
+            graph_stage = {
+                "status": "limited",
+                "detail": "Graph inputs are stale and require reassessment before graph projection is current again.",
+            }
+        elif graph_generated:
+            graph_stage = {
+                "status": "limited",
+                "detail": "Graph inputs were generated, but no current graph projection is available yet.",
+            }
+        elif comparison_ready or comparisons_generated:
+            graph_stage = {
+                "status": "not_started",
+                "detail": "Graph projection is not generated yet.",
+            }
+        else:
+            graph_stage = {
+                "status": "not_started",
+                "detail": "Graph projection has not started yet.",
+            }
+
         return {
             "documents": documents_stage,
+            "results": results_stage,
             "evidence": evidence_stage,
             "comparisons": comparisons_stage,
             "protocol": protocol_stage,
+            "graph": graph_stage,
         }
 
     def _build_warnings(self, document_summary: dict) -> list[dict]:
@@ -347,16 +471,23 @@ class WorkspaceService:
 
     def _build_links(self, collection_id: str, artifacts: dict) -> dict:
         payload = {
+            "documents": f"/api/v1/collections/{collection_id}/documents/profiles",
             "documents_profiles": f"/api/v1/collections/{collection_id}/documents/profiles",
+            "evidence": f"/api/v1/collections/{collection_id}/evidence/cards",
             "evidence_cards": f"/api/v1/collections/{collection_id}/evidence/cards",
             "comparisons": f"/api/v1/collections/{collection_id}/comparisons",
+            "results": f"/api/v1/collections/{collection_id}/results",
+            "comparable_results": f"/api/v1/comparable-results?collection_id={collection_id}",
+            "protocol": None,
             "protocol_steps": None,
+            "graph": f"/api/v1/collections/{collection_id}/graph",
         }
         if self._artifact_generated(
             artifacts,
             "protocol_steps_generated",
             "protocol_steps.parquet",
         ):
+            payload["protocol"] = f"/api/v1/collections/{collection_id}/protocol/steps"
             payload["protocol_steps"] = f"/api/v1/collections/{collection_id}/protocol/steps"
         return payload
 
@@ -396,6 +527,10 @@ class WorkspaceService:
                 "documents_ready": bool(artifacts.get("documents_ready")),
                 "document_profiles_generated": bool(artifacts.get("document_profiles_generated")),
                 "document_profiles_ready": bool(artifacts.get("document_profiles_ready")),
+                "evidence_anchors_generated": bool(artifacts.get("evidence_anchors_generated")),
+                "evidence_anchors_ready": bool(artifacts.get("evidence_anchors_ready")),
+                "method_facts_generated": bool(artifacts.get("method_facts_generated")),
+                "method_facts_ready": bool(artifacts.get("method_facts_ready")),
                 "evidence_cards_generated": bool(artifacts.get("evidence_cards_generated")),
                 "evidence_cards_ready": bool(artifacts.get("evidence_cards_ready")),
                 "characterization_observations_generated": bool(
@@ -426,20 +561,39 @@ class WorkspaceService:
                 "measurement_results_ready": bool(
                     artifacts.get("measurement_results_ready")
                 ),
+                "comparable_results_generated": bool(
+                    artifacts.get("comparable_results_generated")
+                ),
+                "comparable_results_ready": bool(
+                    artifacts.get("comparable_results_ready")
+                ),
+                "collection_comparable_results_generated": bool(
+                    artifacts.get("collection_comparable_results_generated")
+                ),
+                "collection_comparable_results_ready": bool(
+                    artifacts.get("collection_comparable_results_ready")
+                ),
+                "collection_comparable_results_stale": bool(
+                    artifacts.get("collection_comparable_results_stale")
+                ),
                 "comparison_rows_generated": bool(artifacts.get("comparison_rows_generated")),
                 "comparison_rows_ready": bool(artifacts.get("comparison_rows_ready")),
+                "comparison_rows_stale": bool(artifacts.get("comparison_rows_stale")),
                 "graph_generated": bool(artifacts.get("graph_generated")),
                 "graph_ready": bool(artifacts.get("graph_ready")),
-                "sections_generated": bool(artifacts.get("sections_generated")),
-                "sections_ready": bool(artifacts.get("sections_ready")),
+                "graph_stale": bool(artifacts.get("graph_stale")),
+                "blocks_generated": bool(artifacts.get("blocks_generated")),
+                "blocks_ready": bool(artifacts.get("blocks_ready")),
+                "figures_generated": bool(artifacts.get("figures_generated")),
+                "figures_ready": bool(artifacts.get("figures_ready")),
+                "table_rows_generated": bool(artifacts.get("table_rows_generated")),
+                "table_rows_ready": bool(artifacts.get("table_rows_ready")),
                 "table_cells_generated": bool(artifacts.get("table_cells_generated")),
                 "table_cells_ready": bool(artifacts.get("table_cells_ready")),
                 "procedure_blocks_generated": bool(artifacts.get("procedure_blocks_generated")),
                 "procedure_blocks_ready": bool(artifacts.get("procedure_blocks_ready")),
                 "protocol_steps_generated": bool(artifacts.get("protocol_steps_generated")),
                 "protocol_steps_ready": bool(artifacts.get("protocol_steps_ready")),
-                "graphml_generated": bool(artifacts.get("graphml_generated")),
-                "graphml_ready": bool(artifacts.get("graphml_ready")),
                 "updated_at": artifacts["updated_at"],
             },
             "workflow": self._build_workflow(len(files), latest_task, artifacts, document_summary),

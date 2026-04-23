@@ -7,7 +7,7 @@ import logging
 from typing import ClassVar
 
 from infra.source.config.pipeline_mode import IndexingMethod
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.typing.pipeline import Pipeline
 from infra.source.runtime.typing.workflow import WorkflowFunction
 
@@ -39,7 +39,7 @@ class PipelineFactory:
     @classmethod
     def create_pipeline(
         cls,
-        config: GraphRagConfig,
+        config: SourceRuntimeConfig,
         method: IndexingMethod | str = IndexingMethod.Standard,
     ) -> Pipeline:
         """Create a pipeline generator."""
@@ -50,11 +50,7 @@ class PipelineFactory:
 
 # --- Register default implementations ---
 _source_handoff_workflows = [
-    "create_base_text_units",
-    "create_final_documents",
-    "create_final_text_units",
-    "create_sections",
-    "create_table_cells",
+    "create_source_artifacts",
 ]
 PipelineFactory.register_pipeline(
     IndexingMethod.Standard, ["load_input_documents", *_source_handoff_workflows]

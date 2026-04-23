@@ -12,26 +12,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_PUBLIC_STAGE_ALIASES = {
-    "graphrag_index_started": "source_index_started",
-    "graphrag_index_completed": "source_index_completed",
-}
-
-
-def _normalize_stage(stage: str | None) -> str | None:
-    if stage is None:
-        return None
-    return _PUBLIC_STAGE_ALIASES.get(stage, stage)
-
-
-def _normalize_task_record(record: dict | None) -> dict | None:
-    if record is None:
-        return None
-    normalized = dict(record)
-    normalized["current_stage"] = _normalize_stage(record.get("current_stage"))
-    return normalized
-
-
 class TaskService:
     """File-backed task registry for collection processing tasks."""
 
@@ -43,7 +23,7 @@ class TaskService:
         self.repository = repository or build_task_repository(root_dir)
         self.root_dir = self.repository.root_dir
 
-    def create_task(self, collection_id: str, task_type: str = "index") -> dict:
+    def create_task(self, collection_id: str, task_type: str = "build") -> dict:
         task_id = f"task_{uuid4().hex[:12]}"
         now = _now_iso()
         record = {
@@ -68,7 +48,7 @@ class TaskService:
         record = self.repository.read_task(task_id)
         if record is None:
             raise FileNotFoundError(f"task not found: {task_id}")
-        return _normalize_task_record(record) or {}
+        return dict(record)
 
     def list_tasks(
         self,
@@ -79,7 +59,7 @@ class TaskService:
     ) -> list[dict]:
         tasks: list[dict] = []
         for record in self.repository.list_tasks():
-            record = _normalize_task_record(record) or {}
+            record = dict(record)
             if collection_id and record.get("collection_id") != collection_id:
                 continue
             if status and record.get("status") != status:
@@ -97,12 +77,10 @@ class TaskService:
         if stored is None:
             raise FileNotFoundError(f"task not found: {task_id}")
         record = dict(stored)
-        if "current_stage" in fields:
-            fields["current_stage"] = _normalize_stage(fields.get("current_stage"))
         record.update(fields)
         record["updated_at"] = _now_iso()
         self.repository.write_task(task_id, record)
-        return _normalize_task_record(record) or {}
+        return dict(record)
 
     def append_error(self, task_id: str, error: str) -> dict:
         stored = self.repository.read_task(task_id)
@@ -112,4 +90,4 @@ class TaskService:
         record.setdefault("errors", []).append(error)
         record["updated_at"] = _now_iso()
         self.repository.write_task(task_id, record)
-        return _normalize_task_record(record) or {}
+        return dict(record)

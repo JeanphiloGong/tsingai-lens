@@ -66,8 +66,17 @@ class ComparisonRowItemResponse(BaseModel):
     """Single collection-facing comparison row."""
 
     row_id: str = Field(..., description="comparison row ID")
+    result_id: str = Field(..., description="对应的结果 ID")
     collection_id: str = Field(..., description="集合 ID")
     source_document_id: str = Field(..., description="来源文档 ID")
+    supporting_evidence_ids: list[str] = Field(default_factory=list, description="支撑 evidence IDs")
+    material_system_normalized: str = Field(..., description="标准化材料体系")
+    process_normalized: str = Field(..., description="标准化工艺")
+    property_normalized: str = Field(..., description="标准化性质指标")
+    baseline_normalized: str = Field(..., description="标准化 baseline")
+    test_condition_normalized: str = Field(..., description="标准化测试条件")
+    comparability_status: ComparabilityStatus = Field(..., description="可比性状态")
+    comparability_warnings: list[str] = Field(default_factory=list, description="可比性警告")
     display: ComparisonDisplayResponse = Field(..., description="展示字段")
     evidence_bundle: ComparisonEvidenceBundleResponse = Field(..., description="证据包")
     assessment: ComparisonAssessmentResponse = Field(..., description="系统判断")

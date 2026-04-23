@@ -9,6 +9,11 @@ from types import SimpleNamespace
 import pandas as pd
 
 from application.derived.graph_projection_service import load_core_graph_payload
+from domain.core.comparison import (
+    ComparableResult,
+    build_collection_assessment_input_fingerprint,
+    build_comparison_row_id,
+)
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -26,6 +31,110 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
 def _semantic_node_id(prefix: str, label: str) -> str:
     return f"{prefix}:{sha1(label.encode('utf-8')).hexdigest()}"
+
+
+def _comparison_rows_frame(*records: dict) -> pd.DataFrame:
+    return pd.DataFrame(list(records))
+
+
+def _current_scope_metadata(comparable_result: dict) -> dict[str, object]:
+    comparable_record = ComparableResult.from_mapping(comparable_result)
+    return {
+        "policy_family": "default_collection_comparison_policy",
+        "policy_version": "comparison_policy_v1",
+        "comparable_result_normalization_version": comparable_record.normalization_version,
+        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
+            comparable_record
+        ),
+        "reassessment_triggers": [
+            "policy_family_changed",
+            "policy_version_changed",
+            "comparable_result_normalization_version_changed",
+            "assessment_input_fingerprint_changed",
+        ],
+    }
+
+
+def _write_semantic_comparison_artifacts(
+    output_dir: Path,
+    collection_id: str,
+    *,
+    comparable_result_id: str = "cres-1",
+    source_document_id: str = "paper-1",
+    supporting_evidence_ids: list[str] | None = None,
+) -> str:
+    evidence_ids = supporting_evidence_ids or ["ev-1"]
+    comparable_result = {
+        "comparable_result_id": comparable_result_id,
+        "source_result_id": f"res-{comparable_result_id}",
+        "source_document_id": source_document_id,
+        "binding": {
+            "variant_id": None,
+            "baseline_id": f"base-{comparable_result_id}",
+            "test_condition_id": f"tc-{comparable_result_id}",
+        },
+        "normalized_context": {
+            "material_system_normalized": "oxide cathode",
+            "process_normalized": "700 C",
+            "baseline_normalized": "as-prepared",
+            "test_condition_normalized": "EIS",
+        },
+        "axis": {
+            "axis_name": None,
+            "axis_value": None,
+            "axis_unit": None,
+        },
+        "value": {
+            "property_normalized": "conductivity",
+            "result_type": "scalar",
+            "numeric_value": 12.0,
+            "unit": "mS/cm",
+            "summary": "12 mS/cm",
+            "statistic_type": None,
+            "uncertainty": None,
+        },
+        "evidence": {
+            "direct_anchor_ids": ["anchor-1"],
+            "contextual_anchor_ids": [],
+            "evidence_ids": evidence_ids,
+            "structure_feature_ids": [],
+            "characterization_observation_ids": [],
+            "traceability_status": "direct",
+        },
+        "variant_label": None,
+        "baseline_reference": "as-prepared",
+        "result_source_type": "text",
+        "epistemic_status": "normalized_from_evidence",
+        "normalization_version": "comparable_result_v1",
+    }
+    pd.DataFrame([comparable_result]).to_parquet(
+        output_dir / "comparable_results.parquet",
+        index=False,
+    )
+    pd.DataFrame(
+        [
+            {
+                "collection_id": collection_id,
+                "comparable_result_id": comparable_result_id,
+                "assessment": {
+                    "missing_critical_context": [],
+                    "comparability_basis": ["baseline_resolved"],
+                    "comparability_warnings": [],
+                    "comparability_status": "comparable",
+                    "requires_expert_review": False,
+                    "assessment_epistemic_status": "normalized_from_evidence",
+                },
+                "epistemic_status": "normalized_from_evidence",
+                "included": True,
+                "sort_order": 0,
+                **_current_scope_metadata(comparable_result),
+            }
+        ]
+    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
+    return build_comparison_row_id(
+        collection_id=collection_id,
+        comparable_result_id=comparable_result_id,
+    )
 
 
 def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_path):
@@ -80,28 +189,27 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
             }
         ]
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": "col-1",
-                "source_document_id": "paper-1",
-                "supporting_evidence_ids": ["ev-1"],
-                "material_system_normalized": "epoxy composite",
-                "process_normalized": "80 C",
-                "property_normalized": "flexural_strength",
-                "baseline_normalized": "untreated baseline",
-                "test_condition_normalized": "SEM",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-                "value": 97.0,
-                "unit": "MPa",
-            }
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    comparison_rows = _comparison_rows_frame(
+        {
+            "row_id": "cmp-1",
+            "collection_id": "col-1",
+            "source_document_id": "paper-1",
+            "supporting_evidence_ids": ["ev-1"],
+            "material_system_normalized": "epoxy composite",
+            "process_normalized": "80 C",
+            "property_normalized": "flexural_strength",
+            "baseline_normalized": "untreated baseline",
+            "test_condition_normalized": "SEM",
+            "comparability_status": "comparable",
+            "comparability_warnings": [],
+            "value": 97.0,
+            "unit": "MPa",
+        }
+    )
 
     nodes, edges, truncated = load_core_graph_payload(
         base_dir=output_dir,
+        comparison_rows=comparison_rows,
         max_nodes=20,
         min_weight=0.0,
     )
@@ -192,28 +300,27 @@ def test_core_projection_skips_placeholder_semantic_nodes(monkeypatch, tmp_path)
             }
         ]
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": "col-1",
-                "source_document_id": "paper-1",
-                "supporting_evidence_ids": ["ev-1"],
-                "material_system_normalized": "unspecified material system",
-                "process_normalized": "700 C",
-                "property_normalized": "qualitative",
-                "baseline_normalized": "unspecified baseline",
-                "test_condition_normalized": "--",
-                "comparability_status": "limited",
-                "comparability_warnings": [],
-                "value": None,
-                "unit": None,
-            }
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    comparison_rows = _comparison_rows_frame(
+        {
+            "row_id": "cmp-1",
+            "collection_id": "col-1",
+            "source_document_id": "paper-1",
+            "supporting_evidence_ids": ["ev-1"],
+            "material_system_normalized": "unspecified material system",
+            "process_normalized": "700 C",
+            "property_normalized": "qualitative",
+            "baseline_normalized": "unspecified baseline",
+            "test_condition_normalized": "--",
+            "comparability_status": "limited",
+            "comparability_warnings": [],
+            "value": None,
+            "unit": None,
+        }
+    )
 
     nodes, edges, truncated = load_core_graph_payload(
         base_dir=output_dir,
+        comparison_rows=comparison_rows,
         max_nodes=20,
         min_weight=0.0,
     )
@@ -272,8 +379,8 @@ def test_core_projection_truncation_reserves_backbone_capacity(monkeypatch, tmp_
             for index in range(1, 5)
         ]
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
+    comparison_rows = _comparison_rows_frame(
+        *[
             {
                 "row_id": f"cmp-{index}",
                 "collection_id": "col-1",
@@ -291,10 +398,11 @@ def test_core_projection_truncation_reserves_backbone_capacity(monkeypatch, tmp_
             }
             for index in range(1, 5)
         ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    )
 
     nodes, _edges, truncated = load_core_graph_payload(
         base_dir=output_dir,
+        comparison_rows=comparison_rows,
         max_nodes=10,
         min_weight=0.0,
     )
@@ -389,26 +497,9 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
             }
         ]
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": collection_id,
-                "source_document_id": "paper-1",
-                "supporting_evidence_ids": ["ev-1"],
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "property_normalized": "conductivity",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-                "value": 12.0,
-                "unit": "mS/cm",
-            }
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    _write_semantic_comparison_artifacts(output_dir, collection_id)
     artifact_registry.upsert(collection_id, output_dir)
+    assert not (output_dir / "comparison_rows.parquet").exists()
 
     payload = graph_service.get_collection_graph(
         collection_id=collection_id,
@@ -419,6 +510,7 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
     assert payload["collection_id"] == collection_id
     assert len(payload["nodes"]) == 7
     assert len(payload["edges"]) == 6
+    assert not (output_dir / "comparison_rows.parquet").exists()
 
     graphml_bytes, filename = graph_service.build_graphml(
         collection_id=collection_id,
@@ -428,6 +520,7 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
+    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
@@ -494,25 +587,7 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
             }
         ]
     ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-1",
-                "collection_id": collection_id,
-                "source_document_id": "paper-1",
-                "supporting_evidence_ids": ["ev-1"],
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "property_normalized": "conductivity",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-                "value": 12.0,
-                "unit": "mS/cm",
-            }
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
+    row_id = _write_semantic_comparison_artifacts(output_dir, collection_id)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = graph_service.get_collection_graph_neighbors(
@@ -526,9 +601,9 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
     assert {node["id"] for node in payload["nodes"]} == {
         "doc:paper-1",
         "evi:ev-1",
-        "cmp:cmp-1",
+        f"cmp:{row_id}",
     }
     assert {edge["id"] for edge in payload["edges"]} == {
         "edge:doc:paper-1:evi:ev-1",
-        "edge:evi:ev-1:cmp:cmp-1",
+        f"edge:evi:ev-1:cmp:{row_id}",
     }

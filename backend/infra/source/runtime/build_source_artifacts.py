@@ -1,4 +1,4 @@
-"""Source indexing entrypoint."""
+"""Source artifact build entrypoint."""
 
 import logging
 from typing import Any
@@ -7,7 +7,7 @@ import pandas as pd
 
 import infra.source.runtime.workflows as _source_runtime_workflows
 from infra.source.config.pipeline_mode import IndexingMethod
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
 from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.runtime.logging import init_runtime_loggers
@@ -31,8 +31,8 @@ def _summarize_workflow_result(result: Any) -> str:
     return type(result).__name__
 
 
-async def build_index(
-    config: GraphRagConfig,
+async def build_source_artifacts(
+    config: SourceRuntimeConfig,
     method: IndexingMethod | str = IndexingMethod.Standard,
     memory_profile: bool = False,
     callbacks: list[WorkflowCallbacks] | None = None,
@@ -44,7 +44,7 @@ async def build_index(
 
     Parameters
     ----------
-    config : GraphRagConfig
+    config : SourceRuntimeConfig
         The configuration.
     method : IndexingMethod default=IndexingMethod.Standard
         Styling of indexing to perform (full LLM, NLP + LLM, etc.).
@@ -74,7 +74,7 @@ async def build_index(
     if memory_profile:
         logger.warning("New pipeline does not yet support memory profiling.")
 
-    logger.info("Initializing indexing pipeline...")
+    logger.info("Initializing source artifact pipeline...")
     pipeline = PipelineFactory.create_pipeline(config, method)
 
     workflow_callbacks.pipeline_start(pipeline.names())

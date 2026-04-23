@@ -26,6 +26,10 @@ class WorkspaceArtifactStatusResponse(BaseModel):
     documents_ready: bool = Field(default=False, description="documents.parquet 是否存在且非空")
     document_profiles_generated: bool = Field(default=False, description="document_profiles.parquet 是否存在")
     document_profiles_ready: bool = Field(default=False, description="document_profiles.parquet 是否存在且非空")
+    evidence_anchors_generated: bool = Field(default=False, description="evidence_anchors.parquet 是否存在")
+    evidence_anchors_ready: bool = Field(default=False, description="evidence_anchors.parquet 是否存在且非空")
+    method_facts_generated: bool = Field(default=False, description="method_facts.parquet 是否存在")
+    method_facts_ready: bool = Field(default=False, description="method_facts.parquet 是否存在且非空")
     evidence_cards_generated: bool = Field(default=False, description="evidence_cards.parquet 是否存在")
     evidence_cards_ready: bool = Field(default=False, description="evidence_cards.parquet 是否存在且非空")
     characterization_observations_generated: bool = Field(default=False, description="characterization_observations.parquet 是否存在")
@@ -40,12 +44,32 @@ class WorkspaceArtifactStatusResponse(BaseModel):
     sample_variants_ready: bool = Field(default=False, description="sample_variants.parquet 是否存在且非空")
     measurement_results_generated: bool = Field(default=False, description="measurement_results.parquet 是否存在")
     measurement_results_ready: bool = Field(default=False, description="measurement_results.parquet 是否存在且非空")
-    comparison_rows_generated: bool = Field(default=False, description="comparison_rows.parquet 是否存在")
-    comparison_rows_ready: bool = Field(default=False, description="comparison_rows.parquet 是否存在且非空")
-    graph_generated: bool = Field(default=False, description="Core graph 投影输入是否已生成")
-    graph_ready: bool = Field(default=False, description="Core graph 视图是否可用")
-    sections_generated: bool = Field(default=False, description="sections.parquet 是否存在")
-    sections_ready: bool = Field(default=False, description="sections.parquet 是否存在且非空")
+    comparable_results_generated: bool = Field(default=False, description="comparable_results.parquet 是否存在")
+    comparable_results_ready: bool = Field(default=False, description="comparable_results.parquet 是否存在且非空")
+    collection_comparable_results_generated: bool = Field(default=False, description="collection_comparable_results.parquet 是否存在")
+    collection_comparable_results_ready: bool = Field(default=False, description="collection_comparable_results.parquet 是否存在且非空")
+    collection_comparable_results_stale: bool = Field(
+        default=False,
+        description="collection_comparable_results.parquet 是否已因 policy/version drift 而过期",
+    )
+    comparison_rows_generated: bool = Field(default=False, description="comparison_rows.parquet 投影缓存是否存在")
+    comparison_rows_ready: bool = Field(default=False, description="comparison_rows.parquet 投影缓存是否存在且非空")
+    comparison_rows_stale: bool = Field(
+        default=False,
+        description="comparison_rows.parquet 是否因上游 scope artifact 过期而失效",
+    )
+    graph_generated: bool = Field(default=False, description="Core graph 所需 backbone 与 comparison semantic 输入是否均已生成")
+    graph_ready: bool = Field(default=False, description="Core graph 视图是否可按需投影")
+    graph_stale: bool = Field(
+        default=False,
+        description="Core graph 语义输入是否因 collection scope artifact 过期而不再 current",
+    )
+    blocks_generated: bool = Field(default=False, description="blocks.parquet 是否存在")
+    blocks_ready: bool = Field(default=False, description="blocks.parquet 是否存在且非空")
+    figures_generated: bool = Field(default=False, description="figures.parquet 是否存在")
+    figures_ready: bool = Field(default=False, description="figures.parquet 是否存在且非空")
+    table_rows_generated: bool = Field(default=False, description="table_rows.parquet 是否存在")
+    table_rows_ready: bool = Field(default=False, description="table_rows.parquet 是否存在且非空")
     table_cells_generated: bool = Field(default=False, description="table_cells.parquet 是否存在")
     table_cells_ready: bool = Field(default=False, description="table_cells.parquet 是否存在且非空")
     procedure_blocks_generated: bool = Field(default=False, description="procedure_blocks.parquet 是否存在")
@@ -58,8 +82,6 @@ class WorkspaceArtifactStatusResponse(BaseModel):
         default=False,
         description="protocol_steps.parquet 是否存在且非空",
     )
-    graphml_generated: bool = Field(default=False, description="graph.graphml 是否存在")
-    graphml_ready: bool = Field(default=False, description="graph.graphml 是否存在")
     updated_at: str = Field(..., description="更新时间")
 
 
@@ -67,6 +89,11 @@ class WorkspaceCapabilitiesResponse(BaseModel):
     """Feature gates exposed to the frontend workspace."""
 
     can_view_graph: bool = Field(default=False, description="是否可查看图谱")
+    can_view_results: bool = Field(default=False, description="是否可查看 collection 结果页")
+    can_view_comparable_results: bool = Field(
+        default=False,
+        description="是否可查看 collection-filtered corpus comparable results",
+    )
     can_download_graphml: bool = Field(default=False, description="是否可导出 GraphML")
     can_view_protocol_steps: bool = Field(default=False, description="是否可查看 protocol steps")
     can_search_protocol: bool = Field(default=False, description="是否可检索 protocol steps")
@@ -84,9 +111,11 @@ class WorkspaceWorkflowResponse(BaseModel):
     """Primary workflow readiness model for Lens v1."""
 
     documents: WorkspaceStageResponse = Field(..., description="documents 阶段")
+    results: WorkspaceStageResponse = Field(..., description="results 阶段")
     evidence: WorkspaceStageResponse = Field(..., description="evidence 阶段")
     comparisons: WorkspaceStageResponse = Field(..., description="comparisons 阶段")
     protocol: WorkspaceStageResponse = Field(..., description="protocol 阶段")
+    graph: WorkspaceStageResponse = Field(..., description="graph 阶段")
 
 
 class WorkspaceDocumentSummaryResponse(BaseModel):
@@ -111,10 +140,19 @@ class WorkspaceWarningResponse(BaseModel):
 class WorkspaceLinksResponse(BaseModel):
     """Primary navigation links for the frontend workspace."""
 
+    documents: str | None = Field(default=None, description="documents 主路径")
     documents_profiles: str | None = Field(default=None, description="documents/profiles 路径")
+    evidence: str | None = Field(default=None, description="evidence 主路径")
     evidence_cards: str | None = Field(default=None, description="evidence/cards 路径")
     comparisons: str | None = Field(default=None, description="comparisons 路径")
+    results: str | None = Field(default=None, description="results 路径")
+    comparable_results: str | None = Field(
+        default=None,
+        description="comparable-results 路径",
+    )
+    protocol: str | None = Field(default=None, description="protocol 主路径")
     protocol_steps: str | None = Field(default=None, description="protocol/steps 路径")
+    graph: str | None = Field(default=None, description="graph 主路径")
 
 
 class WorkspaceOverviewResponse(BaseModel):

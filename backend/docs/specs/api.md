@@ -12,11 +12,17 @@
 - 文档与静态资源统一位于：`/api/*`
 - collection 是主业务单位，不是单篇 paper
 - `workspace` 是 Lens v1 的主入口界面
-- `documents/profiles`、`evidence/cards`、`comparisons` 是主业务资源
+- `comparisons` 是主分析资源
+- `results` 是核心产品对象资源
+- `documents` 是来源核验资源
+- `evidence/cards` 是支撑型资源，主要服务于 result/document/comparison drilldown
 - `protocol/*` 是条件分支，不是所有 collection 的默认主产物
 - `graph/*`、`reports/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
 - 当前没有单独公开的 `query/search` 产品接口
 - `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
+- 所有业务响应都会回传 `X-Request-ID`
+  - 客户端可主动传入 `X-Request-ID` 参与链路关联
+  - 如果未传入或值非法，后端会生成新的 request id 并回写到响应头
 
 ## 文档与静态资源
 
@@ -29,19 +35,21 @@
 
 1. `POST /api/v1/collections`
 2. `POST /api/v1/collections/{collection_id}/files`
-3. `POST /api/v1/collections/{collection_id}/tasks/index`
+3. `POST /api/v1/collections/{collection_id}/tasks/build`
 4. 轮询 `GET /api/v1/tasks/{task_id}`
 5. 打开 `GET /api/v1/collections/{collection_id}/workspace`
-6. 从 workspace 跳转到 document profiles、evidence cards、comparison rows
-7. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
-8. 在 comparison/evidence 中点击“查看原文证据”时，调用 traceback 接口并跳转文档查看器
+6. 从 workspace 进入 `comparisons`
+7. 从 `comparisons` drilldown 到 `results`
+8. 需要核验来源时，从 `results` 回到 `documents`
+9. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
+10. 在 comparison/result/document 中需要核验证据时，调用 traceback 接口并跳转文档查看器
 
 可选 goal-first 流程（当前只覆盖 Goal Brief / Intake）：
 
 1. `POST /api/v1/goals/intake`
 2. 从响应读取 `seed_collection.collection_id`
 3. 打开 `GET /api/v1/collections/{collection_id}/workspace`
-4. 后续统一进入 `documents/profiles`、`evidence/cards`、`comparisons`
+4. 后续统一进入 `comparisons`、`results`、`documents`
 
 ## 资源与接口
 
@@ -94,7 +102,7 @@
 - `DELETE /api/v1/collections/{collection_id}`
 - `POST /api/v1/collections/{collection_id}/files`
 - `GET /api/v1/collections/{collection_id}/files`
-- `POST /api/v1/collections/{collection_id}/tasks/index`
+- `POST /api/v1/collections/{collection_id}/tasks/build`
 - `GET /api/v1/collections/{collection_id}/tasks`
 - `GET /api/v1/tasks/{task_id}`
 - `GET /api/v1/tasks/{task_id}/artifacts`
@@ -104,10 +112,26 @@
 - `GET /api/v1/tasks/{task_id}` 只接收真正的 `task_id`
 - `collection_id` 不能拿来调用 task 详情接口
 - collection 页面如果要展示任务历史，应走 collection 维度的 tasks 接口
+- `task_type` 对外固定为 `build`
 - `current_stage` 对外应使用：
-  `queued | files_registered | source_index_started | source_index_completed | document_profiles_started | evidence_cards_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
+  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | paper_facts_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
 - `graphrag_index_started`、`graphrag_index_completed`
-  只允许作为内部兼容别名存在，不属于公开 API 合同
+  已退役，不再属于公开或内部活动合同
+- Source 结构产物当前包括
+  `documents.parquet`、`text_units.parquet`、`blocks.parquet`、
+  `figures.parquet`、`table_rows.parquet`、`table_cells.parquet`
+  以及 `image_assets/`
+- `GET /api/v1/tasks/{task_id}/artifacts`
+  与 workspace 内的 `artifacts` 都应对 comparison semantic 相关产物额外暴露
+  `*_stale` 字段，用来表达：
+  - `collection_comparable_results_stale`
+    表示 collection-scoped assessment 已因 policy/version drift 或 assessment
+    input drift 而失效
+  - `comparison_rows_stale`
+    表示 row cache 已因上游 scope artifact 失效而不再 current
+  - `graph_stale`
+    表示 graph 的 comparison semantic 输入不再 current
+  - stale 时对应的 `ready` 必须为 `false`，但 `generated` 可以保持 `true`
 
 ### Workspace
 
@@ -130,32 +154,80 @@
 
 其中：
 
-- `workflow` 应表达 `documents`、`evidence`、`comparisons`、`protocol`
-  四个阶段的状态
+- `workflow` 应优先表达 `comparisons`、`results`、`documents`、`protocol`、
+  `graph` 五个阶段的状态
+  - `evidence` 可以在迁移期继续作为 secondary compatibility field 暴露
 - 状态值应使用显式语义，例如
   `not_started | processing | ready | limited | not_applicable | failed`
+- `workflow.results`
+  应以 `comparable_results.parquet` 与
+  `collection_comparable_results.parquet` 作为 readiness 语义判断
+  - `comparison_rows.parquet` 只是可重建 projection/cache，不是 results 的
+    contract 前提
+- `workflow.comparisons`
+  应以 `comparable_results.parquet` 与
+  `collection_comparable_results.parquet` 作为 readiness 语义判断
+  - `comparison_rows.parquet` 只是可重建 projection/cache，不是 comparisons
+    或 graph 的 contract 前提
+- `status_summary=ready`
+  应表示 collection-scoped comparison read model 已就绪，即使 row cache 尚未预生成
 - `document_summary` 应来自 `document_profiles` 的 collection 级汇总
 - `warnings` 应表达 review-heavy、protocol-limited、comparison-limited、
   traceability-limited 等 collection 风险
 - `links` 应指向主资源页面，而不是让前端自己拼内部跳转语义
+- `links.comparisons`、`links.results`、`links.documents`
+  应是 collection 主工作流入口
+- `links.evidence`
+  如果仍然暴露，应被视为 support/debug surface，而不是主导航中心
+- `links.comparable_results`
+  如果继续暴露，应直接给出当前 collection 对应的 filtered corpus retrieval
+  路径，即 `/api/v1/comparable-results?collection_id={collection_id}`
+  - 它是 semantic inspection / retrieval surface，不应替代 `links.results`
 - `artifacts` 对每类产物应同时提供
   `*_generated` 与 `*_ready` 两类布尔值：
   - `generated` 表示该阶段产物文件已生成（可能为空）
   - `ready` 表示该阶段产物可直接用于主界面消费（通常要求非空）
+- `artifacts`
+  对 comparison semantic 相关产物还应提供 `*_stale`：
+  - `collection_comparable_results_stale`
+  - `comparison_rows_stale`
+  - `graph_stale`
+- 对这些 comparison semantic 产物：
+  - `generated=true` 仅表示文件或投影前提存在
+  - `ready=true` 还要求它们当前没有 stale
+- `figures_generated` / `figures_ready`
+  对应 Source 层 `figures.parquet` 的生成与可消费状态
+  - figure 行可以存在而 `image_path` 为空
+  - 这种情况下仍应保留 figure traceability 行，不应直接丢弃
 - `graph_generated`
   表示 `document_profiles.parquet`、`evidence_cards.parquet`、
-  `comparison_rows.parquet` 三个 Core graph 输入文件都已生成
+  `comparable_results.parquet`、`collection_comparable_results.parquet`
+  四个 Core graph 语义输入文件都已生成
 - `graph_ready`
-  表示上述 Core graph 输入已具备图投影消费条件，而不是
+  表示上述 Core graph 语义输入已具备图投影消费条件，而不是
   `entities.parquet` / `relationships.parquet` 是否存在
-- `graphml_generated` 与 `graphml_ready`
-  只描述 `graph.graphml` 导出文件本身，不代表 graph 事实来源
+- `artifacts` 不再暴露 `graphml_generated` / `graphml_ready`
+  因为 GraphML 已改为基于 Core graph 的按需导出能力，不再是构建阶段的 readiness 产物
+- `capabilities.can_download_graphml`
+  应与 `graph_ready` 保持一致，表达当前 collection 是否可以导出按需生成的 GraphML
+- `capabilities.can_view_results`
+  应在 `comparable_results.parquet` 与 `collection_comparable_results.parquet`
+  已生成时为 `true`
+  - 它表达当前 collection 的 product-facing result surface 可被消费
+- `capabilities.can_view_comparable_results`
+  应在 `comparable_results.parquet` 与 `collection_comparable_results.parquet`
+  已生成时为 `true`
+  - 它表达 collection-filtered corpus comparable-result surface 可被消费
+  - 不要求 `comparison_rows.parquet` 预先存在
 
-### Document Profiles
+### Documents
 
 - `GET /api/v1/collections/{collection_id}/documents/profiles`
 
-这是 Lens v1 主链路的第一层业务资源。
+这是 Lens v1 的来源核验资源。
+
+产品语义上它对应 `Documents` 页面；当前 list endpoint 仍然使用
+`/documents/profiles` 路径。
 
 最小返回结构：
 
@@ -192,6 +264,9 @@
   `experimental | review | mixed | uncertain`
 - `protocol_extractable` 使用
   `yes | partial | no | uncertain`
+- `protocol_extractability_signals` 当前为预留字段，返回空数组
+- `parsing_warnings` 仅用于固定 triage warning，例如
+  `insufficient_content | classification_uncertain`
 - 这是增量字段扩展，不改变 endpoint，也不破坏旧字段
 
 前端消费约定：
@@ -210,7 +285,7 @@
   "source_filename": "wang_2024_battery.pdf",
   "doc_type": "experimental",
   "protocol_extractable": "yes",
-  "protocol_extractability_signals": ["methods_section_detected"],
+  "protocol_extractability_signals": [],
   "parsing_warnings": [],
   "confidence": 0.91
 }
@@ -220,16 +295,249 @@
 
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
 
 其中 `/profile` 返回与 list item 同语义的单项 document profile，`/content`
 返回原文阅读器内容与 section 结构。
+
+文档页语义要求：
+
+- `documents` 是 source-of-truth recovery surface，不是主比较页
+- comparison 或 result drilldown 回到文档时，应能稳定落到对应 paper
+- document detail 应能够承载来自 result/evidence 的 traceback deep link
+
+### Results
+
+- `GET /api/v1/collections/{collection_id}/results`
+- `GET /api/v1/collections/{collection_id}/results/{result_id}`
+
+这是 Lens v1 的核心产品对象资源。
+
+它的产品语义顺序必须是：
+
+`comparison row -> result -> document`
+
+它的内部投影顺序必须是：
+
+`comparable_results -> current collection_comparable_results -> product-facing result projection`
+
+而不是把 raw semantic payload 直接暴露成主页面模型。
+
+列表接口支持这些可选过滤参数：
+
+- `material_system_normalized`
+- `property_normalized`
+- `test_condition_normalized`
+- `baseline_normalized`
+- `comparability_status`
+- `source_document_id`
+
+列表最小返回结构：
+
+- `collection_id`
+- `total`
+- `count`
+- `items`
+
+每个 list item 至少应包含：
+
+- `result_id`
+- `document_id`
+- `document_title`
+- `material_label`
+- `property`
+- `value`
+- `unit`
+- `baseline`
+- `test_condition`
+- `process`
+- `traceability_status`
+- `comparability_status`
+
+详情最小返回结构：
+
+- `result_id`
+- `document`
+- `material`
+- `measurement`
+- `context`
+- `assessment`
+- `evidence`
+- `actions`
+
+语义要求：
+
+- `result_id` 是产品向标识；当前可以内部映射到 deterministic
+  `comparable_result_id`
+- 结果页必须由 `ComparableResult` 与当前 collection 的
+  `CollectionComparableResult` 共同投影
+- 结果页应同时提供回到 comparison 视图和 source document 的链接
+- 结果页不应把 `binding`、`normalized_context`、`collection_overlays`
+  这些 raw semantic 字段直接作为主页面合同
+- `comparison_rows.parquet` 不是 results contract 的语义真源
+- 如果 collection 还没有生成 comparable result semantic artifacts，应返回
+  `409 results_not_ready`
+
+### Document Comparison Semantics
+
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
+
+这是 document-first 的 comparison semantic drilldown 路径，不是产品向
+`Result detail` 合同。
+
+它的语义顺序必须是：
+
+`document -> comparable_results -> collection_comparable_results -> optional row projection`
+
+而不是从 `comparison_rows` 反推语义。
+
+最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `total`
+- `count`
+- `items`
+
+每个 item 至少应包含：
+
+- `comparable_result_id`
+- `source_result_id`
+- `source_document_id`
+- `binding`
+- `normalized_context`
+- `axis`
+- `value`
+- `evidence`
+- `variant_label`
+- `baseline_reference`
+- `result_source_type`
+- `epistemic_status`
+- `normalization_version`
+- `collection_overlays`
+- `projected_rows`
+
+每个 `collection_overlays` item 至少应包含：
+
+- `collection_id`
+- `comparable_result_id`
+- `assessment`
+- `epistemic_status`
+- `included`
+- `sort_order`
+- `policy_family`
+- `policy_version`
+- `comparable_result_normalization_version`
+- `assessment_input_fingerprint`
+- `reassessment_triggers`
+
+语义要求：
+
+- 这是 `ComparableResult` 的 document-scoped inspection surface，不是 row list
+- `collection_overlays`
+  必须来自 `collection_comparable_results.parquet`，按 `comparable_result_id`
+  关联
+- `collection_overlays`
+  必须显式带出评估策略元数据与 reassessment trigger，而不是只返回裸
+  assessment 结果
+- `projected_rows`
+  只是按需附带的 projection/cache 视图，默认可为空或 `null`
+- 该接口不应要求 `comparison_rows.parquet` 预先存在
+
+查询参数：
+
+- `include_row_projections=true|false`
+  - `false` 时不要求返回 row projection
+  - `true` 时允许为 document-facing drilldown 附带按需生成的 row payload
+
+### Corpus Comparable Results
+
+- `GET /api/v1/comparable-results`
+- `GET /api/v1/comparable-results/{comparable_result_id}`
+
+这是 `ComparableResult` 的 corpus-level retrieval surface，不是 collection
+产品页里的 `results` 合同。
+
+它的语义顺序必须是：
+
+`collection outputs -> comparable_results -> current collection_comparable_results overlays`
+
+而不是从 `comparison_rows` 回推语义。
+
+列表接口支持这些可选过滤参数：
+
+- `material_system_normalized`
+- `property_normalized`
+- `test_condition_normalized`
+- `baseline_normalized`
+- `source_document_id`
+- `collection_id`
+
+最小返回结构：
+
+- `collection_id`
+- `total`
+- `count`
+- `items`
+
+每个 item 至少应包含：
+
+- `comparable_result_id`
+- `source_result_id`
+- `source_document_id`
+- `binding`
+- `normalized_context`
+- `axis`
+- `value`
+- `evidence`
+- `variant_label`
+- `baseline_reference`
+- `result_source_type`
+- `epistemic_status`
+- `normalization_version`
+- `observed_collection_ids`
+- `collection_overlays`
+
+每个 `collection_overlays` item 至少应包含：
+
+- `collection_id`
+- `comparable_result_id`
+- `assessment`
+- `epistemic_status`
+- `included`
+- `sort_order`
+- `policy_family`
+- `policy_version`
+- `comparable_result_normalization_version`
+- `assessment_input_fingerprint`
+- `reassessment_triggers`
+
+语义要求：
+
+- 这是 `ComparableResult` 的 corpus retrieval surface，不是 collection row list
+- 基础 item 必须按 deterministic `comparable_result_id` 去重
+- `observed_collection_ids` 表达该 semantic unit 当前在哪些 collection 中被观测到
+- `collection_overlays`
+  只能附着 current 的 `CollectionComparableResult`，不能直接回传 stale overlay
+- 如果 `collection_id` 存在：
+  - 结果集只保留该 collection 当前观测到的 comparable results
+  - `collection_overlays` 也只返回该 collection 的 current overlay
+- 如果 `collection_id` 不存在：
+  - 结果集按 corpus-wide scan 返回
+  - 可附带所有匹配 collection 的 current overlays
+- 该接口不应要求 `comparison_rows.parquet` 预先存在
+- `GET /api/v1/comparable-results/{comparable_result_id}`
+  读取单个 corpus comparable result；如果同时传 `collection_id`，则按该 collection 的
+  current scope 解释是否命中
+- 如果 `collection_id` 指向的 collection 尚未生成 comparable result semantic
+  artifacts，应返回 `409 comparable_results_not_ready`
 
 ### Evidence Cards
 
 - `GET /api/v1/collections/{collection_id}/evidence/cards`
 - `GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`
 
-这是 Lens v1 主链路的 claim-centered 证据资源。
+这是 Lens v1 的 claim-centered 支撑型证据资源。
 
 最小返回结构：
 
@@ -258,12 +566,14 @@
 - 可以有一个或多个 evidence anchors
 - `condition_context` 不能退化成不可解释的黑盒，至少应保留
   process、baseline、test 三类上下文
+- 该资源主要服务于 result detail、document detail、comparison traceback
+  等支撑性阅读流，而不是主 collection 导航中心
 
 ### Claim Traceback 与 PDF 定位合同
 
-这是 comparison/evidence 到原文证据回溯的统一合同。
+这是 comparison/result/document 到原文证据回溯的统一合同。
 
-前端主展示仍是结构化结果（comparison rows、evidence cards），PDF 是证据回溯层，不是默认首页主视图。
+前端主展示应优先围绕 comparison rows、results、documents 组织；PDF 是证据回溯层，不是默认首页主视图。
 
 当前这一波后端落地顺序与边界，记录在
 [`../plans/claim-traceback-navigation-implementation-plan.md`](../plans/core/claim-traceback-navigation-implementation-plan.md)。
@@ -359,6 +669,7 @@ comparison 对 traceback 的依赖约定：
 每个 item 至少应包含：
 
 - `row_id`
+- `result_id`
 - `collection_id`
 - `source_document_id`
 - `supporting_evidence_ids`
@@ -373,9 +684,14 @@ comparison 对 traceback 的依赖约定：
 语义要求：
 
 - 一行表示一个可供 collection 级检查的 normalized result，不是 pairwise 对比对象
+- `/comparisons`
+  当前以 `comparable_results.parquet` +
+  `collection_comparable_results.parquet` 为语义真源，并可按需重投影 row cache
 - `comparability_status` 使用
   `comparable | limited | not_comparable | insufficient`
 - 前端应把 comparison rows 作为主比较表，而不是把 protocol steps 当主表
+- comparison row 的主 drilldown 应进入 `results/{result_id}`，而不是把 row
+  自己当成最终事实页
 
 ### Protocol 条件分支
 
@@ -406,10 +722,14 @@ Graph 语义约束：
 
 - `/graph` 与 `/graphml` 只消费
   `document_profiles.parquet`、`evidence_cards.parquet`、
-  `comparison_rows.parquet`
+  `comparable_results.parquet`、`collection_comparable_results.parquet`
+- graph 与 report 派生读路径应通过共享的 in-memory projection substrate
+  从这些 semantic artifacts 投影，不要求 `comparison_rows.parquet` 预先存在
 - 它们当前是 Core-derived graph projection，不再以
   `entities.parquet`、`relationships.parquet`、`communities.parquet`
   作为产品语义前提
+- `comparison_rows.parquet` 在这条链路里只是可重建的 projection/cache，
+  graph/report 请求不应把它当成必需输入，也不应为了只读访问而要求先物化它
 - `/graph` 返回结构字段：
   `collection_id / nodes / edges / truncated`
 - graph node 只保留：
@@ -429,6 +749,8 @@ Graph 语义约束：
   前端应回到 `/comparisons` 并使用对应过滤参数做 canonical drilldown
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码
   `graph_not_ready`
+- `graph_not_ready.detail.missing_artifacts` 应返回缺失的 graph 语义输入文件名，
+  而不是要求旧的 graph cache 文件
 
 Reports 语义约束：
 
@@ -458,10 +780,13 @@ readiness 类错误至少应包含：
 
 核心资源的阶段语义约定：
 
-- `documents/profiles`、`evidence/cards`、`comparisons`
+- `documents/profiles`、`results`、`comparisons`
   - 对应 `*_generated=false`：返回 `409`
   - 对应 `*_generated=true` 且结果为空：返回 `200`，`count=0`
   - 对应 `*_ready=true`：返回 `200`，可直接用于主界面
+- `evidence/cards`
+  - 作为支撑型资源，未生成时返回 `409`
+  - 生成后即使为空也可返回 `200`，`count=0`
 - `protocol/*`
   - 入口基于 `protocol_steps_generated` 判断是否可访问
   - `protocol_steps_generated=true` 且 `protocol_steps_ready=false` 时允许返回空列表或空结果
@@ -475,12 +800,16 @@ readiness 类错误至少应包含：
 - collection 详情页的主状态来源是 `workspace`
 - 前端不应把 `sections_ready`、`procedure_blocks_ready` 这类内部产物状态当成长期主合同
 - protocol 页面不是默认首页，comparison workspace 才是
+- 前端主工作流应理解为 `comparisons -> results -> documents`
+- `results` 是主 drilldown 对象，不应直接用 raw `comparable-results` retrieval payload 代替
 - goal-first 响应只用于 Goal Brief / Intake 与 collection handoff，主展示仍必须消费 Core 资源
-- graph 与 reports 是从 Core artifact 派生出的次级视图，不能反向充当 document/evidence/comparison 的事实来源
+- `evidence` 是支撑型阅读流，不应重新上升为主导航中心
+- graph 与 reports 是从 Core artifact 派生出的次级视图，不能反向充当 document/result/comparison 的事实来源
 - query 的 runtime 选项是次级搜索接口参数，不应被提升成主界面信息架构或主业务对象语义
 
 ## 相关文档
 
+- [`../../../docs/decisions/rfc-comparison-result-document-product-flow.md`](../../../docs/decisions/rfc-comparison-result-document-product-flow.md)
 - [`../architecture/domain-architecture.md`](../architecture/domain-architecture.md)
 - [`../architecture/goal-core-source-layering.md`](../architecture/goal-core-source-layering.md)
 - [`../plans/core-first-product-surface-cutover-plan.md`](../plans/backend-wide/core-first-product-surface-cutover-plan.md)

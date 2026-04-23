@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from application.derived.protocol import pipeline_service as protocol_pipeline_service
+from infra.source.runtime.source_evidence import build_blocks
 
 
 def _write_index_outputs(output_dir: Path) -> None:
@@ -50,6 +51,7 @@ def _write_index_outputs(output_dir: Path) -> None:
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -66,22 +68,18 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
 
 def _assert_protocol_artifacts(output_dir: Path) -> None:
-    sections_path = output_dir / "sections.parquet"
     blocks_path = output_dir / "procedure_blocks.parquet"
     steps_path = output_dir / "protocol_steps.parquet"
 
-    assert sections_path.exists()
     assert blocks_path.exists()
     assert steps_path.exists()
 
-    sections = pd.read_parquet(sections_path)
     blocks = pd.read_parquet(blocks_path)
     steps = pd.read_parquet(steps_path)
 
-    assert not sections.empty
     assert not blocks.empty
     assert not steps.empty
-    assert set(sections["section_type"]) >= {"methods", "characterization"}
+    assert set(blocks["section_type"]) >= {"methods", "characterization"}
     assert "synthesis" in set(blocks["block_type"])
     assert "anneal" in set(steps["action"])
 
@@ -94,7 +92,7 @@ def test_build_protocol_artifacts_generates_all_parquet(monkeypatch, tmp_path):
     result = protocol_pipeline_service.build_protocol_artifacts(output_dir)
 
     assert result.output_dir == output_dir.resolve()
-    assert result.section_count >= 2
+    assert result.source_block_count >= 5
     assert result.procedure_block_count >= 3
     assert result.protocol_step_count >= 3
     _assert_protocol_artifacts(output_dir)

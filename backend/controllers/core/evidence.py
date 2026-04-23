@@ -4,14 +4,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
-from application.core.document_profile_service import (
+from application.core.semantic_build.document_profile_service import (
     DocumentContentNotReadyError,
     DocumentNotFoundError,
 )
-from application.core.evidence_card_service import (
+from application.core.semantic_build.paper_facts_service import (
     EvidenceCardNotFoundError,
-    EvidenceCardService,
-    EvidenceCardsNotReadyError,
+    PaperFactsNotReadyError,
+    PaperFactsService,
 )
 from controllers.schemas.core.evidence import (
     EvidenceCardItemResponse,
@@ -20,7 +20,7 @@ from controllers.schemas.core.evidence import (
 )
 
 router = APIRouter(prefix="/collections", tags=["evidence"])
-evidence_card_service = EvidenceCardService()
+paper_facts_service = PaperFactsService()
 
 
 def _evidence_cards_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -42,14 +42,14 @@ async def list_collection_evidence_cards(
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
 ) -> EvidenceCardListResponse:
     try:
-        payload = evidence_card_service.list_evidence_cards(
+        payload = paper_facts_service.list_evidence_cards(
             collection_id,
             offset=offset,
             limit=limit,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except EvidenceCardsNotReadyError as exc:
+    except PaperFactsNotReadyError as exc:
         raise HTTPException(
             status_code=409,
             detail=_evidence_cards_not_ready_detail(exc.collection_id),
@@ -67,7 +67,7 @@ async def get_collection_evidence_card(
     evidence_id: str,
 ) -> EvidenceCardItemResponse:
     try:
-        payload = evidence_card_service.get_evidence_card(collection_id, evidence_id)
+        payload = paper_facts_service.get_evidence_card(collection_id, evidence_id)
     except EvidenceCardNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -78,7 +78,7 @@ async def get_collection_evidence_card(
                 "evidence_id": exc.evidence_id,
             },
         ) from exc
-    except EvidenceCardsNotReadyError as exc:
+    except PaperFactsNotReadyError as exc:
         raise HTTPException(
             status_code=409,
             detail=_evidence_cards_not_ready_detail(exc.collection_id),
@@ -98,7 +98,7 @@ async def get_collection_evidence_traceback(
     evidence_id: str,
 ) -> EvidenceTracebackResponse:
     try:
-        payload = evidence_card_service.get_evidence_traceback(collection_id, evidence_id)
+        payload = paper_facts_service.get_evidence_traceback(collection_id, evidence_id)
     except EvidenceCardNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -109,7 +109,7 @@ async def get_collection_evidence_traceback(
                 "evidence_id": exc.evidence_id,
             },
         ) from exc
-    except EvidenceCardsNotReadyError as exc:
+    except PaperFactsNotReadyError as exc:
         raise HTTPException(
             status_code=409,
             detail=_evidence_cards_not_ready_detail(exc.collection_id),

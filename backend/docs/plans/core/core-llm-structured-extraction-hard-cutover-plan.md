@@ -7,16 +7,21 @@ the current Core parsing and evidence backbone away from heuristic extraction
 and onto LLM structured extraction.
 
 This is not a new architecture layer and not a Source-owned parser expansion.
-It is a Core child plan inside the existing Lens v1 backbone:
+It is a Core child plan inside the corrected Lens v1 Core flow:
 
-`document_profiles -> evidence_cards -> comparison_rows`
+`document_profiles -> paper facts family -> evidence_cards plus comparable-result substrate -> row projection`
+
+Read this plan with the accepted paper-facts RFC:
+
+- [`../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md`](../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md)
 
 The purpose of this cutover is straightforward:
 
 - stop treating noisy heuristic inference as the primary semantic extractor
 - move Core fact extraction onto schema-bound LLM parsing
-- keep `comparison_rows` as a deterministic Core judgment surface rather than
-  an opaque model-generated final artifact
+- keep `evidence_cards`, comparable-result artifacts, and row projection as
+  deterministic Core-derived surfaces rather than opaque model-generated final
+  artifacts
 
 For the broader backend roadmap, read
 [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
@@ -31,7 +36,7 @@ Source, read
 The current backend already has the right high-level layering:
 
 - Source hands off structural artifacts such as `documents`, `text_units`,
-  `sections`, and `table_cells`
+  `blocks`, `table_rows`, and `table_cells`
 - Core owns stable research-fact extraction and collection-facing review
   artifacts
 - derived and downstream surfaces consume Core outputs rather than defining the
@@ -67,8 +72,9 @@ That means:
 
 - Source remains a structural handoff layer
 - Core becomes an LLM-first semantic extraction layer
-- `comparison_rows` stay deterministic and assembled from Core backbone
-  artifacts
+- primary paper facts are extracted before views are assembled
+- `evidence_cards`, comparable-result artifacts, and row projection stay
+  deterministic and assembled from Core backbone artifacts
 - the old heuristic extraction path is removed rather than retained as a
   fallback
 
@@ -102,7 +108,7 @@ The dependency direction after cutover should remain:
 - downstream views consume Core artifacts
 
 Source may still use rules to split text and tables, but it must not become the
-owner of stable semantic artifacts such as evidence cards, sample variants,
+owner of stable semantic artifacts such as sample variants, methods,
 measurement results, or comparison judgments.
 
 ## Scope
@@ -111,8 +117,10 @@ This hard-cutover plan covers:
 
 - replacing heuristic `document_profiles` classification with LLM structured
   extraction
-- replacing heuristic evidence, variant, result, test-condition, and baseline
-  extraction with LLM structured extraction
+- replacing heuristic paper-facts extraction and evidence-view projection with
+  LLM-grounded structured extraction plus deterministic projection
+- removing `section` as a Core extraction contract or Source-to-Core semantic
+  handoff requirement
 - preserving deterministic Core assembly for `comparison_rows`
 - invalidating old heuristic-produced Core artifacts rather than supporting
   mixed reads
@@ -135,34 +143,45 @@ Source should continue to produce only structural handoff artifacts:
 
 - `documents`
 - `text_units`
-- `sections`
+- `blocks`
+- `table_rows`
 - `table_cells`
 
 Those are the inputs Core will consume for semantic extraction.
+
+This plan now makes one narrower boundary explicit:
+
+- Core must not depend on `sections.parquet` as an owned semantic handoff
+- Core may build transient text windows over ordered `blocks`
+- those text windows are batching units only, not durable Source or Core
+  domain artifacts
 
 ### What Core Must Extract With LLM Structured Parsing
 
 Core should switch these artifacts to LLM structured extraction:
 
 - `document_profiles`
-- `evidence_cards`
 - `sample_variants`
+- `method_facts`
 - `measurement_results`
 - `test_conditions`
 - `baseline_references`
+- `characterization_observations`
+- `evidence_anchors`
 
 Core may continue to derive:
 
-- `characterization_observations`
+- `evidence_cards`
+- `comparison_rows`
 - `structure_features`
 
-from stronger LLM-grounded evidence outputs when deterministic extraction still
+from stronger LLM-grounded fact outputs when deterministic extraction still
 adds value.
 
 ### What Must Stay Deterministic
 
-`comparison_rows` should remain deterministic and assembled from the backbone
-artifacts above.
+`comparison_rows` and `evidence_cards` should remain deterministic and
+assembled from the backbone artifacts above.
 
 The backend should keep model output away from the final comparison surface for
 three reasons:
@@ -174,9 +193,13 @@ three reasons:
 ## New Extraction Architecture
 
 The cutover should introduce one minimal permanent OpenAI structured-calling
-seam in backend infrastructure and three Core extraction slices above it.
+seam in backend infrastructure, three Core fact-extraction slices, and one
+derived-view projection slice above it.
 
 ### Slice 1: Document Profile Extraction
+
+The current narrowed execution plan for this slice is recorded in
+[`document-profile-lightweight-triage-plan.md`](document-profile-lightweight-triage-plan.md).
 
 Input:
 
@@ -193,22 +216,29 @@ Output:
 - `parsing_warnings`
 - confidence and contamination markers
 
-### Slice 2: Section Evidence Extraction
+### Slice 2: Text-Window Fact Extraction
 
 Input:
 
-- one Core-relevant section at a time
+- one Core-built text window over ordered `blocks`
 - document title and document-level identity
-- section type and local source anchor context
+- local `heading_path`, `block_ids`, and source anchor context
 
 Output:
 
-- `evidence_cards`
-- section-grounded condition context
-- section-grounded baseline context
+- `method_facts`
+- text-grounded `sample_variants`, `test_conditions`, `baseline_references`,
+  and `measurement_results` when the window directly supports them
+- `characterization_observations` when the evidence is explicit enough
 - traceability-ready anchors
 
-### Slice 3: Table Row Extraction
+This slice replaces the old `extract_section_bundle` idea.
+
+The batching unit may still align with a heading boundary when that makes the
+window more coherent, but the contract should be "bounded text window over
+blocks", not "section object with `section_type` semantics".
+
+### Slice 3: Table Row Fact Extraction
 
 Input:
 
@@ -216,7 +246,7 @@ Input:
 - table title if available
 - header path values
 - one row's cells
-- nearby methods or characterization context when available
+- supporting text windows selected from nearby or anchor-related `blocks`
 
 Output:
 
@@ -224,10 +254,40 @@ Output:
 - `measurement_results`
 - `test_conditions`
 - `baseline_references`
+- row-grounded anchors
 
 The extraction unit should be one table row, not the whole paper, so the model
 is forced to reason over bounded local evidence instead of mixing unrelated
 studies in review-heavy documents.
+
+The contextual contract for this slice should no longer be:
+
+- first `methods` section text
+- first `characterization` section text
+
+Instead it should be:
+
+- row-local structure
+- nearby supporting text windows
+- optional caption or block-linked support text
+
+This keeps Core from smuggling `section_type` semantics back into the row path.
+
+### Slice 4: Evidence View Projection
+
+Input:
+
+- extracted paper facts
+- extracted evidence anchors
+- document-level routing context when needed
+
+Output:
+
+- `evidence_cards`
+
+This slice exists so the system can keep cards as a deterministic projection
+layer rather than asking the model to treat them as the only primary research
+objects.
 
 ## Structured Calling Contract
 
@@ -250,7 +310,7 @@ The design goal is:
 
 Every extraction prompt should enforce the same non-negotiables:
 
-- extract only facts supported by the provided text, row, or section
+- extract only facts supported by the provided text window or table row
 - when evidence is missing or ambiguous, return `null` or an empty list
 - do not infer missing material systems from filenames
 - do not treat years, citation numbers, row numbers, or footnote markers as
@@ -286,11 +346,13 @@ quietly trusting them.
 ### Primary Runtime Areas
 
 - `backend/application/core/document_profile_service.py`
-- `backend/application/core/evidence_card_service.py`
+- `backend/application/core/paper_facts_service.py`
 - `backend/application/core/comparison_service.py`
+- `backend/application/core/llm_structured_extractor.py`
 - `backend/application/source/index_task_runner.py`
 - `backend/infra/`
   new minimal OpenAI structured-calling seam
+- `backend/tests/support/fake_core_llm_extractor.py`
 
 ### Suggested New Backend Files
 
@@ -307,6 +369,9 @@ Delete the current heuristic extraction chain after cutover, including:
 - profile keyword-scoring as the primary semantic classifier
 - table-row variant guessing as the primary variant extractor
 - scalar value and unit regex guessing as the primary measurement extractor
+- Core-internal section projection as the primary text extraction contract
+- Source `sections` workflow remnants once no Core read path still depends on
+  them
 - baseline and test-condition inference fallbacks that survive only because the
   LLM extractor was uncertain
 
@@ -316,12 +381,19 @@ not become a second semantic extraction path.
 ## Execution Order
 
 1. Add the minimal OpenAI structured client and extraction models.
-2. Hard-cut table-row extraction to LLM structured parsing.
-3. Hard-cut section evidence extraction to LLM structured parsing.
-4. Hard-cut document-profile classification to LLM structured parsing.
-5. Rebuild Core artifact versioning and stale-artifact invalidation.
-6. Remove the old heuristic extraction implementation.
-7. Lock in regression coverage on a representative benchmark corpus.
+2. Hard-cut Core text extraction from `section` payloads to text-window
+   payloads over `blocks`.
+3. Hard-cut table-row extraction to consume row-local structure plus supporting
+   text windows.
+4. Move characterization support to first-class extracted facts or
+   anchor-linked deterministic derivation only.
+5. Hard-cut document-profile classification to LLM structured parsing.
+6. Rebuild deterministic evidence-card projection over the extracted fact
+   layer.
+7. Rebuild Core artifact versioning and stale-artifact invalidation.
+8. Remove the old heuristic extraction implementation and remaining `sections`
+   dependency chain.
+9. Lock in regression coverage on a representative benchmark corpus.
 
 This order keeps the highest-noise extraction surface first while preserving
 deterministic comparison assembly until the backbone artifacts improve.
@@ -337,11 +409,14 @@ deterministic comparison assembly until the backbone artifacts improve.
 - table-row extraction rejects literature-summary rows that are not
   comparison-worthy
 - `comparison_rows` become fewer but materially higher signal
+- Core no longer requires `sections.parquet` or `section_type` to extract paper
+  facts
 
 ### Contract Verification
 
 - Source still terminates at structural artifacts only
 - Core remains the only stable fact producer
+- Core consumes `blocks` and `table_rows` rather than `sections`
 - comparison APIs continue to serve deterministic collection-facing rows
 
 ### Regression Verification
@@ -365,6 +440,8 @@ deterministic comparison assembly until the backbone artifacts improve.
   dual-semantic ownership
 - if LLM extraction is placed in Source instead of Core, the layering boundary
   will become weaker rather than stronger
+- if Core keeps using `section_type` as a hidden routing primitive, the system
+  will still be Source-shaped even after the LLM cutover
 
 Guardrails:
 
@@ -372,6 +449,8 @@ Guardrails:
 - no adapter or compatibility layer between heuristic and LLM semantic outputs
 - no direct LLM emission of final `comparison_rows`
 - no Source-owned stable fact artifacts
+- no new permanent Core contract that rebrands `section` without actually
+  removing section semantics
 
 ## Parent, Child, And Companion Relationships
 
@@ -400,6 +479,7 @@ than expanding this page into an open-ended parser program.
 ## Related Docs
 
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
+- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`../backend-wide/goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)

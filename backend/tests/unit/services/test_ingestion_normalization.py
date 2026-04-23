@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from infra.source.ingestion.normalized_import import normalize_upload
@@ -28,12 +30,7 @@ def test_normalize_upload_builds_text_batch_for_plain_text():
     assert batch.source_metadata.warnings == ()
 
 
-def test_normalize_upload_uses_pdf_parser_for_pdf(monkeypatch):
-    monkeypatch.setattr(
-        "infra.source.ingestion.normalized_import.pdf_to_text",
-        lambda content: "Parsed PDF text",
-    )
-
+def test_normalize_upload_preserves_pdf_payload_for_pdf():
     batch = normalize_upload(
         filename="paper.pdf",
         content=b"%PDF-1.4 test",
@@ -43,8 +40,9 @@ def test_normalize_upload_uses_pdf_parser_for_pdf(monkeypatch):
     )
 
     assert batch.documents[0].original_filename == "paper.pdf"
-    assert batch.documents[0].stored_filename.endswith("_paper.txt")
-    assert batch.text_units[0].text == "Parsed PDF text"
+    assert batch.documents[0].stored_filename.endswith("_paper.pdf")
+    assert base64.b64decode(batch.documents[0].storage_payload_base64) == b"%PDF-1.4 test"
+    assert batch.text_units == ()
     assert batch.source_metadata.adapter_name == "upload_pdf"
     assert batch.source_metadata.goal_context == {"intent": "compare"}
 

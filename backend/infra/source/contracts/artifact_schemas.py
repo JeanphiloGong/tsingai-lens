@@ -159,18 +159,29 @@ DOCUMENTS_FINAL_COLUMNS = [
     METADATA,
 ]
 
-SECTIONS_FINAL_COLUMNS = [
-    "section_id",
-    ID,
-    TITLE,
-    "section_type",
-    "heading",
+BLOCKS_FINAL_COLUMNS = [
+    "block_id",
+    "document_id",
+    "block_type",
     TEXT,
-    "order",
-    TEXT_UNIT_IDS,
+    "block_order",
+    "text_unit_ids",
     "page",
+    "bbox",
     "char_range",
-    "confidence",
+    "heading_path",
+    "heading_level",
+]
+
+TABLE_ROWS_FINAL_COLUMNS = [
+    "row_id",
+    "document_id",
+    "table_id",
+    "row_index",
+    "row_text",
+    "page",
+    "bbox",
+    "heading_path",
 ]
 
 TABLE_CELLS_FINAL_COLUMNS = [
@@ -185,4 +196,22 @@ TABLE_CELLS_FINAL_COLUMNS = [
     "bbox",
     "char_range",
     "unit_hint",
+]
+
+FIGURES_FINAL_COLUMNS = [
+    "figure_id",
+    "document_id",
+    "figure_order",
+    "figure_label",
+    "caption_text",
+    "caption_block_id",
+    "page",
+    "bbox",
+    "heading_path",
+    "image_path",
+    "image_mime_type",
+    "image_width",
+    "image_height",
+    "asset_sha256",
+    METADATA,
 ]

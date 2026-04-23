@@ -5,15 +5,27 @@ import { isTaskActive, type Task } from './tasks';
 
 export type WorkspaceArtifactStatus = {
   output_path: string;
+  documents_generated: boolean;
   documents_ready: boolean;
+  document_profiles_generated: boolean;
   document_profiles_ready: boolean;
+  evidence_cards_generated: boolean;
   evidence_cards_ready: boolean;
+  comparable_results_generated: boolean;
+  comparable_results_ready: boolean;
+  collection_comparable_results_generated: boolean;
+  collection_comparable_results_ready: boolean;
+  collection_comparable_results_stale: boolean;
+  comparison_rows_generated: boolean;
   comparison_rows_ready: boolean;
+  comparison_rows_stale: boolean;
+  graph_generated: boolean;
   graph_ready: boolean;
-  sections_ready: boolean;
+  graph_stale: boolean;
+  procedure_blocks_generated: boolean;
   procedure_blocks_ready: boolean;
+  protocol_steps_generated: boolean;
   protocol_steps_ready: boolean;
-  graphml_ready: boolean;
   updated_at: string;
 };
 
@@ -27,6 +39,7 @@ export type WorkflowStageStatus =
 
 export type WorkspaceWorkflow = {
   documents: WorkflowStageStatus;
+  results: WorkflowStageStatus;
   evidence: WorkflowStageStatus;
   comparisons: WorkflowStageStatus;
   protocol: WorkflowStageStatus;
@@ -42,6 +55,7 @@ export type WorkspaceDocumentSummary = {
 export type WorkspaceLinks = {
   workspace: string;
   documents: string;
+  results: string;
   evidence: string;
   comparisons: string;
   protocol: string;
@@ -50,6 +64,7 @@ export type WorkspaceLinks = {
 
 export type WorkspaceCapabilities = {
   can_view_documents: boolean;
+  can_view_results: boolean;
   can_view_evidence: boolean;
   can_view_comparisons: boolean;
   can_view_graph: boolean;
@@ -92,7 +107,7 @@ export type WorkspaceSurfaceState =
 
 export type WorkspaceSurfaceKey = keyof WorkspaceWorkflow | 'graph';
 
-const PRIMARY_WORKFLOW_KEYS = ['documents', 'evidence', 'comparisons'] as const;
+const PRIMARY_WORKFLOW_KEYS = ['comparisons', 'results', 'documents'] as const;
 
 const DEFAULT_DOC_TYPE_COUNTS = {
   experimental: 0,
@@ -154,6 +169,7 @@ function defaultLinks(collectionId: string): WorkspaceLinks {
   return {
     workspace: `/collections/${encoded}`,
     documents: `/collections/${encoded}/documents`,
+    results: `/collections/${encoded}/results`,
     evidence: `/collections/${encoded}/evidence`,
     comparisons: `/collections/${encoded}/comparisons`,
     protocol: `/collections/${encoded}/protocol`,
@@ -165,7 +181,7 @@ function normalizeWorkspaceRoute(
   value: unknown,
   fallback: string,
   collectionId: string,
-  surface: 'workspace' | 'documents' | 'evidence' | 'comparisons' | 'protocol' | 'graph'
+  surface: 'workspace' | 'documents' | 'results' | 'evidence' | 'comparisons' | 'protocol' | 'graph'
 ) {
   if (typeof value !== 'string' || !value.trim()) return fallback;
 
@@ -179,6 +195,7 @@ function normalizeWorkspaceRoute(
   const routeMap = {
     workspace: `/collections/${encoded}`,
     documents: `/collections/${encoded}/documents`,
+    results: `/collections/${encoded}/results`,
     evidence: `/collections/${encoded}/evidence`,
     comparisons: `/collections/${encoded}/comparisons`,
     protocol: `/collections/${encoded}/protocol`,
@@ -190,6 +207,13 @@ function normalizeWorkspaceRoute(
   }
   if (surface === 'documents' && normalized === `${apiPrefix}/documents/profiles`) {
     return routeMap.documents;
+  }
+  if (
+    surface === 'results' &&
+    (normalized === `${apiPrefix}/results` ||
+      normalized === `/api/v1/comparable-results?collection_id=${encoded}`)
+  ) {
+    return routeMap.results;
   }
   if (surface === 'evidence' && normalized === `${apiPrefix}/evidence/cards`) {
     return routeMap.evidence;
@@ -220,6 +244,12 @@ function normalizeLinks(value: unknown, collectionId: string): WorkspaceLinks {
       collectionId,
       'documents'
     ),
+    results: normalizeWorkspaceRoute(
+      record.results ?? record.comparable_results,
+      defaults.results,
+      collectionId,
+      'results'
+    ),
     evidence: normalizeWorkspaceRoute(
       record.evidence ?? record.evidence_cards,
       defaults.evidence,
@@ -237,7 +267,9 @@ function normalizeLinks(value: unknown, collectionId: string): WorkspaceLinks {
   };
 }
 
-export function stageIsActionable(status: WorkflowStageStatus | null | undefined) {
+export function stageIsActionable(
+  status: WorkflowStageStatus | WorkspaceSurfaceState | null | undefined
+) {
   return status === 'ready' || status === 'limited';
 }
 
@@ -283,11 +315,15 @@ export function getWorkspaceSurfaceState(
   }
 
   if (surface === 'graph') {
+    if (workspace.artifacts.graph_stale) {
+      return 'limited';
+    }
+
+    // Graph readiness is semantic-artifact-driven. Do not fall back to row cache here.
     if (
       workspace.capabilities.can_view_graph ||
       workspace.capabilities.can_download_graphml ||
-      workspace.artifacts.graph_ready ||
-      workspace.artifacts.graphml_ready
+      workspace.artifacts.graph_ready
     ) {
       return 'ready';
     }
@@ -342,7 +378,7 @@ function normalizeTask(item: unknown): Task | null {
   return {
     task_id: taskId,
     collection_id: String(record.collection_id ?? ''),
-    task_type: String(record.task_type ?? 'index'),
+    task_type: String(record.task_type ?? 'build'),
     status: String(record.status ?? 'queued') as Task['status'],
     current_stage: String(record.current_stage ?? 'queued') as Task['current_stage'],
     progress_percent:
@@ -381,6 +417,17 @@ function deriveLegacyWorkflow(
 
   return {
     documents,
+    results:
+      artifacts.collection_comparable_results_ready ||
+      (USE_API_FIXTURES && documents === 'ready')
+        ? 'ready'
+        : artifacts.collection_comparable_results_stale
+          ? 'limited'
+        : activeTask
+          ? 'processing'
+          : failedTask
+            ? 'failed'
+            : 'not_started',
     evidence:
       artifacts.evidence_cards_ready || (USE_API_FIXTURES && documents === 'ready')
         ? 'ready'
@@ -389,9 +436,15 @@ function deriveLegacyWorkflow(
           : failedTask
             ? 'failed'
             : 'not_started',
+    // The comparisons page is still row-facing in the current frontend.
+    // Keep that fallback local to workflow/comparison UI; graph readiness is separate.
     comparisons:
-      artifacts.comparison_rows_ready || (USE_API_FIXTURES && documents === 'ready')
+      artifacts.collection_comparable_results_ready ||
+      artifacts.comparison_rows_ready ||
+      (USE_API_FIXTURES && documents === 'ready')
         ? 'ready'
+        : artifacts.collection_comparable_results_stale || artifacts.comparison_rows_stale
+          ? 'limited'
         : activeTask
           ? 'processing'
           : failedTask
@@ -420,6 +473,7 @@ function normalizeWorkflow(
 
   return {
     documents: normalizeStageEntry(record.documents, fallback.documents),
+    results: normalizeStageEntry(record.results, fallback.results),
     evidence: normalizeStageEntry(record.evidence, fallback.evidence),
     comparisons: normalizeStageEntry(record.comparisons, fallback.comparisons),
     protocol: normalizeStageEntry(record.protocol, fallback.protocol)
@@ -462,6 +516,36 @@ function normalizeDocumentSummary(value: unknown, fileCount: number): WorkspaceD
   };
 }
 
+function normalizeArtifacts(value: unknown): WorkspaceArtifactStatus {
+  const record = asRecord(value);
+
+  return {
+    output_path: String(record?.output_path ?? ''),
+    documents_generated: Boolean(record?.documents_generated),
+    documents_ready: Boolean(record?.documents_ready),
+    document_profiles_generated: Boolean(record?.document_profiles_generated),
+    document_profiles_ready: Boolean(record?.document_profiles_ready),
+    evidence_cards_generated: Boolean(record?.evidence_cards_generated),
+    evidence_cards_ready: Boolean(record?.evidence_cards_ready),
+    comparable_results_generated: Boolean(record?.comparable_results_generated),
+    comparable_results_ready: Boolean(record?.comparable_results_ready),
+    collection_comparable_results_generated: Boolean(record?.collection_comparable_results_generated),
+    collection_comparable_results_ready: Boolean(record?.collection_comparable_results_ready),
+    collection_comparable_results_stale: Boolean(record?.collection_comparable_results_stale),
+    comparison_rows_generated: Boolean(record?.comparison_rows_generated),
+    comparison_rows_ready: Boolean(record?.comparison_rows_ready),
+    comparison_rows_stale: Boolean(record?.comparison_rows_stale),
+    graph_generated: Boolean(record?.graph_generated),
+    graph_ready: Boolean(record?.graph_ready),
+    graph_stale: Boolean(record?.graph_stale),
+    procedure_blocks_generated: Boolean(record?.procedure_blocks_generated),
+    procedure_blocks_ready: Boolean(record?.procedure_blocks_ready),
+    protocol_steps_generated: Boolean(record?.protocol_steps_generated),
+    protocol_steps_ready: Boolean(record?.protocol_steps_ready),
+    updated_at: String(record?.updated_at ?? '')
+  };
+}
+
 export async function fetchWorkspaceOverview(collectionId: string) {
   const data = (await requestJson(`/collections/${encodeURIComponent(collectionId)}/workspace`, {
     method: 'GET'
@@ -473,23 +557,7 @@ export async function fetchWorkspaceOverview(collectionId: string) {
   }
 
   const file_count = typeof data.file_count === 'number' ? data.file_count : Number(data.file_count ?? 0);
-  const artifacts: WorkspaceArtifactStatus = {
-    output_path: String((data.artifacts as Record<string, unknown> | undefined)?.output_path ?? ''),
-    documents_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.documents_ready),
-    document_profiles_ready: Boolean(
-      (data.artifacts as Record<string, unknown> | undefined)?.document_profiles_ready
-    ),
-    evidence_cards_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.evidence_cards_ready),
-    comparison_rows_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.comparison_rows_ready),
-    graph_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.graph_ready),
-    sections_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.sections_ready),
-    procedure_blocks_ready: Boolean(
-      (data.artifacts as Record<string, unknown> | undefined)?.procedure_blocks_ready
-    ),
-    protocol_steps_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.protocol_steps_ready),
-    graphml_ready: Boolean((data.artifacts as Record<string, unknown> | undefined)?.graphml_ready),
-    updated_at: String((data.artifacts as Record<string, unknown> | undefined)?.updated_at ?? '')
-  };
+  const artifacts = normalizeArtifacts(data.artifacts);
 
   const latest_task = normalizeTask(data.latest_task) ?? null;
   const workflow = normalizeWorkflow(data.workflow, collectionId, file_count, latest_task, artifacts);
@@ -516,6 +584,9 @@ export async function fetchWorkspaceOverview(collectionId: string) {
       can_view_documents:
         Boolean((data.capabilities as Record<string, unknown> | undefined)?.can_view_documents) ||
         stageIsActionable(workflow.documents),
+      can_view_results:
+        Boolean((data.capabilities as Record<string, unknown> | undefined)?.can_view_results) ||
+        stageIsActionable(workflow.results),
       can_view_evidence:
         Boolean((data.capabilities as Record<string, unknown> | undefined)?.can_view_evidence) ||
         stageIsActionable(workflow.evidence),

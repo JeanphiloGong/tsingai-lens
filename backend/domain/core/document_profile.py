@@ -5,9 +5,14 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from domain.shared.enums import (
+    DOC_TYPE_EXPERIMENTAL,
     DOC_TYPE_MIXED,
     DOC_TYPE_REVIEW,
     DOC_TYPE_UNCERTAIN,
+    PROTOCOL_EXTRACTABLE_NO,
+    PROTOCOL_EXTRACTABLE_PARTIAL,
+    PROTOCOL_EXTRACTABLE_UNCERTAIN,
+    PROTOCOL_EXTRACTABLE_YES,
     PROTOCOL_SUITABLE_EXTRACTABILITY,
 )
 
@@ -26,17 +31,20 @@ class DocumentProfile:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "DocumentProfile":
+        signals = _normalize_string_tuple(payload.get("protocol_extractability_signals"))
+        warnings = _normalize_string_tuple(payload.get("parsing_warnings"))
+        doc_type = _normalize_doc_type(payload.get("doc_type"))
         return cls(
             document_id=str(payload.get("document_id") or ""),
             collection_id=str(payload.get("collection_id") or ""),
             title=_normalize_optional_text(payload.get("title")),
             source_filename=_normalize_optional_text(payload.get("source_filename")),
-            doc_type=str(payload.get("doc_type") or DOC_TYPE_UNCERTAIN),
-            protocol_extractable=str(payload.get("protocol_extractable") or "uncertain"),
-            protocol_extractability_signals=_normalize_string_tuple(
-                payload.get("protocol_extractability_signals")
+            doc_type=doc_type,
+            protocol_extractable=_normalize_protocol_extractable(
+                payload.get("protocol_extractable")
             ),
-            parsing_warnings=_normalize_string_tuple(payload.get("parsing_warnings")),
+            protocol_extractability_signals=signals,
+            parsing_warnings=warnings,
             confidence=round(float(payload.get("confidence") or 0.0), 2),
         )
 
@@ -128,6 +136,120 @@ def _normalize_string_tuple(value: Any) -> tuple[str, ...]:
             return _normalize_string_tuple(converted)
     text = str(value).strip()
     return (text,) if text else ()
+
+
+def _normalize_doc_type(
+    value: Any,
+) -> str:
+    raw = _normalize_label(value)
+    if raw in {
+        DOC_TYPE_EXPERIMENTAL,
+        DOC_TYPE_REVIEW,
+        DOC_TYPE_MIXED,
+        DOC_TYPE_UNCERTAIN,
+    }:
+        return raw
+
+    if raw in {
+        "research article",
+        "research paper",
+        "original research",
+        "original article",
+        "primary research",
+        "primary study",
+        "empirical study",
+        "experiment",
+        "experimental study",
+    }:
+        return DOC_TYPE_EXPERIMENTAL
+
+    if raw in {
+        "review article",
+        "review paper",
+        "literature review",
+        "survey",
+        "overview",
+        "perspective",
+    }:
+        return DOC_TYPE_REVIEW
+
+    if raw in {
+        "mixed",
+        "mixed study",
+        "mixed article",
+    }:
+        return DOC_TYPE_MIXED
+
+    if raw in {
+        "",
+        "unknown",
+        "unclear",
+        "other",
+        "n/a",
+        "na",
+    }:
+        return DOC_TYPE_UNCERTAIN
+
+    return DOC_TYPE_UNCERTAIN
+
+
+def _normalize_protocol_extractable(
+    value: Any,
+) -> str:
+    raw = _normalize_label(value)
+    if raw in {
+        PROTOCOL_EXTRACTABLE_YES,
+        PROTOCOL_EXTRACTABLE_PARTIAL,
+        PROTOCOL_EXTRACTABLE_NO,
+        PROTOCOL_EXTRACTABLE_UNCERTAIN,
+    }:
+        return raw
+
+    if raw in {
+        "extractable",
+        "protocol suitable",
+        "suitable",
+        "supported",
+        "full",
+        "high",
+    }:
+        return PROTOCOL_EXTRACTABLE_YES
+
+    if raw in {
+        "partial",
+        "partially extractable",
+        "partially suitable",
+        "limited",
+    }:
+        return PROTOCOL_EXTRACTABLE_PARTIAL
+
+    if raw in {
+        "not suitable",
+        "not extractable",
+        "unsuitable",
+        "review only",
+    }:
+        return PROTOCOL_EXTRACTABLE_NO
+
+    if raw in {
+        "",
+        "unknown",
+        "unclear",
+        "n/a",
+        "na",
+    }:
+        raw = PROTOCOL_EXTRACTABLE_UNCERTAIN
+
+    if raw == PROTOCOL_EXTRACTABLE_UNCERTAIN:
+        return raw
+    return PROTOCOL_EXTRACTABLE_UNCERTAIN
+
+
+def _normalize_label(value: Any) -> str:
+    text = _normalize_optional_text(value)
+    if text is None:
+        return ""
+    return text.lower().replace("_", " ").replace("-", " ")
 
 
 __all__ = [

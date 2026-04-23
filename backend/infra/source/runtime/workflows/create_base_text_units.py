@@ -10,7 +10,7 @@ from typing import Any, cast
 import pandas as pd
 
 from infra.source.runtime.chunking import chunk_text, get_encoding_fn
-from infra.source.config.source_runtime_config import GraphRagConfig
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.runtime.hashing import gen_sha512_hash
 from infra.source.runtime.storage.table_io import (
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_workflow(
-    config: GraphRagConfig,
+    config: SourceRuntimeConfig,
     context: PipelineRunContext,
 ) -> WorkflowFunctionOutput:
     """All the steps to transform base text_units."""

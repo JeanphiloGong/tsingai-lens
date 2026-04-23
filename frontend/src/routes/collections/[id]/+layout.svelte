@@ -18,13 +18,14 @@
 
   $: collectionId = $page.params.id ?? '';
   $: collectionName = $collections.find((item) => item.id === collectionId)?.name;
+  $: resultsVisible = !workspace || getWorkspaceSurfaceState(workspace, 'results') !== 'not_applicable';
+  $: evidenceVisible = !workspace || getWorkspaceSurfaceState(workspace, 'evidence') !== 'not_applicable';
   $: protocolVisible = !workspace || getWorkspaceSurfaceState(workspace, 'protocol') !== 'not_applicable';
   $: graphVisible =
     !workspace ||
     workspace.capabilities.can_view_graph ||
     workspace.capabilities.can_download_graphml ||
-    workspace.artifacts.graph_ready ||
-    workspace.artifacts.graphml_ready;
+    workspace.artifacts.graph_ready;
 
   $: if (collectionId && collectionId !== loadedWorkspaceId) {
     loadedWorkspaceId = collectionId;
@@ -98,12 +99,14 @@
   >
     {$t('collection.tabs.comparisons')}
   </a>
-  <a
-    href={`/collections/${collectionId}/evidence`}
-    class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`)}
-  >
-    {$t('collection.tabs.evidence')}
-  </a>
+  {#if resultsVisible}
+    <a
+      href={`/collections/${collectionId}/results`}
+      class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/results`)}
+    >
+      {$t('collection.tabs.results')}
+    </a>
+  {/if}
   <a
     href={`/collections/${collectionId}/documents`}
     class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/documents`)}
@@ -112,9 +115,17 @@
   </a>
 </nav>
 
-{#if protocolVisible || graphVisible}
+{#if evidenceVisible || protocolVisible || graphVisible}
   <nav class="subnav subnav--secondary" aria-label={$t('collection.moreLabel')}>
     <span class="subnav__label">{$t('collection.moreLabel')}</span>
+    {#if evidenceVisible}
+      <a
+        href={`/collections/${collectionId}/evidence`}
+        class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`)}
+      >
+        {$t('collection.tabs.evidence')}
+      </a>
+    {/if}
     {#if protocolVisible}
       <a
         href={`/collections/${collectionId}/protocol`}

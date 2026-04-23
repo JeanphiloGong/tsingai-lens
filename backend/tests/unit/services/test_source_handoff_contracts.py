@@ -60,11 +60,7 @@ def test_pipeline_factory_defaults_to_minimal_source_handoff():
 
     workflows = ast.literal_eval(assignments["_source_handoff_workflows"])
     assert workflows == [
-        "create_base_text_units",
-        "create_final_documents",
-        "create_final_text_units",
-        "create_sections",
-        "create_table_cells",
+        "create_source_artifacts",
     ]
     assert 'IndexingMethod.Standard, ["load_input_documents", *_source_handoff_workflows]' in source
     assert 'IndexingMethod.Fast, ["load_input_documents", *_source_handoff_workflows]' in source

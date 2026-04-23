@@ -88,10 +88,27 @@ Materials should shape the first schema and workflow, but Lens should remain a
 broader literature intelligence system rather than a materials-only protocol
 tool.
 
+## Long-Term Substrate Direction
+
+Lens v1 should remain collection-first at the product surface, but the
+underlying architecture should be able to grow beyond one collection workspace.
+
+The intended direction is to keep the evidence-backed comparison backbone clean
+enough that it can later support:
+
+- a reusable literature-backed materials facts substrate
+- cross-collection and corpus-level retrieval over structured research facts
+- benchmark, landscape, and agent-readable views derived from the same
+  traceable backbone
+
+That direction should extend the evidence-and-comparison philosophy rather than
+replace it with generic chat or opaque database convenience.
+
 ## Related Docs
 
 - [Lens V1 Definition](../contracts/lens-v1-definition.md)
 - [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](../decisions/rfc-evidence-first-literature-parsing.md)
 - [Lens Agent-Era Positioning and Evidence Layer Direction](../decisions/rfc-lens-agent-era-positioning.md)
+- [RFC Comparable-Result Substrate and Materials Database Direction](../decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
 - [System Overview](system-overview.md)

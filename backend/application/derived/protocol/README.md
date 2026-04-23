@@ -17,8 +17,8 @@ This node owns the conditional protocol branch in the backend.
 ## Responsibilities
 
 - derive protocol-oriented source views from indexed collection documents
-- build `sections.parquet`, `procedure_blocks.parquet`, and
-  `protocol_steps.parquet`
+- build `procedure_blocks.parquet` and `protocol_steps.parquet` from Source
+  `blocks.parquet`
 - normalize and validate protocol-step outputs
 - support collection-scoped protocol listing and search
 - generate SOP drafts over protocol artifacts
@@ -45,11 +45,11 @@ It should not redefine:
 ## Important Files
 
 - `pipeline_service.py`
-  Builds protocol artifacts from indexed collection inputs
+  Builds protocol artifacts from Source `blocks.parquet`
 - `artifact_service.py`
   Persists protocol branch artifacts over the Source-owned collection-input seam
 - `block_service.py`
-  Builds procedure blocks from sections
+  Builds procedure blocks from Source blocks
 - `extract_service.py`
   Converts procedure blocks into protocol-step tables
 - `search_service.py`
@@ -60,10 +60,10 @@ It should not redefine:
 ## Upstream / Downstream
 
 - upstream inputs:
-  indexed collection documents, text units, shared Core parsing seam, and
+  indexed collection documents, Source blocks, shared Core parsing seam, and
   document suitability gating
 - downstream artifacts:
-  `sections.parquet`, `procedure_blocks.parquet`, `protocol_steps.parquet`
+  `procedure_blocks.parquet`, `protocol_steps.parquet`
 - downstream consumers:
   protocol listing/search APIs, SOP drafting, collection capabilities and
   conditional protocol entry

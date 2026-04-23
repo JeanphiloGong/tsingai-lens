@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from application.core.document_profile_service import DocumentProfileService
-from infra.source.runtime.source_evidence import build_sections
+from application.core.semantic_build.document_profile_service import DocumentProfileService
+from infra.source.runtime.source_evidence import build_blocks
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -24,8 +24,8 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
 
 
-def _write_sections(output_dir: Path, documents: pd.DataFrame, text_units: pd.DataFrame | None = None) -> None:
-    build_sections(documents, text_units).to_parquet(output_dir / "sections.parquet", index=False)
+def _write_blocks(output_dir: Path, documents: pd.DataFrame, text_units: pd.DataFrame | None = None) -> None:
+    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
 
 
 def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_path):
@@ -98,7 +98,7 @@ def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_p
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_sections(output_dir, documents, text_units)
+    _write_blocks(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = profile_service.list_document_profiles(collection_id)
@@ -109,12 +109,15 @@ def test_document_profile_service_builds_profiles_and_summary(monkeypatch, tmp_p
     assert items["exp-1"]["source_filename"] is None
     assert items["exp-1"]["doc_type"] == "experimental"
     assert items["exp-1"]["protocol_extractable"] == "yes"
+    assert items["exp-1"]["protocol_extractability_signals"] == []
     assert items["rev-1"]["title"] == "A Review of Composite Fillers"
     assert items["rev-1"]["doc_type"] == "review"
     assert items["rev-1"]["protocol_extractable"] == "no"
+    assert items["rev-1"]["protocol_extractability_signals"] == []
     assert items["mix-1"]["title"] == "Review and Experimental Notes on Ceramic Coatings"
     assert items["mix-1"]["doc_type"] == "mixed"
     assert items["mix-1"]["protocol_extractable"] == "partial"
+    assert items["mix-1"]["protocol_extractability_signals"] == []
     assert payload["summary"]["by_doc_type"] == {
         "experimental": 1,
         "mixed": 1,
@@ -177,7 +180,7 @@ def test_document_profile_service_returns_null_title_and_source_filename_from_fi
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_sections(output_dir, documents, text_units)
+    _write_blocks(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = profile_service.list_document_profiles(collection_id)
@@ -187,7 +190,8 @@ def test_document_profile_service_returns_null_title_and_source_filename_from_fi
     assert item["title"] is None
     assert item["source_filename"] == "wang_2024_battery.txt"
     assert item["doc_type"] == "experimental"
-    assert item["protocol_extractable"] == "partial"
+    assert item["protocol_extractable"] == "yes"
+    assert item["protocol_extractability_signals"] == []
 
 
 def test_document_profile_service_rebuilds_legacy_profiles_with_identity_fields(
@@ -252,7 +256,7 @@ def test_document_profile_service_rebuilds_legacy_profiles_with_identity_fields(
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_sections(output_dir, documents, text_units)
+    _write_blocks(output_dir, documents, text_units)
     legacy_profiles.to_parquet(output_dir / "document_profiles.parquet", index=False)
     artifact_registry.upsert(collection_id, output_dir)
 
@@ -262,7 +266,54 @@ def test_document_profile_service_rebuilds_legacy_profiles_with_identity_fields(
     assert item["title"] == "Composite Paper"
     assert item["source_filename"] == "paper.txt"
     assert item["doc_type"] == "experimental"
-    assert item["protocol_extractable"] == "partial"
+    assert item["protocol_extractable"] == "yes"
+    assert item["protocol_extractability_signals"] == []
+
+
+def test_document_profile_service_short_circuits_insufficient_content(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class ExplodingExtractor:
+        def extract_document_profile(self, payload):  # noqa: ANN001
+            raise AssertionError("extract_document_profile should not be called")
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=ExplodingExtractor(),
+    )
+
+    collection = collection_service.create_collection("Sparse Profiles")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "",
+                "text": "",
+            }
+        ]
+    )
+    text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_blocks(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = profile_service.list_document_profiles(collection_id)
+
+    item = payload["items"][0]
+    assert item["doc_type"] == "uncertain"
+    assert item["protocol_extractable"] == "uncertain"
+    assert item["protocol_extractability_signals"] == []
+    assert item["parsing_warnings"] == ["insufficient_content"]
 
 
 def test_document_profile_service_normalizes_numpy_array_columns():
@@ -333,7 +384,7 @@ def test_document_profile_service_round_trips_json_storage_fields(tmp_path):
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_sections(output_dir, documents, text_units)
+    _write_blocks(output_dir, documents, text_units)
     artifact_registry.upsert(collection_id, output_dir)
 
     profile_service.build_document_profiles(collection_id, output_dir)

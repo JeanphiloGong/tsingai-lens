@@ -17,7 +17,7 @@
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
-- 启动索引任务：`POST /api/v1/collections/{collection_id}/tasks/index`
+- 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`
 - 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
 - 图谱与 GraphML：`GET /api/v1/collections/{collection_id}/graph`、`GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`、`GET /api/v1/collections/{collection_id}/graphml`
 - 图谱 drilldown 详情：`GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、`GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`、`GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
@@ -29,6 +29,8 @@
 - 不再允许浏览器手工设置 Base URL
 - 遗留调试入口已从浏览器产品流程中退役
 - `frontend/nginx.conf` 只代理 `/api/` 到 `backend:8010`
+- collection workspace 与首页统一把任务启动视为 `build`，不再向浏览器公开旧的 `/tasks/index` 合同
+- 前端主合同不再依赖 `sections_ready` 或 `graphml_ready`；GraphML 导出能力统一看 `capabilities.can_download_graphml`
 - 集合图谱页使用 `Cytoscape.js` 在浏览器端本地布局；邻域扩展保留已有节点位置并只对新增节点做增量重排，不依赖服务端坐标
 - 图谱页的语义聚合节点目前是 `material / property / test_condition / baseline`；默认显示 `material / property`，并通过前端类型开关显式控制其余节点可见性
 - 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已退役为说明页，不再发旧浏览器请求

@@ -12,7 +12,11 @@ if str(ROOT) not in sys.path:
 
 @pytest.fixture(autouse=True)
 def _patch_core_llm_extractor(monkeypatch):
-    from application.core import comparison_service, document_profile_service, evidence_card_service
+    from application.core import comparison_service
+    from application.core.semantic_build import (
+        document_profile_service,
+        paper_facts_service,
+    )
     from tests.support.fake_core_llm_extractor import FakeCoreLLMStructuredExtractor
 
     fake = FakeCoreLLMStructuredExtractor()
@@ -22,10 +26,10 @@ def _patch_core_llm_extractor(monkeypatch):
         lambda: fake,
     )
     monkeypatch.setattr(
-        evidence_card_service,
+        paper_facts_service,
         "build_default_core_llm_structured_extractor",
         lambda: fake,
     )
     monkeypatch.setattr(document_profile_service, "core_semantic_rebuild_required", lambda _base_dir: False)
-    monkeypatch.setattr(evidence_card_service, "core_semantic_rebuild_required", lambda _base_dir: False)
+    monkeypatch.setattr(paper_facts_service, "core_semantic_rebuild_required", lambda _base_dir: False)
     monkeypatch.setattr(comparison_service, "core_semantic_rebuild_required", lambda _base_dir: False)

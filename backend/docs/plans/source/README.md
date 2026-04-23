@@ -6,6 +6,9 @@ GraphRAG-era Source seams.
 
 ## Reading Order
 
+- [`source-build-task-background-execution-plan.md`](source-build-task-background-execution-plan.md)
+  Minimal background execution model for collection builds and task-status
+  polling without blocking the main request loop
 - [`source-collection-builder-normalization-plan.md`](source-collection-builder-normalization-plan.md)
   Normalize the collection-builder and import handoff seam
 - [`source-residual-graphrag-retirement-plan.md`](source-residual-graphrag-retirement-plan.md)

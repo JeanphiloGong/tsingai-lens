@@ -365,6 +365,50 @@ def test_request_id_is_echoed_and_propagated_to_background_build(app_client, mon
     assert captured["bound_request_id"] == request_id
 
 
+def test_build_task_route_uses_blocking_background_entry(app_client, monkeypatch):
+    from controllers.source import tasks as tasks_controller
+
+    captured: dict[str, object] = {}
+
+    def fake_run_build_task_blocking(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return {
+            "task_id": args[0],
+            "collection_id": args[1],
+            "status": "queued",
+        }
+
+    def fail_run_build_task(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("async build entry should not be scheduled directly")
+
+    monkeypatch.setattr(
+        tasks_controller.build_task_runner,
+        "run_build_task_blocking",
+        fake_run_build_task_blocking,
+    )
+    monkeypatch.setattr(
+        tasks_controller.build_task_runner,
+        "run_build_task",
+        fail_run_build_task,
+    )
+
+    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Blocking Entry Set"})
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    upload_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+    )
+    assert upload_resp.status_code == 200
+
+    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
+
+    assert task_resp.status_code == 200
+    assert captured["args"][1] == collection_id
+
+
 def test_legacy_index_task_route_is_not_registered(app_client):
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Legacy Route"})
     assert create_resp.status_code == 200

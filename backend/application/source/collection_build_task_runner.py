@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,28 @@ class CollectionBuildTaskRunner:
             record.get("status"),
         )
         return record
+
+    def run_build_task_blocking(
+        self,
+        task_id: str,
+        collection_id: str,
+        method: IndexingMethod | str = IndexingMethod.Standard,
+        verbose: bool = False,
+        additional_context: dict | None = None,
+        request_id: str | None = None,
+    ) -> dict:
+        """Run the full build task in a worker thread with its own event loop."""
+
+        return asyncio.run(
+            self.run_build_task(
+                task_id,
+                collection_id,
+                method=method,
+                verbose=verbose,
+                additional_context=additional_context,
+                request_id=request_id,
+            )
+        )
 
     async def run_build_task(
         self,

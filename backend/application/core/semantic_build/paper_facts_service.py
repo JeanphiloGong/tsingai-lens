@@ -104,6 +104,7 @@ _BASELINE_REFERENCES_JSON_COLUMNS = ("evidence_anchor_ids",)
 _SAMPLE_VARIANTS_FILE = "sample_variants.parquet"
 _SAMPLE_VARIANTS_JSON_COLUMNS = (
     "host_material_system",
+    "variable_value",
     "process_context",
     "profile_payload",
     "structure_feature_ids",

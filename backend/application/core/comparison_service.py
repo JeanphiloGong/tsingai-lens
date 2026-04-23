@@ -53,6 +53,7 @@ _TEST_CONDITIONS_FILE = "test_conditions.parquet"
 _BASELINE_REFERENCES_FILE = "baseline_references.parquet"
 _SAMPLE_VARIANT_JSON_COLUMNS = (
     "host_material_system",
+    "variable_value",
     "process_context",
     "profile_payload",
     "structure_feature_ids",

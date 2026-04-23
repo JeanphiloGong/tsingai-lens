@@ -528,7 +528,8 @@ def test_evidence_service_builds_sample_variants_and_measurement_results(monkeyp
     document_profile_service.build_document_profiles(collection_id, output_dir)
     paper_facts_service.build_evidence_cards(collection_id, output_dir)
 
-    sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
+    frames = paper_facts_service._load_paper_fact_frames(collection_id, output_dir)
+    sample_variants = frames["sample_variants"]
     measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
     baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
 
@@ -841,6 +842,109 @@ def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_p
     }
     assert measurement_results["test_condition_id"].nunique() == 1
     assert measurement_results["baseline_id"].nunique() == 1
+
+
+def test_paper_facts_service_persists_mixed_variant_values_with_real_parquet(tmp_path):
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class MixedVariantValueExtractor:
+        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                protocol_extractable="yes",
+                protocol_extractability_signals=[],
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+            text_window = payload.get("text_window") or {}
+            text = str(text_window.get("text") or "")
+            if "Field conditions varied across samples." not in text:
+                return StructuredExtractionBundle()
+            return StructuredExtractionBundle(
+                sample_variants=[
+                    SampleVariantPayload(
+                        variant_label="V10",
+                        host_material_system={"family": "steel"},
+                        variable_axis_type="field_level",
+                        variable_value=10,
+                        confidence=0.8,
+                    ),
+                    SampleVariantPayload(
+                        variant_label="Vair",
+                        host_material_system={"family": "steel"},
+                        variable_axis_type="field_level",
+                        variable_value="air",
+                        confidence=0.8,
+                    ),
+                ]
+            )
+
+        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
+            return StructuredExtractionBundle()
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = MixedVariantValueExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        artifact_registry,
+        paper_facts_service,
+    )
+
+    collection = collection_service.create_collection("Mixed Variant Value Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Mixed Variant Value Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Field conditions varied across samples.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Field conditions varied across samples.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    paper_facts_service.build_paper_facts(collection_id, output_dir)
+
+    frames = paper_facts_service._load_paper_fact_frames(collection_id, output_dir)
+    assert set(frames["sample_variants"]["variable_value"]) == {10, "air"}
+
+    comparison_inputs = comparison_service._load_comparison_inputs(collection_id, output_dir)
+    assert set(comparison_inputs.sample_variants["variable_value"]) == {10, "air"}
 
 
 def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatch, tmp_path):

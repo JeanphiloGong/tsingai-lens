@@ -285,3 +285,57 @@ def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert paths.output_dir.joinpath("document_profiles.parquet").exists()
     assert paths.output_dir.joinpath("comparable_results.parquet").exists()
     assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()
+
+
+def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
+    _patch_parquet(monkeypatch)
+
+    import application.source.collection_build_task_runner as task_runner_module
+
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
+
+    collection = collection_service.create_collection("Logging Progress Collection")
+    paths = collection_service.get_paths(collection["collection_id"])
+    collection_service.add_file(collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal.")
+
+    default_config = tmp_path / "configs" / "default.yaml"
+    default_config.parent.mkdir(parents=True, exist_ok=True)
+    default_config.write_text("dummy: true\n", encoding="utf-8")
+
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
+        _write_source_artifact_outputs(paths.output_dir)
+        return [DummyWorkflowOutput()]
+
+    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
+    monkeypatch.setattr(
+        task_runner_module,
+        "load_config",
+        lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
+    )
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
+
+    task = task_service.create_task(collection["collection_id"], "build")
+    with caplog.at_level("INFO"):
+        asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
+
+    assert any(
+        "Build task progress" in record.message
+        and "stage=source_artifacts_started" in record.message
+        and "progress_percent=25" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Build task progress" in record.message
+        and "stage=paper_facts_started" in record.message
+        and "progress_percent=76" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Build task progress" in record.message
+        and "stage=artifacts_ready" in record.message
+        and "progress_percent=100" in record.message
+        for record in caplog.records
+    )

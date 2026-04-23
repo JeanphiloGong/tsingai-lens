@@ -475,13 +475,25 @@ class PaperFactsService:
             str(row.get("document_id")): dict(row)
             for _, row in profiles.iterrows()
         }
+        total_documents = len(document_records)
+        total_extraction_units = 0
+        for _, candidate_row in document_records.iterrows():
+            candidate_document_id = str(candidate_row.get("paper_id") or "")
+            candidate_profile = profile_by_doc.get(candidate_document_id)
+            if not candidate_profile:
+                continue
+            total_extraction_units += len(text_windows_by_doc.get(candidate_document_id, []))
+            if str(candidate_profile.get("doc_type") or "") != DOC_TYPE_REVIEW:
+                total_extraction_units += len(table_rows_by_doc.get(candidate_document_id, []))
+        completed_extraction_units = 0
         logger.info(
-            "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_row_count=%s table_cell_count=%s",
+            "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_row_count=%s table_cell_count=%s total_extraction_units=%s",
             collection_id,
-            len(document_records),
+            total_documents,
             len(blocks),
             len(table_rows),
             len(table_cells),
+            total_extraction_units,
         )
         if table_cells.empty:
             logger.warning(
@@ -498,7 +510,7 @@ class PaperFactsService:
 
         extractor = self._get_structured_extractor()
 
-        for _, row in document_records.iterrows():
+        for document_position, (_, row) in enumerate(document_records.iterrows(), start=1):
             document_id = str(row.get("paper_id") or "")
             profile = profile_by_doc.get(document_id)
             if not profile:
@@ -514,13 +526,25 @@ class PaperFactsService:
             doc_table_rows = table_rows_by_doc.get(document_id, [])
             grouped_row_cells = self._group_table_cells_by_row(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
+            planned_table_row_count = (
+                0 if str(profile.get("doc_type") or "") == DOC_TYPE_REVIEW else len(doc_table_rows)
+            )
+            document_total_units = len(doc_text_windows) + planned_table_row_count
+            document_completed_units = 0
             logger.info(
-                "Paper facts extraction document started collection_id=%s document_id=%s text_window_count=%s table_row_count=%s doc_type=%s",
+                "Paper facts extraction document started collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s text_window_count=%s table_row_count=%s doc_type=%s completed_units=%s total_units=%s remaining_units=%s document_total_units=%s",
                 collection_id,
                 document_id,
+                document_position,
+                total_documents,
+                total_documents - document_position,
                 len(doc_text_windows),
-                len(doc_table_rows),
+                planned_table_row_count,
                 profile.get("doc_type"),
+                completed_extraction_units,
+                total_extraction_units,
+                max(total_extraction_units - completed_extraction_units, 0),
+                document_total_units,
             )
 
             doc_anchor_start = len(evidence_anchor_rows)
@@ -582,10 +606,14 @@ class PaperFactsService:
                     measurement_rows=measurement_rows,
                     document_state=document_state,
                 )
+                completed_extraction_units += 1
+                document_completed_units += 1
                 logger.info(
-                    "Paper facts text-window extraction finished collection_id=%s document_id=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                    "Paper facts text-window extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                     collection_id,
                     document_id,
+                    document_position,
+                    total_documents,
                     text_window_position,
                     len(doc_text_windows),
                     window_id,
@@ -595,6 +623,12 @@ class PaperFactsService:
                     len(bundle.test_conditions),
                     len(bundle.baseline_references),
                     len(bundle.measurement_results),
+                    completed_extraction_units,
+                    total_extraction_units,
+                    max(total_extraction_units - completed_extraction_units, 0),
+                    document_completed_units,
+                    document_total_units,
+                    max(document_total_units - document_completed_units, 0),
                 )
 
             if str(profile.get("doc_type") or "") != DOC_TYPE_REVIEW:
@@ -653,10 +687,14 @@ class PaperFactsService:
                         measurement_rows=measurement_rows,
                         document_state=document_state,
                     )
+                    completed_extraction_units += 1
+                    document_completed_units += 1
                     logger.info(
-                        "Paper facts table-row extraction finished collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                        "Paper facts table-row extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                         collection_id,
                         document_id,
+                        document_position,
+                        total_documents,
                         table_row_position,
                         len(doc_table_rows),
                         table_id,
@@ -668,18 +706,30 @@ class PaperFactsService:
                         len(bundle.test_conditions),
                         len(bundle.baseline_references),
                         len(bundle.measurement_results),
+                        completed_extraction_units,
+                        total_extraction_units,
+                        max(total_extraction_units - completed_extraction_units, 0),
+                        document_completed_units,
+                        document_total_units,
+                        max(document_total_units - document_completed_units, 0),
                     )
 
             logger.info(
-                "Paper facts extraction document finished collection_id=%s document_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s",
+                "Paper facts extraction document finished collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s",
                 collection_id,
                 document_id,
+                document_position,
+                total_documents,
+                total_documents - document_position,
                 len(evidence_anchor_rows) - doc_anchor_start,
                 len(method_fact_rows) - doc_method_start,
                 len(sample_variant_rows) - doc_variant_start,
                 len(test_condition_rows) - doc_condition_start,
                 len(baseline_rows) - doc_baseline_start,
                 len(measurement_rows) - doc_measurement_start,
+                completed_extraction_units,
+                total_extraction_units,
+                max(total_extraction_units - completed_extraction_units, 0),
             )
 
         evidence_anchors = self._normalize_evidence_anchors_table(

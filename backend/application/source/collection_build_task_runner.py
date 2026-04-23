@@ -96,6 +96,23 @@ class CollectionBuildTaskRunner:
         config.root_dir = str(paths.collection_dir)
         return config, paths.output_dir
 
+    def _update_task_progress(
+        self,
+        task_id: str,
+        collection_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        record = self.task_service.update_task(task_id, **kwargs)
+        logger.info(
+            "Build task progress task_id=%s collection_id=%s stage=%s progress_percent=%s status=%s",
+            task_id,
+            collection_id,
+            record.get("current_stage"),
+            record.get("progress_percent"),
+            record.get("status"),
+        )
+        return record
+
     async def run_build_task(
         self,
         task_id: str,
@@ -106,8 +123,9 @@ class CollectionBuildTaskRunner:
         request_id: str | None = None,
     ) -> dict:
         request_token = bind_request_id(request_id) if request_id else None
-        task = self.task_service.update_task(
+        task = self._update_task_progress(
             task_id,
+            collection_id,
             status="running",
             current_stage="files_registered",
             progress_percent=5,
@@ -117,8 +135,9 @@ class CollectionBuildTaskRunner:
 
         files = self.collection_service.list_files(collection_id)
         if not files:
-            self.task_service.update_task(
+            self._update_task_progress(
                 task_id,
+                collection_id,
                 status="failed",
                 current_stage="failed",
                 progress_percent=100,
@@ -139,8 +158,9 @@ class CollectionBuildTaskRunner:
         )
 
         try:
-            self.task_service.update_task(
+            self._update_task_progress(
                 task_id,
+                collection_id,
                 current_stage="source_artifacts_started",
                 progress_percent=25,
                 output_path=str(output_dir),
@@ -153,8 +173,9 @@ class CollectionBuildTaskRunner:
                 verbose=verbose,
             )
             errors = [str(err) for o in outputs for err in (o.errors or [])]
-            self.task_service.update_task(
+            self._update_task_progress(
                 task_id,
+                collection_id,
                 current_stage="source_artifacts_completed",
                 progress_percent=60,
                 output_path=str(output_dir),
@@ -162,8 +183,9 @@ class CollectionBuildTaskRunner:
             )
 
             if not errors:
-                self.task_service.update_task(
+                self._update_task_progress(
                     task_id,
+                    collection_id,
                     current_stage="document_profiles_started",
                     progress_percent=70,
                 )
@@ -174,8 +196,9 @@ class CollectionBuildTaskRunner:
                 protocol_candidate_count = self.document_profile_service.count_protocol_suitable(
                     document_profiles
                 )
-                self.task_service.update_task(
+                self._update_task_progress(
                     task_id,
+                    collection_id,
                     current_stage="paper_facts_started",
                     progress_percent=76,
                 )
@@ -189,8 +212,9 @@ class CollectionBuildTaskRunner:
                     warnings.append("未抽取到 evidence cards，collection 暂时只能依赖 document profiles。")
                     self.task_service.update_task(task_id, warnings=warnings)
 
-                self.task_service.update_task(
+                self._update_task_progress(
                     task_id,
+                    collection_id,
                     current_stage="comparison_rows_started",
                     progress_percent=82,
                 )
@@ -204,8 +228,9 @@ class CollectionBuildTaskRunner:
                     warnings.append("未生成 comparison rows，当前 collection 还不能直接做结构化比较。")
                     self.task_service.update_task(task_id, warnings=warnings)
 
-                self.task_service.update_task(
+                self._update_task_progress(
                     task_id,
+                    collection_id,
                     current_stage="protocol_artifacts_started",
                     progress_percent=88,
                 )
@@ -220,8 +245,9 @@ class CollectionBuildTaskRunner:
             artifacts = self.artifact_registry_service.upsert(collection_id, output_dir)
             final_errors = list(self.task_service.get_task(task_id).get("errors", []))
             status = "completed" if not final_errors else "partial_success"
-            self.task_service.update_task(
+            self._update_task_progress(
                 task_id,
+                collection_id,
                 status=status,
                 current_stage="artifacts_ready",
                 progress_percent=100,
@@ -247,8 +273,9 @@ class CollectionBuildTaskRunner:
             record = self.task_service.get_task(task_id)
             errors = list(record.get("errors", []))
             errors.append(str(exc))
-            self.task_service.update_task(
+            self._update_task_progress(
                 task_id,
+                collection_id,
                 status="failed",
                 current_stage="failed",
                 progress_percent=100,

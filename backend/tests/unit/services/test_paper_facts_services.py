@@ -682,6 +682,8 @@ def test_paper_facts_service_logs_window_and_table_progress(monkeypatch, tmp_pat
     assert any(
         "Paper facts text-window extraction finished" in record.message
         and "elapsed_s=" in record.message
+        and "completed_units=" in record.message
+        and "remaining_units=" in record.message
         for record in caplog.records
     )
     assert any(
@@ -693,6 +695,19 @@ def test_paper_facts_service_logs_window_and_table_progress(monkeypatch, tmp_pat
     assert any(
         "Paper facts table-row extraction finished" in record.message
         and "elapsed_s=" in record.message
+        and "completed_units=" in record.message
+        and "remaining_units=" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts extraction document finished" in record.message
+        and "document_position=" in record.message
+        and "remaining_documents=" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts extraction started" in record.message
+        and "total_extraction_units=" in record.message
         for record in caplog.records
     )
 

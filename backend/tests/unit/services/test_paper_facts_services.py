@@ -968,6 +968,119 @@ def test_paper_facts_service_persists_mixed_variant_values_with_real_parquet(tmp
     assert set(comparison_inputs.sample_variants["variable_value"]) == {10, "air"}
 
 
+def test_paper_facts_service_normalizes_null_like_variant_values_before_parquet(tmp_path):
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class NullLikeVariantValueExtractor:
+        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                protocol_extractable="yes",
+                protocol_extractability_signals=[],
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+            text_window = payload.get("text_window") or {}
+            text = str(text_window.get("text") or "")
+            if "Field conditions varied across samples." not in text:
+                return StructuredExtractionBundle()
+            return StructuredExtractionBundle(
+                sample_variants=[
+                    SampleVariantPayload(
+                        variant_label="V10",
+                        host_material_system={"family": "steel"},
+                        variable_axis_type="field_level",
+                        variable_value=10,
+                        confidence=0.8,
+                    ),
+                    SampleVariantPayload(
+                        variant_label="Vnull",
+                        host_material_system={"family": "steel"},
+                        variable_axis_type="field_level",
+                        variable_value="null",
+                        confidence=0.8,
+                    ),
+                ]
+            )
+
+        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
+            return StructuredExtractionBundle()
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = NullLikeVariantValueExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        artifact_registry,
+        paper_facts_service,
+    )
+
+    collection = collection_service.create_collection("Null Like Variant Value Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Null Like Variant Value Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Field conditions varied across samples.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Field conditions varied across samples.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    paper_facts_service.build_paper_facts(collection_id, output_dir)
+
+    frames = paper_facts_service._load_paper_fact_frames(collection_id, output_dir)
+    frame_values_by_label = {
+        row["variant_label"]: row["variable_value"]
+        for _, row in frames["sample_variants"].iterrows()
+    }
+    assert frame_values_by_label["V10"] == 10
+    assert pd.isna(frame_values_by_label["Vnull"])
+
+    comparison_inputs = comparison_service._load_comparison_inputs(collection_id, output_dir)
+    comparison_values_by_label = {
+        row["variant_label"]: row["variable_value"]
+        for _, row in comparison_inputs.sample_variants.iterrows()
+    }
+    assert comparison_values_by_label["V10"] == 10
+    assert pd.isna(comparison_values_by_label["Vnull"])
+
+
 def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 

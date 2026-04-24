@@ -68,8 +68,10 @@ Supporting research binaries live under `docs/research/assets/`.
   start with [`overview/system-overview.md`](overview/system-overview.md), then
   move to the relevant module entry page
 - Shared contracts:
-  start with [`contracts/lens-v1-definition.md`](contracts/lens-v1-definition.md)
-  and
+  start with [`contracts/lens-v1-definition.md`](contracts/lens-v1-definition.md),
+  then
+  [`architecture/lens-v1-architecture-boundary.md`](architecture/lens-v1-architecture-boundary.md),
+  then
   [`contracts/lens-core-artifact-contracts.md`](contracts/lens-core-artifact-contracts.md)
 - Historical or proposed shared decisions:
   use docs under [`decisions/`](decisions/)

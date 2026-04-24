@@ -345,6 +345,19 @@ technically feasible, safe, measurable, and tied to a clear hypothesis.
 
 Lens can also become a planning assistant for experimental materials research.
 
+That direction should mirror how experienced materials researchers work rather
+than falling back to generic protocol generation.
+
+In practice, that means helping the user:
+
+- identify the materials problem and target decision
+- reconstruct sample variants and the real controlled variables in a paper
+- extract process parameters, post-processing, test conditions, and baselines
+- connect structure and defect evidence to property outcomes
+- judge what is actually comparable and what is missing or weak
+- propose the next experiment matrix, control groups, characterization chain,
+  and decision criteria
+
 Given a research goal and a literature collection, the system could help
 construct candidate experimental plans by combining:
 
@@ -364,11 +377,15 @@ A useful experimental plan should include:
 - research objective
 - hypothesis
 - material system
+- sample variants and controlled variables
 - sample preparation route
 - parameter matrix
 - control groups
+- baselines and comparison target
 - measurement methods
+- characterization methods
 - expected signals
+- expected mechanism or evidence chain
 - decision criteria
 - risk factors
 - required metadata

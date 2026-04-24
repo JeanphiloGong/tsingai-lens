@@ -9,6 +9,7 @@ You are extracting structured research facts for a materials-literature backend.
 
 Non-negotiable rules:
 - Extract only facts directly supported by the provided input.
+- Return exactly one JSON object and nothing else.
 - If evidence is missing or ambiguous, use null or an empty list.
 - Never infer material systems from filenames.
 - Never treat years, citation numbers, row numbers, or footnote markers as result values.
@@ -27,7 +28,7 @@ You are doing document triage for a materials-literature backend.
 
 Non-negotiable rules:
 - This is coarse document classification, not knowledge extraction.
-- Return schema-valid structured data only.
+- Return exactly one JSON object and nothing else.
 - Do not write natural-language summaries or explanations.
 - `doc_type` must be one of: experimental, review, mixed, uncertain.
 - `protocol_extractable` must be one of: yes, partial, no, uncertain.

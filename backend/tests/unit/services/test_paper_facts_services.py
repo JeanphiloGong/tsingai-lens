@@ -718,6 +718,114 @@ def test_paper_facts_service_logs_window_and_table_progress(monkeypatch, tmp_pat
     )
 
 
+def test_paper_facts_service_prunes_low_value_text_windows_before_model_calls(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class CountingExtractor:
+        def __init__(self) -> None:
+            self.text_payloads: list[dict[str, object]] = []
+            self.table_payloads: list[dict[str, object]] = []
+
+        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                protocol_extractable="yes",
+                protocol_extractability_signals=[],
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+            self.text_payloads.append(payload)
+            return StructuredExtractionBundle()
+
+        def extract_table_row_bundle(self, payload):  # noqa: ANN001
+            self.table_payloads.append(payload)
+            return StructuredExtractionBundle()
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = CountingExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+
+    collection = collection_service.create_collection("Pruning Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "LPBF Study",
+                "text": "\n".join(
+                    [
+                        "Introduction",
+                        "Previous work is summarized here.",
+                        "Experimental Section",
+                        "Powders were mixed and annealed at 600 C under Ar.",
+                        "Results and Discussion",
+                        "Relative density reached 99.1%.",
+                        "Acknowledgements",
+                        "This work was supported by a grant.",
+                        "References",
+                        "[1] Example reference.",
+                        "Table 1 Mechanical Results",
+                        "Sample | Tensile Strength (MPa)",
+                        "A1 | 950",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Powders were mixed and annealed at 600 C under Ar.",
+                "document_ids": ["paper-1"],
+            },
+            {
+                "id": "tu-2",
+                "text": "Relative density reached 99.1%.",
+                "document_ids": ["paper-1"],
+            },
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    paper_facts_service.build_paper_facts(collection_id, output_dir)
+
+    extracted_texts = [
+        str((payload.get("text_window") or {}).get("text") or "")
+        for payload in extractor.text_payloads
+    ]
+    assert extracted_texts == [
+        "Powders were mixed and annealed at 600 C under Ar.",
+        "Relative density reached 99.1%.",
+    ]
+    assert len(extractor.table_payloads) == 1
+
+
 def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 

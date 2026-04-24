@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import re
@@ -118,6 +119,9 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
     "evidence_anchor_ids",
 )
 _MAX_SUPPORTING_TEXT_WINDOWS = 3
+_MAX_EXTRACTION_CONCURRENCY = 4
+_MAX_TEXT_WINDOWS_PER_DOCUMENT = 24
+_INTRODUCTION_WINDOW_LIMIT = 1
 _CHARACTERIZATION_COLUMNS = [
     "observation_id",
     "document_id",
@@ -299,6 +303,81 @@ _MORPHOLOGY_KEYWORDS = (
     "spherical",
     "melt pool",
 )
+_LOW_VALUE_HEADING_TERMS = (
+    "reference",
+    "acknowledg",
+    "funding",
+    "author contribution",
+    "conflict of interest",
+    "declaration",
+    "supplementary",
+    "appendix",
+)
+_INTRODUCTION_HEADING_TERMS = (
+    "introduction",
+    "background",
+    "related work",
+    "literature review",
+)
+_METHOD_HEADING_TERMS = (
+    "materials and methods",
+    "experimental",
+    "method",
+    "sample preparation",
+    "fabrication",
+    "processing",
+)
+_CHARACTERIZATION_HEADING_TERMS = (
+    "characterization",
+    "measurement",
+    "testing",
+    "analysis",
+)
+_RESULT_HEADING_TERMS = (
+    "result",
+    "discussion",
+    "conclusion",
+)
+_PROCESS_SIGNAL_TERMS = (
+    "anneal",
+    "annealed",
+    "as-built",
+    "as built",
+    "build orientation",
+    "fabricated",
+    "hatch spacing",
+    "heat treated",
+    "laser power",
+    "layer thickness",
+    "mixed",
+    "oxygen",
+    "powder",
+    "process condition",
+    "process conditions",
+    "preheat",
+    "scan speed",
+    "scan strategy",
+    "shielding gas",
+    "stirred",
+)
+_COMPARISON_SIGNAL_TERMS = (
+    "baseline",
+    "control",
+    "density",
+    "elongation",
+    "hardness",
+    "porosity",
+    "relative density",
+    "residual stress",
+    "roughness",
+    "strength",
+    "tensile",
+    "yield",
+)
+_EXTRACTION_UNIT_PATTERN = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:w|kw|mm/s|mm s-1|mpa|gpa|pa|hv|ra|ppm|%|j/mm3|j/mm\^3|um|μm|mm|c|°c)\b",
+    re.IGNORECASE,
+)
 
 
 class PaperFactsNotReadyError(RuntimeError):
@@ -469,7 +548,7 @@ class PaperFactsService:
             raise PaperFactsNotReadyError(collection_id, base_dir) from exc
 
         document_records = build_document_records(documents, text_units)
-        text_windows_by_doc = self._build_text_windows_by_document(blocks)
+        all_text_windows_by_doc = self._build_text_windows_by_document(blocks)
         table_rows_by_doc = self._group_table_rows_by_document(table_rows)
         table_cells_by_doc = self._group_table_cells_by_document(table_cells)
         profile_by_doc = {
@@ -478,14 +557,33 @@ class PaperFactsService:
         }
         total_documents = len(document_records)
         total_extraction_units = 0
+        selected_text_windows_by_doc: dict[str, list[dict[str, Any]]] = {}
+        selected_table_rows_by_doc: dict[str, list[dict[str, Any]]] = {}
         for _, candidate_row in document_records.iterrows():
             candidate_document_id = str(candidate_row.get("paper_id") or "")
             candidate_profile = profile_by_doc.get(candidate_document_id)
             if not candidate_profile:
                 continue
-            total_extraction_units += len(text_windows_by_doc.get(candidate_document_id, []))
-            if str(candidate_profile.get("doc_type") or "") != DOC_TYPE_REVIEW:
-                total_extraction_units += len(table_rows_by_doc.get(candidate_document_id, []))
+            candidate_text_windows = all_text_windows_by_doc.get(candidate_document_id, [])
+            candidate_table_rows = table_rows_by_doc.get(candidate_document_id, [])
+            grouped_row_cells = self._group_table_cells_by_row(
+                table_cells_by_doc.get(candidate_document_id, [])
+            )
+            selected_text_windows = self._select_text_windows_for_extraction(
+                text_windows=candidate_text_windows,
+                profile=candidate_profile,
+                has_table_rows=bool(candidate_table_rows),
+            )
+            if str(candidate_profile.get("doc_type") or "") == DOC_TYPE_REVIEW:
+                selected_table_rows: list[dict[str, Any]] = []
+            else:
+                selected_table_rows = self._select_table_rows_for_extraction(
+                    table_rows=candidate_table_rows,
+                    grouped_row_cells=grouped_row_cells,
+                )
+            selected_text_windows_by_doc[candidate_document_id] = selected_text_windows
+            selected_table_rows_by_doc[candidate_document_id] = selected_table_rows
+            total_extraction_units += len(selected_text_windows) + len(selected_table_rows)
         completed_extraction_units = 0
         logger.info(
             "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_row_count=%s table_cell_count=%s total_extraction_units=%s",
@@ -523,24 +621,25 @@ class PaperFactsService:
                 or document_id
             )
             source_filename = self._normalize_scalar_text(profile.get("source_filename"))
-            doc_text_windows = text_windows_by_doc.get(document_id, [])
-            doc_table_rows = table_rows_by_doc.get(document_id, [])
+            all_doc_text_windows = all_text_windows_by_doc.get(document_id, [])
+            doc_text_windows = selected_text_windows_by_doc.get(document_id, [])
+            raw_doc_table_rows = table_rows_by_doc.get(document_id, [])
+            doc_table_rows = selected_table_rows_by_doc.get(document_id, [])
             grouped_row_cells = self._group_table_cells_by_row(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
-            planned_table_row_count = (
-                0 if str(profile.get("doc_type") or "") == DOC_TYPE_REVIEW else len(doc_table_rows)
-            )
-            document_total_units = len(doc_text_windows) + planned_table_row_count
+            document_total_units = len(doc_text_windows) + len(doc_table_rows)
             document_completed_units = 0
             logger.info(
-                "Paper facts extraction document started collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s text_window_count=%s table_row_count=%s doc_type=%s completed_units=%s total_units=%s remaining_units=%s document_total_units=%s",
+                "Paper facts extraction document started collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s text_window_count=%s raw_text_window_count=%s table_row_count=%s raw_table_row_count=%s doc_type=%s completed_units=%s total_units=%s remaining_units=%s document_total_units=%s",
                 collection_id,
                 document_id,
                 document_position,
                 total_documents,
                 total_documents - document_position,
                 len(doc_text_windows),
-                planned_table_row_count,
+                len(all_doc_text_windows),
+                len(doc_table_rows),
+                len(raw_doc_table_rows),
                 profile.get("doc_type"),
                 completed_extraction_units,
                 total_extraction_units,
@@ -554,7 +653,20 @@ class PaperFactsService:
             doc_condition_start = len(test_condition_rows)
             doc_baseline_start = len(baseline_rows)
             doc_measurement_start = len(measurement_rows)
-            for text_window_position, text_window in enumerate(doc_text_windows, start=1):
+            text_window_jobs = [
+                {
+                    "text_window": text_window,
+                    "payload": self._build_text_window_extraction_payload(
+                        title=title,
+                        source_filename=source_filename,
+                        profile=profile,
+                        text_window=text_window,
+                    ),
+                }
+                for text_window in doc_text_windows
+            ]
+            for text_window_position, job in enumerate(text_window_jobs, start=1):
+                text_window = job["text_window"]
                 window_id = self._normalize_scalar_text(text_window.get("window_id")) or ""
                 heading_path = self._normalize_scalar_text(text_window.get("heading_path"))
                 block_type = self._normalize_scalar_text(text_window.get("block_type"))
@@ -578,29 +690,31 @@ class PaperFactsService:
                     document_total_units,
                     max(document_total_units - document_completed_units, 0),
                 )
-                text_window_started_at = perf_counter()
-                try:
-                    bundle = extractor.extract_text_window_bundle(
-                        self._build_text_window_extraction_payload(
-                            title=title,
-                            source_filename=source_filename,
-                            profile=profile,
-                            text_window=text_window,
-                        )
-                    )
-                except Exception:
-                    logger.exception(
+            text_window_results = self._execute_extraction_jobs(
+                extractor=extractor,
+                jobs=text_window_jobs,
+                kind="text_window",
+            )
+            for text_window_position, (job, result) in enumerate(
+                zip(text_window_jobs, text_window_results, strict=False),
+                start=1,
+            ):
+                text_window = job["text_window"]
+                window_id = self._normalize_scalar_text(text_window.get("window_id")) or ""
+                if result["error"] is not None:
+                    logger.error(
                         "Paper facts text-window extraction failed collection_id=%s document_id=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f elapsed_ms=%s",
                         collection_id,
                         document_id,
                         text_window_position,
                         len(doc_text_windows),
                         window_id,
-                        perf_counter() - text_window_started_at,
-                        round((perf_counter() - text_window_started_at) * 1000),
+                        result["elapsed_s"],
+                        round(result["elapsed_s"] * 1000),
                     )
-                    raise
-                text_window_elapsed_s = perf_counter() - text_window_started_at
+                    raise result["error"]
+                bundle = result["bundle"]
+                text_window_elapsed_s = result["elapsed_s"]
                 text_window_elapsed_ms = round(text_window_elapsed_s * 1000)
                 self._materialize_bundle(
                     bundle=bundle,
@@ -643,99 +757,120 @@ class PaperFactsService:
                     max(document_total_units - document_completed_units, 0),
                 )
 
-            if str(profile.get("doc_type") or "") != DOC_TYPE_REVIEW:
-                for table_row_position, row in enumerate(doc_table_rows, start=1):
-                    table_id = str(row.get("table_id") or "")
-                    row_index = self._safe_int(row.get("row_index"))
-                    row_cells = grouped_row_cells.get((table_id, row_index), [])
-                    logger.info(
-                        "Paper facts table-row extraction started collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s cell_count=%s heading_path=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+            table_row_jobs = []
+            for row in doc_table_rows:
+                table_id = str(row.get("table_id") or "")
+                row_index = self._safe_int(row.get("row_index"))
+                row_cells = grouped_row_cells.get((table_id, row_index), [])
+                table_row_jobs.append(
+                    {
+                        "row": row,
+                        "row_cells": row_cells,
+                        "payload": self._build_table_row_extraction_payload(
+                            title=title,
+                            source_filename=source_filename,
+                            profile=profile,
+                            table_row=row,
+                            row_cells=row_cells,
+                            text_windows=all_doc_text_windows,
+                        ),
+                    }
+                )
+            for table_row_position, job in enumerate(table_row_jobs, start=1):
+                row = job["row"]
+                table_id = str(row.get("table_id") or "")
+                row_index = self._safe_int(row.get("row_index"))
+                row_cells = job["row_cells"]
+                logger.info(
+                    "Paper facts table-row extraction started collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s cell_count=%s heading_path=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+                    collection_id,
+                    document_id,
+                    document_position,
+                    total_documents,
+                    table_row_position,
+                    len(doc_table_rows),
+                    table_id,
+                    row_index,
+                    len(row_cells),
+                    self._normalize_scalar_text(row.get("heading_path")),
+                    completed_extraction_units,
+                    total_extraction_units,
+                    max(total_extraction_units - completed_extraction_units, 0),
+                    document_completed_units,
+                    document_total_units,
+                    max(document_total_units - document_completed_units, 0),
+                )
+            table_row_results = self._execute_extraction_jobs(
+                extractor=extractor,
+                jobs=table_row_jobs,
+                kind="table_row",
+            )
+            for table_row_position, (job, result) in enumerate(
+                zip(table_row_jobs, table_row_results, strict=False),
+                start=1,
+            ):
+                row = job["row"]
+                row_cells = job["row_cells"]
+                table_id = str(row.get("table_id") or "")
+                row_index = self._safe_int(row.get("row_index"))
+                if result["error"] is not None:
+                    logger.error(
+                        "Paper facts table-row extraction failed collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s",
                         collection_id,
                         document_id,
-                        document_position,
-                        total_documents,
                         table_row_position,
                         len(doc_table_rows),
                         table_id,
                         row_index,
-                        len(row_cells),
-                        self._normalize_scalar_text(row.get("heading_path")),
-                        completed_extraction_units,
-                        total_extraction_units,
-                        max(total_extraction_units - completed_extraction_units, 0),
-                        document_completed_units,
-                        document_total_units,
-                        max(document_total_units - document_completed_units, 0),
+                        result["elapsed_s"],
+                        round(result["elapsed_s"] * 1000),
                     )
-                    table_row_started_at = perf_counter()
-                    try:
-                        bundle = extractor.extract_table_row_bundle(
-                            self._build_table_row_extraction_payload(
-                                title=title,
-                                source_filename=source_filename,
-                                profile=profile,
-                                table_row=row,
-                                row_cells=row_cells,
-                                text_windows=doc_text_windows,
-                            )
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Paper facts table-row extraction failed collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s",
-                            collection_id,
-                            document_id,
-                            table_row_position,
-                            len(doc_table_rows),
-                            table_id,
-                            row_index,
-                            perf_counter() - table_row_started_at,
-                            round((perf_counter() - table_row_started_at) * 1000),
-                        )
-                        raise
-                    table_row_elapsed_s = perf_counter() - table_row_started_at
-                    table_row_elapsed_ms = round(table_row_elapsed_s * 1000)
-                    self._materialize_bundle(
-                        bundle=bundle,
-                        collection_id=collection_id,
-                        document_id=document_id,
-                        text_window=None,
-                        table_id=table_id,
-                        row_index=row_index,
-                        evidence_anchor_rows=evidence_anchor_rows,
-                        method_fact_rows=method_fact_rows,
-                        sample_variant_rows=sample_variant_rows,
-                        test_condition_rows=test_condition_rows,
-                        baseline_rows=baseline_rows,
-                        measurement_rows=measurement_rows,
-                        document_state=document_state,
-                    )
-                    completed_extraction_units += 1
-                    document_completed_units += 1
-                    logger.info(
-                        "Paper facts table-row extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
-                        collection_id,
-                        document_id,
-                        document_position,
-                        total_documents,
-                        table_row_position,
-                        len(doc_table_rows),
-                        table_id,
-                        row_index,
-                        table_row_elapsed_s,
-                        table_row_elapsed_ms,
-                        len(row_cells),
-                        len(bundle.method_facts),
-                        len(bundle.sample_variants),
-                        len(bundle.test_conditions),
-                        len(bundle.baseline_references),
-                        len(bundle.measurement_results),
-                        completed_extraction_units,
-                        total_extraction_units,
-                        max(total_extraction_units - completed_extraction_units, 0),
-                        document_completed_units,
-                        document_total_units,
-                        max(document_total_units - document_completed_units, 0),
-                    )
+                    raise result["error"]
+                bundle = result["bundle"]
+                table_row_elapsed_s = result["elapsed_s"]
+                table_row_elapsed_ms = round(table_row_elapsed_s * 1000)
+                self._materialize_bundle(
+                    bundle=bundle,
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    text_window=None,
+                    table_id=table_id,
+                    row_index=row_index,
+                    evidence_anchor_rows=evidence_anchor_rows,
+                    method_fact_rows=method_fact_rows,
+                    sample_variant_rows=sample_variant_rows,
+                    test_condition_rows=test_condition_rows,
+                    baseline_rows=baseline_rows,
+                    measurement_rows=measurement_rows,
+                    document_state=document_state,
+                )
+                completed_extraction_units += 1
+                document_completed_units += 1
+                logger.info(
+                    "Paper facts table-row extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+                    collection_id,
+                    document_id,
+                    document_position,
+                    total_documents,
+                    table_row_position,
+                    len(doc_table_rows),
+                    table_id,
+                    row_index,
+                    table_row_elapsed_s,
+                    table_row_elapsed_ms,
+                    len(row_cells),
+                    len(bundle.method_facts),
+                    len(bundle.sample_variants),
+                    len(bundle.test_conditions),
+                    len(bundle.baseline_references),
+                    len(bundle.measurement_results),
+                    completed_extraction_units,
+                    total_extraction_units,
+                    max(total_extraction_units - completed_extraction_units, 0),
+                    document_completed_units,
+                    document_total_units,
+                    max(document_total_units - document_completed_units, 0),
+                )
 
             logger.info(
                 "Paper facts extraction document finished collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s",
@@ -793,7 +928,7 @@ class PaperFactsService:
             collection_id=collection_id,
             method_facts=method_facts,
             evidence_anchors=evidence_anchors,
-            text_windows_by_doc=text_windows_by_doc,
+            text_windows_by_doc=all_text_windows_by_doc,
         )
         characterization = self._attach_variant_ids_to_characterization(
             characterization,
@@ -1912,6 +2047,230 @@ class PaperFactsService:
             if str(window.get("text") or "").strip()
         ]
         return selected[:_MAX_SUPPORTING_TEXT_WINDOWS]
+
+    def _select_text_windows_for_extraction(
+        self,
+        *,
+        text_windows: list[dict[str, Any]],
+        profile: dict[str, Any],
+        has_table_rows: bool,
+    ) -> list[dict[str, Any]]:
+        if not text_windows:
+            return []
+
+        scored_windows: list[dict[str, Any]] = []
+        for index, window in enumerate(text_windows, start=1):
+            score = self._score_text_window_for_extraction(
+                window=window,
+                has_table_rows=has_table_rows,
+            )
+            if score is None:
+                continue
+            scored_windows.append(
+                {
+                    "index": index,
+                    "score": score,
+                    "is_intro": self._is_introductory_window(window),
+                    "window": window,
+                }
+            )
+
+        if not scored_windows:
+            return []
+
+        intro_windows = [item for item in scored_windows if item["is_intro"]]
+        non_intro_windows = [item for item in scored_windows if not item["is_intro"]]
+        selected = list(non_intro_windows)
+        if has_table_rows and len(selected) > _MAX_TEXT_WINDOWS_PER_DOCUMENT:
+            selected = self._limit_ranked_windows(
+                selected,
+                limit=_MAX_TEXT_WINDOWS_PER_DOCUMENT,
+            )
+
+        selected.extend(
+            self._limit_ranked_windows(
+                intro_windows,
+                limit=_INTRODUCTION_WINDOW_LIMIT,
+            )
+        )
+        if not selected:
+            selected = self._limit_ranked_windows(scored_windows, limit=_INTRODUCTION_WINDOW_LIMIT)
+
+        return [
+            item["window"]
+            for item in sorted(selected, key=lambda item: item["index"])
+        ]
+
+    def _select_table_rows_for_extraction(
+        self,
+        *,
+        table_rows: list[dict[str, Any]],
+        grouped_row_cells: dict[tuple[str, int], list[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        selected: list[dict[str, Any]] = []
+        for row in table_rows:
+            table_id = str(row.get("table_id") or "")
+            row_index = self._safe_int(row.get("row_index"))
+            row_cells = grouped_row_cells.get((table_id, row_index), [])
+            if self._should_extract_table_row(row=row, row_cells=row_cells):
+                selected.append(row)
+        return selected
+
+    def _score_text_window_for_extraction(
+        self,
+        *,
+        window: dict[str, Any],
+        has_table_rows: bool,
+    ) -> int | None:
+        text = str(window.get("text") or "").strip()
+        if not text:
+            return None
+
+        block_type = (self._normalize_scalar_text(window.get("block_type")) or "").lower()
+        if block_type in {"title", "heading", "figure_caption", "table_caption"}:
+            return None
+
+        heading_path = self._normalize_scalar_text(window.get("heading_path")) or ""
+        lowered_heading = heading_path.lower()
+        lowered_text = text.lower()
+        if self._contains_any_term(lowered_heading, _LOW_VALUE_HEADING_TERMS):
+            return None
+
+        signal_score = self._signal_score(lowered_text, text)
+        is_intro = self._contains_any_term(lowered_heading, _INTRODUCTION_HEADING_TERMS)
+        if is_intro and signal_score == 0:
+            return None
+
+        score = signal_score
+        if self._contains_any_term(lowered_heading, _METHOD_HEADING_TERMS):
+            score += 4
+        if self._contains_any_term(lowered_heading, _CHARACTERIZATION_HEADING_TERMS):
+            score += 3
+        if self._contains_any_term(lowered_heading, _RESULT_HEADING_TERMS):
+            score += 1 if has_table_rows else 2
+        if is_intro:
+            score -= 2
+        return score if score > 0 else None
+
+    def _should_extract_table_row(
+        self,
+        *,
+        row: dict[str, Any],
+        row_cells: list[dict[str, Any]],
+    ) -> bool:
+        row_summary = (
+            self._normalize_scalar_text(row.get("row_text"))
+            or self._build_table_row_summary(row_cells)
+        )
+        if not row_summary:
+            return False
+
+        nonempty_cells = [
+            cell for cell in row_cells if self._normalize_scalar_text(cell.get("cell_text"))
+        ]
+        if len(nonempty_cells) < 2:
+            return False
+
+        header_text = " ".join(
+            self._normalize_scalar_text(cell.get("header_path")) or ""
+            for cell in row_cells
+        ).strip()
+        if self._contains_any_term(header_text.lower(), _LOW_VALUE_HEADING_TERMS):
+            return False
+
+        combined_text = "\n".join(part for part in (header_text, row_summary) if part)
+        if self._signal_score(combined_text.lower(), combined_text) > 0:
+            return True
+        return any(self._normalize_scalar_text(cell.get("unit_hint")) for cell in row_cells)
+
+    def _limit_ranked_windows(
+        self,
+        windows: list[dict[str, Any]],
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or len(windows) <= limit:
+            return list(windows)
+        ranked = sorted(
+            windows,
+            key=lambda item: (item["score"], -item["index"]),
+            reverse=True,
+        )
+        return ranked[:limit]
+
+    def _is_introductory_window(self, window: dict[str, Any]) -> bool:
+        heading_path = (self._normalize_scalar_text(window.get("heading_path")) or "").lower()
+        return self._contains_any_term(heading_path, _INTRODUCTION_HEADING_TERMS)
+
+    def _signal_score(self, lowered_text: str, raw_text: str) -> int:
+        score = 0
+        if any(token in lowered_text for token, _ in _PROPERTY_HINTS):
+            score += 2
+        if self._contains_any_term(lowered_text, _PROCESS_SIGNAL_TERMS):
+            score += 2
+        if self._contains_any_term(lowered_text, _COMPARISON_SIGNAL_TERMS):
+            score += 2
+        if any(method.lower() in lowered_text for method in _CHARACTERIZATION_METHODS):
+            score += 2
+        if _EXTRACTION_UNIT_PATTERN.search(raw_text):
+            score += 1
+        return score
+
+    def _contains_any_term(self, text: str, terms: tuple[str, ...]) -> bool:
+        return any(term in text for term in terms)
+
+    def _execute_extraction_jobs(
+        self,
+        *,
+        extractor: CoreLLMStructuredExtractor,
+        jobs: list[dict[str, Any]],
+        kind: str,
+    ) -> list[dict[str, Any]]:
+        if not jobs:
+            return []
+        if len(jobs) == 1:
+            return [self._execute_extraction_job(extractor=extractor, job=jobs[0], kind=kind)]
+
+        with ThreadPoolExecutor(
+            max_workers=min(_MAX_EXTRACTION_CONCURRENCY, len(jobs)),
+        ) as executor:
+            futures = [
+                executor.submit(
+                    self._execute_extraction_job,
+                    extractor=extractor,
+                    job=job,
+                    kind=kind,
+                )
+                for job in jobs
+            ]
+            return [future.result() for future in futures]
+
+    def _execute_extraction_job(
+        self,
+        *,
+        extractor: CoreLLMStructuredExtractor,
+        job: dict[str, Any],
+        kind: str,
+    ) -> dict[str, Any]:
+        started_at = perf_counter()
+        try:
+            if kind == "text_window":
+                bundle = extractor.extract_text_window_bundle(job["payload"])
+            elif kind == "table_row":
+                bundle = extractor.extract_table_row_bundle(job["payload"])
+            else:
+                raise ValueError(f"unsupported extraction job kind: {kind}")
+        except Exception as exc:
+            return {
+                "bundle": None,
+                "elapsed_s": perf_counter() - started_at,
+                "error": exc,
+            }
+        return {
+            "bundle": bundle,
+            "elapsed_s": perf_counter() - started_at,
+            "error": None,
+        }
 
     def _build_characterization_observations(
         self,

@@ -250,6 +250,7 @@ _CHARACTERIZATION_METHODS = (
     "TGA",
     "DMA",
 )
+_NULL_LIKE_SCALAR_TEXTS = {"null", "none", "n/a", "na", "nan"}
 _PROPERTY_HINTS = (
     ("yield strength", "yield_strength"),
     ("tensile strength", "tensile_strength"),
@@ -559,15 +560,23 @@ class PaperFactsService:
                 block_type = self._normalize_scalar_text(text_window.get("block_type"))
                 text_chars = len(str(text_window.get("text") or ""))
                 logger.info(
-                    "Paper facts text-window extraction started collection_id=%s document_id=%s window_position=%s window_count=%s window_id=%s block_type=%s chars=%s heading_path=%s",
+                    "Paper facts text-window extraction started collection_id=%s document_id=%s document_position=%s document_count=%s window_position=%s window_count=%s window_id=%s block_type=%s chars=%s heading_path=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                     collection_id,
                     document_id,
+                    document_position,
+                    total_documents,
                     text_window_position,
                     len(doc_text_windows),
                     window_id,
                     block_type,
                     text_chars,
                     heading_path,
+                    completed_extraction_units,
+                    total_extraction_units,
+                    max(total_extraction_units - completed_extraction_units, 0),
+                    document_completed_units,
+                    document_total_units,
+                    max(document_total_units - document_completed_units, 0),
                 )
                 text_window_started_at = perf_counter()
                 try:
@@ -581,16 +590,18 @@ class PaperFactsService:
                     )
                 except Exception:
                     logger.exception(
-                        "Paper facts text-window extraction failed collection_id=%s document_id=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f",
+                        "Paper facts text-window extraction failed collection_id=%s document_id=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f elapsed_ms=%s",
                         collection_id,
                         document_id,
                         text_window_position,
                         len(doc_text_windows),
                         window_id,
                         perf_counter() - text_window_started_at,
+                        round((perf_counter() - text_window_started_at) * 1000),
                     )
                     raise
                 text_window_elapsed_s = perf_counter() - text_window_started_at
+                text_window_elapsed_ms = round(text_window_elapsed_s * 1000)
                 self._materialize_bundle(
                     bundle=bundle,
                     collection_id=collection_id,
@@ -609,7 +620,7 @@ class PaperFactsService:
                 completed_extraction_units += 1
                 document_completed_units += 1
                 logger.info(
-                    "Paper facts text-window extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+                    "Paper facts text-window extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s window_position=%s window_count=%s window_id=%s elapsed_s=%.3f elapsed_ms=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                     collection_id,
                     document_id,
                     document_position,
@@ -618,6 +629,7 @@ class PaperFactsService:
                     len(doc_text_windows),
                     window_id,
                     text_window_elapsed_s,
+                    text_window_elapsed_ms,
                     len(bundle.method_facts),
                     len(bundle.sample_variants),
                     len(bundle.test_conditions),
@@ -637,15 +649,23 @@ class PaperFactsService:
                     row_index = self._safe_int(row.get("row_index"))
                     row_cells = grouped_row_cells.get((table_id, row_index), [])
                     logger.info(
-                        "Paper facts table-row extraction started collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s cell_count=%s heading_path=%s",
+                        "Paper facts table-row extraction started collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s cell_count=%s heading_path=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                         collection_id,
                         document_id,
+                        document_position,
+                        total_documents,
                         table_row_position,
                         len(doc_table_rows),
                         table_id,
                         row_index,
                         len(row_cells),
                         self._normalize_scalar_text(row.get("heading_path")),
+                        completed_extraction_units,
+                        total_extraction_units,
+                        max(total_extraction_units - completed_extraction_units, 0),
+                        document_completed_units,
+                        document_total_units,
+                        max(document_total_units - document_completed_units, 0),
                     )
                     table_row_started_at = perf_counter()
                     try:
@@ -661,7 +681,7 @@ class PaperFactsService:
                         )
                     except Exception:
                         logger.exception(
-                            "Paper facts table-row extraction failed collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f",
+                            "Paper facts table-row extraction failed collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s",
                             collection_id,
                             document_id,
                             table_row_position,
@@ -669,9 +689,11 @@ class PaperFactsService:
                             table_id,
                             row_index,
                             perf_counter() - table_row_started_at,
+                            round((perf_counter() - table_row_started_at) * 1000),
                         )
                         raise
                     table_row_elapsed_s = perf_counter() - table_row_started_at
+                    table_row_elapsed_ms = round(table_row_elapsed_s * 1000)
                     self._materialize_bundle(
                         bundle=bundle,
                         collection_id=collection_id,
@@ -690,7 +712,7 @@ class PaperFactsService:
                     completed_extraction_units += 1
                     document_completed_units += 1
                     logger.info(
-                        "Paper facts table-row extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+                        "Paper facts table-row extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                         collection_id,
                         document_id,
                         document_position,
@@ -700,6 +722,7 @@ class PaperFactsService:
                         table_id,
                         row_index,
                         table_row_elapsed_s,
+                        table_row_elapsed_ms,
                         len(row_cells),
                         len(bundle.method_facts),
                         len(bundle.sample_variants),
@@ -2212,6 +2235,8 @@ class PaperFactsService:
             return normalized
         text = str(normalized).strip()
         if not text:
+            return None
+        if text.lower() in _NULL_LIKE_SCALAR_TEXTS:
             return None
         if re.fullmatch(r"[-+]?\d+", text):
             return int(text)

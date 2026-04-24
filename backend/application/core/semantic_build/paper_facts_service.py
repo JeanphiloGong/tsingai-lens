@@ -124,6 +124,7 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
 )
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _MAX_SUPPORTING_TEXT_WINDOWS = 3
+_MAX_TABLE_ROW_SUPPORTING_TEXT_CHARS = 1200
 _MAX_TEXT_WINDOWS_PER_DOCUMENT = 24
 _INTRODUCTION_WINDOW_LIMIT = 1
 _CHARACTERIZATION_COLUMNS = [
@@ -1217,7 +1218,9 @@ class PaperFactsService:
                 {
                     "heading": self._normalize_scalar_text(window.get("heading")),
                     "heading_path": self._normalize_scalar_text(window.get("heading_path")),
-                    "text": str(window.get("text") or "")[:4000],
+                    "text": str(window.get("text") or "")[
+                        :_MAX_TABLE_ROW_SUPPORTING_TEXT_CHARS
+                    ],
                     "page": self._safe_int(window.get("page")),
                 }
                 for window in supporting_text_windows

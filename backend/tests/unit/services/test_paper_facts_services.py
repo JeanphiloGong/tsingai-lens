@@ -230,6 +230,8 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"evidence_quote"' in text_window_prompt
     assert '"claim_scope"' in text_window_prompt
     assert '"measurement_results"' not in text_window_prompt
+    assert "If none fit exactly, use `other`." in text_window_prompt
+    assert "If unsure, use `unclear`." in text_window_prompt
 
     table_row_payload = service._build_table_row_extraction_payload(
         title="Prompt Boundary Paper",
@@ -290,6 +292,8 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"keywords"' in table_row_prompt
     assert '"temperatures_c": []' in table_row_prompt
     assert '"unit": "MPa"' in table_row_prompt
+    assert "Use `supporting_text_windows` only when they are required to interpret the row." in table_row_prompt
+    assert "Emit at most 2 `method_facts`" in table_row_prompt
 
 
 def test_paper_facts_service_reads_extraction_concurrency_from_env(monkeypatch):
@@ -315,6 +319,47 @@ def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
         "Invalid CORE_EXTRACTION_MAX_CONCURRENCY=" in record.message
         for record in caplog.records
     )
+
+
+def test_table_row_payload_truncates_supporting_window_text():
+    service = PaperFactsService()
+
+    payload = service._build_table_row_extraction_payload(
+        title="Prompt Boundary Paper",
+        source_filename="prompt-boundary.pdf",
+        profile={
+            "doc_type": "experimental",
+            "protocol_extractable": "yes",
+        },
+        table_row={
+            "table_id": "tbl-1",
+            "row_index": 2,
+            "row_text": "Sample A | 12 MPa | as-built",
+            "heading_path": "Results > Table 1",
+        },
+        row_cells=[
+            {
+                "header_path": "Sample",
+                "cell_text": "A",
+                "unit_hint": None,
+                "col_index": 0,
+            }
+        ],
+        text_windows=[
+            {
+                "window_id": "win-2",
+                "heading": "Results",
+                "heading_path": "Results > Table 1",
+                "text": "x" * 2000,
+                "text_unit_ids": ["tu-2"],
+                "block_ids": ["blk-2"],
+                "page": 5,
+            }
+        ],
+    )
+
+    assert len(payload["supporting_text_windows"]) == 1
+    assert len(payload["supporting_text_windows"][0]["text"]) == 1200
 
 
 def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):

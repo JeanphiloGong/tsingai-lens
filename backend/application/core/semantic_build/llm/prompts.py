@@ -47,6 +47,10 @@ JSON compliance rules for text-window extraction:
 - Do not emit final `measurement_results` in this stage.
 - Classify every `result_claim` with `claim_scope`.
 - Only set `eligible_for_measurement_result` to true when the claim is an explicit current-work result.
+- `method_role` must be one of: process, characterization, test, other. If none fit exactly, use `other`.
+- `condition_type` must be one of: temperature, duration, atmosphere, rate, frequency, location, direction, other. If none fit exactly, use `other`.
+- `baseline_type` must be one of: control, untreated, as-built, reference, without-treatment, other. If none fit exactly, use `other`.
+- `claim_scope` must be one of: current_work, prior_work, literature_summary, review_summary, unclear. If unsure, use `unclear`.
 - Use confidence between 0.5 and 1.0. Do not emit facts below 0.5 confidence.
 
 Valid result claim example:
@@ -135,6 +139,12 @@ JSON compliance rules for this extraction:
 - Put nullable scalars inside those required objects instead of nulling the whole object.
 - `unit` belongs at `measurement_results[*].unit`, never inside `value_payload`.
 - `host_material_system` may be `null`, but `process_context` may not be `null`.
+- Extract row-grounded facts only. Use `supporting_text_windows` only to disambiguate row labels, abbreviations, or column meaning.
+- Do not mine `supporting_text_windows` for extra standalone facts that are not needed to interpret this row.
+- If a fact cannot be grounded to the row or a short disambiguating support quote, omit it.
+- Do not repeat the same fact in multiple arrays.
+- Keep `anchors[*].quote` short, exact, and contiguous.
+- Emit at most 2 `method_facts`, 2 `sample_variants`, 2 `test_conditions`, 2 `baseline_references`, and 4 `measurement_results` for one row.
 - If evidence is weak or absent, return the valid empty-shape object with empty lists and null scalar leaves.
 
 Valid nested object example:
@@ -271,7 +281,10 @@ def build_table_row_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str
         "summary rather than a directly attributable study row. Anchors may include "
         "quote, source_type, and page only. Do not emit backend locators, ids, or "
         "bundle refs. Use human-readable labels instead of refs when a result must "
-        "identify a variant or baseline. Return facts only, not reader-facing cards.\n\n"
+        "identify a variant or baseline. Return facts only, not reader-facing cards.\n"
+        "Use `supporting_text_windows` only when they are required to interpret the row.\n"
+        "If the row is mostly metadata, labels, or literature summary text, return the "
+        "smallest valid object instead of expanding speculative outputs.\n\n"
         f"{_TABLE_ROW_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt

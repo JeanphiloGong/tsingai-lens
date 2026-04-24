@@ -27,6 +27,7 @@ _JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_JSON_TEXT
+_TABLE_ROW_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
 _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
     _EXTRACTION_MODE_PROVIDER_PARSE,
@@ -170,7 +171,8 @@ class CoreLLMStructuredExtractor:
         )
         if not raw_content:
             raise RuntimeError("structured extraction returned empty response content")
-        return response_model.model_validate_json(self._extract_json_object(raw_content))
+        payload = self._load_json_payload(self._extract_json_object(raw_content))
+        return response_model.model_validate(payload)
 
     def _parse_provider_structured_response(
         self,
@@ -178,12 +180,17 @@ class CoreLLMStructuredExtractor:
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
     ) -> BaseModel:
-        completion = self.client.beta.chat.completions.parse(
-            model=self.model,
-            temperature=0,
-            messages=messages,
-            response_format=response_model,
-        )
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "temperature": 0,
+            "messages": messages,
+            "response_format": response_model,
+        }
+        if response_model is StructuredExtractionBundle:
+            request_kwargs["max_completion_tokens"] = (
+                _TABLE_ROW_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
+            )
+        completion = self.client.beta.chat.completions.parse(**request_kwargs)
         if not completion.choices:
             raise RuntimeError("structured extraction returned no completion choices")
         message = completion.choices[0].message
@@ -245,6 +252,52 @@ class CoreLLMStructuredExtractor:
         if start < 0 or end < start:
             raise RuntimeError("structured extraction returned no JSON object")
         return text[start : end + 1]
+
+    def _load_json_payload(self, response_text: str) -> Any:
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError as error:
+            sanitized = self._strip_trailing_commas(response_text)
+            if sanitized == response_text:
+                raise
+            try:
+                return json.loads(sanitized)
+            except json.JSONDecodeError:
+                raise error
+
+    def _strip_trailing_commas(self, response_text: str) -> str:
+        result: list[str] = []
+        in_string = False
+        escape = False
+
+        for char in response_text:
+            if in_string:
+                result.append(char)
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+                result.append(char)
+                continue
+
+            if char in "}]":
+                last_non_whitespace = len(result) - 1
+                while last_non_whitespace >= 0 and result[last_non_whitespace].isspace():
+                    last_non_whitespace -= 1
+                if last_non_whitespace >= 0 and result[last_non_whitespace] == ",":
+                    del result[last_non_whitespace]
+                result.append(char)
+                continue
+
+            result.append(char)
+
+        return "".join(result)
 
 
 def build_default_core_llm_structured_extractor() -> CoreLLMStructuredExtractor:

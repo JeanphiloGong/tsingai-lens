@@ -5,6 +5,15 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+ClaimScope = Literal[
+    "current_work",
+    "prior_work",
+    "literature_summary",
+    "review_summary",
+    "unclear",
+]
+
+
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -54,7 +63,7 @@ class MethodFactPayload(_StrictModel):
     method_name: str
     method_payload: MethodPayloadModel = Field(default_factory=MethodPayloadModel)
     anchors: list[EvidenceAnchorPayload] = Field(default_factory=list)
-    confidence: float = 0.0
+    confidence: float = 0.85
     epistemic_status: str = "normalized_from_evidence"
 
 
@@ -65,7 +74,7 @@ class SampleVariantPayload(_StrictModel):
     variable_axis_type: str | None = None
     variable_value: str | int | float | None = None
     process_context: ProcessContextPayload = Field(default_factory=ProcessContextPayload)
-    confidence: float = 0.0
+    confidence: float = 0.85
     epistemic_status: str = "normalized_from_evidence"
     source_kind: Literal["text_window", "table_row"] = "text_window"
 
@@ -81,13 +90,13 @@ class TestConditionPayloadModel(_StrictModel):
 class ExtractedTestConditionPayload(_StrictModel):
     property_type: str
     condition_payload: TestConditionPayloadModel = Field(default_factory=TestConditionPayloadModel)
-    confidence: float = 0.0
+    confidence: float = 0.85
     epistemic_status: str = "normalized_from_evidence"
 
 
 class BaselineReferencePayload(_StrictModel):
     baseline_label: str
-    confidence: float = 0.0
+    confidence: float = 0.85
     epistemic_status: str = "normalized_from_evidence"
 
 
@@ -109,7 +118,85 @@ class MeasurementResultPayload(_StrictModel):
     variant_label: str | None = None
     baseline_label: str | None = None
     anchors: list[EvidenceAnchorPayload] = Field(default_factory=list)
-    confidence: float = 0.0
+    claim_scope: ClaimScope = "current_work"
+    confidence: float = 0.85
+
+
+class TextWindowMethodMentionPayload(_StrictModel):
+    method_role: Literal["process", "characterization", "test", "other"] = "process"
+    method_name: str
+    details: str | None = None
+    evidence_quote: str
+    confidence: float = 0.85
+
+
+class TextWindowMaterialMentionPayload(_StrictModel):
+    material_label: str
+    family: str | None = None
+    composition: str | None = None
+    evidence_quote: str
+    confidence: float = 0.85
+
+
+class TextWindowVariantMentionPayload(_StrictModel):
+    variant_label: str
+    variable_axis_type: str | None = None
+    variable_value: str | int | float | None = None
+    evidence_quote: str
+    confidence: float = 0.85
+
+
+class TextWindowConditionMentionPayload(_StrictModel):
+    condition_type: Literal[
+        "temperature",
+        "duration",
+        "atmosphere",
+        "rate",
+        "frequency",
+        "location",
+        "direction",
+        "other",
+    ] = "other"
+    condition_text: str
+    normalized_value: str | int | float | None = None
+    unit: str | None = None
+    evidence_quote: str
+    confidence: float = 0.85
+
+
+class TextWindowBaselineMentionPayload(_StrictModel):
+    baseline_label: str
+    baseline_type: Literal[
+        "control",
+        "untreated",
+        "as-built",
+        "reference",
+        "without-treatment",
+        "other",
+    ] = "other"
+    evidence_quote: str
+    confidence: float = 0.85
+
+
+class TextWindowResultClaimPayload(_StrictModel):
+    claim_text: str
+    property_normalized: str
+    result_type: str
+    value_text: str | None = None
+    unit: str | None = None
+    claim_scope: ClaimScope = "unclear"
+    eligible_for_measurement_result: bool = False
+    evidence_quote: str
+    confidence: float = 0.85
+
+
+class StructuredTextWindowMentions(_StrictModel):
+    method_mentions: list[TextWindowMethodMentionPayload] = Field(default_factory=list)
+    material_mentions: list[TextWindowMaterialMentionPayload] = Field(default_factory=list)
+    variant_mentions: list[TextWindowVariantMentionPayload] = Field(default_factory=list)
+    condition_mentions: list[TextWindowConditionMentionPayload] = Field(default_factory=list)
+    baseline_mentions: list[TextWindowBaselineMentionPayload] = Field(default_factory=list)
+    result_claims: list[TextWindowResultClaimPayload] = Field(default_factory=list)
 
 
 class StructuredExtractionBundle(_StrictModel):

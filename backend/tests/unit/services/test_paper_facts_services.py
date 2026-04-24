@@ -23,6 +23,12 @@ from application.core.semantic_build.llm.schemas import (
     SampleVariantPayload,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
+    StructuredTextWindowMentions,
+    TextWindowBaselineMentionPayload,
+    TextWindowConditionMentionPayload,
+    TextWindowMethodMentionPayload,
+    TextWindowResultClaimPayload,
+    TextWindowVariantMentionPayload,
 )
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
@@ -164,19 +170,16 @@ class EvidenceOnlyExtractor:
             confidence=0.9,
         )
 
-    def extract_text_window_bundle(self, payload):  # noqa: ANN001
-        return StructuredExtractionBundle(
-            method_facts=[
-                MethodFactPayload(
+    def extract_text_window_mentions(self, payload):  # noqa: ANN001
+        text_window = payload.get("text_window") or {}
+        quote = str(text_window.get("text") or "").strip() or "Process conditions were reported."
+        return StructuredTextWindowMentions(
+            method_mentions=[
+                TextWindowMethodMentionPayload(
                     method_role="process",
                     method_name="sample preparation",
-                    method_payload={"details": "Process conditions were reported."},
-                    anchors=[
-                        EvidenceAnchorPayload(
-                            quote="Process conditions were reported.",
-                            source_type="text",
-                        )
-                    ],
+                    details=quote,
+                    evidence_quote=quote,
                     confidence=0.7,
                 )
             ]
@@ -224,8 +227,9 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"page"' in text_window_prompt
     assert "Use exactly the schema keys and no others." in text_window_prompt
     assert '"keywords"' in text_window_prompt
-    assert '"temperatures_c": []' in text_window_prompt
-    assert '"unit": "MPa"' in text_window_prompt
+    assert '"evidence_quote"' in text_window_prompt
+    assert '"claim_scope"' in text_window_prompt
+    assert '"measurement_results"' not in text_window_prompt
 
     table_row_payload = service._build_table_row_extraction_payload(
         title="Prompt Boundary Paper",
@@ -774,9 +778,9 @@ def test_paper_facts_service_prunes_low_value_text_windows_before_model_calls(
                 confidence=0.9,
             )
 
-        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+        def extract_text_window_mentions(self, payload):  # noqa: ANN001
             self.text_payloads.append(payload)
-            return StructuredExtractionBundle()
+            return StructuredTextWindowMentions()
 
         def extract_table_row_bundle(self, payload):  # noqa: ANN001
             self.table_payloads.append(payload)
@@ -875,60 +879,68 @@ def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_p
                 confidence=0.9,
             )
 
-        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+        def extract_text_window_mentions(self, payload):  # noqa: ANN001
             text_window = payload.get("text_window") or {}
             quote = "A0 reached 950 MPa while A1 reached 1010 MPa relative to A0."
             if quote not in str(text_window.get("text") or ""):
-                return StructuredExtractionBundle()
-            return StructuredExtractionBundle(
-                sample_variants=[
-                    SampleVariantPayload(
+                return StructuredTextWindowMentions()
+            return StructuredTextWindowMentions(
+                method_mentions=[
+                    TextWindowMethodMentionPayload(
+                        method_role="test",
+                        method_name="tensile test",
+                        details=quote,
+                        evidence_quote=quote,
+                        confidence=0.8,
+                    )
+                ],
+                variant_mentions=[
+                    TextWindowVariantMentionPayload(
                         variant_label="A0",
-                        host_material_system={"family": "Ti alloy", "composition": None},
+                        variable_axis_type=None,
+                        variable_value=None,
+                        evidence_quote=quote,
                         confidence=0.8,
                     ),
-                    SampleVariantPayload(
+                    TextWindowVariantMentionPayload(
                         variant_label="A1",
-                        host_material_system={"family": "Ti alloy", "composition": None},
+                        variable_axis_type=None,
+                        variable_value=None,
+                        evidence_quote=quote,
                         confidence=0.8,
                     ),
                 ],
-                test_conditions=[
-                    {
-                        "property_type": "tensile_strength",
-                        "condition_payload": {"method": "tensile test", "methods": ["tensile test"]},
-                        "confidence": 0.8,
-                    }
+                baseline_mentions=[
+                    TextWindowBaselineMentionPayload(
+                        baseline_label="A0",
+                        baseline_type="reference",
+                        evidence_quote=quote,
+                        confidence=0.8,
+                    )
                 ],
-                baseline_references=[
-                    {
-                        "baseline_label": "A0",
-                        "confidence": 0.8,
-                    }
-                ],
-                measurement_results=[
-                    {
-                        "claim_text": "A0 reached 950 MPa relative to A0.",
-                        "property_normalized": "tensile_strength",
-                        "result_type": "scalar",
-                        "value_payload": {"value": 950, "statement": "A0 reached 950 MPa."},
-                        "unit": "MPa",
-                        "variant_label": "A0",
-                        "baseline_label": "A0",
-                        "anchors": [{"quote": quote, "source_type": "text"}],
-                        "confidence": 0.84,
-                    },
-                    {
-                        "claim_text": "A1 reached 1010 MPa relative to A0.",
-                        "property_normalized": "tensile_strength",
-                        "result_type": "scalar",
-                        "value_payload": {"value": 1010, "statement": "A1 reached 1010 MPa."},
-                        "unit": "MPa",
-                        "variant_label": "A1",
-                        "baseline_label": "A0",
-                        "anchors": [{"quote": quote, "source_type": "text"}],
-                        "confidence": 0.84,
-                    },
+                result_claims=[
+                    TextWindowResultClaimPayload(
+                        claim_text="A0 reached 950 MPa.",
+                        property_normalized="tensile_strength",
+                        result_type="scalar",
+                        value_text="950 MPa",
+                        unit="MPa",
+                        claim_scope="current_work",
+                        eligible_for_measurement_result=True,
+                        evidence_quote=quote,
+                        confidence=0.84,
+                    ),
+                    TextWindowResultClaimPayload(
+                        claim_text="A1 reached 1010 MPa.",
+                        property_normalized="tensile_strength",
+                        result_type="scalar",
+                        value_text="1010 MPa",
+                        unit="MPa",
+                        claim_scope="current_work",
+                        eligible_for_measurement_result=True,
+                        evidence_quote=quote,
+                        confidence=0.84,
+                    ),
                 ],
             )
 
@@ -1006,6 +1018,112 @@ def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_p
     assert measurement_results["baseline_id"].nunique() == 1
 
 
+def test_prior_work_text_window_claims_do_not_materialize_measurement_results(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class PriorWorkClaimExtractor:
+        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                protocol_extractable="yes",
+                protocol_extractability_signals=[],
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+        def extract_text_window_mentions(self, payload):  # noqa: ANN001
+            text_window = payload.get("text_window") or {}
+            quote = "Previous work demonstrated residual stress reduction by over 90%."
+            if quote not in str(text_window.get("text") or ""):
+                return StructuredTextWindowMentions()
+            return StructuredTextWindowMentions(
+                method_mentions=[
+                    TextWindowMethodMentionPayload(
+                        method_role="process",
+                        method_name="laser powder bed fusion",
+                        details=quote,
+                        evidence_quote=quote,
+                        confidence=0.8,
+                    )
+                ],
+                result_claims=[
+                    TextWindowResultClaimPayload(
+                        claim_text="Previous work demonstrated residual stress reduction by over 90%.",
+                        property_normalized="residual_stress",
+                        result_type="reduction",
+                        value_text="over 90%",
+                        unit="%",
+                        claim_scope="prior_work",
+                        eligible_for_measurement_result=True,
+                        evidence_quote=quote,
+                        confidence=0.84,
+                    )
+                ],
+            )
+
+        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
+            return StructuredExtractionBundle()
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = PriorWorkClaimExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+
+    collection = collection_service.create_collection("Prior Work Claim Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Prior Work Claim Paper",
+                "text": "\n".join(
+                    [
+                        "Experimental Section",
+                        "Previous work demonstrated residual stress reduction by over 90%.",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "Previous work demonstrated residual stress reduction by over 90%.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    paper_facts_service.build_evidence_cards(collection_id, output_dir)
+
+    measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
+    method_facts = pd.read_parquet(output_dir / "method_facts.parquet")
+
+    assert not method_facts.empty
+    assert measurement_results.empty
+
+
 def test_paper_facts_service_persists_mixed_variant_values_with_real_parquet(tmp_path):
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
@@ -1020,25 +1138,25 @@ def test_paper_facts_service_persists_mixed_variant_values_with_real_parquet(tmp
                 confidence=0.9,
             )
 
-        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+        def extract_text_window_mentions(self, payload):  # noqa: ANN001
             text_window = payload.get("text_window") or {}
             text = str(text_window.get("text") or "")
             if "Field conditions varied across samples." not in text:
-                return StructuredExtractionBundle()
-            return StructuredExtractionBundle(
-                sample_variants=[
-                    SampleVariantPayload(
+                return StructuredTextWindowMentions()
+            return StructuredTextWindowMentions(
+                variant_mentions=[
+                    TextWindowVariantMentionPayload(
                         variant_label="V10",
-                        host_material_system={"family": "steel"},
                         variable_axis_type="field_level",
                         variable_value=10,
+                        evidence_quote="Field conditions varied across samples.",
                         confidence=0.8,
                     ),
-                    SampleVariantPayload(
+                    TextWindowVariantMentionPayload(
                         variant_label="Vair",
-                        host_material_system={"family": "steel"},
                         variable_axis_type="field_level",
                         variable_value="air",
+                        evidence_quote="Field conditions varied across samples.",
                         confidence=0.8,
                     ),
                 ]
@@ -1123,25 +1241,25 @@ def test_paper_facts_service_normalizes_null_like_variant_values_before_parquet(
                 confidence=0.9,
             )
 
-        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+        def extract_text_window_mentions(self, payload):  # noqa: ANN001
             text_window = payload.get("text_window") or {}
             text = str(text_window.get("text") or "")
             if "Field conditions varied across samples." not in text:
-                return StructuredExtractionBundle()
-            return StructuredExtractionBundle(
-                sample_variants=[
-                    SampleVariantPayload(
+                return StructuredTextWindowMentions()
+            return StructuredTextWindowMentions(
+                variant_mentions=[
+                    TextWindowVariantMentionPayload(
                         variant_label="V10",
-                        host_material_system={"family": "steel"},
                         variable_axis_type="field_level",
                         variable_value=10,
+                        evidence_quote="Field conditions varied across samples.",
                         confidence=0.8,
                     ),
-                    SampleVariantPayload(
+                    TextWindowVariantMentionPayload(
                         variant_label="Vnull",
-                        host_material_system={"family": "steel"},
                         variable_axis_type="field_level",
                         variable_value="null",
+                        evidence_quote="Field conditions varied across samples.",
                         confidence=0.8,
                     ),
                 ]
@@ -1238,23 +1356,18 @@ def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatc
                 confidence=0.9,
             )
 
-        def extract_text_window_bundle(self, payload):  # noqa: ANN001
+        def extract_text_window_mentions(self, payload):  # noqa: ANN001
             text_window = payload.get("text_window") or {}
             quote = "Process conditions were reported."
             if quote not in str(text_window.get("text") or ""):
-                return StructuredExtractionBundle()
-            return StructuredExtractionBundle(
-                method_facts=[
-                    MethodFactPayload(
+                return StructuredTextWindowMentions()
+            return StructuredTextWindowMentions(
+                method_mentions=[
+                    TextWindowMethodMentionPayload(
                         method_role="process",
                         method_name="sample preparation",
-                        method_payload={"details": quote},
-                        anchors=[
-                            EvidenceAnchorPayload(
-                                quote=quote,
-                                source_type="text",
-                            )
-                        ],
+                        details=quote,
+                        evidence_quote=quote,
                         confidence=0.7,
                     )
                 ]

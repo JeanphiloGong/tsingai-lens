@@ -68,11 +68,11 @@ class _TimingRecordingExtractor:
         self._lock = Lock()
         self.records: list[dict[str, Any]] = []
 
-    def extract_text_window_bundle(self, payload: dict[str, Any]) -> Any:
+    def extract_text_window_mentions(self, payload: dict[str, Any]) -> Any:
         return self._timed_call(
             kind="text_window",
             payload=payload,
-            call=self._inner_extractor.extract_text_window_bundle,
+            call=self._inner_extractor.extract_text_window_mentions,
         )
 
     def extract_table_row_bundle(self, payload: dict[str, Any]) -> Any:
@@ -110,7 +110,7 @@ class _TimingRecordingExtractor:
             metadata=metadata,
             elapsed_s=elapsed_s,
             success=True,
-            counts=_bundle_counts(bundle),
+            counts=_parsed_counts(bundle),
             error=None,
         )
         return bundle
@@ -391,13 +391,22 @@ def build_document_metrics(
     return documents
 
 
-def _bundle_counts(bundle: Any) -> dict[str, int]:
+def _parsed_counts(parsed: Any) -> dict[str, int]:
+    if hasattr(parsed, "result_claims"):
+        return {
+            "method_mentions": len(getattr(parsed, "method_mentions", [])),
+            "material_mentions": len(getattr(parsed, "material_mentions", [])),
+            "variant_mentions": len(getattr(parsed, "variant_mentions", [])),
+            "condition_mentions": len(getattr(parsed, "condition_mentions", [])),
+            "baseline_mentions": len(getattr(parsed, "baseline_mentions", [])),
+            "result_claims": len(getattr(parsed, "result_claims", [])),
+        }
     return {
-        "method_facts": len(getattr(bundle, "method_facts", [])),
-        "sample_variants": len(getattr(bundle, "sample_variants", [])),
-        "test_conditions": len(getattr(bundle, "test_conditions", [])),
-        "baseline_references": len(getattr(bundle, "baseline_references", [])),
-        "measurement_results": len(getattr(bundle, "measurement_results", [])),
+        "method_facts": len(getattr(parsed, "method_facts", [])),
+        "sample_variants": len(getattr(parsed, "sample_variants", [])),
+        "test_conditions": len(getattr(parsed, "test_conditions", [])),
+        "baseline_references": len(getattr(parsed, "baseline_references", [])),
+        "measurement_results": len(getattr(parsed, "measurement_results", [])),
     }
 
 

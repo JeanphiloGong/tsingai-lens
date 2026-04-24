@@ -28,10 +28,13 @@ from .llm.schemas import (
     EvidenceAnchorPayload,
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
+    MeasurementValuePayload,
     MethodFactPayload,
     ProcessContextPayload,
     SampleVariantPayload,
     StructuredExtractionBundle,
+    StructuredTextWindowMentions,
+    TestConditionPayloadModel,
     TestContextPayload,
 )
 from .llm.extractor import (
@@ -232,6 +235,7 @@ _MEASUREMENT_RESULT_COLUMNS = [
     "variant_id",
     "property_normalized",
     "result_type",
+    "claim_scope",
     "value_payload",
     "unit",
     "test_condition_id",
@@ -743,7 +747,11 @@ class PaperFactsService:
                         round(result["elapsed_s"] * 1000),
                     )
                     raise result["error"]
-                bundle = result["bundle"]
+                mentions = result["parsed"]
+                bundle = self._bind_text_window_mentions_to_bundle(
+                    mentions=mentions,
+                    text_window=text_window,
+                )
                 text_window_elapsed_s = result["elapsed_s"]
                 text_window_elapsed_ms = round(text_window_elapsed_s * 1000)
                 self._materialize_bundle(
@@ -857,7 +865,7 @@ class PaperFactsService:
                         round(result["elapsed_s"] * 1000),
                     )
                     raise result["error"]
-                bundle = result["bundle"]
+                bundle = result["parsed"]
                 table_row_elapsed_s = result["elapsed_s"]
                 table_row_elapsed_ms = round(table_row_elapsed_s * 1000)
                 self._materialize_bundle(
@@ -1216,6 +1224,609 @@ class PaperFactsService:
             ],
         }
 
+    def _bind_text_window_mentions_to_bundle(
+        self,
+        *,
+        mentions: StructuredTextWindowMentions,
+        text_window: dict[str, Any],
+    ) -> StructuredExtractionBundle:
+        method_facts = self._build_text_window_method_facts(mentions, text_window)
+        process_context = self._build_process_context_from_text_window_mentions(
+            mentions,
+            text_window,
+        )
+        sample_variants = self._build_text_window_sample_variants(
+            mentions,
+            text_window,
+            process_context,
+        )
+        baseline_references = self._build_text_window_baseline_references(
+            mentions,
+            text_window,
+        )
+        result_claims = [
+            claim
+            for claim in mentions.result_claims
+            if self._normalize_text_window_evidence_quote(text_window, claim.evidence_quote)
+            and str(claim.claim_scope or "").strip() == "current_work"
+            and bool(claim.eligible_for_measurement_result)
+        ]
+        test_conditions = self._build_text_window_test_conditions(
+            mentions,
+            text_window,
+            result_claims,
+        )
+        measurement_results = self._build_text_window_measurement_results(
+            result_claims,
+            text_window,
+            sample_variants,
+            baseline_references,
+        )
+        return StructuredExtractionBundle(
+            method_facts=method_facts,
+            sample_variants=sample_variants,
+            test_conditions=test_conditions,
+            baseline_references=baseline_references,
+            measurement_results=measurement_results,
+        )
+
+    def _build_text_window_method_facts(
+        self,
+        mentions: StructuredTextWindowMentions,
+        text_window: dict[str, Any],
+    ) -> list[MethodFactPayload]:
+        rows: list[MethodFactPayload] = []
+        for mention in mentions.method_mentions:
+            evidence_quote = self._normalize_text_window_evidence_quote(
+                text_window,
+                mention.evidence_quote,
+            )
+            method_name = self._normalize_scalar_text(mention.method_name)
+            if not evidence_quote or not method_name:
+                continue
+            method_role = self._normalize_method_role(mention.method_role)
+            payload: dict[str, Any] = {
+                "details": self._normalize_scalar_text(mention.details),
+            }
+            if method_role in {"characterization", "test"}:
+                payload["methods"] = [method_name]
+            rows.append(
+                MethodFactPayload(
+                    method_role=method_role,
+                    method_name=method_name,
+                    method_payload=payload,
+                    anchors=[
+                        EvidenceAnchorPayload(
+                            quote=evidence_quote,
+                            source_type="text",
+                        )
+                    ],
+                    confidence=mention.confidence,
+                )
+            )
+        return rows
+
+    def _build_process_context_from_text_window_mentions(
+        self,
+        mentions: StructuredTextWindowMentions,
+        text_window: dict[str, Any],
+    ) -> ProcessContextPayload:
+        temperatures: list[float] = []
+        durations: list[str] = []
+        atmosphere: str | None = None
+        for mention in mentions.condition_mentions:
+            evidence_quote = self._normalize_text_window_evidence_quote(
+                text_window,
+                mention.evidence_quote,
+            )
+            if not evidence_quote:
+                continue
+            condition_type = str(mention.condition_type or "").strip().lower()
+            if condition_type == "temperature":
+                numeric = self._coerce_numeric_text_window_value(
+                    mention.normalized_value,
+                    mention.condition_text,
+                )
+                if numeric is not None:
+                    temperatures.append(float(numeric))
+            elif condition_type == "duration":
+                duration_text = self._normalize_scalar_text(mention.condition_text)
+                if duration_text:
+                    durations.append(duration_text)
+            elif condition_type == "atmosphere":
+                atmosphere = self._normalize_scalar_text(
+                    mention.normalized_value
+                ) or self._normalize_scalar_text(mention.condition_text)
+        return ProcessContextPayload(
+            temperatures_c=self._dedupe_preserving_order(
+                [round(item, 4) for item in temperatures]
+            ),
+            durations=self._dedupe_preserving_order(durations),
+            atmosphere=atmosphere,
+        )
+
+    def _build_text_window_sample_variants(
+        self,
+        mentions: StructuredTextWindowMentions,
+        text_window: dict[str, Any],
+        process_context: ProcessContextPayload,
+    ) -> list[SampleVariantPayload]:
+        materials = self._collect_text_window_material_mentions(mentions, text_window)
+        shared_material = materials[0] if len(materials) == 1 else None
+        rows: list[SampleVariantPayload] = []
+        if mentions.variant_mentions:
+            for mention in mentions.variant_mentions:
+                evidence_quote = self._normalize_text_window_evidence_quote(
+                    text_window,
+                    mention.evidence_quote,
+                )
+                variant_label = self._normalize_scalar_text(mention.variant_label)
+                if not evidence_quote or not variant_label:
+                    continue
+                matched_material = shared_material
+                if matched_material is None:
+                    quote_matches = [
+                        material
+                        for material in materials
+                        if material["evidence_quote"] == evidence_quote
+                    ]
+                    if len(quote_matches) == 1:
+                        matched_material = quote_matches[0]
+                host_material_system = (
+                    {
+                        "family": matched_material["family"],
+                        "composition": matched_material["composition"],
+                    }
+                    if matched_material is not None
+                    else None
+                )
+                rows.append(
+                    SampleVariantPayload(
+                        variant_label=variant_label,
+                        host_material_system=host_material_system,
+                        composition=(
+                            matched_material["composition"]
+                            if matched_material is not None
+                            else None
+                        ),
+                        variable_axis_type=mention.variable_axis_type,
+                        variable_value=mention.variable_value,
+                        process_context=process_context,
+                        confidence=mention.confidence,
+                        source_kind="text_window",
+                    )
+                )
+        elif materials:
+            for material in materials:
+                rows.append(
+                    SampleVariantPayload(
+                        variant_label=material["material_label"],
+                        host_material_system={
+                            "family": material["family"],
+                            "composition": material["composition"],
+                        },
+                        composition=material["composition"],
+                        variable_axis_type=None,
+                        variable_value=None,
+                        process_context=process_context,
+                        confidence=material["confidence"],
+                        epistemic_status="inferred_with_low_confidence",
+                        source_kind="text_window",
+                    )
+                )
+        return rows
+
+    def _collect_text_window_material_mentions(
+        self,
+        mentions: StructuredTextWindowMentions,
+        text_window: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for mention in mentions.material_mentions:
+            evidence_quote = self._normalize_text_window_evidence_quote(
+                text_window,
+                mention.evidence_quote,
+            )
+            material_label = self._normalize_scalar_text(mention.material_label)
+            family = self._sanitize_material_family(mention.family) or material_label
+            if not evidence_quote or not material_label or not family:
+                continue
+            rows.append(
+                {
+                    "material_label": material_label,
+                    "family": family,
+                    "composition": self._normalize_scalar_text(mention.composition),
+                    "evidence_quote": evidence_quote,
+                    "confidence": mention.confidence,
+                }
+            )
+        return rows
+
+    def _build_text_window_baseline_references(
+        self,
+        mentions: StructuredTextWindowMentions,
+        text_window: dict[str, Any],
+    ) -> list[BaselineReferencePayload]:
+        rows: list[BaselineReferencePayload] = []
+        for mention in mentions.baseline_mentions:
+            evidence_quote = self._normalize_text_window_evidence_quote(
+                text_window,
+                mention.evidence_quote,
+            )
+            baseline_label = self._normalize_scalar_text(mention.baseline_label)
+            if not evidence_quote or not baseline_label:
+                continue
+            rows.append(
+                BaselineReferencePayload(
+                    baseline_label=baseline_label,
+                    confidence=mention.confidence,
+                )
+            )
+        return rows
+
+    def _build_text_window_test_conditions(
+        self,
+        mentions: StructuredTextWindowMentions,
+        text_window: dict[str, Any],
+        result_claims: list[Any],
+    ) -> list[ExtractedTestConditionPayload]:
+        if not result_claims:
+            return []
+        condition_payload = self._build_text_window_test_condition_payload(
+            mentions,
+            text_window,
+        )
+        payload_dict = condition_payload.model_dump(exclude_none=True)
+        if not payload_dict:
+            return []
+        rows: list[ExtractedTestConditionPayload] = []
+        seen: set[str] = set()
+        for claim in result_claims:
+            property_type = self._normalize_property_name(claim.property_normalized)
+            if property_type in seen:
+                continue
+            seen.add(property_type)
+            rows.append(
+                ExtractedTestConditionPayload(
+                    property_type=property_type,
+                    condition_payload=payload_dict,
+                    confidence=max(
+                        [claim.confidence]
+                        + [
+                            mention.confidence
+                            for mention in mentions.condition_mentions
+                            if self._normalize_text_window_evidence_quote(
+                                text_window,
+                                mention.evidence_quote,
+                            )
+                        ]
+                        + [
+                            mention.confidence
+                            for mention in mentions.method_mentions
+                            if str(mention.method_role or "").strip().lower() == "test"
+                            and self._normalize_text_window_evidence_quote(
+                                text_window,
+                                mention.evidence_quote,
+                            )
+                        ]
+                    ),
+                )
+            )
+        return rows
+
+    def _build_text_window_test_condition_payload(
+        self,
+        mentions: StructuredTextWindowMentions,
+        text_window: dict[str, Any],
+    ) -> TestConditionPayloadModel:
+        methods: list[str] = []
+        temperatures: list[float] = []
+        durations: list[str] = []
+        atmosphere: str | None = None
+
+        for mention in mentions.method_mentions:
+            evidence_quote = self._normalize_text_window_evidence_quote(
+                text_window,
+                mention.evidence_quote,
+            )
+            if not evidence_quote:
+                continue
+            if str(mention.method_role or "").strip().lower() == "test":
+                method_name = self._normalize_scalar_text(mention.method_name)
+                if method_name:
+                    methods.append(method_name)
+
+        for mention in mentions.condition_mentions:
+            evidence_quote = self._normalize_text_window_evidence_quote(
+                text_window,
+                mention.evidence_quote,
+            )
+            if not evidence_quote:
+                continue
+            condition_type = str(mention.condition_type or "").strip().lower()
+            if condition_type == "temperature":
+                numeric = self._coerce_numeric_text_window_value(
+                    mention.normalized_value,
+                    mention.condition_text,
+                )
+                if numeric is not None:
+                    temperatures.append(float(numeric))
+            elif condition_type == "duration":
+                duration_text = self._normalize_scalar_text(mention.condition_text)
+                if duration_text:
+                    durations.append(duration_text)
+            elif condition_type == "atmosphere":
+                atmosphere = self._normalize_scalar_text(
+                    mention.normalized_value
+                ) or self._normalize_scalar_text(mention.condition_text)
+
+        deduped_methods = self._dedupe_preserving_order(methods)
+        return TestConditionPayloadModel(
+            method=deduped_methods[0] if len(deduped_methods) == 1 else None,
+            methods=deduped_methods,
+            temperatures_c=self._dedupe_preserving_order(
+                [round(item, 4) for item in temperatures]
+            ),
+            durations=self._dedupe_preserving_order(durations),
+            atmosphere=atmosphere,
+        )
+
+    def _build_text_window_measurement_results(
+        self,
+        result_claims: list[Any],
+        text_window: dict[str, Any],
+        sample_variants: list[SampleVariantPayload],
+        baseline_references: list[BaselineReferencePayload],
+    ) -> list[MeasurementResultPayload]:
+        rows: list[MeasurementResultPayload] = []
+        for claim in result_claims:
+            evidence_quote = self._normalize_text_window_evidence_quote(
+                text_window,
+                claim.evidence_quote,
+            )
+            if not evidence_quote:
+                continue
+            value_payload, unit = self._build_measurement_value_from_text_window_claim(
+                claim
+            )
+            rows.append(
+                MeasurementResultPayload(
+                    claim_text=self._normalize_scalar_text(claim.claim_text) or evidence_quote,
+                    property_normalized=self._normalize_property_name(
+                        claim.property_normalized
+                    ),
+                    result_type=str(claim.result_type or "").strip() or "trend",
+                    value_payload=value_payload,
+                    unit=unit,
+                    variant_label=self._match_variant_label_for_text_window_claim(
+                        claim,
+                        sample_variants,
+                    ),
+                    baseline_label=self._match_baseline_label_for_text_window_claim(
+                        claim,
+                        baseline_references,
+                    ),
+                    anchors=[
+                        EvidenceAnchorPayload(
+                            quote=evidence_quote,
+                            source_type="text",
+                        )
+                    ],
+                    claim_scope=claim.claim_scope,
+                    confidence=claim.confidence,
+                )
+            )
+        return rows
+
+    def _build_measurement_value_from_text_window_claim(
+        self,
+        claim: Any,
+    ) -> tuple[MeasurementValuePayload, str | None]:
+        claim_text = self._normalize_scalar_text(claim.claim_text)
+        value_text = self._normalize_scalar_text(claim.value_text)
+        unit = self._sanitize_unit(claim.unit) or self._extract_unit_from_text(
+            value_text or claim_text or ""
+        )
+        source_text = value_text or claim_text or ""
+        lowered = source_text.lower()
+        statement = claim_text or value_text or None
+
+        range_match = re.search(
+            r"([-+]?\d+(?:\.\d+)?)\s*(?:-|to)\s*([-+]?\d+(?:\.\d+)?)",
+            source_text,
+        )
+        if range_match is not None:
+            return (
+                MeasurementValuePayload(
+                    min=float(range_match.group(1)),
+                    max=float(range_match.group(2)),
+                    statement=statement,
+                ),
+                unit,
+            )
+
+        min_match = re.search(
+            r"\b(?:over|more than|greater than|above)\s+([-+]?\d+(?:\.\d+)?)",
+            lowered,
+        )
+        if min_match is not None:
+            return (
+                MeasurementValuePayload(
+                    min=float(min_match.group(1)),
+                    statement=statement,
+                ),
+                unit,
+            )
+
+        max_match = re.search(
+            r"\b(?:under|less than|below)\s+([-+]?\d+(?:\.\d+)?)",
+            lowered,
+        )
+        if max_match is not None:
+            return (
+                MeasurementValuePayload(
+                    max=float(max_match.group(1)),
+                    statement=statement,
+                ),
+                unit,
+            )
+
+        approx_match = re.search(
+            r"(?:about|approximately|approx\.?|~)\s*([-+]?\d+(?:\.\d+)?)",
+            lowered,
+        )
+        if approx_match is not None:
+            numeric = float(approx_match.group(1))
+            if str(claim.result_type or "").strip().lower() == "retention":
+                return (
+                    MeasurementValuePayload(
+                        retention_percent=numeric,
+                        statement=statement,
+                    ),
+                    unit or "%",
+                )
+            return (
+                MeasurementValuePayload(
+                    value=numeric,
+                    statement=statement,
+                ),
+                unit,
+            )
+
+        numeric = self._coerce_numeric_text_window_value(value_text, claim_text)
+        if numeric is None:
+            return MeasurementValuePayload(statement=statement), unit
+        if str(claim.result_type or "").strip().lower() == "retention":
+            return (
+                MeasurementValuePayload(
+                    retention_percent=float(numeric),
+                    statement=statement,
+                ),
+                unit or "%",
+            )
+        return (
+            MeasurementValuePayload(
+                value=float(numeric),
+                statement=statement,
+            ),
+            unit,
+        )
+
+    def _match_variant_label_for_text_window_claim(
+        self,
+        claim: Any,
+        sample_variants: list[SampleVariantPayload],
+    ) -> str | None:
+        if len(sample_variants) == 1:
+            return self._normalize_scalar_text(sample_variants[0].variant_label)
+        claim_text = " ".join(
+            filter(
+                None,
+                [
+                    self._normalize_scalar_text(claim.claim_text),
+                    self._normalize_scalar_text(claim.evidence_quote),
+                ],
+            )
+        ).lower()
+        matched = [
+            self._normalize_scalar_text(variant.variant_label)
+            for variant in sample_variants
+            if self._normalize_scalar_text(variant.variant_label)
+            and self._normalize_scalar_text(variant.variant_label).lower() in claim_text
+        ]
+        if len(matched) == 1:
+            return matched[0]
+        return None
+
+    def _match_baseline_label_for_text_window_claim(
+        self,
+        claim: Any,
+        baseline_references: list[BaselineReferencePayload],
+    ) -> str | None:
+        if len(baseline_references) == 1:
+            return self._normalize_scalar_text(baseline_references[0].baseline_label)
+        claim_text = " ".join(
+            filter(
+                None,
+                [
+                    self._normalize_scalar_text(claim.claim_text),
+                    self._normalize_scalar_text(claim.evidence_quote),
+                ],
+            )
+        ).lower()
+        matched = [
+            self._normalize_scalar_text(baseline.baseline_label)
+            for baseline in baseline_references
+            if self._normalize_scalar_text(baseline.baseline_label)
+            and self._normalize_scalar_text(baseline.baseline_label).lower() in claim_text
+        ]
+        if len(matched) == 1:
+            return matched[0]
+        return None
+
+    def _normalize_text_window_evidence_quote(
+        self,
+        text_window: dict[str, Any],
+        quote: Any,
+    ) -> str | None:
+        normalized_quote = self._normalize_scalar_text(quote)
+        if normalized_quote is None:
+            return None
+        window_text = str(text_window.get("text") or "")
+        if normalized_quote not in window_text:
+            return None
+        return normalized_quote
+
+    def _coerce_numeric_text_window_value(
+        self,
+        explicit_value: Any,
+        fallback_text: Any,
+    ) -> int | float | None:
+        normalized = normalize_backbone_value(explicit_value)
+        if isinstance(normalized, bool):
+            return None
+        if isinstance(normalized, int):
+            return normalized
+        if isinstance(normalized, float):
+            if pd.isna(normalized):
+                return None
+            return int(normalized) if normalized.is_integer() else normalized
+        text = self._normalize_scalar_text(explicit_value) or self._normalize_scalar_text(
+            fallback_text
+        )
+        if text is None:
+            return None
+        match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+        if match is None:
+            return None
+        numeric = float(match.group(0))
+        return int(numeric) if numeric.is_integer() else numeric
+
+    def _extract_unit_from_text(self, value: str) -> str | None:
+        text = str(value or "")
+        if re.search(r"\bMPa\b", text, re.IGNORECASE):
+            return "MPa"
+        if re.search(r"\bGPa\b", text, re.IGNORECASE):
+            return "GPa"
+        if re.search(r"\bPa\b", text, re.IGNORECASE):
+            return "Pa"
+        if "%" in text:
+            return "%"
+        if re.search(r"(?:°\s*C|\bC\b)", text, re.IGNORECASE):
+            return "C"
+        return None
+
+    def _dedupe_preserving_order(self, values: list[Any]) -> list[Any]:
+        seen: set[Any] = set()
+        rows: list[Any] = []
+        for value in values:
+            key = json.dumps(value, sort_keys=True, ensure_ascii=False) if isinstance(value, (dict, list)) else value
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(value)
+        return rows
+
     def _materialize_bundle(
         self,
         *,
@@ -1353,6 +1964,7 @@ class PaperFactsService:
                         result.property_normalized
                     ),
                     "result_type": self._normalize_result_type(result.result_type),
+                    "claim_scope": str(result.claim_scope or "current_work"),
                     "value_payload": self._sanitize_value_payload(
                         result.value_payload.model_dump(exclude_none=True)
                     ),
@@ -2287,19 +2899,19 @@ class PaperFactsService:
         started_at = perf_counter()
         try:
             if kind == "text_window":
-                bundle = extractor.extract_text_window_bundle(job["payload"])
+                parsed = extractor.extract_text_window_mentions(job["payload"])
             elif kind == "table_row":
-                bundle = extractor.extract_table_row_bundle(job["payload"])
+                parsed = extractor.extract_table_row_bundle(job["payload"])
             else:
                 raise ValueError(f"unsupported extraction job kind: {kind}")
         except Exception as exc:
             return {
-                "bundle": None,
+                "parsed": None,
                 "elapsed_s": perf_counter() - started_at,
                 "error": exc,
             }
         return {
-            "bundle": bundle,
+            "parsed": parsed,
             "elapsed_s": perf_counter() - started_at,
             "error": None,
         }
@@ -2596,6 +3208,19 @@ class PaperFactsService:
         lowered = str(value or "").strip().lower()
         if lowered in {"scalar", "range", "retention", "trend", "optimum", "fitted_value"}:
             return lowered
+        if lowered in {"measurement"}:
+            return "scalar"
+        if lowered in {
+            "increase",
+            "decrease",
+            "reduction",
+            "improvement",
+            "agreement",
+            "spatial_observation",
+            "other",
+            "qualitative",
+        }:
+            return "trend"
         return "scalar"
 
     def _normalize_variant_axis_type(self, value: Any) -> str | None:

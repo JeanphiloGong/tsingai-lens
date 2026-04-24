@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
-from application.core.semantic_build.llm.schemas import StructuredExtractionBundle
+from application.core.semantic_build.llm.schemas import StructuredTextWindowMentions
 
 
 class _FakeCompletions:
@@ -63,17 +63,18 @@ def test_core_llm_extractor_validates_json_text_response():
     client = _FakeOpenAIClient(
         """```json
         {
-          "method_facts": [],
-          "sample_variants": [],
-          "test_conditions": [],
-          "baseline_references": [],
-          "measurement_results": []
+          "method_mentions": [],
+          "material_mentions": [],
+          "variant_mentions": [],
+          "condition_mentions": [],
+          "baseline_mentions": [],
+          "result_claims": []
         }
         ```"""
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    bundle = extractor.extract_text_window_bundle(
+    mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
@@ -81,8 +82,8 @@ def test_core_llm_extractor_validates_json_text_response():
         }
     )
 
-    assert isinstance(bundle, StructuredExtractionBundle)
-    assert bundle.measurement_results == []
+    assert isinstance(mentions, StructuredTextWindowMentions)
+    assert mentions.result_claims == []
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
     assert "JSON schema:" in client.chat.completions.calls[0]["messages"][1]["content"]
@@ -90,11 +91,11 @@ def test_core_llm_extractor_validates_json_text_response():
 
 def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    parsed_bundle = StructuredExtractionBundle()
-    client = _FakeOpenAIClient("unused", parsed=parsed_bundle)
+    parsed_mentions = StructuredTextWindowMentions()
+    client = _FakeOpenAIClient("unused", parsed=parsed_mentions)
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    bundle = extractor.extract_text_window_bundle(
+    mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
@@ -102,11 +103,11 @@ def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
         }
     )
 
-    assert bundle == parsed_bundle
+    assert mentions == parsed_mentions
     assert client.chat.completions.calls == []
     assert len(client.beta.chat.completions.calls) == 1
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredExtractionBundle
+    assert parse_call["response_format"] is StructuredTextWindowMentions
     assert "JSON schema:" in parse_call["messages"][1]["content"]
 
 

@@ -31,7 +31,9 @@ The new benchmark surface made one production problem explicit:
 
 the current provider is reachable and fast enough for single-call work, but the
 production prompt and response contract still allow too many schema-invalid
-outputs to reach `StructuredExtractionBundle.model_validate_json(...)`.
+outputs to reach local `model_validate_json(...)` validation on the text-window
+`StructuredTextWindowMentions` contract or the table-row
+`StructuredExtractionBundle` contract.
 
 The benchmark evidence collected on April 24, 2026 showed:
 
@@ -151,8 +153,8 @@ Supported values:
   - keep the same prompt, payload, and schema contract
 
 The branch should live only inside the internal response-parsing path. Callers
-such as `extract_text_window_bundle(...)` and `extract_table_row_bundle(...)`
-should stay unchanged.
+such as `extract_text_window_mentions(...)` and
+`extract_table_row_bundle(...)` should stay unchanged.
 
 ### Mode Invariants
 

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from .schemas import (
     StructuredDocumentProfile,
     StructuredExtractionBundle,
+    StructuredTextWindowMentions,
 )
 from .prompts import (
     build_document_profile_prompt,
@@ -62,14 +63,14 @@ class CoreLLMStructuredExtractor:
             raise TypeError("unexpected document profile response type")
         return response
 
-    def extract_text_window_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
+    def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
         system_prompt, user_prompt = build_text_window_extraction_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredExtractionBundle,
+            response_model=StructuredTextWindowMentions,
         )
-        if not isinstance(response, StructuredExtractionBundle):
+        if not isinstance(response, StructuredTextWindowMentions):
             raise TypeError("unexpected text window extraction response type")
         return response
 

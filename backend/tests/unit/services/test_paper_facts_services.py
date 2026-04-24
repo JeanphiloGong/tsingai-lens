@@ -222,6 +222,10 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     ):
         assert f'"{field}"' not in text_window_prompt
     assert '"page"' in text_window_prompt
+    assert "Use exactly the schema keys and no others." in text_window_prompt
+    assert '"keywords"' in text_window_prompt
+    assert '"temperatures_c": []' in text_window_prompt
+    assert '"unit": "MPa"' in text_window_prompt
 
     table_row_payload = service._build_table_row_extraction_payload(
         title="Prompt Boundary Paper",
@@ -278,6 +282,10 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     ):
         assert f'"{field}"' not in table_row_prompt
     assert '"page"' in table_row_prompt
+    assert "Use exactly the schema keys and no others." in table_row_prompt
+    assert '"keywords"' in table_row_prompt
+    assert '"temperatures_c": []' in table_row_prompt
+    assert '"unit": "MPa"' in table_row_prompt
 
 
 def test_paper_facts_service_reads_extraction_concurrency_from_env(monkeypatch):

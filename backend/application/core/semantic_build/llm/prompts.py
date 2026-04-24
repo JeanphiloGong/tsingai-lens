@@ -38,6 +38,114 @@ Non-negotiable rules:
 """.strip()
 
 
+_JSON_COMPLIANCE_GUIDANCE = """
+JSON compliance rules for this extraction:
+- Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, or `warnings`.
+- Arrays must stay arrays. When empty, use `[]`. Never use `null` for arrays such as `temperatures_c`, `durations`, `methods`, or any top-level list.
+- Required nested objects must stay objects. Never use `null` for `method_payload`, `process_context`, `condition_payload`, or `value_payload`.
+- Put nullable scalars inside those required objects instead of nulling the whole object.
+- `unit` belongs at `measurement_results[*].unit`, never inside `value_payload`.
+- `host_material_system` may be `null`, but `process_context` may not be `null`.
+- If evidence is weak or absent, return the valid empty-shape object with empty lists and null scalar leaves.
+
+Valid nested object example:
+```json
+{
+  "method_payload": {
+    "temperatures_c": [],
+    "durations": [],
+    "atmosphere": null,
+    "methods": [],
+    "details": null
+  },
+  "process_context": {
+    "temperatures_c": [],
+    "durations": [],
+    "atmosphere": null
+  },
+  "condition_payload": {
+    "method": null,
+    "methods": [],
+    "temperatures_c": [],
+    "durations": [],
+    "atmosphere": null
+  },
+  "value_payload": {
+    "value": null,
+    "min": null,
+    "max": null,
+    "retention_percent": null,
+    "direction": null,
+    "statement": null
+  }
+}
+```
+
+Valid measurement result example:
+```json
+{
+  "claim_text": "Yield strength reached 560 MPa.",
+  "property_normalized": "yield strength",
+  "result_type": "measurement",
+  "value_payload": {
+    "value": 560,
+    "min": null,
+    "max": null,
+    "retention_percent": null,
+    "direction": null,
+    "statement": null
+  },
+  "unit": "MPa",
+  "variant_label": null,
+  "baseline_label": null,
+  "anchors": [
+    {
+      "quote": "yield strength reached 560 MPa",
+      "source_type": "text",
+      "page": 5
+    }
+  ],
+  "confidence": 0.0
+}
+```
+
+Invalid counterexamples. Do not copy these shapes:
+```json
+{
+  "keywords": ["yield strength"],
+  "method_facts": [],
+  "sample_variants": [],
+  "test_conditions": [],
+  "baseline_references": [],
+  "measurement_results": []
+}
+```
+
+```json
+{
+  "method_payload": {
+    "temperatures_c": null,
+    "durations": null
+  },
+  "process_context": null,
+  "condition_payload": {
+    "methods": null
+  },
+  "value_payload": null
+}
+```
+
+```json
+{
+  "value_payload": {
+    "value": 560,
+    "unit": "MPa"
+  }
+}
+```
+""".strip()
+
+
 def build_document_profile_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
         "Classify this document for lightweight Core document triage.\n\n"
@@ -56,7 +164,8 @@ def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, s
         "this text window. Anchors may include quote, source_type, and page only. "
         "Do not emit backend locators, ids, or bundle refs. Use human-readable labels "
         "instead of refs when a result must identify a variant or baseline. Do not emit "
-        "reader-facing summaries or cards."
+        "reader-facing summaries or cards.\n\n"
+        f"{_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
 
@@ -69,6 +178,7 @@ def build_table_row_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str
         "summary rather than a directly attributable study row. Anchors may include "
         "quote, source_type, and page only. Do not emit backend locators, ids, or "
         "bundle refs. Use human-readable labels instead of refs when a result must "
-        "identify a variant or baseline. Return facts only, not reader-facing cards."
+        "identify a variant or baseline. Return facts only, not reader-facing cards.\n\n"
+        f"{_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt

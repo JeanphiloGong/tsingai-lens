@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from time import perf_counter
 from typing import Any
 
 from openai import OpenAI
@@ -22,6 +23,13 @@ from .prompts import (
 logger = logging.getLogger(__name__)
 
 _JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
+_EXTRACTION_MODE_JSON_TEXT = "json_text"
+_EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
+_DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_JSON_TEXT
+_SUPPORTED_EXTRACTION_MODES = {
+    _EXTRACTION_MODE_JSON_TEXT,
+    _EXTRACTION_MODE_PROVIDER_PARSE,
+}
 
 
 class CoreLLMStructuredExtractor:
@@ -34,8 +42,10 @@ class CoreLLMStructuredExtractor:
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        extraction_mode: str | None = None,
     ) -> None:
         self.model = (model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
+        self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
             base_url=(base_url or os.getenv("LLM_BASE_URL", "").strip() or None),
@@ -43,7 +53,7 @@ class CoreLLMStructuredExtractor:
 
     def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
         system_prompt, user_prompt = build_document_profile_prompt(payload)
-        response = self._parse_json_response(
+        response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredDocumentProfile,
@@ -54,7 +64,7 @@ class CoreLLMStructuredExtractor:
 
     def extract_text_window_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
         system_prompt, user_prompt = build_text_window_extraction_prompt(payload)
-        response = self._parse_json_response(
+        response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredExtractionBundle,
@@ -65,7 +75,7 @@ class CoreLLMStructuredExtractor:
 
     def extract_table_row_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
         system_prompt, user_prompt = build_table_row_extraction_prompt(payload)
-        response = self._parse_json_response(
+        response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredExtractionBundle,
@@ -74,49 +84,133 @@ class CoreLLMStructuredExtractor:
             raise TypeError("unexpected table row extraction response type")
         return response
 
-    def _parse_json_response(
+    def _parse_structured_response(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
         response_model: type[BaseModel],
     ) -> BaseModel:
+        messages = self._build_messages(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+        )
+        started_at = perf_counter()
+        try:
+            if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
+                parsed = self._parse_provider_structured_response(
+                    messages=messages,
+                    response_model=response_model,
+                )
+            else:
+                parsed = self._parse_json_text_response(
+                    messages=messages,
+                    response_model=response_model,
+                )
+        except Exception:
+            elapsed_s = perf_counter() - started_at
+            logger.exception(
+                "Core LLM extraction failed mode=%s model=%s response_model=%s elapsed_s=%.3f validated=false",
+                self.extraction_mode,
+                self.model,
+                response_model.__name__,
+                elapsed_s,
+            )
+            raise
+        elapsed_s = perf_counter() - started_at
+        logger.info(
+            "Core LLM extraction finished mode=%s model=%s response_model=%s elapsed_s=%.3f validated=true",
+            self.extraction_mode,
+            self.model,
+            response_model.__name__,
+            elapsed_s,
+        )
+        return parsed
+
+    def _build_messages(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[BaseModel],
+    ) -> list[dict[str, str]]:
         schema = json.dumps(
             response_model.model_json_schema(),
             ensure_ascii=False,
             separators=(",", ":"),
         )
+        return [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    f"{user_prompt}\n\n"
+                    "Return exactly one JSON object that matches this schema. "
+                    "Do not include markdown fences or commentary.\n"
+                    f"JSON schema:\n{schema}"
+                ),
+            },
+        ]
+
+    def _parse_json_text_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+    ) -> BaseModel:
         completion = self.client.chat.completions.create(
             model=self.model,
             temperature=0,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        f"{user_prompt}\n\n"
-                        "Return exactly one JSON object that matches this schema. "
-                        "Do not include markdown fences or commentary.\n"
-                        f"JSON schema:\n{schema}"
-                    ),
-                },
-            ],
+            messages=messages,
         )
         raw_content = self._coerce_message_content(
             completion.choices[0].message.content if completion.choices else None
         )
         if not raw_content:
             raise RuntimeError("structured extraction returned empty response content")
-        try:
-            return response_model.model_validate_json(self._extract_json_object(raw_content))
-        except Exception:
-            logger.exception(
-                "Core LLM JSON validation failed model=%s response_model=%s raw_response=%s",
-                self.model,
-                response_model.__name__,
-                raw_content[:2000],
+        return response_model.model_validate_json(self._extract_json_object(raw_content))
+
+    def _parse_provider_structured_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+    ) -> BaseModel:
+        completion = self.client.beta.chat.completions.parse(
+            model=self.model,
+            temperature=0,
+            messages=messages,
+            response_format=response_model,
+        )
+        if not completion.choices:
+            raise RuntimeError("structured extraction returned no completion choices")
+        message = completion.choices[0].message
+        parsed = getattr(message, "parsed", None)
+        if parsed is None:
+            raw_content = self._coerce_message_content(getattr(message, "content", None))
+            raise RuntimeError(
+                "structured extraction returned no parsed response content"
+                + (f": {raw_content[:500]}" if raw_content else "")
             )
-            raise
+        if isinstance(parsed, response_model):
+            return parsed
+        return response_model.model_validate(parsed)
+
+    def _resolve_extraction_mode(self, extraction_mode: str | None) -> str:
+        candidate = (
+            extraction_mode
+            or os.getenv("CORE_LLM_EXTRACTION_MODE", _DEFAULT_EXTRACTION_MODE)
+        )
+        normalized = str(candidate or "").strip().lower() or _DEFAULT_EXTRACTION_MODE
+        if normalized in _SUPPORTED_EXTRACTION_MODES:
+            return normalized
+        logger.warning(
+            "Invalid CORE_LLM_EXTRACTION_MODE=%s; falling back to %s",
+            normalized,
+            _DEFAULT_EXTRACTION_MODE,
+        )
+        return _DEFAULT_EXTRACTION_MODE
 
     def _coerce_message_content(self, content: Any) -> str:
         if isinstance(content, str):

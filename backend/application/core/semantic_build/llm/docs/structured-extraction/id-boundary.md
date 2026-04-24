@@ -17,8 +17,8 @@ latency fix from prompt cleanup alone. The target is narrower:
 This plan sits under the existing Core structured-extraction cutover wave and
 works with the new semantic-build package boundary:
 
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
-- [`core-semantic-build-packaging-alignment-plan.md`](core-semantic-build-packaging-alignment-plan.md)
+- [`hard-cutover.md`](hard-cutover.md)
+- [`../../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md`](../../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md)
 
 ## Why This Child Plan Exists
 
@@ -323,6 +323,6 @@ Suggested verification commands:
 
 ## Related Docs
 
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
-- [`core-semantic-build-packaging-alignment-plan.md`](core-semantic-build-packaging-alignment-plan.md)
-- [`../../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
+- [`hard-cutover.md`](hard-cutover.md)
+- [`../../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md`](../../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md)
+- [`../../../../../../docs/architecture/goal-core-source-layering.md`](../../../../../../docs/architecture/goal-core-source-layering.md)

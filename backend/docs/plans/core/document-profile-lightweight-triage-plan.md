@@ -25,7 +25,7 @@ For the shared domain-model correction, read
 For the parent Core quality wave, read
 [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md).
 For the broader Core LLM cutover plan, read
-[`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md).
+[`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md).
 
 ## Why This Child Plan Exists
 

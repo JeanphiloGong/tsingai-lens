@@ -280,6 +280,31 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"page"' in table_row_prompt
 
 
+def test_paper_facts_service_reads_extraction_concurrency_from_env(monkeypatch):
+    monkeypatch.setenv("CORE_EXTRACTION_MAX_CONCURRENCY", "8")
+
+    service = PaperFactsService()
+
+    assert service._get_max_extraction_concurrency() == 8
+
+
+def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
+    monkeypatch,
+    caplog,
+):
+    monkeypatch.setenv("CORE_EXTRACTION_MAX_CONCURRENCY", "invalid")
+
+    service = PaperFactsService()
+
+    with caplog.at_level("WARNING"):
+        assert service._get_max_extraction_concurrency() == 4
+
+    assert any(
+        "Invalid CORE_EXTRACTION_MAX_CONCURRENCY=" in record.message
+        for record in caplog.records
+    )
+
+
 def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 

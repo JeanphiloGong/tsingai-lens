@@ -83,6 +83,7 @@ uv sync
 export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
+export CORE_EXTRACTION_MAX_CONCURRENCY=4
 
 uvicorn main:app --reload --port 8010
 ```
@@ -99,6 +100,8 @@ uvicorn main:app --reload --port 8010
   frontend integration.
 - Run backend tests with `uv run pytest` or `./.venv/bin/python -m pytest` so
   the backend-local FastAPI/test dependencies are available during verification.
+- `CORE_EXTRACTION_MAX_CONCURRENCY` is an optional Core extraction tuning knob;
+  when unset, the backend uses `4`.
 - The active backend cleanup direction is to keep the
   `goal / source / core / derived` split explicit in `controllers/`,
   `application/`, and `infra/`, keep Source runtime under `infra/source/*`,

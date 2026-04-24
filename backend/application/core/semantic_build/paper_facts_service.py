@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from time import perf_counter
@@ -118,8 +119,8 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
     "characterization_observation_ids",
     "evidence_anchor_ids",
 )
+_DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _MAX_SUPPORTING_TEXT_WINDOWS = 3
-_MAX_EXTRACTION_CONCURRENCY = 4
 _MAX_TEXT_WINDOWS_PER_DOCUMENT = 24
 _INTRODUCTION_WINDOW_LIMIT = 1
 _CHARACTERIZATION_COLUMNS = [
@@ -423,6 +424,28 @@ class PaperFactsService:
             self._structured_extractor = build_default_core_llm_structured_extractor()
         return self._structured_extractor
 
+    def _get_max_extraction_concurrency(self) -> int:
+        raw_value = os.getenv("CORE_EXTRACTION_MAX_CONCURRENCY", "").strip()
+        if not raw_value:
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        try:
+            parsed = int(raw_value)
+        except ValueError:
+            logger.warning(
+                "Invalid CORE_EXTRACTION_MAX_CONCURRENCY=%s; using default=%s",
+                raw_value,
+                _DEFAULT_MAX_EXTRACTION_CONCURRENCY,
+            )
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        if parsed < 1:
+            logger.warning(
+                "Non-positive CORE_EXTRACTION_MAX_CONCURRENCY=%s; using default=%s",
+                raw_value,
+                _DEFAULT_MAX_EXTRACTION_CONCURRENCY,
+            )
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        return parsed
+
     def list_evidence_cards(
         self,
         collection_id: str,
@@ -608,6 +631,12 @@ class PaperFactsService:
         measurement_rows: list[dict[str, Any]] = []
 
         extractor = self._get_structured_extractor()
+        max_extraction_concurrency = self._get_max_extraction_concurrency()
+        logger.info(
+            "Paper facts extraction concurrency collection_id=%s max_extraction_concurrency=%s",
+            collection_id,
+            max_extraction_concurrency,
+        )
 
         for document_position, (_, row) in enumerate(document_records.iterrows(), start=1):
             document_id = str(row.get("paper_id") or "")
@@ -694,6 +723,7 @@ class PaperFactsService:
                 extractor=extractor,
                 jobs=text_window_jobs,
                 kind="text_window",
+                max_extraction_concurrency=max_extraction_concurrency,
             )
             for text_window_position, (job, result) in enumerate(
                 zip(text_window_jobs, text_window_results, strict=False),
@@ -804,6 +834,7 @@ class PaperFactsService:
                 extractor=extractor,
                 jobs=table_row_jobs,
                 kind="table_row",
+                max_extraction_concurrency=max_extraction_concurrency,
             )
             for table_row_position, (job, result) in enumerate(
                 zip(table_row_jobs, table_row_results, strict=False),
@@ -2225,6 +2256,7 @@ class PaperFactsService:
         extractor: CoreLLMStructuredExtractor,
         jobs: list[dict[str, Any]],
         kind: str,
+        max_extraction_concurrency: int,
     ) -> list[dict[str, Any]]:
         if not jobs:
             return []
@@ -2232,7 +2264,7 @@ class PaperFactsService:
             return [self._execute_extraction_job(extractor=extractor, job=jobs[0], kind=kind)]
 
         with ThreadPoolExecutor(
-            max_workers=min(_MAX_EXTRACTION_CONCURRENCY, len(jobs)),
+            max_workers=min(max_extraction_concurrency, len(jobs)),
         ) as executor:
             futures = [
                 executor.submit(

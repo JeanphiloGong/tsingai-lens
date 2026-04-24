@@ -30,6 +30,7 @@ companion update rather than the main owning scope.
 Read this plan after:
 
 - [`README.md`](README.md)
+- [`parameter-registry-and-variant-report-scope.md`](parameter-registry-and-variant-report-scope.md)
 - [`implementation-plan.md`](implementation-plan.md)
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
@@ -263,6 +264,9 @@ table row, then materializes each returned bundle:
 
 Support the real target comparison job without turning the generic Core
 backbone into a one-vertical-only schema.
+
+The first-version field boundary for this workstream is recorded in
+[`parameter-registry-and-variant-report-scope.md`](parameter-registry-and-variant-report-scope.md).
 
 ### Primary design rule
 

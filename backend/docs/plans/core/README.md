@@ -11,8 +11,8 @@ domain-semantic backfill.
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
   Current Core quality hardening wave
 - [`pbf-metal-extraction-and-comparison-validation/README.md`](pbf-metal-extraction-and-comparison-validation/README.md)
-  Topic family for the PBF-metal validation wave, including the proposal and
-  executable implementation plan
+  Topic family for the PBF-metal validation wave, including the proposal,
+  parameter-registry and report-scope note, and executable implementation plan
 - [`../../../application/core/semantic_build/llm/docs/structured-extraction/README.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/README.md)
   Node-local LLM structured-extraction plan family for cutover, boundary
   cleanup, and prompt hardening under the owning Core package

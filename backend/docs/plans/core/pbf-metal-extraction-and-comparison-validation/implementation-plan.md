@@ -17,6 +17,7 @@ Read this plan with:
 
 - [`README.md`](README.md)
 - [`proposal.md`](proposal.md)
+- [`parameter-registry-and-variant-report-scope.md`](parameter-registry-and-variant-report-scope.md)
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
 
@@ -144,6 +145,9 @@ Then rerun the benchmark collection and compare:
 
 Add only the PBF-metal fields needed for reliable comparison, without creating
 another permanent module tree yet.
+
+The first-version field boundary for this slice is defined in
+[`parameter-registry-and-variant-report-scope.md`](parameter-registry-and-variant-report-scope.md).
 
 ### Changes
 

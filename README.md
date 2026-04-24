@@ -1,7 +1,7 @@
 # Lens
 
 <p align="center">
-  <img src="assets/readme/lens_lockup.png" alt="Lens brand lockup" width="620">
+  <img src="assets/readme/lens_lockup.png" alt="Lens brand lockup">
 </p>
 
 Lens is an evidence-driven literature comparison workspace for research

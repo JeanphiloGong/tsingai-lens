@@ -16,18 +16,18 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 		url: new URL('http://localhost/collections/col_123')
 	};
 
-		return {
-			pageStore: {
-				subscribe(run: (value: WorkspacePageState) => void) {
-					run(current);
-					subscribers.add(run);
-					return () => subscribers.delete(run);
-				}
-			},
-			setPage(next: WorkspacePageState) {
-				current = next;
-				for (const run of subscribers) run(next);
-			},
+	return {
+		pageStore: {
+			subscribe(run: (value: WorkspacePageState) => void) {
+				run(current);
+				subscribers.add(run);
+				return () => subscribers.delete(run);
+			}
+		},
+		setPage(next: WorkspacePageState) {
+			current = next;
+			for (const run of subscribers) run(next);
+		},
 		fetchMock: vi.fn()
 	};
 });
@@ -172,7 +172,7 @@ describe('collections/[id]/+page.svelte', () => {
 		await expect.element(primaryButton).toBeInTheDocument();
 	});
 
-	it('falls back to results as the primary action when comparisons are unavailable', async () => {
+	it('falls back to documents as the primary action when comparisons are unavailable', async () => {
 		workspacePayload = buildWorkspacePayload({
 			workflow: {
 				documents: 'ready',
@@ -196,7 +196,7 @@ describe('collections/[id]/+page.svelte', () => {
 
 		render(Page);
 
-		const primaryButton = browserPage.getByRole('button', { name: 'Open results' });
+		const primaryButton = browserPage.getByRole('button', { name: 'Inspect documents' });
 		await expect.element(primaryButton).toBeInTheDocument();
 	});
 

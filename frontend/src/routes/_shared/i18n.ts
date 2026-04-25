@@ -369,7 +369,7 @@ const translations: Record<Language, Translations> = {
 			primaryViewsLead:
 				'These are the first pages to use for understanding a collection and deciding what to trust.',
 			resultsFlow:
-				'Use comparisons to judge the collection, inspect result detail to understand each finding, then return to documents for source verification.',
+				'Use comparisons to judge the collection, then read documents as evidence chains for source verification. Result detail stays available from drilldowns.',
 			viewStatusTitle: 'Readiness',
 			goToWorkspace: 'Go to workspace',
 			resultComparisonsLead:
@@ -1320,7 +1320,7 @@ const translations: Record<Language, Translations> = {
 			},
 			primaryViewsTitle: '主要分析页面',
 			primaryViewsLead: '理解一个集合、判断哪些结果能信时，应当先从这几页开始。',
-			resultsFlow: '先用比较做集合级判断，再看结果详情理解具体发现，最后回到文档核验来源。',
+			resultsFlow: '先用比较做集合级判断，再按证据链阅读文档；结果详情保留为 drilldown 页面。',
 			viewStatusTitle: '就绪状态',
 			goToWorkspace: '返回工作区',
 			resultComparisonsLead: '看这批论文里哪些结果真的能放在一起比较，哪些只是表面相似。',

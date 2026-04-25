@@ -106,18 +106,20 @@ The collection sub-navigation should be reordered to reflect product priority:
 
 1. `Workspace`
 2. `Comparisons`
-3. `Results`
-4. `Documents`
+3. `Documents`
+4. `Results` under secondary navigation only
 5. `Protocol`
 6. `Graph`
 
 Rules:
 
 - `Comparisons` is the primary analysis destination
-- `Results` is the primary drilldown destination from comparison rows
-- `Documents` is the source recovery and verification page
+- `Documents` is the source recovery, paper evidence-chain, and verification page
+- `Results` remains the drilldown destination from comparison rows, document
+  chains, and review workflows, but should not appear as a primary collection
+  entry
 - `Evidence`, if still rendered as a standalone page, should not displace
-  `Results` or `Documents` in the primary tab order
+  `Documents` in the primary tab order
 - `Protocol` is visible but visually secondary
 - `Graph` remains available but should not be styled as the main end state
 - `Reports` should stay hidden or secondary until a stable collection-scoped
@@ -217,7 +219,7 @@ Routes:
 
 Purpose:
 
-- present the collection's extracted results as the core product object layer
+- retain the collection's extracted results as the atomic product object layer
 - let users inspect what a result actually says before returning to source
 - connect comparison judgments, evidence support, and source document recovery
 
@@ -249,10 +251,10 @@ Expected interactions:
 - inspect supporting evidence without losing result-chain context
 
 `Results` is the product-facing projection over internal semantic comparison
-artifacts. Route code should not expose raw `ComparableResult` internals as the
-page's primary conceptual model. As the additive evidence-chain contract lands,
-the result page should read as one chain-first drilldown rather than as a
-generic measurement card.
+artifacts, but it is no longer a primary collection entry. Route code should
+not expose raw `ComparableResult` internals as the page's primary conceptual
+model. As the additive evidence-chain contract lands, the result page should
+read as one chain-first drilldown rather than as a generic measurement card.
 
 ### Documents
 
@@ -556,12 +558,13 @@ Fixture-backed E2E is acceptable for not-yet-landed APIs.
 
 ## Acceptance Criteria
 
-- collection navigation reflects
-  `workspace / comparisons / results / documents / protocol / graph`
+- collection navigation reflects `workspace / comparisons / documents` as the
+  primary order, with `results / evidence / protocol / graph` kept secondary
 - the primary collection CTA no longer defaults to SOP, protocol steps, or
   standalone evidence review
 - `comparisons` exists as the main analysis surface
-- `results` exists as the main drilldown object family
+- `results` exists as the atomic drilldown object family without becoming a
+  primary collection entry
 - `documents` is a real page rather than a redirect
 - `workspace` is framed around workflow readiness and warnings rather than raw
   artifact booleans

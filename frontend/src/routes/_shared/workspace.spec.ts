@@ -136,7 +136,7 @@ describe('workspace shared helpers', () => {
     expect(workspace.workflow.results).toBe('ready');
     expect(workspace.capabilities.can_view_results).toBe(true);
     expect(workspace.links.results).toBe('/collections/col_123/results');
-    expect(workspace.links.evidence).toBe('/collections/col_123/documents');
+    expect(workspace.links.evidence).toBe('/collections/col_123/evidence');
   });
 
   it('treats stale comparison artifacts as limited in legacy workflow fallback', async () => {

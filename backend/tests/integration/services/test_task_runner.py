@@ -168,7 +168,7 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["structure_features_generated"] is True
     assert artifacts["structure_features_ready"] is False
     assert artifacts["test_conditions_generated"] is True
-    assert artifacts["test_conditions_ready"] is False
+    assert artifacts["test_conditions_ready"] is True
     assert artifacts["baseline_references_generated"] is True
     assert artifacts["baseline_references_ready"] is True
     assert artifacts["sample_variants_generated"] is True

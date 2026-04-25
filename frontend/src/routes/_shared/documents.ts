@@ -1,6 +1,7 @@
 import { buildApiUrl, requestJson } from './api';
 import { USE_API_FIXTURES } from './base';
 import type { ResultListItem } from './results';
+import type { EvidenceTracebackResponse, TracebackAnchor } from './traceback';
 
 export type DocumentType =
 	| 'experimental'
@@ -236,6 +237,7 @@ export type WorkbenchSourceTarget = {
 export type WorkbenchSourceSpan = {
 	id: string;
 	block_id: string | null;
+	anchor_id: string | null;
 	page: number;
 	section: string;
 	quote: string;
@@ -998,6 +1000,11 @@ type WorkbenchChainContext = {
 	chain: DocumentResultChain;
 };
 
+type WorkbenchSourceLinkLookup = {
+	spanIdByAnchorId: Map<string, string>;
+	spanIdByEvidenceId: Map<string, string>;
+};
+
 function workbenchFixtureBlocks(): DocumentContentBlock[] {
 	return [
 		{
@@ -1087,8 +1094,13 @@ function sourceSpanIdForBlock(block: DocumentContentBlock) {
 	return `source-${block.block_id}`;
 }
 
+function sourceSpanIdForTracebackAnchor(anchor: TracebackAnchor) {
+	return `source-anchor-${anchor.anchor_id}`;
+}
+
 function sourceTargetPrecision(block: DocumentContentBlock): SourceTargetPrecision {
-	if (block.page !== null && block.bbox) return 'pdf-region';
+	const anchor = buildSourceAnchor(block, 0, false);
+	if (anchor.rects.length) return 'pdf-region';
 	if (block.charRange) return 'text-range';
 	if (block.page !== null) return 'pdf-page';
 	if (block.heading_path) return 'section';
@@ -1174,6 +1186,82 @@ function buildSourceAnchor(
 	};
 }
 
+function tracebackAnchorPage(anchor: TracebackAnchor) {
+	const page = typeof anchor.page === 'number' ? Math.trunc(anchor.page) : null;
+	return page !== null && page > 0 ? page : null;
+}
+
+function tracebackAnchorBbox(anchor: TracebackAnchor): PdfBoundingBox | null {
+	if (!anchor.bbox) return null;
+	return {
+		x0: anchor.bbox.x0,
+		y0: anchor.bbox.y0,
+		x1: anchor.bbox.x1,
+		y1: anchor.bbox.y1,
+		coord_origin: null
+	};
+}
+
+function sectionForTracebackAnchor(anchor: TracebackAnchor) {
+	return anchor.section_id || anchor.block_id || 'Source anchor';
+}
+
+function buildSourceAnchorFromTracebackAnchor(anchor: TracebackAnchor): SourceAnchor {
+	const page = tracebackAnchorPage(anchor);
+	const bbox = tracebackAnchorBbox(anchor);
+	const bboxRect = bbox ? rectFromPercentBBox(bbox) : null;
+	const rects = bboxRect ? [bboxRect] : [];
+
+	return {
+		pageIndex: Math.max(0, (page ?? 1) - 1),
+		rects,
+		quote: anchor.quote || undefined,
+		section: sectionForTracebackAnchor(anchor),
+		precision: rects.length ? 'pdf-region' : page !== null ? 'pdf-page' : 'pending'
+	};
+}
+
+function sourceTargetPrecisionForTracebackAnchor(
+	anchor: TracebackAnchor,
+	anchorModel: SourceAnchor
+): SourceTargetPrecision {
+	if (anchorModel.rects.length) return 'pdf-region';
+	if (tracebackAnchorPage(anchor) !== null) return 'pdf-page';
+	if (anchor.char_range) return 'text-range';
+	if (anchor.section_id || anchor.block_id) return 'section';
+	if (anchor.quote) return 'quote-search';
+	return 'unavailable';
+}
+
+function buildWorkbenchSourceTargetFromTracebackAnchor(
+	documentId: string,
+	anchor: TracebackAnchor
+): WorkbenchSourceTarget {
+	const page = tracebackAnchorPage(anchor);
+	const bbox = tracebackAnchorBbox(anchor);
+	const sourceAnchor = buildSourceAnchorFromTracebackAnchor(anchor);
+	const precision = sourceTargetPrecisionForTracebackAnchor(anchor, sourceAnchor);
+
+	return {
+		documentId,
+		label: sectionForTracebackAnchor(anchor),
+		page,
+		bbox,
+		charRange: anchor.char_range
+			? {
+					start: Math.trunc(anchor.char_range.start),
+					end: Math.trunc(anchor.char_range.end)
+				}
+			: null,
+		sectionId: anchor.section_id,
+		headingPath: anchor.section_id,
+		quote: anchor.quote,
+		precision,
+		userMessage: sourceTargetMessage(precision),
+		anchor: sourceAnchor
+	};
+}
+
 function buildWorkbenchSourceTarget(
 	documentId: string,
 	block: DocumentContentBlock,
@@ -1214,12 +1302,78 @@ function buildWorkbenchSourceSpans(
 	return blocks.map((block, index) => ({
 		id: sourceSpanIdForBlock(block),
 		block_id: block.block_id,
+		anchor_id: null,
 		page: block.page ?? Math.floor(index / 3) + 1,
 		section: sectionForWorkbenchBlock(block, index),
 		quote: block.text,
 		evidence_id: null,
 		target: buildWorkbenchSourceTarget(documentId, block, index, useFixtureRects)
 	}));
+}
+
+function buildTracebackSourceSpans(
+	documentId: string,
+	tracebacks: EvidenceTracebackResponse[],
+	existingSpanIds: Set<string>
+): WorkbenchSourceSpan[] {
+	const spans: WorkbenchSourceSpan[] = [];
+	const seen = new Set(existingSpanIds);
+
+	for (const traceback of tracebacks) {
+		for (const anchor of traceback.anchors) {
+			if (anchor.document_id && anchor.document_id !== documentId) continue;
+
+			const spanId = sourceSpanIdForTracebackAnchor(anchor);
+			if (seen.has(spanId)) continue;
+			seen.add(spanId);
+
+			const target = buildWorkbenchSourceTargetFromTracebackAnchor(documentId, anchor);
+			spans.push({
+				id: spanId,
+				block_id: anchor.block_id,
+				anchor_id: anchor.anchor_id,
+				page: target.page ?? 1,
+				section: target.label,
+				quote: anchor.quote || target.label,
+				evidence_id: traceback.evidence_id,
+				target
+			});
+		}
+	}
+
+	return spans;
+}
+
+function buildSourceLinkLookup(sourceSpans: WorkbenchSourceSpan[]): WorkbenchSourceLinkLookup {
+	const spanIdByAnchorId = new Map<string, string>();
+	const spanIdByEvidenceId = new Map<string, string>();
+
+	for (const span of sourceSpans) {
+		if (span.anchor_id) spanIdByAnchorId.set(span.anchor_id, span.id);
+		if (span.evidence_id && !spanIdByEvidenceId.has(span.evidence_id)) {
+			spanIdByEvidenceId.set(span.evidence_id, span.id);
+		}
+	}
+
+	return { spanIdByAnchorId, spanIdByEvidenceId };
+}
+
+function sourceSpanForEvidenceTrace(
+	evidence: DocumentChainEvidence,
+	lookup: WorkbenchSourceLinkLookup,
+	fallbackSourceSpanId: string
+) {
+	for (const anchorId of [...evidence.direct_anchor_ids, ...evidence.contextual_anchor_ids]) {
+		const sourceSpanId = lookup.spanIdByAnchorId.get(anchorId);
+		if (sourceSpanId) return sourceSpanId;
+	}
+
+	for (const evidenceId of evidence.evidence_ids) {
+		const sourceSpanId = lookup.spanIdByEvidenceId.get(evidenceId);
+		if (sourceSpanId) return sourceSpanId;
+	}
+
+	return fallbackSourceSpanId;
 }
 
 function spanAt(spans: WorkbenchSourceSpan[], index: number) {
@@ -1402,12 +1556,17 @@ function buildWorkbenchResultRows(
 	collectionId: string,
 	contexts: WorkbenchChainContext[],
 	relatedResults: ResultListItem[],
-	sourceSpans: WorkbenchSourceSpan[]
+	sourceSpans: WorkbenchSourceSpan[],
+	sourceLookup: WorkbenchSourceLinkLookup
 ): WorkbenchResultRow[] {
 	if (contexts.length) {
 		return contexts.map((context, index) => {
 			const { dossier, series, chain } = context;
-			const sourceSpanId = spanAt(sourceSpans, index + 1);
+			const sourceSpanId = sourceSpanForEvidenceTrace(
+				chain.evidence,
+				sourceLookup,
+				spanAt(sourceSpans, index + 1)
+			);
 			const warnings = readableWarnings(chain.assessment, chain.baseline);
 			return {
 				id: chain.result_id,
@@ -1768,17 +1927,26 @@ export function buildDocumentWorkbenchModel({
 	documentId,
 	content,
 	comparisonSemantics,
-	relatedResults = []
+	relatedResults = [],
+	evidenceTracebacks = []
 }: {
 	collectionId: string;
 	documentId: string;
 	content: DocumentContentResponse | null;
 	comparisonSemantics: DocumentComparisonSemanticsResponse | null;
 	relatedResults?: ResultListItem[];
+	evidenceTracebacks?: EvidenceTracebackResponse[];
 }): DocumentWorkbenchModel {
 	const hasBackendBlocks = Boolean(content?.blocks.length);
 	const blocks = sortedWorkbenchBlocks(content);
-	const sourceSpans = buildWorkbenchSourceSpans(documentId, blocks, !hasBackendBlocks);
+	const blockSourceSpans = buildWorkbenchSourceSpans(documentId, blocks, !hasBackendBlocks);
+	const tracebackSourceSpans = buildTracebackSourceSpans(
+		content?.document_id || documentId,
+		evidenceTracebacks,
+		new Set(blockSourceSpans.map((span) => span.id))
+	);
+	const sourceSpans = [...blockSourceSpans, ...tracebackSourceSpans];
+	const sourceLookup = buildSourceLinkLookup(sourceSpans);
 	const sourceTargetsBySpanId = Object.fromEntries(
 		sourceSpans.map((span) => [span.id, span.target])
 	);
@@ -1787,7 +1955,13 @@ export function buildDocumentWorkbenchModel({
 	);
 	const pages = buildWorkbenchPages(blocks, sourceSpans, !hasBackendBlocks);
 	const contexts = flattenWorkbenchChains(comparisonSemantics?.variant_dossiers);
-	const resultRows = buildWorkbenchResultRows(collectionId, contexts, relatedResults, sourceSpans);
+	const resultRows = buildWorkbenchResultRows(
+		collectionId,
+		contexts,
+		relatedResults,
+		blockSourceSpans,
+		sourceLookup
+	);
 	const summaryCards = buildWorkbenchSummaryCards(contexts, resultRows, sourceSpans);
 	const methodRows = buildWorkbenchMethodRows(contexts, resultRows, sourceSpans);
 	const keyResults = buildWorkbenchKeyResults(contexts, relatedResults, resultRows, sourceSpans);

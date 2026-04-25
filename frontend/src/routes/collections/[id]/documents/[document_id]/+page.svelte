@@ -4,6 +4,7 @@
 		buildDocumentWorkbenchModel,
 		fetchDocumentComparisonSemantics,
 		fetchDocumentContent,
+		type DocumentComparisonSemanticsResponse,
 		type DocumentWorkbenchModel,
 		type SourceAnchor,
 		type WorkbenchLocalGraph,
@@ -11,6 +12,7 @@
 	} from '../../../../_shared/documents';
 	import { t } from '../../../../_shared/i18n';
 	import { fetchCollectionResults } from '../../../../_shared/results';
+	import { fetchEvidenceTraceback } from '../../../../_shared/traceback';
 	import LocalGraphPanel from './_components/LocalGraphPanel.svelte';
 	import PaperReader from './_components/PaperReader.svelte';
 	import StructuredExtractionPanel from './_components/StructuredExtractionPanel.svelte';
@@ -29,7 +31,8 @@
 	$: routeDocumentId = $page.params.document_id ?? '';
 	$: requestedResultId = $page.url.searchParams.get('result_id')?.trim() ?? '';
 	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
-	$: loadKey = `${collectionId}:${routeDocumentId}:${requestedResultId}:${requestedEvidenceId}`;
+	$: requestedAnchorId = $page.url.searchParams.get('anchor_id')?.trim() ?? '';
+	$: loadKey = `${collectionId}:${routeDocumentId}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}`;
 	$: selectedGraph = graphForSelection(model, selectedItemId);
 	$: selectedSourceAnchor = sourceAnchorForSelection(model, selectedSourceSpanId);
 	$: if (selectedGraph && !selectedGraph.nodes.some((node) => node.id === selectedGraphNodeId)) {
@@ -62,13 +65,15 @@
 		const relatedResults = resultsResult.status === 'fulfilled' ? resultsResult.value.items : [];
 		const comparisonSemantics =
 			semanticsResult.status === 'fulfilled' ? semanticsResult.value : null;
+		const evidenceTracebacks = await loadEvidenceTracebacks(comparisonSemantics);
 
 		const nextModel = buildDocumentWorkbenchModel({
 			collectionId,
 			documentId: routeDocumentId,
 			content,
 			comparisonSemantics,
-			relatedResults
+			relatedResults,
+			evidenceTracebacks
 		});
 		model = nextModel;
 
@@ -77,7 +82,50 @@
 			nextModel.selectable_items.find((item) => item.id === requestedEvidenceId)?.id ||
 			nextModel.default_item_id;
 		selectItem(requestedItemId);
+		selectRequestedAnchor(nextModel);
 		loading = false;
+	}
+
+	function evidenceIdsForTraceback(
+		comparisonSemantics: DocumentComparisonSemanticsResponse | null
+	) {
+		const ids = new Set<string>();
+		if (requestedEvidenceId) ids.add(requestedEvidenceId);
+
+		for (const dossier of comparisonSemantics?.variant_dossiers ?? []) {
+			for (const series of dossier.series) {
+				for (const chain of series.chains) {
+					for (const evidenceId of chain.evidence.evidence_ids) {
+						if (evidenceId) ids.add(evidenceId);
+					}
+				}
+			}
+		}
+
+		return Array.from(ids);
+	}
+
+	async function loadEvidenceTracebacks(
+		comparisonSemantics: DocumentComparisonSemanticsResponse | null
+	) {
+		const evidenceIds = evidenceIdsForTraceback(comparisonSemantics);
+		if (!evidenceIds.length) return [];
+
+		const tracebacks = await Promise.allSettled(
+			evidenceIds.map((evidenceId) => fetchEvidenceTraceback(collectionId, evidenceId))
+		);
+
+		return tracebacks
+			.filter((result) => result.status === 'fulfilled')
+			.map((result) => result.value);
+	}
+
+	function selectRequestedAnchor(nextModel: DocumentWorkbenchModel) {
+		if (!requestedAnchorId) return;
+		const sourceSpanId = `source-anchor-${requestedAnchorId}`;
+		if (!nextModel.source_anchors_by_span_id[sourceSpanId]) return;
+		selectedSourceSpanId = sourceSpanId;
+		sourceJumpToken += 1;
 	}
 
 	function graphForSelection(

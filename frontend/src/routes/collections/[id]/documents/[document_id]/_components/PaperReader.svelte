@@ -45,6 +45,8 @@
 	let pdfDocument: PDFDocumentProxy | null = null;
 	let loadingTask: PdfLoadingTask | null = null;
 	let pdfPageStates: PdfPageState[] = [];
+	let pendingSourceJump: SourceAnchor | null = null;
+	let appliedSourceJumpKey = '';
 	let loadGeneration = 0;
 	let renderGeneration = 0;
 
@@ -57,6 +59,14 @@
 	);
 	$: totalPages = pdfPageStates.length || pages.length || 1;
 	$: thumbnailPageNumbers = pageNumbersForReader(totalPages);
+	$: sourceJumpKey = activeSourceAnchor
+		? `${sourceJumpToken}:${activeSourceAnchor.pageIndex}:${activeSourceAnchor.precision ?? ''}`
+		: '';
+	$: pendingSourceJumpPage = pendingSourceJump ? pendingSourceJump.pageIndex + 1 : null;
+	$: pendingSourceJumpReady = Boolean(
+		pendingSourceJumpPage !== null &&
+		pdfPageStates.some((page) => page.pageNumber === pendingSourceJumpPage)
+	);
 	$: activePendingAnchor = Boolean(
 		activeSourceAnchor &&
 		activeSourceAnchor.pageIndex >= 0 &&
@@ -69,8 +79,12 @@
 		renderedZoom = zoom;
 		void renderAllPages();
 	}
-	$: if (mounted && activeSourceAnchor && sourceJumpToken >= 0) {
+	$: if (mounted && activeSourceAnchor && sourceJumpKey && sourceJumpKey !== appliedSourceJumpKey) {
+		appliedSourceJumpKey = sourceJumpKey;
 		void jumpToSource(activeSourceAnchor);
+	}
+	$: if (mounted && pendingSourceJump && pendingSourceJumpReady) {
+		void flushPendingSourceJump();
 	}
 	$: if (mounted && !hasPdfSource) {
 		clearPdfState();
@@ -114,6 +128,7 @@
 		pdfDocument = null;
 		if (document) void document.destroy();
 		canvasNodes.clear();
+		pendingSourceJump = null;
 	}
 
 	async function loadPdf() {
@@ -271,8 +286,11 @@
 		currentPage = pageNumber;
 		await tick();
 		const target = document.getElementById(`pdf-page-${pageNumber}`);
-		if (target && typeof target.scrollIntoView === 'function') {
-			target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		if (target) {
+			pendingSourceJump = null;
+			scrollPageIntoView(target, 'center');
+		} else {
+			pendingSourceJump = anchor;
 		}
 	}
 
@@ -281,9 +299,25 @@
 		if (!browser) return;
 		await tick();
 		const target = document.getElementById(`pdf-page-${pageNumber}`);
-		if (target && typeof target.scrollIntoView === 'function') {
-			target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		if (target) {
+			scrollPageIntoView(target, 'start');
 		}
+	}
+
+	async function flushPendingSourceJump() {
+		const anchor = pendingSourceJump;
+		if (!anchor) return;
+		await jumpToSource(anchor);
+	}
+
+	function scrollPageIntoView(target: HTMLElement, block: 'start' | 'center') {
+		if (!pdfScrollContainer) return;
+		const centerOffset =
+			block === 'center'
+				? Math.max(0, (pdfScrollContainer.clientHeight - target.clientHeight) / 2)
+				: 0;
+		const top = Math.max(0, target.offsetTop - centerOffset);
+		pdfScrollContainer.scrollTo({ top, behavior: 'smooth' });
 	}
 
 	function changeZoom(delta: number) {
@@ -405,7 +439,7 @@
 		</header>
 
 		<div class="pdf-toolbar" aria-label={$t('workbench.readerToolbarLabel')}>
-			<div class="page-control">{currentPage}</div>
+			<div class="page-control" data-testid="pdf-current-page">{currentPage}</div>
 			<span class="toolbar-muted">/ {totalPages}</span>
 			<button
 				type="button"

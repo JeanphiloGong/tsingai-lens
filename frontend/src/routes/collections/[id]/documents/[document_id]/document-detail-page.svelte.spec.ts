@@ -250,6 +250,28 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					]
 				});
 			}
+			if (url.pathname === '/api/v1/collections/col_123/evidence/ev_1/traceback') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					evidence_id: 'ev_1',
+					traceback_status: 'ready',
+					anchors: [
+						{
+							anchor_id: 'anc_1',
+							document_id: 'doc_1',
+							locator_type: 'bbox',
+							locator_confidence: 'high',
+							page: 3,
+							quote: 'Conductivity improved to 12 mS/cm under EIS.',
+							section_id: 'Results',
+							block_id: 'results',
+							char_range: { start: 98, end: 143 },
+							bbox: { x0: 18, y0: 62, x1: 76, y1: 66.5 },
+							deep_link: '/collections/col_123/documents/doc_1?evidence_id=ev_1&anchor_id=anc_1'
+						}
+					]
+				});
+			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
 		});
@@ -279,7 +301,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.first()
 			.element()
 			.getAttribute('style');
-		expect(resultHighlightStyle).toContain('left: 22%');
+		expect(resultHighlightStyle).toContain('left: 18%');
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
 
 		await browserPage.getByRole('tab', { name: 'Evidence' }).click();
 		await expect

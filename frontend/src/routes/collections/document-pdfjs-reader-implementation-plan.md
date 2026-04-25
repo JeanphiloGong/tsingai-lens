@@ -126,6 +126,21 @@ trigger a paragraph-text fallback. The graph can still expose source jumps, but
 the target should be a `SourceAnchor`, not a block id or parsed paragraph DOM
 id.
 
+Result and evidence rows should resolve source anchors in this order:
+
+1. `direct_anchor_ids` from the result chain
+2. `contextual_anchor_ids` from the result chain
+3. the first traceback anchor returned for the evidence ID
+4. block/page fallback only when no traceback anchor is available
+
+The document route may fetch
+`/api/v1/collections/{collection_id}/evidence/{evidence_id}/traceback` for the
+evidence IDs already referenced by the document comparison semantics response.
+When a traceback anchor contains a usable `page`, the reader must at least jump
+to that PDF page. If the anchor also contains percentage-like `bbox` values,
+the highlight layer may draw a region; otherwise the reader shows the pending
+region badge and keeps the PDF page as the source of truth.
+
 ## Fixture Anchors
 
 The first PDF.js slice can use fixture anchors when backend coordinate data is

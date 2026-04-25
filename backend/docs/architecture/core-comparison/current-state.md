@@ -107,4 +107,4 @@ reading path.
 - [`decision.md`](decision.md)
 - [`../../specs/api.md`](../../specs/api.md)
 - [`../overview.md`](../overview.md)
-- [`../../plans/backend-wide/current-api-surface-migration-checklist.md`](../../plans/backend-wide/current-api-surface-migration-checklist.md)
+- [`../../plans/backend-wide/api-surface-migration/current-state.md`](../../plans/backend-wide/api-surface-migration/current-state.md)

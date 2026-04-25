@@ -12,7 +12,7 @@ semantic-extraction concern across unrelated `application/core/*` files.
 
 This plan sits under the existing Core structured-extraction cutover wave:
 
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
+- [`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
 
 It is intentionally narrower than that parent wave. The parent wave decides
 that Core semantic extraction should hard-cut to schema-bound LLM parsing.
@@ -85,8 +85,8 @@ This plan covers:
   semantic-build path
 - preserving the current `Source -> Core -> derived` ownership direction while
   making the Source-to-Core handoff seam more legible
-- keeping the OpenAI-compatible transport implementation inside the owning Core
-  extractor path unless a later wave explicitly re-separates that seam
+- keeping the OpenAI transport implementation inside the owning Core extractor
+  path unless a later wave explicitly re-separates that seam
 
 This plan does not cover:
 
@@ -189,9 +189,8 @@ than co-owning extraction internals:
 
 ### Infra
 
-`infra/llm/` should continue to own only the external-transport seam.
-
-It should not absorb:
+If a separate transport seam is reintroduced later, it should stay narrow and
+must not absorb:
 
 - Core prompt text
 - Core extraction schema definitions
@@ -255,7 +254,7 @@ It should not absorb:
 
 ## Related Docs
 
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
+- [`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
 - [`../../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`../../architecture/overview.md`](../../architecture/overview.md)
 - [`../../../application/core/README.md`](../../../application/core/README.md)

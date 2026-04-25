@@ -7,10 +7,14 @@ Use [../README.md](../README.md) for the backend formal-doc landing page.
 Use this subtree only when you are already inside backend change work and need
 wave sequencing, execution lineage, or a business-layer-local plan family.
 
+Shared frontend/backend authority does not live here. Keep shared product
+meaning, cross-module contract freeze work, and repository-level delivery
+order in root `docs/`.
+
 ## Plan Families
 
 - [`backend-wide/README.md`](backend-wide/README.md)
-  Cross-layer plans, current-state checkpoints, and backend-wide contract or
+  Cross-layer topic families, current-state checkpoints, and backend-wide
   rollout waves
 - [`source/README.md`](source/README.md)
   Collection construction, Source runtime, parser, and Source-retirement waves
@@ -23,17 +27,20 @@ wave sequencing, execution lineage, or a business-layer-local plan family.
 
 ## Start Here
 
-- [`backend-wide/current-api-surface-migration-checklist.md`](backend-wide/current-api-surface-migration-checklist.md)
+- [`backend-wide/api-surface-migration/current-state.md`](backend-wide/api-surface-migration/current-state.md)
   Canonical backend current-state entry point
-- [`backend-wide/goal-source-core-business-layer-alignment-plan.md`](backend-wide/goal-source-core-business-layer-alignment-plan.md)
-  Current package-alignment authority for the `goal / source / core / derived`
-  business-layer split
+- [`backend-wide/goal-source-core-layering/README.md`](backend-wide/goal-source-core-layering/README.md)
+  Topic-family entry for the `goal / source / core / derived` layering wave
+- [`backend-wide/evidence-chain-product-surface/README.md`](backend-wide/evidence-chain-product-surface/README.md)
+  Backend-owned implementation family for the evidence-chain product surface
 
 ## Reading Paths By Intent
 
 - Backend-wide migration state:
-  start at [`backend-wide/current-api-surface-migration-checklist.md`](backend-wide/current-api-surface-migration-checklist.md),
+  start at [`backend-wide/api-surface-migration/current-state.md`](backend-wide/api-surface-migration/current-state.md),
   then move to [`backend-wide/README.md`](backend-wide/README.md)
+- Backend-wide evidence-chain delivery:
+  start at [`backend-wide/evidence-chain-product-surface/README.md`](backend-wide/evidence-chain-product-surface/README.md)
 - Source runtime and parser work:
   start at [`source/README.md`](source/README.md)
 - Core quality, traceback, and domain semantics:
@@ -48,6 +55,9 @@ wave sequencing, execution lineage, or a business-layer-local plan family.
 - Put a plan in the lowest backend-local family that fully owns the wave.
 - Use `backend-wide/` only when the wave spans multiple business layers or
   freezes backend-wide contracts.
+- Inside `backend-wide/`, prefer one topic directory per subject and let child
+  filenames express role, such as `proposal.md`, `current-state.md`, or
+  `implementation-plan.md`.
 - Use `historical/` only for pages that are intentionally retained lineage and
   are no longer the current execution entry point.
 - Keep stable contracts in `../specs/`, stable architecture in

@@ -62,7 +62,9 @@ That surface should let a user inspect:
 - weak-evidence and conflict flags
 - direct traceback from a surfaced result to source evidence and conditions
 
-Other surfaces may exist in v1, but they are not the acceptance center.
+Single-paper fact inspection and evidence review may exist as supporting
+surfaces, but they support the comparison workspace rather than replacing it
+as the acceptance center.
 
 ## Core V1 Outputs
 
@@ -70,9 +72,10 @@ The outputs that define v1 value are:
 
 - document profiling that distinguishes `experimental`, `review`, `mixed`, and
   `uncertain` papers
-- comparison-ready rows as the primary collection-facing view for material,
-  process, structure, property, and baseline inspection
-- evidence-backed units such as claim, evidence, and condition/context
+- paper-facts-backed comparison-ready rows as the primary collection-facing
+  view for material, process, structure, property, and baseline inspection
+- paper-facts-backed evidence views and reviewable evidence units for claim,
+  result, and condition/context inspection
 - source traceback into original spans or equivalent evidence anchors
 - explicit warnings when a collection or paper is not suitable for protocol
   extraction or direct comparison
@@ -86,7 +89,7 @@ Lens v1 is in scope for:
 
 - evidence-grounded comparison across a collection
 - document typing and protocol suitability signals
-- traceable evidence outputs
+- traceable paper-facts-backed evidence outputs
 - comparability warnings and weak-evidence warnings
 - materials science as the first proving vertical
 - conditional protocol browsing for methods-heavy papers when the corpus
@@ -137,14 +140,17 @@ It should not redefine the whole product as a materials-only protocol system.
 
 This document is the v1 product boundary.
 
-- shared object relationships and artifact roles belong in architecture docs
-- minimum artifact contracts belong in shared specs
+- the shared object model and system boundary belong in
+  [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
+- minimum artifact contracts and artifact roles belong in
+  [Lens Core Artifact Contracts](lens-core-artifact-contracts.md)
 - implementation sequencing belongs in backend-local plans
 - long-term product identity belongs in the mission and positioning guide
 
 ## Related Docs
 
 - [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
+- [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
 - [Lens Core Artifact Contracts](lens-core-artifact-contracts.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](../decisions/rfc-evidence-first-literature-parsing.md)
 - [Lens Agent-Era Positioning and Evidence Layer Direction](../decisions/rfc-lens-agent-era-positioning.md)

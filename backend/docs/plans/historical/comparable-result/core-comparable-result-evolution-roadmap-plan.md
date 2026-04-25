@@ -32,8 +32,8 @@ Read this plan with:
 - [`core-comparable-result-phase2-policy-lifecycle-plan.md`](core-comparable-result-phase2-policy-lifecycle-plan.md)
 - [`core-comparable-result-phase3-corpus-retrieval-plan.md`](core-comparable-result-phase3-corpus-retrieval-plan.md)
 - [`../../core/minimal-core-domain-backfill-plan.md`](../../core/minimal-core-domain-backfill-plan.md)
-- [`../../core/core-llm-structured-extraction-hard-cutover-plan.md`](../../core/core-llm-structured-extraction-hard-cutover-plan.md)
-- [`../../core/core-llm-structured-extraction-id-boundary-plan.md`](../../core/core-llm-structured-extraction-id-boundary-plan.md)
+- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md)
 
 ## Purpose
 
@@ -350,6 +350,6 @@ should stay narrow:
 
 ### Companion Docs
 
-- [`../../core/core-llm-structured-extraction-hard-cutover-plan.md`](../../core/core-llm-structured-extraction-hard-cutover-plan.md)
-- [`../../core/core-llm-structured-extraction-id-boundary-plan.md`](../../core/core-llm-structured-extraction-id-boundary-plan.md)
+- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md)
 - [`../../core/minimal-core-domain-backfill-plan.md`](../../core/minimal-core-domain-backfill-plan.md)

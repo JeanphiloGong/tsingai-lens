@@ -199,7 +199,7 @@ Readiness semantics remain Core-owned:
 
 The active child execution plan for this freeze is:
 
-- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-core-source-contract-follow-up-plan.md)
+- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-source-core-layering/contract-follow-up.md)
 
 ## Current Backend Mapping
 
@@ -288,8 +288,8 @@ Controller implications:
 
 ## Related Docs
 
-- [`../plans/goal-core-source-implementation-plan.md`](../plans/backend-wide/goal-core-source-implementation-plan.md)
-- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-core-source-contract-follow-up-plan.md)
+- [`../plans/goal-core-source-implementation-plan.md`](../plans/backend-wide/goal-source-core-layering/implementation-plan.md)
+- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-source-core-layering/contract-follow-up.md)
 - [`overview.md`](overview.md)
 - [`domain-architecture.md`](domain-architecture.md)
 - [`core-comparison/README.md`](core-comparison/README.md)

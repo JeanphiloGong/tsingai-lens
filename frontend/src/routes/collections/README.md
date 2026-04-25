@@ -16,6 +16,11 @@ This node owns the collection workspace route family in the frontend.
 
 ## Local Docs
 
+- [`../../../../docs/decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md`](../../../../docs/decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md)
+  Shared cross-module roadmap and overall delivery order for the evidence-chain
+  wave
+- [`../../../../docs/decisions/rfc-comparison-result-document-product-flow.md`](../../../../docs/decisions/rfc-comparison-result-document-product-flow.md)
+  Shared product-flow decision for comparison, result, and document drilldown
 - [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
   Collection-facing interface spec for the Lens v1 workspace flow
 - [`core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md`](core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md)
@@ -38,6 +43,9 @@ This node owns the collection workspace route family in the frontend.
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)
   Follow-on collection UI restructuring proposal for state hierarchy and page
   information architecture
+- [`document-result-evidence-chain-proposal.md`](document-result-evidence-chain-proposal.md)
+  Frontend-local proposal for reading documents and results as variant dossiers,
+  result chains, and result series
 - [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md)
   Claim-to-source navigation contract for comparison/evidence to document
   traceback behavior

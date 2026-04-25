@@ -31,7 +31,7 @@ authority page, current-state page, or implementation lineage.
 - Backend plan-family landing page:
   [`plans/README.md`](plans/README.md)
 - Current backend migration and execution state:
-  [`plans/backend-wide/current-api-surface-migration-checklist.md`](plans/backend-wide/current-api-surface-migration-checklist.md)
+  [`plans/backend-wide/api-surface-migration/current-state.md`](plans/backend-wide/api-surface-migration/current-state.md)
 
 ## Backend-Wide Authority
 
@@ -57,7 +57,7 @@ Start with:
 
 - [`plans/README.md`](plans/README.md)
   Backend-local plans landing page, reading paths, and placement rules
-- [`plans/backend-wide/current-api-surface-migration-checklist.md`](plans/backend-wide/current-api-surface-migration-checklist.md)
+- [`plans/backend-wide/api-surface-migration/current-state.md`](plans/backend-wide/api-surface-migration/current-state.md)
   Canonical current-state page for backend API migration and local reading
   order
 

@@ -28,10 +28,10 @@ Document Evidence Review
 │  └─ secondary actions such as open result detail or open original source
 └─ Review view
    ├─ Left: Source Reader
-   │  ├─ full parsed source blocks by default
+   │  ├─ continuous parsed paper text by default
    │  ├─ PDF facsimile later
-   │  ├─ block navigation
-   │  ├─ active anchor highlight
+   │  ├─ unique section navigation
+   │  ├─ active quote or anchor highlight
    │  └─ source-first reading width
    ├─ Middle: Evidence Review Panel
       ├─ paper summary
@@ -57,21 +57,39 @@ visible without route switching.
 ## Source Reader
 
 The left source reader should stay the primary reading surface. It should show
-the full parsed paper blocks that are available from the document content
-route, not only the excerpt that supports the selected evidence chain.
+the full parsed paper text available from the document content route, not only
+the excerpt that supports the selected evidence chain.
+
+`blocks` are backend locator units. They should not be presented as the main
+reader model, and the UI should not create one visible card or navigation chip
+per block. A block can still provide an internal scroll target, degraded
+precision fallback, or anchor boundary, but users should experience the source
+as a coherent paper.
 
 Required first-slice behavior:
 
-- render parsed `blocks` from the document content route
-- provide block navigation for quick movement through the paper
-- highlight the active traceback quote or block when available
+- render `content_text` from the document content route as continuous source
+  text
+- derive section navigation from unique `heading_path` values or true heading
+  blocks, rather than from every paragraph block
+- highlight the active traceback range or quote when available
 - keep source-location status and anchor controls in the right evidence panel
 - preserve the user's return path to comparison or result drilldown surfaces
 
+Traceback highlight order:
+
+1. Use `char_range` when the traceback response provides it.
+2. If `char_range` is unavailable, search for the returned `quote` inside
+   `content_text`.
+3. If the quote cannot be found globally, use `block_id` as a fallback scroll
+   target and show that the location is block-level only.
+4. If no source location can be resolved, keep the document open and show an
+   explicit source-unavailable state.
+
 PDF rendering should not block the first implementation slice. The page should
-use parsed blocks first, then add a PDF mode only after the backend exposes a
-stable source-file URL and enough page or bounding-box metadata for useful
-navigation.
+use continuous parsed text first, then add a PDF mode only after the backend
+exposes a stable source-file URL and enough page or bounding-box metadata for
+useful navigation.
 
 Future PDF behavior:
 
@@ -81,6 +99,12 @@ Future PDF behavior:
 - use bounding-box highlights when page-region anchors exist
 - keep parsed text fallback available because OCR, PDF layout, and figure or
   table precision will not be uniformly reliable
+
+Review papers need additional care. When the document profile is `review`, the
+reader can still support source verification, but the frontend should avoid
+framing review-derived, weakly bound rows as clean comparable experimental
+results. Backend filtering or marking should prevent review-summary claims
+from appearing as normal comparison rows by default.
 
 ## Evidence Review Panel
 
@@ -174,7 +198,8 @@ Each row should expose:
 ## Chain Selection
 
 Clicking a result chain should select that chain and attempt to locate its
-supporting source context in the left reader.
+supporting source context in the left reader without exposing locator blocks as
+the primary UI object.
 
 Preferred selection flow:
 
@@ -185,9 +210,11 @@ Preferred selection flow:
    already loaded.
 4. Select the best anchor by `direct_anchor_ids` first, then by first returned
    anchor.
-5. Scroll the left reader to the matching source block.
-6. Highlight the quote or active block.
-7. Show an explicit source-unavailable message if no source can be resolved.
+5. Scroll the left reader to the matching character range or quote.
+6. Highlight the quote in the continuous source text.
+7. Fall back to block-level scrolling only when range and quote resolution are
+   unavailable.
+8. Show an explicit source-unavailable message if no source can be resolved.
 
 This interaction should not require opening a result detail page. Result detail
 is a deeper drilldown, not the only way to verify the source for a chain.
@@ -209,8 +236,10 @@ a drawer. It should show:
 - source anchors
 
 Each anchor should support direct jump back into the source reader. When the
-anchor has only block-level precision, the UI should still scroll to that block
-and make the degraded precision visible instead of failing silently.
+anchor has only block-level precision, the UI should still scroll near that
+source region and make the degraded precision visible instead of failing
+silently. The block ID itself should remain an implementation detail unless it
+is needed for diagnostics.
 
 ## First-Slice State Model
 
@@ -237,16 +266,21 @@ to turn document reading back into a single-purpose traceback route.
 
 ## Implementation Order
 
-1. Convert the document page to a split view with parsed source text on the
-   left and evidence review on the right.
+1. Convert the document page to a split view with continuous parsed source text
+   on the left and evidence review on the right.
 2. Move the existing variant dossier and result-series rendering into the right
    evidence review panel.
 3. Add chain selection state and a visible selected-chain style.
-4. Add `Locate source` behavior that fetches traceback from the chain's first
-   usable evidence ID and scrolls or highlights the left source reader.
-5. Keep `Open result detail` available as a secondary drilldown action.
-6. Keep PDF rendering out of the first slice unless stable source-file URLs and
+4. Replace per-block navigation with unique section navigation derived from
+   headings or heading paths.
+5. Add `Locate source` behavior that fetches traceback from the chain's first
+   usable evidence ID and highlights by `char_range`, then `quote`, then
+   block-level fallback.
+6. Keep `Open result detail` available as a secondary drilldown action.
+7. Keep PDF rendering out of the first slice unless stable source-file URLs and
    anchors already exist.
+8. Coordinate with backend follow-up work so review documents do not produce
+   normal comparison rows from review-summary claims by default.
 
 ## Acceptance Checks
 
@@ -254,14 +288,21 @@ The split-view document page is accepted when these checks pass:
 
 - desktop document reading uses a side-by-side source reader and evidence
   review panel
+- the source reader shows continuous paper text instead of one visible card per
+  backend block
+- section navigation does not repeat the same heading for every paragraph under
+  that heading
 - right panel shows `variant dossier -> result series -> result chain`
 - selecting a chain visibly marks it as selected
 - selecting a chain attempts to locate source context without leaving the page
-- a resolvable anchor scrolls or highlights the left source reader
+- a resolvable anchor highlights the matching range or quote in the left source
+  reader
 - an unresolved anchor shows an explicit unavailable state
 - each chain still links to result detail for deeper inspection
 - mobile layout degrades deliberately instead of hiding either source or
   evidence context
+- review documents do not appear to offer clean comparable experimental rows
+  when their results are review-summary or weakly material-bound claims
 
 ## Related Docs
 

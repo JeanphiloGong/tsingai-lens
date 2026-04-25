@@ -29,6 +29,26 @@
 		chain: DocumentResultChain;
 	};
 
+	type SourceTextSegment = {
+		key: string;
+		blockId: string | null;
+		start: number;
+		end: number;
+		text: string;
+	};
+
+	type SourceTextHighlight = {
+		start: number;
+		end: number;
+	};
+
+	type SourceSectionNavItem = {
+		blockId: string;
+		label: string;
+	};
+
+	type Translate = (key: string, vars?: Record<string, string | number>) => string;
+
 	let content: DocumentContentResponse | null = null;
 	let traceback: EvidenceTracebackResponse | null = null;
 	let loading = false;
@@ -69,6 +89,10 @@
 	$: selectedChain = selectedChainContext?.chain ?? null;
 	$: localGraphContext = selectedChainContext ?? firstChainContext(variantDossiers);
 	$: localGraphChain = localGraphContext?.chain ?? null;
+	$: sourceText = sourceTextForContent(content);
+	$: sourceTextSegments = sourceSegmentsForContent(content, sourceText);
+	$: sourceSectionNavItems = sectionNavItemsForContent(content?.blocks ?? [], $t);
+	$: selectedSourceHighlight = sourceHighlightForAnchor(selectedAnchor, sourceText);
 	$: if (collectionId && routeDocumentId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		void loadDocumentViewer();
@@ -178,9 +202,8 @@
 			evidenceChainsLoading = false;
 		}
 
-		const initialBlockId = sourceBlockIdForAnchor(initialAnchor);
-		if (initialBlockId) {
-			await scrollToBlock(initialBlockId);
+		if (initialAnchor) {
+			await scrollToSourceAnchor(initialAnchor);
 		}
 	}
 
@@ -214,17 +237,192 @@
 		return anchor?.block_id || anchor?.section_id || '';
 	}
 
-	function highlightFor(block: DocumentContentBlock) {
-		if (!selectedAnchor || sourceBlockIdForAnchor(selectedAnchor) !== block.block_id) return null;
-		return highlightParts(block.text, selectedAnchor.quote);
+	function sourceTextForContent(response: DocumentContentResponse | null) {
+		const text = response?.content_text.trim();
+		if (text) return text;
+		return [...(response?.blocks ?? [])]
+			.sort((left, right) => left.order - right.order)
+			.map((block) => block.text.trim())
+			.filter((blockText) => blockText.length > 0)
+			.join('\n\n');
 	}
 
-	function blockTitle(block: DocumentContentBlock) {
-		return block.heading_path || block.block_type || block.block_id;
+	function sortedBlocks(blocks: DocumentContentBlock[]) {
+		return [...blocks].sort((left, right) => left.order - right.order);
+	}
+
+	function hasValidSourceRange(block: DocumentContentBlock, sourceTextLength: number) {
+		return (
+			block.start_offset !== null &&
+			block.end_offset !== null &&
+			block.start_offset >= 0 &&
+			block.end_offset > block.start_offset &&
+			block.end_offset <= sourceTextLength
+		);
+	}
+
+	function sourceSegmentsForContent(
+		response: DocumentContentResponse | null,
+		text: string
+	): SourceTextSegment[] {
+		if (!response || !text) return [];
+
+		const rangedBlocks = sortedBlocks(response.blocks).filter((block) =>
+			hasValidSourceRange(block, text.length)
+		);
+
+		if (rangedBlocks.length) {
+			const segments: SourceTextSegment[] = [];
+			let cursor = 0;
+
+			for (const block of rangedBlocks) {
+				const rangeStart = Math.max(block.start_offset ?? 0, cursor);
+				const rangeEnd = block.end_offset ?? rangeStart;
+				if (rangeEnd <= cursor) continue;
+
+				if (cursor < rangeStart) {
+					segments.push({
+						key: `gap-${cursor}-${rangeStart}`,
+						blockId: null,
+						start: cursor,
+						end: rangeStart,
+						text: text.slice(cursor, rangeStart)
+					});
+				}
+
+				segments.push({
+					key: `block-${block.block_id}`,
+					blockId: block.block_id,
+					start: rangeStart,
+					end: rangeEnd,
+					text: text.slice(rangeStart, rangeEnd)
+				});
+				cursor = rangeEnd;
+			}
+
+			if (cursor < text.length) {
+				segments.push({
+					key: `gap-${cursor}-${text.length}`,
+					blockId: null,
+					start: cursor,
+					end: text.length,
+					text: text.slice(cursor)
+				});
+			}
+
+			return segments;
+		}
+
+		const blockSegments = sortedBlocks(response.blocks)
+			.map((block) => block.text.trim())
+			.filter((blockText) => blockText.length > 0);
+
+		if (!blockSegments.length) {
+			return [{ key: 'source-text', blockId: null, start: 0, end: text.length, text }];
+		}
+
+		const segments: SourceTextSegment[] = [];
+		let cursor = 0;
+		for (const block of sortedBlocks(response.blocks)) {
+			const blockText = block.text.trim();
+			if (!blockText) continue;
+
+			if (segments.length) {
+				segments.push({
+					key: `gap-${cursor}-${cursor + 2}`,
+					blockId: null,
+					start: cursor,
+					end: cursor + 2,
+					text: '\n\n'
+				});
+				cursor += 2;
+			}
+
+			segments.push({
+				key: `block-${block.block_id}`,
+				blockId: block.block_id,
+				start: cursor,
+				end: cursor + blockText.length,
+				text: blockText
+			});
+			cursor += blockText.length;
+		}
+
+		return segments.length
+			? segments
+			: [{ key: 'source-text', blockId: null, start: 0, end: text.length, text }];
+	}
+
+	function sectionLabel(block: DocumentContentBlock, translate: Translate) {
+		return (
+			block.heading_path?.trim() ||
+			block.block_type?.trim() ||
+			translate('traceback.sectionFallbackLabel', { index: block.order || 1 })
+		);
+	}
+
+	function sectionNavItemsForContent(
+		blocks: DocumentContentBlock[],
+		translate: Translate
+	): SourceSectionNavItem[] {
+		const seen = new Set<string>();
+		const items: SourceSectionNavItem[] = [];
+
+		for (const block of sortedBlocks(blocks)) {
+			const label = sectionLabel(block, translate);
+			const normalizedLabel = label.toLowerCase().replace(/\s+/g, ' ').trim();
+			if (!normalizedLabel || seen.has(normalizedLabel)) continue;
+			seen.add(normalizedLabel);
+			items.push({ blockId: block.block_id, label });
+		}
+
+		return items;
+	}
+
+	function sourceHighlightForAnchor(
+		anchor: TracebackAnchor | null,
+		text: string
+	): SourceTextHighlight | null {
+		if (!anchor || !text) return null;
+
+		const range = anchor.char_range;
+		if (range && range.start >= 0 && range.end > range.start && range.end <= text.length) {
+			return {
+				start: range.start,
+				end: range.end
+			};
+		}
+
+		const quoteParts = highlightParts(text, anchor.quote);
+		if (!quoteParts) return null;
+
+		return {
+			start: quoteParts.before.length,
+			end: quoteParts.before.length + quoteParts.match.length
+		};
+	}
+
+	function segmentHighlightParts(
+		segment: SourceTextSegment,
+		highlight: SourceTextHighlight | null
+	) {
+		if (!highlight) return null;
+		const start = Math.max(segment.start, highlight.start);
+		const end = Math.min(segment.end, highlight.end);
+		if (start >= end) return null;
+
+		const localStart = start - segment.start;
+		const localEnd = end - segment.start;
+
+		return {
+			before: segment.text.slice(0, localStart),
+			match: segment.text.slice(localStart, localEnd),
+			after: segment.text.slice(localEnd)
+		};
 	}
 
 	async function scrollToBlock(blockId: string) {
-		if (!browser) return;
+		if (!browser || !blockId) return;
 		await tick();
 		const target = document.getElementById(`block-${blockId}`);
 		if (target && typeof target.scrollIntoView === 'function') {
@@ -232,14 +430,36 @@
 		}
 	}
 
+	async function scrollToSourceAnchor(anchor: TracebackAnchor | null) {
+		if (!browser || !anchor) return;
+		await tick();
+
+		const highlightTarget = document.querySelector('.source-highlight');
+		if (
+			highlightTarget instanceof HTMLElement &&
+			typeof highlightTarget.scrollIntoView === 'function'
+		) {
+			highlightTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			return;
+		}
+
+		const blockId = sourceBlockIdForAnchor(anchor);
+		if (blockId) {
+			await scrollToBlock(blockId);
+			return;
+		}
+
+		const reader = document.getElementById('source-document-text');
+		if (reader && typeof reader.scrollIntoView === 'function') {
+			reader.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
+	}
+
 	async function selectAnchor(anchor: TracebackAnchor) {
 		selectedAnchorId = anchor.anchor_id;
 		sourceLocationStatus = 'located';
 		sourceLocationMessage = '';
-		const blockId = sourceBlockIdForAnchor(anchor);
-		if (blockId) {
-			await scrollToBlock(blockId);
-		}
+		await scrollToSourceAnchor(anchor);
 	}
 
 	function documentTitle() {
@@ -352,7 +572,7 @@
 
 			selectedAnchorId = anchor.anchor_id;
 			sourceLocationStatus = 'located';
-			await scrollToBlock(sourceBlockIdForAnchor(anchor));
+			await scrollToSourceAnchor(anchor);
 		} catch (err) {
 			sourceLocationStatus = 'error';
 			sourceLocationMessage = errorMessage(err);
@@ -528,59 +748,52 @@
 					</dl>
 				</article>
 
-				{#if content?.blocks.length}
-					<section class="result-card detail-section">
-						<div class="detail-section__title">{$t('traceback.sectionsTitle')}</div>
-						<div class="section-nav">
-							{#each content.blocks as block}
-								<button
-									class="btn btn--ghost btn--small"
-									type="button"
-									on:click={() => void scrollToBlock(block.block_id)}
-								>
-									{blockTitle(block)}
-								</button>
+				{#if sourceTextSegments.length}
+					{#if sourceSectionNavItems.length}
+						<section class="result-card detail-section">
+							<div class="detail-section__title">{$t('traceback.sectionsTitle')}</div>
+							<div class="section-nav">
+								{#each sourceSectionNavItems as item}
+									<button
+										class="btn btn--ghost btn--small"
+										type="button"
+										on:click={() => void scrollToBlock(item.blockId)}
+									>
+										{item.label}
+									</button>
+								{/each}
+							</div>
+						</section>
+					{/if}
+
+					<article class="result-card document-source-reader" id="source-document-text">
+						<div class="document-source-text">
+							{#each sourceTextSegments as segment}
+								{#if segment.blockId}
+									<span
+										class:source-block-anchor--active={sourceBlockIdForAnchor(selectedAnchor) ===
+											segment.blockId}
+										class="source-block-anchor"
+										id={`block-${segment.blockId}`}
+										aria-hidden="true"
+									></span>
+								{/if}
+								{@const parts = segmentHighlightParts(segment, selectedSourceHighlight)}
+								{#if parts}
+									{parts.before}<mark class="source-highlight">{parts.match}</mark>{parts.after}
+								{:else}
+									{segment.text}
+								{/if}
 							{/each}
 						</div>
-					</section>
 
-					<section class="source-section-stack">
-						{#each content.blocks as block}
-							<article
-								class:document-section--active={sourceBlockIdForAnchor(selectedAnchor) ===
-									block.block_id}
-								class="result-card document-section"
-								id={`block-${block.block_id}`}
-							>
-								<div class="table-main">
-									<div class="table-title">{blockTitle(block)}</div>
-									<div class="table-sub">
-										{$t('traceback.blockLabel', { block: block.block_id })}
-									</div>
-								</div>
-
-								{#if highlightFor(block)}
-									{@const parts = highlightFor(block)}
-									{#if parts}
-										<p class="document-text">
-											{parts.before}<mark>{parts.match}</mark>{parts.after}
-										</p>
-									{:else}
-										<p class="document-text">{block.text}</p>
-									{/if}
-								{:else}
-									<p class="document-text">{block.text}</p>
-								{/if}
-
-								{#if selectedAnchor && sourceBlockIdForAnchor(selectedAnchor) === block.block_id && selectedAnchor.quote && !highlightFor(block)}
-									<section class="detail-section">
-										<div class="detail-section__title">{$t('traceback.quoteTitle')}</div>
-										<p class="result-text">{selectedAnchor.quote}</p>
-									</section>
-								{/if}
-							</article>
-						{/each}
-					</section>
+						{#if selectedAnchor?.quote && !selectedSourceHighlight}
+							<section class="source-location-note">
+								<div class="detail-section__title">{$t('traceback.quoteTitle')}</div>
+								<p class="result-text">{selectedAnchor.quote}</p>
+							</section>
+						{/if}
+					</article>
 				{:else if !contentError}
 					<article class="result-card">
 						<p class="note">{$t('traceback.empty')}</p>
@@ -1003,8 +1216,7 @@
 		top: 1rem;
 	}
 
-	.traceback-anchor-list,
-	.source-section-stack {
+	.traceback-anchor-list {
 		display: grid;
 		gap: 12px;
 	}
@@ -1015,17 +1227,41 @@
 		gap: 0.5rem;
 	}
 
-	.document-section {
+	.document-source-reader {
+		display: grid;
+		gap: 1rem;
 		scroll-margin-top: 5rem;
 	}
 
-	.document-section--active {
-		border-color: var(--accent, #2f5bd2);
+	.document-source-text {
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		line-height: 1.72;
 	}
 
-	.document-text {
-		white-space: pre-wrap;
-		line-height: 1.7;
+	.source-block-anchor {
+		display: inline-block;
+		width: 0;
+		height: 0;
+		scroll-margin-top: 5rem;
+	}
+
+	.source-block-anchor--active {
+		outline: 0;
+	}
+
+	.source-highlight {
+		padding: 0.04em 0.08em;
+		border-radius: 4px;
+		background: color-mix(in srgb, var(--accent, #2f5bd2) 22%, #fff4a3);
+		color: inherit;
+	}
+
+	.source-location-note {
+		display: grid;
+		gap: 0.5rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--color-line);
 	}
 
 	.document-chain-card {

@@ -69,7 +69,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					document_id: 'doc_1',
 					title: 'Paper A',
 					source_filename: 'paper-a.pdf',
-					content_text: 'content',
+					content_text: 'Conductivity improved to 12 mS/cm.',
 					blocks: [
 						{
 							block_id: 'results',
@@ -79,7 +79,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 1,
 							text: 'Conductivity improved to 12 mS/cm.',
 							start_offset: 0,
-							end_offset: 33,
+							end_offset: 34,
 							text_unit_ids: []
 						}
 					],
@@ -129,7 +129,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							block_id: 'results',
 							char_range: {
 								start: 0,
-								end: 33
+								end: 34
 							},
 							bbox: null,
 							deep_link: null
@@ -236,9 +236,10 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Local evidence graph' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Conductivity improved to 12 mS/cm.'))
+			.element(browserPage.getByText(/Conductivity improved to 12 mS\/cm\./))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Block results')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Results' })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
 
 		const sectionHeading = browserPage.getByRole('heading', { name: 'Results from this document' });
 		await expect.element(sectionHeading).toBeInTheDocument();

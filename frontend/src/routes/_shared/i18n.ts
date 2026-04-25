@@ -33,21 +33,41 @@ const translations: Record<Language, Translations> = {
 		},
 		home: {
 			eyebrow: 'Workspace',
-			title: 'Collections',
-			lead: 'Create paper collections, process them, and move into comparison, evidence, and document views from one workspace model.',
+			title: 'Lens Workbench',
+			lead: 'Manage paper collections, finish parsing, extract evidence, and compare research findings.',
 			primaryAction: 'Create collection',
+			secondaryAction: 'Upload documents',
+			heroActionsLabel: 'Home actions',
+			recentTitle: 'Recent collections',
+			recentSubtitle: 'Continue your literature comparison workflow.',
+			searchLabel: 'Search collections',
+			searchPlaceholder: 'Search collection name or keyword...',
+			filterLabel: 'Filter status',
+			filter: {
+				all: 'All status',
+				complete: 'Complete',
+				processing: 'Processing',
+				attention: 'Attention'
+			},
 			emptyTitle: 'No collections yet',
 			emptyDesc: 'Create a collection to upload papers and start the Lens workspace flow.',
 			emptyCta: 'Create your first collection',
+			noResultsTitle: 'No matching collections',
+			noResultsDesc: 'Adjust the search or status filter to see more collections.',
 			loading: 'Loading collections...',
 			tableName: 'Collection',
 			tableStatus: 'Status',
 			tableDocs: 'Docs',
 			tableUpdated: 'Updated',
+			tableNext: 'Next step',
 			tableActions: 'Actions',
 			statusUnknown: 'Unknown',
-			statusReady: 'Ready',
-			statusEmpty: 'Empty',
+			statusDisplay: {
+				complete: 'Complete',
+				processing: 'Processing',
+				attention: 'Needs attention',
+				pending: 'Pending'
+			},
 			status: {
 				idle: 'Idle',
 				ready: 'Ready',
@@ -61,9 +81,13 @@ const translations: Record<Language, Translations> = {
 			},
 			metricsPlaceholder: 'Pending API',
 			updatedPlaceholder: '—',
+			nextCompare: 'Enter comparison',
+			nextProgress: 'View progress',
+			nextWorkspace: 'Open workspace',
+			actionEnter: 'Enter',
+			moreActions: 'More actions for {name}',
 			actionExport: 'Export',
 			actionIndex: 'Process',
-			actionTasks: 'Workspace',
 			actionDelete: 'Delete',
 			exporting: 'Preparing export...',
 			exported: 'Export ready',
@@ -74,9 +98,27 @@ const translations: Record<Language, Translations> = {
 			deleted: 'Deleted collection: {name}',
 			deleteConfirm:
 				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.',
-			openRowLabel: 'Open collection {name}',
-			noteStats: '',
-			noteUpdated: ''
+			futureTitle: 'Future workspace',
+			futureSubtitle: 'Reserved entrances for later capability expansion.',
+			comingSoon: 'Coming soon',
+			future: {
+				researchFactDb: {
+					title: 'Research fact database',
+					desc: 'Structure and reuse extracted research facts as long-lived knowledge assets.'
+				},
+				benchmark: {
+					title: 'Benchmark construction',
+					desc: 'Build task sets for cross-dimensional extraction and evaluation.'
+				},
+				experimentPlan: {
+					title: 'Experimental plan',
+					desc: 'Design experiment and data collection workflows, then track execution and results.'
+				},
+				closedLoop: {
+					title: 'Closed-loop research',
+					desc: 'Move from question discovery to validation iteration in a research loop.'
+				}
+			}
 		},
 		create: {
 			title: 'Create collection',
@@ -1166,21 +1208,41 @@ const translations: Record<Language, Translations> = {
 		},
 		home: {
 			eyebrow: '工作区',
-			title: '集合',
-			lead: '以集合为工作台，完成上传和处理，再进入比较、证据和文档等核心视图。',
+			title: 'Lens 工作台',
+			lead: '管理文献集合，完成解析、证据提取与比较分析。',
 			primaryAction: '创建集合',
+			secondaryAction: '上传文档',
+			heroActionsLabel: '首页操作',
+			recentTitle: '最近集合',
+			recentSubtitle: '继续你的文献比较工作流。',
+			searchLabel: '搜索集合',
+			searchPlaceholder: '搜索集合名称或关键词...',
+			filterLabel: '筛选状态',
+			filter: {
+				all: '全部状态',
+				complete: '已完成',
+				processing: '处理中',
+				attention: '需关注'
+			},
 			emptyTitle: '暂无集合',
 			emptyDesc: '创建集合以上传论文，并启动 Lens 的工作区流程。',
 			emptyCta: '创建第一个集合',
+			noResultsTitle: '没有匹配的集合',
+			noResultsDesc: '调整搜索词或状态筛选后再查看。',
 			loading: '正在加载集合...',
 			tableName: '集合名称',
 			tableStatus: '状态',
 			tableDocs: '文档数',
 			tableUpdated: '最近更新',
+			tableNext: '下一步',
 			tableActions: '操作',
 			statusUnknown: '未知',
-			statusReady: '可用',
-			statusEmpty: '空',
+			statusDisplay: {
+				complete: '已完成',
+				processing: '处理中',
+				attention: '需要关注',
+				pending: '待处理'
+			},
 			status: {
 				idle: '待处理',
 				ready: '可用',
@@ -1194,9 +1256,13 @@ const translations: Record<Language, Translations> = {
 			},
 			metricsPlaceholder: '等待接口',
 			updatedPlaceholder: '—',
+			nextCompare: '进入比较',
+			nextProgress: '查看进度',
+			nextWorkspace: '进入工作区',
+			actionEnter: '进入',
+			moreActions: '{name} 的更多操作',
 			actionExport: '导出',
 			actionIndex: '处理',
-			actionTasks: '工作区',
 			actionDelete: '删除',
 			exporting: '准备导出...',
 			exported: '已完成导出',
@@ -1206,9 +1272,27 @@ const translations: Record<Language, Translations> = {
 			deleting: '正在删除集合...',
 			deleted: '已删除集合：{name}',
 			deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。',
-			openRowLabel: '打开集合 {name}',
-			noteStats: '',
-			noteUpdated: ''
+			futureTitle: '未来工作区',
+			futureSubtitle: '为后续能力扩展预留入口。',
+			comingSoon: 'Coming soon',
+			future: {
+				researchFactDb: {
+					title: '研究事实库',
+					desc: '结构化沉淀研究事实，构建可复用知识资产。'
+				},
+				benchmark: {
+					title: 'Benchmark 构建',
+					desc: '支持多维准集构建与对比评估，驱动模型与方法迭代。'
+				},
+				experimentPlan: {
+					title: '实验计划',
+					desc: '设计实验与数据收集流程，跟踪执行与结果分析。'
+				},
+				closedLoop: {
+					title: '闭环研究',
+					desc: '从问题发现到验证迭代，形成研究闭环。'
+				}
+			}
 		},
 		create: {
 			title: '创建集合',

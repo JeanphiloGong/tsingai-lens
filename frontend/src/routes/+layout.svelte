@@ -74,8 +74,6 @@
 </script>
 
 <div class="app-shell">
-  <div class="bg-shape bg-shape--one" aria-hidden="true"></div>
-  <div class="bg-shape bg-shape--two" aria-hidden="true"></div>
   <div class="bg-grid" aria-hidden="true"></div>
 
   <header class="site-header">
@@ -91,11 +89,12 @@
 
     <div class="header-actions">
       <a
-        class="header-action"
-        href="/"
-        class:active={$page.url.pathname === '/' || $page.url.pathname.startsWith('/collections')}
+        class="header-action header-action--new"
+        href="/?create=collection"
+        aria-label={$t('home.primaryAction')}
       >
-        {$t('nav.home')}
+        <span aria-hidden="true">+</span>
+        {$t('home.primaryAction')}
       </a>
       <div
         class="theme-menu"

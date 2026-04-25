@@ -18,6 +18,16 @@ from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from controllers.core import documents as documents_controller
 from infra.source.runtime.source_evidence import build_blocks
+from tests.support.pbf_acceptance_fixture import (
+    PBF_BASELINE_LABEL,
+    PBF_DOCUMENT_ID,
+    PBF_ELONGATION_COMPARABLE_ID,
+    PBF_S3_VARIANT_ID,
+    PBF_YIELD_25_COMPARABLE_ID,
+    PBF_YIELD_200_COMPARABLE_ID,
+    PBF_YIELD_SERIES_KEY,
+    write_pbf_acceptance_artifacts,
+)
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -283,6 +293,251 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
     assert payload.protocol_extractable == "uncertain"
 
 
+def test_document_content_route_includes_source_locators(
+    document_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Document Locator Collection")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Locator Paper",
+                "source_filename": "paper-1.pdf",
+                "text": "The optimized sample reached 940 MPa. Missing locator paragraph.",
+            }
+        ]
+    ).to_parquet(output_dir / "documents.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Locator Paper",
+                "source_filename": "paper-1.pdf",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "block_id": "blk-result",
+                "block_type": "paragraph",
+                "heading_path": "Results",
+                "heading_level": 1,
+                "block_order": 1,
+                "text": "The optimized sample reached 940 MPa.",
+                "text_unit_ids": [],
+                "page": 6,
+                "bbox": json.dumps(
+                    {"l": 72.4, "t": 182.1, "r": 512.8, "b": 228.6, "coord_origin": "top_left"}
+                ),
+                "char_range": json.dumps({"start": 0, "end": 37}),
+            },
+            {
+                "document_id": "paper-1",
+                "block_id": "blk-invalid",
+                "block_type": "paragraph",
+                "heading_path": "Results",
+                "heading_level": 1,
+                "block_order": 2,
+                "text": "Missing locator paragraph.",
+                "text_unit_ids": [],
+                "page": 0,
+                "bbox": "not-json",
+                "char_range": json.dumps({"start": 20, "end": 10}),
+            },
+        ]
+    ).to_parquet(output_dir / "blocks.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        documents_controller.get_collection_document_content(collection_id, "paper-1")
+    )
+
+    first = payload.blocks[0]
+    assert first.page == 6
+    assert first.bbox is not None
+    assert first.bbox.x0 == 72.4
+    assert first.bbox.y0 == 182.1
+    assert first.bbox.x1 == 512.8
+    assert first.bbox.y1 == 228.6
+    assert first.bbox.coord_origin == "top_left"
+    assert first.char_range is not None
+    assert first.char_range.start == 0
+    assert first.char_range.end == 37
+
+    second = payload.blocks[1]
+    assert second.page is None
+    assert second.bbox is None
+    assert second.char_range is None
+
+
+def test_document_source_route_streams_manifest_source_file(document_services):
+    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Source File Collection")
+    collection_id = record["collection_id"]
+    paths = collection_service.get_paths(collection_id)
+    source_path = paths.input_dir / "paper-1.pdf"
+    source_path.write_bytes(b"%PDF-1.4\nfixture\n")
+    collection_service.repository.write_import_manifest(
+        collection_id,
+        {
+            "collection_id": collection_id,
+            "imports": [
+                {
+                    "documents": [
+                        {
+                            "source_document_id": "paper-1",
+                            "original_filename": "paper-1.pdf",
+                            "stored_filename": "paper-1.pdf",
+                            "storage_relpath": "input/paper-1.pdf",
+                            "media_type": "application/pdf",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    response = asyncio.run(
+        documents_controller.get_collection_document_source(collection_id, "paper-1")
+    )
+
+    assert Path(response.path).read_bytes() == b"%PDF-1.4\nfixture\n"
+    assert response.media_type == "application/pdf"
+    assert response.headers["content-disposition"].startswith("inline;")
+
+
+def test_document_source_route_resolves_profile_document_id_by_source_filename(
+    document_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Profile Source File Collection")
+    collection_id = record["collection_id"]
+    paths = collection_service.get_paths(collection_id)
+    output_dir = paths.output_dir
+    source_path = paths.input_dir / "stored-paper.pdf"
+    source_path.write_bytes(b"%PDF-1.4\nprofile fixture\n")
+    pd.DataFrame(
+        [
+            {
+                "document_id": "profile-hash-doc",
+                "collection_id": collection_id,
+                "title": "Profile Paper",
+                "source_filename": "paper.pdf",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+    collection_service.repository.write_import_manifest(
+        collection_id,
+        {
+            "collection_id": collection_id,
+            "imports": [
+                {
+                    "documents": [
+                        {
+                            "source_document_id": "srcdoc-from-upload",
+                            "original_filename": "paper.pdf",
+                            "stored_filename": "stored-paper.pdf",
+                            "storage_relpath": "input/stored-paper.pdf",
+                            "media_type": "application/pdf",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    response = asyncio.run(
+        documents_controller.get_collection_document_source(
+            collection_id,
+            "profile-hash-doc",
+        )
+    )
+
+    assert Path(response.path).read_bytes() == b"%PDF-1.4\nprofile fixture\n"
+    assert response.media_type == "application/pdf"
+
+
+def test_document_source_route_returns_409_when_source_is_unavailable(document_services):
+    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Missing Source Collection")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_source(
+                record["collection_id"],
+                "paper-1",
+            )
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.detail["code"] == "document_source_unavailable"
+    assert exc.detail["document_id"] == "paper-1"
+
+
+def test_document_source_route_rejects_manifest_path_outside_collection(
+    document_services,
+    tmp_path,
+):
+    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Unsafe Source Collection")
+    collection_id = record["collection_id"]
+    outside_path = tmp_path / "outside.pdf"
+    outside_path.write_bytes(b"%PDF-1.4\noutside\n")
+    collection_service.repository.write_import_manifest(
+        collection_id,
+        {
+            "collection_id": collection_id,
+            "imports": [
+                {
+                    "documents": [
+                        {
+                            "source_document_id": "paper-1",
+                            "original_filename": "paper-1.pdf",
+                            "stored_path": str(outside_path),
+                            "media_type": "application/pdf",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_source(collection_id, "paper-1")
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.detail["code"] == "document_source_path_invalid"
+    assert "outside.pdf" not in str(exc.detail)
+
+
 def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_ready(
     document_services,
 ):
@@ -429,3 +684,71 @@ def test_document_comparison_semantics_route_can_include_projected_rows(
     assert len(payload.items[0].projected_rows) == 1
     assert payload.items[0].projected_rows[0].row_id.startswith("cmp_")
     assert payload.items[0].projected_rows[0].source_document_id == "paper-1"
+
+
+def test_document_comparison_semantics_route_returns_pbf_acceptance_chain(
+    document_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Document Evidence Chain")
+    collection_id = record["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    write_pbf_acceptance_artifacts(output_dir, collection_id=collection_id)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        documents_controller.get_collection_document_comparison_semantics(
+            collection_id,
+            PBF_DOCUMENT_ID,
+            include_grouped_projections=True,
+        )
+    )
+
+    assert payload.total == 3
+    assert payload.variant_dossiers is not None
+    assert len(payload.variant_dossiers) == 1
+    dossier = payload.variant_dossiers[0]
+    assert dossier.variant_id == PBF_S3_VARIANT_ID
+    assert dossier.variant_label == "S3 optimized VED + HIP"
+    assert dossier.material.label == "Ti-6Al-4V"
+    assert dossier.material.composition == "Ti-6Al-4V"
+    assert dossier.shared_process_state["laser_power_w"] == 280
+    assert dossier.shared_process_state["scan_speed_mm_s"] == 1200
+    assert dossier.shared_process_state["hatch_spacing_um"] == 100
+    assert dossier.shared_process_state["layer_thickness_um"] == 30
+    assert dossier.shared_process_state["energy_density_j_mm3"] == 78
+    assert dossier.shared_process_state["energy_density_origin"] == "reported"
+    assert dossier.shared_process_state["build_orientation"] == "vertical"
+    assert dossier.shared_process_state["post_treatment_summary"] == "HIP"
+    series_by_key = {series.series_key: series for series in dossier.series}
+    assert PBF_YIELD_SERIES_KEY in series_by_key
+    yield_series = series_by_key[PBF_YIELD_SERIES_KEY]
+    assert yield_series.varying_axis.axis_name == "test_temperature_c"
+    assert [chain.result_id for chain in yield_series.chains] == [
+        PBF_YIELD_25_COMPARABLE_ID,
+        PBF_YIELD_200_COMPARABLE_ID,
+    ]
+    assert [chain.test_condition.test_temperature_c for chain in yield_series.chains] == [
+        25.0,
+        200.0,
+    ]
+    assert [chain.test_condition.strain_rate_s_1 for chain in yield_series.chains] == [
+        0.001,
+        0.001,
+    ]
+    assert [chain.measurement.value for chain in yield_series.chains] == [940.0, 820.0]
+    assert yield_series.chains[0].baseline.reference == PBF_BASELINE_LABEL
+    assert yield_series.chains[0].value_provenance.value_origin == "reported"
+    assert yield_series.chains[0].value_provenance.source_value_text == "940"
+    elongation_chain = next(
+        chain
+        for series in dossier.series
+        for chain in series.chains
+        if chain.result_id == PBF_ELONGATION_COMPARABLE_ID
+    )
+    assert elongation_chain.measurement.property == "elongation"
+    assert elongation_chain.measurement.value == 15.0

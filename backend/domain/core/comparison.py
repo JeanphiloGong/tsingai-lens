@@ -44,6 +44,40 @@ DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS: Final[tuple[str, ...]] = (
     COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
     COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
 )
+PBF_PROCESS_CONTEXT_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "laser_power_w",
+        "scan_speed_mm_s",
+        "layer_thickness_um",
+        "hatch_spacing_um",
+        "spot_size_um",
+        "energy_density_j_mm3",
+        "energy_density_origin",
+        "scan_strategy",
+        "build_orientation",
+        "preheat_temperature_c",
+        "shielding_gas",
+        "oxygen_level_ppm",
+        "powder_size_distribution_um",
+        "post_treatment_summary",
+    }
+)
+PBF_TENSILE_STYLE_PROPERTIES: Final[frozenset[str]] = frozenset(
+    {
+        "strength",
+        "tensile_strength",
+        "yield_strength",
+        "elongation",
+        "modulus",
+    }
+)
+PBF_ORIENTATION_SENSITIVE_PROPERTIES: Final[frozenset[str]] = frozenset(
+    {
+        *PBF_TENSILE_STYLE_PROPERTIES,
+        "fatigue_life",
+        "residual_stress",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -535,12 +569,21 @@ def evaluate_collection_reassessment_reasons(
     return tuple(reasons)
 
 
-def evaluate_comparison_assessment(comparable_result: ComparableResult) -> ComparisonAssessment:
-    missing_critical_context = _derive_missing_critical_context(comparable_result)
-    comparability_basis = _derive_comparability_basis(comparable_result)
+def evaluate_comparison_assessment(
+    comparable_result: ComparableResult,
+    *,
+    assessment_context: Mapping[str, Any] | None = None,
+) -> ComparisonAssessment:
+    context = _normalize_mapping(assessment_context)
+    missing_critical_context = _derive_missing_critical_context(
+        comparable_result,
+        context,
+    )
+    comparability_basis = _derive_comparability_basis(comparable_result, context)
     comparability_warnings = _build_comparability_warnings(
         missing_critical_context=missing_critical_context,
         result_type=comparable_result.value.result_type,
+        context_warnings=_derive_context_warnings(comparable_result, context),
     )
     comparability_status = _derive_comparability_status(
         missing_critical_context=missing_critical_context,
@@ -565,7 +608,10 @@ def evaluate_comparison_assessment(comparable_result: ComparableResult) -> Compa
     )
 
 
-def _derive_missing_critical_context(comparable_result: ComparableResult) -> list[str]:
+def _derive_missing_critical_context(
+    comparable_result: ComparableResult,
+    assessment_context: Mapping[str, Any],
+) -> list[str]:
     missing: list[str] = []
     if not comparable_result.binding.variant_id:
         missing.append("variant_link")
@@ -579,10 +625,15 @@ def _derive_missing_critical_context(comparable_result: ComparableResult) -> lis
         missing.append("result_value")
     if comparable_result.value.result_type not in SCALAR_LIKE_RESULT_TYPES:
         missing.append("expert_interpretation")
+    if _is_pbf_context(comparable_result, assessment_context):
+        _append_pbf_missing_context(missing, comparable_result, assessment_context)
     return missing
 
 
-def _derive_comparability_basis(comparable_result: ComparableResult) -> list[str]:
+def _derive_comparability_basis(
+    comparable_result: ComparableResult,
+    assessment_context: Mapping[str, Any],
+) -> list[str]:
     basis: list[str] = []
     if comparable_result.binding.variant_id:
         basis.append("variant_linked")
@@ -600,6 +651,23 @@ def _derive_comparability_basis(comparable_result: ComparableResult) -> list[str
         basis.append("structure_context_available")
     if comparable_result.evidence.characterization_observation_ids:
         basis.append("characterization_context_available")
+    if _is_pbf_context(comparable_result, assessment_context):
+        basis.append("pbf_context_detected")
+        process_context = _process_context_from_assessment(assessment_context)
+        condition_payload = _condition_payload_from_assessment(assessment_context)
+        if _has_context_value(process_context.get("build_orientation")):
+            basis.append("build_orientation_reported")
+        if _has_context_value(_strain_rate_value(condition_payload)):
+            basis.append("strain_rate_reported")
+        if _has_context_value(condition_payload.get("loading_direction")):
+            basis.append("loading_direction_reported")
+        if _has_context_value(condition_payload.get("sample_orientation")):
+            basis.append("sample_orientation_reported")
+        energy_density_origin = _normalize_text(
+            process_context.get("energy_density_origin")
+        )
+        if energy_density_origin:
+            basis.append(f"energy_density_origin:{energy_density_origin}")
     return basis
 
 
@@ -607,6 +675,7 @@ def _build_comparability_warnings(
     *,
     missing_critical_context: list[str],
     result_type: str,
+    context_warnings: list[str],
 ) -> list[str]:
     warnings: list[str] = []
     warning_map = {
@@ -616,6 +685,11 @@ def _build_comparability_warnings(
         "direct_traceability": "Traceability is partial or indirect.",
         "result_value": "Result payload is incomplete for comparison display.",
         "expert_interpretation": "Result shape requires expert interpretation before comparison.",
+        "build_orientation": "PBF build orientation is missing for an orientation-sensitive result.",
+        "strain_rate_s-1": "Tensile-style PBF result is missing strain rate.",
+        "loading_direction": "Tensile-style PBF result is missing loading direction.",
+        "sample_orientation": "Tensile-style PBF result is missing sample orientation.",
+        "energy_density_estimated": "Energy density is estimated and requires expert review before comparison.",
     }
     for item in missing_critical_context:
         warning = warning_map.get(item)
@@ -625,7 +699,146 @@ def _build_comparability_warnings(
         warnings.append(
             "This comparison row summarizes a non-scalar result and should be reviewed by a domain expert."
         )
+    for warning in context_warnings:
+        if warning not in warnings:
+            warnings.append(warning)
     return warnings
+
+
+def _append_pbf_missing_context(
+    missing: list[str],
+    comparable_result: ComparableResult,
+    assessment_context: Mapping[str, Any],
+) -> None:
+    process_context = _process_context_from_assessment(assessment_context)
+    condition_payload = _condition_payload_from_assessment(assessment_context)
+    property_name = _normalize_text(comparable_result.value.property_normalized) or ""
+
+    if (
+        property_name in PBF_ORIENTATION_SENSITIVE_PROPERTIES
+        and not _has_context_value(process_context.get("build_orientation"))
+    ):
+        _append_once(missing, "build_orientation")
+
+    if _is_tensile_style_result(comparable_result, condition_payload):
+        if not _has_context_value(_strain_rate_value(condition_payload)):
+            _append_once(missing, "strain_rate_s-1")
+        if not _has_context_value(condition_payload.get("loading_direction")):
+            _append_once(missing, "loading_direction")
+        if not _has_context_value(condition_payload.get("sample_orientation")):
+            _append_once(missing, "sample_orientation")
+
+    if _normalize_text(process_context.get("energy_density_origin")) == "estimated":
+        _append_once(missing, "energy_density_estimated")
+
+
+def _derive_context_warnings(
+    comparable_result: ComparableResult,
+    assessment_context: Mapping[str, Any],
+) -> list[str]:
+    if not _is_pbf_context(comparable_result, assessment_context):
+        return []
+
+    warnings: list[str] = []
+    process_context = _process_context_from_assessment(assessment_context)
+    energy_density_origin = _normalize_text(process_context.get("energy_density_origin"))
+    if energy_density_origin == "derived":
+        warnings.append(
+            "Energy density was derived from reported inputs; verify the formula before cross-paper comparison."
+        )
+    post_treatment = (_normalize_text(process_context.get("post_treatment_summary")) or "").lower()
+    if any(token in post_treatment for token in ("mixed", "multiple", "varied")):
+        warnings.append(
+            "Post-treatment state appears mixed under one variant and should be reviewed."
+        )
+    return warnings
+
+
+def _is_pbf_context(
+    comparable_result: ComparableResult,
+    assessment_context: Mapping[str, Any],
+) -> bool:
+    variant = _normalize_mapping(assessment_context.get("variant"))
+    if _normalize_text(variant.get("domain_profile")) == "pbf_metal":
+        return True
+
+    process_context = _process_context_from_assessment(assessment_context)
+    if any(
+        _has_context_value(process_context.get(key))
+        for key in PBF_PROCESS_CONTEXT_KEYS
+    ):
+        return True
+
+    process_text = (
+        comparable_result.normalized_context.process_normalized or ""
+    ).lower()
+    return any(
+        token in process_text
+        for token in (
+            "lpbf",
+            "pbf-lb",
+            "powder bed fusion",
+            "laser powder bed",
+            "slm",
+        )
+    )
+
+
+def _is_tensile_style_result(
+    comparable_result: ComparableResult,
+    condition_payload: Mapping[str, Any],
+) -> bool:
+    property_name = _normalize_text(comparable_result.value.property_normalized) or ""
+    if property_name in PBF_TENSILE_STYLE_PROPERTIES:
+        return True
+    method_text = " ".join(
+        str(item)
+        for item in (
+            condition_payload.get("test_method"),
+            condition_payload.get("method"),
+            *_normalize_string_tuple(condition_payload.get("methods")),
+        )
+        if _normalize_text(item)
+    ).lower()
+    return "tensile" in method_text or "strain" in method_text
+
+
+def _process_context_from_assessment(
+    assessment_context: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    variant = _normalize_mapping(assessment_context.get("variant"))
+    return _normalize_mapping(variant.get("process_context"))
+
+
+def _condition_payload_from_assessment(
+    assessment_context: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    condition = _normalize_mapping(assessment_context.get("test_condition"))
+    return _normalize_mapping(condition.get("condition_payload"))
+
+
+def _strain_rate_value(condition_payload: Mapping[str, Any]) -> Any:
+    return (
+        condition_payload.get("strain_rate_s-1")
+        or condition_payload.get("strain_rate_s_1")
+        or condition_payload.get("strain_rate")
+        or condition_payload.get("rate")
+    )
+
+
+def _has_context_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, float) and math.isnan(value):
+        return False
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return bool(str(value).strip())
+
+
+def _append_once(items: list[str], value: str) -> None:
+    if value not in items:
+        items.append(value)
 
 
 def _derive_comparability_status(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -41,6 +41,7 @@ _CLAIM_SCOPES = {
     "unclear",
 }
 _EVIDENCE_SOURCE_TYPES = {"text", "method", "table", "figure"}
+_VALUE_ORIGINS = {"reported", "derived", "estimated"}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -58,6 +59,15 @@ def _normalize_underscored_choice(value: object, *, allowed: set[str], default: 
     return lowered if lowered in allowed else default
 
 
+def _normalize_optional_underscored_choice(
+    value: object,
+    *,
+    allowed: set[str],
+) -> str | None:
+    lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return lowered if lowered in allowed else None
+
+
 def _normalize_list_container(value: object) -> object:
     return [] if value is None else value
 
@@ -67,7 +77,7 @@ def _normalize_object_container(value: object) -> object:
 
 
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class MaterialSystemPayload(_StrictModel):
@@ -79,11 +89,33 @@ class ProcessContextPayload(_StrictModel):
     temperatures_c: list[float] = Field(default_factory=list)
     durations: list[str] = Field(default_factory=list)
     atmosphere: str | None = None
+    laser_power_w: float | None = None
+    scan_speed_mm_s: float | None = None
+    layer_thickness_um: float | None = None
+    hatch_spacing_um: float | None = None
+    spot_size_um: float | None = None
+    energy_density_j_mm3: float | None = None
+    energy_density_origin: Literal["reported", "derived", "estimated"] | None = None
+    scan_strategy: str | None = None
+    build_orientation: str | None = None
+    preheat_temperature_c: float | None = None
+    shielding_gas: str | None = None
+    oxygen_level_ppm: float | None = None
+    powder_size_distribution_um: str | list[float] | None = None
+    post_treatment_summary: str | None = None
 
     @field_validator("temperatures_c", "durations", mode="before")
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
+
+    @field_validator("energy_density_origin", mode="before")
+    @classmethod
+    def _normalize_energy_density_origin(cls, value: object) -> str | None:
+        return _normalize_optional_underscored_choice(
+            value,
+            allowed=_VALUE_ORIGINS,
+        )
 
 
 class BaselineContextPayload(_StrictModel):
@@ -135,11 +167,33 @@ class MethodPayloadModel(_StrictModel):
     atmosphere: str | None = None
     methods: list[str] = Field(default_factory=list)
     details: str | None = None
+    laser_power_w: float | None = None
+    scan_speed_mm_s: float | None = None
+    layer_thickness_um: float | None = None
+    hatch_spacing_um: float | None = None
+    spot_size_um: float | None = None
+    energy_density_j_mm3: float | None = None
+    energy_density_origin: Literal["reported", "derived", "estimated"] | None = None
+    scan_strategy: str | None = None
+    build_orientation: str | None = None
+    preheat_temperature_c: float | None = None
+    shielding_gas: str | None = None
+    oxygen_level_ppm: float | None = None
+    powder_size_distribution_um: str | list[float] | None = None
+    post_treatment_summary: str | None = None
 
     @field_validator("temperatures_c", "durations", "methods", mode="before")
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
+
+    @field_validator("energy_density_origin", mode="before")
+    @classmethod
+    def _normalize_energy_density_origin(cls, value: object) -> str | None:
+        return _normalize_optional_underscored_choice(
+            value,
+            allowed=_VALUE_ORIGINS,
+        )
 
 
 class MethodFactPayload(_StrictModel):
@@ -193,6 +247,15 @@ class TestConditionPayloadModel(_StrictModel):
     temperatures_c: list[float] = Field(default_factory=list)
     durations: list[str] = Field(default_factory=list)
     atmosphere: str | None = None
+    test_method: str | None = None
+    test_temperature_c: float | None = None
+    strain_rate_s_1: float | str | None = Field(default=None, alias="strain_rate_s-1")
+    loading_direction: str | None = None
+    sample_orientation: str | None = None
+    environment: str | None = None
+    frequency_hz: float | None = None
+    specimen_geometry: str | None = None
+    surface_state: str | None = None
 
     @field_validator("methods", "temperatures_c", "durations", mode="before")
     @classmethod
@@ -225,6 +288,19 @@ class MeasurementValuePayload(_StrictModel):
     retention_percent: float | None = None
     direction: str | None = None
     statement: str | None = None
+    value_origin: Literal["reported", "derived", "estimated"] | None = None
+    source_value_text: str | None = None
+    source_unit_text: str | None = None
+    derivation_formula: str | None = None
+    derivation_inputs: dict[str, Any] | None = None
+
+    @field_validator("value_origin", mode="before")
+    @classmethod
+    def _normalize_value_origin(cls, value: object) -> str | None:
+        return _normalize_optional_underscored_choice(
+            value,
+            allowed=_VALUE_ORIGINS,
+        )
 
 
 class MeasurementResultPayload(_StrictModel):

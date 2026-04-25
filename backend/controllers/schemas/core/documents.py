@@ -8,6 +8,7 @@ from controllers.schemas.core.comparisons import (
     ComparisonAssessmentResponse,
     ComparisonRowItemResponse,
 )
+from controllers.schemas.core.evidence_chain import EvidenceChainVariantDossierResponse
 
 
 DocumentType = Literal["experimental", "review", "mixed", "uncertain"]
@@ -59,6 +60,23 @@ class DocumentProfileListResponse(BaseModel):
     items: list[DocumentProfileItemResponse] = Field(default_factory=list, description="文档 profile 列表")
 
 
+class DocumentCharRangeResponse(BaseModel):
+    """Document-local source text character range."""
+
+    start: int = Field(..., ge=0, description="字符范围起点")
+    end: int = Field(..., ge=0, description="字符范围终点")
+
+
+class DocumentBoundingBoxResponse(BaseModel):
+    """Document-local source page bounding box."""
+
+    x0: float = Field(..., description="左侧坐标")
+    y0: float = Field(..., description="顶部坐标")
+    x1: float = Field(..., description="右侧坐标")
+    y1: float = Field(..., description="底部坐标")
+    coord_origin: str | None = Field(default=None, description="坐标原点")
+
+
 class DocumentContentBlockResponse(BaseModel):
     """Viewer-friendly block payload for one document."""
 
@@ -71,6 +89,9 @@ class DocumentContentBlockResponse(BaseModel):
     text_unit_ids: list[str] = Field(default_factory=list, description="相关 text unit IDs")
     start_offset: int | None = Field(default=None, description="文档级起始字符偏移")
     end_offset: int | None = Field(default=None, description="文档级结束字符偏移")
+    page: int | None = Field(default=None, description="源文件页码；不可用时为 null")
+    bbox: DocumentBoundingBoxResponse | None = Field(default=None, description="源文件页面坐标框")
+    char_range: DocumentCharRangeResponse | None = Field(default=None, description="源文本字符范围")
 
 
 class DocumentContentResponse(BaseModel):
@@ -197,4 +218,8 @@ class DocumentComparisonSemanticListResponse(BaseModel):
     items: list[DocumentComparisonSemanticItemResponse] = Field(
         default_factory=list,
         description="document 对应的 comparable result 列表",
+    )
+    variant_dossiers: list[EvidenceChainVariantDossierResponse] | None = Field(
+        default=None,
+        description="按需生成的 variant dossier/result series grouped projection",
     )

@@ -295,10 +295,39 @@
 
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/source`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
 
 其中 `/profile` 返回与 list item 同语义的单项 document profile，`/content`
-返回原文阅读器内容与 section 结构。
+返回原文阅读器内容与 section fallback 结构，`/source` 以 inline file
+response 返回该 document 的原始上传文件，供浏览器 PDF/source reader
+直接展示。
+
+`/content` 的每个 block 仍是 backend source locator unit，不是前端可见
+章节模型。前端可以用这些字段做 fallback 定位，但默认 UI 不应暴露
+`block_id`、`blk_xxx` 或重复的 block-level `heading_path`。block locator
+字段：
+
+- `page`: 源文件页码；不可用或非法时为 `null`
+- `bbox`: 页面坐标框；不可用或非法时为 `null`
+  - `x0`
+  - `y0`
+  - `x1`
+  - `y1`
+  - `coord_origin`
+- `char_range`: 源文本字符范围；不可用或非法时为 `null`
+  - `start`
+  - `end`
+
+`/source` 行为：
+
+- 成功时返回 `200`，`Content-Disposition` 为 inline，`Content-Type` 优先使用
+  collection metadata 中的 `media_type`，否则按文件名推断
+- collection 或 document 无法解析时返回 `404`
+- document 存在但 source file 缺失、无法安全解析或存在歧义时返回 `409`
+  structured detail
+- endpoint 不接受任何 request path；文件路径只能从 collection-owned
+  metadata 解析，且必须位于 collection input 目录内
 
 文档页语义要求：
 
@@ -365,7 +394,7 @@
 - `evidence`
 - `actions`
 
-下一波 additive contract 冻结字段：
+已支持的 additive evidence-chain 字段：
 
 - `variant_dossier`
 - `test_condition_detail`
@@ -380,9 +409,9 @@
   `comparable_result_id`
 - 结果页必须由 `ComparableResult` 与当前 collection 的
   `CollectionComparableResult` 共同投影
-- 结果页的下一波 additive contract 已在
+- 结果页的 additive evidence-chain contract 已在
   `docs/decisions/rfc-document-result-evidence-chain-contract-freeze.md`
-  冻结；该 contract 应把结果页提升为 chain-first drilldown，而不是继续停留在
+  冻结；该 contract 把结果页提升为 chain-first drilldown，而不是继续停留在
   generic measurement card
 - `variant_dossier` 是当前 result 对应的 parent dossier summary，不是第二个主页面模型
 - `test_condition_detail`、`baseline_detail`、`structure_support`、
@@ -417,7 +446,7 @@
 - `count`
 - `items`
 
-下一波 additive contract 冻结字段：
+已支持的 additive grouped projection 字段：
 
 - `variant_dossiers`
 
@@ -456,7 +485,7 @@
 语义要求：
 
 - 这是 `ComparableResult` 的 document-scoped inspection surface，不是 row list
-- 该路由的下一波 additive grouped drilldown contract 已在
+- 该路由的 additive grouped drilldown contract 已在
   `docs/decisions/rfc-document-result-evidence-chain-contract-freeze.md`
   冻结
 - flat `items` list 必须继续保留；grouped projections 是 additive read model，
@@ -481,7 +510,7 @@
   - `true` 时允许为 document-facing drilldown 附带按需生成的 row payload
 - `include_grouped_projections=true|false`
   - `false` 时允许省略 grouped dossier/series projection
-  - `true` 时应返回 `variant_dossiers`
+  - `true` 时返回 `variant_dossiers`
 
 ### Corpus Comparable Results
 
@@ -652,9 +681,12 @@
 
 前端降级顺序（固定）：
 
-1. `char_range`
-2. `bbox`
-3. `section`
+1. `page + bbox` when the active reader can draw PDF overlays
+2. `char_range`
+3. `page`
+4. `section`
+5. `quote`
+6. source location unavailable message
 
 comparison 对 traceback 的依赖约定：
 

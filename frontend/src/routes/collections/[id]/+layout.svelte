@@ -26,7 +26,10 @@
 	$: collection = workspace?.collection ?? $collections.find((item) => item.id === collectionId);
 	$: collectionName = collection?.name;
 	$: documentCount =
-		workspace?.document_summary.total_documents ?? collection?.paper_count ?? workspace?.file_count ?? 0;
+		workspace?.document_summary.total_documents ??
+		collection?.paper_count ??
+		workspace?.file_count ??
+		0;
 	$: readinessState = workspace ? getOverviewReadinessState(workspace) : null;
 	$: statusLabel = readinessState
 		? $t(`overview.readinessLabels.${readinessState}`)
@@ -37,8 +40,9 @@
 		!workspace || getWorkspaceSurfaceState(workspace, 'results') !== 'not_applicable';
 	$: protocolVisible =
 		!workspace || getWorkspaceSurfaceState(workspace, 'protocol') !== 'not_applicable';
-	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/documents`;
+	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/evidence`;
 	$: moreActive =
+		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/results`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`);
 
@@ -103,7 +107,11 @@
 		<p class="collection-eyebrow">{$t('collection.eyebrow')}</p>
 		<div class="collection-title-row">
 			<h1>{collectionName || $t('collection.unknownName')}</h1>
-			<button class="icon-button icon-button--subtle" type="button" aria-label={$t('collection.editName')}>
+			<button
+				class="icon-button icon-button--subtle"
+				type="button"
+				aria-label={$t('collection.editName')}
+			>
 				<span class="edit-icon" aria-hidden="true"></span>
 			</button>
 		</div>
@@ -126,7 +134,11 @@
 		>
 			{deleteLoading ? $t('collection.deleting') : $t('collection.delete')}
 		</button>
-		<button class="icon-button icon-button--subtle" type="button" aria-label={$t('collection.moreActions')}>
+		<button
+			class="icon-button icon-button--subtle"
+			type="button"
+			aria-label={$t('collection.moreActions')}
+		>
 			<span aria-hidden="true">...</span>
 		</button>
 	</div>
@@ -149,9 +161,6 @@
 	>
 		{$t('collection.tabs.documents')}
 	</a>
-	<a href={evidenceHref} class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`)}>
-		{$t('collection.tabs.evidence')}
-	</a>
 	<a
 		href={`/collections/${collectionId}/comparisons`}
 		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`)}
@@ -167,6 +176,12 @@
 	<details class="collection-tabs__more" class:active={moreActive}>
 		<summary>{$t('collection.moreLabel')}</summary>
 		<div class="collection-tabs__menu">
+			<a
+				href={evidenceHref}
+				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`)}
+			>
+				{$t('collection.tabs.evidence')}
+			</a>
 			{#if resultsVisible}
 				<a
 					href={`/collections/${collectionId}/results`}

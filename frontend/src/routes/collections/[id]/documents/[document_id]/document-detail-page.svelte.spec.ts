@@ -69,17 +69,40 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					document_id: 'doc_1',
 					title: 'Paper A',
 					source_filename: 'paper-a.pdf',
-					content_text: 'Conductivity improved to 12 mS/cm.',
+					content_text:
+						'Abstract\nConductivity improved to 12 mS/cm.\nMethodology\nThe sample was annealed at 700 C.\nResults\nConductivity improved to 12 mS/cm under EIS.',
 					blocks: [
+						{
+							block_id: 'abstract',
+							block_type: 'abstract',
+							heading_path: 'Abstract',
+							heading_level: 1,
+							order: 1,
+							text: 'Conductivity improved to 12 mS/cm.',
+							start_offset: 9,
+							end_offset: 43,
+							text_unit_ids: []
+						},
+						{
+							block_id: 'methods',
+							block_type: 'methods',
+							heading_path: 'Methodology',
+							heading_level: 1,
+							order: 2,
+							text: 'The sample was annealed at 700 C.',
+							start_offset: 56,
+							end_offset: 89,
+							text_unit_ids: []
+						},
 						{
 							block_id: 'results',
 							block_type: 'results',
 							heading_path: 'Results',
 							heading_level: 1,
-							order: 1,
-							text: 'Conductivity improved to 12 mS/cm.',
-							start_offset: 0,
-							end_offset: 34,
+							order: 3,
+							text: 'Conductivity improved to 12 mS/cm under EIS.',
+							start_offset: 98,
+							end_offset: 143,
 							text_unit_ids: []
 						}
 					],
@@ -108,31 +131,6 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							traceability_status: 'direct',
 							comparability_status: 'comparable',
 							requires_expert_review: false
-						}
-					]
-				});
-			}
-			if (url.pathname === '/api/v1/collections/col_123/evidence/ev_1/traceback') {
-				return jsonResponse({
-					collection_id: 'col_123',
-					evidence_id: 'ev_1',
-					traceback_status: 'ready',
-					anchors: [
-						{
-							anchor_id: 'anc_1',
-							document_id: 'doc_1',
-							locator_type: 'char_range',
-							locator_confidence: 'high',
-							page: 4,
-							quote: 'Conductivity improved to 12 mS/cm.',
-							section_id: 'results',
-							block_id: 'results',
-							char_range: {
-								start: 0,
-								end: 34
-							},
-							bbox: null,
-							deep_link: null
 						}
 					]
 				});
@@ -223,45 +221,28 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		});
 	});
 
-	it('renders source, evidence, and local graph workspace regions', async () => {
+	it('renders the paper reading workbench with tabs and local graph', async () => {
 		render(Page);
 
+		await expect.element(browserPage.getByText('Lens')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('tab', { name: 'Summary' })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Graph').first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Source reader' }))
+			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Evidence review' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Local evidence graph' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText(/Conductivity improved to 12 mS\/cm\./))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Results' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
 
-		const sectionHeading = browserPage.getByRole('heading', { name: 'Results from this document' });
-		await expect.element(sectionHeading).toBeInTheDocument();
+		await browserPage.getByRole('tab', { name: 'Results' }).click();
+		await expect.element(browserPage.getByText('oxide cathode').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Comparable').first()).toBeInTheDocument();
 
-		const resultLink = browserPage.getByRole('link', { name: 'oxide cathode · conductivity' });
-		await expect.element(resultLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
-
+		await browserPage.getByRole('tab', { name: 'Evidence' }).click();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Document evidence chains' }))
+			.element(browserPage.getByText('conductivity is reported for oxide cathode.'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('optimized VED + HIP').first()).toBeInTheDocument();
-
-		const chainLink = browserPage.getByRole('link', { name: 'conductivity · 12 mS/cm' });
-		await expect.element(chainLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
-
-		const locateButton = browserPage.getByRole('button', { name: 'Locate source' });
-		await locateButton.click();
-
-		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/v1/collections/col_123/evidence/ev_1/traceback',
-			expect.objectContaining({ method: 'GET' })
-		);
-		await expect.element(browserPage.getByText('Source located')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Jump to source' }).first())
+			.toBeInTheDocument();
 	});
 });

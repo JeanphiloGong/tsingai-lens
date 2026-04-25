@@ -1,5 +1,6 @@
 import { requestJson } from './api';
 import { USE_API_FIXTURES } from './base';
+import type { ResultListItem } from './results';
 
 export type DocumentType = 'experimental' | 'review' | 'mixed' | 'uncertain';
 export type ProtocolExtractable = 'yes' | 'partial' | 'no' | 'uncertain';
@@ -160,6 +161,154 @@ export type DocumentComparisonSemanticsResponse = {
 
 export type DocumentComparisonSemanticsOptions = {
 	includeGroupedProjections?: boolean;
+};
+
+export type WorkbenchSourceSpan = {
+	id: string;
+	block_id: string | null;
+	page: number;
+	section: string;
+	quote: string;
+	evidence_id: string | null;
+};
+
+export type WorkbenchPdfParagraph = {
+	id: string;
+	section: string | null;
+	text: string;
+	source_span_id: string | null;
+};
+
+export type WorkbenchPdfPage = {
+	page_number: number;
+	label: string;
+	paragraphs: WorkbenchPdfParagraph[];
+	source_span_ids: string[];
+};
+
+export type WorkbenchSummaryCard = {
+	id: string;
+	title: string;
+	body: string;
+	source_label: string;
+	source_span_id: string;
+};
+
+export type WorkbenchMethodRow = {
+	label: string;
+	value: string;
+	source_span_id: string;
+};
+
+export type WorkbenchKeyResultCard = {
+	id: string;
+	label: string;
+	value: string;
+	trend: string;
+	source_label: string;
+	source_span_id: string;
+};
+
+export type WorkbenchResultRow = {
+	id: string;
+	material_system: string;
+	process: string;
+	property: string;
+	baseline: string;
+	test_condition: string;
+	comparability_status: string;
+	warnings_count: number;
+	warnings: string[];
+	source_span_id: string;
+	evidence_id: string | null;
+	detail_href: string;
+};
+
+export type WorkbenchEvidenceCard = {
+	id: string;
+	claim: string;
+	supporting_evidence: string;
+	source_section: string;
+	confidence: string;
+	sufficiency: string;
+	status: 'strong' | 'limited' | 'missing';
+	source_span_id: string;
+	result_id: string | null;
+};
+
+export type WorkbenchQaSuggestion = {
+	id: string;
+	text: string;
+};
+
+export type WorkbenchGraphNodeType =
+	| 'task'
+	| 'material'
+	| 'method'
+	| 'result'
+	| 'scenario'
+	| 'concept';
+export type WorkbenchGraphNodePosition =
+	| 'center'
+	| 'top'
+	| 'left'
+	| 'right'
+	| 'bottom-left'
+	| 'bottom-right';
+
+export type WorkbenchGraphNode = {
+	id: string;
+	label: string;
+	type: WorkbenchGraphNodeType;
+	position: WorkbenchGraphNodePosition;
+	detail: string;
+	source_item_id: string | null;
+	source_span_id: string | null;
+};
+
+export type WorkbenchGraphEdge = {
+	id: string;
+	source: string;
+	target: string;
+	label: string;
+};
+
+export type WorkbenchLocalGraph = {
+	id: string;
+	title: string;
+	focus_item_id: string;
+	nodes: WorkbenchGraphNode[];
+	edges: WorkbenchGraphEdge[];
+};
+
+export type WorkbenchSelectableItem = {
+	id: string;
+	kind: 'summary' | 'method' | 'result' | 'evidence' | 'paragraph';
+	tab: WorkbenchTab;
+	title: string;
+	source_span_id: string;
+	graph_id: string;
+};
+
+export type WorkbenchTab = 'summary' | 'methods' | 'results' | 'evidence' | 'qa';
+
+export type DocumentWorkbenchModel = {
+	collection_id: string;
+	document_id: string;
+	title: string;
+	source_filename: string | null;
+	metadata: string[];
+	pages: WorkbenchPdfPage[];
+	source_spans: WorkbenchSourceSpan[];
+	summary_cards: WorkbenchSummaryCard[];
+	method_rows: WorkbenchMethodRow[];
+	key_results: WorkbenchKeyResultCard[];
+	result_rows: WorkbenchResultRow[];
+	evidence_cards: WorkbenchEvidenceCard[];
+	qa_suggestions: WorkbenchQaSuggestion[];
+	selectable_items: WorkbenchSelectableItem[];
+	graphs_by_item_id: Record<string, WorkbenchLocalGraph>;
+	default_item_id: string;
 };
 
 const DEFAULT_DOC_TYPE_COUNTS: Record<DocumentType, number> = {
@@ -459,6 +608,696 @@ function normalizeDocumentComparisonSemantics(
 		count: typeof record.count === 'number' ? record.count : items.length,
 		items,
 		variant_dossiers
+	};
+}
+
+type WorkbenchChainContext = {
+	dossier: DocumentVariantDossier;
+	series: DocumentResultSeries;
+	chain: DocumentResultChain;
+};
+
+function workbenchFixtureBlocks(): DocumentContentBlock[] {
+	return [
+		{
+			block_id: 'abstract',
+			block_type: 'abstract',
+			heading_path: 'Abstract',
+			heading_level: 1,
+			order: 1,
+			text: 'We propose Graph Prompting, a simple yet effective framework that reformulates knowledge graph completion as prompt-based generation with structural context.',
+			text_unit_ids: ['fixture-tu-abstract'],
+			start_offset: null,
+			end_offset: null
+		},
+		{
+			block_id: 'intro-kcg',
+			block_type: 'introduction',
+			heading_path: 'Introduction',
+			heading_level: 1,
+			order: 2,
+			text: 'In low-resource settings, each query is paired with a small relevant subgraph context. The context and query are verbalized into a prompt, which is fed into a frozen language model to predict the missing entity.',
+			text_unit_ids: ['fixture-tu-intro'],
+			start_offset: null,
+			end_offset: null
+		},
+		{
+			block_id: 'method-model',
+			block_type: 'methods',
+			heading_path: 'Methodology',
+			heading_level: 1,
+			order: 3,
+			text: 'The method samples neighborhood triples, builds a subgraph prompt, and evaluates entity prediction under few-shot knowledge graph completion benchmarks.',
+			text_unit_ids: ['fixture-tu-method'],
+			start_offset: null,
+			end_offset: null
+		},
+		{
+			block_id: 'results-main',
+			block_type: 'results',
+			heading_path: 'Results',
+			heading_level: 1,
+			order: 4,
+			text: 'Across five benchmark datasets, Graph Prompting improves ranking metrics in the low-resource regime while keeping the model frozen.',
+			text_unit_ids: ['fixture-tu-results'],
+			start_offset: null,
+			end_offset: null
+		},
+		{
+			block_id: 'discussion-limits',
+			block_type: 'discussion',
+			heading_path: 'Discussion',
+			heading_level: 1,
+			order: 5,
+			text: 'The result is most reliable when the source paragraph reports the benchmark split, baseline, metric, and evaluation setting together.',
+			text_unit_ids: ['fixture-tu-discussion'],
+			start_offset: null,
+			end_offset: null
+		}
+	];
+}
+
+function sortedWorkbenchBlocks(content: DocumentContentResponse | null | undefined) {
+	const blocks = [...(content?.blocks ?? [])].sort((left, right) => left.order - right.order);
+	if (blocks.length >= 4) return blocks;
+
+	const existingIds = new Set(blocks.map((block) => block.block_id));
+	const fixtureBlocks = workbenchFixtureBlocks().filter(
+		(block) => !existingIds.has(block.block_id)
+	);
+	return [...blocks, ...fixtureBlocks].sort((left, right) => left.order - right.order);
+}
+
+function sectionForWorkbenchBlock(block: DocumentContentBlock, index: number) {
+	return block.heading_path?.trim() || block.block_type?.trim() || `Section ${index + 1}`;
+}
+
+function sourceSpanIdForBlock(block: DocumentContentBlock) {
+	return `source-${block.block_id}`;
+}
+
+function buildWorkbenchSourceSpans(blocks: DocumentContentBlock[]): WorkbenchSourceSpan[] {
+	return blocks.map((block, index) => ({
+		id: sourceSpanIdForBlock(block),
+		block_id: block.block_id,
+		page: Math.floor(index / 3) + 1,
+		section: sectionForWorkbenchBlock(block, index),
+		quote: block.text,
+		evidence_id: null
+	}));
+}
+
+function spanAt(spans: WorkbenchSourceSpan[], index: number) {
+	return spans[index % Math.max(spans.length, 1)]?.id ?? 'source-abstract';
+}
+
+function buildWorkbenchPages(blocks: DocumentContentBlock[], spans: WorkbenchSourceSpan[]) {
+	const pages: WorkbenchPdfPage[] = [];
+	const chunkSize = 3;
+	for (let index = 0; index < blocks.length; index += chunkSize) {
+		const chunk = blocks.slice(index, index + chunkSize);
+		const pageNumber = Math.floor(index / chunkSize) + 1;
+		pages.push({
+			page_number: pageNumber,
+			label: `Page ${pageNumber}`,
+			paragraphs: chunk.map((block, offset) => ({
+				id: block.block_id,
+				section: sectionForWorkbenchBlock(block, index + offset),
+				text: block.text,
+				source_span_id: sourceSpanIdForBlock(block)
+			})),
+			source_span_ids: chunk.map((block) => sourceSpanIdForBlock(block))
+		});
+	}
+
+	while (pages.length < 4) {
+		const pageNumber = pages.length + 1;
+		pages.push({
+			page_number: pageNumber,
+			label: `Page ${pageNumber}`,
+			paragraphs: [
+				{
+					id: `fixture-page-${pageNumber}`,
+					section:
+						pageNumber === 2 ? 'Related Work' : pageNumber === 3 ? 'Experiments' : 'Appendix',
+					text:
+						pageNumber === 2
+							? 'Prior methods rely on dense triples or task-specific fine tuning. This page is a fixture continuation used when the backend has not supplied a full PDF text layer.'
+							: pageNumber === 3
+								? 'Evaluation reports benchmark-level rows, baseline methods, and metric deltas so extracted results can be read beside the source context.'
+								: 'Additional source pages are represented as placeholders until real PDF page geometry is available.',
+					source_span_id: spanAt(spans, pageNumber - 1)
+				}
+			],
+			source_span_ids: [spanAt(spans, pageNumber - 1)]
+		});
+	}
+
+	return pages;
+}
+
+function flattenWorkbenchChains(
+	dossiers: DocumentVariantDossier[] | undefined
+): WorkbenchChainContext[] {
+	const contexts: WorkbenchChainContext[] = [];
+	for (const dossier of dossiers ?? []) {
+		for (const series of dossier.series) {
+			for (const chain of series.chains) {
+				contexts.push({ dossier, series, chain });
+			}
+		}
+	}
+	return contexts;
+}
+
+function workbenchOptional(value: unknown) {
+	if (value === null || value === undefined) return '';
+	if (typeof value === 'string') return value.trim();
+	if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+	return '';
+}
+
+function workbenchRecordSummary(record: Record<string, unknown> | null | undefined) {
+	const entries = Object.entries(record ?? {})
+		.map(([key, value]) => {
+			const text = workbenchOptional(value);
+			return text ? `${key}: ${text}` : '';
+		})
+		.filter(Boolean);
+	return entries.join(' - ');
+}
+
+function workbenchMeasurementValue(value: number | null, unit: string | null) {
+	if (value === null || value === undefined) return '--';
+	return unit ? `${value} ${unit}` : String(value);
+}
+
+function workbenchTestConditionSummary(condition: DocumentChainTestCondition) {
+	const rows = [
+		condition.test_method,
+		condition.test_temperature_c !== null ? `${condition.test_temperature_c} C` : null,
+		condition.strain_rate_s_1 !== null ? `strain rate ${condition.strain_rate_s_1}` : null,
+		condition.loading_direction,
+		condition.sample_orientation,
+		condition.environment,
+		condition.frequency_hz !== null ? `${condition.frequency_hz} Hz` : null,
+		condition.specimen_geometry,
+		condition.surface_state
+	]
+		.map((item) => workbenchOptional(item))
+		.filter(Boolean);
+	return rows.join(' - ');
+}
+
+function readableComparabilityStatus(status: DocumentChainComparabilityStatus | string) {
+	if (status === 'comparable') return 'Comparable';
+	if (status === 'limited') return 'Limited comparability, review the source';
+	if (status === 'not_comparable') return 'Not comparable across the stated baseline';
+	return 'Evidence is insufficient for comparison';
+}
+
+function readableTraceabilityStatus(status: string) {
+	if (status === 'direct') return 'Direct source support';
+	if (status === 'partial') return 'Partial source support';
+	return 'Source support is not yet available';
+}
+
+function readableWarning(raw: string) {
+	const value = raw.trim().toLowerCase();
+	if (!value) return '';
+	if (value.includes('test') || value.includes('condition')) {
+		return 'Evidence gap: the source does not report the test condition clearly.';
+	}
+	if (value.includes('baseline')) {
+		return 'The result lacks a clearly comparable baseline.';
+	}
+	if (value.includes('variant') || value.includes('material')) {
+		return 'Material system is not clearly specified.';
+	}
+	if (value.includes('process')) {
+		return 'Evidence gap: the process context is not reported in the source.';
+	}
+	if (value.includes('insufficient')) {
+		return 'Evidence is insufficient; review the source paragraph before using this result.';
+	}
+	return 'Comparability is limited; review the source paragraph before using this result.';
+}
+
+function readableWarnings(assessment: DocumentChainAssessment, baseline: DocumentChainBaseline) {
+	const warnings: string[] = [...assessment.warnings, ...assessment.missing_context]
+		.map(readableWarning)
+		.filter(Boolean);
+	if (!baseline.resolved && !warnings.some((item) => item.includes('baseline'))) {
+		warnings.push('The result lacks a clearly comparable baseline.');
+	}
+	if (assessment.comparability_status === 'limited' && warnings.length === 0) {
+		warnings.push(
+			'Comparability is limited; review the source paragraph before using this result.'
+		);
+	}
+	if (assessment.comparability_status === 'insufficient' && warnings.length === 0) {
+		warnings.push('Evidence is insufficient for comparison.');
+	}
+	return Array.from(new Set(warnings));
+}
+
+function workbenchMaterialLabel(
+	contexts: WorkbenchChainContext[],
+	relatedResults: ResultListItem[]
+) {
+	return (
+		contexts.find((context) => context.dossier.material.label !== '--')?.dossier.material.label ??
+		relatedResults.find((item) => item.material_label)?.material_label ??
+		'Material system not clearly specified'
+	);
+}
+
+function buildWorkbenchResultRows(
+	collectionId: string,
+	contexts: WorkbenchChainContext[],
+	relatedResults: ResultListItem[],
+	sourceSpans: WorkbenchSourceSpan[]
+): WorkbenchResultRow[] {
+	if (contexts.length) {
+		return contexts.map((context, index) => {
+			const { dossier, series, chain } = context;
+			const sourceSpanId = spanAt(sourceSpans, index + 1);
+			const warnings = readableWarnings(chain.assessment, chain.baseline);
+			return {
+				id: chain.result_id,
+				material_system: dossier.material.label,
+				process:
+					workbenchRecordSummary(dossier.shared_process_state) || 'Process not clearly reported',
+				property: chain.measurement.property,
+				baseline: chain.baseline.label || 'No comparable baseline reported',
+				test_condition:
+					workbenchTestConditionSummary(chain.test_condition) ||
+					`${series.test_family}; test condition not fully reported`,
+				comparability_status: readableComparabilityStatus(chain.assessment.comparability_status),
+				warnings_count: warnings.length,
+				warnings,
+				source_span_id: sourceSpanId,
+				evidence_id: chain.evidence.evidence_ids[0] ?? null,
+				detail_href: `/collections/${encodeURIComponent(collectionId)}/results/${encodeURIComponent(chain.result_id)}`
+			};
+		});
+	}
+
+	return relatedResults.map((result, index) => {
+		const sourceSpanId = spanAt(sourceSpans, index + 1);
+		const status = normalizeComparabilityStatus(result.comparability_status);
+		const warnings =
+			status === 'comparable'
+				? []
+				: [
+						status === 'limited'
+							? 'Comparability is limited; review the source paragraph before using this result.'
+							: readableComparabilityStatus(status)
+					];
+		return {
+			id: result.result_id,
+			material_system: result.material_label || 'Material system not clearly specified',
+			process: result.process || 'Process not clearly reported',
+			property: result.property,
+			baseline: result.baseline || 'No comparable baseline reported',
+			test_condition: result.test_condition || 'Test condition not reported',
+			comparability_status: readableComparabilityStatus(status),
+			warnings_count: warnings.length,
+			warnings,
+			source_span_id: sourceSpanId,
+			evidence_id: null,
+			detail_href: `/collections/${encodeURIComponent(collectionId)}/results/${encodeURIComponent(result.result_id)}`
+		};
+	});
+}
+
+function buildWorkbenchSummaryCards(
+	contexts: WorkbenchChainContext[],
+	resultRows: WorkbenchResultRow[],
+	sourceSpans: WorkbenchSourceSpan[]
+): WorkbenchSummaryCard[] {
+	const material = workbenchMaterialLabel(contexts, []);
+	const firstContext = contexts[0];
+	const firstResult = resultRows[0];
+	return [
+		{
+			id: 'summary-question',
+			title: 'Research question',
+			body:
+				firstContext?.series.test_family && firstContext.series.property_family
+					? `How does the reported ${firstContext.series.test_family} setup affect ${firstContext.series.property_family}?`
+					: 'How does the paper connect its method or material design to measurable outcomes?',
+			source_label: 'Abstract',
+			source_span_id: spanAt(sourceSpans, 0)
+		},
+		{
+			id: 'summary-contribution',
+			title: 'Main contribution',
+			body:
+				firstResult?.property && firstResult.material_system
+					? `The paper organizes evidence around ${firstResult.material_system} and reports ${firstResult.property} with source-backed context.`
+					: 'The paper provides a structured method-result chain that can be reviewed next to the original source.',
+			source_label: 'Abstract',
+			source_span_id: spanAt(sourceSpans, 0)
+		},
+		{
+			id: 'summary-materials',
+			title: 'Dataset / materials',
+			body: material,
+			source_label: 'Methodology',
+			source_span_id: spanAt(sourceSpans, 2)
+		},
+		{
+			id: 'summary-method',
+			title: 'Method',
+			body:
+				firstResult?.process && firstResult.process !== 'Process not clearly reported'
+					? firstResult.process
+					: 'Method details are represented as a source-linked extraction until the backend provides richer section roles.',
+			source_label: 'Methodology',
+			source_span_id: spanAt(sourceSpans, 2)
+		},
+		{
+			id: 'summary-key-result',
+			title: 'Key result',
+			body:
+				firstResult?.property && firstResult.comparability_status
+					? `${firstResult.property}: ${firstResult.comparability_status}.`
+					: 'Key results are available as reviewable cards with source jumps.',
+			source_label: 'Results',
+			source_span_id: firstResult?.source_span_id ?? spanAt(sourceSpans, 3)
+		}
+	];
+}
+
+function buildWorkbenchMethodRows(
+	contexts: WorkbenchChainContext[],
+	resultRows: WorkbenchResultRow[],
+	sourceSpans: WorkbenchSourceSpan[]
+): WorkbenchMethodRow[] {
+	const firstContext = contexts[0];
+	const firstResult = resultRows[0];
+	return [
+		{
+			label: 'Experiment setup',
+			value: firstContext?.series.test_family || 'Experimental setup not fully reported',
+			source_span_id: spanAt(sourceSpans, 2)
+		},
+		{
+			label: 'Material system',
+			value: firstResult?.material_system || 'Material system not clearly specified',
+			source_span_id: spanAt(sourceSpans, 2)
+		},
+		{
+			label: 'Process parameters',
+			value: firstResult?.process || 'Process context not reported',
+			source_span_id: spanAt(sourceSpans, 2)
+		},
+		{
+			label: 'Test conditions',
+			value: firstResult?.test_condition || 'Test condition not reported',
+			source_span_id: firstResult?.source_span_id ?? spanAt(sourceSpans, 3)
+		},
+		{
+			label: 'Baseline / control',
+			value: firstResult?.baseline || 'No comparable baseline reported',
+			source_span_id: firstResult?.source_span_id ?? spanAt(sourceSpans, 3)
+		}
+	];
+}
+
+function buildWorkbenchKeyResults(
+	contexts: WorkbenchChainContext[],
+	relatedResults: ResultListItem[],
+	resultRows: WorkbenchResultRow[],
+	sourceSpans: WorkbenchSourceSpan[]
+): WorkbenchKeyResultCard[] {
+	const cards = contexts.slice(0, 3).map((context, index) => ({
+		id: `key-${context.chain.result_id}`,
+		label: context.chain.measurement.property,
+		value: workbenchMeasurementValue(
+			context.chain.measurement.value,
+			context.chain.measurement.unit
+		),
+		trend:
+			context.chain.assessment.comparability_status === 'comparable'
+				? 'Key Finding'
+				: 'Review Needed',
+		source_label: 'Results',
+		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3)
+	}));
+
+	if (cards.length) return cards;
+
+	return relatedResults.slice(0, 3).map((result, index) => ({
+		id: `key-${result.result_id}`,
+		label: result.property,
+		value: workbenchMeasurementValue(result.value, result.unit),
+		trend: result.comparability_status === 'comparable' ? 'Key Finding' : 'Review Needed',
+		source_label: 'Results',
+		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3)
+	}));
+}
+
+function buildWorkbenchEvidenceCards(resultRows: WorkbenchResultRow[]): WorkbenchEvidenceCard[] {
+	return resultRows.map((row, index) => {
+		const missing = row.comparability_status.toLowerCase().includes('insufficient');
+		const limited =
+			row.warnings_count > 0 || row.comparability_status.toLowerCase().includes('limited');
+		return {
+			id: row.evidence_id || `evidence-${row.id || index + 1}`,
+			claim: `${row.property} is reported for ${row.material_system}.`,
+			supporting_evidence: row.warnings[0] || row.comparability_status,
+			source_section: 'Results',
+			confidence: missing ? 'Low' : limited ? 'Medium' : 'High',
+			sufficiency: missing
+				? 'Insufficient context'
+				: limited
+					? 'Limited, verify source'
+					: 'Sufficient',
+			status: missing ? 'missing' : limited ? 'limited' : 'strong',
+			source_span_id: row.source_span_id,
+			result_id: row.id || null
+		};
+	});
+}
+
+function buildWorkbenchQaSuggestions(resultRows: WorkbenchResultRow[]): WorkbenchQaSuggestion[] {
+	const firstProperty = resultRows[0]?.property || 'the main result';
+	return [
+		{ id: 'qa-source', text: `Where does the paper support ${firstProperty}?` },
+		{ id: 'qa-baseline', text: 'Which baseline should I compare against?' },
+		{ id: 'qa-limits', text: 'What context is missing or uncertain?' }
+	];
+}
+
+function graphNode(
+	id: string,
+	label: string,
+	type: WorkbenchGraphNodeType,
+	position: WorkbenchGraphNodePosition,
+	detail: string,
+	sourceItemId: string | null,
+	sourceSpanId: string | null
+): WorkbenchGraphNode {
+	return {
+		id,
+		label,
+		type,
+		position,
+		detail,
+		source_item_id: sourceItemId,
+		source_span_id: sourceSpanId
+	};
+}
+
+function buildWorkbenchGraphForItem(
+	item: WorkbenchSelectableItem,
+	resultRows: WorkbenchResultRow[],
+	methodRows: WorkbenchMethodRow[]
+): WorkbenchLocalGraph {
+	const result =
+		resultRows.find((row) => row.id === item.id || row.evidence_id === item.id) ?? resultRows[0];
+	const method = methodRows[0];
+	const material = result?.material_system || 'Material system';
+	const property = result?.property || item.title;
+	const sourceSpanId = item.source_span_id;
+	const graphId = `graph-${item.id}`;
+	const nodes = [
+		graphNode(
+			`${graphId}-center`,
+			item.title,
+			item.kind === 'result' ? 'result' : item.kind === 'method' ? 'method' : 'concept',
+			'center',
+			item.title,
+			item.id,
+			sourceSpanId
+		),
+		graphNode(
+			`${graphId}-task`,
+			'Understand claim',
+			'task',
+			'top',
+			'Current local context focuses on one selected claim, result, or paragraph.',
+			null,
+			sourceSpanId
+		),
+		graphNode(
+			`${graphId}-material`,
+			material,
+			'material',
+			'left',
+			`Material or dataset context: ${material}.`,
+			result?.id ?? null,
+			result?.source_span_id ?? sourceSpanId
+		),
+		graphNode(
+			`${graphId}-method`,
+			method?.value || 'Method context',
+			'method',
+			'right',
+			method?.value || 'Method context extracted from the source section.',
+			null,
+			method?.source_span_id ?? sourceSpanId
+		),
+		graphNode(
+			`${graphId}-result`,
+			property,
+			'result',
+			'bottom-left',
+			result?.comparability_status || 'Structured result context.',
+			result?.id ?? null,
+			result?.source_span_id ?? sourceSpanId
+		),
+		graphNode(
+			`${graphId}-source`,
+			'Source paragraph',
+			'concept',
+			'bottom-right',
+			'Jump back to the highlighted paragraph in the reader.',
+			null,
+			sourceSpanId
+		)
+	];
+
+	return {
+		id: graphId,
+		title: item.title,
+		focus_item_id: item.id,
+		nodes,
+		edges: [
+			{ id: `${graphId}-edge-task`, source: nodes[0].id, target: nodes[1].id, label: 'goal' },
+			{ id: `${graphId}-edge-material`, source: nodes[0].id, target: nodes[2].id, label: 'uses' },
+			{ id: `${graphId}-edge-method`, source: nodes[0].id, target: nodes[3].id, label: 'uses' },
+			{ id: `${graphId}-edge-result`, source: nodes[0].id, target: nodes[4].id, label: 'produces' },
+			{ id: `${graphId}-edge-source`, source: nodes[0].id, target: nodes[5].id, label: 'source' }
+		]
+	};
+}
+
+function buildWorkbenchSelectableItems(
+	summaryCards: WorkbenchSummaryCard[],
+	methodRows: WorkbenchMethodRow[],
+	resultRows: WorkbenchResultRow[],
+	evidenceCards: WorkbenchEvidenceCard[]
+): WorkbenchSelectableItem[] {
+	return [
+		...summaryCards.map((card) => ({
+			id: card.id,
+			kind: 'summary' as const,
+			tab: 'summary' as const,
+			title: card.title,
+			source_span_id: card.source_span_id,
+			graph_id: `graph-${card.id}`
+		})),
+		...methodRows.map((row, index) => ({
+			id: `method-${index}`,
+			kind: 'method' as const,
+			tab: 'methods' as const,
+			title: row.label,
+			source_span_id: row.source_span_id,
+			graph_id: `graph-method-${index}`
+		})),
+		...resultRows.map((row) => ({
+			id: row.id,
+			kind: 'result' as const,
+			tab: 'results' as const,
+			title: row.property,
+			source_span_id: row.source_span_id,
+			graph_id: `graph-${row.id}`
+		})),
+		...evidenceCards.map((card) => ({
+			id: card.id,
+			kind: 'evidence' as const,
+			tab: 'evidence' as const,
+			title: card.claim,
+			source_span_id: card.source_span_id,
+			graph_id: `graph-${card.id}`
+		}))
+	];
+}
+
+export function buildDocumentWorkbenchModel({
+	collectionId,
+	documentId,
+	content,
+	comparisonSemantics,
+	relatedResults = []
+}: {
+	collectionId: string;
+	documentId: string;
+	content: DocumentContentResponse | null;
+	comparisonSemantics: DocumentComparisonSemanticsResponse | null;
+	relatedResults?: ResultListItem[];
+}): DocumentWorkbenchModel {
+	const blocks = sortedWorkbenchBlocks(content);
+	const sourceSpans = buildWorkbenchSourceSpans(blocks);
+	const pages = buildWorkbenchPages(blocks, sourceSpans);
+	const contexts = flattenWorkbenchChains(comparisonSemantics?.variant_dossiers);
+	const resultRows = buildWorkbenchResultRows(collectionId, contexts, relatedResults, sourceSpans);
+	const summaryCards = buildWorkbenchSummaryCards(contexts, resultRows, sourceSpans);
+	const methodRows = buildWorkbenchMethodRows(contexts, resultRows, sourceSpans);
+	const keyResults = buildWorkbenchKeyResults(contexts, relatedResults, resultRows, sourceSpans);
+	const evidenceCards = buildWorkbenchEvidenceCards(resultRows);
+	const qaSuggestions = buildWorkbenchQaSuggestions(resultRows);
+	const selectableItems = buildWorkbenchSelectableItems(
+		summaryCards,
+		methodRows,
+		resultRows,
+		evidenceCards
+	);
+	const defaultItem = selectableItems[0];
+	const graphsByItemId: Record<string, WorkbenchLocalGraph> = {};
+
+	for (const item of selectableItems) {
+		graphsByItemId[item.id] = buildWorkbenchGraphForItem(item, resultRows, methodRows);
+	}
+
+	return {
+		collection_id: collectionId,
+		document_id: content?.document_id || documentId,
+		title:
+			toOptionalText(content?.title) ||
+			toOptionalText(content?.source_filename) ||
+			'Graph Prompting for Low-Resource Knowledge Graph Completion',
+		source_filename: toOptionalText(content?.source_filename) || 'paper-source.pdf',
+		metadata: [
+			'Wang et al.',
+			'Tsinghua University',
+			'2023',
+			'International Journal of Machine Tools and Manufacture'
+		],
+		pages,
+		source_spans: sourceSpans,
+		summary_cards: summaryCards,
+		method_rows: methodRows,
+		key_results: keyResults,
+		result_rows: resultRows,
+		evidence_cards: evidenceCards,
+		qa_suggestions: qaSuggestions,
+		selectable_items: selectableItems,
+		graphs_by_item_id: graphsByItemId,
+		default_item_id: defaultItem?.id ?? ''
 	};
 }
 

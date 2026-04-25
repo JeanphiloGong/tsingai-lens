@@ -162,6 +162,14 @@ class ComparableResultAssembler:
         if not source_document_id:
             logger.debug("Skipped comparison result without source_document_id")
             return None
+        claim_scope = self.safe_text(result_row.get("claim_scope")) or "current_work"
+        if claim_scope != "current_work":
+            logger.debug(
+                "Skipped comparison result outside current_work claim scope result_id=%s claim_scope=%s",
+                self.safe_text(result_row.get("result_id")),
+                claim_scope,
+            )
+            return None
 
         variant_id = self.safe_text(result_row.get("variant_id"))
         variant = sample_lookup.get(variant_id or "", {})

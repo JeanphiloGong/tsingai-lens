@@ -369,6 +369,7 @@ class MeasurementResult:
     variant_id: str | None
     property_normalized: str
     result_type: str
+    claim_scope: str
     value_payload: dict[str, Any]
     unit: str | None
     test_condition_id: str | None
@@ -390,6 +391,7 @@ class MeasurementResult:
             variant_id=_normalize_text(payload.get("variant_id")),
             property_normalized=_normalize_text(payload.get("property_normalized")) or "",
             result_type=_normalize_text(payload.get("result_type")) or "",
+            claim_scope=_normalize_text(payload.get("claim_scope")) or "current_work",
             value_payload=_normalize_mapping(payload.get("value_payload")),
             unit=_normalize_text(payload.get("unit")),
             test_condition_id=_normalize_text(payload.get("test_condition_id")),
@@ -413,6 +415,7 @@ class MeasurementResult:
             "variant_id": self.variant_id,
             "property_normalized": self.property_normalized,
             "result_type": self.result_type,
+            "claim_scope": self.claim_scope,
             "value_payload": dict(self.value_payload),
             "unit": self.unit,
             "test_condition_id": self.test_condition_id,

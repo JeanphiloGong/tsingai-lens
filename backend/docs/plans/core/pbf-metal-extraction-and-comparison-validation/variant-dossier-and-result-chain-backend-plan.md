@@ -257,22 +257,28 @@ Suggested additive payload shape:
     {
       "variant_id": "var_x",
       "variant_label": "optimized VED + HIP",
-      "material_system": {},
+      "material": {},
       "shared_process_state": {},
       "shared_missingness": [],
       "series": [
         {
           "series_key": "tensile:test_temperature_c",
-          "varying_axis": "test_temperature_c",
+          "property_family": "tensile",
+          "test_family": "tensile",
+          "varying_axis": {
+            "axis_name": "test_temperature_c",
+            "axis_unit": "C"
+          },
           "chains": [
             {
               "source_result_id": "mr_x",
               "result_id": "cmp_x",
+              "measurement": {},
               "test_condition": {},
-              "value": {},
               "baseline": {},
-              "comparability": {},
-              "anchors": []
+              "assessment": {},
+              "value_provenance": {},
+              "evidence": {}
             }
           ]
         }
@@ -284,6 +290,9 @@ Suggested additive payload shape:
 
 This grouped view should be derived from the same underlying semantic facts as
 the flat `items` list. The frontend should not receive two conflicting truths.
+The naming and field boundary for this additive payload should follow the
+shared contract freeze in
+`docs/decisions/rfc-document-result-evidence-chain-contract-freeze.md`.
 
 ### Result Detail
 
@@ -295,6 +304,7 @@ with:
 
 - parent variant dossier summary
 - chain-local test condition
+- explicit baseline detail
 - explicit value provenance
 - linked structure support summary
 - sibling result-series navigation when the same variant has other chains in

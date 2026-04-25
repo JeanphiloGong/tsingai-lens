@@ -365,12 +365,30 @@
 - `evidence`
 - `actions`
 
+下一波 additive contract 冻结字段：
+
+- `variant_dossier`
+- `test_condition_detail`
+- `baseline_detail`
+- `structure_support`
+- `value_provenance`
+- `series_navigation`
+
 语义要求：
 
 - `result_id` 是产品向标识；当前可以内部映射到 deterministic
   `comparable_result_id`
 - 结果页必须由 `ComparableResult` 与当前 collection 的
   `CollectionComparableResult` 共同投影
+- 结果页的下一波 additive contract 已在
+  `docs/decisions/rfc-document-result-evidence-chain-contract-freeze.md`
+  冻结；该 contract 应把结果页提升为 chain-first drilldown，而不是继续停留在
+  generic measurement card
+- `variant_dossier` 是当前 result 对应的 parent dossier summary，不是第二个主页面模型
+- `test_condition_detail`、`baseline_detail`、`structure_support`、
+  `value_provenance` 应作为 additive fields 暴露，不应挤压现有根级结果合同
+- `series_navigation`
+  只在同一 dossier 下存在 sibling result series 时出现，可选返回
 - 结果页应同时提供回到 comparison 视图和 source document 的链接
 - 结果页不应把 `binding`、`normalized_context`、`collection_overlays`
   这些 raw semantic 字段直接作为主页面合同
@@ -398,6 +416,10 @@
 - `total`
 - `count`
 - `items`
+
+下一波 additive contract 冻结字段：
+
+- `variant_dossiers`
 
 每个 item 至少应包含：
 
@@ -434,6 +456,14 @@
 语义要求：
 
 - 这是 `ComparableResult` 的 document-scoped inspection surface，不是 row list
+- 该路由的下一波 additive grouped drilldown contract 已在
+  `docs/decisions/rfc-document-result-evidence-chain-contract-freeze.md`
+  冻结
+- flat `items` list 必须继续保留；grouped projections 是 additive read model，
+  不是第二套相互冲突的 semantic truth
+- `variant_dossiers`
+  应作为 document-side grouped drilldown 的顶层字段，由 backend 从同一 semantic
+  truth 投影而来
 - `collection_overlays`
   必须来自 `collection_comparable_results.parquet`，按 `comparable_result_id`
   关联
@@ -449,6 +479,9 @@
 - `include_row_projections=true|false`
   - `false` 时不要求返回 row projection
   - `true` 时允许为 document-facing drilldown 附带按需生成的 row payload
+- `include_grouped_projections=true|false`
+  - `false` 时允许省略 grouped dossier/series projection
+  - `true` 时应返回 `variant_dossiers`
 
 ### Corpus Comparable Results
 

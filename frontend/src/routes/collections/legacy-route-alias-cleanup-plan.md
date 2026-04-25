@@ -2,11 +2,12 @@
 
 ## Summary
 
-This plan records the cleanup boundary for redirect-only collection routes that
-remain after the collection information architecture moved to the Lens v1
-workspace, protocol, document, result, comparison, evidence, and graph pages.
+This record documents the completed cleanup boundary for redirect-only
+collection routes that remained after the collection information architecture
+moved to the Lens v1 workspace, protocol, document, result, comparison,
+evidence, and graph pages.
 
-The cleanup is frontend-local. It removes stale browser route aliases, but it
+The cleanup is frontend-local. It removed stale browser route aliases, but it
 does not remove backend APIs or shared clients that still support active
 workspace, protocol, task, graph, document, result, comparison, or evidence
 flows.
@@ -44,7 +45,7 @@ surface actually is.
 
 ## Cleanup Scope
 
-The first cleanup slice deletes the redirect-only frontend page files:
+The completed cleanup slice deleted the redirect-only frontend page files:
 
 - `frontend/src/routes/collections/[id]/steps/+page.ts`
 - `frontend/src/routes/collections/[id]/sop/+page.ts`
@@ -53,9 +54,11 @@ The first cleanup slice deletes the redirect-only frontend page files:
 - `frontend/src/routes/collections/[id]/reports/+page.ts`
 - `frontend/src/routes/collections/[id]/settings/+page.ts`
 
-The same slice updates collection-route docs that describe transitional
-aliases, especially references that say `/steps` and `/sop` may remain as
-compatibility routes.
+The same slice updated collection-route docs that described transitional
+aliases, especially references that said `/steps` and `/sop` may remain as
+compatibility routes. A follow-on frontend cleanup also removed the unused
+reports API client from `_shared/` because the current browser workflow only
+keeps reports as a non-fetching workspace note.
 
 ## Backend Boundary
 
@@ -77,7 +80,7 @@ same as proving every reports backend path is dead.
 
 ## Expected Result
 
-After this cleanup slice:
+After this cleanup:
 
 - the frontend route tree no longer contains redirect-only `steps`, `sop`,
   `search`, `tasks`, `reports`, or `settings` pages under

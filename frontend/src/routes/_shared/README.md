@@ -5,7 +5,7 @@ This node owns browser-side helpers that are shared across frontend routes.
 ## Scope
 
 - same-origin API request helpers
-- collection, file, task, graph, protocol, report, and workspace clients
+- collection, file, task, graph, protocol, and workspace clients
 - i18n and theme support
 - shared route notices and utility functions
 
@@ -19,7 +19,7 @@ This node owns browser-side helpers that are shared across frontend routes.
 
 - `api.ts`
   Base request helpers
-- `collections.ts`, `files.ts`, `tasks.ts`, `protocol.ts`, `reports.ts`
+- `collections.ts`, `files.ts`, `tasks.ts`, `protocol.ts`
   Domain-specific API wrappers
 - `i18n.ts`
   Shared translations and labels

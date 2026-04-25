@@ -101,14 +101,8 @@ const translations: Record<Language, Translations> = {
 				results: 'Results',
 				evidence: 'Evidence',
 				documents: 'Documents',
-				tasks: 'Tasks',
 				protocol: 'Protocol',
-				steps: 'Paper Steps',
-				search: 'Protocol Search',
-				sop: 'Draft Plan',
-				graph: 'Graph',
-				reports: 'Reports',
-				settings: 'Settings'
+				graph: 'Graph'
 			},
 			backToCollections: 'Back to collections',
 			delete: 'Delete collection',
@@ -1162,14 +1156,8 @@ const translations: Record<Language, Translations> = {
 				results: '结果',
 				evidence: '证据',
 				documents: '文档',
-				tasks: '任务',
 				protocol: 'Protocol',
-				steps: '论文步骤',
-				search: 'Protocol 检索',
-				sop: '方案草案',
-				graph: '图谱',
-				reports: '报告',
-				settings: '设置'
+				graph: '图谱'
 			},
 			backToCollections: '返回集合列表',
 			delete: '删除集合',

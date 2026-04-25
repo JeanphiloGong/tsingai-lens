@@ -39,8 +39,8 @@ The current frontend still reflects the older product center:
   assumptions
 - evidence is still too close to the center of the collection hierarchy
 - the workspace contract still has to normalize older artifact-first fields
-- task, report, and settings affordances still need to stay visually contained
-  inside the workspace instead of becoming parallel route families
+- reports must stay visually contained as workspace context unless a stable
+  product reports surface is intentionally reintroduced
 
 This means the frontend can still mislead users about the intended product
 flow even though the shared product direction is now:
@@ -513,11 +513,19 @@ Deliverables:
 
 Deliverables:
 
-- remove redirect-only route patterns that no longer serve the IA
-- remove stale guidance that describes `/steps`, `/sop`, `/search`, `/tasks`,
+- keep redirect-only route aliases out of the collection route tree
+- keep stale guidance from describing `/steps`, `/sop`, `/search`, `/tasks`,
   `/reports`, or `/settings` as collection pages
 - tighten type definitions to the final backend contract
 - remove stale wording that still treats evidence as the main collection center
+
+Completed cleanup:
+
+- redirect-only `/steps`, `/sop`, `/search`, `/tasks`, `/reports`, and
+  `/settings` collection pages have been removed
+- the unused frontend reports API client has been removed because the current
+  browser workflow keeps reports as a non-fetching workspace note, not as a
+  standalone page or primary contract
 
 ## Copy and UX Rules
 

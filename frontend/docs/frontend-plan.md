@@ -26,7 +26,6 @@
 - 图谱 drilldown 详情：`GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、`GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`、`GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
 - 图谱聚合节点 drilldown：回到 `GET /api/v1/collections/{collection_id}/comparisons`，并使用 `material_system_normalized`、`property_normalized`、`test_condition_normalized`、`baseline_normalized` 过滤参数
 - Protocol 结果：`GET /api/v1/collections/{collection_id}/protocol/steps`、`GET /api/v1/collections/{collection_id}/protocol/search`、`POST /api/v1/collections/{collection_id}/protocol/sop`
-- 报告结果：`GET /api/v1/collections/{collection_id}/reports/communities`、`GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`、`GET /api/v1/collections/{collection_id}/reports/patterns`
 
 ## 前端实现约束
 
@@ -37,10 +36,11 @@
 - 前端主合同不再依赖 `sections_ready` 或 `graphml_ready`；GraphML 导出能力统一看 `capabilities.can_download_graphml`
 - 集合图谱页使用 `Cytoscape.js` 在浏览器端本地布局；邻域扩展保留已有节点位置并只对新增节点做增量重排，不依赖服务端坐标
 - 图谱页的语义聚合节点目前是 `material / property / test_condition / baseline`；默认显示 `material / property`，并通过前端类型开关显式控制其余节点可见性
+- 报告结果不再是当前浏览器主流程；workspace 只保留降级说明，不再维护前端 reports API 客户端
 - 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已退役为说明页，不再发旧浏览器请求
 
 ## 验收重点
 
 - Network 面板中的产品请求只出现 `/api/v1/*` 与 `/api/*`
-- 首页、集合工作区、文件上传、任务轮询、图谱、步骤、SOP、报告都通过同源入口工作
+- 首页、集合工作区、文件上传、任务轮询、图谱、步骤、SOP 都通过同源入口工作
 - 浏览器中的 API 文档入口固定为 `/api/docs`

@@ -17,18 +17,18 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 		url: new URL('http://localhost/collections/col_123/results/cres_1')
 	};
 
-		return {
-			pageStore: {
-				subscribe(run: (value: ResultDetailPageState) => void) {
-					run(current);
-					subscribers.add(run);
-					return () => subscribers.delete(run);
-				}
-			},
-			setPage(next: ResultDetailPageState) {
-				current = next;
-				for (const run of subscribers) run(next);
-			},
+	return {
+		pageStore: {
+			subscribe(run: (value: ResultDetailPageState) => void) {
+				run(current);
+				subscribers.add(run);
+				return () => subscribers.delete(run);
+			}
+		},
+		setPage(next: ResultDetailPageState) {
+			current = next;
+			for (const run of subscribers) run(next);
+		},
 		fetchMock: vi.fn()
 	};
 });
@@ -197,9 +197,66 @@ describe('collections/[id]/results/[resultId]/+page.svelte', () => {
 					],
 					actions: {
 						open_document: '/collections/col_123/documents/doc_1',
-						open_comparisons:
-							'/collections/col_123/comparisons?property_normalized=conductivity',
+						open_comparisons: '/collections/col_123/comparisons?property_normalized=conductivity',
 						open_evidence: null
+					},
+					variant_dossier: {
+						variant_id: 'var_1',
+						variant_label: 'optimized VED + HIP',
+						material: {
+							label: 'oxide cathode',
+							composition: 'LiNiO2'
+						},
+						shared_process_state: {
+							anneal_temperature_c: 700
+						},
+						shared_missingness: ['surface state']
+					},
+					test_condition_detail: {
+						test_method: 'EIS',
+						test_temperature_c: 25,
+						environment: 'air'
+					},
+					baseline_detail: {
+						label: 'as-prepared',
+						reference: 'same-paper control',
+						baseline_type: 'same_document',
+						resolved: true,
+						baseline_scope: 'same material'
+					},
+					structure_support: [
+						{
+							support_id: 'sf_1',
+							support_type: 'phase',
+							summary: 'Layered phase retained after annealing.',
+							condition: {
+								method: 'XRD'
+							}
+						}
+					],
+					value_provenance: {
+						value_origin: 'reported',
+						source_value_text: '12',
+						source_unit_text: 'mS/cm'
+					},
+					series_navigation: {
+						series_key: 'conductivity:test_temperature_c',
+						varying_axis: {
+							axis_name: 'test_temperature_c',
+							axis_unit: 'C'
+						},
+						siblings: [
+							{
+								result_id: 'cres_2',
+								axis_value: 400,
+								axis_unit: 'C',
+								measurement: {
+									property: 'conductivity',
+									value: 10,
+									unit: 'mS/cm'
+								}
+							}
+						]
 					}
 				});
 			}
@@ -215,15 +272,27 @@ describe('collections/[id]/results/[resultId]/+page.svelte', () => {
 		await expect.element(documentTitle).toBeInTheDocument();
 
 		const comparisonLink = browserPage.getByRole('link', { name: 'Open comparisons' });
-		await expect.element(comparisonLink).toHaveAttribute(
-			'href',
-			'/collections/col_123/comparisons?property_normalized=conductivity'
-		);
+		await expect
+			.element(comparisonLink)
+			.toHaveAttribute('href', '/collections/col_123/comparisons?property_normalized=conductivity');
 
 		const sourceLink = browserPage.getByRole('link', { name: 'View source evidence' });
-		await expect.element(sourceLink).toHaveAttribute(
-			'href',
-			'/collections/col_123/documents/doc_1?evidence_id=ev_1&return_to=%2Fcollections%2Fcol_123%2Fresults%2Fcres_1'
-		);
+		await expect
+			.element(sourceLink)
+			.toHaveAttribute(
+				'href',
+				'/collections/col_123/documents/doc_1?evidence_id=ev_1&return_to=%2Fcollections%2Fcol_123%2Fresults%2Fcres_1'
+			);
+
+		await expect.element(browserPage.getByText('Evidence chain')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('optimized VED + HIP')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Layered phase retained after annealing.'))
+			.toBeInTheDocument();
+
+		const siblingLink = browserPage.getByRole('link', { name: /400 C/ });
+		await expect
+			.element(siblingLink)
+			.toHaveAttribute('href', '/collections/col_123/results/cres_2');
 	});
 });

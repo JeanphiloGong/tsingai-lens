@@ -100,6 +100,66 @@ describe('results shared helpers', () => {
 			actions: {
 				open_document: '/collections/col_123/documents/doc_1',
 				open_comparisons: '/collections/col_123/comparisons?property_normalized=conductivity'
+			},
+			variant_dossier: {
+				variant_id: 'var_1',
+				variant_label: 'optimized VED + HIP',
+				material: {
+					label: 'oxide cathode',
+					composition: 'LiNiO2',
+					host_material_system: { family: 'layered oxide' }
+				},
+				shared_process_state: {
+					anneal_temperature_c: 700
+				},
+				shared_missingness: ['surface state']
+			},
+			test_condition_detail: {
+				test_method: 'EIS',
+				test_temperature_c: 25,
+				'strain_rate_s-1': null,
+				environment: 'air'
+			},
+			baseline_detail: {
+				label: 'as-prepared',
+				reference: 'same-paper control',
+				baseline_type: 'same_document',
+				resolved: true,
+				baseline_scope: 'same material'
+			},
+			structure_support: [
+				{
+					support_id: 'sf_1',
+					support_type: 'phase',
+					summary: 'Layered phase retained after annealing.',
+					condition: { method: 'XRD' }
+				}
+			],
+			value_provenance: {
+				value_origin: 'reported',
+				source_value_text: '12',
+				source_unit_text: 'mS/cm',
+				derivation_formula: null,
+				derivation_inputs: null
+			},
+			series_navigation: {
+				series_key: 'conductivity:test_temperature_c',
+				varying_axis: {
+					axis_name: 'test_temperature_c',
+					axis_unit: 'C'
+				},
+				siblings: [
+					{
+						result_id: 'cres_2',
+						axis_value: 400,
+						axis_unit: 'C',
+						measurement: {
+							property: 'conductivity',
+							value: 10,
+							unit: 'mS/cm'
+						}
+					}
+				]
 			}
 		});
 
@@ -110,5 +170,15 @@ describe('results shared helpers', () => {
 		expect(detail.measurement.property).toBe('conductivity');
 		expect(detail.assessment.comparability_status).toBe('comparable');
 		expect(detail.actions.open_document).toContain('/collections/col_123/documents/doc_1');
+		expect(detail.variant_dossier?.variant_label).toBe('optimized VED + HIP');
+		expect(detail.variant_dossier?.shared_process_state.anneal_temperature_c).toBe(700);
+		expect(detail.test_condition_detail?.test_temperature_c).toBe(25);
+		expect(detail.baseline_detail?.resolved).toBe(true);
+		expect(detail.structure_support[0]).toMatchObject({
+			support_id: 'sf_1',
+			support_type: 'phase'
+		});
+		expect(detail.value_provenance?.source_value_text).toBe('12');
+		expect(detail.series_navigation?.siblings[0].axis_value).toBe(400);
 	});
 });

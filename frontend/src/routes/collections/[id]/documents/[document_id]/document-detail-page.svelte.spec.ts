@@ -17,18 +17,18 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 		url: new URL('http://localhost/collections/col_123/documents/doc_1')
 	};
 
-		return {
-			pageStore: {
-				subscribe(run: (value: DocumentDetailPageState) => void) {
-					run(current);
-					subscribers.add(run);
-					return () => subscribers.delete(run);
-				}
-			},
-			setPage(next: DocumentDetailPageState) {
-				current = next;
-				for (const run of subscribers) run(next);
-			},
+	return {
+		pageStore: {
+			subscribe(run: (value: DocumentDetailPageState) => void) {
+				run(current);
+				subscribers.add(run);
+				return () => subscribers.delete(run);
+			}
+		},
+		setPage(next: DocumentDetailPageState) {
+			current = next;
+			for (const run of subscribers) run(next);
+		},
 		fetchMock: vi.fn()
 	};
 });
@@ -113,6 +113,87 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					]
 				});
 			}
+			if (
+				url.pathname === '/api/v1/collections/col_123/documents/doc_1/comparison-semantics' &&
+				url.searchParams.get('include_grouped_projections') === 'true'
+			) {
+				return jsonResponse({
+					collection_id: 'col_123',
+					document_id: 'doc_1',
+					total: 1,
+					count: 1,
+					items: [],
+					variant_dossiers: [
+						{
+							variant_id: 'var_1',
+							variant_label: 'optimized VED + HIP',
+							material: {
+								label: 'oxide cathode',
+								composition: 'LiNiO2'
+							},
+							shared_process_state: {
+								anneal_temperature_c: 700
+							},
+							shared_missingness: [],
+							series: [
+								{
+									series_key: 'conductivity:test_temperature_c',
+									property_family: 'conductivity',
+									test_family: 'EIS',
+									varying_axis: {
+										axis_name: 'test_temperature_c',
+										axis_unit: 'C'
+									},
+									chains: [
+										{
+											result_id: 'cres_1',
+											source_result_id: 'mr_1',
+											measurement: {
+												property: 'conductivity',
+												value: 12,
+												unit: 'mS/cm',
+												result_type: 'scalar',
+												summary: '12 mS/cm'
+											},
+											test_condition: {
+												test_method: 'EIS',
+												test_temperature_c: 25
+											},
+											baseline: {
+												label: 'as-prepared',
+												reference: 'same-paper control',
+												baseline_type: 'same_document',
+												resolved: true
+											},
+											assessment: {
+												comparability_status: 'comparable',
+												warnings: [],
+												basis: [],
+												missing_context: [],
+												requires_expert_review: false,
+												assessment_epistemic_status: 'grounded'
+											},
+											value_provenance: {
+												value_origin: 'reported',
+												source_value_text: '12',
+												source_unit_text: 'mS/cm'
+											},
+											evidence: {
+												evidence_ids: ['ev_1'],
+												direct_anchor_ids: ['anc_1'],
+												contextual_anchor_ids: [],
+												structure_feature_ids: [],
+												characterization_observation_ids: [],
+												traceability_status: 'direct'
+											}
+										}
+									]
+								}
+							]
+						}
+					]
+				});
+			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
 		});
@@ -126,5 +207,13 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		const resultLink = browserPage.getByRole('link', { name: 'oxide cathode · conductivity' });
 		await expect.element(resultLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Document evidence chains' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('optimized VED + HIP')).toBeInTheDocument();
+
+		const chainLink = browserPage.getByRole('link', { name: 'conductivity · 12 mS/cm' });
+		await expect.element(chainLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
 	});
 });

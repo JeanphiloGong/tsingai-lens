@@ -1,4 +1,4 @@
-import { requestJson } from './api';
+import { buildApiUrl, requestJson } from './api';
 import { USE_API_FIXTURES } from './base';
 import type { ResultListItem } from './results';
 
@@ -30,6 +30,19 @@ export type DocumentProfilesResponse = {
 	items: DocumentProfile[];
 };
 
+export type TextCharRange = {
+	start: number;
+	end: number;
+};
+
+export type PdfBoundingBox = {
+	x0: number;
+	y0: number;
+	x1: number;
+	y1: number;
+	coord_origin: string | null;
+};
+
 export type DocumentContentBlock = {
 	block_id: string;
 	block_type: string | null;
@@ -40,6 +53,9 @@ export type DocumentContentBlock = {
 	text_unit_ids: string[];
 	start_offset: number | null;
 	end_offset: number | null;
+	page: number | null;
+	bbox: PdfBoundingBox | null;
+	charRange: TextCharRange | null;
 };
 
 export type DocumentContentResponse = {
@@ -163,6 +179,27 @@ export type DocumentComparisonSemanticsOptions = {
 	includeGroupedProjections?: boolean;
 };
 
+export type SourceTargetPrecision =
+	| 'pdf-region'
+	| 'text-range'
+	| 'pdf-page'
+	| 'section'
+	| 'quote-search'
+	| 'unavailable';
+
+export type WorkbenchSourceTarget = {
+	documentId: string;
+	label: string;
+	page: number | null;
+	bbox: PdfBoundingBox | null;
+	charRange: TextCharRange | null;
+	sectionId: string | null;
+	headingPath: string | null;
+	quote: string | null;
+	precision: SourceTargetPrecision;
+	userMessage: string | null;
+};
+
 export type WorkbenchSourceSpan = {
 	id: string;
 	block_id: string | null;
@@ -170,6 +207,7 @@ export type WorkbenchSourceSpan = {
 	section: string;
 	quote: string;
 	evidence_id: string | null;
+	target: WorkbenchSourceTarget;
 };
 
 export type WorkbenchPdfParagraph = {
@@ -297,9 +335,11 @@ export type DocumentWorkbenchModel = {
 	document_id: string;
 	title: string;
 	source_filename: string | null;
+	sourceFileUrl: string;
 	metadata: string[];
 	pages: WorkbenchPdfPage[];
 	source_spans: WorkbenchSourceSpan[];
+	source_targets_by_span_id: Record<string, WorkbenchSourceTarget>;
 	summary_cards: WorkbenchSummaryCard[];
 	method_rows: WorkbenchMethodRow[];
 	key_results: WorkbenchKeyResultCard[];
@@ -356,6 +396,49 @@ function toOptionalNumber(value: unknown) {
 	return Number.isFinite(number) ? number : null;
 }
 
+function toPositiveInteger(value: unknown) {
+	const number = toOptionalNumber(value);
+	if (number === null) return null;
+	const integer = Math.trunc(number);
+	return integer > 0 && integer === number ? integer : null;
+}
+
+function toNonNegativeInteger(value: unknown) {
+	const number = toOptionalNumber(value);
+	if (number === null) return null;
+	const integer = Math.trunc(number);
+	return integer >= 0 && integer === number ? integer : null;
+}
+
+function normalizeTextCharRange(value: unknown): TextCharRange | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const start = toNonNegativeInteger(record.start);
+	const end = toNonNegativeInteger(record.end);
+	if (start === null || end === null || end < start) return null;
+	return { start, end };
+}
+
+function normalizePdfBoundingBox(value: unknown): PdfBoundingBox | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const x0 = toOptionalNumber(record.x0);
+	const y0 = toOptionalNumber(record.y0);
+	const x1 = toOptionalNumber(record.x1);
+	const y1 = toOptionalNumber(record.y1);
+	if (x0 === null || y0 === null || x1 === null || y1 === null) return null;
+
+	return {
+		x0,
+		y0,
+		x1,
+		y1,
+		coord_origin: toOptionalText(record.coord_origin)
+	};
+}
+
 function toBoolean(value: unknown) {
 	if (typeof value === 'boolean') return value;
 	if (typeof value === 'number') return value !== 0;
@@ -402,7 +485,10 @@ function normalizeContentBlock(value: unknown, index: number): DocumentContentBl
 		text,
 		text_unit_ids: toStringList(record.text_unit_ids),
 		start_offset: Number.isFinite(startOffset) ? startOffset : null,
-		end_offset: Number.isFinite(endOffset) ? endOffset : null
+		end_offset: Number.isFinite(endOffset) ? endOffset : null,
+		page: toPositiveInteger(record.page),
+		bbox: normalizePdfBoundingBox(record.bbox),
+		charRange: normalizeTextCharRange(record.char_range ?? record.charRange)
 	};
 }
 
@@ -628,7 +714,10 @@ function workbenchFixtureBlocks(): DocumentContentBlock[] {
 			text: 'We propose Graph Prompting, a simple yet effective framework that reformulates knowledge graph completion as prompt-based generation with structural context.',
 			text_unit_ids: ['fixture-tu-abstract'],
 			start_offset: null,
-			end_offset: null
+			end_offset: null,
+			page: 1,
+			bbox: { x0: 72, y0: 120, x1: 520, y1: 186, coord_origin: 'top_left' },
+			charRange: { start: 0, end: 152 }
 		},
 		{
 			block_id: 'intro-kcg',
@@ -639,7 +728,10 @@ function workbenchFixtureBlocks(): DocumentContentBlock[] {
 			text: 'In low-resource settings, each query is paired with a small relevant subgraph context. The context and query are verbalized into a prompt, which is fed into a frozen language model to predict the missing entity.',
 			text_unit_ids: ['fixture-tu-intro'],
 			start_offset: null,
-			end_offset: null
+			end_offset: null,
+			page: 2,
+			bbox: null,
+			charRange: null
 		},
 		{
 			block_id: 'method-model',
@@ -650,7 +742,10 @@ function workbenchFixtureBlocks(): DocumentContentBlock[] {
 			text: 'The method samples neighborhood triples, builds a subgraph prompt, and evaluates entity prediction under few-shot knowledge graph completion benchmarks.',
 			text_unit_ids: ['fixture-tu-method'],
 			start_offset: null,
-			end_offset: null
+			end_offset: null,
+			page: null,
+			bbox: null,
+			charRange: null
 		},
 		{
 			block_id: 'results-main',
@@ -661,7 +756,10 @@ function workbenchFixtureBlocks(): DocumentContentBlock[] {
 			text: 'Across five benchmark datasets, Graph Prompting improves ranking metrics in the low-resource regime while keeping the model frozen.',
 			text_unit_ids: ['fixture-tu-results'],
 			start_offset: null,
-			end_offset: null
+			end_offset: null,
+			page: 4,
+			bbox: null,
+			charRange: null
 		},
 		{
 			block_id: 'discussion-limits',
@@ -672,20 +770,18 @@ function workbenchFixtureBlocks(): DocumentContentBlock[] {
 			text: 'The result is most reliable when the source paragraph reports the benchmark split, baseline, metric, and evaluation setting together.',
 			text_unit_ids: ['fixture-tu-discussion'],
 			start_offset: null,
-			end_offset: null
+			end_offset: null,
+			page: null,
+			bbox: null,
+			charRange: null
 		}
 	];
 }
 
 function sortedWorkbenchBlocks(content: DocumentContentResponse | null | undefined) {
 	const blocks = [...(content?.blocks ?? [])].sort((left, right) => left.order - right.order);
-	if (blocks.length >= 4) return blocks;
-
-	const existingIds = new Set(blocks.map((block) => block.block_id));
-	const fixtureBlocks = workbenchFixtureBlocks().filter(
-		(block) => !existingIds.has(block.block_id)
-	);
-	return [...blocks, ...fixtureBlocks].sort((left, right) => left.order - right.order);
+	if (blocks.length) return blocks;
+	return workbenchFixtureBlocks();
 }
 
 function sectionForWorkbenchBlock(block: DocumentContentBlock, index: number) {
@@ -696,14 +792,67 @@ function sourceSpanIdForBlock(block: DocumentContentBlock) {
 	return `source-${block.block_id}`;
 }
 
-function buildWorkbenchSourceSpans(blocks: DocumentContentBlock[]): WorkbenchSourceSpan[] {
+function sourceTargetPrecision(block: DocumentContentBlock): SourceTargetPrecision {
+	if (block.page !== null && block.bbox) return 'pdf-region';
+	if (block.charRange) return 'text-range';
+	if (block.page !== null) return 'pdf-page';
+	if (block.heading_path) return 'section';
+	if (block.text) return 'quote-search';
+	return 'unavailable';
+}
+
+function sourceTargetMessage(precision: SourceTargetPrecision) {
+	if (precision === 'pdf-region') {
+		return 'PDF region metadata is available; this reader opens the source page until region overlays are enabled.';
+	}
+	if (precision === 'text-range') return 'Parsed text range is available for highlighting.';
+	if (precision === 'pdf-page') return 'Precise PDF region is unavailable; page fallback is used.';
+	if (precision === 'section') {
+		return 'Location precision is limited; review the nearby source section.';
+	}
+	if (precision === 'quote-search') return 'Location is matched from the source quote.';
+	return 'Source location is unavailable for this item.';
+}
+
+function buildWorkbenchSourceTarget(
+	documentId: string,
+	block: DocumentContentBlock,
+	index: number
+): WorkbenchSourceTarget {
+	const label = sectionForWorkbenchBlock(block, index);
+	const precision = sourceTargetPrecision(block);
+	return {
+		documentId,
+		label,
+		page: block.page,
+		bbox: block.bbox,
+		charRange: block.charRange,
+		sectionId: block.heading_path ? `section-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : null,
+		headingPath: block.heading_path,
+		quote: block.text || null,
+		precision,
+		userMessage: sourceTargetMessage(precision)
+	};
+}
+
+function buildDocumentSourceFileUrl(collectionId: string, documentId: string) {
+	return buildApiUrl(
+		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/source`
+	);
+}
+
+function buildWorkbenchSourceSpans(
+	documentId: string,
+	blocks: DocumentContentBlock[]
+): WorkbenchSourceSpan[] {
 	return blocks.map((block, index) => ({
 		id: sourceSpanIdForBlock(block),
 		block_id: block.block_id,
-		page: Math.floor(index / 3) + 1,
+		page: block.page ?? Math.floor(index / 3) + 1,
 		section: sectionForWorkbenchBlock(block, index),
 		quote: block.text,
-		evidence_id: null
+		evidence_id: null,
+		target: buildWorkbenchSourceTarget(documentId, block, index)
 	}));
 }
 
@@ -711,26 +860,37 @@ function spanAt(spans: WorkbenchSourceSpan[], index: number) {
 	return spans[index % Math.max(spans.length, 1)]?.id ?? 'source-abstract';
 }
 
-function buildWorkbenchPages(blocks: DocumentContentBlock[], spans: WorkbenchSourceSpan[]) {
-	const pages: WorkbenchPdfPage[] = [];
-	const chunkSize = 3;
-	for (let index = 0; index < blocks.length; index += chunkSize) {
-		const chunk = blocks.slice(index, index + chunkSize);
-		const pageNumber = Math.floor(index / chunkSize) + 1;
-		pages.push({
+function buildWorkbenchPages(
+	blocks: DocumentContentBlock[],
+	spans: WorkbenchSourceSpan[],
+	padFixturePages: boolean
+) {
+	const pagesByNumber = new Map<number, WorkbenchPdfPage>();
+
+	for (const [index, block] of blocks.entries()) {
+		const span = spans[index];
+		const pageNumber = span?.page ?? Math.floor(index / 3) + 1;
+		const page = pagesByNumber.get(pageNumber) ?? {
 			page_number: pageNumber,
 			label: `Page ${pageNumber}`,
-			paragraphs: chunk.map((block, offset) => ({
-				id: block.block_id,
-				section: sectionForWorkbenchBlock(block, index + offset),
-				text: block.text,
-				source_span_id: sourceSpanIdForBlock(block)
-			})),
-			source_span_ids: chunk.map((block) => sourceSpanIdForBlock(block))
+			paragraphs: [],
+			source_span_ids: []
+		};
+		page.paragraphs.push({
+			id: block.block_id,
+			section: sectionForWorkbenchBlock(block, index),
+			text: block.text,
+			source_span_id: span?.id ?? sourceSpanIdForBlock(block)
 		});
+		page.source_span_ids.push(span?.id ?? sourceSpanIdForBlock(block));
+		pagesByNumber.set(pageNumber, page);
 	}
 
-	while (pages.length < 4) {
+	const pages = Array.from(pagesByNumber.values()).sort(
+		(left, right) => left.page_number - right.page_number
+	);
+
+	while (padFixturePages && pages.length < 4) {
 		const pageNumber = pages.length + 1;
 		pages.push({
 			page_number: pageNumber,
@@ -1250,9 +1410,13 @@ export function buildDocumentWorkbenchModel({
 	comparisonSemantics: DocumentComparisonSemanticsResponse | null;
 	relatedResults?: ResultListItem[];
 }): DocumentWorkbenchModel {
+	const hasBackendBlocks = Boolean(content?.blocks.length);
 	const blocks = sortedWorkbenchBlocks(content);
-	const sourceSpans = buildWorkbenchSourceSpans(blocks);
-	const pages = buildWorkbenchPages(blocks, sourceSpans);
+	const sourceSpans = buildWorkbenchSourceSpans(documentId, blocks);
+	const sourceTargetsBySpanId = Object.fromEntries(
+		sourceSpans.map((span) => [span.id, span.target])
+	);
+	const pages = buildWorkbenchPages(blocks, sourceSpans, !hasBackendBlocks);
 	const contexts = flattenWorkbenchChains(comparisonSemantics?.variant_dossiers);
 	const resultRows = buildWorkbenchResultRows(collectionId, contexts, relatedResults, sourceSpans);
 	const summaryCards = buildWorkbenchSummaryCards(contexts, resultRows, sourceSpans);
@@ -1280,7 +1444,8 @@ export function buildDocumentWorkbenchModel({
 			toOptionalText(content?.title) ||
 			toOptionalText(content?.source_filename) ||
 			'Graph Prompting for Low-Resource Knowledge Graph Completion',
-		source_filename: toOptionalText(content?.source_filename) || 'paper-source.pdf',
+		source_filename: toOptionalText(content?.source_filename) || (content ? null : 'fixture-paper.txt'),
+		sourceFileUrl: buildDocumentSourceFileUrl(collectionId, content?.document_id || documentId),
 		metadata: [
 			'Wang et al.',
 			'Tsinghua University',
@@ -1289,6 +1454,7 @@ export function buildDocumentWorkbenchModel({
 		],
 		pages,
 		source_spans: sourceSpans,
+		source_targets_by_span_id: sourceTargetsBySpanId,
 		summary_cards: summaryCards,
 		method_rows: methodRows,
 		key_results: keyResults,
@@ -1566,7 +1732,10 @@ export async function fetchDocumentContent(
 					text: 'The precursor powders were mixed in ethanol and stirred for 2 h.',
 					text_unit_ids: ['tu-1'],
 					start_offset: 21,
-					end_offset: 84
+					end_offset: 84,
+					page: 3,
+					bbox: null,
+					charRange: { start: 21, end: 84 }
 				},
 				{
 					block_id: 'characterization',
@@ -1577,7 +1746,10 @@ export async function fetchDocumentContent(
 					text: 'XRD and SEM were used to characterize the powders.',
 					text_unit_ids: ['tu-2'],
 					start_offset: 102,
-					end_offset: 153
+					end_offset: 153,
+					page: null,
+					bbox: null,
+					charRange: null
 				}
 			],
 			warnings: []

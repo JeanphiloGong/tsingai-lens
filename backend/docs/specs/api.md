@@ -295,10 +295,39 @@
 
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/source`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
 
 其中 `/profile` 返回与 list item 同语义的单项 document profile，`/content`
-返回原文阅读器内容与 section 结构。
+返回原文阅读器内容与 section fallback 结构，`/source` 以 inline file
+response 返回该 document 的原始上传文件，供浏览器 PDF/source reader
+直接展示。
+
+`/content` 的每个 block 仍是 backend source locator unit，不是前端可见
+章节模型。前端可以用这些字段做 fallback 定位，但默认 UI 不应暴露
+`block_id`、`blk_xxx` 或重复的 block-level `heading_path`。block locator
+字段：
+
+- `page`: 源文件页码；不可用或非法时为 `null`
+- `bbox`: 页面坐标框；不可用或非法时为 `null`
+  - `x0`
+  - `y0`
+  - `x1`
+  - `y1`
+  - `coord_origin`
+- `char_range`: 源文本字符范围；不可用或非法时为 `null`
+  - `start`
+  - `end`
+
+`/source` 行为：
+
+- 成功时返回 `200`，`Content-Disposition` 为 inline，`Content-Type` 优先使用
+  collection metadata 中的 `media_type`，否则按文件名推断
+- collection 或 document 无法解析时返回 `404`
+- document 存在但 source file 缺失、无法安全解析或存在歧义时返回 `409`
+  structured detail
+- endpoint 不接受任何 request path；文件路径只能从 collection-owned
+  metadata 解析，且必须位于 collection input 目录内
 
 文档页语义要求：
 
@@ -652,9 +681,12 @@
 
 前端降级顺序（固定）：
 
-1. `char_range`
-2. `bbox`
-3. `section`
+1. `page + bbox` when the active reader can draw PDF overlays
+2. `char_range`
+3. `page`
+4. `section`
+5. `quote`
+6. source location unavailable message
 
 comparison 对 traceback 的依赖约定：
 

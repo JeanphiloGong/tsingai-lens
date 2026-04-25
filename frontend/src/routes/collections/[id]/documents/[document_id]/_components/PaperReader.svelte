@@ -2,12 +2,18 @@
 	import { browser } from '$app/environment';
 	import { tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
-	import type { WorkbenchPdfPage } from '../../../../../_shared/documents';
+	import type {
+		WorkbenchPdfPage,
+		WorkbenchSourceTarget
+	} from '../../../../../_shared/documents';
 
 	export let title = '';
 	export let metadata: string[] = [];
 	export let pages: WorkbenchPdfPage[] = [];
+	export let sourceFileUrl = '';
+	export let sourceFilename: string | null = null;
 	export let activeSourceSpanId = '';
+	export let sourceTarget: WorkbenchSourceTarget | null = null;
 	export let onSelectSourceSpan: (sourceSpanId: string) => void = () => {};
 
 	let thumbnailTab: 'source' | 'outline' = 'source';
@@ -15,12 +21,35 @@
 	let zoom = '100%';
 	const zoomLevels = ['Fit', '90%', '100%', '125%'];
 
-	$: currentPage = pageForSourceSpan(activeSourceSpanId);
+	$: readerMode = resolveReaderMode(sourceFilename, sourceFileUrl, pages);
+	$: sourceTargetMessageKey = messageKeyForTarget(sourceTarget);
+	$: pdfSourceUrl = sourceFileUrl ? `${sourceFileUrl}#page=${currentPage}` : '';
+	$: currentPage = pageForSourceSpan(activeSourceSpanId, sourceTarget);
 	$: if (activeSourceSpanId) {
 		void scrollToSourceSpan(activeSourceSpanId);
 	}
 
-	function pageForSourceSpan(sourceSpanId: string) {
+	function resolveReaderMode(
+		filename: string | null,
+		fileUrl: string,
+		sourcePages: WorkbenchPdfPage[]
+	): 'pdf' | 'text' | 'unavailable' {
+		if (fileUrl && filename?.toLowerCase().endsWith('.pdf')) return 'pdf';
+		return sourcePages.length ? 'text' : 'unavailable';
+	}
+
+	function messageKeyForTarget(target: WorkbenchSourceTarget | null) {
+		if (!target) return '';
+		if (target.precision === 'pdf-region') return 'workbench.sourcePdfRegionFallback';
+		if (target.precision === 'text-range') return 'workbench.sourceTextRange';
+		if (target.precision === 'pdf-page') return 'workbench.sourcePdfPageFallback';
+		if (target.precision === 'section') return 'workbench.sourceSectionFallback';
+		if (target.precision === 'quote-search') return 'workbench.sourceQuoteFallback';
+		return 'workbench.sourceUnavailable';
+	}
+
+	function pageForSourceSpan(sourceSpanId: string, target: WorkbenchSourceTarget | null) {
+		if (target?.page) return target.page;
 		const page = pages.find((item) => item.source_span_ids.includes(sourceSpanId));
 		return page?.page_number ?? currentPage;
 	}
@@ -46,6 +75,33 @@
 
 	function selectParagraph(sourceSpanId: string | null) {
 		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
+	}
+
+	function outlineSections() {
+		const seen = new Set<string>();
+		const sections: { label: string; sourceSpanId: string | null }[] = [];
+		for (const page of pages) {
+			for (const paragraph of page.paragraphs) {
+				const label = paragraph.section || $t('workbench.sectionFallback');
+				if (seen.has(label)) continue;
+				seen.add(label);
+				sections.push({ label, sourceSpanId: paragraph.source_span_id });
+			}
+		}
+		return sections;
+	}
+
+	function shouldShowSectionHeading(
+		pageIndex: number,
+		paragraphIndex: number,
+		section: string | null
+	) {
+		if (!section) return false;
+		const previousParagraph =
+			paragraphIndex > 0
+				? pages[pageIndex]?.paragraphs[paragraphIndex - 1]
+				: pages[pageIndex - 1]?.paragraphs.at(-1);
+		return previousParagraph?.section !== section;
 	}
 
 	function handleParagraphKeydown(event: KeyboardEvent, sourceSpanId: string | null) {
@@ -97,13 +153,13 @@
 			</div>
 		{:else}
 			<div class="outline-list">
-				{#each pages.flatMap((page) => page.paragraphs) as paragraph}
+				{#each outlineSections() as section}
 					<button
 						type="button"
-						on:click={() => selectParagraph(paragraph.source_span_id)}
-						class:active={paragraph.source_span_id === activeSourceSpanId}
+						on:click={() => selectParagraph(section.sourceSpanId)}
+						class:active={section.sourceSpanId === activeSourceSpanId}
 					>
-						{paragraph.section || $t('workbench.sectionFallback')}
+						{section.label}
 					</button>
 				{/each}
 			</div>
@@ -143,48 +199,101 @@
 			</select>
 			<button type="button" class="icon-button" aria-label={$t('workbench.fitWidth')}>F</button>
 			<button type="button" class="icon-button" aria-label={$t('workbench.searchSource')}>S</button>
-			<button type="button" class="icon-button" aria-label={$t('workbench.downloadSource')}
-				>DL</button
-			>
+			{#if sourceFileUrl}
+				<a class="icon-button" href={sourceFileUrl} aria-label={$t('workbench.downloadSource')}
+					>DL</a
+				>
+			{:else}
+				<button type="button" class="icon-button" aria-label={$t('workbench.downloadSource')}>
+					DL
+				</button>
+			{/if}
 		</div>
 
 		<div class="pdf-canvas">
-			<div class="selection-popover" aria-label={$t('workbench.selectionActions')}>
-				<button type="button">{$t('workbench.explain')}</button>
-				<button type="button">{$t('workbench.summarize')}</button>
-				<button type="button">{$t('workbench.addNote')}</button>
-				<button type="button">{$t('workbench.more')}</button>
-			</div>
+			{#if readerMode === 'pdf'}
+				<div class="pdf-object-stage" id={`pdf-page-${currentPage}`}>
+					<object data={pdfSourceUrl} type="application/pdf" title={title}>
+						<div class="empty-state">
+							<h3>{$t('workbench.sourceUnavailableTitle')}</h3>
+							<p>{$t('workbench.sourceUnavailableBody')}</p>
+						</div>
+					</object>
+				</div>
 
-			<div class="reader-tool-rail" aria-label={$t('workbench.readerToolsLabel')}>
-				<button type="button" aria-label={$t('workbench.selectTool')}>T</button>
-				<button type="button" aria-label={$t('workbench.panTool')}>P</button>
-				<button type="button" aria-label={$t('workbench.commentTool')}>C</button>
-				<button type="button" aria-label={$t('workbench.penTool')}>/</button>
-				<button type="button" aria-label={$t('workbench.searchTool')}>S</button>
-			</div>
+				{#if sourceTargetMessageKey}
+					<div class="source-target-note">
+						<strong>{sourceTarget?.label}</strong>
+						<span>{$t(sourceTargetMessageKey)}</span>
+					</div>
+				{/if}
 
-			{#each pages as page}
-				<section class="pdf-page" id={`pdf-page-${page.page_number}`} aria-label={page.label}>
-					<h2>{title}</h2>
-					<p class="authors">{metadata.slice(0, 2).join(' | ')}</p>
-					{#each page.paragraphs as paragraph}
-						{#if paragraph.section}
-							<h3>{paragraph.section}</h3>
-						{/if}
-						<button
-							type="button"
-							id={paragraph.source_span_id ? `pdf-source-${paragraph.source_span_id}` : undefined}
-							class:source-span--active={paragraph.source_span_id === activeSourceSpanId}
-							class="pdf-paragraph"
-							on:click={() => selectParagraph(paragraph.source_span_id)}
-							on:keydown={(event) => handleParagraphKeydown(event, paragraph.source_span_id)}
-						>
-							{paragraph.text}
-						</button>
+				<div class="parsed-source-strip" aria-label={$t('workbench.parsedSourceFallback')}>
+					{#each pages as page, pageIndex}
+						<section class="parsed-page" id={`parsed-page-${page.page_number}`}>
+							{#each page.paragraphs as paragraph, paragraphIndex}
+								{#if shouldShowSectionHeading(pageIndex, paragraphIndex, paragraph.section)}
+									<h3>{paragraph.section}</h3>
+								{/if}
+								<button
+									type="button"
+									id={paragraph.source_span_id ? `pdf-source-${paragraph.source_span_id}` : undefined}
+									class:source-span--active={paragraph.source_span_id === activeSourceSpanId}
+									class="pdf-paragraph"
+									on:click={() => selectParagraph(paragraph.source_span_id)}
+									on:keydown={(event) => handleParagraphKeydown(event, paragraph.source_span_id)}
+								>
+									{paragraph.text}
+								</button>
+							{/each}
+						</section>
 					{/each}
-				</section>
-			{/each}
+				</div>
+			{:else if readerMode === 'text'}
+				<div class="selection-popover" aria-label={$t('workbench.selectionActions')}>
+					<button type="button">{$t('workbench.explain')}</button>
+					<button type="button">{$t('workbench.summarize')}</button>
+					<button type="button">{$t('workbench.addNote')}</button>
+					<button type="button">{$t('workbench.more')}</button>
+				</div>
+
+				<div class="reader-tool-rail" aria-label={$t('workbench.readerToolsLabel')}>
+					<button type="button" aria-label={$t('workbench.selectTool')}>T</button>
+					<button type="button" aria-label={$t('workbench.panTool')}>P</button>
+					<button type="button" aria-label={$t('workbench.commentTool')}>C</button>
+					<button type="button" aria-label={$t('workbench.penTool')}>/</button>
+					<button type="button" aria-label={$t('workbench.searchTool')}>S</button>
+				</div>
+
+				{#each pages as page, pageIndex}
+					<section class="pdf-page" id={`pdf-page-${page.page_number}`} aria-label={page.label}>
+						{#if page.page_number === 1}
+							<h2>{title}</h2>
+							<p class="authors">{metadata.slice(0, 2).join(' | ')}</p>
+						{/if}
+						{#each page.paragraphs as paragraph, paragraphIndex}
+							{#if shouldShowSectionHeading(pageIndex, paragraphIndex, paragraph.section)}
+								<h3>{paragraph.section}</h3>
+							{/if}
+							<button
+								type="button"
+								id={paragraph.source_span_id ? `pdf-source-${paragraph.source_span_id}` : undefined}
+								class:source-span--active={paragraph.source_span_id === activeSourceSpanId}
+								class="pdf-paragraph"
+								on:click={() => selectParagraph(paragraph.source_span_id)}
+								on:keydown={(event) => handleParagraphKeydown(event, paragraph.source_span_id)}
+							>
+								{paragraph.text}
+							</button>
+						{/each}
+					</section>
+				{/each}
+			{:else}
+				<div class="empty-state empty-state--reader">
+					<h3>{$t('workbench.sourceUnavailableTitle')}</h3>
+					<p>{$t('workbench.sourceUnavailableBody')}</p>
+				</div>
+			{/if}
 		</div>
 	</article>
 </section>
@@ -382,6 +491,7 @@
 		color: #475569;
 		font-size: 13px;
 		font-weight: 700;
+		text-decoration: none;
 		cursor: pointer;
 	}
 
@@ -425,6 +535,60 @@
 		background: #f8fafc;
 	}
 
+	.pdf-object-stage {
+		width: min(100%, 680px);
+		height: calc(100% - 106px);
+		min-height: 620px;
+		margin: 0 auto 16px;
+		overflow: hidden;
+		border: 1px solid #e5e7eb;
+		background: #ffffff;
+		box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+	}
+
+	.pdf-object-stage object {
+		display: block;
+		width: 100%;
+		height: 100%;
+		border: 0;
+	}
+
+	.source-target-note {
+		display: flex;
+		width: min(100%, 680px);
+		margin: 0 auto 12px;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 12px;
+		border: 1px solid #bfdbfe;
+		border-radius: 12px;
+		background: #eff6ff;
+		color: #1e40af;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.source-target-note strong {
+		color: #0f172a;
+		font-weight: 700;
+	}
+
+	.parsed-source-strip {
+		width: min(100%, 680px);
+		max-height: 190px;
+		margin: 0 auto;
+		overflow-y: auto;
+		padding: 12px;
+		border: 1px solid #e2e8f0;
+		border-radius: 14px;
+		background: #ffffff;
+	}
+
+	.parsed-page + .parsed-page {
+		margin-top: 12px;
+	}
+
 	.pdf-page {
 		width: 600px;
 		min-height: 820px;
@@ -463,6 +627,14 @@
 		line-height: 1.35;
 	}
 
+	.parsed-page h3 {
+		margin: 0 0 8px;
+		color: #0f172a;
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
 	.pdf-paragraph {
 		display: block;
 		width: 100%;
@@ -480,10 +652,53 @@
 		cursor: pointer;
 	}
 
+	.parsed-source-strip .pdf-paragraph {
+		font-family:
+			system-ui,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
 	.source-span--active {
 		border-color: #60a5fa;
 		background: #dbeafe;
 		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+	}
+
+	.empty-state {
+		display: grid;
+		height: 100%;
+		place-content: center;
+		gap: 8px;
+		padding: 24px;
+		border: 1px dashed #cbd5e1;
+		border-radius: 14px;
+		background: #f8fafc;
+		text-align: center;
+	}
+
+	.empty-state h3 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 16px;
+		font-weight: 700;
+		line-height: 24px;
+	}
+
+	.empty-state p {
+		max-width: 320px;
+		margin: 0;
+		color: #64748b;
+		font-size: 14px;
+		line-height: 22px;
+	}
+
+	.empty-state--reader {
+		min-height: 320px;
 	}
 
 	.selection-popover {

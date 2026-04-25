@@ -6,13 +6,17 @@ This node owns the collection workspace route family in the frontend.
 
 - `collections/[id]/+layout.svelte`
 - `collections/[id]/+page.svelte`
+- `collections/[id]/documents/[document_id]/+page.svelte`
 
 ## Responsibilities
 
 - render the collection workspace
+- render document detail as a paper reader plus structured understanding workbench
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness
 - surface graph, protocol, and report capabilities to the user
+- keep source traceback on the document page user-facing: original PDF/source
+  first, parsed text/section fallback second, block IDs only for diagnostics
 
 ## Local Docs
 
@@ -52,6 +56,9 @@ This node owns the collection workspace route family in the frontend.
 - [`document-evidence-review-split-view-plan.md`](document-evidence-review-split-view-plan.md)
   Frontend-local plan for the document detail split view that aligns source
   text with selected evidence chains
+- [`../../../../docs/decisions/rfc-pdf-backed-document-workbench.md`](../../../../docs/decisions/rfc-pdf-backed-document-workbench.md)
+  Shared frontend/backend plan for making the document detail route a
+  PDF-backed paper understanding workbench with locator fallback
 - [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md)
   Claim-to-source navigation contract for comparison, result, and document
   evidence-panel traceback behavior

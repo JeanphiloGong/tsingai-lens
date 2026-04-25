@@ -24,6 +24,24 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class DocumentSourceUnavailableError(RuntimeError):
+    """Raised when a document exists but its original source file cannot be served."""
+
+    def __init__(
+        self,
+        collection_id: str,
+        document_id: str,
+        *,
+        code: str = "document_source_unavailable",
+        message: str = "The original source file is not available for this document.",
+    ) -> None:
+        self.collection_id = collection_id
+        self.document_id = document_id
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
 class CollectionService:
     """File-backed collection registry for the application layer."""
 
@@ -141,6 +159,51 @@ class CollectionService:
         if manifest is None:
             return empty_import_manifest(collection_id)
         return manifest
+
+    def resolve_document_source_file(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> dict[str, Any]:
+        self.get_collection(collection_id)
+        paths = self.repository.get_paths(collection_id)
+        document_key = str(document_id or "").strip()
+        if not document_key:
+            raise DocumentSourceUnavailableError(collection_id, document_key)
+
+        manifest = self.repository.read_import_manifest(collection_id) or {}
+        manifest_documents = self._iter_manifest_documents(manifest)
+        for document in manifest_documents:
+            if str(document.get("source_document_id") or "").strip() == document_key:
+                return self._build_source_file_payload(
+                    collection_id=collection_id,
+                    document_id=document_key,
+                    record=document,
+                    paths=paths,
+                )
+
+        file_matches = [
+            record
+            for record in self.repository.read_files(collection_id) or []
+            if self._source_file_record_matches(record, document_key)
+        ]
+        if len(file_matches) == 1:
+            return self._build_source_file_payload(
+                collection_id=collection_id,
+                document_id=document_key,
+                record=file_matches[0],
+                paths=paths,
+            )
+        if len(file_matches) > 1:
+            raise DocumentSourceUnavailableError(
+                collection_id,
+                document_key,
+                code="document_source_ambiguous",
+                message="More than one stored source file matches this document.",
+            )
+        if manifest_documents:
+            raise FileNotFoundError(f"document not found: {collection_id}/{document_key}")
+        raise DocumentSourceUnavailableError(collection_id, document_key)
 
     def register_goal_brief_handoff(
         self,
@@ -389,3 +452,124 @@ class CollectionService:
             "ingested_at": batch.source_metadata.ingested_at,
             "documents": documents,
         }
+
+    def _iter_manifest_documents(self, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        imports = manifest.get("imports")
+        if not isinstance(imports, list):
+            return documents
+        for import_record in imports:
+            if not isinstance(import_record, dict):
+                continue
+            import_documents = import_record.get("documents")
+            if not isinstance(import_documents, list):
+                continue
+            documents.extend(
+                document
+                for document in import_documents
+                if isinstance(document, dict)
+            )
+        return documents
+
+    def _source_file_record_matches(
+        self,
+        record: dict[str, Any],
+        document_id: str,
+    ) -> bool:
+        candidates = (
+            record.get("source_document_id"),
+            record.get("document_id"),
+            record.get("original_filename"),
+            record.get("stored_filename"),
+        )
+        return any(str(candidate or "").strip() == document_id for candidate in candidates)
+
+    def _build_source_file_payload(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        record: dict[str, Any],
+        paths: CollectionPaths,
+    ) -> dict[str, Any]:
+        path = self._resolve_source_record_path(
+            collection_id=collection_id,
+            document_id=document_id,
+            record=record,
+            paths=paths,
+        )
+        filename = (
+            self._optional_text(record.get("original_filename"))
+            or self._optional_text(record.get("stored_filename"))
+            or path.name
+        )
+        return {
+            "path": path,
+            "filename": filename,
+            "media_type": self._optional_text(record.get("media_type")),
+            "source_document_id": self._optional_text(record.get("source_document_id"))
+            or document_id,
+        }
+
+    def _resolve_source_record_path(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        record: dict[str, Any],
+        paths: CollectionPaths,
+    ) -> Path:
+        candidates: list[Path] = []
+        storage_relpath = self._optional_text(record.get("storage_relpath"))
+        if storage_relpath:
+            relpath = Path(storage_relpath)
+            candidates.append(
+                relpath if relpath.is_absolute() else paths.collection_dir / relpath
+            )
+
+        stored_path = self._optional_text(record.get("stored_path"))
+        if stored_path:
+            candidates.append(Path(stored_path))
+
+        stored_filename = self._optional_text(record.get("stored_filename"))
+        if stored_filename:
+            candidates.append(paths.input_dir / Path(stored_filename).name)
+
+        for candidate in candidates:
+            resolved = self._validate_collection_input_path(
+                collection_id=collection_id,
+                document_id=document_id,
+                candidate=candidate,
+                paths=paths,
+            )
+            if resolved.is_file():
+                return resolved
+
+        raise DocumentSourceUnavailableError(collection_id, document_id)
+
+    def _validate_collection_input_path(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        candidate: Path,
+        paths: CollectionPaths,
+    ) -> Path:
+        resolved = candidate.expanduser().resolve()
+        try:
+            resolved.relative_to(paths.collection_dir.resolve())
+            resolved.relative_to(paths.input_dir.resolve())
+        except ValueError as exc:
+            raise DocumentSourceUnavailableError(
+                collection_id,
+                document_id,
+                code="document_source_path_invalid",
+                message="The stored source file path is not safe to serve.",
+            ) from exc
+        return resolved
+
+    def _optional_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None

@@ -6,6 +6,7 @@
 		fetchDocumentContent,
 		type DocumentWorkbenchModel,
 		type WorkbenchLocalGraph,
+		type WorkbenchSourceTarget,
 		type WorkbenchTab
 	} from '../../../../_shared/documents';
 	import { t } from '../../../../_shared/i18n';
@@ -29,6 +30,7 @@
 	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
 	$: loadKey = `${collectionId}:${routeDocumentId}:${requestedResultId}:${requestedEvidenceId}`;
 	$: selectedGraph = graphForSelection(model, selectedItemId);
+	$: selectedSourceTarget = sourceTargetForSelection(model, selectedSourceSpanId);
 	$: if (selectedGraph && !selectedGraph.nodes.some((node) => node.id === selectedGraphNodeId)) {
 		selectedGraphNodeId = selectedGraph.nodes.find((node) => node.position === 'center')?.id ?? '';
 	}
@@ -87,6 +89,14 @@
 			currentModel.graphs_by_item_id[currentModel.default_item_id] ??
 			null
 		);
+	}
+
+	function sourceTargetForSelection(
+		currentModel: DocumentWorkbenchModel | null,
+		sourceSpanId: string
+	): WorkbenchSourceTarget | null {
+		if (!currentModel || !sourceSpanId) return null;
+		return currentModel.source_targets_by_span_id[sourceSpanId] ?? null;
 	}
 
 	function selectItem(itemId: string, tab?: WorkbenchTab) {
@@ -179,7 +189,10 @@
 					title={model.title}
 					metadata={model.metadata}
 					pages={model.pages}
+					sourceFileUrl={model.sourceFileUrl}
+					sourceFilename={model.source_filename}
 					activeSourceSpanId={selectedSourceSpanId}
+					sourceTarget={selectedSourceTarget}
 					onSelectSourceSpan={selectSourceSpan}
 				/>
 			</section>

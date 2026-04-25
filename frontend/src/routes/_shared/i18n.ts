@@ -1555,7 +1555,140 @@ const translations: Record<Language, Translations> = {
 			detailProperty: 'Property',
 			detailResult: 'Result summary',
 			detailComparability: 'Comparability',
-			detailEvidenceIds: 'Evidence IDs'
+			detailEvidenceIds: 'Evidence IDs',
+			description:
+				'Explore themes, materials, methods, evidence, and comparison relationships in this collection.',
+			meta: {
+				label: 'Graph metadata',
+				nodes: '{count} nodes',
+				edges: '{count} edges',
+				types: '{count} node types'
+			},
+			status: {
+				built: 'Graph built',
+				pending: 'Graph pending',
+				loading: 'Loading graph...',
+				loaded: 'Graph loaded',
+				loadedTruncated: 'Graph loaded with truncation',
+				supportPartial: 'Some linked evidence or comparison data could not be loaded.',
+				generating: 'Starting graph build...',
+				generateStarted: 'Graph build started.',
+				neighborsExpanded: 'Neighborhood expanded',
+				imageExported: 'PNG exported',
+				downloading: 'Preparing GraphML...',
+				downloaded: 'Downloaded {filename}',
+				viewCopied: 'Current graph view copied',
+				copyUnavailable: 'Clipboard is unavailable in this browser'
+			},
+			actions: {
+				refresh: 'Refresh graph',
+				resetView: 'Reset view',
+				export: 'Export',
+				exportPng: 'Export PNG',
+				downloadGraphml: 'Download GraphML',
+				copyView: 'Copy current view',
+				retry: 'Retry',
+				refreshStatus: 'Refresh status'
+			},
+			workspace: {
+				label: 'Graph exploration workspace'
+			},
+			controls: {
+				title: 'Graph controls',
+				search: 'Search nodes',
+				searchPlaceholder: 'Search node name or keyword...',
+				focusSearch: 'Focus matching node',
+				nodeTypes: 'Node types',
+				advanced: 'Advanced settings',
+				maxNodes: 'Max nodes',
+				minWeight: 'Min weight',
+				layout: 'Layout algorithm',
+				restoreDefaults: 'Restore defaults',
+				visibleNodes: 'Visible nodes',
+				visibleEdges: 'Visible edges',
+				loadState: 'Load state'
+			},
+			layout: {
+				fcose: 'fCoSE force layout',
+				cose: 'CoSE force layout',
+				grid: 'Grid layout',
+				circle: 'Circle layout'
+			},
+			canvas: {
+				title: 'Collection relationship graph',
+				meta: 'Nodes {nodes} · Edges {edges}',
+				fit: 'Fit canvas',
+				zoomIn: 'Zoom in',
+				zoomOut: 'Zoom out',
+				center: 'Center',
+				layout: 'Layout',
+				ariaLabel: 'Interactive collection graph canvas',
+				empty: 'No visible graph elements match the current controls.'
+			},
+			legend: {
+				label: 'Node type legend',
+				document: 'Document',
+				evidence: 'Evidence',
+				comparison: 'Comparison',
+				material: 'Material',
+				property: 'Property',
+				testCondition: 'Test condition',
+				baseline: 'Baseline',
+				variant: 'Variant',
+				process: 'Process',
+				unknown: 'Unknown'
+			},
+			detail: {
+				title: 'Selected object detail',
+				empty:
+					'Click a graph node or relationship to inspect source evidence, related comparisons, and original document locations.',
+				clear: 'Clear',
+				loading: 'Loading detail...',
+				relatedEvidence: 'Evidence',
+				relatedComparisons: 'Comparisons',
+				relatedDocuments: 'Documents',
+				description: 'Description',
+				relatedContent: 'Linked content',
+				commonRelations: 'Common relations',
+				noRelations: 'No visible relations for this object.',
+				viewEvidence: 'View evidence',
+				openComparison: 'Open comparison',
+				locateSource: 'Locate source',
+				expand: 'Expand neighbors',
+				expanding: 'Expanding...',
+				relationshipType: 'Relationship type',
+				confidence: 'Confidence',
+				sourceEvidence: 'Source evidence',
+				originalEvidence: 'Original evidence',
+				noEvidenceQuote: 'No source quote is available for this relationship yet.',
+				viewSource: 'View source'
+			},
+			linked: {
+				title: 'Linked evidence and comparisons',
+				relatedTitle: 'Related to "{name}"',
+				empty:
+					'Select a node or relationship to show linked evidence, comparison items, and source documents.',
+				stats: 'Evidence {evidence} · Comparisons {comparison} · Documents {documents}',
+				evidence: 'Evidence',
+				comparison: 'Comparison',
+				documents: 'Documents',
+				viewAll: 'View all',
+				viewEvidence: 'View evidence',
+				viewSource: 'View source',
+				openComparison: 'Open comparison',
+				viewDocument: 'View document',
+				pages: '{count} pages',
+				noSummary: 'No summary available.',
+				noEvidence: 'No linked evidence is available for the current selection.',
+				noComparisons: 'No linked comparison rows are available for the current selection.',
+				noDocuments: 'No linked documents are available for the current selection.'
+			},
+			empty: {
+				title: 'Graph has not been built',
+				description:
+					'After document parsing and evidence extraction finish, Lens can generate a collection graph for exploring themes, evidence, and comparison relationships.',
+				action: 'Generate graph'
+			}
 		},
 		reports: {
 			title: 'Reports',
@@ -3161,7 +3294,137 @@ const translations: Record<Language, Translations> = {
 			detailProperty: '性质指标',
 			detailResult: '结果摘要',
 			detailComparability: '可比性',
-			detailEvidenceIds: '证据 ID'
+			detailEvidenceIds: '证据 ID',
+			description: '探索集合中的主题、材料、方法、证据和比较关系。',
+			meta: {
+				label: '图谱元信息',
+				nodes: '{count} 个节点',
+				edges: '{count} 条边',
+				types: '{count} 类节点'
+			},
+			status: {
+				built: '已完成构建',
+				pending: '图谱待生成',
+				loading: '图谱加载中...',
+				loaded: '图谱已加载',
+				loadedTruncated: '图谱已加载（已截断）',
+				supportPartial: '部分关联证据或比较数据暂时无法加载。',
+				generating: '正在启动图谱构建...',
+				generateStarted: '已开始构建图谱。',
+				neighborsExpanded: '邻域已展开',
+				imageExported: 'PNG 已导出',
+				downloading: '正在准备 GraphML...',
+				downloaded: '已下载 {filename}',
+				viewCopied: '当前图谱视图已复制',
+				copyUnavailable: '当前浏览器无法访问剪贴板'
+			},
+			actions: {
+				refresh: '刷新图谱',
+				resetView: '重置视图',
+				export: '导出',
+				exportPng: '导出 PNG',
+				downloadGraphml: '下载 GraphML',
+				copyView: '复制当前视图',
+				retry: '重试',
+				refreshStatus: '刷新状态'
+			},
+			workspace: {
+				label: '图谱探索工作台'
+			},
+			controls: {
+				title: '图谱控制',
+				search: '搜索节点',
+				searchPlaceholder: '搜索节点名称或关键词...',
+				focusSearch: '定位匹配节点',
+				nodeTypes: '节点类型',
+				advanced: '高级设置',
+				maxNodes: '最大节点数',
+				minWeight: '最小权重',
+				layout: '布局算法',
+				restoreDefaults: '恢复默认设置',
+				visibleNodes: '可见节点',
+				visibleEdges: '可见边',
+				loadState: '加载状态'
+			},
+			layout: {
+				fcose: 'fCoSE 力导向布局',
+				cose: 'CoSE 力导向布局',
+				grid: '网格布局',
+				circle: '环形布局'
+			},
+			canvas: {
+				title: '集合关系图谱',
+				meta: '节点 {nodes} · 边 {edges}',
+				fit: '适配画布',
+				zoomIn: '放大',
+				zoomOut: '缩小',
+				center: '居中',
+				layout: '布局',
+				ariaLabel: '可交互的集合图谱画布',
+				empty: '当前控制条件下没有可见图谱元素。'
+			},
+			legend: {
+				label: '节点类型图例',
+				document: '文档',
+				evidence: '证据',
+				comparison: '比较',
+				material: '材料',
+				property: '性质',
+				testCondition: '测试条件',
+				baseline: '对照',
+				variant: '变体',
+				process: '方法',
+				unknown: '未知'
+			},
+			detail: {
+				title: '选中对象详情',
+				empty: '点击图谱中的节点或关系，查看它的来源证据、关联比较和原文位置。',
+				clear: '清除',
+				loading: '正在加载详情...',
+				relatedEvidence: '关联证据',
+				relatedComparisons: '关联比较',
+				relatedDocuments: '关联文档',
+				description: '描述',
+				relatedContent: '关联内容',
+				commonRelations: '常见关系',
+				noRelations: '当前对象暂无可见关系。',
+				viewEvidence: '查看证据',
+				openComparison: '打开比较',
+				locateSource: '定位原文',
+				expand: '展开邻域',
+				expanding: '展开中...',
+				relationshipType: '关系类型',
+				confidence: '置信度',
+				sourceEvidence: '来源证据',
+				originalEvidence: '原文证据',
+				noEvidenceQuote: '当前关系暂未提供原文片段。',
+				viewSource: '查看原文'
+			},
+			linked: {
+				title: '关联证据与比较',
+				relatedTitle: '与 “{name}” 相关',
+				empty: '选择一个节点或关系后，这里会显示相关证据、比较项和原文来源。',
+				stats: '证据 {evidence} 条 · 比较 {comparison} 项 · 文档 {documents} 篇',
+				evidence: '证据',
+				comparison: '比较',
+				documents: '文档',
+				viewAll: '查看全部',
+				viewEvidence: '查看证据',
+				viewSource: '查看原文',
+				openComparison: '打开比较',
+				viewDocument: '查看文档',
+				pages: '{count} 页',
+				noSummary: '暂无摘要。',
+				noEvidence: '当前选择没有关联证据。',
+				noComparisons: '当前选择没有关联比较项。',
+				noDocuments: '当前选择没有关联文档。'
+			},
+			empty: {
+				title: '图谱尚未构建',
+				description:
+					'完成文档解析和证据提取后，Lens 可以生成文献集合图谱，用于探索主题、证据和比较关系。',
+				action: '生成图谱'
+			}
 		},
 		reports: {
 			title: '报告',

@@ -8,6 +8,7 @@ from controllers.schemas.core.comparisons import (
     ComparisonAssessmentResponse,
     ComparisonRowItemResponse,
 )
+from controllers.schemas.core.evidence_chain import EvidenceChainVariantDossierResponse
 
 
 DocumentType = Literal["experimental", "review", "mixed", "uncertain"]
@@ -197,4 +198,8 @@ class DocumentComparisonSemanticListResponse(BaseModel):
     items: list[DocumentComparisonSemanticItemResponse] = Field(
         default_factory=list,
         description="document 对应的 comparable result 列表",
+    )
+    variant_dossiers: list[EvidenceChainVariantDossierResponse] | None = Field(
+        default=None,
+        description="按需生成的 variant dossier/result series grouped projection",
     )

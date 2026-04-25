@@ -54,6 +54,192 @@ def _write_semantic_comparison_artifacts(
     )
 
 
+def _write_evidence_chain_fact_artifacts(output_dir: Path) -> None:
+    pd.DataFrame(
+        [
+            {
+                "variant_id": "var-1",
+                "document_id": "paper-1",
+                "collection_id": "test",
+                "domain_profile": "pbf_metal",
+                "variant_label": "optimized VED + HIP",
+                "host_material_system": {
+                    "family": "titanium alloy",
+                    "composition": "Ti-6Al-4V",
+                },
+                "composition": "Ti-6Al-4V",
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": {
+                    "laser_power_w": 280,
+                    "scan_speed_mm_s": 1200,
+                    "layer_thickness_um": 30,
+                    "hatch_spacing_um": 100,
+                    "build_orientation": "vertical",
+                    "post_treatment_summary": "HIP",
+                },
+                "profile_payload": {},
+                "structure_feature_ids": ["sf-porosity"],
+                "source_anchor_ids": ["anchor-process"],
+                "confidence": 0.9,
+                "epistemic_status": "normalized_from_evidence",
+            }
+        ]
+    ).to_parquet(output_dir / "sample_variants.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "test_condition_id": "tc-25",
+                "document_id": "paper-1",
+                "collection_id": "test",
+                "domain_profile": "pbf_metal",
+                "property_type": "yield_strength",
+                "template_type": "mechanical",
+                "scope_level": "result",
+                "condition_payload": {
+                    "method": "tensile",
+                    "test_temperature_c": 25.0,
+                    "strain_rate_s-1": 0.001,
+                    "loading_direction": "vertical",
+                    "sample_orientation": "vertical",
+                },
+                "condition_completeness": "complete",
+                "missing_fields": [],
+                "evidence_anchor_ids": ["anchor-test-25"],
+                "confidence": 0.9,
+                "epistemic_status": "normalized_from_evidence",
+            },
+            {
+                "test_condition_id": "tc-200",
+                "document_id": "paper-1",
+                "collection_id": "test",
+                "domain_profile": "pbf_metal",
+                "property_type": "yield_strength",
+                "template_type": "mechanical",
+                "scope_level": "result",
+                "condition_payload": {
+                    "method": "tensile",
+                    "test_temperature_c": 200.0,
+                    "strain_rate_s-1": 0.001,
+                    "loading_direction": "vertical",
+                    "sample_orientation": "vertical",
+                },
+                "condition_completeness": "complete",
+                "missing_fields": [],
+                "evidence_anchor_ids": ["anchor-test-200"],
+                "confidence": 0.9,
+                "epistemic_status": "normalized_from_evidence",
+            },
+        ]
+    ).to_parquet(output_dir / "test_conditions.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "baseline_id": "base-1",
+                "document_id": "paper-1",
+                "collection_id": "test",
+                "domain_profile": "pbf_metal",
+                "variant_id": "var-1",
+                "baseline_type": "same_paper_control",
+                "baseline_label": "optimized VED without HIP",
+                "baseline_scope": "current_paper",
+                "evidence_anchor_ids": ["anchor-baseline"],
+                "confidence": 0.9,
+                "epistemic_status": "normalized_from_evidence",
+            }
+        ]
+    ).to_parquet(output_dir / "baseline_references.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "result_id": "res-detail-25",
+                "document_id": "paper-1",
+                "collection_id": "test",
+                "domain_profile": "pbf_metal",
+                "variant_id": "var-1",
+                "property_normalized": "yield_strength",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {
+                    "value": 940.0,
+                    "source_value_text": "940",
+                    "source_unit_text": "MPa",
+                    "value_origin": "reported",
+                },
+                "unit": "MPa",
+                "test_condition_id": "tc-25",
+                "baseline_id": "base-1",
+                "structure_feature_ids": ["sf-porosity"],
+                "characterization_observation_ids": ["obs-porosity"],
+                "evidence_anchor_ids": ["anchor-1"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+                "epistemic_status": "normalized_from_evidence",
+            },
+            {
+                "result_id": "res-detail-200",
+                "document_id": "paper-1",
+                "collection_id": "test",
+                "domain_profile": "pbf_metal",
+                "variant_id": "var-1",
+                "property_normalized": "yield_strength",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {
+                    "value": 820.0,
+                    "source_value_text": "820",
+                    "source_unit_text": "MPa",
+                    "value_origin": "reported",
+                },
+                "unit": "MPa",
+                "test_condition_id": "tc-200",
+                "baseline_id": "base-1",
+                "structure_feature_ids": [],
+                "characterization_observation_ids": [],
+                "evidence_anchor_ids": ["anchor-3"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+                "epistemic_status": "normalized_from_evidence",
+            },
+        ]
+    ).to_parquet(output_dir / "measurement_results.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "observation_id": "obs-porosity",
+                "document_id": "paper-1",
+                "collection_id": "test",
+                "variant_id": "var-1",
+                "characterization_type": "porosity",
+                "observation_text": "Porosity decreased to 0.1%.",
+                "observed_value": 0.1,
+                "observed_unit": "%",
+                "condition_context": {"process": {"temperatures_c": []}},
+                "evidence_anchor_ids": ["anchor-porosity"],
+                "confidence": 0.9,
+                "epistemic_status": "normalized_from_evidence",
+            }
+        ]
+    ).to_parquet(output_dir / "characterization_observations.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "feature_id": "sf-porosity",
+                "document_id": "paper-1",
+                "collection_id": "test",
+                "variant_id": "var-1",
+                "feature_type": "porosity",
+                "feature_value": 0.1,
+                "feature_unit": "%",
+                "qualitative_descriptor": "Porosity 0.1%",
+                "source_observation_ids": ["obs-porosity"],
+                "confidence": 0.9,
+                "epistemic_status": "normalized_from_evidence",
+            }
+        ]
+    ).to_parquet(output_dir / "structure_features.parquet", index=False)
+
+
 def _build_semantic_result_record(
     *,
     collection_id: str,
@@ -351,6 +537,104 @@ def test_result_detail_route_returns_document_assessment_evidence_and_actions(
         f"/collections/{collection_id}/comparisons?"
     )
     assert payload.actions.open_evidence == f"/collections/{collection_id}/evidence"
+
+
+def test_result_detail_route_returns_evidence_chain_additive_fields(
+    result_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _comparison_service = result_services
+    collection = collection_service.create_collection(name="Result Evidence Chain")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Ti64 Tensile Study",
+                "source_filename": "ti64.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.93,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    first_result, first_scope = _build_semantic_result_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-detail-25",
+        source_document_id="paper-1",
+        property_normalized="yield_strength",
+        numeric_value=940.0,
+    )
+    first_result["source_result_id"] = "res-detail-25"
+    first_result["binding"]["test_condition_id"] = "tc-25"
+    first_result["normalized_context"]["material_system_normalized"] = "Ti-6Al-4V"
+    first_result["normalized_context"]["process_normalized"] = "LPBF optimized VED + HIP"
+    first_result["normalized_context"]["test_condition_normalized"] = "tensile"
+    first_result["value"]["summary"] = "YS 940 MPa"
+    first_result["evidence"]["structure_feature_ids"] = ["sf-porosity"]
+    first_result["evidence"]["characterization_observation_ids"] = ["obs-porosity"]
+    first_result["variant_label"] = "optimized VED + HIP"
+    first_result["baseline_reference"] = "optimized VED without HIP"
+    second_result, second_scope = _build_semantic_result_record(
+        collection_id=collection_id,
+        comparable_result_id="cres-detail-200",
+        source_document_id="paper-1",
+        property_normalized="yield_strength",
+        numeric_value=820.0,
+        sort_order=1,
+    )
+    second_result["source_result_id"] = "res-detail-200"
+    second_result["binding"]["test_condition_id"] = "tc-200"
+    second_result["normalized_context"]["material_system_normalized"] = "Ti-6Al-4V"
+    second_result["normalized_context"]["process_normalized"] = "LPBF optimized VED + HIP"
+    second_result["normalized_context"]["test_condition_normalized"] = "tensile"
+    second_result["value"]["summary"] = "YS 820 MPa"
+    second_result["variant_label"] = "optimized VED + HIP"
+    second_result["baseline_reference"] = "optimized VED without HIP"
+    _write_semantic_comparison_artifacts(
+        output_dir,
+        [first_result, second_result],
+        [first_scope, second_scope],
+    )
+    _write_evidence_chain_fact_artifacts(output_dir)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        results_controller.get_collection_result(collection_id, "cres-detail-25")
+    )
+
+    assert payload.variant_dossier is not None
+    assert payload.variant_dossier.variant_id == "var-1"
+    assert payload.variant_dossier.variant_label == "optimized VED + HIP"
+    assert payload.variant_dossier.material.composition == "Ti-6Al-4V"
+    assert payload.variant_dossier.shared_process_state["laser_power_w"] == 280
+    assert payload.test_condition_detail is not None
+    assert payload.test_condition_detail.test_method == "tensile"
+    assert payload.test_condition_detail.test_temperature_c == 25.0
+    assert payload.test_condition_detail.strain_rate_s_1 == 0.001
+    assert payload.baseline_detail is not None
+    assert payload.baseline_detail.reference == "optimized VED without HIP"
+    assert payload.baseline_detail.baseline_type == "same_paper_control"
+    assert payload.baseline_detail.baseline_scope == "current_paper"
+    assert payload.structure_support[0].support_id == "sf-porosity"
+    assert payload.structure_support[0].summary == "Porosity 0.1%"
+    assert payload.value_provenance is not None
+    assert payload.value_provenance.value_origin == "reported"
+    assert payload.value_provenance.source_value_text == "940"
+    assert payload.series_navigation is not None
+    assert payload.series_navigation.series_key == "yield_strength:test_temperature_c"
+    assert [sibling.axis_value for sibling in payload.series_navigation.siblings] == [
+        25.0,
+        200.0,
+    ]
 
 
 def test_result_detail_route_returns_404_when_missing(

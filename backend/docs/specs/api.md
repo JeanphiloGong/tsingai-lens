@@ -365,7 +365,7 @@
 - `evidence`
 - `actions`
 
-下一波 additive contract 冻结字段：
+已支持的 additive evidence-chain 字段：
 
 - `variant_dossier`
 - `test_condition_detail`
@@ -380,9 +380,9 @@
   `comparable_result_id`
 - 结果页必须由 `ComparableResult` 与当前 collection 的
   `CollectionComparableResult` 共同投影
-- 结果页的下一波 additive contract 已在
+- 结果页的 additive evidence-chain contract 已在
   `docs/decisions/rfc-document-result-evidence-chain-contract-freeze.md`
-  冻结；该 contract 应把结果页提升为 chain-first drilldown，而不是继续停留在
+  冻结；该 contract 把结果页提升为 chain-first drilldown，而不是继续停留在
   generic measurement card
 - `variant_dossier` 是当前 result 对应的 parent dossier summary，不是第二个主页面模型
 - `test_condition_detail`、`baseline_detail`、`structure_support`、
@@ -417,7 +417,7 @@
 - `count`
 - `items`
 
-下一波 additive contract 冻结字段：
+已支持的 additive grouped projection 字段：
 
 - `variant_dossiers`
 
@@ -456,7 +456,7 @@
 语义要求：
 
 - 这是 `ComparableResult` 的 document-scoped inspection surface，不是 row list
-- 该路由的下一波 additive grouped drilldown contract 已在
+- 该路由的 additive grouped drilldown contract 已在
   `docs/decisions/rfc-document-result-evidence-chain-contract-freeze.md`
   冻结
 - flat `items` list 必须继续保留；grouped projections 是 additive read model，
@@ -481,7 +481,7 @@
   - `true` 时允许为 document-facing drilldown 附带按需生成的 row payload
 - `include_grouped_projections=true|false`
   - `false` 时允许省略 grouped dossier/series projection
-  - `true` 时应返回 `variant_dossiers`
+  - `true` 时返回 `variant_dossiers`
 
 ### Corpus Comparable Results
 

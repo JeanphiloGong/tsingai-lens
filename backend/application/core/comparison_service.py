@@ -51,6 +51,8 @@ _SAMPLE_VARIANTS_FILE = "sample_variants.parquet"
 _MEASUREMENT_RESULTS_FILE = "measurement_results.parquet"
 _TEST_CONDITIONS_FILE = "test_conditions.parquet"
 _BASELINE_REFERENCES_FILE = "baseline_references.parquet"
+_CHARACTERIZATION_OBSERVATIONS_FILE = "characterization_observations.parquet"
+_STRUCTURE_FEATURES_FILE = "structure_features.parquet"
 _SAMPLE_VARIANT_JSON_COLUMNS = (
     "host_material_system",
     "variable_value",
@@ -71,6 +73,11 @@ _TEST_CONDITION_JSON_COLUMNS = (
     "evidence_anchor_ids",
 )
 _BASELINE_REFERENCE_JSON_COLUMNS = ("evidence_anchor_ids",)
+_CHARACTERIZATION_OBSERVATION_JSON_COLUMNS = (
+    "condition_context",
+    "evidence_anchor_ids",
+)
+_STRUCTURE_FEATURE_JSON_COLUMNS = ("source_observation_ids",)
 _COMPARABLE_RESULT_JSON_COLUMNS = (
     "binding",
     "normalized_context",
@@ -100,6 +107,35 @@ _CORPUS_COMPARABLE_RESULTS_CACHE_JSON_COLUMNS = (
     "evidence",
     "observed_collection_ids",
     "collection_overlays",
+)
+_PROCESS_STATE_KEYS = (
+    "laser_power_w",
+    "scan_speed_mm_s",
+    "layer_thickness_um",
+    "hatch_spacing_um",
+    "spot_size_um",
+    "energy_density_j_mm3",
+    "energy_density_origin",
+    "scan_strategy",
+    "build_orientation",
+    "preheat_temperature_c",
+    "shielding_gas",
+    "oxygen_level_ppm",
+    "powder_size_distribution_um",
+    "post_treatment_summary",
+)
+_SERIES_AXIS_UNITS = {
+    "test_temperature_c": "C",
+    "strain_rate_s-1": "s^-1",
+    "hold_time": "s",
+    "frequency_hz": "Hz",
+    "test_condition": None,
+}
+_TEST_SERIES_AXIS_CANDIDATES = (
+    "test_temperature_c",
+    "strain_rate_s-1",
+    "hold_time",
+    "frequency_hz",
 )
 
 
@@ -292,18 +328,24 @@ class ComparisonService:
         result_id: str,
     ) -> dict[str, Any]:
         result_key = self._safe_text(result_id) or ""
-        records = self._collect_collection_result_records(
-            collection_id,
-            result_id=result_key,
-        )
-        if not records:
+        all_records = self._collect_collection_result_records(collection_id)
+        matching_records = [
+            item
+            for item in all_records
+            if self._safe_text(item[1].comparable_result_id) == result_key
+        ]
+        if not matching_records:
             raise ResultNotFoundError(collection_id, result_key)
-        scoped_record, comparable_record, document_payload = records[0]
+        scoped_record, comparable_record, document_payload = matching_records[0]
+        output_dir = self._resolve_output_dir(collection_id)
+        projection_context = self._load_optional_projection_context(output_dir)
         return self._serialize_collection_result_detail(
             collection_id,
             comparable_record,
             scoped_record,
             document_payload=document_payload,
+            projection_context=projection_context,
+            sibling_records=all_records,
         )
 
     def read_comparison_rows(self, collection_id: str) -> pd.DataFrame:
@@ -358,6 +400,7 @@ class ComparisonService:
         source_document_id: str,
         *,
         include_row_projections: bool = False,
+        include_grouped_projections: bool = False,
     ) -> dict[str, Any]:
         output_dir = self._resolve_output_dir(collection_id)
         semantic_tables = self._read_semantic_comparison_artifacts(
@@ -372,13 +415,16 @@ class ComparisonService:
             )
         ].copy()
         if document_results.empty:
-            return {
+            payload = {
                 "collection_id": collection_id,
                 "source_document_id": document_id,
                 "total": 0,
                 "count": 0,
                 "items": [],
             }
+            if include_grouped_projections:
+                payload["variant_dossiers"] = []
+            return payload
 
         comparable_records = [
             ComparableResult.from_mapping(dict(row))
@@ -459,13 +505,22 @@ class ComparisonService:
                     [],
                 )
             items.append(item)
-        return {
+        payload = {
             "collection_id": collection_id,
             "source_document_id": document_id,
             "total": len(items),
             "count": len(items),
             "items": items,
         }
+        if include_grouped_projections:
+            projection_context = self._load_optional_projection_context(output_dir)
+            payload["variant_dossiers"] = self._build_variant_dossiers(
+                collection_id=collection_id,
+                comparable_records=comparable_records,
+                scoped_records_by_result_id=scoped_records_by_result_id,
+                projection_context=projection_context,
+            )
+        return payload
 
     def _collect_collection_result_items(
         self,
@@ -1331,6 +1386,709 @@ class ComparisonService:
     ) -> dict[str, Any]:
         return record.to_record()
 
+    def _load_optional_projection_context(self, output_dir: Path) -> dict[str, Any]:
+        sample_variants = self._read_optional_semantic_frame(
+            output_dir / _SAMPLE_VARIANTS_FILE,
+            _SAMPLE_VARIANT_JSON_COLUMNS,
+        )
+        measurement_results = self._read_optional_semantic_frame(
+            output_dir / _MEASUREMENT_RESULTS_FILE,
+            _MEASUREMENT_RESULT_JSON_COLUMNS,
+        )
+        test_conditions = self._read_optional_semantic_frame(
+            output_dir / _TEST_CONDITIONS_FILE,
+            _TEST_CONDITION_JSON_COLUMNS,
+        )
+        baseline_references = self._read_optional_semantic_frame(
+            output_dir / _BASELINE_REFERENCES_FILE,
+            _BASELINE_REFERENCE_JSON_COLUMNS,
+        )
+        characterization_observations = self._read_optional_semantic_frame(
+            output_dir / _CHARACTERIZATION_OBSERVATIONS_FILE,
+            _CHARACTERIZATION_OBSERVATION_JSON_COLUMNS,
+        )
+        structure_features = self._read_optional_semantic_frame(
+            output_dir / _STRUCTURE_FEATURES_FILE,
+            _STRUCTURE_FEATURE_JSON_COLUMNS,
+        )
+        return {
+            "sample_variants_by_id": self._index_frame_by_text(
+                sample_variants,
+                "variant_id",
+            ),
+            "measurement_results_by_id": self._index_frame_by_text(
+                measurement_results,
+                "result_id",
+            ),
+            "test_conditions_by_id": self._index_frame_by_text(
+                test_conditions,
+                "test_condition_id",
+            ),
+            "baseline_references_by_id": self._index_frame_by_text(
+                baseline_references,
+                "baseline_id",
+            ),
+            "characterization_observations_by_id": self._index_frame_by_text(
+                characterization_observations,
+                "observation_id",
+            ),
+            "structure_features_by_id": self._index_frame_by_text(
+                structure_features,
+                "feature_id",
+            ),
+        }
+
+    def _read_optional_semantic_frame(
+        self,
+        path: Path,
+        json_columns: tuple[str, ...],
+    ) -> pd.DataFrame:
+        if not path.is_file():
+            return pd.DataFrame()
+        return restore_frame_from_storage(pd.read_parquet(path), json_columns)
+
+    def _index_frame_by_text(
+        self,
+        frame: pd.DataFrame,
+        key: str,
+    ) -> dict[str, dict[str, Any]]:
+        if frame.empty or key not in frame.columns:
+            return {}
+        lookup: dict[str, dict[str, Any]] = {}
+        for _, row in frame.iterrows():
+            row_payload = dict(row)
+            record_key = self._safe_text(row_payload.get(key))
+            if record_key:
+                lookup[record_key] = row_payload
+        return lookup
+
+    def _build_variant_dossiers(
+        self,
+        *,
+        collection_id: str,
+        comparable_records: list[ComparableResult],
+        scoped_records_by_result_id: dict[str, list[CollectionComparableResult]],
+        projection_context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        records_by_variant: dict[str, list[ComparableResult]] = {}
+        for record in comparable_records:
+            variant_key = (
+                self._safe_text(record.binding.variant_id)
+                or f"unresolved:{record.source_document_id}"
+            )
+            records_by_variant.setdefault(variant_key, []).append(record)
+
+        dossiers: list[dict[str, Any]] = []
+        for variant_key in sorted(records_by_variant):
+            variant_records = records_by_variant[variant_key]
+            representative = variant_records[0]
+            dossier = self._build_variant_dossier_summary(
+                representative,
+                projection_context=projection_context,
+            )
+            dossier["series"] = self._build_result_series(
+                collection_id=collection_id,
+                comparable_records=variant_records,
+                scoped_records_by_result_id=scoped_records_by_result_id,
+                projection_context=projection_context,
+            )
+            dossiers.append(dossier)
+        return dossiers
+
+    def _build_result_series(
+        self,
+        *,
+        collection_id: str,
+        comparable_records: list[ComparableResult],
+        scoped_records_by_result_id: dict[str, list[CollectionComparableResult]],
+        projection_context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        grouped: dict[tuple[str, str], list[ComparableResult]] = {}
+        for record in comparable_records:
+            test_condition = self._build_test_condition_detail(
+                record,
+                projection_context=projection_context,
+            )
+            key = (
+                self._property_family(record),
+                self._test_family(record, test_condition),
+            )
+            grouped.setdefault(key, []).append(record)
+
+        series_items: list[dict[str, Any]] = []
+        for property_family, test_family in sorted(grouped):
+            sibling_records = sorted(
+                grouped[(property_family, test_family)],
+                key=lambda item: item.comparable_result_id,
+            )
+            chain_payloads = [
+                self._build_result_chain(
+                    comparable_record=record,
+                    scoped_records=scoped_records_by_result_id.get(
+                        record.comparable_result_id,
+                        [],
+                    ),
+                    projection_context=projection_context,
+                )
+                for record in sibling_records
+            ]
+            axis_name = self._select_series_axis(chain_payloads)
+            chain_payloads.sort(
+                key=lambda chain: (
+                    self._axis_sort_key((chain.get("test_condition") or {}).get(axis_name)),
+                    chain["result_id"],
+                )
+            )
+            series_items.append(
+                {
+                    "series_key": f"{property_family}:{axis_name}",
+                    "property_family": property_family,
+                    "test_family": test_family,
+                    "varying_axis": {
+                        "axis_name": axis_name,
+                        "axis_unit": _SERIES_AXIS_UNITS.get(axis_name),
+                    },
+                    "chains": chain_payloads,
+                }
+            )
+        return series_items
+
+    def _build_result_chain(
+        self,
+        *,
+        comparable_record: ComparableResult,
+        scoped_records: list[CollectionComparableResult],
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        scoped_record = self._select_scoped_record(scoped_records)
+        return {
+            "result_id": comparable_record.comparable_result_id,
+            "source_result_id": comparable_record.source_result_id,
+            "measurement": self._build_measurement_payload(comparable_record),
+            "test_condition": self._build_test_condition_detail(
+                comparable_record,
+                projection_context=projection_context,
+            ),
+            "baseline": self._build_baseline_detail(
+                comparable_record,
+                projection_context=projection_context,
+                include_scope=False,
+            ),
+            "assessment": self._build_chain_assessment(scoped_record),
+            "value_provenance": self._build_value_provenance(
+                comparable_record,
+                projection_context=projection_context,
+            ),
+            "evidence": self._build_chain_evidence(comparable_record),
+        }
+
+    def _select_scoped_record(
+        self,
+        scoped_records: list[CollectionComparableResult],
+    ) -> CollectionComparableResult | None:
+        if not scoped_records:
+            return None
+        return sorted(
+            scoped_records,
+            key=lambda record: (
+                1_000_000_000 if record.sort_order is None else record.sort_order,
+                record.comparable_result_id,
+            ),
+        )[0]
+
+    def _build_variant_dossier_summary(
+        self,
+        comparable_record: ComparableResult,
+        *,
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        variant = self._lookup_variant(comparable_record, projection_context)
+        variant_id = self._safe_text(comparable_record.binding.variant_id)
+        host_material_system = self._safe_mapping(
+            variant.get("host_material_system") if variant else None
+        )
+        composition = self._safe_text((variant or {}).get("composition")) or self._safe_text(
+            host_material_system.get("composition")
+        )
+        material_label = (
+            self._safe_text(comparable_record.normalized_context.material_system_normalized)
+            or self._safe_text(host_material_system.get("family"))
+            or composition
+            or "unspecified material system"
+        )
+        return {
+            "variant_id": variant_id,
+            "variant_label": comparable_record.variant_label
+            or self._safe_text((variant or {}).get("variant_label")),
+            "material": {
+                "label": material_label,
+                "composition": composition,
+                "host_material_system": host_material_system or None,
+            },
+            "shared_process_state": self._build_shared_process_state(variant),
+            "shared_missingness": self._build_shared_missingness(variant),
+        }
+
+    def _build_shared_process_state(
+        self,
+        variant: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        process_context = self._safe_mapping((variant or {}).get("process_context"))
+        process_state: dict[str, Any] = {}
+        for key in _PROCESS_STATE_KEYS:
+            value = process_context.get(key)
+            if value not in (None, "", [], {}):
+                process_state[key] = value
+        return process_state
+
+    def _build_shared_missingness(
+        self,
+        variant: dict[str, Any] | None,
+    ) -> list[str]:
+        process_context = self._safe_mapping((variant or {}).get("process_context"))
+        missing: list[str] = []
+        if variant is None:
+            missing.append("variant_fact_not_available")
+        if not process_context:
+            missing.append("process_context_not_reported")
+        return missing
+
+    def _build_measurement_payload(
+        self,
+        comparable_record: ComparableResult,
+    ) -> dict[str, Any]:
+        return {
+            "property": comparable_record.value.property_normalized,
+            "value": comparable_record.value.numeric_value,
+            "unit": comparable_record.value.unit,
+            "result_type": comparable_record.value.result_type,
+            "summary": comparable_record.value.summary,
+            "statistic_type": comparable_record.value.statistic_type,
+            "uncertainty": comparable_record.value.uncertainty,
+        }
+
+    def _build_test_condition_detail(
+        self,
+        comparable_record: ComparableResult,
+        *,
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        condition = self._lookup_test_condition(comparable_record, projection_context)
+        payload = self._safe_mapping((condition or {}).get("condition_payload"))
+        method = self._safe_text(payload.get("test_method")) or self._safe_text(
+            payload.get("method")
+        )
+        methods = self._safe_list(payload.get("methods"))
+        if method is None and methods:
+            method = self._safe_text(methods[0])
+        temperature = self._optional_float(payload.get("test_temperature_c"))
+        if temperature is None:
+            temperatures = self._safe_list(payload.get("temperatures_c"))
+            if temperatures:
+                temperature = self._optional_float(temperatures[0])
+        return {
+            "test_method": method
+            or self._safe_text(comparable_record.normalized_context.test_condition_normalized),
+            "test_temperature_c": temperature,
+            "strain_rate_s-1": self._optional_float(
+                payload.get("strain_rate_s-1")
+                or payload.get("strain_rate_s_1")
+                or payload.get("strain_rate")
+                or payload.get("rate")
+            )
+            or self._safe_text(payload.get("strain_rate_text")),
+            "loading_direction": self._safe_text(
+                payload.get("loading_direction") or payload.get("direction")
+            ),
+            "sample_orientation": self._safe_text(payload.get("sample_orientation")),
+            "environment": self._safe_text(payload.get("environment"))
+            or self._safe_text(payload.get("atmosphere")),
+            "frequency_hz": self._optional_float(
+                payload.get("frequency_hz") or payload.get("frequency")
+            ),
+            "specimen_geometry": self._safe_text(payload.get("specimen_geometry")),
+            "surface_state": self._safe_text(payload.get("surface_state")),
+        }
+
+    def _build_baseline_detail(
+        self,
+        comparable_record: ComparableResult,
+        *,
+        projection_context: dict[str, Any],
+        include_scope: bool,
+    ) -> dict[str, Any]:
+        baseline = self._lookup_baseline(comparable_record, projection_context)
+        label = self._safe_text((baseline or {}).get("baseline_label"))
+        reference = comparable_record.baseline_reference or label
+        payload = {
+            "label": label or reference,
+            "reference": reference,
+            "baseline_type": self._safe_text((baseline or {}).get("baseline_type")),
+            "resolved": bool(reference or baseline),
+        }
+        if include_scope:
+            payload["baseline_scope"] = self._safe_text((baseline or {}).get("baseline_scope"))
+        return payload
+
+    def _build_chain_assessment(
+        self,
+        scoped_record: CollectionComparableResult | None,
+    ) -> dict[str, Any]:
+        if scoped_record is None:
+            return {
+                "comparability_status": "insufficient",
+                "warnings": ["Collection assessment is missing for this result."],
+                "basis": [],
+                "missing_context": ["collection_assessment"],
+                "requires_expert_review": True,
+                "assessment_epistemic_status": "unresolved",
+            }
+        assessment = scoped_record.assessment
+        return {
+            "comparability_status": assessment.comparability_status,
+            "warnings": list(assessment.comparability_warnings),
+            "basis": list(assessment.comparability_basis),
+            "missing_context": list(assessment.missing_critical_context),
+            "requires_expert_review": assessment.requires_expert_review,
+            "assessment_epistemic_status": assessment.assessment_epistemic_status,
+        }
+
+    def _build_value_provenance(
+        self,
+        comparable_record: ComparableResult,
+        *,
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        measurement_result = self._lookup_measurement_result(
+            comparable_record,
+            projection_context,
+        )
+        value_payload = self._safe_mapping((measurement_result or {}).get("value_payload"))
+        value_origin = self._safe_text(value_payload.get("value_origin"))
+        if value_origin is None:
+            value_origin = "derived" if value_payload.get("derivation_formula") else "reported"
+        source_value_text = self._safe_text(value_payload.get("source_value_text"))
+        if source_value_text is None:
+            source_value_text = self._first_value_text(
+                value_payload,
+                ("value", "min", "max", "retention_percent", "statement"),
+            )
+        return {
+            "value_origin": value_origin,
+            "source_value_text": source_value_text,
+            "source_unit_text": self._safe_text(value_payload.get("source_unit_text"))
+            or comparable_record.value.unit,
+            "derivation_formula": self._safe_text(value_payload.get("derivation_formula")),
+            "derivation_inputs": self._safe_mapping_or_none(
+                value_payload.get("derivation_inputs")
+            ),
+        }
+
+    def _build_chain_evidence(self, comparable_record: ComparableResult) -> dict[str, Any]:
+        return {
+            "evidence_ids": list(comparable_record.evidence.evidence_ids),
+            "direct_anchor_ids": list(comparable_record.evidence.direct_anchor_ids),
+            "contextual_anchor_ids": list(comparable_record.evidence.contextual_anchor_ids),
+            "structure_feature_ids": list(comparable_record.evidence.structure_feature_ids),
+            "characterization_observation_ids": list(
+                comparable_record.evidence.characterization_observation_ids
+            ),
+            "traceability_status": comparable_record.evidence.traceability_status,
+        }
+
+    def _build_structure_support(
+        self,
+        comparable_record: ComparableResult,
+        *,
+        projection_context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        supports: list[dict[str, Any]] = []
+        structure_lookup = projection_context.get("structure_features_by_id", {})
+        observation_lookup = projection_context.get("characterization_observations_by_id", {})
+        for feature_id in comparable_record.evidence.structure_feature_ids:
+            feature = structure_lookup.get(feature_id, {})
+            supports.append(
+                {
+                    "support_id": feature_id,
+                    "support_type": "structure_feature",
+                    "summary": self._structure_feature_summary(feature, feature_id),
+                    "condition": {
+                        "characterization_temperature_c": self._support_temperature(
+                            feature,
+                            observation_lookup,
+                        )
+                    },
+                }
+            )
+        for observation_id in comparable_record.evidence.characterization_observation_ids:
+            observation = observation_lookup.get(observation_id, {})
+            supports.append(
+                {
+                    "support_id": observation_id,
+                    "support_type": "characterization_observation",
+                    "summary": self._characterization_observation_summary(
+                        observation,
+                        observation_id,
+                    ),
+                    "condition": {
+                        "characterization_temperature_c": self._observation_temperature(
+                            observation,
+                        )
+                    },
+                }
+            )
+        return supports
+
+    def _build_series_navigation(
+        self,
+        *,
+        current_record: ComparableResult,
+        sibling_records: list[
+            tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]
+        ],
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        current_variant = self._safe_text(current_record.binding.variant_id)
+        current_property = self._property_family(current_record)
+        current_test_condition = self._build_test_condition_detail(
+            current_record,
+            projection_context=projection_context,
+        )
+        current_test_family = self._test_family(current_record, current_test_condition)
+        siblings: list[ComparableResult] = []
+        for _scoped, record, _document in sibling_records:
+            if self._safe_text(record.binding.variant_id) != current_variant:
+                continue
+            if self._property_family(record) != current_property:
+                continue
+            condition = self._build_test_condition_detail(
+                record,
+                projection_context=projection_context,
+            )
+            if self._test_family(record, condition) != current_test_family:
+                continue
+            siblings.append(record)
+        if len(siblings) < 2:
+            return None
+
+        chain_payloads = [
+            {
+                "result_id": record.comparable_result_id,
+                "test_condition": self._build_test_condition_detail(
+                    record,
+                    projection_context=projection_context,
+                ),
+                "measurement": self._build_measurement_payload(record),
+            }
+            for record in sorted(siblings, key=lambda item: item.comparable_result_id)
+        ]
+        axis_name = self._select_series_axis(chain_payloads)
+        if axis_name == "test_condition":
+            return None
+        chain_payloads.sort(
+            key=lambda chain: (
+                self._axis_sort_key((chain["test_condition"] or {}).get(axis_name)),
+                chain["result_id"],
+            )
+        )
+        return {
+            "series_key": f"{current_property}:{axis_name}",
+            "varying_axis": {
+                "axis_name": axis_name,
+                "axis_unit": _SERIES_AXIS_UNITS.get(axis_name),
+            },
+            "siblings": [
+                {
+                    "result_id": chain["result_id"],
+                    "axis_value": (chain["test_condition"] or {}).get(axis_name),
+                    "axis_unit": _SERIES_AXIS_UNITS.get(axis_name),
+                    "measurement": {
+                        "property": chain["measurement"]["property"],
+                        "value": chain["measurement"]["value"],
+                        "unit": chain["measurement"]["unit"],
+                    },
+                }
+                for chain in chain_payloads
+            ],
+        }
+
+    def _select_series_axis(self, chains: list[dict[str, Any]]) -> str:
+        for axis_name in _TEST_SERIES_AXIS_CANDIDATES:
+            values = {
+                self._axis_value_key((chain.get("test_condition") or {}).get(axis_name))
+                for chain in chains
+                if (chain.get("test_condition") or {}).get(axis_name) is not None
+            }
+            if len(values) > 1:
+                return axis_name
+        for axis_name in _TEST_SERIES_AXIS_CANDIDATES:
+            if any((chain.get("test_condition") or {}).get(axis_name) is not None for chain in chains):
+                return axis_name
+        return "test_condition"
+
+    def _property_family(self, comparable_record: ComparableResult) -> str:
+        return comparable_record.value.property_normalized or "qualitative"
+
+    def _test_family(
+        self,
+        comparable_record: ComparableResult,
+        test_condition: dict[str, Any],
+    ) -> str:
+        return (
+            self._safe_text(test_condition.get("test_method"))
+            or self._safe_text(comparable_record.normalized_context.test_condition_normalized)
+            or "unspecified test"
+        )
+
+    def _lookup_variant(
+        self,
+        comparable_record: ComparableResult,
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        variant_id = self._safe_text(comparable_record.binding.variant_id)
+        return (projection_context.get("sample_variants_by_id", {}) or {}).get(variant_id)
+
+    def _lookup_measurement_result(
+        self,
+        comparable_record: ComparableResult,
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        source_result_id = self._safe_text(comparable_record.source_result_id)
+        return (projection_context.get("measurement_results_by_id", {}) or {}).get(
+            source_result_id
+        )
+
+    def _lookup_test_condition(
+        self,
+        comparable_record: ComparableResult,
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        test_condition_id = self._safe_text(comparable_record.binding.test_condition_id)
+        return (projection_context.get("test_conditions_by_id", {}) or {}).get(
+            test_condition_id
+        )
+
+    def _lookup_baseline(
+        self,
+        comparable_record: ComparableResult,
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        baseline_id = self._safe_text(comparable_record.binding.baseline_id)
+        return (projection_context.get("baseline_references_by_id", {}) or {}).get(
+            baseline_id
+        )
+
+    def _structure_feature_summary(
+        self,
+        feature: dict[str, Any],
+        fallback_id: str,
+    ) -> str:
+        descriptor = self._safe_text(feature.get("qualitative_descriptor"))
+        feature_type = self._safe_text(feature.get("feature_type"))
+        feature_value = feature.get("feature_value")
+        feature_unit = self._safe_text(feature.get("feature_unit"))
+        if descriptor:
+            return descriptor
+        if feature_type and feature_value not in (None, "", [], {}):
+            value_text = str(feature_value)
+            if feature_unit:
+                value_text = f"{value_text} {feature_unit}"
+            return f"{feature_type}: {value_text}"
+        return f"Linked structure feature {fallback_id}"
+
+    def _characterization_observation_summary(
+        self,
+        observation: dict[str, Any],
+        fallback_id: str,
+    ) -> str:
+        text = self._safe_text(observation.get("observation_text"))
+        if text:
+            return text
+        observation_type = self._safe_text(observation.get("characterization_type"))
+        observed_value = observation.get("observed_value")
+        observed_unit = self._safe_text(observation.get("observed_unit"))
+        if observation_type and observed_value not in (None, "", [], {}):
+            value_text = str(observed_value)
+            if observed_unit:
+                value_text = f"{value_text} {observed_unit}"
+            return f"{observation_type}: {value_text}"
+        return f"Linked characterization observation {fallback_id}"
+
+    def _support_temperature(
+        self,
+        feature: dict[str, Any],
+        observation_lookup: dict[str, dict[str, Any]],
+    ) -> float | None:
+        for observation_id in self._safe_list(feature.get("source_observation_ids")):
+            temperature = self._observation_temperature(
+                observation_lookup.get(str(observation_id), {})
+            )
+            if temperature is not None:
+                return temperature
+        return None
+
+    def _observation_temperature(self, observation: dict[str, Any]) -> float | None:
+        condition = self._safe_mapping(observation.get("condition_context"))
+        direct = self._optional_float(condition.get("characterization_temperature_c"))
+        if direct is not None:
+            return direct
+        process = self._safe_mapping(condition.get("process"))
+        temperatures = self._safe_list(process.get("temperatures_c"))
+        if temperatures:
+            return self._optional_float(temperatures[0])
+        return None
+
+    def _safe_mapping(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        return {}
+
+    def _safe_mapping_or_none(self, value: Any) -> dict[str, Any] | None:
+        payload = self._safe_mapping(value)
+        return payload or None
+
+    def _safe_list(self, value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        if isinstance(value, set):
+            return list(value)
+        return []
+
+    def _optional_float(self, value: Any) -> float | None:
+        try:
+            if value is None:
+                return None
+            if isinstance(value, float) and pd.isna(value):
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _first_value_text(
+        self,
+        payload: dict[str, Any],
+        keys: tuple[str, ...],
+    ) -> str | None:
+        for key in keys:
+            value = payload.get(key)
+            if value not in (None, "", [], {}):
+                return str(value)
+        return None
+
+    def _axis_value_key(self, value: Any) -> str:
+        if isinstance(value, float):
+            return f"{value:g}"
+        return str(value)
+
+    def _axis_sort_key(self, value: Any) -> tuple[int, float | str]:
+        numeric = self._optional_float(value)
+        if numeric is not None:
+            return (0, numeric)
+        text = self._safe_text(value)
+        return (1, text or "")
+
     def _serialize_corpus_comparable_result(
         self,
         record: ComparableResult,
@@ -1381,6 +2139,11 @@ class ComparisonService:
         scoped_record: CollectionComparableResult,
         *,
         document_payload: dict[str, Any] | None,
+        projection_context: dict[str, Any] | None = None,
+        sibling_records: list[
+            tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]
+        ]
+        | None = None,
     ) -> dict[str, Any]:
         baseline = self._safe_text(comparable_record.baseline_reference) or self._safe_text(
             comparable_record.normalized_context.baseline_normalized
@@ -1389,7 +2152,8 @@ class ComparisonService:
             *comparable_record.evidence.direct_anchor_ids,
             *comparable_record.evidence.contextual_anchor_ids,
         ]
-        return {
+        context = projection_context or {}
+        detail = {
             "result_id": comparable_record.comparable_result_id,
             "document": {
                 "document_id": comparable_record.source_document_id,
@@ -1438,6 +2202,37 @@ class ComparisonService:
             ],
             "actions": self._build_collection_result_actions(collection_id, comparable_record),
         }
+        detail.update(
+            {
+                "variant_dossier": self._build_variant_dossier_summary(
+                    comparable_record,
+                    projection_context=context,
+                ),
+                "test_condition_detail": self._build_test_condition_detail(
+                    comparable_record,
+                    projection_context=context,
+                ),
+                "baseline_detail": self._build_baseline_detail(
+                    comparable_record,
+                    projection_context=context,
+                    include_scope=True,
+                ),
+                "structure_support": self._build_structure_support(
+                    comparable_record,
+                    projection_context=context,
+                ),
+                "value_provenance": self._build_value_provenance(
+                    comparable_record,
+                    projection_context=context,
+                ),
+                "series_navigation": self._build_series_navigation(
+                    current_record=comparable_record,
+                    sibling_records=sibling_records or [],
+                    projection_context=context,
+                ),
+            }
+        )
+        return detail
 
     def _load_document_profile_lookup(self, collection_id: str) -> dict[str, dict[str, Any]]:
         try:

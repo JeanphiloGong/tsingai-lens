@@ -150,12 +150,17 @@ async def get_collection_document_comparison_semantics(
         bool,
         Query(description="是否附带按需生成的 row projection"),
     ] = False,
+    include_grouped_projections: Annotated[
+        bool,
+        Query(description="是否附带 variant dossier/result series grouped projection"),
+    ] = False,
 ) -> DocumentComparisonSemanticListResponse:
     try:
         payload = comparison_service.inspect_document_comparison_semantics(
             collection_id,
             document_id,
             include_row_projections=include_row_projections,
+            include_grouped_projections=include_grouped_projections,
         )
         if payload["count"] == 0:
             document_profile_service.get_document_profile(collection_id, document_id)

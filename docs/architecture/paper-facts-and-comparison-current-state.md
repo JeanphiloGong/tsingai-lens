@@ -310,4 +310,4 @@ Until the design is reconciled, changes should preserve these guardrails:
 - [Lens V1 Architecture Boundary](lens-v1-architecture-boundary.md)
 - [RFC Paper-Facts Primary Domain Model and Derived Comparison Views](../decisions/rfc-paper-facts-primary-domain-model.md)
 - [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
-- [Materials Comparison V2 Plan](../../backend/docs/plans/backend-wide/materials-comparison-v2-plan.md)
+- [Materials Comparison V2 Plan](../../backend/docs/plans/backend-wide/materials-comparison-v2/implementation-plan.md)

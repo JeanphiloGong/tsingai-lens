@@ -25,7 +25,7 @@ evidence for the fixed Source contract".
 Read this plan with:
 
 - [`born-digital-source-parser-first-plan.md`](born-digital-source-parser-first-plan.md)
-- [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
+- [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2/implementation-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 
 ## Status

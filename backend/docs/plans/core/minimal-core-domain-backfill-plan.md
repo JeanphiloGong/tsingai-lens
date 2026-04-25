@@ -21,8 +21,8 @@ Read this plan with:
 - [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`../architecture/core-comparison/README.md`](../../architecture/core-comparison/README.md)
-- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
-- [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
+- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-layering/proposal.md)
+- [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2/implementation-plan.md)
 - [`../historical/comparable-result/core-comparable-result-domain-model-plan.md`](../historical/comparable-result/core-comparable-result-domain-model-plan.md)
 - [`../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md`](../historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md)
 
@@ -454,9 +454,9 @@ directly in each wave.
 
 This plan follows, but does not replace:
 
-- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
+- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-layering/proposal.md)
   which made the business-layer split visible in package layout
-- [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
+- [`materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2/implementation-plan.md)
   which established the stronger sample/result Core backbone
 - [`../../architecture/core-comparison/decision.md`](../../architecture/core-comparison/decision.md)
   which is the current authority for `ComparableResult` as the semantic center

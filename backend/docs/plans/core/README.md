@@ -10,16 +10,21 @@ domain-semantic backfill.
   Earlier stabilization wave for the shared parsing seam
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
   Current Core quality hardening wave
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
-  Child implementation plan for hard-cutting Core semantic extraction to
-  schema-bound LLM parsing
+- [`pbf-metal-extraction-and-comparison-validation/README.md`](pbf-metal-extraction-and-comparison-validation/README.md)
+  Topic family for the PBF-metal validation wave, including the proposal,
+  parameter-registry and report-scope note, and executable implementation plan
+- [`../../../application/core/semantic_build/llm/docs/structured-extraction/README.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/README.md)
+  Node-local LLM structured-extraction plan family for cutover, boundary
+  cleanup, and prompt hardening under the owning Core package
 - [`core-semantic-build-packaging-alignment-plan.md`](core-semantic-build-packaging-alignment-plan.md)
   Child implementation plan for packaging the Source-to-Core semantic build
   slice into one explicit Core-owned submodule
-- [`core-llm-structured-extraction-id-boundary-plan.md`](core-llm-structured-extraction-id-boundary-plan.md)
-  Child implementation plan for removing backend/internal identifiers from the
-  Core LLM extraction contract and moving identity resolution back into the
-  backend
+- [`core-text-window-atomic-mentions-plan.md`](core-text-window-atomic-mentions-plan.md)
+  Child implementation plan for narrowing text-window extraction to atomic
+  mentions plus deterministic backend binding
+- [`core-benchmark-script-consolidation-plan.md`](core-benchmark-script-consolidation-plan.md)
+  Child implementation plan for moving Core benchmark probes into one
+  repo-owned backend benchmark directory
 - [`document-profile-lightweight-triage-plan.md`](document-profile-lightweight-triage-plan.md)
   Child plan for narrowing `document_profiles` to lightweight triage with
   enum-stable routing outputs

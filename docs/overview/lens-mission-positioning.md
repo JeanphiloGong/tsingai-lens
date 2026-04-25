@@ -104,6 +104,34 @@ enough that it can later support:
 That direction should extend the evidence-and-comparison philosophy rather than
 replace it with generic chat or opaque database convenience.
 
+## Post-V1 Workflow Direction
+
+Beyond the current Lens v1 comparison foundation, Lens should move toward
+supporting how professional materials researchers actually work with papers and
+follow-up experiments.
+
+That workflow is not "read a paper and summarize it". It is:
+
+- identify the research problem and the decision the paper is trying to support
+- reconstruct sample variants, controlled variables, process parameters, test
+  conditions, and baselines
+- connect process, structure, defects, properties, and evidence into one
+  inspectable chain
+- judge which results are genuinely comparable and which remain weak,
+  incomplete, or baseline-misaligned
+- turn the literature into candidate hypotheses, control groups, parameter
+  matrices, characterization plans, and decision criteria for the next
+  experiment
+
+If Lens grows in this direction, it should help users treat one paper as an
+experimental design and evidence object rather than only as prose. It should
+help them review literature as variable tables, condition-bound results,
+baseline-aware comparisons, and mechanism-backed evidence chains.
+
+The output of that later workflow should remain human-reviewable. Lens should
+help researchers propose and evaluate experiment plans, not pretend to replace
+scientific judgment with a generic autonomous agent.
+
 ## Related Docs
 
 - [Lens V1 Definition](../contracts/lens-v1-definition.md)

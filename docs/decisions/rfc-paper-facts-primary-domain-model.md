@@ -30,15 +30,15 @@ The current shared product boundary remains defined by:
 - [Lens V1 Definition](../contracts/lens-v1-definition.md)
 - [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
 
-The current shared artifact contracts and architecture boundary still reflect a
-stronger claim-centered backbone:
+The current shared architecture and shared artifact contracts that promoted
+this correction now live in:
 
-- [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
 - [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
+- [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
 
-This RFC proposes the next reconciliation step. It should not be treated as
-the current source of truth until the repository accepts the change and updates
-the shared contracts and architecture docs.
+This RFC should now be read as the historical rationale for the paper-facts
+correction and the tradeoffs behind it. It is not the current source of truth
+for the shared object model or artifact contracts.
 
 ## Context
 
@@ -56,9 +56,9 @@ In practical product terms, Lens needs both:
 2. a comparison surface that tells the user which extracted results can be
    inspected side by side without misleading them
 
-The current repository has drifted into a hybrid state:
+When this RFC was written, the repository had drifted into a hybrid state:
 
-- shared contracts still define `evidence_cards` as the core research object
+- shared contracts still defined `evidence_cards` as the core research object
 - the materials comparison direction already relies more heavily on
   `sample_variants`, `measurement_results`, `test_conditions`, and
   `baseline_references`
@@ -405,4 +405,4 @@ That risk is still lower than preserving the current ambiguity indefinitely.
 - [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
 - [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](rfc-evidence-first-literature-parsing.md)
-- [Materials Comparison V2 Plan](../../backend/docs/plans/backend-wide/materials-comparison-v2-plan.md)
+- [Materials Comparison V2 Plan](../../backend/docs/plans/backend-wide/materials-comparison-v2/implementation-plan.md)

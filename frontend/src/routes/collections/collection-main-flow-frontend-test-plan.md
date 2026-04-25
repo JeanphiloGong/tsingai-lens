@@ -195,12 +195,18 @@ Files:
 
 Changes:
 
-- add tests that render result detail with measurement, context, assessment,
-  and evidence sections
+- add tests that render result detail with chain-first sections:
+  - parent variant dossier summary
+  - chain-local test condition or baseline detail
+  - collection assessment
+  - evidence support
+  - value provenance
 - assert the page exposes the source-document action
 - assert the source-document action points to
   `/collections/{id}/documents/{document_id}`
 - assert the page keeps the comparison return path visible
+- add one assertion for optional sibling series navigation when the fixture
+  includes related chains
 
 ### 5. Document detail coverage
 
@@ -211,10 +217,15 @@ Files:
 
 Changes:
 
-- add tests that render document detail with related results
-- assert related results link back into result detail
-- keep source-verification and related-result behavior covered in the same page
-  test instead of splitting the product story across two disconnected specs
+- add tests that render document detail with:
+  - variant dossier summary or dossier list
+  - grouped result series
+  - related result drilldown
+- assert one series row opens or exposes full chain detail
+- assert document detail still links back into result detail where applicable
+- keep source-verification, dossier review, and related-result behavior covered
+  in the same page test instead of splitting the product story across two
+  disconnected specs
 
 ### 6. Optional Playwright main-flow guard
 

@@ -11,5 +11,6 @@ artifacts.
   conditions, baselines, and measurement results
 - `core_semantic_version.py`
   manifest-based invalidation for Core semantic artifacts
-- `llm/`
-  Core-owned prompt, schema, and extraction orchestration contracts
+- [`llm/README.md`](llm/README.md)
+  Core-owned prompt, schema, extractor, and structured-extraction plan
+  contracts

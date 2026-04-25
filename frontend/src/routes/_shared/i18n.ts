@@ -836,6 +836,10 @@ const translations: Record<Language, Translations> = {
 		graph: {
 			title: 'Graph',
 			lead: 'Use this as a secondary relationship view after you have already read the main collection pages.',
+			filtersTitle: 'Graph filters',
+			filtersLead:
+				'Keep the canvas focused on research objects, then reveal source nodes when needed.',
+			insightTitle: 'Selected insight',
 			previewLoad: 'Refresh preview',
 			previewLoading: 'Loading preview...',
 			previewLoaded: 'Preview loaded',
@@ -872,6 +876,23 @@ const translations: Record<Language, Translations> = {
 			openEvidenceSource: 'Open source view',
 			openComparisons: 'Open comparisons',
 			openFilteredComparisons: 'Open filtered comparisons',
+			openResult: 'Open result',
+			openSourceContext: 'Open source context',
+			evidencePanelTitle: 'Evidence and comparisons',
+			evidencePanelEmptyLead:
+				'Select a shared material, property, condition, comparison, evidence node, or relation to load supporting rows.',
+			evidencePanelAggregateLead:
+				'These comparison rows share the selected graph hub and can be traced back to source evidence.',
+			evidencePanelComparisonLead:
+				'This row is the canonical comparison behind the selected graph node.',
+			evidencePanelEvidenceLead:
+				'Rows connected to this evidence node show how the claim is used in comparison.',
+			evidencePanelNodeLead:
+				'This node does not currently expose comparison rows in the lean graph contract.',
+			evidencePanelEdgeLead:
+				'Rows connected to the selected relation show what evidence is available for verification.',
+			evidencePanelLoading: 'Loading evidence rows...',
+			evidencePanelEmpty: 'No supporting comparison rows are available for the current selection.',
 			edgeLabelDocumentEvidence: 'source',
 			edgeLabelEvidenceComparison: 'supports',
 			edgeLabelComparisonMaterial: 'material',
@@ -1815,6 +1836,9 @@ const translations: Record<Language, Translations> = {
 		graph: {
 			title: '图谱',
 			lead: '把图谱当成主要页面之后的次级关系视图，而不是集合理解的第一入口。',
+			filtersTitle: '图谱筛选',
+			filtersLead: '优先保留科研对象，需要时再打开来源类节点。',
+			insightTitle: '选中对象解释',
 			previewLoad: '刷新预览',
 			previewLoading: '预览加载中...',
 			previewLoaded: '预览已加载',
@@ -1851,6 +1875,18 @@ const translations: Record<Language, Translations> = {
 			openEvidenceSource: '打开溯源视图',
 			openComparisons: '打开比较页',
 			openFilteredComparisons: '打开筛选后的比较页',
+			openResult: '打开结果',
+			openSourceContext: '打开原文上下文',
+			evidencePanelTitle: '证据与比较',
+			evidencePanelEmptyLead:
+				'选择材料、性质、条件、比较、证据节点或关系后，这里会加载可核查的支撑行。',
+			evidencePanelAggregateLead: '这些比较行共享当前图谱节点，并可继续回到原文证据。',
+			evidencePanelComparisonLead: '这是当前比较节点背后的 canonical comparison 行。',
+			evidencePanelEvidenceLead: '这些行展示当前证据节点如何被用于比较。',
+			evidencePanelNodeLead: '当前精简图谱契约还没有为这个节点暴露比较行。',
+			evidencePanelEdgeLead: '这些行展示当前关系可用的核查证据。',
+			evidencePanelLoading: '正在加载证据行...',
+			evidencePanelEmpty: '当前选择没有可展示的支撑比较行。',
 			edgeLabelDocumentEvidence: '来源',
 			edgeLabelEvidenceComparison: '支撑',
 			edgeLabelComparisonMaterial: '材料',

@@ -27,7 +27,11 @@
 		type GraphResponse
 	} from '../../../_shared/graph';
 	import { t } from '../../../_shared/i18n';
-	import { fetchComparisonRow, type ComparisonRow } from '../../../_shared/comparisons';
+	import {
+		fetchComparisonRow,
+		fetchComparisons,
+		type ComparisonRow
+	} from '../../../_shared/comparisons';
 	import { fetchDocumentProfile, type DocumentProfile } from '../../../_shared/documents';
 	import { fetchEvidenceCard, type EvidenceCard } from '../../../_shared/evidence';
 	import { buildDocumentViewerHref } from '../../../_shared/traceback';
@@ -89,8 +93,8 @@
 		process: { color: '#65748b', shape: 'concave-hexagon' }
 	};
 	const defaultVisibleNodeTypes: Record<NodeKind, boolean> = {
-		document: true,
-		evidence: true,
+		document: false,
+		evidence: false,
 		comparison: true,
 		material: true,
 		property: true,
@@ -245,6 +249,8 @@
 	let status = '';
 	let detailLoading = false;
 	let detailError = '';
+	let evidenceRowsLoading = false;
+	let evidenceRowsError = '';
 	let expandingNeighborhood = false;
 	let workspace: WorkspaceOverview | null = null;
 	let notFound = false;
@@ -256,10 +262,12 @@
 	let selectedNode: SelectedNode | null = null;
 	let selectedNodeDetail: NodeDetail | null = null;
 	let selectedEdge: EdgeDetail | null = null;
+	let evidenceRows: ComparisonRow[] = [];
 	let hoveredNodeId: string | null = null;
 	let hoverPreview: HoverPreview | null = null;
 	let loadedCollectionId = '';
 	let detailRequestId = 0;
+	let evidenceRowsRequestId = 0;
 	let visibleNodeTypes: Record<NodeKind, boolean> = { ...defaultVisibleNodeTypes };
 	$: surfaceState = getWorkspaceSurfaceState(workspace, 'graph');
 	$: showFallbackState =
@@ -327,8 +335,8 @@
 			? clamp(98 + Math.min(displayLabel.length, 44) * 2.1 + degreeBoost * 5, 98, 210)
 			: clamp(58 + Math.min(displayLabel.length, 22) * 1.55 + degreeBoost * 4, 58, 128);
 		const height = aggregate
-			? clamp(52 + ((lineCount - 1) * 22) + degreeBoost * 4, 52, 118)
-			: clamp(44 + ((lineCount - 1) * 18) + degreeBoost * 3, 44, 82);
+			? clamp(52 + (lineCount - 1) * 22 + degreeBoost * 4, 52, 118)
+			: clamp(44 + (lineCount - 1) * 18 + degreeBoost * 3, 44, 82);
 		return {
 			aggregate,
 			displayLabel,
@@ -573,11 +581,15 @@
 
 	function clearSelection() {
 		detailRequestId += 1;
+		evidenceRowsRequestId += 1;
 		hoveredNodeId = null;
 		hoverPreview = null;
 		selectedNode = null;
 		selectedNodeDetail = null;
 		selectedEdge = null;
+		evidenceRows = [];
+		evidenceRowsLoading = false;
+		evidenceRowsError = '';
 		detailLoading = false;
 		detailError = '';
 		syncSelectionStyles();
@@ -619,7 +631,8 @@
 
 	async function loadNodeDetail(node: SelectedNode) {
 		const requestId = ++detailRequestId;
-		detailLoading = node.kind === 'document' || node.kind === 'evidence' || node.kind === 'comparison';
+		detailLoading =
+			node.kind === 'document' || node.kind === 'evidence' || node.kind === 'comparison';
 		detailError = '';
 		selectedNodeDetail = null;
 
@@ -684,6 +697,7 @@
 		selectedEdge = null;
 		selectedNode = nextSelectedNode;
 		syncSelectionStyles();
+		void loadEvidenceRowsForNode(nextSelectedNode);
 		if (options.focus !== false) {
 			focusNodeInViewport(nodeId);
 		}
@@ -713,6 +727,7 @@
 				typeof edge.data('edgeDescription') === 'string' ? edge.data('edgeDescription') : null
 		};
 		syncSelectionStyles();
+		void loadEvidenceRowsForEdge(selectedEdge);
 		if (focus) {
 			focusEdgeInViewport(edgeId);
 		}
@@ -774,7 +789,8 @@
 		const elements: ElementDefinition[] = [];
 
 		for (const [index, node] of nodes.entries()) {
-			const position = previousPositions.get(node.id) ?? fallbackPosition(node.id, index, nodes.length);
+			const position =
+				previousPositions.get(node.id) ?? fallbackPosition(node.id, index, nodes.length);
 			const metrics = nodeLayoutMetrics(node);
 			elements.push({
 				group: 'nodes',
@@ -1058,36 +1074,154 @@
 		return items.length ? items.join(', ') : '--';
 	}
 
-	function selectedNodeComparisonFilter() {
-		if (!selectedNode) return null;
-		const value = selectedNode.label.trim();
+	function nodeComparisonFilter(node: SelectedNode | null) {
+		if (!node) return null;
+		const value = node.label.trim();
 		if (!value) return null;
 
-		if (selectedNode.kind === 'material') {
+		if (node.kind === 'material') {
 			return {
 				key: 'material_system_normalized',
 				value
 			};
 		}
-		if (selectedNode.kind === 'property') {
+		if (node.kind === 'property') {
 			return {
 				key: 'property_normalized',
 				value
 			};
 		}
-		if (selectedNode.kind === 'test_condition') {
+		if (node.kind === 'test_condition') {
 			return {
 				key: 'test_condition_normalized',
 				value
 			};
 		}
-		if (selectedNode.kind === 'baseline') {
+		if (node.kind === 'baseline') {
 			return {
 				key: 'baseline_normalized',
 				value
 			};
 		}
 		return null;
+	}
+
+	function selectedNodeComparisonFilter() {
+		return nodeComparisonFilter(selectedNode);
+	}
+
+	function connectedComparisonIds(nodeId: string) {
+		if (!cy) return [];
+		const node = cy.$id(nodeId);
+		if (node.empty()) return [];
+		const ids = new Set<string>();
+		node.connectedNodes().forEach((neighbor) => {
+			const parsed = parseGraphNodeId(neighbor.id());
+			if (parsed.kind === 'comparison' && parsed.resourceId) {
+				ids.add(parsed.resourceId);
+			}
+		});
+		return Array.from(ids);
+	}
+
+	function comparisonIdsForEdge(edge: EdgeDetail) {
+		const ids = new Set<string>();
+		for (const nodeId of [edge.source, edge.target]) {
+			const parsed = parseGraphNodeId(nodeId);
+			if (parsed.kind === 'comparison' && parsed.resourceId) {
+				ids.add(parsed.resourceId);
+			}
+		}
+		return Array.from(ids);
+	}
+
+	async function loadRowsByComparisonIds(rowIds: string[], requestId: number) {
+		const uniqueIds = Array.from(new Set(rowIds.filter((rowId) => rowId.trim()))).slice(0, 6);
+		if (!uniqueIds.length) {
+			evidenceRows = [];
+			evidenceRowsLoading = false;
+			return;
+		}
+
+		const rows = await Promise.all(
+			uniqueIds.map((rowId) => fetchComparisonRow(collectionId, rowId))
+		);
+		if (requestId !== evidenceRowsRequestId) return;
+		evidenceRows = rows;
+	}
+
+	async function loadEvidenceRowsForNode(node: SelectedNode) {
+		const requestId = ++evidenceRowsRequestId;
+		evidenceRows = [];
+		evidenceRowsError = '';
+		evidenceRowsLoading = true;
+
+		try {
+			const filter = nodeComparisonFilter(node);
+			if (filter) {
+				const response = await fetchComparisons(collectionId, {
+					limit: 6,
+					[filter.key]: filter.value
+				});
+				if (requestId !== evidenceRowsRequestId) return;
+				evidenceRows = response.items;
+			} else if (node.kind === 'comparison' && node.resourceId) {
+				await loadRowsByComparisonIds([node.resourceId], requestId);
+			} else if (node.kind === 'evidence') {
+				await loadRowsByComparisonIds(connectedComparisonIds(node.id), requestId);
+			}
+		} catch (err) {
+			if (requestId !== evidenceRowsRequestId) return;
+			evidenceRowsError = errorMessage(err);
+			evidenceRows = [];
+		} finally {
+			if (requestId === evidenceRowsRequestId) {
+				evidenceRowsLoading = false;
+			}
+		}
+	}
+
+	async function loadEvidenceRowsForEdge(edge: EdgeDetail) {
+		const requestId = ++evidenceRowsRequestId;
+		evidenceRows = [];
+		evidenceRowsError = '';
+		evidenceRowsLoading = true;
+
+		try {
+			await loadRowsByComparisonIds(comparisonIdsForEdge(edge), requestId);
+		} catch (err) {
+			if (requestId !== evidenceRowsRequestId) return;
+			evidenceRowsError = errorMessage(err);
+			evidenceRows = [];
+		} finally {
+			if (requestId === evidenceRowsRequestId) {
+				evidenceRowsLoading = false;
+			}
+		}
+	}
+
+	function evidencePanelLead() {
+		if (selectedNode) {
+			if (selectedNodeComparisonFilter()) return $t('graph.evidencePanelAggregateLead');
+			if (selectedNode.kind === 'comparison') return $t('graph.evidencePanelComparisonLead');
+			if (selectedNode.kind === 'evidence') return $t('graph.evidencePanelEvidenceLead');
+			return $t('graph.evidencePanelNodeLead');
+		}
+		if (selectedEdge) return $t('graph.evidencePanelEdgeLead');
+		return $t('graph.evidencePanelEmptyLead');
+	}
+
+	function resultHref(row: ComparisonRow) {
+		return `/collections/${encodeURIComponent(collectionId)}/results/${encodeURIComponent(row.result_id)}`;
+	}
+
+	function rowSourceHref(row: ComparisonRow) {
+		if (!row.source_document_id) return null;
+		const evidenceId = row.evidence_bundle.supporting_evidence_ids[0] ?? null;
+		return buildDocumentViewerHref(collectionId, row.source_document_id, {
+			evidenceId,
+			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
+		});
 	}
 
 	function selectedNodeHref() {
@@ -1196,280 +1330,423 @@
 		</article>
 	</section>
 {:else}
-	<section class="card">
-		<div class="graph-preview-body">
-			<div class="graph-controls">
-				<div class="field">
-					<label for="maxNodes">{$t('graph.maxNodesLabel')}</label>
-					<input
-						id="maxNodes"
-						class="input"
-						type="number"
-						min="1"
-						max="2000"
-						bind:value={maxNodes}
-					/>
-				</div>
-				<div class="field">
-					<label for="minWeight">{$t('graph.minWeightLabel')}</label>
-					<input
-						id="minWeight"
-						class="input"
-						type="number"
-						min="0"
-						step="0.1"
-						bind:value={minWeight}
-					/>
-				</div>
-				<div class="field">
-					<label for="previewQuery">{$t('graph.searchLabel')}</label>
-					<input
-						id="previewQuery"
-						class="input"
-						bind:value={previewQuery}
-						placeholder={$t('graph.searchPlaceholder')}
-					/>
-				</div>
-				{#if availableNodeTypes.length}
-					<div class="field field--wide">
-						<span>{$t('graph.nodeTypesLabel')}</span>
-						<div class="graph-node-types">
-							{#each availableNodeTypes as type}
-								<label class="graph-node-type">
-									<input
-										type="checkbox"
-										checked={isNodeTypeVisible(type)}
-										on:change={(event) =>
-											setNodeTypeVisibility(
-												type,
-												(event.currentTarget as HTMLInputElement).checked
-											)}
-									/>
-									<span
-										class="graph-node-type__swatch"
-										style={`background:${nodeColor(type)};`}
-										aria-hidden="true"
-									></span>
-									<span>{nodeTypeLabel(type)}</span>
-								</label>
-							{/each}
-						</div>
+	<div class="graph-workspace-shell">
+		<section class="card graph-map-card">
+			<div class="graph-preview-body">
+				<div class="graph-controls">
+					<div>
+						<h3 class="graph-panel-title">{$t('graph.filtersTitle')}</h3>
+						<p class="note">{$t('graph.filtersLead')}</p>
 					</div>
-				{/if}
-				<div class="table-actions">
-					<button class="btn btn--ghost btn--small" type="button" on:click={resetFilters}>
-						{$t('graph.resetFilters')}
-					</button>
-				</div>
-				<div class="graph-stats">
-					<span>{$t('graph.visibleNodes')}: {visibleNodes}</span>
-					<span>{$t('graph.visibleEdges')}: {visibleEdges}</span>
-					{#if graphData?.truncated}
-						<span>{$t('graph.truncated')}</span>
+					<div class="field">
+						<label for="maxNodes">{$t('graph.maxNodesLabel')}</label>
+						<input
+							id="maxNodes"
+							class="input"
+							type="number"
+							min="1"
+							max="2000"
+							bind:value={maxNodes}
+						/>
+					</div>
+					<div class="field">
+						<label for="minWeight">{$t('graph.minWeightLabel')}</label>
+						<input
+							id="minWeight"
+							class="input"
+							type="number"
+							min="0"
+							step="0.1"
+							bind:value={minWeight}
+						/>
+					</div>
+					<div class="field">
+						<label for="previewQuery">{$t('graph.searchLabel')}</label>
+						<input
+							id="previewQuery"
+							class="input"
+							bind:value={previewQuery}
+							placeholder={$t('graph.searchPlaceholder')}
+						/>
+					</div>
+					{#if availableNodeTypes.length}
+						<div class="field field--wide">
+							<span>{$t('graph.nodeTypesLabel')}</span>
+							<div class="graph-node-types">
+								{#each availableNodeTypes as type}
+									<label class="graph-node-type">
+										<input
+											type="checkbox"
+											checked={isNodeTypeVisible(type)}
+											on:change={(event) =>
+												setNodeTypeVisibility(
+													type,
+													(event.currentTarget as HTMLInputElement).checked
+												)}
+										/>
+										<span
+											class="graph-node-type__swatch"
+											style={`background:${nodeColor(type)};`}
+											aria-hidden="true"
+										></span>
+										<span>{nodeTypeLabel(type)}</span>
+									</label>
+								{/each}
+							</div>
+						</div>
+					{/if}
+					<div class="table-actions">
+						<button class="btn btn--ghost btn--small" type="button" on:click={resetFilters}>
+							{$t('graph.resetFilters')}
+						</button>
+					</div>
+					<div class="graph-stats">
+						<span>{$t('graph.visibleNodes')}: {visibleNodes}</span>
+						<span>{$t('graph.visibleEdges')}: {visibleEdges}</span>
+						{#if graphData?.truncated}
+							<span>{$t('graph.truncated')}</span>
+						{/if}
+					</div>
+					<p class="graph-hint">{$t('graph.interactionHint')}</p>
+					{#if status}
+						<div class="status" role="status">{status}</div>
+					{/if}
+					{#if error}
+						<div class="status status--error" role="alert">{error}</div>
 					{/if}
 				</div>
-				<p class="graph-hint">{$t('graph.interactionHint')}</p>
-				{#if status}
-					<div class="status" role="status">{status}</div>
-				{/if}
-				{#if error}
-					<div class="status status--error" role="alert">{error}</div>
-				{/if}
-			</div>
 
-			<div
-				class="graph-canvas"
-				bind:this={graphContainer}
-				aria-label={$t('graph.previewCanvasLabel')}
-			>
-				{#if loading}
-					<div class="graph-empty">{$t('graph.previewLoading')}</div>
-				{:else if !visibleNodes}
-					<div class="graph-empty">{$t('graph.previewEmpty')}</div>
-				{/if}
-				{#if hoverPreview}
-					<div
-						class="graph-hover-preview"
-						style={`left:${hoverPreview.left}px;top:${hoverPreview.top}px;`}
-						aria-hidden="true"
-					>
-						<div class="graph-hover-preview__title">{hoverPreview.label}</div>
-						<div class="graph-hover-preview__meta">
-							<span>{hoverPreview.typeLabel || '--'}</span>
-							<span>{$t('graph.detailDegree')}: {hoverPreview.degree ?? '--'}</span>
+				<div
+					class="graph-canvas"
+					bind:this={graphContainer}
+					aria-label={$t('graph.previewCanvasLabel')}
+				>
+					{#if loading}
+						<div class="graph-empty">{$t('graph.previewLoading')}</div>
+					{:else if !visibleNodes}
+						<div class="graph-empty">{$t('graph.previewEmpty')}</div>
+					{/if}
+					{#if hoverPreview}
+						<div
+							class="graph-hover-preview"
+							style={`left:${hoverPreview.left}px;top:${hoverPreview.top}px;`}
+							aria-hidden="true"
+						>
+							<div class="graph-hover-preview__title">{hoverPreview.label}</div>
+							<div class="graph-hover-preview__meta">
+								<span>{hoverPreview.typeLabel || '--'}</span>
+								<span>{$t('graph.detailDegree')}: {hoverPreview.degree ?? '--'}</span>
+							</div>
+						</div>
+					{/if}
+				</div>
+			</div>
+		</section>
+
+		<section class="card graph-insight-card">
+			<h3>{$t('graph.insightTitle')}</h3>
+			<div class="graph-details">
+				{#if selectedNode}
+					<div class="graph-details__header">
+						<span>{$t('graph.detailsNode')}</span>
+						<div class="table-actions">
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								on:click={() => void expandSelectedNeighborhood()}
+								disabled={expandingNeighborhood}
+							>
+								{expandingNeighborhood
+									? $t('graph.neighborsExpanding')
+									: $t('graph.neighborsExpand')}
+							</button>
+							{#if selectedNodeHref()}
+								<a class="btn btn--ghost btn--small" href={selectedNodeHref() ?? '#'}>
+									{selectedNodeLinkLabel()}
+								</a>
+							{/if}
+							<button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
+								{$t('graph.detailsClear')}
+							</button>
 						</div>
 					</div>
-				{/if}
-			</div>
-		</div>
-	</section>
-
-	<section class="card">
-		<h3>{$t('graph.detailsTitle')}</h3>
-		<div class="graph-details">
-			{#if selectedNode}
-				<div class="graph-details__header">
-					<span>{$t('graph.detailsNode')}</span>
-					<div class="table-actions">
-						<button
-							class="btn btn--ghost btn--small"
-							type="button"
-							on:click={() => void expandSelectedNeighborhood()}
-							disabled={expandingNeighborhood}
-						>
-							{expandingNeighborhood ? $t('graph.neighborsExpanding') : $t('graph.neighborsExpand')}
-						</button>
-						{#if selectedNodeHref()}
-							<a class="btn btn--ghost btn--small" href={selectedNodeHref() ?? '#'}>
-								{selectedNodeLinkLabel()}
-							</a>
+					<div class="detail-primary">
+						<span class="detail-name">{selectedNode.label}</span>
+						{#if selectedNode.type}
+							<span class="detail-tag">{selectedNodeTypeLabel(selectedNode.type)}</span>
 						{/if}
+					</div>
+					<dl class="detail-list">
+						<div class="detail-row">
+							<dt>{$t('graph.detailId')}</dt>
+							<dd>{selectedNode.id}</dd>
+						</div>
+						<div class="detail-row">
+							<dt>{$t('graph.detailDegree')}</dt>
+							<dd>{selectedNode.degree ?? '--'}</dd>
+						</div>
+						{#if detailLoading}
+							<div class="status" role="status">{$t('graph.detailsLoading')}</div>
+						{:else if detailError}
+							<div class="status status--error" role="alert">{detailError}</div>
+						{:else if selectedNodeComparisonFilter()}
+							<div class="detail-row detail-row--wide">
+								<dt>{$t('graph.detailAggregate')}</dt>
+								<dd>{$t('graph.detailAggregateBody')}</dd>
+							</div>
+							<div class="detail-row detail-row--wide">
+								<dt>{$t('graph.detailAggregateValue')}</dt>
+								<dd>{selectedNode.label}</dd>
+							</div>
+						{:else if selectedNodeDetail?.kind === 'document'}
+							<div class="detail-row">
+								<dt>{$t('graph.detailSourceFile')}</dt>
+								<dd>{selectedNodeDetail.data.source_filename ?? '--'}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailDocType')}</dt>
+								<dd>{selectedNodeDetail.data.doc_type}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailProtocol')}</dt>
+								<dd>{selectedNodeDetail.data.protocol_extractable}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailConfidence')}</dt>
+								<dd>{selectedNodeDetail.data.confidence ?? '--'}</dd>
+							</div>
+						{:else if selectedNodeDetail?.kind === 'evidence'}
+							<div class="detail-row detail-row--wide">
+								<dt>{$t('graph.detailClaim')}</dt>
+								<dd>{selectedNodeDetail.data.claim_text || '--'}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailClaimType')}</dt>
+								<dd>{selectedNodeDetail.data.claim_type}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailTraceability')}</dt>
+								<dd>{selectedNodeDetail.data.traceability_status}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailConfidence')}</dt>
+								<dd>{selectedNodeDetail.data.confidence ?? '--'}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailMaterialSystem')}</dt>
+								<dd>{selectedNodeDetail.data.material_system || '--'}</dd>
+							</div>
+							<div class="detail-row detail-row--wide">
+								<dt>{$t('graph.detailProcess')}</dt>
+								<dd>{formatList(selectedNodeDetail.data.condition_context.process)}</dd>
+							</div>
+							<div class="detail-row detail-row--wide">
+								<dt>{$t('graph.detailBaseline')}</dt>
+								<dd>{formatList(selectedNodeDetail.data.condition_context.baseline)}</dd>
+							</div>
+							<div class="detail-row detail-row--wide">
+								<dt>{$t('graph.detailTest')}</dt>
+								<dd>{formatList(selectedNodeDetail.data.condition_context.test)}</dd>
+							</div>
+						{:else if selectedNodeDetail?.kind === 'comparison'}
+							<div class="detail-row">
+								<dt>{$t('graph.detailSourceDocument')}</dt>
+								<dd>{selectedNodeDetail.data.source_document_id}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailProperty')}</dt>
+								<dd>{selectedNodeDetail.data.display.property_normalized}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailComparability')}</dt>
+								<dd>{selectedNodeDetail.data.assessment.comparability_status}</dd>
+							</div>
+							<div class="detail-row detail-row--wide">
+								<dt>{$t('graph.detailResult')}</dt>
+								<dd>{selectedNodeDetail.data.display.result_summary}</dd>
+							</div>
+							<div class="detail-row detail-row--wide">
+								<dt>{$t('graph.detailEvidenceIds')}</dt>
+								<dd>
+									{formatList(selectedNodeDetail.data.evidence_bundle.supporting_evidence_ids)}
+								</dd>
+							</div>
+						{/if}
+					</dl>
+				{:else if selectedEdge}
+					<div class="graph-details__header">
+						<span>{$t('graph.detailsEdge')}</span>
 						<button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
 							{$t('graph.detailsClear')}
 						</button>
 					</div>
-				</div>
-				<div class="detail-primary">
-					<span class="detail-name">{selectedNode.label}</span>
-					{#if selectedNode.type}
-						<span class="detail-tag">{selectedNodeTypeLabel(selectedNode.type)}</span>
-					{/if}
-				</div>
-				<dl class="detail-list">
-					<div class="detail-row">
-						<dt>{$t('graph.detailId')}</dt>
-						<dd>{selectedNode.id}</dd>
+					<div class="detail-primary">
+						<span class="detail-name">{selectedEdge.sourceLabel} -> {selectedEdge.targetLabel}</span
+						>
 					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailDegree')}</dt>
-						<dd>{selectedNode.degree ?? '--'}</dd>
-					</div>
-					{#if detailLoading}
-						<div class="status" role="status">{$t('graph.detailsLoading')}</div>
-					{:else if detailError}
-						<div class="status status--error" role="alert">{detailError}</div>
-					{:else if selectedNodeComparisonFilter()}
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailAggregate')}</dt>
-							<dd>{$t('graph.detailAggregateBody')}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailAggregateValue')}</dt>
-							<dd>{selectedNode.label}</dd>
-						</div>
-					{:else if selectedNodeDetail?.kind === 'document'}
+					<dl class="detail-list">
 						<div class="detail-row">
-							<dt>{$t('graph.detailSourceFile')}</dt>
-							<dd>{selectedNodeDetail.data.source_filename ?? '--'}</dd>
+							<dt>{$t('graph.detailId')}</dt>
+							<dd>{selectedEdge.id}</dd>
 						</div>
 						<div class="detail-row">
-							<dt>{$t('graph.detailDocType')}</dt>
-							<dd>{selectedNodeDetail.data.doc_type}</dd>
+							<dt>{$t('graph.detailSource')}</dt>
+							<dd>{selectedEdge.source}</dd>
 						</div>
 						<div class="detail-row">
-							<dt>{$t('graph.detailProtocol')}</dt>
-							<dd>{selectedNodeDetail.data.protocol_extractable}</dd>
+							<dt>{$t('graph.detailTarget')}</dt>
+							<dd>{selectedEdge.target}</dd>
 						</div>
 						<div class="detail-row">
-							<dt>{$t('graph.detailConfidence')}</dt>
-							<dd>{selectedNodeDetail.data.confidence ?? '--'}</dd>
-						</div>
-					{:else if selectedNodeDetail?.kind === 'evidence'}
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailClaim')}</dt>
-							<dd>{selectedNodeDetail.data.claim_text || '--'}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailClaimType')}</dt>
-							<dd>{selectedNodeDetail.data.claim_type}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailTraceability')}</dt>
-							<dd>{selectedNodeDetail.data.traceability_status}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailConfidence')}</dt>
-							<dd>{selectedNodeDetail.data.confidence ?? '--'}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailMaterialSystem')}</dt>
-							<dd>{selectedNodeDetail.data.material_system || '--'}</dd>
+							<dt>{$t('graph.detailWeight')}</dt>
+							<dd>{selectedEdge.weight ?? '--'}</dd>
 						</div>
 						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailProcess')}</dt>
-							<dd>{formatList(selectedNodeDetail.data.condition_context.process)}</dd>
+							<dt>{$t('graph.detailDescription')}</dt>
+							<dd>{selectedEdge.edge_description || '--'}</dd>
 						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailBaseline')}</dt>
-							<dd>{formatList(selectedNodeDetail.data.condition_context.baseline)}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailTest')}</dt>
-							<dd>{formatList(selectedNodeDetail.data.condition_context.test)}</dd>
-						</div>
-					{:else if selectedNodeDetail?.kind === 'comparison'}
-						<div class="detail-row">
-							<dt>{$t('graph.detailSourceDocument')}</dt>
-							<dd>{selectedNodeDetail.data.source_document_id}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailProperty')}</dt>
-							<dd>{selectedNodeDetail.data.display.property_normalized}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailComparability')}</dt>
-							<dd>{selectedNodeDetail.data.assessment.comparability_status}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailResult')}</dt>
-							<dd>{selectedNodeDetail.data.display.result_summary}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailEvidenceIds')}</dt>
-							<dd>{formatList(selectedNodeDetail.data.evidence_bundle.supporting_evidence_ids)}</dd>
-						</div>
-					{/if}
-				</dl>
-			{:else if selectedEdge}
-				<div class="graph-details__header">
-					<span>{$t('graph.detailsEdge')}</span>
-					<button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
-						{$t('graph.detailsClear')}
-					</button>
-				</div>
-				<div class="detail-primary">
-					<span class="detail-name">{selectedEdge.sourceLabel} -> {selectedEdge.targetLabel}</span>
-				</div>
-				<dl class="detail-list">
-					<div class="detail-row">
-						<dt>{$t('graph.detailId')}</dt>
-						<dd>{selectedEdge.id}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailSource')}</dt>
-						<dd>{selectedEdge.source}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailTarget')}</dt>
-						<dd>{selectedEdge.target}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailWeight')}</dt>
-						<dd>{selectedEdge.weight ?? '--'}</dd>
-					</div>
-					<div class="detail-row detail-row--wide">
-						<dt>{$t('graph.detailDescription')}</dt>
-						<dd>{selectedEdge.edge_description || '--'}</dd>
-					</div>
-				</dl>
-			{:else}
-				<div class="graph-empty">{$t('graph.detailsEmpty')}</div>
+					</dl>
+				{:else}
+					<div class="graph-panel-empty">{$t('graph.detailsEmpty')}</div>
+				{/if}
+			</div>
+		</section>
+	</div>
+
+	<section class="card graph-evidence-card">
+		<div class="graph-evidence-card__header">
+			<div>
+				<h3>{$t('graph.evidencePanelTitle')}</h3>
+				<p class="note">{evidencePanelLead()}</p>
+			</div>
+			{#if selectedNodeHref()}
+				<a class="btn btn--ghost btn--small" href={selectedNodeHref() ?? '#'}>
+					{selectedNodeLinkLabel()}
+				</a>
 			{/if}
 		</div>
+
+		{#if evidenceRowsLoading}
+			<div class="status" role="status">{$t('graph.evidencePanelLoading')}</div>
+		{:else if evidenceRowsError}
+			<div class="status status--error" role="alert">{evidenceRowsError}</div>
+		{:else if evidenceRows.length}
+			<div class="graph-evidence-list">
+				{#each evidenceRows as row}
+					<article class="result-card graph-evidence-row">
+						<div class="table-main">
+							<div class="table-title">
+								{row.display.material_system_normalized} · {row.display.property_normalized}
+							</div>
+							<div class="table-sub">{row.assessment.comparability_status}</div>
+						</div>
+						<p class="result-text">{row.display.result_summary}</p>
+						<dl class="detail-list graph-evidence-row__details">
+							<div class="detail-row">
+								<dt>{$t('graph.detailProcess')}</dt>
+								<dd>{row.display.process_normalized}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailTest')}</dt>
+								<dd>{row.display.test_condition_normalized}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailBaseline')}</dt>
+								<dd>{row.display.baseline_normalized}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('graph.detailEvidenceIds')}</dt>
+								<dd>{formatList(row.evidence_bundle.supporting_evidence_ids)}</dd>
+							</div>
+						</dl>
+						<div class="table-actions">
+							<a class="btn btn--ghost btn--small" href={resultHref(row)}>
+								{$t('graph.openResult')}
+							</a>
+							{#if rowSourceHref(row)}
+								<a class="btn btn--ghost btn--small" href={rowSourceHref(row) ?? '#'}>
+									{$t('graph.openSourceContext')}
+								</a>
+							{/if}
+						</div>
+					</article>
+				{/each}
+			</div>
+		{:else}
+			<div class="graph-panel-empty">{$t('graph.evidencePanelEmpty')}</div>
+		{/if}
 	</section>
 {/if}
 
 <style>
+	.graph-workspace-shell {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(340px, 0.27fr);
+		gap: 16px;
+		align-items: stretch;
+	}
+
+	.graph-map-card,
+	.graph-insight-card,
+	.graph-evidence-card {
+		min-width: 0;
+	}
+
+	.graph-preview-body {
+		grid-template-columns: minmax(280px, 0.24fr) minmax(0, 1fr);
+		height: 100%;
+	}
+
+	.graph-controls {
+		padding-right: 4px;
+		border-right: 1px solid var(--color-line);
+	}
+
+	.graph-canvas {
+		min-height: min(690px, calc(100vh - 300px));
+	}
+
+	.graph-insight-card {
+		position: sticky;
+		top: 1rem;
+		align-self: start;
+	}
+
+	.graph-panel-title {
+		margin: 0;
+	}
+
+	.graph-panel-empty {
+		padding: 1rem;
+		border: 1px dashed var(--color-line);
+		border-radius: 14px;
+		color: var(--color-subtle);
+		background: rgba(255, 255, 255, 0.52);
+	}
+
+	.graph-evidence-card__header {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		align-items: flex-start;
+		margin-bottom: 1rem;
+	}
+
+	.graph-evidence-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		gap: 12px;
+	}
+
+	.graph-evidence-row {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.graph-evidence-row__details {
+		margin-top: 0;
+	}
+
 	.field--wide {
 		grid-column: 1 / -1;
 	}
@@ -1532,5 +1809,36 @@
 		margin-top: 0.35rem;
 		font-size: 0.76rem;
 		color: var(--color-subtle);
+	}
+
+	@media (max-width: 1180px) {
+		.graph-workspace-shell {
+			grid-template-columns: 1fr;
+		}
+
+		.graph-insight-card {
+			position: static;
+		}
+	}
+
+	@media (max-width: 760px) {
+		.graph-preview-body {
+			grid-template-columns: 1fr;
+		}
+
+		.graph-controls {
+			padding-right: 0;
+			border-right: 0;
+			border-bottom: 1px solid var(--color-line);
+			padding-bottom: 1rem;
+		}
+
+		.graph-canvas {
+			min-height: 420px;
+		}
+
+		.graph-evidence-card__header {
+			display: grid;
+		}
 	}
 </style>

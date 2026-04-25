@@ -379,6 +379,13 @@ textarea {
   gap: 48px;
 }
 
+.page--wide {
+  width: min(1800px, 100%);
+  max-width: none;
+  margin-top: 20px;
+  gap: 16px;
+}
+
 .collection-toolbar {
   display: flex;
   justify-content: flex-end;

@@ -69,6 +69,8 @@
     window.addEventListener('click', handleClick);
     return () => window.removeEventListener('click', handleClick);
   });
+
+  $: isGraphRoute = /^\/collections\/[^/]+\/graph\/?$/.test($page.url.pathname);
 </script>
 
 <div class="app-shell">
@@ -166,7 +168,7 @@
     </div>
   </header>
 
-  <main class="page">
+  <main class="page" class:page--wide={isGraphRoute}>
     <slot />
   </main>
 

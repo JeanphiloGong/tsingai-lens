@@ -16,18 +16,18 @@ const { pageStore, setPage, goto, fetchMock } = vi.hoisted(() => {
 		url: new URL('http://localhost/collections/col_123/results')
 	};
 
-		return {
-			pageStore: {
-				subscribe(run: (value: ResultsPageState) => void) {
-					run(current);
-					subscribers.add(run);
-					return () => subscribers.delete(run);
-				}
-			},
-			setPage(next: ResultsPageState) {
-				current = next;
-				for (const run of subscribers) run(next);
-			},
+	return {
+		pageStore: {
+			subscribe(run: (value: ResultsPageState) => void) {
+				run(current);
+				subscribers.add(run);
+				return () => subscribers.delete(run);
+			}
+		},
+		setPage(next: ResultsPageState) {
+			current = next;
+			for (const run of subscribers) run(next);
+		},
 		goto: vi.fn(),
 		fetchMock: vi.fn()
 	};
@@ -201,27 +201,40 @@ describe('collections/[id]/results/+page.svelte', () => {
 		});
 	});
 
-	it('renders result and document actions from the result list', async () => {
+	it('renders extracted result cards with source and comparison actions', async () => {
 		render(Page);
 
-		const resultLink = browserPage.getByRole('link', { name: 'Open result' }).nth(0);
-		await expect.element(resultLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
+		await expect.element(browserPage.getByText('Extracted Results')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Source evidence').nth(0)).toBeInTheDocument();
 
-		const sourceLink = browserPage.getByRole('link', { name: 'View source evidence' }).nth(0);
-		await expect.element(sourceLink).toHaveAttribute('href', '/collections/col_123/documents/doc_1');
+		const sourceLink = browserPage.getByRole('link', { name: 'View source' }).nth(0);
+		await expect
+			.element(sourceLink)
+			.toHaveAttribute(
+				'href',
+				'/collections/col_123/documents/doc_1?result_id=cres_1&return_to=%2Fcollections%2Fcol_123%2Fresults'
+			);
+
+		const comparisonLink = browserPage.getByRole('link', { name: 'Enter comparison' }).nth(0);
+		await expect
+			.element(comparisonLink)
+			.toHaveAttribute(
+				'href',
+				'/collections/col_123/comparisons?material_system_normalized=oxide+cathode&property_normalized=conductivity&baseline_normalized=as-prepared&test_condition_normalized=EIS'
+			);
 	});
 
 	it('updates the route query when the material filter changes', async () => {
 		render(Page);
 
-		const resultLink = browserPage.getByRole('link', { name: 'Open result' }).nth(0);
-		await expect.element(resultLink).toBeInTheDocument();
+		const sourceLink = browserPage.getByRole('link', { name: 'View source' }).nth(0);
+		await expect.element(sourceLink).toBeInTheDocument();
 
-		const filter = browserPage.getByLabelText('Material');
-		await filter.selectOptions('layered oxide');
+		const filter = browserPage.getByLabelText('Material system');
+		await filter.selectOptions('Layered oxide');
 
 		expect(goto).toHaveBeenCalledWith(
-			'/collections/col_123/results?material_system_normalized=layered+oxide',
+			'/collections/col_123/results?material_system_normalized=Layered+oxide',
 			expect.objectContaining({
 				keepFocus: true,
 				noScroll: true,

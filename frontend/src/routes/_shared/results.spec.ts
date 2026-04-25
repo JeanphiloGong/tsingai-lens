@@ -8,7 +8,19 @@ vi.mock('./api', () => ({
 	requestJson
 }));
 
-const { fetchCollectionResults, fetchCollectionResult } = await import('./results');
+const {
+	buildResultsConclusion,
+	buildResultsQualitySummary,
+	fetchCollectionResult,
+	fetchCollectionResults,
+	filterResults,
+	formatResultValue,
+	getMissingContextChips,
+	getResultAvailabilityStatus,
+	getResultConfidence,
+	getSourceEvidenceQuote,
+	getTraceabilityStatus
+} = await import('./results');
 
 describe('results shared helpers', () => {
 	beforeEach(() => {
@@ -53,6 +65,90 @@ describe('results shared helpers', () => {
 			unit: 'mS/cm',
 			comparability_status: 'comparable'
 		});
+	});
+
+	it('derives extracted-result quality, status, missing context, and readable values', async () => {
+		requestJson.mockResolvedValue({
+			collection_id: 'col_123',
+			total: 2,
+			count: 2,
+			items: [
+				{
+					result_id: 'cres_1',
+					document_id: 'doc_1',
+					document_title: 'Paper A',
+					material_label: 'unspecified material system',
+					property: 'thermoelectric_magnetic_effects',
+					value: 12,
+					unit: null,
+					summary:
+						'The dendrites at the tail of the melt pool perform the strongest thermoelectric magnetic effects.',
+					baseline: 'unspecified baseline',
+					test_condition: 'unspecified test condition',
+					process: 'unspecified process',
+					traceability_status: 'direct',
+					comparability_status: 'comparable',
+					requires_expert_review: true,
+					confidence: 0.9,
+					source_evidence_quote:
+						'The dendrites at the tail of the melt pool perform the strongest thermoelectric magnetic effects.',
+					source_type: 'text',
+					source_section: 'Section 3.2',
+					evidence_ids: ['ev_1'],
+					anchor_ids: ['anc_1']
+				},
+				{
+					result_id: 'cres_2',
+					document_id: 'doc_2',
+					document_title: 'Paper B',
+					material_label: 'nickel superalloy',
+					property: 'volume_fraction_of_the_laves_phases',
+					summary: 'Volume fraction of the Laves phases reduces from 2.4% to 1.3%.',
+					traceability_status: 'none',
+					comparability_status: 'not_comparable',
+					requires_expert_review: false
+				}
+			]
+		});
+
+		const response = await fetchCollectionResults('col_123');
+		const first = response.items[0];
+
+		expect(formatResultValue(first.property, 'property')).toBe('Thermoelectric magnetic effects');
+		expect(getTraceabilityStatus(first)).toBe('direct');
+		expect(getResultAvailabilityStatus(first)).toBe('insufficient');
+		expect(getResultConfidence(first)).toBe(90);
+		expect(getSourceEvidenceQuote(first)).toMatchObject({
+			text: 'The dendrites at the tail of the melt pool perform the strongest thermoelectric magnetic effects.'
+		});
+		expect(getMissingContextChips(first).map((chip) => chip.key)).toEqual([
+			'material_system',
+			'process',
+			'baseline',
+			'test_condition',
+			'unit_context',
+			'experimental_explanation'
+		]);
+
+		const summary = buildResultsQualitySummary(response.items);
+		expect(summary).toMatchObject({
+			total: 2,
+			traceable: 1,
+			insufficientContext: 2,
+			comparable: 0,
+			needsReview: 2
+		});
+		expect(buildResultsConclusion(summary).tone).toBe('warning');
+		expect(
+			filterResults(response.items, {
+				search: 'laves',
+				availability: '',
+				material: '',
+				property: '',
+				testCondition: '',
+				traceability: ''
+			})
+		).toHaveLength(1);
 	});
 
 	it('normalizes result detail payloads into the product-facing drilldown model', async () => {

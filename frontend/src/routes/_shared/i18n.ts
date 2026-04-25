@@ -150,7 +150,7 @@ const translations: Record<Language, Translations> = {
 			tabs: {
 				overview: 'Overview',
 				comparisons: 'Comparisons',
-				results: 'Results',
+				results: 'Extracted Results',
 				evidence: 'Evidence',
 				documents: 'Documents',
 				protocol: 'Protocol',
@@ -380,7 +380,7 @@ const translations: Record<Language, Translations> = {
 			primaryActionProcess: 'Start processing',
 			primaryActionTrack: 'Track processing',
 			primaryActionComparisons: 'Open comparisons',
-			primaryActionResults: 'Open results',
+			primaryActionResults: 'Open extracted results',
 			primaryActionDocuments: 'Inspect documents',
 			primaryActionProtocol: 'Open protocol branch',
 			primaryActionSteps: 'Review paper steps',
@@ -493,7 +493,7 @@ const translations: Record<Language, Translations> = {
 			indexStarted: 'Processing started',
 			capabilities: {
 				comparisons: 'Comparisons',
-				results: 'Results',
+				results: 'Extracted Results',
 				documents: 'Documents',
 				protocol: 'Protocol',
 				graph: 'Graph view',
@@ -505,7 +505,7 @@ const translations: Record<Language, Translations> = {
 			warningsLead:
 				'Use these warnings to decide how cautious you should be with the outputs below.',
 			nextComparisons: 'Open comparisons',
-			nextResults: 'Open results',
+			nextResults: 'Open extracted results',
 			nextDocuments: 'Inspect documents',
 			nextProtocol: 'Open protocol',
 			nextSteps: 'Review paper steps',
@@ -1035,11 +1035,144 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		results: {
-			title: 'Results',
+			title: 'Extracted Results',
+			description:
+				'Review the research results identified from papers, source evidence, material context, and traceback status.',
 			detailTitle: 'Result detail',
-			lead: 'Inspect extracted results as product objects before jumping back to the source paper.',
+			lead: 'Review extracted results, source evidence, material context, and traceback status.',
 			loading: 'Loading results...',
-			empty: 'No results are available yet.',
+			review: {
+				count: '{count} result(s)',
+				updatedAt: 'Updated: {time}',
+				error: 'Unable to load extracted results',
+				processing: 'Starting...',
+				actionTodo: 'Recorded action "{action}" for {result}.'
+			},
+			summary: {
+				label: 'Results quality summary',
+				total: 'Total results',
+				traceable: 'Directly traceable',
+				insufficientContext: 'Insufficient context',
+				comparable: 'Can enter comparison',
+				needsReview: 'Needs human review'
+			},
+			conclusion: {
+				title: 'Result conclusion',
+				warningBody:
+					'Most extracted results can be traced back to source text, but many still lack material system, test condition, treatment, or baseline context. Check insufficient-context items before entering comparison review.',
+				successBody:
+					'Current extracted results include relatively complete material, property, and source information. They can enter the comparison page for further comparability review.'
+			},
+			conclusionActions: {
+				view_insufficient: 'View insufficient-context items',
+				open_comparison: 'Enter comparison review',
+				view_all: 'View all results'
+			},
+			filters: {
+				title: 'Result filters',
+				search: 'Search results',
+				searchPlaceholder: 'Search results, materials, properties, parameters...',
+				availability: 'Availability',
+				material: 'Material system',
+				property: 'Property',
+				testCondition: 'Test condition',
+				traceability: 'Traceability',
+				all: 'All',
+				specified: 'Specified',
+				unspecified: 'Unspecified',
+				clear: 'Clear filters'
+			},
+			view: {
+				label: 'View mode',
+				card: 'Card view',
+				table: 'Table view'
+			},
+			status: {
+				comparable: 'Can enter comparison',
+				limited: 'Limited',
+				insufficient: 'Insufficient context',
+				unavailable: 'Unavailable'
+			},
+			traceability: {
+				direct: 'Directly traceable',
+				indirect: 'Indirectly traceable',
+				none: 'Not traceable'
+			},
+			values: {
+				unspecifiedMaterialSystem: 'Unspecified material system',
+				unspecifiedProcess: 'Unspecified treatment',
+				unspecifiedBaseline: 'Unspecified baseline',
+				unspecifiedTestCondition: 'Unspecified test condition',
+				unspecified: 'Unspecified'
+			},
+			card: {
+				extractedResult: 'Extracted result',
+				resultNote: 'This is the research result identified and normalized by the system.',
+				sourceEvidence: 'Source evidence',
+				sourcePrefix: 'Source',
+				context: 'Result context',
+				missingContext: 'Missing context',
+				noMissingContext: 'No obvious missing context',
+				materialSystem: 'Material system',
+				property: 'Property / metric',
+				process: 'Treatment',
+				baseline: 'Baseline',
+				testCondition: 'Test condition',
+				confidenceValue: 'Confidence {value}'
+			},
+			actions: {
+				viewSource: 'View source',
+				openComparison: 'Enter comparison',
+				openComparisonReview: 'Enter comparison review',
+				viewMissingContext: 'View missing context',
+				viewReason: 'View reason',
+				markIssue: 'Flag issue',
+				refresh: 'Refresh',
+				refreshStatus: 'Refresh status'
+			},
+			more: {
+				label: 'More result actions',
+				copyResult: 'Copy result',
+				openDetail: 'Open detail',
+				markReviewed: 'Mark as reviewed',
+				reanalyze: 'Reanalyze'
+			},
+			missing: {
+				materialSystem: 'Missing material system',
+				process: 'Missing treatment',
+				baseline: 'Missing baseline',
+				testCondition: 'Missing test condition',
+				unitContext: 'Missing unit context',
+				experimentalExplanation: 'Missing experimental explanation'
+			},
+			list: {
+				count: '{count} result(s)',
+				emptyFiltered: 'No extracted results match the current filters.'
+			},
+			sort: {
+				label: 'Sort',
+				confidenceDesc: 'By confidence, high to low',
+				contextCompleteness: 'By context completeness',
+				traceability: 'By traceability',
+				recent: 'Recently generated'
+			},
+			table: {
+				result: 'Result',
+				availability: 'Availability',
+				traceability: 'Traceability',
+				material: 'Material system',
+				property: 'Property / metric',
+				testCondition: 'Test condition',
+				document: 'Source document',
+				actions: 'Actions'
+			},
+			empty: {
+				title: 'No extracted results yet',
+				description:
+					'After document parsing finishes, Lens will show the research results, source evidence, and context identified from papers here.',
+				startProcessing: 'Start processing',
+				refreshStatus: 'Refresh status'
+			},
 			relatedTitle: 'Results from this document',
 			relatedLead: 'These extracted results came from the same paper.',
 			summaryTitle: 'Result summary',
@@ -1961,7 +2094,7 @@ const translations: Record<Language, Translations> = {
 			tabs: {
 				overview: '概览',
 				comparisons: '比较',
-				results: '结果',
+				results: '抽取结果',
 				evidence: '证据',
 				documents: '文档',
 				protocol: 'Protocol',
@@ -2177,7 +2310,7 @@ const translations: Record<Language, Translations> = {
 			primaryActionProcess: '开始处理',
 			primaryActionTrack: '查看进度',
 			primaryActionComparisons: '打开比较',
-			primaryActionResults: '打开结果',
+			primaryActionResults: '打开抽取结果',
 			primaryActionDocuments: '查看文档',
 			primaryActionProtocol: '打开 Protocol 分支',
 			primaryActionSteps: '查看论文步骤',
@@ -2295,7 +2428,7 @@ const translations: Record<Language, Translations> = {
 			indexStarted: '处理已启动',
 			capabilities: {
 				comparisons: '比较',
-				results: '结果',
+				results: '抽取结果',
 				documents: '文档',
 				protocol: 'Protocol',
 				graph: '图谱查看',
@@ -2306,7 +2439,7 @@ const translations: Record<Language, Translations> = {
 			warningsTitle: '集合级提醒',
 			warningsLead: '这些提醒决定了你应当用多谨慎的态度去看下面的结果。',
 			nextComparisons: '打开比较',
-			nextResults: '打开结果',
+			nextResults: '打开抽取结果',
 			nextDocuments: '查看文档',
 			nextProtocol: '打开 Protocol',
 			nextSteps: '查看论文步骤',
@@ -2801,11 +2934,142 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		results: {
-			title: '结果',
+			title: '抽取结果',
+			description: '查看从文献中识别出的研究结果、原文依据、材料上下文和回溯状态。',
 			detailTitle: '结果详情',
-			lead: '先把抽取出来的结果当成核心对象来看，再决定是否回到原文。',
+			lead: '查看从文献中识别出的研究结果、原文依据、材料上下文和回溯状态。',
 			loading: '正在加载结果...',
-			empty: '当前还没有结果。',
+			review: {
+				count: '{count} 个结果',
+				updatedAt: '最近更新：{time}',
+				error: '无法加载抽取结果',
+				processing: '正在启动...',
+				actionTodo: '已记录操作“{action}”：{result}。'
+			},
+			summary: {
+				label: '结果质量概览',
+				total: '结果总数',
+				traceable: '可直接回溯',
+				insufficientContext: '上下文不足',
+				comparable: '可进入比较',
+				needsReview: '需人工检查'
+			},
+			conclusion: {
+				title: '结果结论',
+				warningBody:
+					'当前抽取结果大多可回溯到原文，但多数结果缺少材料体系、测试条件、处理方式或对照对象上下文。建议优先检查上下文不足项，再进入比较审查。',
+				successBody: '当前抽取结果具备较完整的材料、性质和来源信息，可进入比较页进一步检查可比性。'
+			},
+			conclusionActions: {
+				view_insufficient: '查看上下文不足项',
+				open_comparison: '进入比较审查',
+				view_all: '查看全部结果'
+			},
+			filters: {
+				title: '结果筛选',
+				search: '搜索结果',
+				searchPlaceholder: '搜索结果、材料、性质、参数...',
+				availability: '可用性',
+				material: '材料体系',
+				property: '性质指标',
+				testCondition: '测试条件',
+				traceability: '回溯状态',
+				all: '全部',
+				specified: '已指定',
+				unspecified: '未指定',
+				clear: '清空筛选'
+			},
+			view: {
+				label: '视图模式',
+				card: '卡片视图',
+				table: '表格视图'
+			},
+			status: {
+				comparable: '可进入比较',
+				limited: '受限',
+				insufficient: '信息不足',
+				unavailable: '不可用'
+			},
+			traceability: {
+				direct: '可直接回溯',
+				indirect: '间接回溯',
+				none: '不可回溯'
+			},
+			values: {
+				unspecifiedMaterialSystem: '未指定材料体系',
+				unspecifiedProcess: '未指定处理方式',
+				unspecifiedBaseline: '未指定对照对象',
+				unspecifiedTestCondition: '未指定测试条件',
+				unspecified: '未指定'
+			},
+			card: {
+				extractedResult: '抽取结果',
+				resultNote: '这是系统从文献中识别和归一化后的研究结果。',
+				sourceEvidence: '原文依据',
+				sourcePrefix: '来源',
+				context: '结果上下文',
+				missingContext: '缺失上下文',
+				noMissingContext: '暂无明显缺失上下文',
+				materialSystem: '材料体系',
+				property: '性质/指标',
+				process: '处理方式',
+				baseline: '对照对象',
+				testCondition: '测试条件',
+				confidenceValue: '置信度 {value}'
+			},
+			actions: {
+				viewSource: '查看原文',
+				openComparison: '进入比较',
+				openComparisonReview: '进入比较审查',
+				viewMissingContext: '查看缺失上下文',
+				viewReason: '查看原因',
+				markIssue: '标记问题',
+				refresh: '刷新',
+				refreshStatus: '刷新状态'
+			},
+			more: {
+				label: '更多结果操作',
+				copyResult: '复制结果',
+				openDetail: '打开详情',
+				markReviewed: '标记为已审查',
+				reanalyze: '重新分析'
+			},
+			missing: {
+				materialSystem: '缺材料体系',
+				process: '缺处理方式',
+				baseline: '缺对照对象',
+				testCondition: '缺测试条件',
+				unitContext: '缺单位上下文',
+				experimentalExplanation: '缺实验解释'
+			},
+			list: {
+				count: '共 {count} 个结果',
+				emptyFiltered: '当前筛选条件下没有抽取结果。'
+			},
+			sort: {
+				label: '排序',
+				confidenceDesc: '按置信度从高到低',
+				contextCompleteness: '按上下文完整度',
+				traceability: '按回溯状态',
+				recent: '最近生成'
+			},
+			table: {
+				result: '结果',
+				availability: '可用性',
+				traceability: '回溯状态',
+				material: '材料体系',
+				property: '性质/指标',
+				testCondition: '测试条件',
+				document: '来源文档',
+				actions: '操作'
+			},
+			empty: {
+				title: '暂无抽取结果',
+				description:
+					'完成文档解析后，Lens 会在这里展示从文献中识别出的研究结果、原文依据和上下文信息。',
+				startProcessing: '开始处理',
+				refreshStatus: '刷新状态'
+			},
 			relatedTitle: '这篇文献抽出的结果',
 			relatedLead: '下面这些结果都来自当前文献。',
 			summaryTitle: '结果概览',

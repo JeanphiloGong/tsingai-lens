@@ -43,7 +43,6 @@
 	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/evidence`;
 	$: moreActive =
 		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
-		$page.url.pathname.startsWith(`/collections/${collectionId}/results`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`);
 
 	$: if (collectionId && collectionId !== loadedWorkspaceId) {
@@ -161,6 +160,14 @@
 	>
 		{$t('collection.tabs.documents')}
 	</a>
+	{#if resultsVisible}
+		<a
+			href={`/collections/${collectionId}/results`}
+			class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/results`)}
+		>
+			{$t('collection.tabs.results')}
+		</a>
+	{/if}
 	<a
 		href={`/collections/${collectionId}/comparisons`}
 		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`)}
@@ -182,14 +189,6 @@
 			>
 				{$t('collection.tabs.evidence')}
 			</a>
-			{#if resultsVisible}
-				<a
-					href={`/collections/${collectionId}/results`}
-					class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/results`)}
-				>
-					{$t('collection.tabs.results')}
-				</a>
-			{/if}
 			{#if protocolVisible}
 				<a
 					href={`/collections/${collectionId}/protocol`}

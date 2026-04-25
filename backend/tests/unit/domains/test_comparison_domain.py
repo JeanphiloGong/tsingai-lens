@@ -34,6 +34,13 @@ from domain.shared.enums import (
     TRACEABILITY_STATUS_MISSING,
     TRACEABILITY_STATUS_PARTIAL,
 )
+from tests.support.pbf_acceptance_fixture import (
+    PBF_BASELINE_ID,
+    PBF_BASELINE_LABEL,
+    PBF_S3_VARIANT_ID,
+    PBF_YIELD_25_COMPARABLE_ID,
+    pbf_acceptance_assessment_context,
+)
 
 
 def _build_comparable_result(
@@ -44,6 +51,7 @@ def _build_comparable_result(
     baseline_reference: str | None = "untreated baseline",
     test_condition_id: str | None = "tc-1",
     traceability_status: str = TRACEABILITY_STATUS_DIRECT,
+    property_normalized: str = "strength",
     result_type: str = "scalar",
     result_summary: str = "97 MPa",
     numeric_value: float | None = 97.0,
@@ -71,7 +79,7 @@ def _build_comparable_result(
             axis_unit=None,
         ),
         value=ResultValue(
-            property_normalized="strength",
+            property_normalized=property_normalized,
             result_type=result_type,
             numeric_value=numeric_value,
             unit="MPa",
@@ -142,6 +150,165 @@ def test_evaluate_comparison_assessment_detects_not_comparable_without_baseline_
     assert assessment.comparability_status == COMPARABILITY_STATUS_NOT_COMPARABLE
     assert "baseline_reference" in assessment.missing_critical_context
     assert "test_condition" in assessment.missing_critical_context
+
+
+def test_evaluate_comparison_assessment_applies_pbf_tensile_missingness() -> None:
+    context = {
+        "variant": {
+            "domain_profile": "pbf_metal",
+            "process_context": {
+                "laser_power_w": 280,
+                "scan_speed_mm_s": 1200,
+                "layer_thickness_um": 30,
+                "hatch_spacing_um": 100,
+                "energy_density_j_mm3": 78,
+                "energy_density_origin": "reported",
+                "build_orientation": "vertical",
+                "post_treatment_summary": "HIP",
+            },
+        },
+        "test_condition": {
+            "condition_payload": {
+                "test_method": "tensile",
+                "test_temperature_c": 25,
+                "strain_rate_s-1": 0.001,
+                "loading_direction": "vertical",
+                "sample_orientation": "vertical",
+            }
+        },
+        "measurement_result": {
+            "value_payload": {
+                "value": 940,
+                "value_origin": "reported",
+            }
+        },
+    }
+
+    complete = evaluate_comparison_assessment(
+        _build_comparable_result(property_normalized="yield_strength"),
+        assessment_context=context,
+    )
+    missing_strain_rate = evaluate_comparison_assessment(
+        _build_comparable_result(property_normalized="yield_strength"),
+        assessment_context={
+            **context,
+            "test_condition": {
+                "condition_payload": {
+                    "test_method": "tensile",
+                    "test_temperature_c": 25,
+                    "loading_direction": "vertical",
+                    "sample_orientation": "vertical",
+                }
+            },
+        },
+    )
+
+    assert complete.comparability_status == COMPARABILITY_STATUS_COMPARABLE
+    assert "pbf_context_detected" in complete.comparability_basis
+    assert "strain_rate_reported" in complete.comparability_basis
+    assert missing_strain_rate.comparability_status == COMPARABILITY_STATUS_LIMITED
+    assert "strain_rate_s-1" in missing_strain_rate.missing_critical_context
+    assert any(
+        "missing strain rate" in warning
+        for warning in missing_strain_rate.comparability_warnings
+    )
+
+
+def test_pbf_acceptance_fixture_missing_strain_rate_is_limited() -> None:
+    complete = evaluate_comparison_assessment(
+        _build_comparable_result(
+            comparable_result_id=PBF_YIELD_25_COMPARABLE_ID,
+            variant_id=PBF_S3_VARIANT_ID,
+            baseline_id=PBF_BASELINE_ID,
+            baseline_reference=PBF_BASELINE_LABEL,
+            test_condition_id="tc-25",
+            property_normalized="yield_strength",
+            result_summary="YS 940 MPa at 25 C",
+            numeric_value=940.0,
+        ),
+        assessment_context=pbf_acceptance_assessment_context(),
+    )
+    missing_strain_rate = evaluate_comparison_assessment(
+        _build_comparable_result(
+            comparable_result_id=PBF_YIELD_25_COMPARABLE_ID,
+            variant_id=PBF_S3_VARIANT_ID,
+            baseline_id=PBF_BASELINE_ID,
+            baseline_reference=PBF_BASELINE_LABEL,
+            test_condition_id="tc-25",
+            property_normalized="yield_strength",
+            result_summary="YS 940 MPa at 25 C",
+            numeric_value=940.0,
+        ),
+        assessment_context=pbf_acceptance_assessment_context(
+            include_strain_rate=False,
+        ),
+    )
+
+    assert complete.comparability_status == COMPARABILITY_STATUS_COMPARABLE
+    assert "pbf_context_detected" in complete.comparability_basis
+    assert "strain_rate_reported" in complete.comparability_basis
+    assert missing_strain_rate.comparability_status == COMPARABILITY_STATUS_LIMITED
+    assert "strain_rate_s-1" in missing_strain_rate.missing_critical_context
+
+
+def test_evaluate_comparison_assessment_flags_energy_density_provenance() -> None:
+    base_context = {
+        "variant": {
+            "domain_profile": "pbf_metal",
+            "process_context": {
+                "laser_power_w": 280,
+                "scan_speed_mm_s": 1200,
+                "layer_thickness_um": 30,
+                "hatch_spacing_um": 100,
+                "energy_density_j_mm3": 78,
+                "build_orientation": "vertical",
+            },
+        },
+        "test_condition": {
+            "condition_payload": {
+                "test_method": "tensile",
+                "test_temperature_c": 25,
+                "strain_rate_s-1": 0.001,
+                "loading_direction": "vertical",
+                "sample_orientation": "vertical",
+            }
+        },
+    }
+
+    derived = evaluate_comparison_assessment(
+        _build_comparable_result(property_normalized="yield_strength"),
+        assessment_context={
+            **base_context,
+            "variant": {
+                **base_context["variant"],
+                "process_context": {
+                    **base_context["variant"]["process_context"],
+                    "energy_density_origin": "derived",
+                },
+            },
+        },
+    )
+    estimated = evaluate_comparison_assessment(
+        _build_comparable_result(property_normalized="yield_strength"),
+        assessment_context={
+            **base_context,
+            "variant": {
+                **base_context["variant"],
+                "process_context": {
+                    **base_context["variant"]["process_context"],
+                    "energy_density_origin": "estimated",
+                },
+            },
+        },
+    )
+
+    assert derived.comparability_status == COMPARABILITY_STATUS_COMPARABLE
+    assert derived.requires_expert_review is False
+    assert "energy_density_origin:derived" in derived.comparability_basis
+    assert any("Energy density was derived" in warning for warning in derived.comparability_warnings)
+    assert estimated.comparability_status == COMPARABILITY_STATUS_LIMITED
+    assert estimated.requires_expert_review is True
+    assert "energy_density_estimated" in estimated.missing_critical_context
 
 
 def test_comparison_row_record_normalizes_lists_and_defaults() -> None:

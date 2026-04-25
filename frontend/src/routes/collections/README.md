@@ -6,13 +6,26 @@ This node owns the collection workspace route family in the frontend.
 
 - `collections/[id]/+layout.svelte`
 - `collections/[id]/+page.svelte`
+- `collections/[id]/documents/+page.svelte`
+- `collections/[id]/evidence/+page.svelte`
+- `collections/[id]/comparisons/+page.svelte`
+- `collections/[id]/documents/[document_id]/+page.svelte`
 
 ## Responsibilities
 
 - render the collection workspace
+- render collection-level document profile screening and Protocol suitability
+  signals
+- render collection-level evidence cards and source-anchor entry points
+- render comparison review for cross-paper comparability, missing context, and
+  next actions
+- render document detail as a paper reader plus structured understanding workbench
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness
 - surface graph, protocol, and report capabilities to the user
+- keep source traceback on the document page user-facing: original PDF/PDF.js
+  reader first, page-level fallback when precise regions are missing, block IDs
+  only for diagnostics
 
 ## Local Docs
 
@@ -43,12 +56,24 @@ This node owns the collection workspace route family in the frontend.
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)
   Follow-on collection UI restructuring proposal for state hierarchy and page
   information architecture
+- [`legacy-route-alias-cleanup-plan.md`](legacy-route-alias-cleanup-plan.md)
+  Frontend-local plan for removing redirect-only collection route aliases while
+  keeping active backend APIs intact
 - [`document-result-evidence-chain-proposal.md`](document-result-evidence-chain-proposal.md)
   Frontend-local proposal for reading documents and results as variant dossiers,
   result chains, and result series
+- [`document-evidence-review-split-view-plan.md`](document-evidence-review-split-view-plan.md)
+  Frontend-local plan for the document detail split view that aligns source
+  text with selected evidence chains
+- [`document-pdfjs-reader-implementation-plan.md`](document-pdfjs-reader-implementation-plan.md)
+  Frontend-local implementation plan for replacing the simulated source reader
+  with a PDF.js reader and custom source highlight layer
+- [`../../../../docs/decisions/rfc-pdf-backed-document-workbench.md`](../../../../docs/decisions/rfc-pdf-backed-document-workbench.md)
+  Shared frontend/backend plan for making the document detail route a
+  PDF-backed paper understanding workbench with locator fallback
 - [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md)
-  Claim-to-source navigation contract for comparison/evidence to document
-  traceback behavior
+  Claim-to-source navigation contract for comparison, result, and document
+  evidence-panel traceback behavior
 
 ## Dependency Rule
 

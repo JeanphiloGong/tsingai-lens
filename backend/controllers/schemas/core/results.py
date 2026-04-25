@@ -3,6 +3,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from controllers.schemas.core.comparisons import ComparabilityStatus
+from controllers.schemas.core.evidence_chain import (
+    EvidenceChainTestConditionResponse,
+    EvidenceChainValueProvenanceResponse,
+    EvidenceChainVariantDossierSummaryResponse,
+    ResultBaselineDetailResponse,
+    ResultSeriesNavigationResponse,
+    ResultStructureSupportResponse,
+)
 
 
 class ResultListItemResponse(BaseModel):
@@ -104,6 +112,30 @@ class ResultItemResponse(BaseModel):
     assessment: ResultAssessmentResponse = Field(..., description="collection 判断")
     evidence: list[ResultEvidenceItemResponse] = Field(default_factory=list, description="证据列表")
     actions: ResultActionsResponse = Field(..., description="drilldown 动作")
+    variant_dossier: EvidenceChainVariantDossierSummaryResponse | None = Field(
+        default=None,
+        description="当前 result 的 parent variant dossier summary",
+    )
+    test_condition_detail: EvidenceChainTestConditionResponse | None = Field(
+        default=None,
+        description="chain-local 测试条件详情",
+    )
+    baseline_detail: ResultBaselineDetailResponse | None = Field(
+        default=None,
+        description="baseline 详情",
+    )
+    structure_support: list[ResultStructureSupportResponse] = Field(
+        default_factory=list,
+        description="结构/表征支撑证据摘要",
+    )
+    value_provenance: EvidenceChainValueProvenanceResponse | None = Field(
+        default=None,
+        description="数值来源与派生信息",
+    )
+    series_navigation: ResultSeriesNavigationResponse | None = Field(
+        default=None,
+        description="同 dossier 下的 sibling result series 导航",
+    )
 
 
 class ResultListResponse(BaseModel):

@@ -126,7 +126,8 @@ describe('workspace shared helpers', () => {
       links: {
         results: '/api/v1/collections/col_123/results',
         comparisons: '/api/v1/collections/col_123/comparisons',
-        documents: '/api/v1/collections/col_123/documents/profiles'
+        documents: '/api/v1/collections/col_123/documents/profiles',
+        evidence: '/api/v1/collections/col_123/evidence/cards'
       }
     });
 
@@ -135,6 +136,7 @@ describe('workspace shared helpers', () => {
     expect(workspace.workflow.results).toBe('ready');
     expect(workspace.capabilities.can_view_results).toBe(true);
     expect(workspace.links.results).toBe('/collections/col_123/results');
+    expect(workspace.links.evidence).toBe('/collections/col_123/evidence');
   });
 
   it('treats stale comparison artifacts as limited in legacy workflow fallback', async () => {

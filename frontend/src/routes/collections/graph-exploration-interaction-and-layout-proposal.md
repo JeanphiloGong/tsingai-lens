@@ -53,6 +53,29 @@ Out of scope:
 
 ## Proposed Change
 
+### 0. Reframe The Page As Graph Navigation Plus Evidence Review
+
+The first product-facing pass should organize the existing lean graph contract
+into a research review workspace without changing the backend graph API.
+
+The page should use:
+
+- a left filter panel for node visibility, search, and graph query controls
+- the central Cytoscape canvas as the relationship navigation surface
+- a right insight panel for the selected node or edge
+- a bottom evidence panel that lists comparison rows connected to the current
+  selection when those rows can be resolved from existing canonical endpoints
+
+This is intentionally a frontend information-architecture improvement. It does
+not yet claim that the backend graph can express stable process-to-property or
+mechanism relationships. Those require a later Lens-native graph projection
+that adds process nodes and relation-level evidence aggregation.
+
+The frontend may normalize labels for display, for example by replacing raw
+underscore-separated values with readable title-cased text and adding node-kind
+context inside the canvas node. This display label must not replace the raw
+graph label used for canonical comparison filters or backend lookups.
+
 ### 1. Treat Single Click As Selection Plus Focus
 
 Single click on a node should:

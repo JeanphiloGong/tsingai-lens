@@ -82,9 +82,6 @@
           <a class="btn btn--ghost btn--small" href={workspace.links.comparisons}>
             {$t('overview.nextComparisons')}
           </a>
-          <a class="btn btn--ghost btn--small" href={workspace.links.evidence}>
-            {$t('overview.nextEvidence')}
-          </a>
           <a class="btn btn--ghost btn--small" href={workspace.links.documents}>
             {$t('overview.nextDocuments')}
           </a>

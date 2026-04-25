@@ -8,7 +8,19 @@ vi.mock('./api', () => ({
 	requestJson
 }));
 
-const { fetchCollectionResults, fetchCollectionResult } = await import('./results');
+const {
+	buildResultsConclusion,
+	buildResultsQualitySummary,
+	fetchCollectionResult,
+	fetchCollectionResults,
+	filterResults,
+	formatResultValue,
+	getMissingContextChips,
+	getResultAvailabilityStatus,
+	getResultConfidence,
+	getSourceEvidenceQuote,
+	getTraceabilityStatus
+} = await import('./results');
 
 describe('results shared helpers', () => {
 	beforeEach(() => {
@@ -53,6 +65,90 @@ describe('results shared helpers', () => {
 			unit: 'mS/cm',
 			comparability_status: 'comparable'
 		});
+	});
+
+	it('derives extracted-result quality, status, missing context, and readable values', async () => {
+		requestJson.mockResolvedValue({
+			collection_id: 'col_123',
+			total: 2,
+			count: 2,
+			items: [
+				{
+					result_id: 'cres_1',
+					document_id: 'doc_1',
+					document_title: 'Paper A',
+					material_label: 'unspecified material system',
+					property: 'thermoelectric_magnetic_effects',
+					value: 12,
+					unit: null,
+					summary:
+						'The dendrites at the tail of the melt pool perform the strongest thermoelectric magnetic effects.',
+					baseline: 'unspecified baseline',
+					test_condition: 'unspecified test condition',
+					process: 'unspecified process',
+					traceability_status: 'direct',
+					comparability_status: 'comparable',
+					requires_expert_review: true,
+					confidence: 0.9,
+					source_evidence_quote:
+						'The dendrites at the tail of the melt pool perform the strongest thermoelectric magnetic effects.',
+					source_type: 'text',
+					source_section: 'Section 3.2',
+					evidence_ids: ['ev_1'],
+					anchor_ids: ['anc_1']
+				},
+				{
+					result_id: 'cres_2',
+					document_id: 'doc_2',
+					document_title: 'Paper B',
+					material_label: 'nickel superalloy',
+					property: 'volume_fraction_of_the_laves_phases',
+					summary: 'Volume fraction of the Laves phases reduces from 2.4% to 1.3%.',
+					traceability_status: 'none',
+					comparability_status: 'not_comparable',
+					requires_expert_review: false
+				}
+			]
+		});
+
+		const response = await fetchCollectionResults('col_123');
+		const first = response.items[0];
+
+		expect(formatResultValue(first.property, 'property')).toBe('Thermoelectric magnetic effects');
+		expect(getTraceabilityStatus(first)).toBe('direct');
+		expect(getResultAvailabilityStatus(first)).toBe('insufficient');
+		expect(getResultConfidence(first)).toBe(90);
+		expect(getSourceEvidenceQuote(first)).toMatchObject({
+			text: 'The dendrites at the tail of the melt pool perform the strongest thermoelectric magnetic effects.'
+		});
+		expect(getMissingContextChips(first).map((chip) => chip.key)).toEqual([
+			'material_system',
+			'process',
+			'baseline',
+			'test_condition',
+			'unit_context',
+			'experimental_explanation'
+		]);
+
+		const summary = buildResultsQualitySummary(response.items);
+		expect(summary).toMatchObject({
+			total: 2,
+			traceable: 1,
+			insufficientContext: 2,
+			comparable: 0,
+			needsReview: 2
+		});
+		expect(buildResultsConclusion(summary).tone).toBe('warning');
+		expect(
+			filterResults(response.items, {
+				search: 'laves',
+				availability: '',
+				material: '',
+				property: '',
+				testCondition: '',
+				traceability: ''
+			})
+		).toHaveLength(1);
 	});
 
 	it('normalizes result detail payloads into the product-facing drilldown model', async () => {
@@ -100,6 +196,66 @@ describe('results shared helpers', () => {
 			actions: {
 				open_document: '/collections/col_123/documents/doc_1',
 				open_comparisons: '/collections/col_123/comparisons?property_normalized=conductivity'
+			},
+			variant_dossier: {
+				variant_id: 'var_1',
+				variant_label: 'optimized VED + HIP',
+				material: {
+					label: 'oxide cathode',
+					composition: 'LiNiO2',
+					host_material_system: { family: 'layered oxide' }
+				},
+				shared_process_state: {
+					anneal_temperature_c: 700
+				},
+				shared_missingness: ['surface state']
+			},
+			test_condition_detail: {
+				test_method: 'EIS',
+				test_temperature_c: 25,
+				'strain_rate_s-1': null,
+				environment: 'air'
+			},
+			baseline_detail: {
+				label: 'as-prepared',
+				reference: 'same-paper control',
+				baseline_type: 'same_document',
+				resolved: true,
+				baseline_scope: 'same material'
+			},
+			structure_support: [
+				{
+					support_id: 'sf_1',
+					support_type: 'phase',
+					summary: 'Layered phase retained after annealing.',
+					condition: { method: 'XRD' }
+				}
+			],
+			value_provenance: {
+				value_origin: 'reported',
+				source_value_text: '12',
+				source_unit_text: 'mS/cm',
+				derivation_formula: null,
+				derivation_inputs: null
+			},
+			series_navigation: {
+				series_key: 'conductivity:test_temperature_c',
+				varying_axis: {
+					axis_name: 'test_temperature_c',
+					axis_unit: 'C'
+				},
+				siblings: [
+					{
+						result_id: 'cres_2',
+						axis_value: 400,
+						axis_unit: 'C',
+						measurement: {
+							property: 'conductivity',
+							value: 10,
+							unit: 'mS/cm'
+						}
+					}
+				]
 			}
 		});
 
@@ -110,5 +266,15 @@ describe('results shared helpers', () => {
 		expect(detail.measurement.property).toBe('conductivity');
 		expect(detail.assessment.comparability_status).toBe('comparable');
 		expect(detail.actions.open_document).toContain('/collections/col_123/documents/doc_1');
+		expect(detail.variant_dossier?.variant_label).toBe('optimized VED + HIP');
+		expect(detail.variant_dossier?.shared_process_state.anneal_temperature_c).toBe(700);
+		expect(detail.test_condition_detail?.test_temperature_c).toBe(25);
+		expect(detail.baseline_detail?.resolved).toBe(true);
+		expect(detail.structure_support[0]).toMatchObject({
+			support_id: 'sf_1',
+			support_type: 'phase'
+		});
+		expect(detail.value_provenance?.source_value_text).toBe('12');
+		expect(detail.series_navigation?.siblings[0].axis_value).toBe(400);
 	});
 });

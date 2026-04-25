@@ -1,427 +1,579 @@
 <script lang="ts">
-  import { browser } from '$app/environment';
-  import { page } from '$app/stores';
-  import { tick } from 'svelte';
-  import { errorMessage } from '../../../../_shared/api';
-  import { t } from '../../../../_shared/i18n';
-  import {
-    fetchCollectionResults,
-    type ResultListItem
-  } from '../../../../_shared/results';
-  import {
-    buildDocumentViewerHref,
-    fetchDocumentContent,
-    fetchEvidenceTraceback,
-    type DocumentContentResponse,
-    type DocumentContentSection,
-    type EvidenceTracebackResponse,
-    type TracebackAnchor
-  } from '../../../../_shared/traceback';
+	import { page } from '$app/stores';
+	import {
+		buildDocumentWorkbenchModel,
+		fetchDocumentComparisonSemantics,
+		fetchDocumentContent,
+		type DocumentComparisonSemanticsResponse,
+		type DocumentWorkbenchModel,
+		type SourceAnchor,
+		type WorkbenchLocalGraph,
+		type WorkbenchTab
+	} from '../../../../_shared/documents';
+	import { t } from '../../../../_shared/i18n';
+	import { fetchCollectionResults } from '../../../../_shared/results';
+	import { fetchEvidenceTraceback } from '../../../../_shared/traceback';
+	import LocalGraphPanel from './_components/LocalGraphPanel.svelte';
+	import PaperReader from './_components/PaperReader.svelte';
+	import StructuredExtractionPanel from './_components/StructuredExtractionPanel.svelte';
 
-  let content: DocumentContentResponse | null = null;
-  let traceback: EvidenceTracebackResponse | null = null;
-  let loading = false;
-  let contentError = '';
-  let tracebackError = '';
-  let loadedKey = '';
-  let selectedAnchorId = '';
-  let resolvedDocumentId = '';
-  let relatedResults: ResultListItem[] = [];
-  let relatedResultsLoading = false;
-  let relatedResultsError = '';
+	let model: DocumentWorkbenchModel | null = null;
+	let loading = false;
+	let loadedKey = '';
+	let activeTab: WorkbenchTab = 'summary';
+	let selectedItemId = '';
+	let selectedSourceSpanId = '';
+	let selectedGraphNodeId = '';
+	let graphCollapsed = false;
+	let sourceJumpToken = 0;
 
-  $: collectionId = $page.params.id ?? '';
-  $: routeDocumentId = $page.params.document_id ?? '';
-  $: evidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
-  $: requestedAnchorId = $page.url.searchParams.get('anchor_id')?.trim() ?? '';
-  $: loadKey = [collectionId, routeDocumentId, evidenceId, requestedAnchorId].join(':');
-  $: selectedAnchor =
-    traceback?.anchors.find((anchor) => anchor.anchor_id === selectedAnchorId) ?? traceback?.anchors[0] ?? null;
-  $: if (collectionId && routeDocumentId && loadKey !== loadedKey) {
-    loadedKey = loadKey;
-    void loadDocumentViewer();
-  }
+	$: collectionId = $page.params.id ?? '';
+	$: routeDocumentId = $page.params.document_id ?? '';
+	$: requestedResultId = $page.url.searchParams.get('result_id')?.trim() ?? '';
+	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
+	$: requestedAnchorId = $page.url.searchParams.get('anchor_id')?.trim() ?? '';
+	$: loadKey = `${collectionId}:${routeDocumentId}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}`;
+	$: selectedGraph = graphForSelection(model, selectedItemId);
+	$: selectedSourceAnchor = sourceAnchorForSelection(model, selectedSourceSpanId);
+	$: if (selectedGraph && !selectedGraph.nodes.some((node) => node.id === selectedGraphNodeId)) {
+		selectedGraphNodeId = selectedGraph.nodes.find((node) => node.position === 'center')?.id ?? '';
+	}
+	$: if (collectionId && routeDocumentId && loadKey !== loadedKey) {
+		loadedKey = loadKey;
+		void loadWorkbench();
+	}
 
-  function defaultReturnTo() {
-    return `/collections/${collectionId}/documents`;
-  }
+	function backHref() {
+		return `/collections/${collectionId}/documents`;
+	}
 
-  function backHref() {
-    const target = $page.url.searchParams.get('return_to')?.trim();
-    if (target && target.startsWith(`/collections/${collectionId}`)) {
-      return target;
-    }
-    return defaultReturnTo();
-  }
+	async function loadWorkbench() {
+		loading = true;
 
-  async function loadDocumentViewer() {
-    loading = true;
-    contentError = '';
-    tracebackError = '';
-    content = null;
-    traceback = null;
-    selectedAnchorId = '';
-    resolvedDocumentId = routeDocumentId;
-    relatedResults = [];
-    relatedResultsError = '';
-    relatedResultsLoading = false;
-    let initialAnchor: TracebackAnchor | null = null;
+		const [contentResult, resultsResult, semanticsResult] = await Promise.allSettled([
+			fetchDocumentContent(collectionId, routeDocumentId),
+			fetchCollectionResults(collectionId, {
+				source_document_id: routeDocumentId,
+				limit: 20
+			}),
+			fetchDocumentComparisonSemantics(collectionId, routeDocumentId, {
+				includeGroupedProjections: true
+			})
+		]);
 
-    if (evidenceId) {
-      try {
-        traceback = await fetchEvidenceTraceback(collectionId, evidenceId);
-        initialAnchor =
-          traceback.anchors.find((anchor) => anchor.anchor_id === requestedAnchorId) ?? traceback.anchors[0] ?? null;
-        selectedAnchorId = initialAnchor?.anchor_id ?? '';
-        if (initialAnchor?.document_id) {
-          resolvedDocumentId = initialAnchor.document_id;
-        }
-      } catch (err) {
-        tracebackError = errorMessage(err);
-      }
-    }
+		const content = contentResult.status === 'fulfilled' ? contentResult.value : null;
+		const relatedResults = resultsResult.status === 'fulfilled' ? resultsResult.value.items : [];
+		const comparisonSemantics =
+			semanticsResult.status === 'fulfilled' ? semanticsResult.value : null;
+		const evidenceTracebacks = await loadEvidenceTracebacks(comparisonSemantics);
 
-    try {
-      content = await fetchDocumentContent(collectionId, resolvedDocumentId);
-      resolvedDocumentId = content.document_id;
-      if (browser && resolvedDocumentId !== routeDocumentId) {
-        history.replaceState(
-          history.state,
-          '',
-          buildDocumentViewerHref(collectionId, resolvedDocumentId, {
-            evidenceId,
-            anchorId: selectedAnchorId || requestedAnchorId || null,
-            returnTo: backHref()
-          })
-        );
-      }
-    } catch (err) {
-      contentError = errorMessage(err);
-    } finally {
-      loading = false;
-    }
+		const nextModel = buildDocumentWorkbenchModel({
+			collectionId,
+			documentId: routeDocumentId,
+			content,
+			comparisonSemantics,
+			relatedResults,
+			evidenceTracebacks
+		});
+		model = nextModel;
 
-    if (!contentError && resolvedDocumentId) {
-      relatedResultsLoading = true;
-      try {
-        const resultResponse = await fetchCollectionResults(collectionId, {
-          source_document_id: resolvedDocumentId,
-          limit: 20
-        });
-        relatedResults = resultResponse.items;
-      } catch (err) {
-        relatedResultsError = errorMessage(err);
-      } finally {
-        relatedResultsLoading = false;
-      }
-    }
+		const requestedItemId =
+			nextModel.selectable_items.find((item) => item.id === requestedResultId)?.id ||
+			nextModel.selectable_items.find((item) => item.id === requestedEvidenceId)?.id ||
+			nextModel.default_item_id;
+		selectItem(requestedItemId);
+		selectRequestedAnchor(nextModel);
+		loading = false;
+	}
 
-    if (initialAnchor?.section_id) {
-      await scrollToSection(initialAnchor.section_id);
-    }
-  }
+	function evidenceIdsForTraceback(
+		comparisonSemantics: DocumentComparisonSemanticsResponse | null
+	) {
+		const ids = new Set<string>();
+		if (requestedEvidenceId) ids.add(requestedEvidenceId);
 
-  function traceStatusLabel(status?: EvidenceTracebackResponse['traceback_status'] | null) {
-    if (status === 'ready') return $t('traceback.statusReady');
-    if (status === 'partial') return $t('traceback.statusPartial');
-    return $t('traceback.statusUnavailable');
-  }
+		for (const dossier of comparisonSemantics?.variant_dossiers ?? []) {
+			for (const series of dossier.series) {
+				for (const chain of series.chains) {
+					for (const evidenceId of chain.evidence.evidence_ids) {
+						if (evidenceId) ids.add(evidenceId);
+					}
+				}
+			}
+		}
 
-  function traceStatusBody(status?: EvidenceTracebackResponse['traceback_status'] | null) {
-    if (status === 'ready') return $t('traceback.statusReadyBody');
-    if (status === 'partial') return $t('traceback.statusPartialBody');
-    return $t('traceback.statusUnavailableBody');
-  }
+		return Array.from(ids);
+	}
 
-  function locatorLabel(anchor: TracebackAnchor) {
-    if (anchor.locator_type === 'char_range') return $t('traceback.locatorCharRange');
-    if (anchor.locator_type === 'bbox') return $t('traceback.locatorBBox');
-    return $t('traceback.locatorSection');
-  }
+	async function loadEvidenceTracebacks(
+		comparisonSemantics: DocumentComparisonSemanticsResponse | null
+	) {
+		const evidenceIds = evidenceIdsForTraceback(comparisonSemantics);
+		if (!evidenceIds.length) return [];
 
-  function confidenceLabel(anchor: TracebackAnchor) {
-    if (anchor.locator_confidence === 'high') return $t('traceback.confidenceHigh');
-    if (anchor.locator_confidence === 'medium') return $t('traceback.confidenceMedium');
-    return $t('traceback.confidenceLow');
-  }
+		const tracebacks = await Promise.allSettled(
+			evidenceIds.map((evidenceId) => fetchEvidenceTraceback(collectionId, evidenceId))
+		);
 
-  function highlightParts(text: string, quote: string | null) {
-    const normalizedQuote = quote?.trim();
-    if (!normalizedQuote) return null;
+		return tracebacks
+			.filter((result) => result.status === 'fulfilled')
+			.map((result) => result.value);
+	}
 
-    const index = text.indexOf(normalizedQuote);
-    if (index < 0) return null;
+	function selectRequestedAnchor(nextModel: DocumentWorkbenchModel) {
+		if (!requestedAnchorId) return;
+		const sourceSpanId = `source-anchor-${requestedAnchorId}`;
+		if (!nextModel.source_anchors_by_span_id[sourceSpanId]) return;
+		selectedSourceSpanId = sourceSpanId;
+		sourceJumpToken += 1;
+	}
 
-    return {
-      before: text.slice(0, index),
-      match: text.slice(index, index + normalizedQuote.length),
-      after: text.slice(index + normalizedQuote.length)
-    };
-  }
+	function graphForSelection(
+		currentModel: DocumentWorkbenchModel | null,
+		itemId: string
+	): WorkbenchLocalGraph | null {
+		if (!currentModel) return null;
+		return (
+			currentModel.graphs_by_item_id[itemId] ??
+			currentModel.graphs_by_item_id[currentModel.default_item_id] ??
+			null
+		);
+	}
 
-  function highlightFor(section: DocumentContentSection) {
-    if (!selectedAnchor || selectedAnchor.section_id !== section.section_id) return null;
-    return highlightParts(section.text, selectedAnchor.quote);
-  }
+	function sourceAnchorForSelection(
+		currentModel: DocumentWorkbenchModel | null,
+		sourceSpanId: string
+	): SourceAnchor | null {
+		if (!currentModel || !sourceSpanId) return null;
+		return currentModel.source_anchors_by_span_id[sourceSpanId] ?? null;
+	}
 
-  function sectionTitle(section: DocumentContentSection) {
-    return section.title || section.section_type || section.section_id;
-  }
+	function selectItem(itemId: string, tab?: WorkbenchTab) {
+		if (!model || !itemId) return;
+		const item = model.selectable_items.find((candidate) => candidate.id === itemId);
+		if (!item) return;
+		selectedItemId = item.id;
+		activeTab = tab ?? item.tab;
+		selectedSourceSpanId = item.source_span_id;
+		sourceJumpToken += 1;
+		const graph = graphForSelection(model, item.id);
+		selectedGraphNodeId = graph?.nodes.find((node) => node.position === 'center')?.id ?? '';
+	}
 
-  function pageLabel(section: DocumentContentSection) {
-    if (section.page === null) return null;
-    return $t('traceback.pageLabel', { page: section.page });
-  }
+	function jumpToSource(sourceSpanId: string) {
+		const linkedItem =
+			model?.selectable_items.find(
+				(item) => item.source_span_id === sourceSpanId && item.tab === activeTab
+			) ?? model?.selectable_items.find((item) => item.source_span_id === sourceSpanId);
+		if (linkedItem) {
+			selectItem(linkedItem.id, linkedItem.tab);
+			return;
+		}
+		selectedSourceSpanId = sourceSpanId;
+		sourceJumpToken += 1;
+	}
 
-  async function scrollToSection(sectionId: string) {
-    if (!browser) return;
-    await tick();
-    const target = document.getElementById(`section-${sectionId}`);
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+	function selectSourceSpan(sourceSpanId: string) {
+		selectedSourceSpanId = sourceSpanId;
+		const linkedItem = model?.selectable_items.find((item) => item.source_span_id === sourceSpanId);
+		if (linkedItem) {
+			selectItem(linkedItem.id);
+		}
+	}
 
-  async function selectAnchor(anchor: TracebackAnchor) {
-    selectedAnchorId = anchor.anchor_id;
-    if (anchor.section_id) {
-      await scrollToSection(anchor.section_id);
-    }
-  }
+	function handleGraphItemSelect(itemId: string) {
+		selectItem(itemId);
+	}
 
-  function documentTitle() {
-    return content?.title || routeDocumentId;
-  }
+	function openTab(tab: WorkbenchTab) {
+		activeTab = tab;
+		const item = model?.selectable_items.find((candidate) => candidate.tab === tab);
+		if (item) selectItem(item.id, tab);
+	}
 
-  function documentSubtitle() {
-    return content?.source_filename || null;
-  }
-
-  function sectionCount() {
-    return content?.sections.length ?? 0;
-  }
-
-  function showTracebackPanel() {
-    return Boolean(evidenceId || traceback || tracebackError);
-  }
-
-  function resultHref(result: ResultListItem) {
-    return `/collections/${collectionId}/results/${encodeURIComponent(result.result_id)}`;
-  }
+	function setActiveTab(tab: WorkbenchTab) {
+		activeTab = tab;
+	}
 </script>
 
 <svelte:head>
-  <title>{$t('traceback.title')}</title>
+	<title>{model?.title ?? $t('workbench.pageTitle')}</title>
 </svelte:head>
 
-<section class="card fade-up">
-  <div class="card-header-inline">
-    <div>
-      <h2>{$t('traceback.title')}</h2>
-      <p class="lead">{$t('traceback.lead')}</p>
-    </div>
-    <a class="btn btn--ghost btn--small" href={backHref()}>
-      {$t('traceback.back')}
-    </a>
-  </div>
+<div class="document-workbench-root">
+	<header class="workbench-appbar">
+		<a class="workbench-logo" href={`/collections/${collectionId}`}>
+			<span class="logo-mark" aria-hidden="true">L</span>
+			<span>Lens</span>
+		</a>
 
-  {#if loading}
-    <div class="status" role="status">{$t('traceback.loading')}</div>
-  {:else}
-    {#if contentError}
-      <div class="status status--error" role="alert">{contentError}</div>
-    {/if}
+		<div class="title-zone">
+			<nav class="breadcrumb" aria-label={$t('workbench.breadcrumbLabel')}>
+				<a href={`/collections/${collectionId}`}>{$t('workbench.workspace')}</a>
+				<span>/</span>
+				<a href={backHref()}>{$t('workbench.documents')}</a>
+				<span>/</span>
+			</nav>
+			<div class="current-title">{model?.title ?? routeDocumentId}</div>
+		</div>
 
-    {#if tracebackError}
-      <div class="status status--error" role="alert">{tracebackError}</div>
-    {/if}
+		<label class="global-search">
+			<span class="visually-hidden">{$t('workbench.searchLabel')}</span>
+			<input placeholder={$t('workbench.searchPlaceholder')} />
+			<kbd>Cmd K</kbd>
+		</label>
 
-    <div class="result-grid result-grid--tasks">
-      <article class="result-card">
-        <h3>{$t('traceback.documentCardTitle')}</h3>
-        <dl class="detail-list">
-          <div class="detail-row">
-            <dt>{$t('traceback.documentLabel')}</dt>
-            <dd>{documentTitle()}</dd>
-          </div>
-          {#if documentSubtitle()}
-            <div class="detail-row">
-              <dt>{$t('traceback.sourceFileLabel')}</dt>
-              <dd>{documentSubtitle()}</dd>
-            </div>
-          {/if}
-          <div class="detail-row">
-            <dt>{$t('traceback.sectionCountLabel')}</dt>
-            <dd>{sectionCount()}</dd>
-          </div>
-          {#if content?.page_count !== null}
-            <div class="detail-row">
-              <dt>{$t('traceback.pageCountLabel')}</dt>
-              <dd>{content?.page_count}</dd>
-            </div>
-          {/if}
-        </dl>
-      </article>
+		<div class="top-actions">
+			<button type="button" on:click={() => openTab('summary')}
+				>{$t('workbench.actionSummary')}</button
+			>
+			<button type="button" on:click={() => openTab('evidence')}
+				>{$t('workbench.actionEvidence')}</button
+			>
+			<button type="button" on:click={() => (graphCollapsed = !graphCollapsed)}>
+				{$t('workbench.actionGraph')}
+			</button>
+			<button class="primary" type="button">{$t('workbench.actionExport')}</button>
+		</div>
+	</header>
 
-      {#if showTracebackPanel()}
-        <article class="result-card">
-          <h3>{$t('traceback.traceCardTitle')}</h3>
-          <p class="result-text">{traceStatusLabel(traceback?.traceback_status)}</p>
-          <p class="note">{traceStatusBody(traceback?.traceback_status)}</p>
-          {#if selectedAnchor}
-            <dl class="detail-list">
-              <div class="detail-row">
-                <dt>{$t('traceback.locatorLabel')}</dt>
-                <dd>{locatorLabel(selectedAnchor)}</dd>
-              </div>
-              <div class="detail-row">
-                <dt>{$t('traceback.precisionLabel')}</dt>
-                <dd>{confidenceLabel(selectedAnchor)}</dd>
-              </div>
-              {#if selectedAnchor.page !== null}
-                <div class="detail-row">
-                  <dt>{$t('traceback.pageNumberLabel')}</dt>
-                  <dd>{selectedAnchor.page}</dd>
-                </div>
-              {/if}
-            </dl>
-          {/if}
-        </article>
-      {/if}
+	{#if loading && !model}
+		<main class="workbench-main">
+			<section class="loading-panel" aria-label={$t('workbench.loading')}>
+				<div class="skeleton skeleton--wide"></div>
+				<div class="skeleton"></div>
+				<div class="skeleton skeleton--short"></div>
+			</section>
+		</main>
+	{:else if model}
+		<main class="workbench-main">
+			<section class="reader-column">
+				<PaperReader
+					title={model.title}
+					metadata={model.metadata}
+					pages={model.pages}
+					sourceFileUrl={model.sourceFileUrl}
+					sourceFilename={model.source_filename}
+					activeSourceSpanId={selectedSourceSpanId}
+					activeSourceAnchor={selectedSourceAnchor}
+					{sourceJumpToken}
+					onSelectSourceSpan={selectSourceSpan}
+				/>
+			</section>
 
-      {#if relatedResultsLoading || relatedResults.length || relatedResultsError}
-        <article class="result-card">
-          <h3>{$t('results.relatedTitle')}</h3>
-          <p class="note">{$t('results.relatedLead')}</p>
-          {#if relatedResultsLoading}
-            <div class="status" role="status">{$t('results.loading')}</div>
-          {:else if relatedResultsError}
-            <div class="status status--error" role="alert">{relatedResultsError}</div>
-          {:else}
-            <ul class="result-list">
-              {#each relatedResults as result}
-                <li>
-                  <a href={resultHref(result)}>
-                    {result.material_label} · {result.property}
-                  </a>
-                  <span class="note"> ({result.comparability_status})</span>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </article>
-      {/if}
-    </div>
+			<section class="extraction-column">
+				<StructuredExtractionPanel
+					{model}
+					{activeTab}
+					{selectedItemId}
+					onSelectItem={selectItem}
+					onJumpToSource={jumpToSource}
+					onOpenTab={setActiveTab}
+				/>
+			</section>
 
-    {#if showTracebackPanel() && traceback?.anchors.length}
-      <section class="detail-section">
-        <div class="detail-section__title">{$t('traceback.anchorsTitle')}</div>
-        <div class="result-grid">
-          {#each traceback.anchors as anchor}
-            <button
-              class:selected-anchor={selectedAnchor?.anchor_id === anchor.anchor_id}
-              class="result-card traceback-anchor"
-              type="button"
-              on:click={() => void selectAnchor(anchor)}
-            >
-              <div class="table-main">
-                <div class="table-title">{locatorLabel(anchor)}</div>
-                <div class="table-sub">{confidenceLabel(anchor)}</div>
-              </div>
-              {#if anchor.quote}
-                <p class="result-text">{anchor.quote}</p>
-              {/if}
-              <div class="note">
-                {#if anchor.page !== null}
-                  {$t('traceback.pageLabel', { page: anchor.page })}
-                {/if}
-                {#if anchor.section_id}
-                  {anchor.page !== null ? ' · ' : ''}{$t('traceback.sectionLabel', { section: anchor.section_id })}
-                {/if}
-              </div>
-            </button>
-          {/each}
-        </div>
-      </section>
-    {/if}
-
-    {#if content?.sections.length}
-      <section class="detail-section">
-        <div class="detail-section__title">{$t('traceback.sectionsTitle')}</div>
-        <div class="section-nav">
-          {#each content.sections as section}
-            <button class="btn btn--ghost btn--small" type="button" on:click={() => void scrollToSection(section.section_id)}>
-              {sectionTitle(section)}
-            </button>
-          {/each}
-        </div>
-      </section>
-
-      <section class="result-grid">
-        {#each content.sections as section}
-          <article
-            class:document-section--active={selectedAnchor?.section_id === section.section_id}
-            class="result-card document-section"
-            id={`section-${section.section_id}`}
-          >
-            <div class="table-main">
-              <div class="table-title">{sectionTitle(section)}</div>
-              {#if pageLabel(section)}
-                <div class="table-sub">{pageLabel(section)}</div>
-              {/if}
-            </div>
-
-            {#if highlightFor(section)}
-              {@const parts = highlightFor(section)}
-              {#if parts}
-                <p class="document-text">{parts.before}<mark>{parts.match}</mark>{parts.after}</p>
-              {:else}
-                <p class="document-text">{section.text}</p>
-              {/if}
-            {:else}
-              <p class="document-text">{section.text}</p>
-            {/if}
-
-            {#if selectedAnchor?.section_id === section.section_id && selectedAnchor.quote && !highlightFor(section)}
-              <section class="detail-section">
-                <div class="detail-section__title">{$t('traceback.quoteTitle')}</div>
-                <p class="result-text">{selectedAnchor.quote}</p>
-              </section>
-            {/if}
-          </article>
-        {/each}
-      </section>
-    {:else if !contentError}
-      <p class="note">{$t('traceback.empty')}</p>
-    {/if}
-  {/if}
-</section>
+			<section class:graph-column--collapsed={graphCollapsed} class="graph-column">
+				<LocalGraphPanel
+					graph={selectedGraph}
+					selectedNodeId={selectedGraphNodeId}
+					collapsed={graphCollapsed}
+					onToggleCollapse={() => (graphCollapsed = !graphCollapsed)}
+					onSelectNode={(nodeId) => (selectedGraphNodeId = nodeId)}
+					onSelectItem={handleGraphItemSelect}
+					onJumpToSource={jumpToSource}
+				/>
+			</section>
+		</main>
+	{/if}
+</div>
 
 <style>
-  .traceback-anchor {
-    width: 100%;
-    text-align: left;
-  }
+	.document-workbench-root {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		overflow: hidden;
+		background: #f6f9fd;
+		color: #0f172a;
+		font-family:
+			system-ui,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
+	}
 
-  .selected-anchor {
-    border-color: var(--accent, #2f5bd2);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #2f5bd2) 40%, transparent);
-  }
+	.workbench-appbar {
+		display: grid;
+		grid-template-columns: 120px minmax(0, 1fr) 320px 420px;
+		height: 64px;
+		align-items: center;
+		gap: 16px;
+		padding: 0 24px;
+		border-bottom: 1px solid #e2e8f0;
+		background: rgba(255, 255, 255, 0.92);
+		backdrop-filter: blur(12px);
+	}
 
-  .section-nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
+	.workbench-logo {
+		display: flex;
+		width: 120px;
+		align-items: center;
+		gap: 10px;
+		color: #0f172a;
+		font-size: 18px;
+		font-weight: 700;
+	}
 
-  .document-section {
-    scroll-margin-top: 5rem;
-  }
+	.logo-mark {
+		display: grid;
+		width: 32px;
+		height: 32px;
+		place-items: center;
+		border-radius: 10px;
+		background: #2563eb;
+		color: #ffffff;
+		font-size: 16px;
+		font-weight: 800;
+	}
 
-  .document-section--active {
-    border-color: var(--accent, #2f5bd2);
-  }
+	.title-zone {
+		min-width: 0;
+	}
 
-  .document-text {
-    white-space: pre-wrap;
-    line-height: 1.7;
-  }
+	.breadcrumb {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		color: #64748b;
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.current-title {
+		max-width: 420px;
+		overflow: hidden;
+		color: #0f172a;
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 20px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.global-search {
+		display: flex;
+		width: 320px;
+		height: 38px;
+		align-items: center;
+		gap: 8px;
+		padding: 0 12px;
+		border: 1px solid #e2e8f0;
+		border-radius: 10px;
+		background: #ffffff;
+	}
+
+	.global-search input {
+		min-width: 0;
+		flex: 1;
+		border: 0;
+		outline: 0;
+		background: transparent;
+		color: #0f172a;
+		font-size: 13px;
+	}
+
+	.global-search kbd {
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.top-actions {
+		display: flex;
+		width: 420px;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+
+	.top-actions button {
+		display: inline-flex;
+		height: 38px;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		padding: 0 14px;
+		border: 1px solid #e2e8f0;
+		border-radius: 10px;
+		background: #ffffff;
+		color: #0f172a;
+		font-size: 14px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.top-actions button:hover {
+		background: #f8fafc;
+	}
+
+	.top-actions .primary {
+		border-color: #2563eb;
+		background: #2563eb;
+		color: #ffffff;
+	}
+
+	.top-actions .primary:hover {
+		background: #1d4ed8;
+	}
+
+	.workbench-main {
+		display: grid;
+		height: calc(100vh - 64px);
+		grid-template-columns: 700px 480px 420px;
+		column-gap: 16px;
+		padding: 16px 20px 20px;
+		box-sizing: border-box;
+		overflow: hidden;
+	}
+
+	.reader-column,
+	.extraction-column,
+	.graph-column {
+		min-width: 0;
+		height: 100%;
+		overflow: hidden;
+	}
+
+	.loading-panel {
+		grid-column: 1 / -1;
+		display: grid;
+		width: 100%;
+		height: 100%;
+		place-content: center;
+		gap: 12px;
+		border: 1px dashed #cbd5e1;
+		border-radius: 14px;
+		background: #f8fafc;
+	}
+
+	.skeleton {
+		width: 280px;
+		height: 16px;
+		border-radius: 8px;
+		background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);
+	}
+
+	.skeleton--wide {
+		width: 420px;
+	}
+
+	.skeleton--short {
+		width: 180px;
+	}
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	@media (min-width: 1729px) {
+		.workbench-main {
+			grid-template-columns: minmax(700px, 760px) 500px 420px;
+		}
+	}
+
+	@media (max-width: 1440px) {
+		.workbench-appbar {
+			grid-template-columns: 120px minmax(0, 1fr) 280px minmax(320px, 420px);
+		}
+
+		.global-search {
+			width: 280px;
+		}
+
+		.top-actions {
+			width: auto;
+		}
+
+		.workbench-main {
+			grid-template-columns: minmax(0, 52%) minmax(420px, 31%) minmax(300px, 17%);
+		}
+	}
+
+	@media (max-width: 1280px) {
+		.workbench-appbar {
+			grid-template-columns: 120px minmax(0, 1fr) 260px auto;
+		}
+
+		.global-search {
+			width: 260px;
+		}
+
+		.workbench-main {
+			grid-template-columns: minmax(0, 52%) minmax(420px, 1fr);
+		}
+
+		.graph-column {
+			position: fixed;
+			top: 64px;
+			right: 0;
+			bottom: 0;
+			z-index: 120;
+			width: 420px;
+			padding: 16px 20px 20px 0;
+			background: #f6f9fd;
+			transform: translateX(0);
+			transition: transform 0.18s ease;
+		}
+
+		.graph-column--collapsed {
+			transform: translateX(100%);
+		}
+	}
+
+	@media (max-width: 1024px) {
+		.document-workbench-root {
+			overflow: auto;
+		}
+
+		.workbench-appbar {
+			grid-template-columns: 120px minmax(0, 1fr);
+			height: auto;
+			min-height: 64px;
+			padding: 12px 16px;
+		}
+
+		.global-search,
+		.top-actions {
+			grid-column: 1 / -1;
+			width: 100%;
+		}
+
+		.workbench-main {
+			height: auto;
+			min-height: calc(100vh - 64px);
+			grid-template-columns: 1fr;
+			row-gap: 16px;
+			overflow: visible;
+		}
+
+		.reader-column {
+			height: 760px;
+		}
+
+		.extraction-column {
+			height: 720px;
+		}
+
+		.graph-column {
+			display: none;
+		}
+	}
 </style>

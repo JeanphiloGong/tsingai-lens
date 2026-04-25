@@ -10,31 +10,41 @@ type DocumentDetailPageState = {
 	url: URL;
 };
 
-const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
+const { pageStore, setPage, fetchMock, getDocumentMock } = vi.hoisted(() => {
 	const subscribers = new Set<(value: DocumentDetailPageState) => void>();
 	let current: DocumentDetailPageState = {
 		params: { id: 'col_123', document_id: 'doc_1' },
 		url: new URL('http://localhost/collections/col_123/documents/doc_1')
 	};
 
-		return {
-			pageStore: {
-				subscribe(run: (value: DocumentDetailPageState) => void) {
-					run(current);
-					subscribers.add(run);
-					return () => subscribers.delete(run);
-				}
-			},
-			setPage(next: DocumentDetailPageState) {
-				current = next;
-				for (const run of subscribers) run(next);
-			},
-		fetchMock: vi.fn()
+	return {
+		pageStore: {
+			subscribe(run: (value: DocumentDetailPageState) => void) {
+				run(current);
+				subscribers.add(run);
+				return () => subscribers.delete(run);
+			}
+		},
+		setPage(next: DocumentDetailPageState) {
+			current = next;
+			for (const run of subscribers) run(next);
+		},
+		fetchMock: vi.fn(),
+		getDocumentMock: vi.fn()
 	};
 });
 
 vi.mock('$app/stores', () => ({
 	page: pageStore
+}));
+
+vi.mock('pdfjs-dist', () => ({
+	GlobalWorkerOptions: { workerSrc: '' },
+	getDocument: getDocumentMock
+}));
+
+vi.mock('pdfjs-dist/build/pdf.worker.mjs?url', () => ({
+	default: '/mock-pdf-worker.mjs'
 }));
 
 vi.stubGlobal('fetch', fetchMock);
@@ -58,6 +68,24 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/documents/doc_1')
 		});
 		fetchMock.mockReset();
+		getDocumentMock.mockReset();
+		getDocumentMock.mockImplementation(() => ({
+			promise: Promise.resolve({
+				numPages: 4,
+				destroy: vi.fn(),
+				getPage: vi.fn(async () => ({
+					getViewport: ({ scale }: { scale: number }) => ({
+						width: 600 * scale,
+						height: 820 * scale
+					}),
+					render: vi.fn(() => ({
+						promise: Promise.resolve(),
+						cancel: vi.fn()
+					}))
+				}))
+			}),
+			destroy: vi.fn()
+		}));
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
 				typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -69,19 +97,47 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					document_id: 'doc_1',
 					title: 'Paper A',
 					source_filename: 'paper-a.pdf',
-					page_count: 5,
-					content_text: 'content',
-					sections: [
+					content_text:
+						'Abstract\nConductivity improved to 12 mS/cm.\nMethodology\nThe sample was annealed at 700 C.\nResults\nConductivity improved to 12 mS/cm under EIS.',
+					blocks: [
 						{
-							section_id: 'results',
-							title: 'Results',
-							section_type: 'results',
-							text: 'Conductivity improved to 12 mS/cm.',
-							page: 4,
+							block_id: 'abstract',
+							block_type: 'abstract',
+							heading_path: 'Abstract',
+							heading_level: 1,
 							order: 1,
-							start_offset: 0,
-							end_offset: 33,
-							text_unit_ids: []
+							text: 'Conductivity improved to 12 mS/cm.',
+							start_offset: 9,
+							end_offset: 43,
+							text_unit_ids: [],
+							page: 1,
+							bbox: { x0: 18, y0: 20, x1: 82, y1: 24.5, coord_origin: 'percent' }
+						},
+						{
+							block_id: 'methods',
+							block_type: 'methods',
+							heading_path: 'Methodology',
+							heading_level: 1,
+							order: 2,
+							text: 'The sample was annealed at 700 C.',
+							start_offset: 56,
+							end_offset: 89,
+							text_unit_ids: [],
+							page: 2,
+							bbox: { x0: 22, y0: 44, x1: 72, y1: 48.5, coord_origin: 'percent' }
+						},
+						{
+							block_id: 'results',
+							block_type: 'results',
+							heading_path: 'Results',
+							heading_level: 1,
+							order: 3,
+							text: 'Conductivity improved to 12 mS/cm under EIS.',
+							start_offset: 98,
+							end_offset: 143,
+							text_unit_ids: [],
+							page: 3,
+							bbox: { x0: 18, y0: 62, x1: 76, y1: 66.5, coord_origin: 'percent' }
 						}
 					],
 					warnings: []
@@ -113,18 +169,149 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					]
 				});
 			}
+			if (
+				url.pathname === '/api/v1/collections/col_123/documents/doc_1/comparison-semantics' &&
+				url.searchParams.get('include_grouped_projections') === 'true'
+			) {
+				return jsonResponse({
+					collection_id: 'col_123',
+					document_id: 'doc_1',
+					total: 1,
+					count: 1,
+					items: [],
+					variant_dossiers: [
+						{
+							variant_id: 'var_1',
+							variant_label: 'optimized VED + HIP',
+							material: {
+								label: 'oxide cathode',
+								composition: 'LiNiO2'
+							},
+							shared_process_state: {
+								anneal_temperature_c: 700
+							},
+							shared_missingness: [],
+							series: [
+								{
+									series_key: 'conductivity:test_temperature_c',
+									property_family: 'conductivity',
+									test_family: 'EIS',
+									varying_axis: {
+										axis_name: 'test_temperature_c',
+										axis_unit: 'C'
+									},
+									chains: [
+										{
+											result_id: 'cres_1',
+											source_result_id: 'mr_1',
+											measurement: {
+												property: 'conductivity',
+												value: 12,
+												unit: 'mS/cm',
+												result_type: 'scalar',
+												summary: '12 mS/cm'
+											},
+											test_condition: {
+												test_method: 'EIS',
+												test_temperature_c: 25
+											},
+											baseline: {
+												label: 'as-prepared',
+												reference: 'same-paper control',
+												baseline_type: 'same_document',
+												resolved: true
+											},
+											assessment: {
+												comparability_status: 'comparable',
+												warnings: [],
+												basis: [],
+												missing_context: [],
+												requires_expert_review: false,
+												assessment_epistemic_status: 'grounded'
+											},
+											value_provenance: {
+												value_origin: 'reported',
+												source_value_text: '12',
+												source_unit_text: 'mS/cm'
+											},
+											evidence: {
+												evidence_ids: ['ev_1'],
+												direct_anchor_ids: ['anc_1'],
+												contextual_anchor_ids: [],
+												structure_feature_ids: [],
+												characterization_observation_ids: [],
+												traceability_status: 'direct'
+											}
+										}
+									]
+								}
+							]
+						}
+					]
+				});
+			}
+			if (url.pathname === '/api/v1/collections/col_123/evidence/ev_1/traceback') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					evidence_id: 'ev_1',
+					traceback_status: 'ready',
+					anchors: [
+						{
+							anchor_id: 'anc_1',
+							document_id: 'doc_1',
+							locator_type: 'bbox',
+							locator_confidence: 'high',
+							page: 3,
+							quote: 'Conductivity improved to 12 mS/cm under EIS.',
+							section_id: 'Results',
+							block_id: 'results',
+							char_range: { start: 98, end: 143 },
+							bbox: { x0: 18, y0: 62, x1: 76, y1: 66.5 },
+							deep_link: '/collections/col_123/documents/doc_1?evidence_id=ev_1&anchor_id=anc_1'
+						}
+					]
+				});
+			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
 		});
 	});
 
-	it('renders related results that drill back into result detail', async () => {
+	it('renders the paper reading workbench with tabs and local graph', async () => {
 		render(Page);
 
-		const sectionHeading = browserPage.getByRole('heading', { name: 'Results from this document' });
-		await expect.element(sectionHeading).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Lens')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('tab', { name: 'Summary' })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Graph').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Parsed source fallback')).not.toBeInTheDocument();
 
-		const resultLink = browserPage.getByRole('link', { name: 'oxide cathode · conductivity' });
-		await expect.element(resultLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
+		await browserPage.getByRole('tab', { name: 'Results' }).click();
+		await expect.element(browserPage.getByText('oxide cathode').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Comparable').first()).toBeInTheDocument();
+		await browserPage.getByText('oxide cathode').first().click();
+		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
+		const resultHighlightStyle = browserPage
+			.getByTestId('pdf-highlight')
+			.first()
+			.element()
+			.getAttribute('style');
+		expect(resultHighlightStyle).toContain('left: 18%');
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
+
+		await browserPage.getByRole('tab', { name: 'Evidence' }).click();
+		await expect
+			.element(browserPage.getByText('conductivity is reported for oxide cathode.'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Jump to source' }).first())
+			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Jump to source' }).first().click();
+		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
 	});
 });

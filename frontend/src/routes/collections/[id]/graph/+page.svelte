@@ -1,35 +1,55 @@
 <script lang="ts">
-	import { onDestroy, tick } from 'svelte';
+	import { tick, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
-	import cytoscape, {
-		type CollectionReturnValue,
-		type Core,
-		type EdgeSingular,
-		type ElementDefinition,
-		type LayoutOptions,
-		type NodeSingular,
-		type StylesheetJson
-	} from 'cytoscape';
+	import cytoscape, { type Core, type EdgeSingular, type NodeSingular } from 'cytoscape';
 	import fcose from 'cytoscape-fcose';
+	import { errorMessage, getApiErrorCode, isHttpStatusError } from '../../../_shared/api';
 	import {
-		errorMessage,
-		getApiErrorCode,
-		isHttpStatusError,
-		throwApiError
-	} from '../../../_shared/api';
-	import {
-		buildCollectionGraphmlUrl,
+		buildCytoscapeElements,
+		buildCytoscapeStyles,
+		buildGraphMeta,
+		buildNodeTypeCounts,
+		downloadGraphml as downloadGraphmlFile,
+		exportGraphPng,
 		fetchCollectionGraph,
 		fetchCollectionGraphNeighbors,
+		filterGraphElements,
+		formatGraphLabel,
+		getEdgeTypeStyle,
+		getLinkedComparisons,
+		getLinkedDocuments,
+		getLinkedEvidence,
+		getNodeDescription,
+		getNodeTypeStyle,
+		getSelectedObjectDetail,
+		graphNodeTypeOrder,
 		parseGraphNodeId,
+		runGraphLayout,
 		type GraphEdge,
+		type GraphMeta,
 		type GraphNode,
-		type GraphResponse
+		type GraphNodeType,
+		type GraphPosition,
+		type GraphResponse,
+		type GraphSelectedObject
 	} from '../../../_shared/graph';
+	import {
+		fetchComparisonRow,
+		fetchComparisons,
+		type ComparisonRow
+	} from '../../../_shared/comparisons';
+	import {
+		fetchDocumentProfile,
+		fetchDocumentProfiles,
+		type DocumentProfile
+	} from '../../../_shared/documents';
+	import {
+		fetchEvidenceCard,
+		fetchEvidenceCards,
+		type EvidenceCard
+	} from '../../../_shared/evidence';
 	import { t } from '../../../_shared/i18n';
-	import { fetchComparisonRow, type ComparisonRow } from '../../../_shared/comparisons';
-	import { fetchDocumentProfile, type DocumentProfile } from '../../../_shared/documents';
-	import { fetchEvidenceCard, type EvidenceCard } from '../../../_shared/evidence';
+	import { createBuildTask } from '../../../_shared/tasks';
 	import { buildDocumentViewerHref } from '../../../_shared/traceback';
 	import {
 		fetchWorkspaceOverview,
@@ -39,595 +59,422 @@
 
 	cytoscape.use(fcose);
 
-	type NodeKind =
-		| 'document'
-		| 'evidence'
-		| 'comparison'
-		| 'material'
-		| 'property'
-		| 'test_condition'
-		| 'baseline'
-		| 'variant'
-		| 'process';
-	type Position = { x: number; y: number };
-	type ViewportState = { zoom: number; pan: Position };
-	type SelectedNode = GraphNode & { kind: NodeKind | 'unknown'; resourceId: string | null };
+	type LayoutName = 'fcose' | 'cose' | 'grid' | 'circle';
+	type LinkedTab = 'evidence' | 'comparison' | 'documents';
+	type SelectedNode = GraphNode & {
+		kind: GraphNodeType | 'unknown';
+		resourceId: string | null;
+		displayLabel: string;
+	};
+	type SelectedEdge = GraphEdge & {
+		sourceLabel: string;
+		targetLabel: string;
+		relationLabel: string;
+	};
 	type NodeDetail =
 		| { kind: 'document'; data: DocumentProfile }
 		| { kind: 'evidence'; data: EvidenceCard }
 		| { kind: 'comparison'; data: ComparisonRow };
-	type EdgeDetail = GraphEdge & { sourceLabel: string; targetLabel: string };
 	type HoverPreview = {
-		nodeId: string;
 		label: string;
 		typeLabel: string;
-		degree: number | null;
 		left: number;
 		top: number;
 	};
+	type RelationPreview = {
+		label: string;
+		target: string;
+	};
 
-	const nodeTypeOrder: NodeKind[] = [
-		'document',
-		'evidence',
-		'comparison',
-		'material',
-		'property',
-		'test_condition',
-		'baseline',
-		'variant',
-		'process'
-	];
-	const nodeTypeMeta: Record<NodeKind, { color: string; shape: string }> = {
-		document: { color: '#2b6ff7', shape: 'round-rectangle' },
-		evidence: { color: '#12a579', shape: 'ellipse' },
-		comparison: { color: '#f28f3b', shape: 'diamond' },
-		material: { color: '#d94f70', shape: 'hexagon' },
-		property: { color: '#7a63ff', shape: 'round-hexagon' },
-		test_condition: { color: '#1791c8', shape: 'vee' },
-		baseline: { color: '#5b8c3b', shape: 'tag' },
-		variant: { color: '#b14d83', shape: 'star' },
-		process: { color: '#65748b', shape: 'concave-hexagon' }
-	};
-	const defaultVisibleNodeTypes: Record<NodeKind, boolean> = {
-		document: true,
-		evidence: true,
-		comparison: true,
-		material: true,
-		property: true,
-		test_condition: false,
-		baseline: false,
-		variant: false,
-		process: false
-	};
-	const detailNodeKinds = new Set<NodeKind>(['document', 'evidence', 'comparison']);
-	const graphViewportPadding = 72;
+	const defaultMaxNodes = 200;
+	const defaultMinWeight = 0;
+	const graphPadding = 72;
 	const graphAnimationDuration = 220;
-	const graphStylesheet = [
-		{
-			selector: 'node',
-			style: {
-				shape: 'data(shape)',
-				width: 'data(width)',
-				height: 'data(height)',
-				'background-color': 'data(color)',
-				'background-opacity': 0.93,
-				'border-width': 1.5,
-				'border-color': 'rgba(255, 255, 255, 0.94)',
-				label: 'data(label)',
-				color: '#0f1b2d',
-				'font-size': 'data(fontSize)',
-				'font-weight': 600,
-				'text-wrap': 'wrap',
-				'text-max-width': 'data(textMaxWidth)',
-				'text-valign': 'center',
-				'text-halign': 'center',
-				'text-justification': 'center',
-				'text-margin-y': 0,
-				'overlay-opacity': 0
-			}
-		},
-		{
-			selector: 'node.is-card-node',
-			style: {
-				shape: 'round-rectangle',
-				'border-width': 2,
-				'font-weight': 700
-			}
-		},
-		{
-			selector: 'node.is-detail-node',
-			style: {
-				'background-opacity': 0.97
-			}
-		},
-		{
-			selector: 'edge',
-			style: {
-				width: 'data(width)',
-				'curve-style': 'bezier',
-				'line-color': 'rgba(15, 27, 45, 0.25)',
-				'target-arrow-color': 'rgba(15, 27, 45, 0.25)',
-				'target-arrow-shape': 'triangle',
-				'arrow-scale': 0.9,
-				label: 'data(label)',
-				color: 'rgba(15, 27, 45, 0.8)',
-				'font-size': 9,
-				'text-rotation': 'autorotate',
-				'text-background-color': '#ffffff',
-				'text-background-opacity': 0.92,
-				'text-background-shape': 'roundrectangle',
-				'text-background-padding': 2,
-				'text-margin-y': -4,
-				'min-zoomed-font-size': 4,
-				'overlay-opacity': 0
-			}
-		},
-		{
-			selector: '.is-hidden',
-			style: {
-				display: 'none'
-			}
-		},
-		{
-			selector: 'node.is-selected',
-			style: {
-				'border-width': 3,
-				'border-color': '#0f1b2d',
-				'shadow-blur': 20,
-				'shadow-color': 'rgba(15, 27, 45, 0.18)',
-				'shadow-opacity': 1,
-				'shadow-offset-x': 0,
-				'shadow-offset-y': 8
-			}
-		},
-		{
-			selector: 'node.is-connected',
-			style: {
-				'border-width': 2,
-				'border-color': '#2b6ff7',
-				'background-blacken': -0.05
-			}
-		},
-		{
-			selector: 'node.is-hovered',
-			style: {
-				'border-width': 2.5,
-				'border-color': '#f28f3b',
-				'shadow-blur': 14,
-				'shadow-color': 'rgba(242, 143, 59, 0.22)',
-				'shadow-opacity': 1,
-				'shadow-offset-x': 0,
-				'shadow-offset-y': 4
-			}
-		},
-		{
-			selector: 'node.is-hovered-neighbor',
-			style: {
-				'border-width': 2,
-				'border-color': 'rgba(242, 143, 59, 0.48)'
-			}
-		},
-		{
-			selector: 'edge.is-selected',
-			style: {
-				'line-color': '#0f1b2d',
-				'target-arrow-color': '#0f1b2d',
-				width: 4
-			}
-		},
-		{
-			selector: 'edge.is-connected',
-			style: {
-				'line-color': 'rgba(43, 111, 247, 0.38)',
-				'target-arrow-color': 'rgba(43, 111, 247, 0.38)',
-				width: 3
-			}
-		},
-		{
-			selector: 'edge.is-hovered',
-			style: {
-				'line-color': 'rgba(242, 143, 59, 0.54)',
-				'target-arrow-color': 'rgba(242, 143, 59, 0.54)',
-				width: 3
-			}
-		}
-	] as unknown as StylesheetJson;
 
 	let collectionId = '';
-
-	$: collectionId = $page.params.id ?? '';
-
-	let maxNodes = 200;
-	let minWeight = 0;
-	let previewQuery = '';
-	let loading = false;
-	let error = '';
-	let status = '';
-	let detailLoading = false;
-	let detailError = '';
-	let expandingNeighborhood = false;
-	let workspace: WorkspaceOverview | null = null;
-	let notFound = false;
-	let visibleNodes = 0;
-	let visibleEdges = 0;
 	let graphContainer: HTMLDivElement | null = null;
 	let cy: Core | null = null;
 	let graphData: GraphResponse | null = null;
-	let selectedNode: SelectedNode | null = null;
-	let selectedNodeDetail: NodeDetail | null = null;
-	let selectedEdge: EdgeDetail | null = null;
-	let hoveredNodeId: string | null = null;
-	let hoverPreview: HoverPreview | null = null;
+	let workspace: WorkspaceOverview | null = null;
 	let loadedCollectionId = '';
+
+	let loading = false;
+	let supportLoading = false;
+	let detailLoading = false;
+	let expandingNeighborhood = false;
+	let exportMenuOpen = false;
+	let notFound = false;
+	let error = '';
+	let status = '';
+	let supportStatus = '';
+	let detailError = '';
+
+	let maxNodes = defaultMaxNodes;
+	let minWeight = defaultMinWeight;
+	let layoutName: LayoutName = 'fcose';
+	let searchQuery = '';
+	let visibleNodeTypes: Partial<Record<GraphNodeType, boolean>> = buildDefaultVisibleTypes();
+	let visibleNodes = 0;
+	let visibleEdges = 0;
+
+	let selectedNode: SelectedNode | null = null;
+	let selectedEdge: SelectedEdge | null = null;
+	let selectedNodeDetail: NodeDetail | null = null;
+	let hoverPreview: HoverPreview | null = null;
+	let linkedTab: LinkedTab = 'evidence';
 	let detailRequestId = 0;
-	let visibleNodeTypes: Record<NodeKind, boolean> = { ...defaultVisibleNodeTypes };
+
+	let evidenceItems: EvidenceCard[] = [];
+	let comparisonItems: ComparisonRow[] = [];
+	let documentItems: DocumentProfile[] = [];
+
+	$: collectionId = $page.params.id ?? '';
+	$: graphMeta = buildGraphMeta(graphData);
+	$: nodeTypeCounts = buildNodeTypeCounts(graphData);
+	$: availableNodeTypes = graphNodeTypeOrder.filter((type) => nodeTypeCounts[type] > 0);
 	$: surfaceState = getWorkspaceSurfaceState(workspace, 'graph');
-	$: showFallbackState =
-		Boolean(workspace) && !loading && !visibleNodes && (surfaceState !== 'ready' || notFound);
-	$: availableNodeTypes = nodeTypeOrder.filter((type) =>
-		(graphData?.nodes ?? []).some((node) => node.type === type)
+	$: selectedObject = selectedNode
+		? ({ kind: 'node', node: selectedNode } as GraphSelectedObject)
+		: selectedEdge
+			? ({ kind: 'edge', edge: selectedEdge } as GraphSelectedObject)
+			: null;
+	$: selectedDetail = getSelectedObjectDetail(selectedObject);
+	$: linkedEvidence = getLinkedEvidence(selectedObject, evidenceItems);
+	$: linkedComparisons = getLinkedComparisons(selectedObject, comparisonItems);
+	$: linkedDocuments = buildLinkedDocuments(
+		getLinkedDocuments(selectedObject, documentItems),
+		linkedEvidence,
+		linkedComparisons
 	);
+	$: selectedStats = {
+		evidence: linkedEvidence.length,
+		comparison: linkedComparisons.length,
+		documents: linkedDocuments.length
+	};
+	$: commonRelations = buildCommonRelations();
+	$: showEmptyGraph = !loading && (!graphData || !graphData.nodes.length || (notFound && !visibleNodes));
+	$: if (cy) {
+		searchQuery;
+		visibleNodeTypes;
+		applyVisibilityAndSearch();
+	}
+	$: if (collectionId && collectionId !== loadedCollectionId) {
+		loadedCollectionId = collectionId;
+		resetControlState();
+		void loadGraph();
+	}
+
+	onDestroy(() => {
+		disposeRenderer();
+	});
+
+	function buildDefaultVisibleTypes() {
+		return Object.fromEntries(graphNodeTypeOrder.map((type) => [type, true])) as Partial<
+			Record<GraphNodeType, boolean>
+		>;
+	}
+
+	function resetControlState() {
+		maxNodes = defaultMaxNodes;
+		minWeight = defaultMinWeight;
+		layoutName = 'fcose';
+		searchQuery = '';
+		visibleNodeTypes = buildDefaultVisibleTypes();
+		linkedTab = 'evidence';
+	}
 
 	function disposeRenderer() {
-		if (cy) {
-			cy.destroy();
-			cy = null;
-		}
-	}
-
-	function asNodeKind(type?: string | null): NodeKind | null {
-		return type && type in nodeTypeMeta ? (type as NodeKind) : null;
-	}
-
-	function isAggregateNodeKind(kind: NodeKind | null) {
-		return Boolean(kind && !detailNodeKinds.has(kind));
-	}
-
-	function clamp(value: number, min: number, max: number) {
-		return Math.max(min, Math.min(max, value));
-	}
-
-	function truncateText(value: string, limit: number) {
-		const normalized = value.replace(/\s+/g, ' ').trim();
-		if (normalized.length <= limit) return normalized;
-		return `${normalized.slice(0, Math.max(limit - 1, 1)).trimEnd()}…`;
-	}
-
-	function nodeColor(type?: string | null) {
-		const kind = asNodeKind(type);
-		return kind ? nodeTypeMeta[kind].color : '#2b6ff7';
-	}
-
-	function nodeShape(type?: string | null) {
-		const kind = asNodeKind(type);
-		if (!kind) return 'round-rectangle';
-		return isAggregateNodeKind(kind) ? 'round-rectangle' : nodeTypeMeta[kind].shape;
-	}
-
-	function nodeDisplayLabel(label: string, type?: string | null) {
-		const kind = asNodeKind(type);
-		return truncateText(label || '', isAggregateNodeKind(kind) ? 54 : 22) || '--';
-	}
-
-	function estimatedLineCount(label: string, type?: string | null) {
-		const kind = asNodeKind(type);
-		const charsPerLine = isAggregateNodeKind(kind) ? 16 : 12;
-		const maxLines = isAggregateNodeKind(kind) ? 3 : 2;
-		const normalized = label.replace(/\s+/g, ' ').trim();
-		return clamp(Math.ceil(Math.max(normalized.length, 1) / charsPerLine), 1, maxLines);
-	}
-
-	function nodeLayoutMetrics(node: GraphNode) {
-		const kind = asNodeKind(node.type);
-		const displayLabel = nodeDisplayLabel(node.label || node.id, node.type);
-		const lineCount = estimatedLineCount(displayLabel, node.type);
-		const aggregate = isAggregateNodeKind(kind);
-		const degreeBoost = Math.min(node.degree ?? 0, aggregate ? 5 : 4);
-		const width = aggregate
-			? clamp(98 + Math.min(displayLabel.length, 44) * 2.1 + degreeBoost * 5, 98, 210)
-			: clamp(58 + Math.min(displayLabel.length, 22) * 1.55 + degreeBoost * 4, 58, 128);
-		const height = aggregate
-			? clamp(52 + ((lineCount - 1) * 22) + degreeBoost * 4, 52, 118)
-			: clamp(44 + ((lineCount - 1) * 18) + degreeBoost * 3, 44, 82);
-		return {
-			aggregate,
-			displayLabel,
-			width: Math.round(width),
-			height: Math.round(height),
-			textMaxWidth: Math.max(Math.round(width - 18), aggregate ? 76 : 44),
-			fontSize: aggregate ? 12 : 10,
-			focusZoom: aggregate ? 0.88 : 1.02,
-			layoutRepulsion: aggregate ? 26000 + degreeBoost * 900 : 12000 + degreeBoost * 700
-		};
-	}
-
-	function edgeWidth(weight?: number | null) {
-		return Math.max(1.4, Math.min(5, (weight ?? 1) + 0.25));
-	}
-
-	function getNodeLabel(nodeId: string) {
-		if (!cy) return nodeId;
-		const node = cy.$id(nodeId);
-		return node.empty() ? nodeId : String(node.data('fullLabel') ?? nodeId);
-	}
-
-	function edgeRelationLabel(description?: string | null) {
-		if (description === 'document_to_evidence') {
-			return $t('graph.edgeLabelDocumentEvidence');
-		}
-		if (description === 'evidence_to_comparison') {
-			return $t('graph.edgeLabelEvidenceComparison');
-		}
-		if (description === 'comparison_to_material') {
-			return $t('graph.edgeLabelComparisonMaterial');
-		}
-		if (description === 'comparison_to_property') {
-			return $t('graph.edgeLabelComparisonProperty');
-		}
-		if (description === 'comparison_to_test_condition') {
-			return $t('graph.edgeLabelComparisonTestCondition');
-		}
-		if (description === 'comparison_to_baseline') {
-			return $t('graph.edgeLabelComparisonBaseline');
-		}
-		return description?.trim() || $t('graph.edgeLabelFallback');
-	}
-
-	function nodeTypeLabel(type: NodeKind) {
-		if (type === 'document') return $t('graph.nodeTypeDocument');
-		if (type === 'evidence') return $t('graph.nodeTypeEvidence');
-		if (type === 'comparison') return $t('graph.nodeTypeComparison');
-		if (type === 'material') return $t('graph.nodeTypeMaterial');
-		if (type === 'property') return $t('graph.nodeTypeProperty');
-		if (type === 'test_condition') return $t('graph.nodeTypeTestCondition');
-		if (type === 'baseline') return $t('graph.nodeTypeBaseline');
-		if (type === 'variant') return $t('graph.nodeTypeVariant');
-		return $t('graph.nodeTypeProcess');
-	}
-
-	function selectedNodeTypeLabel(type?: string | null) {
-		const kind = asNodeKind(type);
-		return kind ? nodeTypeLabel(kind) : type?.trim() || '';
-	}
-
-	function isNodeTypeVisible(type: NodeKind) {
-		return visibleNodeTypes[type];
-	}
-
-	function setNodeTypeVisibility(type: NodeKind, checked: boolean) {
-		visibleNodeTypes = {
-			...visibleNodeTypes,
-			[type]: checked
-		};
-	}
-
-	function stableHash(value: string) {
-		let hash = 0;
-		for (const item of value) {
-			hash = (hash * 31 + item.charCodeAt(0)) | 0;
-		}
-		return Math.abs(hash);
-	}
-
-	function fallbackPosition(nodeId: string, index: number, total: number): Position {
-		const hash = stableHash(nodeId);
-		const angle = (2 * Math.PI * index) / Math.max(total, 1);
-		const radius = 120 + (hash % 11) * 12;
-		const xJitter = ((hash >> 3) % 100) - 50;
-		const yJitter = ((hash >> 9) % 100) - 50;
-		return {
-			x: Math.cos(angle) * radius + xJitter,
-			y: Math.sin(angle) * radius + yJitter
-		};
+		if (!cy) return;
+		cy.destroy();
+		cy = null;
 	}
 
 	function currentPositions() {
-		const positions = new Map<string, Position>();
-		if (!cy) return positions;
-
-		cy.nodes().forEach((node) => {
+		const positions = new Map<string, GraphPosition>();
+		cy?.nodes().forEach((node) => {
 			const position = node.position();
 			positions.set(node.id(), { x: position.x, y: position.y });
 		});
 		return positions;
 	}
 
-	function currentViewport(): ViewportState | null {
-		if (!cy) return null;
-		const pan = cy.pan();
-		return {
-			zoom: cy.zoom(),
-			pan: { x: pan.x, y: pan.y }
-		};
+	function visibleGraphElements() {
+		return cy?.elements().filter((element) => !element.hasClass('is-hidden')) ?? null;
 	}
 
-	function restoreViewport(viewport: ViewportState | null) {
-		if (!cy || !viewport) return;
-		cy.zoom(viewport.zoom);
-		cy.pan(viewport.pan);
-	}
-
-	function visibleGraphElements(): CollectionReturnValue | null {
-		if (!cy) return null;
-		return cy.elements().filter((element) => !element.hasClass('is-hidden'));
-	}
-
-	function fitVisibleGraph(animate = true) {
+	function fitGraph(animate = true) {
 		if (!cy) return;
 		const visible = visibleGraphElements();
 		if (!visible || visible.empty()) return;
-
 		if (animate) {
 			cy.animate({
-				fit: { eles: visible, padding: graphViewportPadding },
+				fit: { eles: visible, padding: graphPadding },
 				duration: graphAnimationDuration,
 				easing: 'ease-out-cubic'
 			});
 			return;
 		}
-
-		cy.fit(visible, graphViewportPadding);
+		cy.fit(visible, graphPadding);
 	}
 
-	function focusNodeInViewport(nodeId: string) {
-		if (!cy) return;
-		const node = cy.$id(nodeId);
-		if (node.empty()) return;
-		const targetZoom = clamp(
-			Math.max(
-				cy.zoom(),
-				typeof node.data('focusZoom') === 'number' ? Number(node.data('focusZoom')) : 0.92
-			),
-			0.45,
-			1.25
-		);
+	function centerGraph() {
+		const visible = visibleGraphElements();
+		if (!cy || !visible || visible.empty()) return;
 		cy.animate({
-			center: { eles: node },
-			zoom: targetZoom,
+			center: { eles: visible },
 			duration: graphAnimationDuration,
 			easing: 'ease-out-cubic'
 		});
 	}
 
-	function focusEdgeInViewport(edgeId: string) {
+	function zoomGraph(factor: number) {
 		if (!cy) return;
-		const edge = cy.$id(edgeId);
-		if (edge.empty()) return;
 		cy.animate({
-			fit: { eles: edge.union(edge.connectedNodes()), padding: 92 },
+			zoom: Math.max(0.22, Math.min(2.4, cy.zoom() * factor)),
 			duration: graphAnimationDuration,
 			easing: 'ease-out-cubic'
 		});
 	}
 
-	function clearHoverPreview(shouldSync = true) {
-		hoveredNodeId = null;
-		hoverPreview = null;
-		if (shouldSync) {
-			syncSelectionStyles();
+	function currentTheme() {
+		if (typeof document === 'undefined') return 'light';
+		return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+	}
+
+	function buildVisibleGraphPayload() {
+		if (!graphData) return { nodes: [], edges: [] };
+		return filterGraphElements(graphData, {
+			maxNodes,
+			minWeight,
+			visibleNodeTypes
+		});
+	}
+
+	async function renderGraph(focusNodeId: string | null = null) {
+		if (!graphData) return;
+		if (!graphContainer) {
+			await tick();
 		}
-	}
-
-	function updateHoverPreview(node: NodeSingular) {
 		if (!graphContainer) return;
-		const position = node.renderedPosition();
-		hoverPreview = {
-			nodeId: node.id(),
-			label: String(node.data('fullLabel') ?? node.id()),
-			typeLabel: selectedNodeTypeLabel(
-				typeof node.data('entityType') === 'string' ? node.data('entityType') : null
-			),
-			degree: typeof node.data('degree') === 'number' ? node.data('degree') : null,
-			left: clamp(position.x + 18, 14, Math.max(14, graphContainer.clientWidth - 228)),
-			top: clamp(position.y + 16, 14, Math.max(14, graphContainer.clientHeight - 104))
-		};
+
+		const previousPositions = currentPositions();
+		const payload = buildVisibleGraphPayload();
+		disposeRenderer();
+		clearSelection(false);
+
+		cy = cytoscape({
+			container: graphContainer,
+			elements: buildCytoscapeElements(payload, { previousPositions }),
+			style: buildCytoscapeStyles(currentTheme()),
+			layout: { name: 'preset' },
+			minZoom: 0.2,
+			maxZoom: 2.6,
+			wheelSensitivity: 0.2,
+			boxSelectionEnabled: false
+		});
+
+		attachRendererEvents();
+		await runGraphLayout(cy, layoutName);
+		applyVisibilityAndSearch();
+		fitGraph(false);
+
+		if (focusNodeId) {
+			const focusNode = cy.$id(focusNodeId);
+			if (!focusNode.empty()) {
+				await selectNode(focusNodeId, { focus: true });
+			}
+		}
 	}
 
-	function setHoveredNode(node: NodeSingular | null) {
-		if (!node) {
-			clearHoverPreview();
-			return;
-		}
-		if (selectedNode?.id === node.id()) {
-			clearHoverPreview();
-			return;
-		}
-		hoveredNodeId = node.id();
-		updateHoverPreview(node);
+	function attachRendererEvents() {
+		if (!cy) return;
+		cy.on('tap', 'node', (event) => {
+			void selectNode(event.target.id(), { focus: true });
+		});
+		cy.on('dbltap', 'node', (event) => {
+			void expandNeighborhood(event.target.id());
+		});
+		cy.on('mouseover', 'node', (event) => {
+			updateHoverPreview(event.target as NodeSingular);
+		});
+		cy.on('mouseout', () => {
+			hoverPreview = null;
+			syncSelectionStyles();
+		});
+		cy.on('tap', 'edge', (event) => {
+			selectEdge(event.target.id(), true);
+		});
+		cy.on('tap', (event) => {
+			if (event.target === cy) {
+				clearSelection();
+			}
+		});
+		cy.on('pan zoom tapdrag', () => {
+			hoverPreview = null;
+		});
+	}
+
+	function applyVisibilityAndSearch() {
+		if (!cy) return;
+		const query = searchQuery.trim().toLowerCase();
+
+		cy.batch(() => {
+			cy?.nodes().forEach((node) => {
+				const type = String(node.data('entityType') ?? 'unknown') as GraphNodeType;
+				const typeVisible = visibleNodeTypes[type] ?? true;
+				const label = String(node.data('fullLabel') ?? '').toLowerCase();
+				const displayLabel = String(node.data('displayLabel') ?? '').toLowerCase();
+				const id = node.id().toLowerCase();
+				const matches = Boolean(query && `${label} ${displayLabel} ${id}`.includes(query));
+				node.toggleClass('is-hidden', !typeVisible);
+				node.toggleClass('search-match', matches);
+			});
+			cy?.edges().forEach((edge) => {
+				edge.toggleClass(
+					'is-hidden',
+					edge.source().hasClass('is-hidden') || edge.target().hasClass('is-hidden')
+				);
+			});
+		});
+
+		visibleNodes = cy.nodes().filter((node) => !node.hasClass('is-hidden')).length;
+		visibleEdges = cy.edges().filter((edge) => !edge.hasClass('is-hidden')).length;
 		syncSelectionStyles();
 	}
 
 	function syncSelectionStyles() {
 		if (!cy) return;
 		cy.batch(() => {
-			cy?.elements().removeClass('is-selected');
-			cy?.elements().removeClass('is-connected');
-			cy?.elements().removeClass('is-hovered');
-			cy?.elements().removeClass('is-hovered-neighbor');
+			cy?.elements().removeClass('is-selected is-neighbor is-dimmed');
+			const selectedId = selectedNode?.id ?? selectedEdge?.id ?? '';
+			if (!selectedId) return;
 
+			cy?.elements().addClass('is-dimmed');
 			if (selectedNode) {
 				const node = cy?.$id(selectedNode.id);
 				if (node && !node.empty()) {
+					const connected = node.closedNeighborhood();
+					connected.removeClass('is-dimmed');
 					node.addClass('is-selected');
-					node.connectedNodes().difference(node).addClass('is-connected');
-					node.connectedEdges().addClass('is-connected');
+					node.connectedNodes().addClass('is-neighbor');
+					node.connectedEdges().addClass('is-neighbor');
 				}
-			} else if (selectedEdge) {
+			}
+			if (selectedEdge) {
 				const edge = cy?.$id(selectedEdge.id);
 				if (edge && !edge.empty()) {
-					edge.addClass('is-selected');
-					edge.connectedNodes().addClass('is-connected');
-				}
-			}
-
-			if (hoveredNodeId) {
-				const node = cy?.$id(hoveredNodeId);
-				if (node && !node.empty()) {
-					node.addClass('is-hovered');
-					node.connectedNodes().difference(node).addClass('is-hovered-neighbor');
-					node.connectedEdges().addClass('is-hovered');
+					edge.removeClass('is-dimmed').addClass('is-selected');
+					edge.connectedNodes().removeClass('is-dimmed').addClass('is-neighbor');
 				}
 			}
 		});
 	}
 
-	function clearSelection() {
+	function updateHoverPreview(node: NodeSingular) {
+		if (!graphContainer || selectedNode?.id === node.id()) return;
+		const position = node.renderedPosition();
+		hoverPreview = {
+			label: String(node.data('fullLabel') ?? node.id()),
+			typeLabel: nodeTypeLabel(String(node.data('entityType') ?? 'unknown')),
+			left: clamp(position.x + 18, 12, Math.max(12, graphContainer.clientWidth - 230)),
+			top: clamp(position.y + 14, 12, Math.max(12, graphContainer.clientHeight - 112))
+		};
+		syncSelectionStyles();
+	}
+
+	function clearSelection(sync = true) {
 		detailRequestId += 1;
-		hoveredNodeId = null;
+		selectedNode = null;
+		selectedEdge = null;
+		selectedNodeDetail = null;
+		detailError = '';
+		detailLoading = false;
 		hoverPreview = null;
+		if (sync) syncSelectionStyles();
+	}
+
+	async function selectNode(nodeId: string, options: { focus?: boolean } = {}) {
+		if (!cy) return;
+		const node = cy.$id(nodeId);
+		if (node.empty()) return;
+		const parsed = parseGraphNodeId(nodeId);
+		const entityType = String(node.data('entityType') ?? parsed.kind ?? 'unknown') as GraphNodeType;
+		selectedNode = {
+			id: node.id(),
+			label: String(node.data('fullLabel') ?? node.id()),
+			type: entityType,
+			degree: Number(node.data('degree') ?? 0),
+			kind: parsed.kind === 'unknown' ? entityType : parsed.kind,
+			resourceId: parsed.resourceId || null,
+			displayLabel: String(node.data('displayLabel') ?? node.data('fullLabel') ?? node.id())
+		};
+		selectedEdge = null;
+		linkedTab = 'evidence';
+		syncSelectionStyles();
+		if (options.focus) focusNode(nodeId);
+		void loadNodeDetail(selectedNode);
+	}
+
+	function selectEdge(edgeId: string, focus = false) {
+		if (!cy) return;
+		const edge = cy.$id(edgeId);
+		if (edge.empty()) return;
+		detailRequestId += 1;
 		selectedNode = null;
 		selectedNodeDetail = null;
-		selectedEdge = null;
-		detailLoading = false;
 		detailError = '';
+		detailLoading = false;
+		selectedEdge = {
+			id: edge.id(),
+			source: String(edge.data('source') ?? ''),
+			target: String(edge.data('target') ?? ''),
+			edge_description: String(edge.data('edgeDescription') ?? 'related_to'),
+			weight: typeof edge.data('weight') === 'number' ? Number(edge.data('weight')) : null,
+			sourceLabel: nodeLabelForId(String(edge.data('source') ?? '')),
+			targetLabel: nodeLabelForId(String(edge.data('target') ?? '')),
+			relationLabel: String(edge.data('label') ?? '')
+		};
+		linkedTab = 'evidence';
 		syncSelectionStyles();
+		if (focus) {
+			cy.animate({
+				fit: { eles: edge.connectedNodes().union(edge), padding: 100 },
+				duration: graphAnimationDuration,
+				easing: 'ease-out-cubic'
+			});
+		}
 	}
 
-	function updateVisibility() {
+	function focusNode(nodeId: string) {
 		if (!cy) return;
-
-		const query = previewQuery.trim().toLowerCase();
-
-		cy.batch(() => {
-			cy?.nodes().forEach((node) => {
-				const label = String(node.data('fullLabel') ?? '').toLowerCase();
-				const type = asNodeKind(
-					typeof node.data('entityType') === 'string' ? node.data('entityType') : null
-				);
-				const typeVisible = type ? visibleNodeTypes[type] : true;
-				const matches = !query || label.includes(query) || node.id().toLowerCase().includes(query);
-				node.toggleClass('is-hidden', !(typeVisible && matches));
-			});
-
-			cy?.edges().forEach((edge) => {
-				const hidden = edge.source().hasClass('is-hidden') || edge.target().hasClass('is-hidden');
-				edge.toggleClass('is-hidden', hidden);
-			});
+		const node = cy.$id(nodeId);
+		if (node.empty()) return;
+		cy.animate({
+			center: { eles: node },
+			zoom: Math.max(cy.zoom(), 0.88),
+			duration: graphAnimationDuration,
+			easing: 'ease-out-cubic'
 		});
+	}
 
-		visibleNodes = cy.nodes().filter((node) => !node.hasClass('is-hidden')).length;
-		visibleEdges = cy.edges().filter((edge) => !edge.hasClass('is-hidden')).length;
-		if (hoveredNodeId) {
-			const hoveredNode = cy.$id(hoveredNodeId);
-			if (hoveredNode.empty() || hoveredNode.hasClass('is-hidden')) {
-				hoveredNodeId = null;
-				hoverPreview = null;
-			}
+	function focusFirstSearchMatch() {
+		if (!cy) return;
+		const match = cy.nodes('.search-match').filter((node) => !node.hasClass('is-hidden'))[0];
+		if (match) {
+			void selectNode(match.id(), { focus: true });
 		}
-		syncSelectionStyles();
 	}
 
 	async function loadNodeDetail(node: SelectedNode) {
 		const requestId = ++detailRequestId;
-		detailLoading = node.kind === 'document' || node.kind === 'evidence' || node.kind === 'comparison';
-		detailError = '';
 		selectedNodeDetail = null;
+		detailError = '';
+		detailLoading =
+			node.kind === 'document' || node.kind === 'evidence' || node.kind === 'comparison';
+
+		if (!detailLoading || !node.resourceId) return;
 
 		try {
-			if (!node.resourceId || node.kind === 'unknown') {
-				throw new Error('Unsupported graph node type.');
-			}
-
 			if (node.kind === 'document') {
 				selectedNodeDetail = {
 					kind: 'document',
@@ -643,8 +490,6 @@
 					kind: 'comparison',
 					data: await fetchComparisonRow(collectionId, node.resourceId)
 				};
-			} else {
-				selectedNodeDetail = null;
 			}
 		} catch (err) {
 			if (requestId !== detailRequestId) return;
@@ -657,380 +502,104 @@
 		}
 	}
 
-	async function selectNode(
-		nodeId: string,
-		options: { focus?: boolean; reloadDetail?: boolean } = {}
-	) {
-		if (!cy) return;
-		const node = cy.$id(nodeId);
-		if (node.empty()) return;
-		const parsed = parseGraphNodeId(nodeId);
-		const nextSelectedNode: SelectedNode = {
-			id: nodeId,
-			label: String(node.data('fullLabel') ?? nodeId),
-			type: typeof node.data('entityType') === 'string' ? node.data('entityType') : null,
-			degree: typeof node.data('degree') === 'number' ? node.data('degree') : null,
-			kind: parsed.kind,
-			resourceId: parsed.resourceId || null
-		};
-		const shouldReloadDetail =
-			options.reloadDetail ??
-			(nextSelectedNode.id !== selectedNode?.id ||
-				nextSelectedNode.kind !== selectedNode?.kind ||
-				nextSelectedNode.resourceId !== selectedNode?.resourceId ||
-				Boolean(detailError));
-
-		clearHoverPreview(false);
-		selectedEdge = null;
-		selectedNode = nextSelectedNode;
-		syncSelectionStyles();
-		if (options.focus !== false) {
-			focusNodeInViewport(nodeId);
-		}
-		if (shouldReloadDetail) {
-			await loadNodeDetail(nextSelectedNode);
-		}
-	}
-
-	function selectEdge(edgeId: string, focus = true) {
-		if (!cy) return;
-		const edge = cy.$id(edgeId);
-		if (edge.empty()) return;
-		detailRequestId += 1;
-		clearHoverPreview(false);
-		selectedNode = null;
-		selectedNodeDetail = null;
-		detailLoading = false;
-		detailError = '';
-		selectedEdge = {
-			id: edgeId,
-			source: String(edge.data('source') ?? ''),
-			target: String(edge.data('target') ?? ''),
-			sourceLabel: getNodeLabel(String(edge.data('source') ?? '')),
-			targetLabel: getNodeLabel(String(edge.data('target') ?? '')),
-			weight: typeof edge.data('weight') === 'number' ? edge.data('weight') : null,
-			edge_description:
-				typeof edge.data('edgeDescription') === 'string' ? edge.data('edgeDescription') : null
-		};
-		syncSelectionStyles();
-		if (focus) {
-			focusEdgeInViewport(edgeId);
-		}
-	}
-
-	function attachRendererEvents() {
-		if (!cy) return;
-		cy.on('tap', 'node', (event) => {
-			void selectNode(event.target.id());
-		});
-		cy.on('dbltap', 'node', (event) => {
-			void expandNeighborhood(event.target.id());
-		});
-		cy.on('mouseover', 'node', (event) => {
-			setHoveredNode(event.target);
-		});
-		cy.on('mouseout', 'node', (event) => {
-			if (hoveredNodeId === event.target.id()) {
-				clearHoverPreview();
-			}
-		});
-		cy.on('tap', 'edge', (event) => {
-			selectEdge(event.target.id());
-		});
-		cy.on('tap', (event) => {
-			if (event.target === cy) {
-				clearSelection();
-			}
-		});
-		cy.on('dbltap', (event) => {
-			if (event.target === cy) {
-				fitVisibleGraph(true);
-			}
-		});
-		cy.on('pan', () => {
-			if (hoveredNodeId || hoverPreview) {
-				clearHoverPreview();
-			}
-		});
-		cy.on('zoom', () => {
-			if (hoveredNodeId || hoverPreview) {
-				clearHoverPreview();
-			}
-		});
-		cy.on('tapdrag', () => {
-			if (hoveredNodeId || hoverPreview) {
-				clearHoverPreview();
-			}
-		});
-	}
-
-	function buildGraphElements(
-		nodes: GraphNode[],
-		edges: GraphEdge[],
-		previousPositions: Map<string, Position>
-	): ElementDefinition[] {
-		const nodeIds = new Set(nodes.map((node) => node.id));
-		const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-		const elements: ElementDefinition[] = [];
-
-		for (const [index, node] of nodes.entries()) {
-			const position = previousPositions.get(node.id) ?? fallbackPosition(node.id, index, nodes.length);
-			const metrics = nodeLayoutMetrics(node);
-			elements.push({
-				group: 'nodes',
-				classes: metrics.aggregate ? 'is-card-node' : 'is-detail-node',
-				data: {
-					id: node.id,
-					label: metrics.displayLabel,
-					fullLabel: node.label,
-					entityType: node.type ?? null,
-					degree: node.degree ?? 0,
-					color: nodeColor(node.type),
-					width: metrics.width,
-					height: metrics.height,
-					textMaxWidth: metrics.textMaxWidth,
-					fontSize: metrics.fontSize,
-					focusZoom: metrics.focusZoom,
-					layoutRepulsion: metrics.layoutRepulsion,
-					shape: nodeShape(node.type)
-				},
-				position
-			});
-		}
-
-		for (const edge of edges) {
-			if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
-			const edgeId = edge.id || `${edge.source}-${edge.target}`;
-			const sourceKind = asNodeKind(nodeMap.get(edge.source)?.type);
-			const targetKind = asNodeKind(nodeMap.get(edge.target)?.type);
-			const idealLength =
-				isAggregateNodeKind(sourceKind) || isAggregateNodeKind(targetKind) ? 170 : 128;
-			elements.push({
-				group: 'edges',
-				data: {
-					id: edgeId,
-					source: edge.source,
-					target: edge.target,
-					label: edgeRelationLabel(edge.edge_description),
-					weight: edge.weight ?? 1,
-					width: edgeWidth(edge.weight),
-					idealLength,
-					edgeDescription: edge.edge_description ?? null
-				}
-			});
-		}
-
-		return elements;
-	}
-
-	async function runGraphLayout(previousPositions: Map<string, Position>) {
-		if (!cy || cy.nodes().length < 2) {
-			return;
-		}
-
-		const fixedNodeConstraint = Array.from(previousPositions.entries())
-			.filter(([nodeId]) => !cy?.$id(nodeId).empty())
-			.map(([nodeId, position]) => ({ nodeId, position }));
-
-		await new Promise<void>((resolve) => {
-			if (!cy) {
-				resolve();
-				return;
-			}
-
-			const layout = cy.layout({
-				name: 'fcose',
-				quality: 'proof',
-				randomize: false,
-				animate: false,
-				fit: false,
-				padding: graphViewportPadding,
-				nodeDimensionsIncludeLabels: true,
-				uniformNodeDimensions: false,
-				nodeSeparation: 88,
-				nodeRepulsion: (node: NodeSingular) => Number(node.data('layoutRepulsion') ?? 12000),
-				idealEdgeLength: (edge: EdgeSingular) => Number(edge.data('idealLength') ?? 132),
-				edgeElasticity: 0.2,
-				gravity: 0.18,
-				gravityRange: 3.2,
-				numIter: 3000,
-				tile: true,
-				tilingPaddingVertical: 20,
-				tilingPaddingHorizontal: 20,
-				fixedNodeConstraint
-			} as unknown as LayoutOptions);
-
-			layout.on('layoutstop', () => resolve());
-			layout.run();
-		});
-	}
-
-	async function renderGraph(
-		nodes: GraphNode[],
-		edges: GraphEdge[],
-		focusNodeId: string | null = null
-	) {
-		const previousPositions = currentPositions();
-		const previousViewport = currentViewport();
-		const hasNewNodes = nodes.some((node) => !previousPositions.has(node.id));
-		const shouldFit = !previousViewport;
-
-		if (!graphContainer) {
-			await tick();
-		}
-		if (!graphContainer) return;
-
-		disposeRenderer();
-		clearSelection();
-
-		cy = cytoscape({
-			container: graphContainer,
-			elements: buildGraphElements(nodes, edges, previousPositions),
-			style: graphStylesheet,
-			layout: { name: 'preset' },
-			minZoom: 0.2,
-			maxZoom: 2.5,
-			wheelSensitivity: 0.2,
-			boxSelectionEnabled: false
-		});
-		attachRendererEvents();
-		restoreViewport(previousViewport);
-
-		if (hasNewNodes) {
-			await runGraphLayout(previousPositions);
-			if (previousViewport) {
-				restoreViewport(previousViewport);
-			}
-		}
-
-		updateVisibility();
-		if (shouldFit) {
-			fitVisibleGraph(false);
-		}
-		if (focusNodeId && !cy.$id(focusNodeId).empty()) {
-			await selectNode(focusNodeId);
-		}
-	}
-
 	async function loadGraph() {
 		loading = true;
 		error = '';
 		status = '';
+		supportStatus = '';
 		notFound = false;
+		clearSelection(false);
 
 		const [graphResult, workspaceResult] = await Promise.allSettled([
-			fetchCollectionGraph(collectionId, {
-				maxNodes,
-				minWeight
-			}),
+			fetchCollectionGraph(collectionId, { maxNodes, minWeight }),
 			fetchWorkspaceOverview(collectionId)
 		]);
 
 		workspace = workspaceResult.status === 'fulfilled' ? workspaceResult.value : null;
 
 		try {
-			if (graphResult.status !== 'fulfilled') {
-				throw graphResult.reason;
-			}
-
-			const response = graphResult.value;
-			graphData = response;
-			await renderGraph(response.nodes, response.edges);
-			status = response.truncated ? $t('graph.previewLoadedTruncated') : $t('graph.previewLoaded');
+			if (graphResult.status !== 'fulfilled') throw graphResult.reason;
+			graphData = graphResult.value;
+			visibleNodeTypes = ensureVisibleTypes(graphData);
+			await renderGraph();
+			status = graphData.truncated
+				? $t('graph.status.loadedTruncated')
+				: $t('graph.status.loaded');
 		} catch (err) {
 			const errorCode = getApiErrorCode(err);
 			error = errorMessage(err);
 			notFound = errorCode ? errorCode === 'collection_not_found' : isHttpStatusError(err, 404);
 			graphData = null;
-			disposeRenderer();
-			clearSelection();
 			visibleNodes = 0;
 			visibleEdges = 0;
+			disposeRenderer();
 		} finally {
 			loading = false;
+			void loadSupportData();
 		}
 	}
 
-	async function downloadGraphml() {
+	async function loadSupportData() {
+		if (!collectionId) return;
+		supportLoading = true;
+		supportStatus = '';
+		const [evidenceResult, comparisonResult, documentResult] = await Promise.allSettled([
+			fetchEvidenceCards(collectionId),
+			fetchComparisons(collectionId, { limit: 120 }),
+			fetchDocumentProfiles(collectionId)
+		]);
+
+		evidenceItems = evidenceResult.status === 'fulfilled' ? evidenceResult.value.items : [];
+		comparisonItems = comparisonResult.status === 'fulfilled' ? comparisonResult.value.items : [];
+		documentItems = documentResult.status === 'fulfilled' ? documentResult.value.items : [];
+		if (
+			evidenceResult.status === 'rejected' ||
+			comparisonResult.status === 'rejected' ||
+			documentResult.status === 'rejected'
+		) {
+			supportStatus = $t('graph.status.supportPartial');
+		}
+		supportLoading = false;
+	}
+
+	async function handleGenerateGraph() {
 		try {
-			status = $t('graph.downloading');
-			const response = await fetch(
-				buildCollectionGraphmlUrl(collectionId, {
-					maxNodes,
-					minWeight
-				})
-			);
-			if (!response.ok) {
-				await throwApiError(response);
-			}
-			const blob = await response.blob();
-			const disposition = response.headers.get('content-disposition') ?? '';
-			const matched = disposition.match(/filename="(.+?)"/i);
-			const fileName = matched?.[1] ?? `graph-${collectionId}.graphml`;
-			const url = URL.createObjectURL(blob);
-			const anchor = document.createElement('a');
-			anchor.href = url;
-			anchor.download = fileName;
-			anchor.click();
-			URL.revokeObjectURL(url);
-			status = $t('graph.downloaded', { filename: fileName });
+			status = $t('graph.status.generating');
+			await createBuildTask(collectionId);
+			status = $t('graph.status.generateStarted');
 		} catch (err) {
 			error = errorMessage(err);
 		}
 	}
 
-	function exportImage() {
+	async function handleRefreshGraph() {
+		await loadGraph();
+	}
+
+	async function handleResetView() {
+		resetControlState();
+		if (graphData) {
+			await renderGraph();
+		}
+		fitGraph(true);
+	}
+
+	async function handleRestoreDefaults() {
+		resetControlState();
+		if (graphData) {
+			await renderGraph();
+		}
+	}
+
+	async function handleControlRender() {
+		if (!graphData) return;
+		await renderGraph(selectedNode?.id ?? null);
+	}
+
+	async function handleLayout() {
 		if (!cy) return;
-
-		const url = cy.png({ full: true, scale: 2, bg: '#ffffff' });
-		const anchor = document.createElement('a');
-		anchor.href = String(url);
-		anchor.download = `graph-${collectionId}.png`;
-		anchor.click();
-		status = $t('graph.imageExported');
-	}
-
-	function resetFilters() {
-		previewQuery = '';
-		visibleNodeTypes = { ...defaultVisibleNodeTypes };
-		updateVisibility();
-	}
-
-	function stateCardTitle() {
-		return $t(`overview.surfaceStateCards.${surfaceState}.title`);
-	}
-
-	function stateCardBody() {
-		return $t(`overview.surfaceStateCards.${surfaceState}.body`);
-	}
-
-	function mergeGraphPayload(
-		current: GraphResponse | null,
-		next: Pick<GraphResponse, 'collection_id' | 'nodes' | 'edges' | 'truncated'>
-	): GraphResponse {
-		const nodes = new Map<string, GraphNode>();
-		const edges = new Map<string, GraphEdge>();
-
-		for (const node of current?.nodes ?? []) {
-			nodes.set(node.id, node);
-		}
-		for (const node of next.nodes) {
-			nodes.set(node.id, node);
-		}
-
-		for (const edge of current?.edges ?? []) {
-			edges.set(edge.id, edge);
-		}
-		for (const edge of next.edges) {
-			edges.set(edge.id, edge);
-		}
-
-		return {
-			collection_id: next.collection_id,
-			nodes: Array.from(nodes.values()),
-			edges: Array.from(edges.values()),
-			truncated: Boolean(current?.truncated || next.truncated)
-		};
+		await runGraphLayout(cy, layoutName);
+		fitGraph(true);
 	}
 
 	async function expandNeighborhood(nodeId: string) {
@@ -1040,8 +609,8 @@
 		try {
 			const response = await fetchCollectionGraphNeighbors(collectionId, nodeId);
 			graphData = mergeGraphPayload(graphData, response);
-			await renderGraph(graphData.nodes, graphData.edges, nodeId);
-			status = $t('graph.neighborsExpanded');
+			await renderGraph(nodeId);
+			status = $t('graph.status.neighborsExpanded');
 		} catch (err) {
 			detailError = errorMessage(err);
 		} finally {
@@ -1049,488 +618,2080 @@
 		}
 	}
 
-	async function expandSelectedNeighborhood() {
-		if (!selectedNode) return;
-		await expandNeighborhood(selectedNode.id);
+	function mergeGraphPayload(
+		current: GraphResponse | null,
+		next: Pick<GraphResponse, 'collection_id' | 'nodes' | 'edges' | 'truncated'>
+	): GraphResponse {
+		const nodes = new Map<string, GraphNode>();
+		const edges = new Map<string, GraphEdge>();
+		for (const node of current?.nodes ?? []) nodes.set(node.id, node);
+		for (const node of next.nodes) nodes.set(node.id, node);
+		for (const edge of current?.edges ?? []) edges.set(edge.id, edge);
+		for (const edge of next.edges) edges.set(edge.id, edge);
+		return {
+			collection_id: next.collection_id,
+			nodes: Array.from(nodes.values()),
+			edges: Array.from(edges.values()),
+			truncated: Boolean(current?.truncated || next.truncated)
+		};
 	}
 
-	function formatList(items: string[]) {
-		return items.length ? items.join(', ') : '--';
+	function ensureVisibleTypes(graph: GraphResponse | null) {
+		const next = { ...visibleNodeTypes };
+		for (const node of graph?.nodes ?? []) {
+			const type = String(node.type ?? 'unknown') as GraphNodeType;
+			if (next[type] === undefined) next[type] = true;
+		}
+		return next;
+	}
+
+	function toggleNodeType(type: GraphNodeType, checked: boolean) {
+		visibleNodeTypes = { ...visibleNodeTypes, [type]: checked };
+	}
+
+	function nodeTypeLabel(type: string) {
+		const key = type === 'test_condition' ? 'testCondition' : type;
+		const translated = $t(`graph.legend.${key}`);
+		return translated === `graph.legend.${key}` ? formatMachineText(type) : translated;
+	}
+
+	function nodeLabelForId(nodeId: string) {
+		if (!cy) return nodeId;
+		const node = cy.$id(nodeId);
+		if (node.empty()) return nodeId;
+		return String(node.data('displayLabel') ?? node.data('fullLabel') ?? nodeId);
+	}
+
+	function selectedNodeDescription() {
+		if (!selectedNode) return '';
+		if (selectedNodeDetail?.kind === 'document') {
+			return (
+				selectedNodeDetail.data.title ||
+				selectedNodeDetail.data.source_filename ||
+				getNodeDescription(selectedNode)
+			);
+		}
+		if (selectedNodeDetail?.kind === 'evidence') {
+			return selectedNodeDetail.data.claim_text || getNodeDescription(selectedNode);
+		}
+		if (selectedNodeDetail?.kind === 'comparison') {
+			return selectedNodeDetail.data.display.result_summary || getNodeDescription(selectedNode);
+		}
+		return getNodeDescription(selectedNode);
+	}
+
+	function selectedActionHref(action: 'evidence' | 'comparison' | 'source') {
+		const returnTo = `/collections/${encodeURIComponent(collectionId)}/graph`;
+		if (action === 'evidence') return `/collections/${encodeURIComponent(collectionId)}/evidence`;
+		if (action === 'comparison') {
+			const filter = selectedNodeComparisonFilter();
+			if (filter) {
+				const params = new URLSearchParams({ [filter.key]: filter.value });
+				return `/collections/${encodeURIComponent(collectionId)}/comparisons?${params.toString()}`;
+			}
+			if (selectedNode?.kind === 'comparison' && selectedNode.resourceId) {
+				if (selectedNodeDetail?.kind === 'comparison') {
+					return `/collections/${encodeURIComponent(collectionId)}/results/${encodeURIComponent(
+						selectedNodeDetail.data.result_id
+					)}`;
+				}
+				return `/collections/${encodeURIComponent(collectionId)}/comparisons`;
+			}
+			return `/collections/${encodeURIComponent(collectionId)}/comparisons`;
+		}
+
+		if (selectedNode?.kind === 'document' && selectedNode.resourceId) {
+			return buildDocumentViewerHref(collectionId, selectedNode.resourceId, { returnTo });
+		}
+		if (
+			selectedNode?.kind === 'evidence' &&
+			selectedNodeDetail?.kind === 'evidence' &&
+			selectedNodeDetail.data.document_id
+		) {
+			return buildDocumentViewerHref(collectionId, selectedNodeDetail.data.document_id, {
+				evidenceId: selectedNodeDetail.data.evidence_id,
+				anchorId: selectedNodeDetail.data.evidence_anchors[0]?.anchor_id,
+				returnTo
+			});
+		}
+		if (linkedEvidence[0]?.document_id) {
+			return buildDocumentViewerHref(collectionId, linkedEvidence[0].document_id, {
+				evidenceId: linkedEvidence[0].evidence_id,
+				anchorId: linkedEvidence[0].evidence_anchors[0]?.anchor_id,
+				returnTo
+			});
+		}
+		if (linkedComparisons[0]?.source_document_id) {
+			const evidenceId = linkedComparisons[0].evidence_bundle.supporting_evidence_ids[0] ?? null;
+			return buildDocumentViewerHref(collectionId, linkedComparisons[0].source_document_id, {
+				evidenceId,
+				returnTo
+			});
+		}
+		return null;
 	}
 
 	function selectedNodeComparisonFilter() {
 		if (!selectedNode) return null;
 		const value = selectedNode.label.trim();
 		if (!value) return null;
-
-		if (selectedNode.kind === 'material') {
-			return {
-				key: 'material_system_normalized',
-				value
-			};
-		}
-		if (selectedNode.kind === 'property') {
-			return {
-				key: 'property_normalized',
-				value
-			};
-		}
-		if (selectedNode.kind === 'test_condition') {
-			return {
-				key: 'test_condition_normalized',
-				value
-			};
-		}
-		if (selectedNode.kind === 'baseline') {
-			return {
-				key: 'baseline_normalized',
-				value
-			};
-		}
+		if (selectedNode.kind === 'material') return { key: 'material_system_normalized', value };
+		if (selectedNode.kind === 'property') return { key: 'property_normalized', value };
+		if (selectedNode.kind === 'test_condition') return { key: 'test_condition_normalized', value };
+		if (selectedNode.kind === 'baseline') return { key: 'baseline_normalized', value };
 		return null;
 	}
 
-	function selectedNodeHref() {
-		if (!selectedNode) return null;
-		const returnTo = `/collections/${encodeURIComponent(collectionId)}/graph`;
-
-		if (selectedNode.kind === 'document' && selectedNode.resourceId) {
-			return buildDocumentViewerHref(collectionId, selectedNode.resourceId, { returnTo });
+	function buildLinkedDocuments(
+		directDocuments: DocumentProfile[],
+		evidence: EvidenceCard[],
+		comparisons: ComparisonRow[]
+	) {
+		const docs = new Map(documentItems.map((item) => [item.document_id, item]));
+		const linked = new Map<string, DocumentProfile>();
+		for (const document of directDocuments) linked.set(document.document_id, document);
+		for (const item of evidence) {
+			const document = docs.get(item.document_id);
+			if (document) linked.set(document.document_id, document);
 		}
-		if (
-			selectedNode.kind === 'evidence' &&
-			selectedNodeDetail?.kind === 'evidence' &&
-			selectedNodeDetail.data.document_id
-		) {
-			return buildDocumentViewerHref(collectionId, selectedNodeDetail.data.document_id, {
-				evidenceId: selectedNodeDetail.data.evidence_id,
-				returnTo
+		for (const item of comparisons) {
+			const document = docs.get(item.source_document_id);
+			if (document) linked.set(document.document_id, document);
+		}
+		return Array.from(linked.values());
+	}
+
+	function buildCommonRelations(): RelationPreview[] {
+		if (!cy || !selectedNode) return [];
+		const node = cy.$id(selectedNode.id);
+		if (node.empty()) return [];
+		const relations: RelationPreview[] = [];
+		node.connectedEdges().forEach((item) => {
+			const edge = item as EdgeSingular;
+			if (edge.hasClass('is-hidden') || relations.length >= 5) return;
+			const other = edge.source().id() === selectedNode?.id ? edge.target() : edge.source();
+			relations.push({
+				label: String(edge.data('label') ?? 'related'),
+				target: String(other.data('displayLabel') ?? other.data('fullLabel') ?? other.id())
 			});
-		}
-		if (selectedNode.kind === 'comparison') {
-			return `/collections/${encodeURIComponent(collectionId)}/comparisons`;
-		}
-		const comparisonFilter = selectedNodeComparisonFilter();
-		if (comparisonFilter) {
-			const params = new URLSearchParams({
-				[comparisonFilter.key]: comparisonFilter.value
-			});
-			return `/collections/${encodeURIComponent(collectionId)}/comparisons?${params.toString()}`;
-		}
-		return null;
+		});
+		return relations;
 	}
 
-	function selectedNodeLinkLabel() {
-		if (
-			selectedNode?.kind === 'material' ||
-			selectedNode?.kind === 'property' ||
-			selectedNode?.kind === 'test_condition' ||
-			selectedNode?.kind === 'baseline'
-		) {
-			return $t('graph.openFilteredComparisons');
+	function formatMachineText(value?: string | null) {
+		return String(value ?? '')
+			.replace(/[_-]+/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim()
+			.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+	}
+
+	function formatConfidence(value?: number | null) {
+		if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
+		const percent = value <= 1 ? value * 100 : value;
+		return `${Math.max(0, Math.min(100, Math.round(percent)))}%`;
+	}
+
+	function formatCount(value: number) {
+		return Number.isFinite(value) ? value : 0;
+	}
+
+	function statusBadgeLabel(meta: GraphMeta) {
+		if (loading) return $t('graph.status.loading');
+		if (meta.nodeCount > 0) return $t('graph.status.built');
+		return $t('graph.status.pending');
+	}
+
+	function statusBadgeTone() {
+		if (loading) return 'warning';
+		if (graphMeta.nodeCount > 0) return 'success';
+		return 'neutral';
+	}
+
+	function evidenceSourceHref(item: EvidenceCard) {
+		if (!item.document_id) return null;
+		return buildDocumentViewerHref(collectionId, item.document_id, {
+			evidenceId: item.evidence_id,
+			anchorId: item.evidence_anchors[0]?.anchor_id,
+			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
+		});
+	}
+
+	function comparisonHref(item: ComparisonRow) {
+		return `/collections/${encodeURIComponent(collectionId)}/results/${encodeURIComponent(
+			item.result_id
+		)}`;
+	}
+
+	function comparisonSourceHref(item: ComparisonRow) {
+		if (!item.source_document_id) return null;
+		return buildDocumentViewerHref(collectionId, item.source_document_id, {
+			evidenceId: item.evidence_bundle.supporting_evidence_ids[0] ?? null,
+			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
+		});
+	}
+
+	function documentHref(item: DocumentProfile) {
+		return buildDocumentViewerHref(collectionId, item.document_id, {
+			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
+		});
+	}
+
+	function handleExportImage() {
+		if (!cy) return;
+		exportGraphPng(cy, `graph-${collectionId}.png`);
+		status = $t('graph.status.imageExported');
+		exportMenuOpen = false;
+	}
+
+	async function handleDownloadGraphml() {
+		try {
+			status = $t('graph.status.downloading');
+			const fileName = await downloadGraphmlFile(collectionId, { maxNodes, minWeight });
+			status = $t('graph.status.downloaded', { filename: fileName });
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			exportMenuOpen = false;
 		}
-		if (selectedNode?.kind === 'comparison') return $t('graph.openComparisons');
-		if (selectedNode?.kind === 'evidence') return $t('graph.openEvidenceSource');
-		return $t('graph.openDocument');
 	}
 
-	$: if (cy) {
-		previewQuery;
-		visibleNodeTypes;
-		updateVisibility();
+	async function copyCurrentView() {
+		if (!cy) return;
+		const view = {
+			collectionId,
+			selected: selectedNode?.id ?? selectedEdge?.id ?? null,
+			zoom: cy.zoom(),
+			pan: cy.pan(),
+			filters: {
+				maxNodes,
+				minWeight,
+				layoutName,
+				searchQuery,
+				visibleNodeTypes
+			}
+		};
+		try {
+			await navigator.clipboard.writeText(JSON.stringify(view, null, 2));
+			status = $t('graph.status.viewCopied');
+		} catch {
+			status = $t('graph.status.copyUnavailable');
+		} finally {
+			exportMenuOpen = false;
+		}
 	}
 
-	$: if (collectionId && collectionId !== loadedCollectionId) {
-		loadedCollectionId = collectionId;
-		visibleNodeTypes = { ...defaultVisibleNodeTypes };
-		void loadGraph();
+	function clamp(value: number, min: number, max: number) {
+		return Math.max(min, Math.min(max, value));
 	}
-
-	onDestroy(() => {
-		disposeRenderer();
-	});
 </script>
 
 <svelte:head>
 	<title>{$t('graph.title')}</title>
 </svelte:head>
 
-<section class="card fade-up">
-	<div class="graph-preview-header">
-		<div>
-			<h2>{$t('graph.title')}</h2>
-			<p class="lead">{$t('graph.lead')}</p>
-		</div>
-		<div class="preview-actions">
-			<button class="btn btn--ghost" type="button" on:click={() => void loadGraph()}>
-				{$t('graph.previewLoad')}
-			</button>
-			<button
-				class="btn btn--ghost"
-				type="button"
-				on:click={() => fitVisibleGraph(true)}
-				disabled={!visibleNodes}
-			>
-				{$t('graph.resetView')}
-			</button>
-			<button class="btn btn--ghost" type="button" on:click={exportImage} disabled={!visibleNodes}>
-				{$t('graph.exportImage')}
-			</button>
-			<button class="btn btn--primary" type="button" on:click={() => void downloadGraphml()}>
-				{$t('graph.download')}
-			</button>
-		</div>
-	</div>
-</section>
-
-{#if showFallbackState}
-	<section class="card">
-		<article class="result-card">
-			<h3>{stateCardTitle()}</h3>
-			<p class="result-text">{stateCardBody()}</p>
-			<div class="table-actions">
-				<a class="btn btn--ghost btn--small" href={`/collections/${collectionId}`}>
-					{$t('overview.goToWorkspace')}
-				</a>
+<section class="graph-page-shell" aria-labelledby="graph-page-title">
+	<header class="graph-page-card graph-header-card">
+		<div class="graph-header-identity">
+			<div class="graph-header-icon" aria-hidden="true">
+				<span class="graph-icon graph-icon--network"></span>
 			</div>
-		</article>
-	</section>
-{:else}
-	<section class="card">
-		<div class="graph-preview-body">
-			<div class="graph-controls">
-				<div class="field">
-					<label for="maxNodes">{$t('graph.maxNodesLabel')}</label>
-					<input
-						id="maxNodes"
-						class="input"
-						type="number"
-						min="1"
-						max="2000"
-						bind:value={maxNodes}
-					/>
+			<div class="graph-header-copy">
+				<h1 id="graph-page-title">{$t('graph.title')}</h1>
+				<p>{$t('graph.description')}</p>
+				<div class="graph-meta-row" aria-label={$t('graph.meta.label')}>
+					<span class="graph-meta-item">
+						<span class="meta-icon meta-icon--node" aria-hidden="true"></span>
+						{$t('graph.meta.nodes', { count: graphMeta.nodeCount })}
+					</span>
+					<span class="graph-meta-item">
+						<span class="meta-icon meta-icon--edge" aria-hidden="true"></span>
+						{$t('graph.meta.edges', { count: graphMeta.edgeCount })}
+					</span>
+					<span class="graph-meta-item">
+						<span class="meta-icon meta-icon--type" aria-hidden="true"></span>
+						{$t('graph.meta.types', { count: graphMeta.nodeTypeCount })}
+					</span>
+					<span class={`graph-status-badge graph-status-badge--${statusBadgeTone()}`}>
+						<span class="meta-icon meta-icon--status" aria-hidden="true"></span>
+						{statusBadgeLabel(graphMeta)}
+					</span>
 				</div>
-				<div class="field">
-					<label for="minWeight">{$t('graph.minWeightLabel')}</label>
-					<input
-						id="minWeight"
-						class="input"
-						type="number"
-						min="0"
-						step="0.1"
-						bind:value={minWeight}
-					/>
-				</div>
-				<div class="field">
-					<label for="previewQuery">{$t('graph.searchLabel')}</label>
-					<input
-						id="previewQuery"
-						class="input"
-						bind:value={previewQuery}
-						placeholder={$t('graph.searchPlaceholder')}
-					/>
-				</div>
-				{#if availableNodeTypes.length}
-					<div class="field field--wide">
-						<span>{$t('graph.nodeTypesLabel')}</span>
-						<div class="graph-node-types">
-							{#each availableNodeTypes as type}
-								<label class="graph-node-type">
-									<input
-										type="checkbox"
-										checked={isNodeTypeVisible(type)}
-										on:change={(event) =>
-											setNodeTypeVisibility(
-												type,
-												(event.currentTarget as HTMLInputElement).checked
-											)}
-									/>
-									<span
-										class="graph-node-type__swatch"
-										style={`background:${nodeColor(type)};`}
-										aria-hidden="true"
-									></span>
-									<span>{nodeTypeLabel(type)}</span>
-								</label>
-							{/each}
-						</div>
+			</div>
+		</div>
+		<div class="graph-header-actions">
+			<button class="graph-button graph-button--ghost" type="button" on:click={handleRefreshGraph}>
+				<span class="action-icon action-icon--refresh" aria-hidden="true"></span>
+				{$t('graph.actions.refresh')}
+			</button>
+			<button class="graph-button graph-button--ghost" type="button" on:click={handleResetView}>
+				<span class="action-icon action-icon--target" aria-hidden="true"></span>
+				{$t('graph.actions.resetView')}
+			</button>
+			<div class="graph-export-menu">
+				<button
+					class="graph-button graph-button--primary"
+					type="button"
+					aria-haspopup="menu"
+					aria-expanded={exportMenuOpen}
+					on:click={() => (exportMenuOpen = !exportMenuOpen)}
+				>
+					<span class="action-icon action-icon--export" aria-hidden="true"></span>
+					{$t('graph.actions.export')}
+				</button>
+				{#if exportMenuOpen}
+					<div class="graph-export-dropdown" role="menu">
+						<button type="button" role="menuitem" disabled={!cy} on:click={handleExportImage}>
+							{$t('graph.actions.exportPng')}
+						</button>
+						<button type="button" role="menuitem" on:click={handleDownloadGraphml}>
+							{$t('graph.actions.downloadGraphml')}
+						</button>
+						<button type="button" role="menuitem" disabled={!cy} on:click={copyCurrentView}>
+							{$t('graph.actions.copyView')}
+						</button>
 					</div>
 				{/if}
-				<div class="table-actions">
-					<button class="btn btn--ghost btn--small" type="button" on:click={resetFilters}>
-						{$t('graph.resetFilters')}
-					</button>
+			</div>
+		</div>
+	</header>
+
+	{#if status || supportStatus}
+		<div class="graph-inline-status" role="status">{status || supportStatus}</div>
+	{/if}
+	{#if error}
+		<div class="graph-inline-status graph-inline-status--error" role="alert">
+			<span>{error}</span>
+			<button class="graph-link-button" type="button" on:click={handleRefreshGraph}>
+				{$t('graph.actions.retry')}
+			</button>
+		</div>
+	{/if}
+
+	{#if showEmptyGraph}
+		<section class="graph-page-card graph-empty-state">
+			<div class="graph-empty-state__icon" aria-hidden="true">
+				<span class="graph-icon graph-icon--network"></span>
+			</div>
+			<h2>{$t('graph.empty.title')}</h2>
+			<p>{$t('graph.empty.description')}</p>
+			<div class="graph-empty-state__actions">
+				<button class="graph-button graph-button--primary" type="button" on:click={handleGenerateGraph}>
+					{$t('graph.empty.action')}
+				</button>
+				<button class="graph-button graph-button--ghost" type="button" on:click={handleRefreshGraph}>
+					{$t('graph.actions.refreshStatus')}
+				</button>
+			</div>
+			{#if workspace && surfaceState !== 'ready'}
+				<p class="graph-empty-state__note">{$t(`overview.surfaceStateCards.${surfaceState}.body`)}</p>
+			{/if}
+		</section>
+	{:else}
+		<div class="graph-workspace" aria-label={$t('graph.workspace.label')}>
+			<aside class="graph-page-card graph-controls-panel" aria-labelledby="graph-controls-title">
+				<div class="graph-panel-header">
+					<h2 id="graph-controls-title">{$t('graph.controls.title')}</h2>
 				</div>
-				<div class="graph-stats">
-					<span>{$t('graph.visibleNodes')}: {visibleNodes}</span>
-					<span>{$t('graph.visibleEdges')}: {visibleEdges}</span>
-					{#if graphData?.truncated}
-						<span>{$t('graph.truncated')}</span>
+
+				<div class="graph-control-group">
+					<label class="graph-control-label" for="graph-node-search">
+						{$t('graph.controls.search')}
+					</label>
+					<div class="graph-search-control">
+						<input
+							id="graph-node-search"
+							class="graph-input"
+							bind:value={searchQuery}
+							placeholder={$t('graph.controls.searchPlaceholder')}
+							disabled={loading}
+							on:keydown={(event) => {
+								if (event.key === 'Enter') focusFirstSearchMatch();
+							}}
+						/>
+						<button
+							class="graph-search-button"
+							type="button"
+							aria-label={$t('graph.controls.focusSearch')}
+							disabled={!searchQuery.trim()}
+							on:click={focusFirstSearchMatch}
+						>
+							<span class="action-icon action-icon--search" aria-hidden="true"></span>
+						</button>
+					</div>
+				</div>
+
+				<fieldset class="graph-control-group graph-node-type-fieldset">
+					<legend>{$t('graph.controls.nodeTypes')}</legend>
+					<div class="graph-node-type-list">
+						{#each availableNodeTypes as type}
+							<label
+								class="graph-node-type-row"
+								style={`--node-color:${getNodeTypeStyle(type).color};--node-bg:${getNodeTypeStyle(type).background};`}
+							>
+								<span class="graph-node-type-icon" aria-hidden="true"></span>
+								<span class="graph-node-type-label">{nodeTypeLabel(type)}</span>
+								<span class="graph-node-type-count">{formatCount(nodeTypeCounts[type])}</span>
+								<input
+									type="checkbox"
+									checked={visibleNodeTypes[type] ?? true}
+									disabled={loading}
+									on:change={(event) =>
+										toggleNodeType(type, (event.currentTarget as HTMLInputElement).checked)}
+								/>
+							</label>
+						{/each}
+					</div>
+				</fieldset>
+
+				<details class="graph-advanced-settings" open>
+					<summary>{$t('graph.controls.advanced')}</summary>
+					<div class="graph-advanced-grid">
+						<label class="graph-control-field" for="graph-max-nodes">
+							<span>{$t('graph.controls.maxNodes')}</span>
+							<input
+								id="graph-max-nodes"
+								class="graph-input"
+								type="number"
+								min="1"
+								max="2000"
+								bind:value={maxNodes}
+								disabled={loading}
+								on:change={handleControlRender}
+							/>
+						</label>
+						<label class="graph-control-field" for="graph-min-weight">
+							<span>{$t('graph.controls.minWeight')}</span>
+							<input
+								id="graph-min-weight"
+								class="graph-input"
+								type="number"
+								min="0"
+								step="0.01"
+								bind:value={minWeight}
+								disabled={loading}
+								on:change={handleControlRender}
+							/>
+						</label>
+						<label class="graph-control-field" for="graph-layout">
+							<span>{$t('graph.controls.layout')}</span>
+							<select
+								id="graph-layout"
+								class="graph-input"
+								bind:value={layoutName}
+								disabled={loading}
+								on:change={handleLayout}
+							>
+								<option value="fcose">{$t('graph.layout.fcose')}</option>
+								<option value="cose">{$t('graph.layout.cose')}</option>
+								<option value="grid">{$t('graph.layout.grid')}</option>
+								<option value="circle">{$t('graph.layout.circle')}</option>
+							</select>
+						</label>
+						<button class="graph-link-button graph-link-button--icon" type="button" on:click={handleRestoreDefaults}>
+							<span class="action-icon action-icon--refresh" aria-hidden="true"></span>
+							{$t('graph.controls.restoreDefaults')}
+						</button>
+					</div>
+				</details>
+
+				<div class="graph-control-status">
+					<div>
+						<span>{$t('graph.controls.visibleNodes')}</span>
+						<strong>{visibleNodes}</strong>
+					</div>
+					<div>
+						<span>{$t('graph.controls.visibleEdges')}</span>
+						<strong>{visibleEdges}</strong>
+					</div>
+					<div>
+						<span>{$t('graph.controls.loadState')}</span>
+						<strong>{supportLoading ? $t('graph.status.loading') : $t('graph.status.loaded')}</strong>
+					</div>
+				</div>
+			</aside>
+
+			<section class="graph-page-card graph-canvas-panel" aria-labelledby="graph-canvas-title">
+				<div class="graph-canvas-toolbar">
+					<div>
+						<h2 id="graph-canvas-title">{$t('graph.canvas.title')}</h2>
+						<p>{$t('graph.canvas.meta', { nodes: visibleNodes, edges: visibleEdges })}</p>
+					</div>
+					<div class="graph-canvas-actions">
+						<button class="graph-tool-button" type="button" title={$t('graph.canvas.fit')} on:click={() => fitGraph(true)}>
+							<span class="action-icon action-icon--fit" aria-hidden="true"></span>
+						</button>
+						<button class="graph-tool-button" type="button" title={$t('graph.canvas.zoomIn')} on:click={() => zoomGraph(1.18)}>
+							<span class="action-icon action-icon--plus" aria-hidden="true"></span>
+						</button>
+						<button class="graph-tool-button" type="button" title={$t('graph.canvas.zoomOut')} on:click={() => zoomGraph(0.84)}>
+							<span class="action-icon action-icon--minus" aria-hidden="true"></span>
+						</button>
+						<button class="graph-tool-button" type="button" title={$t('graph.canvas.center')} on:click={centerGraph}>
+							<span class="action-icon action-icon--target" aria-hidden="true"></span>
+						</button>
+						<button class="graph-tool-button graph-tool-button--text" type="button" on:click={handleLayout}>
+							{$t('graph.canvas.layout')}
+						</button>
+					</div>
+				</div>
+
+				<div class="graph-legend" aria-label={$t('graph.legend.label')}>
+					{#each availableNodeTypes as type}
+						<span
+							class="graph-legend-item"
+							style={`--node-color:${getNodeTypeStyle(type).color};`}
+						>
+							<i aria-hidden="true"></i>
+							{nodeTypeLabel(type)}
+						</span>
+					{/each}
+				</div>
+
+				<div class="graph-canvas-stage">
+					<div class="graph-cytoscape" bind:this={graphContainer} aria-label={$t('graph.canvas.ariaLabel')}></div>
+					{#if loading}
+						<div class="graph-canvas-state graph-canvas-state--loading">
+							<div class="graph-spinner" aria-hidden="true"></div>
+							<span>{$t('graph.status.loading')}</span>
+						</div>
+					{:else if !visibleNodes}
+						<div class="graph-canvas-state">
+							<span>{$t('graph.canvas.empty')}</span>
+						</div>
+					{/if}
+					{#if hoverPreview}
+						<div
+							class="graph-hover-card"
+							style={`left:${hoverPreview.left}px;top:${hoverPreview.top}px;`}
+							aria-hidden="true"
+						>
+							<strong>{hoverPreview.label}</strong>
+							<span>{hoverPreview.typeLabel}</span>
+						</div>
 					{/if}
 				</div>
-				<p class="graph-hint">{$t('graph.interactionHint')}</p>
-				{#if status}
-					<div class="status" role="status">{status}</div>
-				{/if}
-				{#if error}
-					<div class="status status--error" role="alert">{error}</div>
-				{/if}
-			</div>
+			</section>
 
-			<div
-				class="graph-canvas"
-				bind:this={graphContainer}
-				aria-label={$t('graph.previewCanvasLabel')}
-			>
-				{#if loading}
-					<div class="graph-empty">{$t('graph.previewLoading')}</div>
-				{:else if !visibleNodes}
-					<div class="graph-empty">{$t('graph.previewEmpty')}</div>
-				{/if}
-				{#if hoverPreview}
-					<div
-						class="graph-hover-preview"
-						style={`left:${hoverPreview.left}px;top:${hoverPreview.top}px;`}
-						aria-hidden="true"
-					>
-						<div class="graph-hover-preview__title">{hoverPreview.label}</div>
-						<div class="graph-hover-preview__meta">
-							<span>{hoverPreview.typeLabel || '--'}</span>
-							<span>{$t('graph.detailDegree')}: {hoverPreview.degree ?? '--'}</span>
+			<aside class="graph-page-card graph-detail-panel" aria-labelledby="graph-detail-title">
+				<div class="graph-panel-header">
+					<h2 id="graph-detail-title">{$t('graph.detail.title')}</h2>
+					{#if selectedObject}
+						<button class="graph-link-button" type="button" on:click={() => clearSelection()}>
+							{$t('graph.detail.clear')}
+						</button>
+					{/if}
+				</div>
+
+				{#if selectedNode}
+					<div class="graph-selected-summary">
+						<span
+							class="graph-selected-icon"
+							style={`--node-color:${getNodeTypeStyle(selectedNode.type).color};--node-bg:${getNodeTypeStyle(selectedNode.type).background};`}
+							aria-hidden="true"
+						></span>
+						<div>
+							<h3>{selectedNode.displayLabel}</h3>
+							<span class="graph-chip">{nodeTypeLabel(selectedNode.type ?? 'unknown')}</span>
 						</div>
 					</div>
-				{/if}
-			</div>
-		</div>
-	</section>
 
-	<section class="card">
-		<h3>{$t('graph.detailsTitle')}</h3>
-		<div class="graph-details">
-			{#if selectedNode}
-				<div class="graph-details__header">
-					<span>{$t('graph.detailsNode')}</span>
-					<div class="table-actions">
-						<button
-							class="btn btn--ghost btn--small"
-							type="button"
-							on:click={() => void expandSelectedNeighborhood()}
-							disabled={expandingNeighborhood}
-						>
-							{expandingNeighborhood ? $t('graph.neighborsExpanding') : $t('graph.neighborsExpand')}
-						</button>
-						{#if selectedNodeHref()}
-							<a class="btn btn--ghost btn--small" href={selectedNodeHref() ?? '#'}>
-								{selectedNodeLinkLabel()}
+					<div class="graph-detail-stat-grid">
+						<div>
+							<span>{$t('graph.detail.relatedEvidence')}</span>
+							<strong>{selectedStats.evidence}</strong>
+						</div>
+						<div>
+							<span>{$t('graph.detail.relatedComparisons')}</span>
+							<strong>{selectedStats.comparison}</strong>
+						</div>
+						<div>
+							<span>{$t('graph.detail.relatedDocuments')}</span>
+							<strong>{selectedStats.documents}</strong>
+						</div>
+					</div>
+
+					<div class="graph-detail-section">
+						<h4>{$t('graph.detail.description')}</h4>
+						{#if detailLoading}
+							<p class="graph-muted">{$t('graph.detail.loading')}</p>
+						{:else if detailError}
+							<p class="graph-error-text">{detailError}</p>
+						{:else}
+							<p>{selectedNodeDescription()}</p>
+						{/if}
+					</div>
+
+					<div class="graph-detail-section">
+						<h4>{$t('graph.detail.relatedContent')}</h4>
+						<ul class="graph-compact-list">
+							<li>
+								<span>{$t('graph.linked.evidence')}</span>
+								<strong>{selectedStats.evidence}</strong>
+							</li>
+							<li>
+								<span>{$t('graph.linked.comparison')}</span>
+								<strong>{selectedStats.comparison}</strong>
+							</li>
+							<li>
+								<span>{$t('graph.linked.documents')}</span>
+								<strong>{selectedStats.documents}</strong>
+							</li>
+						</ul>
+					</div>
+
+					<div class="graph-detail-section">
+						<h4>{$t('graph.detail.commonRelations')}</h4>
+						{#if commonRelations.length}
+							<ul class="graph-relation-list">
+								{#each commonRelations as relation}
+									<li>
+										<span>{relation.label}</span>
+										<strong>{relation.target}</strong>
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="graph-muted">{$t('graph.detail.noRelations')}</p>
+						{/if}
+					</div>
+
+					<div class="graph-detail-actions">
+						<a class="graph-button graph-button--primary" href={selectedActionHref('evidence') ?? '#'}>
+							{$t('graph.detail.viewEvidence')}
+						</a>
+						<a class="graph-button graph-button--ghost" href={selectedActionHref('comparison') ?? '#'}>
+							{$t('graph.detail.openComparison')}
+						</a>
+						{#if selectedActionHref('source')}
+							<a class="graph-button graph-button--ghost" href={selectedActionHref('source') ?? '#'}>
+								{$t('graph.detail.locateSource')}
 							</a>
 						{/if}
-						<button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
-							{$t('graph.detailsClear')}
+						<button
+							class="graph-button graph-button--ghost"
+							type="button"
+							disabled={expandingNeighborhood}
+							on:click={() => void expandNeighborhood(selectedNode?.id ?? '')}
+						>
+							{expandingNeighborhood ? $t('graph.detail.expanding') : $t('graph.detail.expand')}
 						</button>
 					</div>
-				</div>
-				<div class="detail-primary">
-					<span class="detail-name">{selectedNode.label}</span>
-					{#if selectedNode.type}
-						<span class="detail-tag">{selectedNodeTypeLabel(selectedNode.type)}</span>
-					{/if}
-				</div>
-				<dl class="detail-list">
-					<div class="detail-row">
-						<dt>{$t('graph.detailId')}</dt>
-						<dd>{selectedNode.id}</dd>
+				{:else if selectedEdge}
+					<div class="graph-edge-detail">
+						<h3>{selectedEdge.sourceLabel} -&gt; {selectedEdge.targetLabel}</h3>
+						<div class="graph-detail-kv">
+							<span>{$t('graph.detail.relationshipType')}</span>
+							<strong>{selectedEdge.relationLabel || formatMachineText(selectedEdge.edge_description)}</strong>
+						</div>
+						<div class="graph-detail-kv">
+							<span>{$t('graph.detail.confidence')}</span>
+							<strong>{formatConfidence(selectedEdge.weight)}</strong>
+						</div>
+						<div class="graph-detail-kv">
+							<span>{$t('graph.detail.sourceEvidence')}</span>
+							<strong>{selectedStats.evidence}</strong>
+						</div>
+						<div class="graph-detail-section">
+							<h4>{$t('graph.detail.originalEvidence')}</h4>
+							<p>
+								{linkedEvidence[0]?.claim_text ||
+									getEdgeTypeStyle(selectedEdge.edge_description).label ||
+									$t('graph.detail.noEvidenceQuote')}
+							</p>
+						</div>
+						<div class="graph-detail-actions">
+							{#if selectedActionHref('source')}
+								<a class="graph-button graph-button--primary" href={selectedActionHref('source') ?? '#'}>
+									{$t('graph.detail.viewSource')}
+								</a>
+							{/if}
+							<a class="graph-button graph-button--ghost" href={selectedActionHref('evidence') ?? '#'}>
+								{$t('graph.detail.viewEvidence')}
+							</a>
+							<a class="graph-button graph-button--ghost" href={selectedActionHref('comparison') ?? '#'}>
+								{$t('graph.detail.openComparison')}
+							</a>
+						</div>
 					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailDegree')}</dt>
-						<dd>{selectedNode.degree ?? '--'}</dd>
+				{:else}
+					<div class="graph-detail-empty">
+						<span class="graph-icon graph-icon--network" aria-hidden="true"></span>
+						<p>{$t('graph.detail.empty')}</p>
 					</div>
-					{#if detailLoading}
-						<div class="status" role="status">{$t('graph.detailsLoading')}</div>
-					{:else if detailError}
-						<div class="status status--error" role="alert">{detailError}</div>
-					{:else if selectedNodeComparisonFilter()}
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailAggregate')}</dt>
-							<dd>{$t('graph.detailAggregateBody')}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailAggregateValue')}</dt>
-							<dd>{selectedNode.label}</dd>
-						</div>
-					{:else if selectedNodeDetail?.kind === 'document'}
-						<div class="detail-row">
-							<dt>{$t('graph.detailSourceFile')}</dt>
-							<dd>{selectedNodeDetail.data.source_filename ?? '--'}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailDocType')}</dt>
-							<dd>{selectedNodeDetail.data.doc_type}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailProtocol')}</dt>
-							<dd>{selectedNodeDetail.data.protocol_extractable}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailConfidence')}</dt>
-							<dd>{selectedNodeDetail.data.confidence ?? '--'}</dd>
-						</div>
-					{:else if selectedNodeDetail?.kind === 'evidence'}
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailClaim')}</dt>
-							<dd>{selectedNodeDetail.data.claim_text || '--'}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailClaimType')}</dt>
-							<dd>{selectedNodeDetail.data.claim_type}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailTraceability')}</dt>
-							<dd>{selectedNodeDetail.data.traceability_status}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailConfidence')}</dt>
-							<dd>{selectedNodeDetail.data.confidence ?? '--'}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailMaterialSystem')}</dt>
-							<dd>{selectedNodeDetail.data.material_system || '--'}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailProcess')}</dt>
-							<dd>{formatList(selectedNodeDetail.data.condition_context.process)}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailBaseline')}</dt>
-							<dd>{formatList(selectedNodeDetail.data.condition_context.baseline)}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailTest')}</dt>
-							<dd>{formatList(selectedNodeDetail.data.condition_context.test)}</dd>
-						</div>
-					{:else if selectedNodeDetail?.kind === 'comparison'}
-						<div class="detail-row">
-							<dt>{$t('graph.detailSourceDocument')}</dt>
-							<dd>{selectedNodeDetail.data.source_document_id}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailProperty')}</dt>
-							<dd>{selectedNodeDetail.data.display.property_normalized}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('graph.detailComparability')}</dt>
-							<dd>{selectedNodeDetail.data.assessment.comparability_status}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailResult')}</dt>
-							<dd>{selectedNodeDetail.data.display.result_summary}</dd>
-						</div>
-						<div class="detail-row detail-row--wide">
-							<dt>{$t('graph.detailEvidenceIds')}</dt>
-							<dd>{formatList(selectedNodeDetail.data.evidence_bundle.supporting_evidence_ids)}</dd>
-						</div>
-					{/if}
-				</dl>
-			{:else if selectedEdge}
-				<div class="graph-details__header">
-					<span>{$t('graph.detailsEdge')}</span>
-					<button class="btn btn--ghost btn--small" type="button" on:click={clearSelection}>
-						{$t('graph.detailsClear')}
-					</button>
-				</div>
-				<div class="detail-primary">
-					<span class="detail-name">{selectedEdge.sourceLabel} -> {selectedEdge.targetLabel}</span>
-				</div>
-				<dl class="detail-list">
-					<div class="detail-row">
-						<dt>{$t('graph.detailId')}</dt>
-						<dd>{selectedEdge.id}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailSource')}</dt>
-						<dd>{selectedEdge.source}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailTarget')}</dt>
-						<dd>{selectedEdge.target}</dd>
-					</div>
-					<div class="detail-row">
-						<dt>{$t('graph.detailWeight')}</dt>
-						<dd>{selectedEdge.weight ?? '--'}</dd>
-					</div>
-					<div class="detail-row detail-row--wide">
-						<dt>{$t('graph.detailDescription')}</dt>
-						<dd>{selectedEdge.edge_description || '--'}</dd>
-					</div>
-				</dl>
-			{:else}
-				<div class="graph-empty">{$t('graph.detailsEmpty')}</div>
-			{/if}
+				{/if}
+			</aside>
 		</div>
-	</section>
-{/if}
+
+		<section class="graph-page-card graph-linked-panel" aria-labelledby="graph-linked-title">
+			<div class="graph-linked-header">
+				<div>
+					<h2 id="graph-linked-title">
+						{#if selectedDetail}
+							{$t('graph.linked.relatedTitle', { name: selectedDetail.title })}
+						{:else}
+							{$t('graph.linked.title')}
+						{/if}
+					</h2>
+					<p>
+						{#if selectedObject}
+							{$t('graph.linked.stats', {
+								evidence: selectedStats.evidence,
+								comparison: selectedStats.comparison,
+								documents: selectedStats.documents
+							})}
+						{:else}
+							{$t('graph.linked.empty')}
+						{/if}
+					</p>
+				</div>
+				{#if selectedObject}
+					<a class="graph-link-button" href={selectedActionHref('comparison') ?? `/collections/${collectionId}/comparisons`}>
+						{$t('graph.linked.viewAll')}
+					</a>
+				{/if}
+			</div>
+
+			<div class="graph-linked-tabs" role="tablist" aria-label={$t('graph.linked.title')}>
+				<button
+					type="button"
+					role="tab"
+					class:active={linkedTab === 'evidence'}
+					on:click={() => (linkedTab = 'evidence')}
+				>
+					{$t('graph.linked.evidence')} ({selectedStats.evidence})
+				</button>
+				<button
+					type="button"
+					role="tab"
+					class:active={linkedTab === 'comparison'}
+					on:click={() => (linkedTab = 'comparison')}
+				>
+					{$t('graph.linked.comparison')} ({selectedStats.comparison})
+				</button>
+				<button
+					type="button"
+					role="tab"
+					class:active={linkedTab === 'documents'}
+					on:click={() => (linkedTab = 'documents')}
+				>
+					{$t('graph.linked.documents')} ({selectedStats.documents})
+				</button>
+			</div>
+
+			{#if !selectedObject}
+				<div class="graph-linked-empty">{$t('graph.linked.empty')}</div>
+			{:else if linkedTab === 'evidence'}
+				{#if linkedEvidence.length}
+					<div class="graph-linked-grid graph-linked-grid--evidence">
+						{#each linkedEvidence.slice(0, 6) as item}
+							<article class="graph-linked-card">
+								<div class="graph-linked-card__header">
+									<h3>{item.claim_type || $t('graph.linked.evidence')}</h3>
+									<span class="graph-chip graph-chip--success">{item.traceability_status}</span>
+								</div>
+								<p>{item.claim_text || $t('graph.linked.noSummary')}</p>
+								<div class="graph-linked-card__meta">
+									<span>{item.source_document_title || item.document_id || '--'}</span>
+								</div>
+								<div class="graph-linked-card__actions">
+									<a class="graph-link-button" href={`/collections/${collectionId}/evidence`}>
+										{$t('graph.linked.viewEvidence')}
+									</a>
+									{#if evidenceSourceHref(item)}
+										<a class="graph-link-button" href={evidenceSourceHref(item) ?? '#'}>
+											{$t('graph.linked.viewSource')}
+										</a>
+									{/if}
+								</div>
+							</article>
+						{/each}
+					</div>
+				{:else}
+					<div class="graph-linked-empty">{$t('graph.linked.noEvidence')}</div>
+				{/if}
+			{:else if linkedTab === 'comparison'}
+				{#if linkedComparisons.length}
+					<div class="graph-linked-grid graph-linked-grid--comparison">
+						{#each linkedComparisons.slice(0, 6) as item}
+							<article class="graph-linked-card">
+								<div class="graph-linked-card__header">
+									<h3>{item.display.result_summary || item.row_id}</h3>
+									<span class="graph-chip">{formatMachineText(item.assessment.comparability_status)}</span>
+								</div>
+								<p>
+									{formatGraphLabel(item.display.material_system_normalized)} /
+									{formatGraphLabel(item.display.property_normalized)}
+								</p>
+								{#if item.uncertainty.missing_critical_context.length}
+									<div class="graph-missing-chip-row">
+										{#each item.uncertainty.missing_critical_context.slice(0, 3) as missing}
+											<span>{formatMachineText(missing)}</span>
+										{/each}
+									</div>
+								{/if}
+								<div class="graph-linked-card__actions">
+									<a class="graph-link-button" href={comparisonHref(item)}>
+										{$t('graph.linked.openComparison')}
+									</a>
+									{#if comparisonSourceHref(item)}
+										<a class="graph-link-button" href={comparisonSourceHref(item) ?? '#'}>
+											{$t('graph.linked.viewSource')}
+										</a>
+									{/if}
+								</div>
+							</article>
+						{/each}
+					</div>
+				{:else}
+					<div class="graph-linked-empty">{$t('graph.linked.noComparisons')}</div>
+				{/if}
+			{:else if linkedDocuments.length}
+				<div class="graph-linked-grid graph-linked-grid--documents">
+					{#each linkedDocuments.slice(0, 6) as item}
+						<article class="graph-linked-card">
+							<div class="graph-linked-card__header">
+								<h3>{item.title || item.source_filename || item.document_id}</h3>
+								<span class="graph-chip">{formatMachineText(item.doc_type)}</span>
+							</div>
+							<p>{item.source_filename || item.document_id}</p>
+							<div class="graph-linked-card__meta">
+								<span>{formatMachineText(item.processing_status ?? 'unknown')}</span>
+								{#if item.page_count}
+									<span>{$t('graph.linked.pages', { count: item.page_count })}</span>
+								{/if}
+							</div>
+							<div class="graph-linked-card__actions">
+								<a class="graph-link-button" href={documentHref(item)}>
+									{$t('graph.linked.viewDocument')}
+								</a>
+							</div>
+						</article>
+					{/each}
+				</div>
+			{:else}
+				<div class="graph-linked-empty">{$t('graph.linked.noDocuments')}</div>
+			{/if}
+		</section>
+	{/if}
+</section>
 
 <style>
-	.field--wide {
-		grid-column: 1 / -1;
+	.graph-page-shell {
+		width: 100%;
+		max-width: 1440px;
+		margin: 0 auto;
+		display: grid;
+		gap: 16px;
 	}
 
-	.graph-node-types {
+	.graph-page-card {
+		min-width: 0;
+		border: 1px solid #e6ebf2;
+		border-radius: 16px;
+		background: #ffffff;
+		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+	}
+
+	.graph-header-card {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.75rem;
-		margin-top: 0.5rem;
+		align-items: center;
+		justify-content: space-between;
+		gap: 20px;
+		padding: 22px 24px;
 	}
 
-	.graph-node-type {
+	.graph-header-identity {
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 18px;
+	}
+
+	.graph-header-icon,
+	.graph-empty-state__icon {
+		width: 72px;
+		height: 72px;
+		flex: 0 0 auto;
+		display: grid;
+		place-items: center;
+		border-radius: 999px;
+		background: #eff6ff;
+		color: #2563eb;
+	}
+
+	.graph-header-copy {
+		min-width: 0;
+		display: grid;
+		gap: 8px;
+	}
+
+	.graph-header-copy h1 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 30px;
+		font-weight: 700;
+		line-height: 38px;
+		letter-spacing: 0;
+	}
+
+	.graph-header-copy p {
+		margin: 0;
+		color: #64748b;
+		font-size: 15px;
+		line-height: 22px;
+	}
+
+	.graph-meta-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 10px;
+		color: #64748b;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.graph-meta-item,
+	.graph-status-badge {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.45rem;
-		padding: 0.45rem 0.7rem;
-		border: 1px solid rgba(15, 27, 45, 0.12);
+		gap: 6px;
+	}
+
+	.graph-status-badge {
+		min-height: 24px;
+		padding: 2px 9px;
 		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.9);
-		font-size: 0.92rem;
+		font-size: 12px;
+		font-weight: 700;
 	}
 
-	.graph-node-type__swatch {
-		width: 0.7rem;
-		height: 0.7rem;
-		border-radius: 999px;
-		flex: 0 0 auto;
+	.graph-status-badge--success {
+		color: #15803d;
+		background: #dcfce7;
 	}
 
-	.graph-hint {
-		margin: 0;
-		font-size: 0.84rem;
-		line-height: 1.5;
-		color: var(--color-subtle);
+	.graph-status-badge--warning {
+		color: #b45309;
+		background: #fef3c7;
 	}
 
-	.graph-hover-preview {
+	.graph-status-badge--neutral {
+		color: #64748b;
+		background: #f1f5f9;
+	}
+
+	.graph-header-actions,
+	.graph-canvas-actions,
+	.graph-empty-state__actions,
+	.graph-detail-actions,
+	.graph-linked-card__actions {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 10px;
+	}
+
+	.graph-button,
+	.graph-tool-button,
+	.graph-link-button,
+	.graph-search-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		min-height: 40px;
+		border: 1px solid transparent;
+		border-radius: 10px;
+		font-size: 14px;
+		font-weight: 700;
+		line-height: 20px;
+		cursor: pointer;
+		transition:
+			background 0.18s ease,
+			border-color 0.18s ease,
+			box-shadow 0.18s ease,
+			color 0.18s ease;
+	}
+
+	.graph-button {
+		padding: 0 16px;
+	}
+
+	.graph-button--primary {
+		color: #ffffff;
+		background: #2563eb;
+		box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+	}
+
+	.graph-button--primary:hover {
+		background: #1d4ed8;
+	}
+
+	.graph-button--ghost,
+	.graph-tool-button,
+	.graph-search-button {
+		color: #0f172a;
+		border-color: #d7e0ec;
+		background: #ffffff;
+	}
+
+	.graph-button--ghost:hover,
+	.graph-tool-button:hover,
+	.graph-search-button:hover {
+		background: #f8fafc;
+		border-color: #cbd5e1;
+	}
+
+	.graph-button:disabled,
+	.graph-tool-button:disabled,
+	.graph-search-button:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	.graph-tool-button {
+		width: 40px;
+		padding: 0;
+	}
+
+	.graph-tool-button--text {
+		width: auto;
+		padding: 0 12px;
+	}
+
+	.graph-link-button {
+		min-height: 0;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: #2563eb;
+		font-size: 13px;
+	}
+
+	.graph-link-button:hover {
+		color: #1d4ed8;
+	}
+
+	.graph-link-button--icon {
+		gap: 6px;
+	}
+
+	.graph-export-menu {
+		position: relative;
+	}
+
+	.graph-export-dropdown {
 		position: absolute;
-		z-index: 2;
-		max-width: 210px;
-		padding: 0.7rem 0.8rem;
-		border: 1px solid rgba(15, 27, 45, 0.12);
+		top: calc(100% + 8px);
+		right: 0;
+		z-index: 8;
+		min-width: 180px;
+		display: grid;
+		gap: 4px;
+		padding: 6px;
+		border: 1px solid #e6ebf2;
 		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.96);
-		box-shadow: 0 16px 32px rgba(15, 27, 45, 0.16);
-		backdrop-filter: blur(10px);
+		background: #ffffff;
+		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+	}
+
+	.graph-export-dropdown button {
+		width: 100%;
+		padding: 9px 10px;
+		border: 0;
+		border-radius: 9px;
+		background: transparent;
+		color: #0f172a;
+		text-align: left;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.graph-export-dropdown button:hover {
+		background: #eff6ff;
+	}
+
+	.graph-export-dropdown button:disabled {
+		color: #94a3b8;
+		cursor: not-allowed;
+	}
+
+	.graph-inline-status {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 12px;
+		border: 1px solid #bfdbfe;
+		border-radius: 12px;
+		background: #eff6ff;
+		color: #1d4ed8;
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.graph-inline-status--error {
+		border-color: #fecaca;
+		background: #fee2e2;
+		color: #b91c1c;
+	}
+
+	.graph-empty-state {
+		min-height: 420px;
+		display: grid;
+		place-items: center;
+		justify-items: center;
+		gap: 14px;
+		padding: 48px 24px;
+		text-align: center;
+	}
+
+	.graph-empty-state h2 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 22px;
+		line-height: 30px;
+	}
+
+	.graph-empty-state p {
+		max-width: 560px;
+		margin: 0;
+		color: #64748b;
+		font-size: 14px;
+		line-height: 22px;
+	}
+
+	.graph-empty-state__note {
+		color: #94a3b8;
+	}
+
+	.graph-workspace {
+		display: grid;
+		grid-template-columns: 260px minmax(0, 1fr) 320px;
+		gap: 16px;
+		align-items: stretch;
+	}
+
+	.graph-controls-panel,
+	.graph-detail-panel {
+		align-self: start;
+		display: grid;
+		gap: 16px;
+		padding: 16px;
+	}
+
+	.graph-detail-panel {
+		position: sticky;
+		top: 96px;
+		max-height: calc(100vh - 128px);
+		overflow: auto;
+	}
+
+	.graph-panel-header,
+	.graph-canvas-toolbar,
+	.graph-linked-header,
+	.graph-linked-card__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.graph-panel-header h2,
+	.graph-canvas-toolbar h2,
+	.graph-linked-header h2 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 16px;
+		font-weight: 700;
+		line-height: 24px;
+	}
+
+	.graph-canvas-toolbar p,
+	.graph-linked-header p {
+		margin: 2px 0 0;
+		color: #64748b;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.graph-control-group {
+		display: grid;
+		gap: 8px;
+	}
+
+	.graph-control-label,
+	.graph-node-type-fieldset legend,
+	.graph-control-field span {
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.graph-node-type-fieldset {
+		min-width: 0;
+		margin: 0;
+		padding: 0;
+		border: 0;
+	}
+
+	.graph-search-control {
+		height: 40px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 40px;
+		border: 1px solid #d7e0ec;
+		border-radius: 10px;
+		background: #ffffff;
+		overflow: hidden;
+	}
+
+	.graph-search-control:focus-within {
+		border-color: #2563eb;
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+	}
+
+	.graph-search-control .graph-input {
+		border: 0;
+		border-radius: 0;
+	}
+
+	.graph-search-button {
+		width: 40px;
+		height: 40px;
+		border-width: 0 0 0 1px;
+		border-color: #e6ebf2;
+		border-radius: 0;
+	}
+
+	.graph-input {
+		width: 100%;
+		height: 40px;
+		padding: 0 11px;
+		border: 1px solid #d7e0ec;
+		border-radius: 10px;
+		background: #ffffff;
+		color: #0f172a;
+		font-size: 14px;
+		line-height: 22px;
+	}
+
+	.graph-input::placeholder {
+		color: #94a3b8;
+	}
+
+	.graph-input:focus {
+		border-color: #2563eb;
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+		outline: 0;
+	}
+
+	.graph-node-type-list {
+		display: grid;
+		gap: 8px;
+	}
+
+	.graph-node-type-row {
+		display: grid;
+		grid-template-columns: 24px minmax(0, 1fr) auto auto;
+		align-items: center;
+		gap: 8px;
+		min-height: 36px;
+		padding: 6px 8px;
+		border: 1px solid #e6ebf2;
+		border-radius: 10px;
+		background: #ffffff;
+		color: #0f172a;
+		font-size: 13px;
+		cursor: pointer;
+	}
+
+	.graph-node-type-icon,
+	.graph-selected-icon {
+		display: inline-grid;
+		place-items: center;
+		border-radius: 8px;
+		background: var(--node-bg);
+		border: 1px solid color-mix(in srgb, var(--node-color) 45%, transparent);
+	}
+
+	.graph-node-type-icon {
+		width: 24px;
+		height: 24px;
+	}
+
+	.graph-node-type-icon::after,
+	.graph-selected-icon::after {
+		content: '';
+		width: 8px;
+		height: 8px;
+		border-radius: 999px;
+		background: var(--node-color);
+	}
+
+	.graph-node-type-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.graph-node-type-count {
+		min-width: 26px;
+		padding: 1px 7px;
+		border-radius: 999px;
+		background: #f1f5f9;
+		color: #64748b;
+		text-align: center;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.graph-node-type-row input {
+		width: 16px;
+		height: 16px;
+		accent-color: #2563eb;
+	}
+
+	.graph-advanced-settings {
+		border-top: 1px solid #e6ebf2;
+		padding-top: 12px;
+	}
+
+	.graph-advanced-settings summary {
+		color: #0f172a;
+		font-size: 14px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.graph-advanced-grid {
+		display: grid;
+		gap: 10px;
+		margin-top: 12px;
+	}
+
+	.graph-control-field {
+		display: grid;
+		gap: 6px;
+	}
+
+	.graph-control-status {
+		display: grid;
+		gap: 8px;
+		padding: 12px;
+		border-radius: 12px;
+		background: #fbfdff;
+		border: 1px solid #e6ebf2;
+	}
+
+	.graph-control-status div {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		color: #64748b;
+		font-size: 13px;
+	}
+
+	.graph-control-status strong {
+		color: #0f172a;
+	}
+
+	.graph-canvas-panel {
+		min-height: 680px;
+		display: grid;
+		grid-template-rows: auto auto minmax(0, 1fr);
+		gap: 12px;
+		padding: 16px;
+		box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+	}
+
+	.graph-legend {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 10px;
+		padding: 0 2px;
+	}
+
+	.graph-legend-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.graph-legend-item i {
+		width: 9px;
+		height: 9px;
+		border-radius: 999px;
+		background: var(--node-color);
+	}
+
+	.graph-canvas-stage {
+		position: relative;
+		min-height: 600px;
+		border: 1px solid #e6ebf2;
+		border-radius: 16px;
+		background:
+			linear-gradient(rgba(37, 99, 235, 0.035) 1px, transparent 1px),
+			linear-gradient(90deg, rgba(37, 99, 235, 0.035) 1px, transparent 1px), #fbfdff;
+		background-size: 22px 22px;
+		overflow: hidden;
+	}
+
+	.graph-cytoscape {
+		position: absolute;
+		inset: 0;
+	}
+
+	.graph-canvas-state {
+		position: absolute;
+		inset: 0;
+		z-index: 2;
+		display: grid;
+		place-items: center;
+		gap: 10px;
+		padding: 24px;
+		background: rgba(251, 253, 255, 0.72);
+		color: #64748b;
+		font-size: 14px;
+		text-align: center;
 		pointer-events: none;
 	}
 
-	.graph-hover-preview__title {
-		font-weight: 700;
-		font-size: 0.92rem;
-		line-height: 1.35;
+	.graph-canvas-state--loading {
+		background: rgba(251, 253, 255, 0.84);
 	}
 
-	.graph-hover-preview__meta {
+	.graph-spinner {
+		width: 28px;
+		height: 28px;
+		border: 3px solid #dbeafe;
+		border-top-color: #2563eb;
+		border-radius: 999px;
+		animation: graph-spin 0.9s linear infinite;
+	}
+
+	.graph-hover-card {
+		position: absolute;
+		z-index: 4;
+		max-width: 220px;
+		display: grid;
+		gap: 4px;
+		padding: 10px 12px;
+		border: 1px solid #d7e0ec;
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.96);
+		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+		pointer-events: none;
+	}
+
+	.graph-hover-card strong {
+		color: #0f172a;
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.graph-hover-card span {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.graph-selected-summary {
+		display: grid;
+		grid-template-columns: 46px minmax(0, 1fr);
+		gap: 12px;
+		align-items: center;
+	}
+
+	.graph-selected-icon {
+		width: 46px;
+		height: 46px;
+		border-radius: 12px;
+	}
+
+	.graph-selected-summary h3,
+	.graph-edge-detail h3,
+	.graph-linked-card h3 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 17px;
+		font-weight: 700;
+		line-height: 24px;
+		letter-spacing: 0;
+	}
+
+	.graph-chip {
+		display: inline-flex;
+		width: max-content;
+		align-items: center;
+		min-height: 22px;
+		padding: 2px 8px;
+		border-radius: 999px;
+		background: #eff6ff;
+		color: #2563eb;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.graph-chip--success {
+		color: #15803d;
+		background: #dcfce7;
+	}
+
+	.graph-detail-stat-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.graph-detail-stat-grid div {
+		display: grid;
+		gap: 4px;
+		padding: 10px;
+		border: 1px solid #e6ebf2;
+		border-radius: 10px;
+		background: #fbfdff;
+		text-align: center;
+	}
+
+	.graph-detail-stat-grid span,
+	.graph-detail-kv span {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.graph-detail-stat-grid strong,
+	.graph-detail-kv strong {
+		color: #0f172a;
+		font-size: 18px;
+		line-height: 24px;
+	}
+
+	.graph-detail-section {
+		display: grid;
+		gap: 8px;
+	}
+
+	.graph-detail-section h4 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 20px;
+	}
+
+	.graph-detail-section p,
+	.graph-edge-detail p,
+	.graph-linked-card p {
+		margin: 0;
+		color: #64748b;
+		font-size: 14px;
+		line-height: 22px;
+	}
+
+	.graph-compact-list,
+	.graph-relation-list {
+		display: grid;
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.graph-compact-list li,
+	.graph-relation-list li,
+	.graph-detail-kv {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 8px 10px;
+		border-radius: 10px;
+		background: #f8fafc;
+	}
+
+	.graph-compact-list span,
+	.graph-relation-list span {
+		color: #64748b;
+		font-size: 13px;
+	}
+
+	.graph-compact-list strong,
+	.graph-relation-list strong {
+		min-width: 0;
+		color: #0f172a;
+		font-size: 13px;
+		text-align: right;
+		overflow-wrap: anywhere;
+	}
+
+	.graph-edge-detail {
+		display: grid;
+		gap: 14px;
+	}
+
+	.graph-detail-empty,
+	.graph-linked-empty {
+		display: grid;
+		place-items: center;
+		gap: 12px;
+		min-height: 220px;
+		padding: 24px;
+		border: 1px dashed #d7e0ec;
+		border-radius: 14px;
+		background: #fbfdff;
+		color: #64748b;
+		text-align: center;
+	}
+
+	.graph-detail-empty p,
+	.graph-linked-empty {
+		margin: 0;
+		font-size: 14px;
+		line-height: 22px;
+	}
+
+	.graph-linked-panel {
+		display: grid;
+		gap: 14px;
+		padding: 20px;
+	}
+
+	.graph-linked-tabs {
+		display: flex;
+		align-items: center;
+		gap: 20px;
+		border-bottom: 1px solid #e6ebf2;
+	}
+
+	.graph-linked-tabs button {
+		position: relative;
+		min-height: 42px;
+		padding: 0 2px;
+		border: 0;
+		background: transparent;
+		color: #64748b;
+		font-size: 14px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.graph-linked-tabs button.active {
+		color: #2563eb;
+	}
+
+	.graph-linked-tabs button.active::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: -1px;
+		height: 2px;
+		border-radius: 999px;
+		background: #2563eb;
+	}
+
+	.graph-linked-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+		gap: 12px;
+	}
+
+	.graph-linked-card {
+		min-width: 0;
+		display: grid;
+		align-content: start;
+		gap: 10px;
+		padding: 14px;
+		border: 1px solid #e6ebf2;
+		border-radius: 12px;
+		background: #ffffff;
+	}
+
+	.graph-linked-card h3 {
+		font-size: 14px;
+		line-height: 20px;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.graph-linked-card__meta,
+	.graph-missing-chip-row {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin-top: 0.35rem;
-		font-size: 0.76rem;
-		color: var(--color-subtle);
+		gap: 6px;
+	}
+
+	.graph-linked-card__meta span,
+	.graph-missing-chip-row span {
+		display: inline-flex;
+		min-height: 22px;
+		align-items: center;
+		padding: 2px 8px;
+		border-radius: 999px;
+		background: #f1f5f9;
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.graph-muted {
+		color: #94a3b8;
+	}
+
+	.graph-error-text {
+		color: #b91c1c;
+	}
+
+	.graph-icon--network,
+	.meta-icon,
+	.action-icon {
+		position: relative;
+		display: inline-block;
+		flex: 0 0 auto;
+	}
+
+	.graph-icon--network {
+		width: 34px;
+		height: 34px;
+	}
+
+	.graph-icon--network::before,
+	.graph-icon--network::after {
+		content: '';
+		position: absolute;
+		inset: 6px;
+		border: 3px solid currentColor;
+		border-radius: 999px;
+		clip-path: polygon(0 38%, 42% 38%, 42% 0, 58% 0, 58% 38%, 100% 38%, 100% 58%, 58% 58%, 58% 100%, 42% 100%, 42% 58%, 0 58%);
+	}
+
+	.graph-icon--network::after {
+		inset: 0;
+		border-width: 2px;
+		opacity: 0.42;
+		transform: rotate(45deg);
+	}
+
+	.meta-icon {
+		width: 13px;
+		height: 13px;
+	}
+
+	.meta-icon--node {
+		border: 2px solid #64748b;
+		border-radius: 999px;
+	}
+
+	.meta-icon--edge::before {
+		content: '';
+		position: absolute;
+		left: 1px;
+		right: 1px;
+		top: 6px;
+		height: 2px;
+		background: #64748b;
+		transform: rotate(-20deg);
+	}
+
+	.meta-icon--type {
+		border: 2px solid #64748b;
+		border-radius: 4px;
+	}
+
+	.meta-icon--status {
+		border: 2px solid currentColor;
+		border-radius: 999px;
+	}
+
+	.meta-icon--status::after {
+		content: '';
+		position: absolute;
+		left: 3px;
+		top: 3px;
+		width: 5px;
+		height: 3px;
+		border: solid currentColor;
+		border-width: 0 0 2px 2px;
+		transform: rotate(-45deg);
+	}
+
+	.action-icon {
+		width: 15px;
+		height: 15px;
+		color: currentColor;
+	}
+
+	.action-icon--refresh {
+		border: 2px solid currentColor;
+		border-right-color: transparent;
+		border-radius: 999px;
+	}
+
+	.action-icon--target {
+		border: 2px solid currentColor;
+		border-radius: 999px;
+	}
+
+	.action-icon--target::after {
+		content: '';
+		position: absolute;
+		inset: 4px;
+		border-radius: 999px;
+		background: currentColor;
+	}
+
+	.action-icon--export {
+		border: 2px solid currentColor;
+		border-radius: 3px;
+	}
+
+	.action-icon--search {
+		border: 2px solid currentColor;
+		border-radius: 999px;
+	}
+
+	.action-icon--search::after {
+		content: '';
+		position: absolute;
+		right: -4px;
+		bottom: -2px;
+		width: 6px;
+		height: 2px;
+		border-radius: 999px;
+		background: currentColor;
+		transform: rotate(45deg);
+	}
+
+	.action-icon--fit {
+		border: 2px solid currentColor;
+		border-radius: 4px;
+	}
+
+	.action-icon--plus::before,
+	.action-icon--plus::after,
+	.action-icon--minus::before {
+		content: '';
+		position: absolute;
+		left: 2px;
+		right: 2px;
+		top: 6px;
+		height: 2px;
+		background: currentColor;
+	}
+
+	.action-icon--plus::after {
+		top: 2px;
+		bottom: 2px;
+		left: 6px;
+		right: auto;
+		width: 2px;
+		height: auto;
+	}
+
+	@keyframes graph-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	@media (max-width: 1240px) {
+		.graph-workspace {
+			grid-template-columns: 260px minmax(0, 1fr);
+		}
+
+		.graph-detail-panel {
+			grid-column: 1 / -1;
+			position: static;
+			max-height: none;
+		}
+	}
+
+	@media (max-width: 920px) {
+		.graph-header-card {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.graph-header-actions {
+			width: 100%;
+		}
+
+		.graph-header-actions .graph-button,
+		.graph-export-menu {
+			flex: 1 1 auto;
+		}
+
+		.graph-export-menu > .graph-button {
+			width: 100%;
+		}
+
+		.graph-workspace {
+			grid-template-columns: 1fr;
+		}
+
+		.graph-controls-panel {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			align-items: start;
+		}
+
+		.graph-panel-header,
+		.graph-control-status {
+			grid-column: 1 / -1;
+		}
+
+		.graph-canvas-panel {
+			min-height: auto;
+		}
+
+		.graph-canvas-stage {
+			min-height: 500px;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.graph-page-shell {
+			gap: 12px;
+		}
+
+		.graph-header-card,
+		.graph-linked-panel {
+			padding: 16px;
+		}
+
+		.graph-header-identity {
+			align-items: flex-start;
+		}
+
+		.graph-header-icon {
+			width: 56px;
+			height: 56px;
+		}
+
+		.graph-header-copy h1 {
+			font-size: 26px;
+			line-height: 34px;
+		}
+
+		.graph-controls-panel {
+			grid-template-columns: 1fr;
+		}
+
+		.graph-panel-header,
+		.graph-control-status {
+			grid-column: auto;
+		}
+
+		.graph-canvas-toolbar,
+		.graph-linked-header {
+			display: grid;
+		}
+
+		.graph-canvas-actions {
+			justify-content: flex-start;
+		}
+
+		.graph-canvas-stage {
+			min-height: 420px;
+		}
+
+		.graph-detail-stat-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.graph-linked-tabs {
+			overflow-x: auto;
+		}
+	}
+
+	:global(:root[data-theme='dark']) .graph-page-card,
+	:global(:root[data-theme='dark']) .graph-export-dropdown,
+	:global(:root[data-theme='dark']) .graph-linked-card {
+		border-color: rgba(122, 145, 185, 0.2);
+		background: rgba(16, 26, 44, 0.94);
+	}
+
+	:global(:root[data-theme='dark']) .graph-header-copy h1,
+	:global(:root[data-theme='dark']) .graph-panel-header h2,
+	:global(:root[data-theme='dark']) .graph-canvas-toolbar h2,
+	:global(:root[data-theme='dark']) .graph-linked-header h2,
+	:global(:root[data-theme='dark']) .graph-selected-summary h3,
+	:global(:root[data-theme='dark']) .graph-edge-detail h3,
+	:global(:root[data-theme='dark']) .graph-linked-card h3,
+	:global(:root[data-theme='dark']) .graph-detail-section h4,
+	:global(:root[data-theme='dark']) .graph-control-status strong,
+	:global(:root[data-theme='dark']) .graph-detail-stat-grid strong,
+	:global(:root[data-theme='dark']) .graph-detail-kv strong,
+	:global(:root[data-theme='dark']) .graph-compact-list strong,
+	:global(:root[data-theme='dark']) .graph-relation-list strong {
+		color: #e6efff;
+	}
+
+	:global(:root[data-theme='dark']) .graph-header-copy p,
+	:global(:root[data-theme='dark']) .graph-meta-row,
+	:global(:root[data-theme='dark']) .graph-canvas-toolbar p,
+	:global(:root[data-theme='dark']) .graph-linked-header p,
+	:global(:root[data-theme='dark']) .graph-detail-section p,
+	:global(:root[data-theme='dark']) .graph-edge-detail p,
+	:global(:root[data-theme='dark']) .graph-linked-card p,
+	:global(:root[data-theme='dark']) .graph-control-label,
+	:global(:root[data-theme='dark']) .graph-node-type-fieldset legend,
+	:global(:root[data-theme='dark']) .graph-control-field span {
+		color: #a7b6cf;
+	}
+
+	:global(:root[data-theme='dark']) .graph-button--ghost,
+	:global(:root[data-theme='dark']) .graph-tool-button,
+	:global(:root[data-theme='dark']) .graph-search-button,
+	:global(:root[data-theme='dark']) .graph-input,
+	:global(:root[data-theme='dark']) .graph-search-control,
+	:global(:root[data-theme='dark']) .graph-node-type-row,
+	:global(:root[data-theme='dark']) .graph-control-status,
+	:global(:root[data-theme='dark']) .graph-detail-stat-grid div,
+	:global(:root[data-theme='dark']) .graph-compact-list li,
+	:global(:root[data-theme='dark']) .graph-relation-list li,
+	:global(:root[data-theme='dark']) .graph-detail-kv,
+	:global(:root[data-theme='dark']) .graph-detail-empty,
+	:global(:root[data-theme='dark']) .graph-linked-empty {
+		border-color: rgba(122, 145, 185, 0.24);
+		background: rgba(12, 20, 34, 0.8);
+		color: #e6efff;
+	}
+
+	:global(:root[data-theme='dark']) .graph-canvas-stage {
+		border-color: rgba(122, 145, 185, 0.2);
+		background:
+			linear-gradient(rgba(75, 139, 255, 0.06) 1px, transparent 1px),
+			linear-gradient(90deg, rgba(75, 139, 255, 0.06) 1px, transparent 1px), #101a2c;
+		background-size: 22px 22px;
+	}
+
+	:global(:root[data-theme='dark']) .graph-canvas-state {
+		background: rgba(16, 26, 44, 0.78);
+		color: #a7b6cf;
+	}
+
+	:global(:root[data-theme='dark']) .graph-hover-card {
+		border-color: rgba(122, 145, 185, 0.3);
+		background: rgba(16, 26, 44, 0.96);
+	}
+
+	:global(:root[data-theme='dark']) .graph-hover-card strong {
+		color: #e6efff;
 	}
 </style>

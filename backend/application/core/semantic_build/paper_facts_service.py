@@ -278,6 +278,22 @@ _PROPERTY_HINTS = (
     ("density", "density"),
     ("strength", "strength"),
 )
+_PBF_PROCESS_PAYLOAD_KEYS = (
+    "laser_power_w",
+    "scan_speed_mm_s",
+    "layer_thickness_um",
+    "hatch_spacing_um",
+    "spot_size_um",
+    "energy_density_j_mm3",
+    "energy_density_origin",
+    "scan_strategy",
+    "build_orientation",
+    "preheat_temperature_c",
+    "shielding_gas",
+    "oxygen_level_ppm",
+    "powder_size_distribution_um",
+    "post_treatment_summary",
+)
 _OBSERVED_VALUE_PATTERN = re.compile(
     r"([-+]?\d+(?:\.\d+)?)\s*(nm|um|μm|mm|cm|m2/g|m\^2/g|m²/g|mpa|gpa|pa|%)\b",
     re.IGNORECASE,
@@ -1644,6 +1660,9 @@ class PaperFactsService:
                     min=float(range_match.group(1)),
                     max=float(range_match.group(2)),
                     statement=statement,
+                    value_origin="reported",
+                    source_value_text=range_match.group(0),
+                    source_unit_text=unit,
                 ),
                 unit,
             )
@@ -1657,6 +1676,9 @@ class PaperFactsService:
                 MeasurementValuePayload(
                     min=float(min_match.group(1)),
                     statement=statement,
+                    value_origin="reported",
+                    source_value_text=min_match.group(0),
+                    source_unit_text=unit,
                 ),
                 unit,
             )
@@ -1670,6 +1692,9 @@ class PaperFactsService:
                 MeasurementValuePayload(
                     max=float(max_match.group(1)),
                     statement=statement,
+                    value_origin="reported",
+                    source_value_text=max_match.group(0),
+                    source_unit_text=unit,
                 ),
                 unit,
             )
@@ -1685,6 +1710,9 @@ class PaperFactsService:
                     MeasurementValuePayload(
                         retention_percent=numeric,
                         statement=statement,
+                        value_origin="reported",
+                        source_value_text=approx_match.group(0),
+                        source_unit_text=unit or "%",
                     ),
                     unit or "%",
                 )
@@ -1692,6 +1720,9 @@ class PaperFactsService:
                 MeasurementValuePayload(
                     value=numeric,
                     statement=statement,
+                    value_origin="reported",
+                    source_value_text=approx_match.group(0),
+                    source_unit_text=unit,
                 ),
                 unit,
             )
@@ -1699,11 +1730,15 @@ class PaperFactsService:
         numeric = self._coerce_numeric_text_window_value(value_text, claim_text)
         if numeric is None:
             return MeasurementValuePayload(statement=statement), unit
+        source_value_text = value_text or f"{numeric:g}"
         if str(claim.result_type or "").strip().lower() == "retention":
             return (
                 MeasurementValuePayload(
                     retention_percent=float(numeric),
                     statement=statement,
+                    value_origin="reported",
+                    source_value_text=source_value_text,
+                    source_unit_text=unit or "%",
                 ),
                 unit or "%",
             )
@@ -1711,6 +1746,9 @@ class PaperFactsService:
             MeasurementValuePayload(
                 value=float(numeric),
                 statement=statement,
+                value_origin="reported",
+                source_value_text=source_value_text,
+                source_unit_text=unit,
             ),
             unit,
         )
@@ -2148,7 +2186,7 @@ class PaperFactsService:
         document_state: dict[str, Any],
     ) -> tuple[str, dict[str, Any] | None]:
         normalized_payload = self._normalize_condition_payload(
-            payload.condition_payload.model_dump(exclude_none=True)
+            payload.condition_payload.model_dump(exclude_none=True, by_alias=True)
         )
         property_type = self._normalize_property_name(payload.property_type)
         condition_key = (
@@ -4105,6 +4143,11 @@ class PaperFactsService:
                 "durations": payload.get("durations"),
                 "atmosphere": payload.get("atmosphere"),
                 "methods": payload.get("methods"),
+                **{
+                    key: payload.get(key)
+                    for key in _PBF_PROCESS_PAYLOAD_KEYS
+                    if key in payload
+                },
             }
         )
         details = self._normalize_scalar_text(payload.get("details"))

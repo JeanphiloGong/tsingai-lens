@@ -20,6 +20,14 @@ from domain.core.comparison import (
     ComparableResult,
     build_collection_assessment_input_fingerprint,
 )
+from tests.support.pbf_acceptance_fixture import (
+    PBF_BASELINE_LABEL,
+    PBF_DOCUMENT_ID,
+    PBF_S3_VARIANT_ID,
+    PBF_YIELD_25_COMPARABLE_ID,
+    PBF_YIELD_SERIES_KEY,
+    write_pbf_acceptance_artifacts,
+)
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -351,6 +359,75 @@ def test_result_detail_route_returns_document_assessment_evidence_and_actions(
         f"/collections/{collection_id}/comparisons?"
     )
     assert payload.actions.open_evidence == f"/collections/{collection_id}/evidence"
+
+
+def test_result_detail_route_returns_pbf_acceptance_chain_fields(
+    result_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _comparison_service = result_services
+    collection = collection_service.create_collection(name="Result Evidence Chain")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "document_id": PBF_DOCUMENT_ID,
+                "collection_id": collection_id,
+                "title": "Ti64 Tensile Study",
+                "source_filename": "ti64.txt",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.93,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    write_pbf_acceptance_artifacts(output_dir, collection_id=collection_id)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    payload = asyncio.run(
+        results_controller.get_collection_result(collection_id, PBF_YIELD_25_COMPARABLE_ID)
+    )
+
+    assert payload.variant_dossier is not None
+    assert payload.variant_dossier.variant_id == PBF_S3_VARIANT_ID
+    assert payload.variant_dossier.variant_label == "S3 optimized VED + HIP"
+    assert payload.variant_dossier.material.composition == "Ti-6Al-4V"
+    assert payload.variant_dossier.shared_process_state["laser_power_w"] == 280
+    assert payload.variant_dossier.shared_process_state["scan_speed_mm_s"] == 1200
+    assert payload.variant_dossier.shared_process_state["hatch_spacing_um"] == 100
+    assert payload.variant_dossier.shared_process_state["layer_thickness_um"] == 30
+    assert payload.variant_dossier.shared_process_state["energy_density_j_mm3"] == 78
+    assert payload.variant_dossier.shared_process_state["energy_density_origin"] == "reported"
+    assert payload.variant_dossier.shared_process_state["build_orientation"] == "vertical"
+    assert payload.test_condition_detail is not None
+    assert payload.test_condition_detail.test_method == "tensile"
+    assert payload.test_condition_detail.test_temperature_c == 25.0
+    assert payload.test_condition_detail.strain_rate_s_1 == 0.001
+    assert payload.test_condition_detail.loading_direction == "vertical"
+    assert payload.test_condition_detail.sample_orientation == "vertical"
+    assert payload.baseline_detail is not None
+    assert payload.baseline_detail.reference == PBF_BASELINE_LABEL
+    assert payload.baseline_detail.baseline_type == "same_paper_control"
+    assert payload.baseline_detail.baseline_scope == "current_paper"
+    support_by_id = {support.support_id: support for support in payload.structure_support}
+    assert support_by_id["sf-porosity"].summary == "Porosity 0.1%"
+    assert support_by_id["sf-residual-stress"].summary == "Residual stress lower after HIP"
+    assert payload.value_provenance is not None
+    assert payload.value_provenance.value_origin == "reported"
+    assert payload.value_provenance.source_value_text == "940"
+    assert payload.series_navigation is not None
+    assert payload.series_navigation.series_key == PBF_YIELD_SERIES_KEY
+    assert [sibling.axis_value for sibling in payload.series_navigation.siblings] == [
+        25.0,
+        200.0,
+    ]
 
 
 def test_result_detail_route_returns_404_when_missing(

@@ -67,6 +67,8 @@ Supporting research binaries live under `docs/research/assets/`.
   then
   [`decisions/rfc-document-result-evidence-chain-contract-freeze.md`](decisions/rfc-document-result-evidence-chain-contract-freeze.md),
   then
+  [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md),
+  then
   [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
 - Shared system understanding:
   start with [`overview/system-overview.md`](overview/system-overview.md), then
@@ -135,6 +137,7 @@ Decisions:
 - [`decisions/rfc-comparison-result-document-product-flow.md`](decisions/rfc-comparison-result-document-product-flow.md)
 - [`decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md`](decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md)
 - [`decisions/rfc-document-result-evidence-chain-contract-freeze.md`](decisions/rfc-document-result-evidence-chain-contract-freeze.md)
+- [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md)
 
 Research:
 

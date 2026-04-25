@@ -208,5 +208,6 @@ describe('collections/[id]/comparisons/+page.svelte', () => {
 
 		const resultLink = browserPage.getByRole('link', { name: 'Open results' });
 		await expect.element(resultLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
+		await expect.element(browserPage.getByRole('link', { name: /Inspect evidence/ })).not.toBeInTheDocument();
 	});
 });

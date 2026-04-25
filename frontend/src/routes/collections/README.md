@@ -53,8 +53,8 @@ This node owns the collection workspace route family in the frontend.
   Frontend-local plan for the document detail split view that aligns source
   text with selected evidence chains
 - [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md)
-  Claim-to-source navigation contract for comparison/evidence to document
-  traceback behavior
+  Claim-to-source navigation contract for comparison, result, and document
+  evidence-panel traceback behavior
 
 ## Dependency Rule
 

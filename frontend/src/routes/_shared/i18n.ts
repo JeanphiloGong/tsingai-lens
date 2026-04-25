@@ -225,7 +225,6 @@ const translations: Record<Language, Translations> = {
 			primaryActionTrack: 'Track processing',
 			primaryActionComparisons: 'Open comparisons',
 			primaryActionResults: 'Open results',
-			primaryActionEvidence: 'Inspect evidence',
 			primaryActionDocuments: 'Inspect documents',
 			primaryActionProtocol: 'Open protocol branch',
 			primaryActionSteps: 'Review paper steps',
@@ -240,8 +239,6 @@ const translations: Record<Language, Translations> = {
 				'Start with comparisons to quickly see which results can actually be judged side by side.',
 			primaryActionHelperResults:
 				'Then inspect the result objects to see what each extracted finding actually says.',
-			primaryActionHelperEvidence:
-				'Start with evidence if you need to verify what really supports a conclusion.',
 			primaryActionHelperDocuments:
 				'Start with documents if you first need to separate experimental papers from reviews and mixed content.',
 			primaryActionHelperProtocol:
@@ -340,7 +337,6 @@ const translations: Record<Language, Translations> = {
 			capabilities: {
 				comparisons: 'Comparisons',
 				results: 'Results',
-				evidence: 'Evidence',
 				documents: 'Documents',
 				protocol: 'Protocol',
 				graph: 'Graph view',
@@ -353,7 +349,6 @@ const translations: Record<Language, Translations> = {
 				'Use these warnings to decide how cautious you should be with the outputs below.',
 			nextComparisons: 'Open comparisons',
 			nextResults: 'Open results',
-			nextEvidence: 'Inspect evidence',
 			nextDocuments: 'Inspect documents',
 			nextProtocol: 'Open protocol',
 			nextSteps: 'Review paper steps',
@@ -370,8 +365,6 @@ const translations: Record<Language, Translations> = {
 				'See which results across papers are really comparable, and which ones only look similar.',
 			resultResultsLead:
 				'Inspect one extracted result at a time before jumping back to the paper or the comparison table.',
-			resultEvidenceLead:
-				'Trace a conclusion back to the figure, table, or passage that supports it.',
 			resultDocumentsLead:
 				'Separate experimental papers from reviews before using them in comparison or protocol workflows.',
 			resultProtocolLead:
@@ -1268,7 +1261,6 @@ const translations: Record<Language, Translations> = {
 			primaryActionTrack: '查看进度',
 			primaryActionComparisons: '打开比较',
 			primaryActionResults: '打开结果',
-			primaryActionEvidence: '查看证据',
 			primaryActionDocuments: '查看文档',
 			primaryActionProtocol: '打开 Protocol 分支',
 			primaryActionSteps: '查看论文步骤',
@@ -1279,7 +1271,6 @@ const translations: Record<Language, Translations> = {
 			primaryActionHelperTrack: '系统正在处理，稍后就可以进入主要研究页面。',
 			primaryActionHelperComparisons: '先看比较，最快判断这批论文里哪些结果值得继续追。',
 			primaryActionHelperResults: '再看结果本体，确认每条抽取结果到底在说什么。',
-			primaryActionHelperEvidence: '先看证据，确认关键结论到底由什么支撑。',
 			primaryActionHelperDocuments: '先看文档筛选，分清哪些是实验论文，哪些是综述或混合内容。',
 			primaryActionHelperProtocol: '如果还要整理实验步骤，再进入 Protocol 分支。',
 			readyViewsCount: '已就绪主页面 {count} 个',
@@ -1370,7 +1361,6 @@ const translations: Record<Language, Translations> = {
 			goToWorkspace: '返回工作区',
 			resultComparisonsLead: '看这批论文里哪些结果真的能放在一起比较，哪些只是表面相似。',
 			resultResultsLead: '逐条看结果本体，再决定是回到比较页还是进入文档核验。',
-			resultEvidenceLead: '回到原文，看一个结论到底是由哪张图、哪段文字、什么条件支撑的。',
 			resultDocumentsLead: '先分清哪些是实验论文，哪些是综述，避免把不适合的材料继续往下用。',
 			resultProtocolLead: '只有当这批论文确实包含可整理的实验过程时，才进入这个分支。',
 			resultStepsLead: '先看这里，确认论文里实际做了什么：步骤顺序、材料和条件。',
@@ -1388,7 +1378,6 @@ const translations: Record<Language, Translations> = {
 			capabilities: {
 				comparisons: '比较',
 				results: '结果',
-				evidence: '证据',
 				documents: '文档',
 				protocol: 'Protocol',
 				graph: '图谱查看',
@@ -1400,7 +1389,6 @@ const translations: Record<Language, Translations> = {
 			warningsLead: '这些提醒决定了你应当用多谨慎的态度去看下面的结果。',
 			nextComparisons: '打开比较',
 			nextResults: '打开结果',
-			nextEvidence: '查看证据',
 			nextDocuments: '查看文档',
 			nextProtocol: '打开 Protocol',
 			nextSteps: '查看论文步骤',

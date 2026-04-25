@@ -50,7 +50,6 @@
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
 	$: workspaceState = getCollectionWorkspaceState(stateWorkspace);
 	$: actionablePrimaryViews = countActionablePrimaryViews(stateWorkspace);
-	$: evidenceState = getWorkspaceSurfaceState(stateWorkspace, 'evidence');
 	$: protocolState = getWorkspaceSurfaceState(stateWorkspace, 'protocol');
 	$: graphState = getWorkspaceSurfaceState(stateWorkspace, 'graph');
 	$: isEmptyState = workspaceState === 'empty';
@@ -61,11 +60,7 @@
 		workspaceState === 'ready_with_limits' ||
 		workspaceState === 'failed';
 	$: showAdditionalViews = Boolean(
-		workspace &&
-		isAnalysisState &&
-		(stageIsActionable(evidenceState) ||
-			protocolState !== 'not_applicable' ||
-			graphState === 'ready')
+		workspace && isAnalysisState && (protocolState !== 'not_applicable' || graphState === 'ready')
 	);
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
@@ -918,31 +913,6 @@
 				</div>
 
 				<div class="result-grid result-grid--tasks">
-					{#if stageIsActionable(evidenceState)}
-						<article class="result-card">
-							<div class="table-main">
-								<div class="table-title">{$t('overview.capabilities.evidence')}</div>
-								<div class="table-sub">{$t('overview.resultEvidenceLead')}</div>
-							</div>
-							<div class="detail-section">
-								<div class="detail-section__title">{$t('overview.viewStatusTitle')}</div>
-								<div class="detail-chips">
-									<span
-										class={`detail-chip ${stageIsActionable(evidenceState) ? '' : 'detail-chip--muted'}`}
-									>
-										{surfaceStatusLabel(evidenceState)}
-									</span>
-								</div>
-								<p class="note">{surfaceStatusNote(evidenceState)}</p>
-							</div>
-							<div class="table-actions">
-								<a class="btn btn--ghost btn--small" href={workspace.links.evidence}>
-									{$t('overview.nextEvidence')}
-								</a>
-							</div>
-						</article>
-					{/if}
-
 					{#if protocolState !== 'not_applicable'}
 						<article class="result-card">
 							<div class="table-main">

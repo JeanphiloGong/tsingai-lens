@@ -6,14 +6,15 @@ This document records the implementation contract for claim-to-source
 navigation in the collection route family.
 
 It aligns frontend behavior and backend payload/API expectations so users can
-move from comparison/evidence outputs to original document context with
-deterministic fallback.
+move from comparison, result, or document evidence panels to original document
+context with deterministic fallback.
 
 ## Scope
 
 In scope:
 
-- frontend navigation behavior from comparisons/evidence to source documents
+- frontend navigation behavior from comparison, result, and document evidence
+  panels to source documents
 - minimum anchor payload required from backend
 - fallback policy when precise anchors are unavailable
 - phased rollout and verification path
@@ -33,11 +34,13 @@ Out of scope:
 
 ## User-Level Workflow Contract
 
-1. user views a claim-bearing output in `comparisons` or `evidence`
+1. user views a claim-bearing output in `comparisons`, result detail, or the
+   document evidence panel
 2. user clicks `查看原文证据`
 3. frontend opens the collection-scoped document viewer
 4. frontend resolves the best available anchor and highlights context
-5. user can return to comparison/evidence flow without losing context
+5. user can return to the originating comparison, result, or document flow
+   without losing context
 
 ## Shared Anchor Payload
 
@@ -46,16 +49,16 @@ following minimum shape:
 
 ```json
 {
-  "anchor_id": "anc_xxx",
-  "document_id": "doc_xxx",
-  "section_id": "sec_xxx",
-  "block_id": "blk_xxx",
-  "span_start": 120,
-  "span_end": 188,
-  "quote": "source evidence snippet",
-  "source_type": "text",
-  "page": null,
-  "deep_link": "/collections/{collection_id}/documents/{document_id}?anchor_id=anc_xxx"
+	"anchor_id": "anc_xxx",
+	"document_id": "doc_xxx",
+	"section_id": "sec_xxx",
+	"block_id": "blk_xxx",
+	"span_start": 120,
+	"span_end": 188,
+	"quote": "source evidence snippet",
+	"source_type": "text",
+	"page": null,
+	"deep_link": "/collections/{collection_id}/documents/{document_id}?anchor_id=anc_xxx"
 }
 ```
 
@@ -109,7 +112,12 @@ navigation:
   `/collections/[id]/documents/[document_id]`
 - entry points:
   - `/collections/[id]/comparisons`
-  - `/collections/[id]/evidence`
+  - `/collections/[id]/results/[result_id]`
+  - `/collections/[id]/documents/[document_id]`
+
+Standalone `/collections/[id]/evidence` rendering is no longer part of the
+frontend route family. Evidence remains an internal support object for
+traceback and document review.
 
 ### Fallback Policy (Strict Order)
 

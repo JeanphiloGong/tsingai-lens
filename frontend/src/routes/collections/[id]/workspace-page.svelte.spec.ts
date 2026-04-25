@@ -170,6 +170,7 @@ describe('collections/[id]/+page.svelte', () => {
 
 		const primaryButton = browserPage.getByRole('button', { name: 'Open comparisons' });
 		await expect.element(primaryButton).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('link', { name: 'Inspect evidence' })).not.toBeInTheDocument();
 	});
 
 	it('falls back to documents as the primary action when comparisons are unavailable', async () => {

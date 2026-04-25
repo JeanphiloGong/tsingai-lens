@@ -91,12 +91,6 @@ The target collection route family should be:
 - `/collections/[id]/graph`
   Secondary graph analysis
 
-Optional or transitional support route:
-
-- `/collections/[id]/evidence`
-  Support or debug surface for claim-centered evidence browsing when that view
-  is still useful during migration
-
 Redirect-only aliases such as `/steps`, `/sop`, `/search`, `/tasks`,
 `/reports`, and `/settings` are no longer part of the target frontend route
 family. Old deep links should use the canonical routes or workspace anchors
@@ -120,8 +114,8 @@ Rules:
 - `Results` remains the drilldown destination from comparison rows, document
   chains, and review workflows, but should not appear as a primary collection
   entry
-- `Evidence`, if still rendered as a standalone page, should not displace
-  `Documents` in the primary tab order
+- `Evidence` should not render as a standalone collection page; evidence review
+  belongs inside document and result verification flows
 - `Protocol` is visible but visually secondary
 - `Graph` remains available but should not be styled as the main end state
 - `Reports` should stay hidden or secondary until a stable collection-scoped
@@ -166,7 +160,6 @@ Primary CTA rules:
 
 Secondary CTA rules:
 
-- evidence, when exposed, should be framed as support for traceability review
 - graph should remain secondary even when ready
 
 ### Comparisons
@@ -299,26 +292,22 @@ Expected interactions:
 - open one full chain detail from a series row
 - land on anchored source context from result or evidence flows
 
-### Evidence
+### Evidence Review
 
-Optional route:
-
-- `/collections/[id]/evidence`
-
-Purpose:
-
-- preserve claim-centered evidence browsing when it still helps with review,
-  debugging, or migration
-- keep traceback inspection available without making evidence the main product
-  center
+Standalone evidence browsing is removed from the collection route family.
+Evidence remains a data and verification concept, but the UI should expose it
+inside document and result flows.
 
 Rules:
 
-- this page should be visually secondary to `comparisons`, `results`, and
-  `documents`
-- evidence pages should be reachable from result and document pages
-- new product copy should avoid implying evidence is the canonical collection
-  landing surface
+- document detail owns the source reader, evidence review panel, source anchors,
+  and traceback controls
+- result detail may summarize evidence IDs and link into the document source
+  reader with `evidence_id` context
+- collection-level navigation, workspace cards, and protocol actions should not
+  send users to `/collections/[id]/evidence`
+- new product copy should avoid implying evidence is a separate canonical
+  collection destination
 
 Detailed traceback rules are defined in
 [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md).
@@ -455,14 +444,13 @@ without waiting for backend delivery.
 Deliverables:
 
 - upgrade `workspace.ts` adapter
-- add `documents.ts`, `results.ts`, `comparisons.ts`, and optional `evidence.ts`
+- add `documents.ts`, `results.ts`, and `comparisons.ts`
 - add route skeletons:
   - `/comparisons`
   - `/results`
   - `/results/[resultId]`
   - `/documents`
   - `/documents/[documentId]`
-  - optional `/evidence`
   - `/protocol`
 - reorder collection sub-navigation
 
@@ -503,8 +491,8 @@ Constraint:
 
 Deliverables:
 
-- connect evidence entry points from result and document pages
-- decide whether standalone `/evidence` remains visible or becomes secondary
+- fold evidence review into result and document pages
+- remove standalone `/evidence` navigation and route rendering
 - move `steps` and `sop` under protocol framing
 - update copy and entry points so protocol is clearly conditional
 - reduce graph prominence in page hierarchy and workspace CTAs

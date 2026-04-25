@@ -656,7 +656,7 @@ function buildFixtureDetail(collectionId: string, resultId: string): ResultDetai
 		actions: {
 			open_document: `/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(listItem.document_id)}`,
 			open_comparisons: `/collections/${encodeURIComponent(collectionId)}/comparisons?property_normalized=${encodeURIComponent(listItem.property)}`,
-			open_evidence: `/collections/${encodeURIComponent(collectionId)}/evidence`
+			open_evidence: null
 		},
 		variant_dossier: {
 			variant_id: `var_${listItem.result_id}`,

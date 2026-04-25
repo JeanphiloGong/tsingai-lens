@@ -25,8 +25,6 @@
 	$: collectionName = $collections.find((item) => item.id === collectionId)?.name;
 	$: resultsVisible =
 		!workspace || getWorkspaceSurfaceState(workspace, 'results') !== 'not_applicable';
-	$: evidenceVisible =
-		!workspace || getWorkspaceSurfaceState(workspace, 'evidence') !== 'not_applicable';
 	$: protocolVisible =
 		!workspace || getWorkspaceSurfaceState(workspace, 'protocol') !== 'not_applicable';
 	$: graphVisible =
@@ -120,7 +118,7 @@
 	</a>
 </nav>
 
-{#if resultsVisible || evidenceVisible || protocolVisible || graphVisible}
+{#if resultsVisible || protocolVisible || graphVisible}
 	<nav class="subnav subnav--secondary" aria-label={$t('collection.moreLabel')}>
 		<span class="subnav__label">{$t('collection.moreLabel')}</span>
 		{#if resultsVisible}
@@ -129,14 +127,6 @@
 				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/results`)}
 			>
 				{$t('collection.tabs.results')}
-			</a>
-		{/if}
-		{#if evidenceVisible}
-			<a
-				href={`/collections/${collectionId}/evidence`}
-				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`)}
-			>
-				{$t('collection.tabs.evidence')}
 			</a>
 		{/if}
 		{#if protocolVisible}

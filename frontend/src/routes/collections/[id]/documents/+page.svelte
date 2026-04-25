@@ -300,9 +300,6 @@
                     <a class="btn btn--ghost btn--small" href={viewDocumentHref(item)}>
                       {$t('traceback.openDocument')}
                     </a>
-                    <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/evidence`}>
-                      {$t('overview.nextEvidence')}
-                    </a>
                     <a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/comparisons`}>
                       {$t('overview.nextComparisons')}
                     </a>

@@ -172,7 +172,7 @@ function defaultLinks(collectionId: string): WorkspaceLinks {
 		workspace: `/collections/${encoded}`,
 		documents: `/collections/${encoded}/documents`,
 		results: `/collections/${encoded}/results`,
-		evidence: `/collections/${encoded}/evidence`,
+		evidence: `/collections/${encoded}/documents`,
 		comparisons: `/collections/${encoded}/comparisons`,
 		protocol: `/collections/${encoded}/protocol`,
 		graph: `/collections/${encoded}/graph`
@@ -188,21 +188,25 @@ function normalizeWorkspaceRoute(
 	if (typeof value !== 'string' || !value.trim()) return fallback;
 
 	const normalized = value.trim();
-	if (!normalized.startsWith('/api/')) {
-		return normalized;
-	}
-
 	const encoded = encodeURIComponent(collectionId);
 	const apiPrefix = `/api/v1/collections/${encoded}`;
 	const routeMap = {
 		workspace: `/collections/${encoded}`,
 		documents: `/collections/${encoded}/documents`,
 		results: `/collections/${encoded}/results`,
-		evidence: `/collections/${encoded}/evidence`,
+		evidence: `/collections/${encoded}/documents`,
 		comparisons: `/collections/${encoded}/comparisons`,
 		protocol: `/collections/${encoded}/protocol`,
 		graph: `/collections/${encoded}/graph`
 	} as const;
+
+	if (surface === 'evidence') {
+		return routeMap.evidence;
+	}
+
+	if (!normalized.startsWith('/api/')) {
+		return normalized;
+	}
 
 	if (surface === 'workspace' && normalized === `${apiPrefix}/workspace`) {
 		return routeMap.workspace;
@@ -216,9 +220,6 @@ function normalizeWorkspaceRoute(
 			normalized === `/api/v1/comparable-results?collection_id=${encoded}`)
 	) {
 		return routeMap.results;
-	}
-	if (surface === 'evidence' && normalized === `${apiPrefix}/evidence/cards`) {
-		return routeMap.evidence;
 	}
 	if (surface === 'comparisons' && normalized === `${apiPrefix}/comparisons`) {
 		return routeMap.comparisons;

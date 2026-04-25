@@ -37,7 +37,9 @@
 		| 'baseline_normalized';
 
 	function uniqueSorted(values: string[]) {
-		return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value !== ''))).sort();
+		return Array.from(
+			new Set(values.map((value) => value.trim()).filter((value) => value !== ''))
+		).sort();
 	}
 
 	function routeFilterValue(name: ComparisonRouteFilterName) {
@@ -150,10 +152,6 @@
 			);
 		}
 		return parts.join(' | ') || $t('comparisons.noWarnings');
-	}
-
-	function evidenceCount(row: ComparisonRow) {
-		return row.evidence_bundle.supporting_evidence_ids.length;
 	}
 
 	function canViewSource(row: ComparisonRow) {
@@ -422,12 +420,6 @@
 											{$t('traceback.viewSource')}
 										</a>
 									{/if}
-									<a
-										class="btn btn--ghost btn--small"
-										href={`/collections/${collectionId}/evidence`}
-									>
-										{$t('overview.nextEvidence')} ({evidenceCount(item)})
-									</a>
 								</div>
 							</td>
 						</tr>

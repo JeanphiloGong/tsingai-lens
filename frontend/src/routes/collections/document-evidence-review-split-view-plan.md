@@ -27,13 +27,14 @@ Document Evidence Review
 │  └─ secondary actions such as open result detail or open original source
 └─ Split view
    ├─ Left: Source Reader
-   │  ├─ parsed sections by default
+   │  ├─ full parsed source blocks by default
    │  ├─ PDF facsimile later
-   │  ├─ section navigation
+   │  ├─ block navigation
    │  ├─ active anchor highlight
-   │  └─ explicit fallback state
+   │  └─ source-first reading width
    └─ Right: Evidence Review Panel
       ├─ paper summary
+      ├─ traceback status and source anchors
       ├─ variant dossiers
       ├─ result series
       ├─ result chains
@@ -47,19 +48,20 @@ chains can be compared without route switching.
 
 ## Source Reader
 
-The left source reader should show the paper context that supports the selected
-evidence chain.
+The left source reader should stay the primary reading surface. It should show
+the full parsed paper blocks that are available from the document content
+route, not only the excerpt that supports the selected evidence chain.
 
 Required first-slice behavior:
 
-- render parsed `sections` from the document content route
-- provide section navigation for quick movement through the paper
-- highlight the active traceback quote or section when available
-- show an explicit unavailable state when no anchor can be resolved
+- render parsed `blocks` from the document content route
+- provide block navigation for quick movement through the paper
+- highlight the active traceback quote or block when available
+- keep source-location status and anchor controls in the right evidence panel
 - preserve the user's return path to comparison or result drilldown surfaces
 
 PDF rendering should not block the first implementation slice. The page should
-use parsed sections first, then add a PDF mode only after the backend exposes a
+use parsed blocks first, then add a PDF mode only after the backend exposes a
 stable source-file URL and enough page or bounding-box metadata for useful
 navigation.
 
@@ -78,9 +80,10 @@ The right evidence review panel should organize the paper's extracted chain
 model while keeping source-location actions close to each chain.
 
 The first implementation does not need a tab system if a single scrollable
-panel is clearer. Whether rendered as sections or tabs, the panel should cover:
+panel is clearer. Whether rendered as cards or tabs, the panel should cover:
 
 - paper overview
+- traceback status and source anchors for the selected chain
 - variant dossiers
 - result series under each dossier
 - result chains under each series
@@ -158,8 +161,8 @@ Preferred selection flow:
    already loaded.
 4. Select the best anchor by `direct_anchor_ids` first, then by first returned
    anchor.
-5. Scroll the left reader to the matching section.
-6. Highlight the quote or active section.
+5. Scroll the left reader to the matching source block.
+6. Highlight the quote or active block.
 7. Show an explicit source-unavailable message if no source can be resolved.
 
 This interaction should not require opening a result detail page. Result detail
@@ -182,8 +185,8 @@ a drawer. It should show:
 - source anchors
 
 Each anchor should support direct jump back into the source reader. When the
-anchor has only section-level precision, the UI should still scroll to that
-section and make the degraded precision visible instead of failing silently.
+anchor has only block-level precision, the UI should still scroll to that block
+and make the degraded precision visible instead of failing silently.
 
 ## First-Slice State Model
 

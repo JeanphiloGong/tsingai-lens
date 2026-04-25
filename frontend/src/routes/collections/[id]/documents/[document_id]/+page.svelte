@@ -17,8 +17,8 @@
 		buildDocumentViewerHref,
 		fetchDocumentContent,
 		fetchEvidenceTraceback,
+		type DocumentContentBlock,
 		type DocumentContentResponse,
-		type DocumentContentSection,
 		type EvidenceTracebackResponse,
 		type TracebackAnchor
 	} from '../../../../_shared/traceback';
@@ -170,8 +170,9 @@
 			evidenceChainsLoading = false;
 		}
 
-		if (initialAnchor?.section_id) {
-			await scrollToSection(initialAnchor.section_id);
+		const initialBlockId = sourceBlockIdForAnchor(initialAnchor);
+		if (initialBlockId) {
+			await scrollToBlock(initialBlockId);
 		}
 	}
 
@@ -201,24 +202,23 @@
 		};
 	}
 
-	function highlightFor(section: DocumentContentSection) {
-		if (!selectedAnchor || selectedAnchor.section_id !== section.section_id) return null;
-		return highlightParts(section.text, selectedAnchor.quote);
+	function sourceBlockIdForAnchor(anchor: TracebackAnchor | null) {
+		return anchor?.block_id || anchor?.section_id || '';
 	}
 
-	function sectionTitle(section: DocumentContentSection) {
-		return section.title || section.section_type || section.section_id;
+	function highlightFor(block: DocumentContentBlock) {
+		if (!selectedAnchor || sourceBlockIdForAnchor(selectedAnchor) !== block.block_id) return null;
+		return highlightParts(block.text, selectedAnchor.quote);
 	}
 
-	function pageLabel(section: DocumentContentSection) {
-		if (section.page === null) return null;
-		return $t('traceback.pageLabel', { page: section.page });
+	function blockTitle(block: DocumentContentBlock) {
+		return block.heading_path || block.block_type || block.block_id;
 	}
 
-	async function scrollToSection(sectionId: string) {
+	async function scrollToBlock(blockId: string) {
 		if (!browser) return;
 		await tick();
-		const target = document.getElementById(`section-${sectionId}`);
+		const target = document.getElementById(`block-${blockId}`);
 		if (target && typeof target.scrollIntoView === 'function') {
 			target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 		}
@@ -228,8 +228,9 @@
 		selectedAnchorId = anchor.anchor_id;
 		sourceLocationStatus = 'located';
 		sourceLocationMessage = '';
-		if (anchor.section_id) {
-			await scrollToSection(anchor.section_id);
+		const blockId = sourceBlockIdForAnchor(anchor);
+		if (blockId) {
+			await scrollToBlock(blockId);
 		}
 	}
 
@@ -241,8 +242,8 @@
 		return content?.source_filename || null;
 	}
 
-	function sectionCount() {
-		return content?.sections.length ?? 0;
+	function blockCount() {
+		return content?.blocks.length ?? 0;
 	}
 
 	function showTracebackPanel() {
@@ -337,7 +338,7 @@
 
 			selectedAnchorId = anchor.anchor_id;
 			sourceLocationStatus = 'located';
-			await scrollToSection(anchor.section_id ?? '');
+			await scrollToBlock(sourceBlockIdForAnchor(anchor));
 		} catch (err) {
 			sourceLocationStatus = 'error';
 			sourceLocationMessage = errorMessage(err);
@@ -492,133 +493,56 @@
 						{/if}
 						<div class="detail-row">
 							<dt>{$t('traceback.sectionCountLabel')}</dt>
-							<dd>{sectionCount()}</dd>
+							<dd>{blockCount()}</dd>
 						</div>
-						{#if content?.page_count !== null}
-							<div class="detail-row">
-								<dt>{$t('traceback.pageCountLabel')}</dt>
-								<dd>{content?.page_count}</dd>
-							</div>
-						{/if}
 					</dl>
 				</article>
 
-				<article class="result-card source-location-card">
-					<h3>{$t('traceback.traceCardTitle')}</h3>
-					<p class="result-text">
-						{sourceLocationTitle(sourceLocationStatus, Boolean(selectedChain))}
-					</p>
-					<p class="note">
-						{sourceLocationBody(
-							sourceLocationStatus,
-							sourceLocationMessage,
-							Boolean(selectedChain)
-						)}
-					</p>
-					{#if selectedAnchor}
-						<dl class="detail-list">
-							{#if selectedEvidenceId}
-								<div class="detail-row">
-									<dt>{$t('traceback.evidenceIdsTitle')}</dt>
-									<dd>{selectedEvidenceId}</dd>
-								</div>
-							{/if}
-							<div class="detail-row">
-								<dt>{$t('traceback.locatorLabel')}</dt>
-								<dd>{locatorLabel(selectedAnchor)}</dd>
-							</div>
-							<div class="detail-row">
-								<dt>{$t('traceback.precisionLabel')}</dt>
-								<dd>{confidenceLabel(selectedAnchor)}</dd>
-							</div>
-							{#if selectedAnchor.page !== null}
-								<div class="detail-row">
-									<dt>{$t('traceback.pageNumberLabel')}</dt>
-									<dd>{selectedAnchor.page}</dd>
-								</div>
-							{/if}
-						</dl>
-					{/if}
-				</article>
-
-				{#if showTracebackPanel() && traceback?.anchors.length}
-					<section class="result-card detail-section">
-						<div class="detail-section__title">{$t('traceback.anchorsTitle')}</div>
-						<div class="traceback-anchor-list">
-							{#each traceback.anchors as anchor}
-								<button
-									class:selected-anchor={selectedAnchor?.anchor_id === anchor.anchor_id}
-									class="traceback-anchor"
-									type="button"
-									on:click={() => void selectAnchor(anchor)}
-								>
-									<div class="table-main">
-										<div class="table-title">{locatorLabel(anchor)}</div>
-										<div class="table-sub">{confidenceLabel(anchor)}</div>
-									</div>
-									{#if anchor.quote}
-										<p class="result-text">{anchor.quote}</p>
-									{/if}
-									<div class="note">
-										{#if anchor.page !== null}
-											{$t('traceback.pageLabel', { page: anchor.page })}
-										{/if}
-										{#if anchor.section_id}
-											{anchor.page !== null ? ' · ' : ''}{$t('traceback.sectionLabel', {
-												section: anchor.section_id
-											})}
-										{/if}
-									</div>
-								</button>
-							{/each}
-						</div>
-					</section>
-				{/if}
-
-				{#if content?.sections.length}
+				{#if content?.blocks.length}
 					<section class="result-card detail-section">
 						<div class="detail-section__title">{$t('traceback.sectionsTitle')}</div>
 						<div class="section-nav">
-							{#each content.sections as section}
+							{#each content.blocks as block}
 								<button
 									class="btn btn--ghost btn--small"
 									type="button"
-									on:click={() => void scrollToSection(section.section_id)}
+									on:click={() => void scrollToBlock(block.block_id)}
 								>
-									{sectionTitle(section)}
+									{blockTitle(block)}
 								</button>
 							{/each}
 						</div>
 					</section>
 
 					<section class="source-section-stack">
-						{#each content.sections as section}
+						{#each content.blocks as block}
 							<article
-								class:document-section--active={selectedAnchor?.section_id === section.section_id}
+								class:document-section--active={sourceBlockIdForAnchor(selectedAnchor) ===
+									block.block_id}
 								class="result-card document-section"
-								id={`section-${section.section_id}`}
+								id={`block-${block.block_id}`}
 							>
 								<div class="table-main">
-									<div class="table-title">{sectionTitle(section)}</div>
-									{#if pageLabel(section)}
-										<div class="table-sub">{pageLabel(section)}</div>
-									{/if}
+									<div class="table-title">{blockTitle(block)}</div>
+									<div class="table-sub">
+										{$t('traceback.blockLabel', { block: block.block_id })}
+									</div>
 								</div>
 
-								{#if highlightFor(section)}
-									{@const parts = highlightFor(section)}
+								{#if highlightFor(block)}
+									{@const parts = highlightFor(block)}
 									{#if parts}
 										<p class="document-text">
 											{parts.before}<mark>{parts.match}</mark>{parts.after}
 										</p>
 									{:else}
-										<p class="document-text">{section.text}</p>
+										<p class="document-text">{block.text}</p>
 									{/if}
 								{:else}
-									<p class="document-text">{section.text}</p>
+									<p class="document-text">{block.text}</p>
 								{/if}
 
-								{#if selectedAnchor?.section_id === section.section_id && selectedAnchor.quote && !highlightFor(section)}
+								{#if selectedAnchor && sourceBlockIdForAnchor(selectedAnchor) === block.block_id && selectedAnchor.quote && !highlightFor(block)}
 									<section class="detail-section">
 										<div class="detail-section__title">{$t('traceback.quoteTitle')}</div>
 										<p class="result-text">{selectedAnchor.quote}</p>
@@ -657,6 +581,78 @@
 				</article>
 
 				{#if !contentError}
+					<article class="result-card source-location-card">
+						<h3>{$t('traceback.traceCardTitle')}</h3>
+						<p class="result-text">
+							{sourceLocationTitle(sourceLocationStatus, Boolean(selectedChain))}
+						</p>
+						<p class="note">
+							{sourceLocationBody(
+								sourceLocationStatus,
+								sourceLocationMessage,
+								Boolean(selectedChain)
+							)}
+						</p>
+						{#if selectedAnchor}
+							<dl class="detail-list">
+								{#if selectedEvidenceId}
+									<div class="detail-row">
+										<dt>{$t('traceback.evidenceIdsTitle')}</dt>
+										<dd>{selectedEvidenceId}</dd>
+									</div>
+								{/if}
+								<div class="detail-row">
+									<dt>{$t('traceback.locatorLabel')}</dt>
+									<dd>{locatorLabel(selectedAnchor)}</dd>
+								</div>
+								<div class="detail-row">
+									<dt>{$t('traceback.precisionLabel')}</dt>
+									<dd>{confidenceLabel(selectedAnchor)}</dd>
+								</div>
+								{#if selectedAnchor.page !== null}
+									<div class="detail-row">
+										<dt>{$t('traceback.pageNumberLabel')}</dt>
+										<dd>{selectedAnchor.page}</dd>
+									</div>
+								{/if}
+							</dl>
+						{/if}
+					</article>
+
+					{#if showTracebackPanel() && traceback?.anchors.length}
+						<section class="result-card detail-section">
+							<div class="detail-section__title">{$t('traceback.anchorsTitle')}</div>
+							<div class="traceback-anchor-list">
+								{#each traceback.anchors as anchor}
+									<button
+										class:selected-anchor={selectedAnchor?.anchor_id === anchor.anchor_id}
+										class="traceback-anchor"
+										type="button"
+										on:click={() => void selectAnchor(anchor)}
+									>
+										<div class="table-main">
+											<div class="table-title">{locatorLabel(anchor)}</div>
+											<div class="table-sub">{confidenceLabel(anchor)}</div>
+										</div>
+										{#if anchor.quote}
+											<p class="result-text">{anchor.quote}</p>
+										{/if}
+										<div class="note">
+											{#if anchor.page !== null}
+												{$t('traceback.pageLabel', { page: anchor.page })}
+											{/if}
+											{#if sourceBlockIdForAnchor(anchor)}
+												{anchor.page !== null ? ' · ' : ''}{$t('traceback.blockLabel', {
+													block: sourceBlockIdForAnchor(anchor)
+												})}
+											{/if}
+										</div>
+									</button>
+								{/each}
+							</div>
+						</section>
+					{/if}
+
 					<article class="result-card document-chain-card">
 						<h3>{$t('results.documentChainsTitle')}</h3>
 						<p class="note">{$t('results.documentChainsLead')}</p>
@@ -889,7 +885,7 @@
 
 	.document-review-layout {
 		display: grid;
-		grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+		grid-template-columns: minmax(0, 2.1fr) minmax(320px, 0.9fr);
 		gap: 16px;
 		align-items: start;
 		margin-top: 16px;

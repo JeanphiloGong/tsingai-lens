@@ -29,10 +29,11 @@ export type DocumentProfilesResponse = {
 	items: DocumentProfile[];
 };
 
-export type DocumentContentSection = {
-	section_id: string;
-	heading: string | null;
-	section_type: string | null;
+export type DocumentContentBlock = {
+	block_id: string;
+	block_type: string | null;
+	heading_path: string | null;
+	heading_level: number;
 	order: number;
 	text: string;
 	text_unit_ids: string[];
@@ -46,7 +47,7 @@ export type DocumentContentResponse = {
 	title: string | null;
 	source_filename: string | null;
 	content_text: string;
-	sections: DocumentContentSection[];
+	blocks: DocumentContentBlock[];
 	warnings: string[];
 };
 
@@ -230,22 +231,26 @@ function normalizeComparabilityStatus(value: unknown): DocumentChainComparabilit
 		: 'insufficient';
 }
 
-function normalizeContentSection(value: unknown): DocumentContentSection | null {
+function normalizeContentBlock(value: unknown, index: number): DocumentContentBlock | null {
 	const record = asRecord(value);
 	if (!record) return null;
 
-	const section_id = String(record.section_id ?? '').trim();
-	if (!section_id) return null;
+	const block_id = String(record.block_id ?? '').trim();
+	const text = String(record.text ?? '').trim();
+	if (!block_id || !text) return null;
 
 	const startOffset = toNumber(record.start_offset);
 	const endOffset = toNumber(record.end_offset);
 
 	return {
-		section_id,
-		heading: toOptionalText(record.heading),
-		section_type: toOptionalText(record.section_type),
-		order: Number.isFinite(toNumber(record.order)) ? toNumber(record.order) : 0,
-		text: String(record.text ?? '').trim(),
+		block_id,
+		block_type: toOptionalText(record.block_type),
+		heading_path: toOptionalText(record.heading_path),
+		heading_level: Number.isFinite(toNumber(record.heading_level))
+			? toNumber(record.heading_level)
+			: 0,
+		order: Number.isFinite(toNumber(record.order)) ? toNumber(record.order) : index + 1,
+		text,
 		text_unit_ids: toStringList(record.text_unit_ids),
 		start_offset: Number.isFinite(startOffset) ? startOffset : null,
 		end_offset: Number.isFinite(endOffset) ? endOffset : null
@@ -682,10 +687,11 @@ function normalizeDocumentContent(
 		throw new Error('Document content response is invalid.');
 	}
 
-	const sections = Array.isArray(record.sections)
-		? record.sections
-				.map((item) => normalizeContentSection(item))
-				.filter((item): item is DocumentContentSection => item !== null)
+	const contentText = String(record.content_text ?? '').trim();
+	const blocks = Array.isArray(record.blocks)
+		? record.blocks
+				.map((item, index) => normalizeContentBlock(item, index))
+				.filter((item): item is DocumentContentBlock => item !== null)
 		: [];
 
 	return {
@@ -693,8 +699,8 @@ function normalizeDocumentContent(
 		document_id: String(record.document_id ?? documentId).trim() || documentId,
 		title: toOptionalText(record.title),
 		source_filename: toOptionalText(record.source_filename),
-		content_text: String(record.content_text ?? '').trim(),
-		sections,
+		content_text: contentText,
+		blocks,
 		warnings: toStringList(record.warnings)
 	};
 }
@@ -711,11 +717,12 @@ export async function fetchDocumentContent(
 			source_filename: 'fixture-paper.txt',
 			content_text:
 				'Experimental Section\nThe precursor powders were mixed in ethanol and stirred for 2 h.\nCharacterization\nXRD and SEM were used to characterize the powders.',
-			sections: [
+			blocks: [
 				{
-					section_id: 'methods',
-					heading: 'Experimental Section',
-					section_type: 'methods',
+					block_id: 'methods',
+					block_type: 'methods',
+					heading_path: 'Experimental Section',
+					heading_level: 1,
 					order: 1,
 					text: 'The precursor powders were mixed in ethanol and stirred for 2 h.',
 					text_unit_ids: ['tu-1'],
@@ -723,9 +730,10 @@ export async function fetchDocumentContent(
 					end_offset: 84
 				},
 				{
-					section_id: 'characterization',
-					heading: 'Characterization',
-					section_type: 'characterization',
+					block_id: 'characterization',
+					block_type: 'characterization',
+					heading_path: 'Characterization',
+					heading_level: 1,
 					order: 2,
 					text: 'XRD and SEM were used to characterize the powders.',
 					text_unit_ids: ['tu-2'],

@@ -69,16 +69,15 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					document_id: 'doc_1',
 					title: 'Paper A',
 					source_filename: 'paper-a.pdf',
-					page_count: 5,
 					content_text: 'content',
-					sections: [
+					blocks: [
 						{
-							section_id: 'results',
-							title: 'Results',
-							section_type: 'results',
-							text: 'Conductivity improved to 12 mS/cm.',
-							page: 4,
+							block_id: 'results',
+							block_type: 'results',
+							heading_path: 'Results',
+							heading_level: 1,
 							order: 1,
+							text: 'Conductivity improved to 12 mS/cm.',
 							start_offset: 0,
 							end_offset: 33,
 							text_unit_ids: []
@@ -127,6 +126,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							page: 4,
 							quote: 'Conductivity improved to 12 mS/cm.',
 							section_id: 'results',
+							block_id: 'results',
 							char_range: {
 								start: 0,
 								end: 33
@@ -232,6 +232,10 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Evidence review' }))
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Conductivity improved to 12 mS/cm.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Block results')).toBeInTheDocument();
 
 		const sectionHeading = browserPage.getByRole('heading', { name: 'Results from this document' });
 		await expect.element(sectionHeading).toBeInTheDocument();

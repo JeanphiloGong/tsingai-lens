@@ -15,9 +15,11 @@ comparison work on a small fixed corpus.
 
 Read this plan with:
 
+- [`../../../../../docs/decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md`](../../../../../docs/decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md)
 - [`README.md`](README.md)
 - [`proposal.md`](proposal.md)
 - [`parameter-registry-and-variant-report-scope.md`](parameter-registry-and-variant-report-scope.md)
+- [`variant-dossier-and-result-chain-backend-plan.md`](variant-dossier-and-result-chain-backend-plan.md)
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
 

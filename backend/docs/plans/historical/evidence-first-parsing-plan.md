@@ -29,11 +29,11 @@ This is a target implementation plan, not a description of already-implemented
 backend current-state behavior.
 
 For the current backend migration state, read
-[`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md).
+[`current-api-surface-migration-checklist.md`](../backend-wide/api-surface-migration/current-state.md).
 For the active near-term execution plan, read
 [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md).
 For the broader parent roadmap, read
-[`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
+[`goal-core-source-implementation-plan.md`](../backend-wide/goal-source-core-layering/implementation-plan.md).
 
 ## Scope
 
@@ -326,11 +326,11 @@ This backend plan is successful when:
 
 ## Related Docs
 
-- [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
+- [`current-api-surface-migration-checklist.md`](../backend-wide/api-surface-migration/current-state.md)
   Current backend migration state and reading order
 - [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
   Active near-term child execution plan for the Core slice
-- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
+- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-source-core-layering/implementation-plan.md)
   Broader parent roadmap for later Core, Goal, and Source waves
 - [`../../../docs/overview/lens-mission-positioning.md`](../../../../docs/overview/lens-mission-positioning.md)
   Shared long-lived Lens mission and positioning

@@ -175,8 +175,8 @@ Primary changes:
 - remove `/query` OpenAPI expectations from
   [`tests/integration/routers/test_protocol_api.py`](../../../tests/integration/routers/test_protocol_api.py)
 - update [`../specs/api.md`](../../specs/api.md)
-- update [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
-- update [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface-cutover-plan.md)
+- update [`current-api-surface-migration-checklist.md`](../backend-wide/api-surface-migration/current-state.md)
+- update [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface/implementation-plan.md)
 - update [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
 - update
   [`../../../docs/overview/system-overview.md`](../../../../docs/overview/system-overview.md)
@@ -231,8 +231,8 @@ than folded into this query retirement wave.
 
 ## Related Docs
 
-- [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface-cutover-plan.md)
-- [`current-api-surface-migration-checklist.md`](../backend-wide/current-api-surface-migration-checklist.md)
+- [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface/implementation-plan.md)
+- [`current-api-surface-migration-checklist.md`](../backend-wide/api-surface-migration/current-state.md)
 - [`../specs/api.md`](../../specs/api.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)

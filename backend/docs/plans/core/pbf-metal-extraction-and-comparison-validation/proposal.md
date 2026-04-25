@@ -35,7 +35,7 @@ Read this plan after:
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
 - [`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
-- [`../../backend-wide/materials-comparison-v2-plan.md`](../../backend-wide/materials-comparison-v2-plan.md)
+- [`../../backend-wide/materials-comparison-v2/implementation-plan.md`](../../backend-wide/materials-comparison-v2/implementation-plan.md)
 
 ## Why This Wave Exists
 
@@ -528,4 +528,4 @@ pass.
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
 - [`../document-profile-lightweight-triage-plan.md`](../document-profile-lightweight-triage-plan.md)
 - [`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
-- [`../../backend-wide/materials-comparison-v2-plan.md`](../../backend-wide/materials-comparison-v2-plan.md)
+- [`../../backend-wide/materials-comparison-v2/implementation-plan.md`](../../backend-wide/materials-comparison-v2/implementation-plan.md)

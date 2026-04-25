@@ -19,7 +19,7 @@ decoupling:
 Read this plan with:
 
 - [`source-residual-graphrag-retirement-plan.md`](source-residual-graphrag-retirement-plan.md)
-- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-business-layer-alignment-plan.md)
+- [`goal-source-core-business-layer-alignment-plan.md`](../backend-wide/goal-source-core-layering/proposal.md)
 
 ## Status
 

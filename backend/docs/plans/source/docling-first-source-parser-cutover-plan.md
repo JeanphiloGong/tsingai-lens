@@ -21,7 +21,7 @@ Read this plan with:
 
 - [`source-parser-evaluation-plan.md`](source-parser-evaluation-plan.md)
 - [`born-digital-source-parser-first-plan.md`](born-digital-source-parser-first-plan.md)
-- [`../backend-wide/materials-comparison-v2-plan.md`](../backend-wide/materials-comparison-v2-plan.md)
+- [`../backend-wide/materials-comparison-v2/implementation-plan.md`](../backend-wide/materials-comparison-v2/implementation-plan.md)
 
 ## Decision
 

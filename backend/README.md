@@ -59,7 +59,7 @@ Operations:
   Backend plan-family landing page for active waves and retained lineage
 
 If you are already inside an active backend change wave, use
-[`docs/plans/backend-wide/current-api-surface-migration-checklist.md`](docs/plans/backend-wide/current-api-surface-migration-checklist.md)
+[`docs/plans/backend-wide/api-surface-migration/current-state.md`](docs/plans/backend-wide/api-surface-migration/current-state.md)
 as the current-state page, then choose the owning plan family from
 [`docs/plans/README.md`](docs/plans/README.md) rather than starting from a
 flat file list.

@@ -19,7 +19,7 @@ It does not justify expanding scope into `evidence_cards`, comparison
 assembly, Source restructuring, or API-wide contract cleanup.
 
 For the broader backend roadmap, read
-[`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
+[`goal-core-source-implementation-plan.md`](../backend-wide/goal-source-core-layering/implementation-plan.md).
 For the shared domain-model correction, read
 [`../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md`](../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md).
 For the parent Core quality wave, read

@@ -37,15 +37,15 @@ The current API still leaks internal execution choices into public contracts.
 
 Current leakage points include:
 
-- [`../../../controllers/schemas/source/collection.py`](../../../controllers/schemas/source/collection.py)
+- [`../../../controllers/schemas/source/collection.py`](../../../../controllers/schemas/source/collection.py)
   exposes `default_method`
-- [`../../../controllers/schemas/source/task.py`](../../../controllers/schemas/source/task.py)
+- [`../../../controllers/schemas/source/task.py`](../../../../controllers/schemas/source/task.py)
   exposes `method` and `is_update_run`
-- [`../../../application/source/collection_service.py`](../../../application/source/collection_service.py)
+- [`../../../application/source/collection_service.py`](../../../../application/source/collection_service.py)
   persists `default_method` as collection metadata
-- [`../../../application/source/collection_build_task_runner.py`](../../../application/source/collection_build_task_runner.py)
+- [`../../../application/source/collection_build_task_runner.py`](../../../../application/source/collection_build_task_runner.py)
   accepts a caller-provided indexing method
-- [`../../../infra/source/config/pipeline_mode.py`](../../../infra/source/config/pipeline_mode.py)
+- [`../../../infra/source/config/pipeline_mode.py`](../../../../infra/source/config/pipeline_mode.py)
   defines `IndexingMethod.Standard` and `IndexingMethod.Fast` as engine-level
   execution options
 
@@ -205,7 +205,7 @@ Task responses should not gain engine-mode echo fields.
 
 Frontend should drive most UI state from:
 
-- [`../../../controllers/schemas/core/workspace.py`](../../../controllers/schemas/core/workspace.py)
+- [`../../../controllers/schemas/core/workspace.py`](../../../../controllers/schemas/core/workspace.py)
 
 Primary frontend decisions should come from:
 
@@ -222,7 +222,7 @@ engine configuration.
 
 Frontend may continue consuming:
 
-- [`../../../controllers/schemas/goal/intake.py`](../../../controllers/schemas/goal/intake.py)
+- [`../../../controllers/schemas/goal/intake.py`](../../../../controllers/schemas/goal/intake.py)
 
 In particular:
 
@@ -259,8 +259,8 @@ Backend decides whether to:
 
 The current mode-selection and downgrade policy now lives across:
 
-- [`../../../application/source/collection_build_task_runner.py`](../../../application/source/collection_build_task_runner.py)
-- [`../../../infra/source/config/pipeline_mode.py`](../../../infra/source/config/pipeline_mode.py)
+- [`../../../application/source/collection_build_task_runner.py`](../../../../application/source/collection_build_task_runner.py)
+- [`../../../infra/source/config/pipeline_mode.py`](../../../../infra/source/config/pipeline_mode.py)
 
 That logic should remain backend-owned rather than frontend-owned.
 
@@ -385,8 +385,8 @@ stable across rebuilds until evidence ids become deterministic.
 
 ## Related Docs
 
-- [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
-- [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
+- [`../architecture/goal-core-source-layering.md`](../../../architecture/goal-core-source-layering.md)
+- [`goal-core-source-contract-follow-up-plan.md`](../goal-source-core-layering/contract-follow-up.md)
+- [`goal-core-source-implementation-plan.md`](../goal-source-core-layering/implementation-plan.md)
+- [`current-api-surface-migration-checklist.md`](../api-surface-migration/current-state.md)
+- [`core-first-product-surface-cutover-plan.md`](../core-first-product-surface/implementation-plan.md)

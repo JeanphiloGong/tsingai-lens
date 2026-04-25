@@ -24,10 +24,10 @@ effective implementation status inside `backend/`.
 It does not attempt to restate frontend requirements in full and it does not
 replace:
 
-- [`../specs/api.md`](../../specs/api.md)
-- [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
+- [`../specs/api.md`](../../../specs/api.md)
+- [`../architecture/domain-architecture.md`](../../../architecture/domain-architecture.md)
 
-It supersedes [`v1-api-migration-notes.md`](../historical/v1-api-migration-notes.md) as the
+It supersedes [`v1-api-migration-notes.md`](../../historical/v1-api-migration-notes.md) as the
 current migration entry point while that note is retained as historical bridge
 context.
 
@@ -211,14 +211,14 @@ semantic center of Core.
 
 ## Related Docs
 
-- [`../specs/api.md`](../../specs/api.md)
-- [`../architecture/overview.md`](../../architecture/overview.md)
-- [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
-- [`../architecture/core-comparison/README.md`](../../architecture/core-comparison/README.md)
-- [`core-stabilization-and-seam-extraction-plan.md`](../core/core-stabilization-and-seam-extraction-plan.md)
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-- [`graph-surface-plan.md`](../derived/graph-surface-plan.md)
-- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
-- [`../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md`](../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md)
-- [`v1-api-migration-notes.md`](../historical/v1-api-migration-notes.md)
-- [`evidence-first-parsing-plan.md`](../historical/evidence-first-parsing-plan.md)
+- [`../specs/api.md`](../../../specs/api.md)
+- [`../architecture/overview.md`](../../../architecture/overview.md)
+- [`../architecture/domain-architecture.md`](../../../architecture/domain-architecture.md)
+- [`../architecture/core-comparison/README.md`](../../../architecture/core-comparison/README.md)
+- [`core-stabilization-and-seam-extraction-plan.md`](../../core/core-stabilization-and-seam-extraction-plan.md)
+- [`goal-core-source-implementation-plan.md`](../goal-source-core-layering/implementation-plan.md)
+- [`graph-surface-plan.md`](../../derived/graph-surface-plan.md)
+- [`core-first-product-surface-cutover-plan.md`](../core-first-product-surface/implementation-plan.md)
+- [`../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md`](../../../../../docs/decisions/rfc-paper-facts-primary-domain-model.md)
+- [`v1-api-migration-notes.md`](../../historical/v1-api-migration-notes.md)
+- [`evidence-first-parsing-plan.md`](../../historical/evidence-first-parsing-plan.md)

@@ -24,7 +24,7 @@ The purpose of this cutover is straightforward:
   artifacts
 
 For the broader backend roadmap, read
-[`../../../../../../docs/plans/backend-wide/goal-core-source-implementation-plan.md`](../../../../../../docs/plans/backend-wide/goal-core-source-implementation-plan.md).
+[`../../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md`](../../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md).
 For the immediate parent quality wave, read
 [`../../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md).
 For the layering rule that keeps stable research facts in Core rather than in
@@ -459,7 +459,7 @@ Guardrails:
 - [`../../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md)
   is the immediate parent execution plan. This page is the detailed child plan
   for the hard cutover decision inside that quality wave.
-- [`../../../../../../docs/plans/backend-wide/goal-core-source-implementation-plan.md`](../../../../../../docs/plans/backend-wide/goal-core-source-implementation-plan.md)
+- [`../../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md`](../../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md)
   remains the broader backend roadmap.
 
 ### Companion Docs
@@ -482,4 +482,4 @@ than expanding this page into an open-ended parser program.
 - [`id-boundary.md`](id-boundary.md)
 - [`../../../../../../docs/plans/core/minimal-core-domain-backfill-plan.md`](../../../../../../docs/plans/core/minimal-core-domain-backfill-plan.md)
 - [`../../../../../../docs/architecture/goal-core-source-layering.md`](../../../../../../docs/architecture/goal-core-source-layering.md)
-- [`../../../../../../docs/plans/backend-wide/goal-core-source-implementation-plan.md`](../../../../../../docs/plans/backend-wide/goal-core-source-implementation-plan.md)
+- [`../../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md`](../../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md)

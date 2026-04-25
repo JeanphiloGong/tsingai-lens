@@ -405,4 +405,4 @@ That risk is still lower than preserving the current ambiguity indefinitely.
 - [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
 - [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](rfc-evidence-first-literature-parsing.md)
-- [Materials Comparison V2 Plan](../../backend/docs/plans/backend-wide/materials-comparison-v2-plan.md)
+- [Materials Comparison V2 Plan](../../backend/docs/plans/backend-wide/materials-comparison-v2/implementation-plan.md)

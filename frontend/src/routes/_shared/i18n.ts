@@ -1022,7 +1022,7 @@ const translations: Record<Language, Translations> = {
 				'Use graph preview and GraphML export as secondary analysis, not the primary end state.',
 			advancedTitle: 'Advanced access',
 			advancedDesc:
-				'Documents, tasks, reports, and settings remain reachable through workspace sections and compatibility links.',
+				'Tasks, reports, and read-only settings stay inside the workspace so the primary route tree remains focused.',
 			tutorialTitle: 'Visualizing Your Knowledge Graph (Gephi)',
 			tutorialSub: 'Export GraphML from the web UI and explore it in Gephi.',
 			tutorialStep1Title: '1. Build a collection graph',
@@ -2013,7 +2013,7 @@ const translations: Record<Language, Translations> = {
 			surfaceGraphTitle: '图谱',
 			surfaceGraphDesc: '图谱预览和 GraphML 导出属于辅助分析，不是主终点。',
 			advancedTitle: '高级入口',
-			advancedDesc: '文档、任务、报告和设置都还在，但被收进工作区分区和兼容跳转中。',
+			advancedDesc: '任务、报告和只读设置保留在工作区分区中，主路由树保持聚焦。',
 			tutorialTitle: '知识图谱可视化（Gephi）',
 			tutorialSub: '通过 Web 界面导出 GraphML，并在 Gephi 中分析结构。',
 			tutorialStep1Title: '1. 构建集合图谱',

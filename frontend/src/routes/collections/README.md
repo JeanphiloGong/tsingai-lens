@@ -43,6 +43,9 @@ This node owns the collection workspace route family in the frontend.
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)
   Follow-on collection UI restructuring proposal for state hierarchy and page
   information architecture
+- [`legacy-route-alias-cleanup-plan.md`](legacy-route-alias-cleanup-plan.md)
+  Frontend-local plan for removing redirect-only collection route aliases while
+  keeping active backend APIs intact
 - [`document-result-evidence-chain-proposal.md`](document-result-evidence-chain-proposal.md)
   Frontend-local proposal for reading documents and results as variant dossiers,
   result chains, and result series

@@ -39,8 +39,8 @@ The current frontend still reflects the older product center:
   assumptions
 - evidence is still too close to the center of the collection hierarchy
 - the workspace contract still has to normalize older artifact-first fields
-- `documents`, `tasks`, and `reports` still carry legacy or compatibility
-  behavior instead of a clear product hierarchy
+- task, report, and settings affordances still need to stay visually contained
+  inside the workspace instead of becoming parallel route families
 
 This means the frontend can still mislead users about the intended product
 flow even though the shared product direction is now:
@@ -97,8 +97,10 @@ Optional or transitional support route:
   Support or debug surface for claim-centered evidence browsing when that view
   is still useful during migration
 
-During migration, the existing `/steps` and `/sop` routes may remain as
-compatibility aliases or redirects into `/protocol/*`.
+Redirect-only aliases such as `/steps`, `/sop`, `/search`, `/tasks`,
+`/reports`, and `/settings` are no longer part of the target frontend route
+family. Old deep links should use the canonical routes or workspace anchors
+instead of compatibility pages.
 
 ## Navigation Rules
 
@@ -512,8 +514,8 @@ Deliverables:
 Deliverables:
 
 - remove redirect-only route patterns that no longer serve the IA
-- decide whether `/steps` and `/sop` stay as aliases or redirect to
-  `/protocol/*`
+- remove stale guidance that describes `/steps`, `/sop`, `/search`, `/tasks`,
+  `/reports`, or `/settings` as collection pages
 - tighten type definitions to the final backend contract
 - remove stale wording that still treats evidence as the main collection center
 

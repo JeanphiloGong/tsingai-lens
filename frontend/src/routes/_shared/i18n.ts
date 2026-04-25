@@ -729,7 +729,115 @@ const translations: Record<Language, Translations> = {
 			title: 'Evidence',
 			lead: 'Use this page to check what evidence actually supports a conclusion and under what conditions.',
 			loading: 'Loading evidence...',
-			empty: 'No evidence is available yet.',
+			review: {
+				title: 'Evidence Review',
+				description:
+					'Review each conclusion against its source evidence, traceability, confidence, and comparability.',
+				count: '{count} evidence item(s)',
+				updatedAt: 'Updated: {time}',
+				total: 'Total evidence',
+				traceable: 'Traceable',
+				needsReview: 'Needs review',
+				comparable: 'Can enter comparison',
+				unusable: 'Unusable',
+				summaryLabel: 'Evidence quality summary',
+				error: 'Could not load evidence.',
+				processing: 'Starting processing...',
+				processingStarted: 'Processing started. Refresh after the run prepares evidence.',
+				actionTodo: '{action} is reserved until review actions are wired.'
+			},
+			filters: {
+				title: 'Evidence filters',
+				searchLabel: 'Search evidence',
+				searchPlaceholder: 'Search conclusions, materials, methods, parameters...',
+				clear: 'Clear',
+				all: 'All',
+				type: 'Conclusion type',
+				traceability: 'Traceability',
+				source: 'Evidence source',
+				confidence: 'Confidence',
+				comparability: 'Comparison status'
+			},
+			types: {
+				process: 'Process',
+				method: 'Method',
+				material: 'Material',
+				property: 'Property',
+				result: 'Result',
+				condition: 'Condition',
+				other: 'Other'
+			},
+			traceability: {
+				direct: 'Directly traceable',
+				indirect: 'Indirectly traceable',
+				none: 'Not traceable'
+			},
+			sources: {
+				text: 'Text',
+				table: 'Table',
+				figure: 'Figure',
+				abstract: 'Abstract',
+				method: 'Methods'
+			},
+			confidence: {
+				high: 'High',
+				medium: 'Medium',
+				low: 'Low',
+				unknown: 'Unknown'
+			},
+			comparability: {
+				joinable: 'Can add to comparison',
+				needs_context: 'Needs conditions',
+				not_recommended: 'Not recommended',
+				added: 'Already added'
+			},
+			sort: {
+				label: 'Sort',
+				confidenceDesc: 'Confidence high to low',
+				confidenceAsc: 'Confidence low to high',
+				recent: 'Recently extracted',
+				document: 'By document'
+			},
+			list: {
+				count: '{count} evidence item(s)',
+				emptyFiltered: 'No evidence matches the current filters.'
+			},
+			card: {
+				extractedClaim: 'Extracted conclusion',
+				claimNote:
+					'This is the AI-extracted and normalized conclusion, separated from the original source evidence.',
+				sourceEvidence: 'Source evidence',
+				sourceDocument: 'Source document',
+				sourceType: 'Evidence source',
+				location: 'Traceback location',
+				comparability: 'Comparability',
+				materials: 'Materials',
+				parameters: 'Parameters',
+				tags: 'Tags',
+				confidenceLevel: 'Confidence level',
+				confidenceValue: 'Confidence {value}'
+			},
+			actions: {
+				viewSource: 'View source',
+				addToComparison: 'Add to comparison',
+				viewComparison: 'View comparison',
+				markIssue: 'Mark issue',
+				markTrusted: 'Mark trusted',
+				viewReason: 'View reason',
+				refresh: 'Refresh'
+			},
+			more: {
+				label: 'More actions',
+				copyEvidence: 'Copy evidence',
+				removeFromComparison: 'Remove from comparison',
+				markUnusable: 'Mark unusable',
+				reanalyze: 'Reanalyze'
+			},
+			empty: {
+				title: 'No evidence yet',
+				description:
+					'After document parsing and evidence extraction finish, Lens will show traceable conclusions, source evidence, and comparison status here.'
+			},
 			filterClaimType: 'Conclusion type',
 			filterTraceability: 'How well traced',
 			filterSourceType: 'Evidence comes from',
@@ -2109,7 +2217,112 @@ const translations: Record<Language, Translations> = {
 			title: '证据',
 			lead: '用这个页面确认一个结论到底由什么证据支撑，以及这些证据是在什么条件下成立的。',
 			loading: '正在加载证据...',
-			empty: '当前还没有证据结果。',
+			review: {
+				title: '证据审查',
+				description: '查看每条结论的原文依据、追溯状态、置信度和可比性。',
+				count: '{count} 条证据',
+				updatedAt: '最近更新：{time}',
+				total: '证据总数',
+				traceable: '可追溯',
+				needsReview: '需人工检查',
+				comparable: '可进入比较',
+				unusable: '不可使用',
+				summaryLabel: '证据质量概览',
+				error: '无法加载证据。',
+				processing: '正在开始处理...',
+				processingStarted: '处理已开始。请在证据生成后刷新查看。',
+				actionTodo: '“{action}”暂未接入审核操作。'
+			},
+			filters: {
+				title: '证据筛选',
+				searchLabel: '搜索证据',
+				searchPlaceholder: '搜索结论、材料、方法、参数...',
+				clear: '清空',
+				all: '全部',
+				type: '结论类型',
+				traceability: '追溯程度',
+				source: '证据来源',
+				confidence: '置信度',
+				comparability: '比较状态'
+			},
+			types: {
+				process: 'Process',
+				method: 'Method',
+				material: 'Material',
+				property: 'Property',
+				result: 'Result',
+				condition: 'Condition',
+				other: 'Other'
+			},
+			traceability: {
+				direct: '可直接追溯',
+				indirect: '间接追溯',
+				none: '不可追溯'
+			},
+			sources: {
+				text: '正文',
+				table: '表格',
+				figure: '图',
+				abstract: '摘要',
+				method: '方法'
+			},
+			confidence: {
+				high: '高',
+				medium: '中',
+				low: '低',
+				unknown: '未知'
+			},
+			comparability: {
+				joinable: '可加入比较',
+				needs_context: '需补条件',
+				not_recommended: '不建议比较',
+				added: '已加入'
+			},
+			sort: {
+				label: '排序',
+				confidenceDesc: '按置信度从高到低',
+				confidenceAsc: '按置信度从低到高',
+				recent: '最近提取',
+				document: '按文档排序'
+			},
+			list: {
+				count: '共 {count} 条证据',
+				emptyFiltered: '没有符合当前筛选条件的证据。'
+			},
+			card: {
+				extractedClaim: '提取结论',
+				claimNote: '这是 AI 从文献中抽取和归一化后的结论，已和原文证据分开显示。',
+				sourceEvidence: '原文证据',
+				sourceDocument: '来源文档',
+				sourceType: '证据来源',
+				location: '追溯位置',
+				comparability: '可比性',
+				materials: '涉及材料',
+				parameters: '涉及参数',
+				tags: '标签',
+				confidenceLevel: '置信度等级',
+				confidenceValue: '置信度 {value}'
+			},
+			actions: {
+				viewSource: '查看原文',
+				addToComparison: '加入比较',
+				viewComparison: '查看比较',
+				markIssue: '标记问题',
+				markTrusted: '标记可信',
+				viewReason: '查看原因',
+				refresh: '刷新'
+			},
+			more: {
+				label: '更多操作',
+				copyEvidence: '复制证据',
+				removeFromComparison: '从比较中移除',
+				markUnusable: '标记为不可用',
+				reanalyze: '重新分析'
+			},
+			empty: {
+				title: '暂无证据',
+				description: '完成文档解析和证据提取后，Lens 会在这里展示可追溯的结论、原文依据和比较状态。'
+			},
 			filterClaimType: '结论类型',
 			filterTraceability: '追溯程度',
 			filterSourceType: '证据来源',

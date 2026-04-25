@@ -229,13 +229,16 @@ Result list sections:
 
 Result detail sections:
 
-- result summary
-- material and variant context
-- measurement value and property
-- baseline and test-condition context
+- chain summary
+- parent variant dossier summary
+- process or sample state
+- chain-local test condition
+- result values and value provenance
+- baseline detail
+- structure or defect support
 - collection-scoped assessment
-- supporting evidence
-- source document links
+- series navigation when sibling chains exist
+- source document links and anchor actions
 
 Expected interactions:
 
@@ -243,11 +246,13 @@ Expected interactions:
 - open result detail from list or from comparison rows
 - open filtered comparisons from a result
 - open source document verification from a result
-- inspect supporting evidence without losing result context
+- inspect supporting evidence without losing result-chain context
 
 `Results` is the product-facing projection over internal semantic comparison
 artifacts. Route code should not expose raw `ComparableResult` internals as the
-page's primary conceptual model.
+page's primary conceptual model. As the additive evidence-chain contract lands,
+the result page should read as one chain-first drilldown rather than as a
+generic measurement card.
 
 ### Documents
 
@@ -273,8 +278,11 @@ Document detail sections:
 
 - source metadata
 - original content or content viewer
+- paper overview and missingness summary
+- variant dossier list
+- grouped result series under each dossier
+- chain detail drawer or equivalent drilldown
 - evidence highlights or traceback targets
-- extracted results from the same paper
 
 Expected interactions:
 
@@ -283,6 +291,8 @@ Expected interactions:
 - inspect `protocol_extractability_signals`
 - inspect parsing warnings per paper
 - open result detail for results extracted from the same paper
+- expand one variant dossier and inspect grouped result series
+- open one full chain detail from a series row
 - land on anchored source context from result or evidence flows
 
 ### Evidence

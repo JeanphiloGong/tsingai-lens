@@ -1,39 +1,55 @@
 # Backend-Wide Plans
 
-This family owns backend plans whose lowest common ancestor is the backend
-module itself rather than one business layer.
+This family owns backend-local plan topics whose lowest common ancestor is the
+backend module itself rather than `source/`, `core/`, or `derived/`.
 
-Use this family for:
+Use this family when the work is still backend-owned but spans multiple
+business layers, records backend-wide current state, or coordinates one
+backend-local rollout wave across several seams.
 
-- current-state checkpoints
-- cross-layer contract freeze work
-- package-alignment waves
-- backend-wide closure waves
-- product-surface or contract cleanup that spans Source, Core, and Derived
+Shared frontend/backend authority does not belong here. Put cross-module
+product meaning, shared contract freeze work, and repository-level delivery
+order in root `docs/`.
 
-## Reading Order
+## Topic Families
 
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-  Canonical current-state entry
-- [`goal-source-core-business-layer-alignment-plan.md`](goal-source-core-business-layer-alignment-plan.md)
-  Current code-tree alignment plan for `goal / source / core / derived`
-- [`goal-core-source-implementation-plan.md`](goal-core-source-implementation-plan.md)
-  Parent five-layer rollout roadmap
-- [`goal-core-source-contract-follow-up-plan.md`](goal-core-source-contract-follow-up-plan.md)
-  Contract-freeze follow-up across the five-layer model
-- [`materials-comparison-v2-plan.md`](materials-comparison-v2-plan.md)
-  Backend-wide contract and closure page for the materials comparison backbone
-- [`core-first-product-surface-cutover-plan.md`](core-first-product-surface-cutover-plan.md)
-  Backend-wide closure page for the Core-first graph/report/product-surface cut
-- [`frontend-facing-contract-cleanup-plan.md`](frontend-facing-contract-cleanup-plan.md)
-  Backend-wide frontend-contract cleanup lineage
-- [`index-to-build-contract-cutover-plan.md`](index-to-build-contract-cutover-plan.md)
-  Coordinated backend/frontend hard-cut plan for renaming collection
-  processing from `index` to `build`
-- [`backend-request-id-and-extraction-observability-plan.md`](backend-request-id-and-extraction-observability-plan.md)
-  Backend-wide request correlation and Core extraction diagnostics plan
+- [`api-surface-migration/README.md`](api-surface-migration/README.md)
+  Backend-local API migration current-state family
+- [`goal-source-core-layering/README.md`](goal-source-core-layering/README.md)
+  Proposal, rollout, and contract follow-up family for explicit
+  `goal / source / core / derived` layering
+- [`evidence-chain-product-surface/README.md`](evidence-chain-product-surface/README.md)
+  Backend implementation family for dossier, chain, and series delivery on
+  the current semantic backbone
+- [`core-first-product-surface/README.md`](core-first-product-surface/README.md)
+  Backend-local cutover family for the Core-first product surface shift
+- [`frontend-facing-contract-cleanup/README.md`](frontend-facing-contract-cleanup/README.md)
+  Backend-owned cleanup family for frontend-consumed contract semantics
+- [`index-to-build-contract/README.md`](index-to-build-contract/README.md)
+  Backend implementation family for the `index` to `build` vocabulary cut
+- [`materials-comparison-v2/README.md`](materials-comparison-v2/README.md)
+  Backend-local materials comparison direction and closure family
+- [`request-id-and-extraction-observability/README.md`](request-id-and-extraction-observability/README.md)
+  Backend-wide request correlation and extraction diagnostics family
+
+## Reading Paths
+
+- Backend migration state:
+  start at [`api-surface-migration/current-state.md`](api-surface-migration/current-state.md)
+- Backend layering and package alignment:
+  start at [`goal-source-core-layering/README.md`](goal-source-core-layering/README.md)
+- Backend evidence-chain delivery:
+  start at [`evidence-chain-product-surface/README.md`](evidence-chain-product-surface/README.md)
+- Backend-local materials comparison direction:
+  start at [`materials-comparison-v2/README.md`](materials-comparison-v2/README.md)
 
 ## Boundary Rule
 
-If a plan mainly belongs to Source, Core, or Derived, keep it in that family
-even when it has some neighboring impact.
+- If a plan mainly belongs to `source/`, `core/`, or `derived/`, keep it in
+  that family even when it has neighboring impact.
+- If the topic needs both frontend and backend to follow one shared contract,
+  keep the authority in root `docs/` and let this family hold only the
+  backend-owned companion material.
+- Inside `backend-wide/`, prefer one topic directory per subject and let child
+  filenames express role, such as `proposal.md`, `current-state.md`, or
+  `implementation-plan.md`.

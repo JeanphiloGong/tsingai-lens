@@ -26,10 +26,10 @@ not allow a long-lived compatibility route family.
 
 Read this plan with:
 
-- [`frontend-facing-contract-cleanup-plan.md`](frontend-facing-contract-cleanup-plan.md)
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`../../specs/api.md`](../../specs/api.md)
-- [`../../../../frontend/docs/frontend-plan.md`](../../../../frontend/docs/frontend-plan.md)
+- [`frontend-facing-contract-cleanup-plan.md`](../frontend-facing-contract-cleanup/implementation-plan.md)
+- [`current-api-surface-migration-checklist.md`](../api-surface-migration/current-state.md)
+- [`../../specs/api.md`](../../../specs/api.md)
+- [`../../../../frontend/docs/frontend-plan.md`](../../../../../frontend/docs/frontend-plan.md)
 
 ## Why This Wave Is Needed
 
@@ -58,15 +58,15 @@ That means:
 
 Current frontend code still expects outdated contract pieces:
 
-- [`../../../../frontend/src/routes/_shared/tasks.ts`](../../../../frontend/src/routes/_shared/tasks.ts)
+- [`../../../../frontend/src/routes/_shared/tasks.ts`](../../../../../frontend/src/routes/_shared/tasks.ts)
   still types `graphrag_index_started` and `graphrag_index_completed`
 - the same file still calls
   `POST /api/v1/collections/{collection_id}/tasks/index`
-- [`../../../../frontend/src/routes/_shared/workspace.ts`](../../../../frontend/src/routes/_shared/workspace.ts)
+- [`../../../../frontend/src/routes/_shared/workspace.ts`](../../../../../frontend/src/routes/_shared/workspace.ts)
   still expects `sections_ready` and `graphml_ready`
-- [`../../../../frontend/src/routes/collections/[id]/+layout.svelte`](../../../../frontend/src/routes/collections/[id]/+layout.svelte)
+- [`../../../../frontend/src/routes/collections/[id]/+layout.svelte`](../../../../../frontend/src/routes/collections/[id]/+layout.svelte)
   still treats `graphml_ready` as a graph visibility signal
-- [`../../../../frontend/src/routes/_shared/i18n.ts`](../../../../frontend/src/routes/_shared/i18n.ts)
+- [`../../../../frontend/src/routes/_shared/i18n.ts`](../../../../../frontend/src/routes/_shared/i18n.ts)
   still renders GraphRAG-era stage labels
 
 This means the next vocabulary cleanup should not be treated as a backend-only
@@ -287,17 +287,17 @@ Target frontend contract rules:
 Primary backend changes:
 
 - rename the route in
-  [`../../../controllers/source/tasks.py`](../../../controllers/source/tasks.py)
+  [`../../../controllers/source/tasks.py`](../../../../controllers/source/tasks.py)
   from `/tasks/index` to `/tasks/build`
 - rename request/handler symbols from `IndexTask*` / `create_index_task` to
   `BuildTask*` / `create_build_task`
 - change task creation in
-  [`../../../application/source/task_service.py`](../../../application/source/task_service.py)
+  [`../../../application/source/task_service.py`](../../../../application/source/task_service.py)
   from `task_type="index"` to `task_type="build"`
 - update
-  [`../../../controllers/schemas/source/task.py`](../../../controllers/schemas/source/task.py)
+  [`../../../controllers/schemas/source/task.py`](../../../../controllers/schemas/source/task.py)
   to the new task-stage enum
-- update [`../../specs/api.md`](../../specs/api.md) to the new route and stage
+- update [`../../specs/api.md`](../../../specs/api.md) to the new route and stage
   vocabulary
 
 Exit criteria:
@@ -311,7 +311,7 @@ Exit criteria:
 Primary backend changes:
 
 - rename
-  [`../../../application/source/collection_build_task_runner.py`](../../../application/source/collection_build_task_runner.py)
+  [`../../../application/source/collection_build_task_runner.py`](../../../../application/source/collection_build_task_runner.py)
   to a build-oriented name such as `collection_build_task_runner.py`
 - rename `IndexTaskRunner` to `CollectionBuildTaskRunner`
 - rename `run_index_task()` to `run_build_task()`
@@ -337,7 +337,7 @@ the naming correction.
 
 Primary backend changes:
 
-- rename [`../../../infra/source/runtime/build_source_artifacts.py`](../../../infra/source/runtime/build_source_artifacts.py)
+- rename [`../../../infra/source/runtime/build_source_artifacts.py`](../../../../infra/source/runtime/build_source_artifacts.py)
   to a build-oriented runtime entry such as `build_source_artifacts.py` or
   `run_source_pipeline.py`
 - rename `build_index()` to a name that describes the current runtime job
@@ -355,14 +355,14 @@ Exit criteria:
 
 Frontend files that need direct contract updates:
 
-- [`../../../../frontend/src/routes/_shared/tasks.ts`](../../../../frontend/src/routes/_shared/tasks.ts)
-- [`../../../../frontend/src/routes/_shared/workspace.ts`](../../../../frontend/src/routes/_shared/workspace.ts)
-- [`../../../../frontend/src/routes/_shared/i18n.ts`](../../../../frontend/src/routes/_shared/i18n.ts)
-- [`../../../../frontend/src/routes/+page.svelte`](../../../../frontend/src/routes/+page.svelte)
-- [`../../../../frontend/src/routes/collections/[id]/+page.svelte`](../../../../frontend/src/routes/collections/[id]/+page.svelte)
-- [`../../../../frontend/src/routes/collections/[id]/+layout.svelte`](../../../../frontend/src/routes/collections/[id]/+layout.svelte)
-- [`../../../../frontend/src/routes/collections/lens-v1-interface-spec.md`](../../../../frontend/src/routes/collections/lens-v1-interface-spec.md)
-- [`../../../../frontend/docs/frontend-plan.md`](../../../../frontend/docs/frontend-plan.md)
+- [`../../../../frontend/src/routes/_shared/tasks.ts`](../../../../../frontend/src/routes/_shared/tasks.ts)
+- [`../../../../frontend/src/routes/_shared/workspace.ts`](../../../../../frontend/src/routes/_shared/workspace.ts)
+- [`../../../../frontend/src/routes/_shared/i18n.ts`](../../../../../frontend/src/routes/_shared/i18n.ts)
+- [`../../../../frontend/src/routes/+page.svelte`](../../../../../frontend/src/routes/+page.svelte)
+- [`../../../../frontend/src/routes/collections/[id]/+page.svelte`](../../../../../frontend/src/routes/collections/[id]/+page.svelte)
+- [`../../../../frontend/src/routes/collections/[id]/+layout.svelte`](../../../../../frontend/src/routes/collections/[id]/+layout.svelte)
+- [`../../../../frontend/src/routes/collections/lens-v1-interface-spec.md`](../../../../../frontend/src/routes/collections/lens-v1-interface-spec.md)
+- [`../../../../frontend/docs/frontend-plan.md`](../../../../../frontend/docs/frontend-plan.md)
 
 ### Frontend Required Changes
 
@@ -452,8 +452,8 @@ This plan is complete when:
 
 ## Related Docs
 
-- [`frontend-facing-contract-cleanup-plan.md`](frontend-facing-contract-cleanup-plan.md)
-- [`current-api-surface-migration-checklist.md`](current-api-surface-migration-checklist.md)
-- [`../../specs/api.md`](../../specs/api.md)
-- [`../../../../frontend/docs/frontend-plan.md`](../../../../frontend/docs/frontend-plan.md)
-- [`../../../../frontend/src/routes/collections/lens-v1-interface-spec.md`](../../../../frontend/src/routes/collections/lens-v1-interface-spec.md)
+- [`frontend-facing-contract-cleanup-plan.md`](../frontend-facing-contract-cleanup/implementation-plan.md)
+- [`current-api-surface-migration-checklist.md`](../api-surface-migration/current-state.md)
+- [`../../specs/api.md`](../../../specs/api.md)
+- [`../../../../frontend/docs/frontend-plan.md`](../../../../../frontend/docs/frontend-plan.md)
+- [`../../../../frontend/src/routes/collections/lens-v1-interface-spec.md`](../../../../../frontend/src/routes/collections/lens-v1-interface-spec.md)

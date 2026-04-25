@@ -17,11 +17,13 @@ Core-owned path across `application/documents/`, `application/evidence/`, and
 `application/comparisons/`.
 
 For the broader roadmap, read
-[`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md).
+[`goal-core-source-implementation-plan.md`](../backend-wide/goal-source-core-layering/implementation-plan.md).
 For the earlier Core seam work, read
 [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md).
+For the narrow PBF-metal validation wave under this quality plan, read
+[`pbf-metal-extraction-and-comparison-validation/README.md`](pbf-metal-extraction-and-comparison-validation/README.md).
 For the LLM hard-cutover child execution plan under this wave, read
-[`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md).
+[`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md).
 For the traceback/document-viewer vertical slice under this plan, read
 [`claim-traceback-navigation-implementation-plan.md`](claim-traceback-navigation-implementation-plan.md).
 
@@ -269,10 +271,10 @@ Exit criteria:
 
 ## Related Docs
 
-- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-core-source-implementation-plan.md)
-- [`goal-core-source-contract-follow-up-plan.md`](../backend-wide/goal-core-source-contract-follow-up-plan.md)
+- [`goal-core-source-implementation-plan.md`](../backend-wide/goal-source-core-layering/implementation-plan.md)
+- [`goal-core-source-contract-follow-up-plan.md`](../backend-wide/goal-source-core-layering/contract-follow-up.md)
 - [`core-stabilization-and-seam-extraction-plan.md`](core-stabilization-and-seam-extraction-plan.md)
-- [`core-llm-structured-extraction-hard-cutover-plan.md`](core-llm-structured-extraction-hard-cutover-plan.md)
+- [`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
 - [`claim-traceback-navigation-implementation-plan.md`](claim-traceback-navigation-implementation-plan.md)
 - [`source-collection-builder-normalization-plan.md`](../source/source-collection-builder-normalization-plan.md)
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)

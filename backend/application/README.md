@@ -33,7 +33,7 @@ Inside it, business responsibilities are now grouped as:
 
 - [`docs/application-layer-one-shot-cutover-plan.md`](docs/application-layer-one-shot-cutover-plan.md)
   Historical application cutover background
-- [`../docs/plans/goal-source-core-business-layer-alignment-plan.md`](../docs/plans/backend-wide/goal-source-core-business-layer-alignment-plan.md)
+- [`../docs/plans/goal-source-core-business-layer-alignment-plan.md`](../docs/plans/backend-wide/goal-source-core-layering/proposal.md)
   Active backend-wide package-alignment plan for Goal, Source, Core, and
   Derived
 

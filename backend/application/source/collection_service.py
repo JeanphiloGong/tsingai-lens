@@ -164,6 +164,8 @@ class CollectionService:
         self,
         collection_id: str,
         document_id: str,
+        *,
+        source_filename: str | None = None,
     ) -> dict[str, Any]:
         self.get_collection(collection_id)
         paths = self.repository.get_paths(collection_id)
@@ -171,10 +173,11 @@ class CollectionService:
         if not document_key:
             raise DocumentSourceUnavailableError(collection_id, document_key)
 
+        match_keys = self._source_match_keys(document_key, source_filename)
         manifest = self.repository.read_import_manifest(collection_id) or {}
         manifest_documents = self._iter_manifest_documents(manifest)
         for document in manifest_documents:
-            if str(document.get("source_document_id") or "").strip() == document_key:
+            if self._source_document_record_matches(document, match_keys):
                 return self._build_source_file_payload(
                     collection_id=collection_id,
                     document_id=document_key,
@@ -185,7 +188,7 @@ class CollectionService:
         file_matches = [
             record
             for record in self.repository.read_files(collection_id) or []
-            if self._source_file_record_matches(record, document_key)
+            if self._source_file_record_matches(record, match_keys)
         ]
         if len(file_matches) == 1:
             return self._build_source_file_payload(
@@ -474,15 +477,46 @@ class CollectionService:
     def _source_file_record_matches(
         self,
         record: dict[str, Any],
-        document_id: str,
+        match_keys: set[str],
     ) -> bool:
         candidates = (
             record.get("source_document_id"),
             record.get("document_id"),
             record.get("original_filename"),
             record.get("stored_filename"),
+            Path(str(record.get("stored_path") or "")).name,
         )
-        return any(str(candidate or "").strip() == document_id for candidate in candidates)
+        return any(self._source_match_value(candidate) in match_keys for candidate in candidates)
+
+    def _source_document_record_matches(
+        self,
+        record: dict[str, Any],
+        match_keys: set[str],
+    ) -> bool:
+        candidates = (
+            record.get("source_document_id"),
+            record.get("original_filename"),
+            record.get("stored_filename"),
+            record.get("storage_relpath"),
+            Path(str(record.get("storage_relpath") or "")).name,
+            Path(str(record.get("stored_path") or "")).name,
+        )
+        return any(self._source_match_value(candidate) in match_keys for candidate in candidates)
+
+    def _source_match_keys(
+        self,
+        document_id: str,
+        source_filename: str | None,
+    ) -> set[str]:
+        keys = {
+            self._source_match_value(document_id),
+            self._source_match_value(source_filename),
+            self._source_match_value(Path(str(source_filename or "")).name),
+        }
+        return {key for key in keys if key}
+
+    def _source_match_value(self, value: Any) -> str:
+        return str(value or "").strip()
 
     def _build_source_file_payload(
         self,

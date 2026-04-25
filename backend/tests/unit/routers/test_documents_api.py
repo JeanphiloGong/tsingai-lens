@@ -421,6 +421,66 @@ def test_document_source_route_streams_manifest_source_file(document_services):
     assert response.headers["content-disposition"].startswith("inline;")
 
 
+def test_document_source_route_resolves_profile_document_id_by_source_filename(
+    document_services,
+    monkeypatch,
+):
+    _patch_parquet(monkeypatch)
+
+    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    record = collection_service.create_collection(name="Profile Source File Collection")
+    collection_id = record["collection_id"]
+    paths = collection_service.get_paths(collection_id)
+    output_dir = paths.output_dir
+    source_path = paths.input_dir / "stored-paper.pdf"
+    source_path.write_bytes(b"%PDF-1.4\nprofile fixture\n")
+    pd.DataFrame(
+        [
+            {
+                "document_id": "profile-hash-doc",
+                "collection_id": collection_id,
+                "title": "Profile Paper",
+                "source_filename": "paper.pdf",
+                "doc_type": "experimental",
+                "protocol_extractable": "yes",
+                "protocol_extractability_signals": [],
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            }
+        ]
+    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    artifact_registry.upsert(collection_id, output_dir)
+    collection_service.repository.write_import_manifest(
+        collection_id,
+        {
+            "collection_id": collection_id,
+            "imports": [
+                {
+                    "documents": [
+                        {
+                            "source_document_id": "srcdoc-from-upload",
+                            "original_filename": "paper.pdf",
+                            "stored_filename": "stored-paper.pdf",
+                            "storage_relpath": "input/stored-paper.pdf",
+                            "media_type": "application/pdf",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    response = asyncio.run(
+        documents_controller.get_collection_document_source(
+            collection_id,
+            "profile-hash-doc",
+        )
+    )
+
+    assert Path(response.path).read_bytes() == b"%PDF-1.4\nprofile fixture\n"
+    assert response.media_type == "application/pdf"
+
+
 def test_document_source_route_returns_409_when_source_is_unavailable(document_services):
     collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Missing Source Collection")

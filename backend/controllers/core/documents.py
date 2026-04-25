@@ -181,10 +181,18 @@ async def get_collection_document_source(
     collection_id: str,
     document_id: str,
 ) -> FileResponse:
+    source_filename: str | None = None
+    try:
+        profile = document_profile_service.get_document_profile(collection_id, document_id)
+        source_filename = profile.get("source_filename")
+    except (DocumentNotFoundError, DocumentProfilesNotReadyError):
+        source_filename = None
+
     try:
         payload = document_profile_service.collection_service.resolve_document_source_file(
             collection_id,
             document_id,
+            source_filename=source_filename,
         )
     except DocumentSourceUnavailableError as exc:
         raise HTTPException(

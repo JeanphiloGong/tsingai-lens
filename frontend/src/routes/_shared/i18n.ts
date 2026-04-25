@@ -887,6 +887,153 @@ const translations: Record<Language, Translations> = {
 			noWarnings: 'No major caution flags',
 			tableActions: 'Read next'
 		},
+		comparison: {
+			review: {
+				title: 'Comparison Review',
+				description:
+					'Review cross-paper comparability, materials, baselines, test conditions, and missing context.',
+				count: '{count} comparison item(s)',
+				updatedAt: 'Updated: {time}',
+				summaryLabel: 'Comparison quality summary',
+				error: 'Unable to load comparisons',
+				processing: 'Starting...',
+				processingStarted: 'Comparison generation started.',
+				actionTodo: 'Action queued: {action}'
+			},
+			summary: {
+				direct: 'Directly comparable',
+				limited: 'Limited comparison',
+				notComparable: 'Not comparable',
+				insufficient: 'Insufficient context'
+			},
+			conclusion: {
+				title: 'Comparison conclusion',
+				insufficientBody:
+					'Most current results are missing baseline, test condition, variant linkage, or related context. Do not form a reliable comparison conclusion yet. Review source evidence and fill the missing context first.',
+				limitedBody:
+					'Some results in this collection can be compared with limits, but materials, test conditions, baselines, and experimental context still need review.',
+				directBody:
+					'This collection includes directly comparable results. Review evidence sources and key conditions before adding them to the final comparison table.'
+			},
+			conclusionActions: {
+				view_direct: 'View comparable items',
+				view_limited: 'View limited comparisons',
+				view_insufficient: 'View insufficient items',
+				view_evidence: 'View evidence',
+				add_to_final: 'Add to final table'
+			},
+			filters: {
+				title: 'Comparison filters',
+				search: 'Search comparisons',
+				searchPlaceholder: 'Search results, materials, parameters...',
+				status: 'Comparison status',
+				material: 'Material system',
+				resultType: 'Result type',
+				testCondition: 'Test condition',
+				baseline: 'Baseline',
+				missingContext: 'Missing context',
+				all: 'All',
+				specified: 'Specified',
+				unspecified: 'Unspecified',
+				clear: 'Clear filters'
+			},
+			values: {
+				unspecifiedMaterialSystem: 'Unspecified material system',
+				unspecifiedProcess: 'Unspecified treatment',
+				unspecifiedBaseline: 'Unspecified baseline',
+				unspecifiedTestCondition: 'Unspecified test condition',
+				unspecified: 'Unspecified'
+			},
+			view: {
+				label: 'View mode',
+				card: 'Card view',
+				table: 'Table view'
+			},
+			status: {
+				comparable: 'Directly comparable',
+				limited: 'Limited comparison',
+				notComparable: 'Not comparable',
+				insufficient: 'Insufficient context'
+			},
+			resultTypes: {
+				property: 'Property',
+				process: 'Process',
+				result: 'Result',
+				structure: 'Structure',
+				performance: 'Performance',
+				other: 'Other'
+			},
+			card: {
+				extractedResult: 'Extracted result',
+				resultNote: 'This is the system-extracted result pending comparison review.',
+				context: 'Comparison context',
+				missingContext: 'Missing context',
+				noMissingContext: 'No major missing context',
+				note: 'Review note',
+				materialSystem: 'Material system',
+				process: 'Treatment',
+				baseline: 'Baseline',
+				testCondition: 'Test condition',
+				confidenceValue: 'Confidence {value}'
+			},
+			actions: {
+				viewEvidence: 'View source evidence',
+				viewMissing: 'View missing fields',
+				addToFinal: 'Add to final comparison',
+				viewComparison: 'View comparison',
+				viewConditions: 'View conditions',
+				markIssue: 'Flag issue',
+				viewReason: 'View reason',
+				exclude: 'Exclude result',
+				refresh: 'Refresh',
+				refreshStatus: 'Refresh status'
+			},
+			more: {
+				label: 'More comparison actions',
+				copyResult: 'Copy result',
+				remove: 'Remove from comparison',
+				markReviewed: 'Mark as reviewed',
+				reanalyze: 'Reanalyze',
+				exportItem: 'Export item'
+			},
+			missing: {
+				baseline: 'Missing baseline',
+				variantLink: 'Missing variant link',
+				testCondition: 'Missing test condition',
+				unitContext: 'Missing unit context',
+				expertInterpretation: 'Missing expert interpretation',
+				materialSystem: 'Missing material system',
+				process: 'Missing treatment'
+			},
+			list: {
+				count: '{count} comparison item(s)',
+				emptyFiltered: 'No comparison items match the current filters.'
+			},
+			sort: {
+				label: 'Sort',
+				completeness: 'By context completeness',
+				confidenceDesc: 'By confidence, high to low',
+				status: 'By status',
+				material: 'By material system',
+				recent: 'Recently generated'
+			},
+			table: {
+				result: 'Result',
+				status: 'Status',
+				material: 'Material system',
+				process: 'Treatment',
+				baseline: 'Baseline',
+				testCondition: 'Test condition',
+				missingContext: 'Missing context',
+				actions: 'Actions'
+			},
+			empty: {
+				title: 'No comparison results yet',
+				description:
+					'After evidence extraction and comparison generation finish, Lens will show cross-paper results, comparability judgments, and missing context here.',
+				generate: 'Start comparison generation'
+			}
+		},
 		results: {
 			title: 'Results',
 			detailTitle: 'Result detail',
@@ -2374,6 +2521,151 @@ const translations: Record<Language, Translations> = {
 			missingContext: '缺失上下文',
 			noWarnings: '当前没有明显警示',
 			tableActions: '下一步'
+		},
+		comparison: {
+			review: {
+				title: '比较审查',
+				description: '审查跨文献结果的可比性，查看材料、基准、测试条件和缺失上下文。',
+				count: '{count} 个比较项',
+				updatedAt: '最近更新：{time}',
+				summaryLabel: '比较质量概览',
+				error: '无法加载比较结果',
+				processing: '正在启动...',
+				processingStarted: '已开始生成比较。',
+				actionTodo: '已记录操作：{action}'
+			},
+			summary: {
+				direct: '可直接比较',
+				limited: '受限比较',
+				notComparable: '不可比较',
+				insufficient: '信息不足'
+			},
+			conclusion: {
+				title: '比较结论',
+				insufficientBody:
+					'当前多数结果缺少 baseline、测试条件或变体关联信息，暂不适合直接形成可靠比较结论。建议优先查看原文证据并补全缺失上下文。',
+				limitedBody:
+					'当前集合中部分结果可以进行受限比较，但仍需要检查材料体系、测试条件、基准对象和实验上下文。',
+				directBody: '当前集合包含可直接比较的结果。建议检查证据来源和关键条件后，加入最终比较表。'
+			},
+			conclusionActions: {
+				view_direct: '查看可比较项',
+				view_limited: '查看受限比较',
+				view_insufficient: '查看信息不足项',
+				view_evidence: '查看原文证据',
+				add_to_final: '加入最终表'
+			},
+			filters: {
+				title: '比较筛选',
+				search: '搜索比较项',
+				searchPlaceholder: '搜索结果、材料、参数...',
+				status: '比较状态',
+				material: '材料体系',
+				resultType: '结果类型',
+				testCondition: '测试条件',
+				baseline: '基准对象',
+				missingContext: '缺失信息',
+				all: '全部',
+				specified: '已指定',
+				unspecified: '未指定',
+				clear: '清空筛选'
+			},
+			values: {
+				unspecifiedMaterialSystem: '未指定材料体系',
+				unspecifiedProcess: '未指定处理方式',
+				unspecifiedBaseline: '未指定基准对象',
+				unspecifiedTestCondition: '未指定测试条件',
+				unspecified: '未指定'
+			},
+			view: {
+				label: '视图模式',
+				card: '卡片视图',
+				table: '表格视图'
+			},
+			status: {
+				comparable: '可直接比较',
+				limited: '受限比较',
+				notComparable: '不可比较',
+				insufficient: '信息不足'
+			},
+			resultTypes: {
+				property: 'Property',
+				process: 'Process',
+				result: 'Result',
+				structure: 'Structure',
+				performance: 'Performance',
+				other: 'Other'
+			},
+			card: {
+				extractedResult: '提取结果',
+				resultNote: '这是系统抽取的待比较结果。',
+				context: '比较上下文',
+				missingContext: '缺失信息',
+				noMissingContext: '暂无明显缺失信息',
+				note: '注意点',
+				materialSystem: '材料体系',
+				process: '处理方式',
+				baseline: '基准对象',
+				testCondition: '测试条件',
+				confidenceValue: '置信度 {value}'
+			},
+			actions: {
+				viewEvidence: '查看原文证据',
+				viewMissing: '查看缺失项',
+				addToFinal: '加入最终比较',
+				viewComparison: '查看比较',
+				viewConditions: '查看条件',
+				markIssue: '标记问题',
+				viewReason: '查看原因',
+				exclude: '排除结果',
+				refresh: '刷新',
+				refreshStatus: '刷新状态'
+			},
+			more: {
+				label: '更多比较操作',
+				copyResult: '复制结果',
+				remove: '从比较中移除',
+				markReviewed: '标记为已审查',
+				reanalyze: '重新分析',
+				exportItem: '导出该项'
+			},
+			missing: {
+				baseline: '缺 baseline',
+				variantLink: '缺 variant link',
+				testCondition: '缺 test condition',
+				unitContext: '缺 unit context',
+				expertInterpretation: '缺 expert interpretation',
+				materialSystem: '缺 material system',
+				process: '缺 process'
+			},
+			list: {
+				count: '共 {count} 个比较项',
+				emptyFiltered: '当前筛选条件下没有比较项。'
+			},
+			sort: {
+				label: '排序',
+				completeness: '按信息完整度',
+				confidenceDesc: '按置信度从高到低',
+				status: '按状态',
+				material: '按材料体系',
+				recent: '最近生成'
+			},
+			table: {
+				result: '结果',
+				status: '状态',
+				material: '材料体系',
+				process: '处理方式',
+				baseline: '基准对象',
+				testCondition: '测试条件',
+				missingContext: '缺失信息',
+				actions: '操作'
+			},
+			empty: {
+				title: '暂无比较结果',
+				description:
+					'完成证据提取和比较生成后，Lens 会在这里展示跨文献结果、可比性判断和缺失上下文。',
+				generate: '开始生成比较'
+			}
 		},
 		results: {
 			title: '结果',

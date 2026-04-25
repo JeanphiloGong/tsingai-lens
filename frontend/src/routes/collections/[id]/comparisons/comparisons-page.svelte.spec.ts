@@ -16,18 +16,18 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 		url: new URL('http://localhost/collections/col_123/comparisons')
 	};
 
-		return {
-			pageStore: {
-				subscribe(run: (value: ComparisonsPageState) => void) {
-					run(current);
-					subscribers.add(run);
-					return () => subscribers.delete(run);
-				}
-			},
-			setPage(next: ComparisonsPageState) {
-				current = next;
-				for (const run of subscribers) run(next);
-			},
+	return {
+		pageStore: {
+			subscribe(run: (value: ComparisonsPageState) => void) {
+				run(current);
+				subscribers.add(run);
+				return () => subscribers.delete(run);
+			}
+		},
+		setPage(next: ComparisonsPageState) {
+			current = next;
+			for (const run of subscribers) run(next);
+		},
 		fetchMock: vi.fn()
 	};
 });
@@ -150,14 +150,15 @@ describe('collections/[id]/comparisons/+page.svelte', () => {
 			if (url.pathname === '/api/v1/collections/col_123/comparisons') {
 				return jsonResponse({
 					collection_id: 'col_123',
-					total: 1,
-					count: 1,
+					total: 2,
+					count: 2,
 					items: [
 						{
 							row_id: 'row_1',
 							result_id: 'cres_1',
 							collection_id: 'col_123',
 							source_document_id: 'doc_1',
+							confidence: 0.9,
 							display: {
 								material_system_normalized: 'oxide cathode',
 								process_normalized: '700 C anneal',
@@ -194,6 +195,49 @@ describe('collections/[id]/comparisons/+page.svelte', () => {
 								unresolved_baseline_link: false,
 								unresolved_condition_link: false
 							}
+						},
+						{
+							row_id: 'row_2',
+							result_id: 'cres_2',
+							collection_id: 'col_123',
+							source_document_id: 'doc_2',
+							confidence: 0.86,
+							display: {
+								material_system_normalized: 'oxide cathode',
+								process_normalized: '700 C anneal',
+								variant_id: 'var_2',
+								variant_label: 'Sample B',
+								variable_axis: null,
+								variable_value: null,
+								property_normalized: 'impedance',
+								result_type: 'result',
+								result_summary: 'Impedance improved with partial baseline alignment.',
+								value: null,
+								unit: null,
+								test_condition_normalized: 'EIS',
+								baseline_reference: 'as-prepared',
+								baseline_normalized: 'as-prepared'
+							},
+							evidence_bundle: {
+								result_source_type: 'text',
+								supporting_evidence_ids: [],
+								supporting_anchor_ids: [],
+								characterization_observation_ids: [],
+								structure_feature_ids: []
+							},
+							assessment: {
+								comparability_status: 'limited',
+								comparability_warnings: ['Baseline should be checked before comparison.'],
+								comparability_basis: [],
+								requires_expert_review: false,
+								assessment_epistemic_status: 'provisional'
+							},
+							uncertainty: {
+								missing_critical_context: [],
+								unresolved_fields: [],
+								unresolved_baseline_link: false,
+								unresolved_condition_link: false
+							}
 						}
 					]
 				});
@@ -203,11 +247,26 @@ describe('collections/[id]/comparisons/+page.svelte', () => {
 		});
 	});
 
-	it('renders result drilldown links from comparison rows', async () => {
+	it('renders the comparison review cards and row actions', async () => {
 		render(Page);
 
-		const resultLink = browserPage.getByRole('link', { name: 'Open results' });
-		await expect.element(resultLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
-		await expect.element(browserPage.getByRole('link', { name: /Inspect evidence/ })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Comparison Review' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Comparison conclusion')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Confidence 90%')).toBeInTheDocument();
+
+		const sourceLink = browserPage.getByRole('link', { name: 'View source evidence' });
+		await expect
+			.element(sourceLink)
+			.toHaveAttribute(
+				'href',
+				'/collections/col_123/documents/doc_1?evidence_id=ev_1&return_to=%2Fcollections%2Fcol_123%2Fcomparisons'
+			);
+
+		const comparisonLink = browserPage.getByRole('link', { name: 'View comparison' });
+		await expect
+			.element(comparisonLink)
+			.toHaveAttribute('href', '/collections/col_123/results/cres_2');
 	});
 });

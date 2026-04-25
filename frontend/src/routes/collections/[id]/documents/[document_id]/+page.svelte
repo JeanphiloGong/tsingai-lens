@@ -5,8 +5,8 @@
 		fetchDocumentComparisonSemantics,
 		fetchDocumentContent,
 		type DocumentWorkbenchModel,
+		type SourceAnchor,
 		type WorkbenchLocalGraph,
-		type WorkbenchSourceTarget,
 		type WorkbenchTab
 	} from '../../../../_shared/documents';
 	import { t } from '../../../../_shared/i18n';
@@ -23,6 +23,7 @@
 	let selectedSourceSpanId = '';
 	let selectedGraphNodeId = '';
 	let graphCollapsed = false;
+	let sourceJumpToken = 0;
 
 	$: collectionId = $page.params.id ?? '';
 	$: routeDocumentId = $page.params.document_id ?? '';
@@ -30,7 +31,7 @@
 	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
 	$: loadKey = `${collectionId}:${routeDocumentId}:${requestedResultId}:${requestedEvidenceId}`;
 	$: selectedGraph = graphForSelection(model, selectedItemId);
-	$: selectedSourceTarget = sourceTargetForSelection(model, selectedSourceSpanId);
+	$: selectedSourceAnchor = sourceAnchorForSelection(model, selectedSourceSpanId);
 	$: if (selectedGraph && !selectedGraph.nodes.some((node) => node.id === selectedGraphNodeId)) {
 		selectedGraphNodeId = selectedGraph.nodes.find((node) => node.position === 'center')?.id ?? '';
 	}
@@ -91,12 +92,12 @@
 		);
 	}
 
-	function sourceTargetForSelection(
+	function sourceAnchorForSelection(
 		currentModel: DocumentWorkbenchModel | null,
 		sourceSpanId: string
-	): WorkbenchSourceTarget | null {
+	): SourceAnchor | null {
 		if (!currentModel || !sourceSpanId) return null;
-		return currentModel.source_targets_by_span_id[sourceSpanId] ?? null;
+		return currentModel.source_anchors_by_span_id[sourceSpanId] ?? null;
 	}
 
 	function selectItem(itemId: string, tab?: WorkbenchTab) {
@@ -106,12 +107,22 @@
 		selectedItemId = item.id;
 		activeTab = tab ?? item.tab;
 		selectedSourceSpanId = item.source_span_id;
+		sourceJumpToken += 1;
 		const graph = graphForSelection(model, item.id);
 		selectedGraphNodeId = graph?.nodes.find((node) => node.position === 'center')?.id ?? '';
 	}
 
 	function jumpToSource(sourceSpanId: string) {
+		const linkedItem =
+			model?.selectable_items.find(
+				(item) => item.source_span_id === sourceSpanId && item.tab === activeTab
+			) ?? model?.selectable_items.find((item) => item.source_span_id === sourceSpanId);
+		if (linkedItem) {
+			selectItem(linkedItem.id, linkedItem.tab);
+			return;
+		}
 		selectedSourceSpanId = sourceSpanId;
+		sourceJumpToken += 1;
 	}
 
 	function selectSourceSpan(sourceSpanId: string) {
@@ -130,6 +141,10 @@
 		activeTab = tab;
 		const item = model?.selectable_items.find((candidate) => candidate.tab === tab);
 		if (item) selectItem(item.id, tab);
+	}
+
+	function setActiveTab(tab: WorkbenchTab) {
+		activeTab = tab;
 	}
 </script>
 
@@ -192,7 +207,8 @@
 					sourceFileUrl={model.sourceFileUrl}
 					sourceFilename={model.source_filename}
 					activeSourceSpanId={selectedSourceSpanId}
-					sourceTarget={selectedSourceTarget}
+					activeSourceAnchor={selectedSourceAnchor}
+					{sourceJumpToken}
 					onSelectSourceSpan={selectSourceSpan}
 				/>
 			</section>
@@ -204,6 +220,7 @@
 					{selectedItemId}
 					onSelectItem={selectItem}
 					onJumpToSource={jumpToSource}
+					onOpenTab={setActiveTab}
 				/>
 			</section>
 

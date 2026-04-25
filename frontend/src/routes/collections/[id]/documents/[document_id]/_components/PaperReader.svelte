@@ -1,11 +1,27 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { tick } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
 	import type {
-		WorkbenchPdfPage,
-		WorkbenchSourceTarget
+		SourceAnchor,
+		SourceAnchorRect,
+		WorkbenchPdfPage
 	} from '../../../../../_shared/documents';
+	import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+
+	type PdfJsModule = typeof import('pdfjs-dist');
+	type PdfLoadingTask = {
+		promise: Promise<PDFDocumentProxy>;
+		destroy?: () => Promise<void> | void;
+	};
+	type PdfPageState = {
+		pageNumber: number;
+		label: string;
+		width: number;
+		height: number;
+		status: 'queued' | 'rendering' | 'rendered' | 'error';
+		error: string | null;
+	};
 
 	export let title = '';
 	export let metadata: string[] = [];
@@ -13,51 +29,248 @@
 	export let sourceFileUrl = '';
 	export let sourceFilename: string | null = null;
 	export let activeSourceSpanId = '';
-	export let sourceTarget: WorkbenchSourceTarget | null = null;
+	export let activeSourceAnchor: SourceAnchor | null = null;
+	export let sourceJumpToken = 0;
 	export let onSelectSourceSpan: (sourceSpanId: string) => void = () => {};
 
 	let thumbnailTab: 'source' | 'outline' = 'source';
 	let currentPage = 1;
-	let zoom = '100%';
+	let zoom = 'Fit';
+	let mounted = false;
+	let loadedSourceFileUrl = '';
+	let renderedZoom = '';
+	let pdfLoading = false;
+	let pdfError = '';
+	let pdfScrollContainer: HTMLDivElement | null = null;
+	let pdfDocument: PDFDocumentProxy | null = null;
+	let loadingTask: PdfLoadingTask | null = null;
+	let pdfPageStates: PdfPageState[] = [];
+	let loadGeneration = 0;
+	let renderGeneration = 0;
+
 	const zoomLevels = ['Fit', '90%', '100%', '125%'];
+	const canvasNodes = new Map<number, HTMLCanvasElement>();
+	const renderTasks = new Map<number, RenderTask>();
 
-	$: readerMode = resolveReaderMode(sourceFilename, sourceFileUrl, pages);
-	$: sourceTargetMessageKey = messageKeyForTarget(sourceTarget);
-	$: pdfSourceUrl = sourceFileUrl ? `${sourceFileUrl}#page=${currentPage}` : '';
-	$: currentPage = pageForSourceSpan(activeSourceSpanId, sourceTarget);
-	$: if (activeSourceSpanId) {
-		void scrollToSourceSpan(activeSourceSpanId);
+	$: hasPdfSource = Boolean(
+		sourceFileUrl && (!sourceFilename || sourceFilename.toLowerCase().endsWith('.pdf'))
+	);
+	$: totalPages = pdfPageStates.length || pages.length || 1;
+	$: thumbnailPageNumbers = pageNumbersForReader(totalPages);
+	$: activePendingAnchor = Boolean(
+		activeSourceAnchor &&
+		activeSourceAnchor.pageIndex >= 0 &&
+		(activeSourceAnchor.rects.length === 0 || activeSourceAnchor.precision === 'pending')
+	);
+	$: if (mounted && hasPdfSource && sourceFileUrl && sourceFileUrl !== loadedSourceFileUrl) {
+		void loadPdf();
+	}
+	$: if (mounted && pdfDocument && zoom !== renderedZoom) {
+		renderedZoom = zoom;
+		void renderAllPages();
+	}
+	$: if (mounted && activeSourceAnchor && sourceJumpToken >= 0) {
+		void jumpToSource(activeSourceAnchor);
+	}
+	$: if (mounted && !hasPdfSource) {
+		clearPdfState();
 	}
 
-	function resolveReaderMode(
-		filename: string | null,
-		fileUrl: string,
-		sourcePages: WorkbenchPdfPage[]
-	): 'pdf' | 'text' | 'unavailable' {
-		if (fileUrl && filename?.toLowerCase().endsWith('.pdf')) return 'pdf';
-		return sourcePages.length ? 'text' : 'unavailable';
+	onMount(() => {
+		mounted = true;
+		if (hasPdfSource) void loadPdf();
+	});
+
+	onDestroy(() => {
+		mounted = false;
+		cleanupPdf();
+	});
+
+	function clearPdfState() {
+		if (!pdfDocument && !pdfPageStates.length && !loadedSourceFileUrl) return;
+		cleanupPdf();
+		pdfPageStates = [];
+		pdfError = '';
+		loadedSourceFileUrl = '';
 	}
 
-	function messageKeyForTarget(target: WorkbenchSourceTarget | null) {
-		if (!target) return '';
-		if (target.precision === 'pdf-region') return 'workbench.sourcePdfRegionFallback';
-		if (target.precision === 'text-range') return 'workbench.sourceTextRange';
-		if (target.precision === 'pdf-page') return 'workbench.sourcePdfPageFallback';
-		if (target.precision === 'section') return 'workbench.sourceSectionFallback';
-		if (target.precision === 'quote-search') return 'workbench.sourceQuoteFallback';
-		return 'workbench.sourceUnavailable';
+	async function loadPdfJs(): Promise<PdfJsModule> {
+		const [pdfjs, worker] = await Promise.all([
+			import('pdfjs-dist'),
+			import('pdfjs-dist/build/pdf.worker.mjs?url')
+		]);
+		pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+		return pdfjs;
 	}
 
-	function pageForSourceSpan(sourceSpanId: string, target: WorkbenchSourceTarget | null) {
-		if (target?.page) return target.page;
-		const page = pages.find((item) => item.source_span_ids.includes(sourceSpanId));
-		return page?.page_number ?? currentPage;
+	function cleanupPdf() {
+		loadGeneration += 1;
+		renderGeneration += 1;
+		cancelRenderTasks();
+		const task = loadingTask;
+		loadingTask = null;
+		if (task?.destroy) void task.destroy();
+		const document = pdfDocument;
+		pdfDocument = null;
+		if (document) void document.destroy();
+		canvasNodes.clear();
 	}
 
-	async function scrollToSourceSpan(sourceSpanId: string) {
-		if (!browser || !sourceSpanId) return;
+	async function loadPdf() {
+		const sourceUrl = sourceFileUrl;
+		if (!sourceUrl || !hasPdfSource) return;
+
+		cleanupPdf();
+		const generation = loadGeneration;
+		loadedSourceFileUrl = sourceUrl;
+		pdfLoading = true;
+		pdfError = '';
+		pdfPageStates = [];
+
+		try {
+			const pdfjs = await loadPdfJs();
+			if (generation !== loadGeneration) return;
+			const task = pdfjs.getDocument({ url: sourceUrl }) as PdfLoadingTask;
+			loadingTask = task;
+			const document = await task.promise;
+			if (loadingTask === task) loadingTask = null;
+			if (generation !== loadGeneration) {
+				await document.destroy();
+				return;
+			}
+			pdfDocument = document;
+			currentPage = 1;
+			renderedZoom = '';
+		} catch (error) {
+			if (generation !== loadGeneration) return;
+			pdfDocument = null;
+			pdfError = error instanceof Error ? error.message : String(error);
+		} finally {
+			if (generation === loadGeneration) {
+				pdfLoading = false;
+			}
+		}
+	}
+
+	function cancelRenderTasks() {
+		for (const task of renderTasks.values()) {
+			task.cancel();
+		}
+		renderTasks.clear();
+	}
+
+	async function renderAllPages() {
+		const document = pdfDocument;
+		if (!document) return;
+
+		const generation = loadGeneration;
+		const renderId = ++renderGeneration;
+		cancelRenderTasks();
+
+		try {
+			const nextPages: PdfPageState[] = [];
+			for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+				const page = await document.getPage(pageNumber);
+				if (generation !== loadGeneration || renderId !== renderGeneration) return;
+				const baseViewport = page.getViewport({ scale: 1 });
+				const scale = scaleForPage(baseViewport.width);
+				const viewport = page.getViewport({ scale });
+				nextPages.push({
+					pageNumber,
+					label: $t('workbench.pageLabel', { page: pageNumber }),
+					width: Math.round(viewport.width),
+					height: Math.round(viewport.height),
+					status: 'queued',
+					error: null
+				});
+			}
+
+			pdfPageStates = nextPages;
+			await tick();
+			await Promise.all(nextPages.map((page) => renderPage(page.pageNumber, renderId)));
+		} catch (error) {
+			if (generation !== loadGeneration || renderId !== renderGeneration) return;
+			pdfError = error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	async function renderPage(pageNumber: number, renderId: number) {
+		const document = pdfDocument;
+		const canvas = canvasNodes.get(pageNumber);
+		if (!document || !canvas || renderId !== renderGeneration) return;
+
+		updatePageState(pageNumber, { status: 'rendering', error: null });
+
+		try {
+			const page = await document.getPage(pageNumber);
+			if (renderId !== renderGeneration) return;
+
+			const baseViewport = page.getViewport({ scale: 1 });
+			const scale = scaleForPage(baseViewport.width);
+			const viewport = page.getViewport({ scale });
+			const outputScale = browser ? window.devicePixelRatio || 1 : 1;
+			const context = canvas.getContext('2d');
+			if (!context) throw new Error('Canvas rendering context is unavailable.');
+
+			canvas.width = Math.floor(viewport.width * outputScale);
+			canvas.height = Math.floor(viewport.height * outputScale);
+			canvas.style.width = `${viewport.width}px`;
+			canvas.style.height = `${viewport.height}px`;
+
+			const task = page.render({
+				canvasContext: context,
+				canvas,
+				viewport,
+				transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined
+			});
+			renderTasks.set(pageNumber, task);
+			await task.promise;
+			renderTasks.delete(pageNumber);
+
+			if (renderId === renderGeneration) {
+				updatePageState(pageNumber, {
+					width: Math.round(viewport.width),
+					height: Math.round(viewport.height),
+					status: 'rendered',
+					error: null
+				});
+			}
+		} catch (error) {
+			renderTasks.delete(pageNumber);
+			if (renderId !== renderGeneration) return;
+			if (error instanceof Error && error.name === 'RenderingCancelledException') return;
+			updatePageState(pageNumber, {
+				status: 'error',
+				error: error instanceof Error ? error.message : String(error)
+			});
+		}
+	}
+
+	function updatePageState(pageNumber: number, patch: Partial<PdfPageState>) {
+		pdfPageStates = pdfPageStates.map((page) =>
+			page.pageNumber === pageNumber ? { ...page, ...patch } : page
+		);
+	}
+
+	function scaleForPage(baseWidth: number) {
+		if (zoom === 'Fit') {
+			const availableWidth = Math.max(320, (pdfScrollContainer?.clientWidth ?? 680) - 36);
+			return Math.max(0.5, Math.min(1.8, availableWidth / baseWidth));
+		}
+		const parsed = Number.parseFloat(zoom.replace('%', ''));
+		return Number.isFinite(parsed) ? parsed / 100 : 1;
+	}
+
+	function pageNumbersForReader(count: number) {
+		return Array.from({ length: Math.max(1, count) }, (_, index) => index + 1);
+	}
+
+	async function jumpToSource(anchor: SourceAnchor) {
+		if (!browser) return;
+		const pageNumber = Math.max(1, Math.min(totalPages, anchor.pageIndex + 1));
+		currentPage = pageNumber;
 		await tick();
-		const target = document.getElementById(`pdf-source-${sourceSpanId}`);
+		const target = document.getElementById(`pdf-page-${pageNumber}`);
 		if (target && typeof target.scrollIntoView === 'function') {
 			target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 		}
@@ -73,8 +286,10 @@
 		}
 	}
 
-	function selectParagraph(sourceSpanId: string | null) {
-		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
+	function changeZoom(delta: number) {
+		const index = zoomLevels.indexOf(zoom);
+		const nextIndex = Math.max(0, Math.min(zoomLevels.length - 1, index + delta));
+		zoom = zoomLevels[nextIndex] ?? '100%';
 	}
 
 	function outlineSections() {
@@ -91,24 +306,26 @@
 		return sections;
 	}
 
-	function shouldShowSectionHeading(
-		pageIndex: number,
-		paragraphIndex: number,
-		section: string | null
-	) {
-		if (!section) return false;
-		const previousParagraph =
-			paragraphIndex > 0
-				? pages[pageIndex]?.paragraphs[paragraphIndex - 1]
-				: pages[pageIndex - 1]?.paragraphs.at(-1);
-		return previousParagraph?.section !== section;
+	function selectOutlineSource(sourceSpanId: string | null) {
+		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
 	}
 
-	function handleParagraphKeydown(event: KeyboardEvent, sourceSpanId: string | null) {
-		if (event.key === 'Enter' || event.key === ' ') {
-			event.preventDefault();
-			selectParagraph(sourceSpanId);
-		}
+	function rectStyle(rect: SourceAnchorRect) {
+		return `left: ${rect.left}%; top: ${rect.top}%; width: ${rect.width}%; height: ${rect.height}%;`;
+	}
+
+	function canvasPage(node: HTMLCanvasElement, pageNumber: number) {
+		canvasNodes.set(pageNumber, node);
+		return {
+			update(nextPageNumber: number) {
+				canvasNodes.delete(pageNumber);
+				pageNumber = nextPageNumber;
+				canvasNodes.set(pageNumber, node);
+			},
+			destroy() {
+				canvasNodes.delete(pageNumber);
+			}
+		};
 	}
 </script>
 
@@ -133,13 +350,13 @@
 
 		{#if thumbnailTab === 'source'}
 			<div class="page-thumbnails">
-				{#each pages as page}
+				{#each thumbnailPageNumbers as pageNumber}
 					<button
 						type="button"
-						class:active={currentPage === page.page_number}
+						class:active={currentPage === pageNumber}
 						class="page-thumbnail"
-						aria-label={$t('workbench.pageLabel', { page: page.page_number })}
-						on:click={() => void scrollToPage(page.page_number)}
+						aria-label={$t('workbench.pageLabel', { page: pageNumber })}
+						on:click={() => void scrollToPage(pageNumber)}
 					>
 						<span class="thumbnail-paper" aria-hidden="true">
 							<span></span>
@@ -147,7 +364,7 @@
 							<span></span>
 							<span></span>
 						</span>
-						<span class="thumbnail-page">{page.page_number}</span>
+						<span class="thumbnail-page">{pageNumber}</span>
 					</button>
 				{/each}
 			</div>
@@ -156,7 +373,7 @@
 				{#each outlineSections() as section}
 					<button
 						type="button"
-						on:click={() => selectParagraph(section.sourceSpanId)}
+						on:click={() => selectOutlineSource(section.sourceSpanId)}
 						class:active={section.sourceSpanId === activeSourceSpanId}
 					>
 						{section.label}
@@ -189,109 +406,99 @@
 
 		<div class="pdf-toolbar" aria-label={$t('workbench.readerToolbarLabel')}>
 			<div class="page-control">{currentPage}</div>
-			<span class="toolbar-muted">/ {pages.length}</span>
-			<button type="button" class="icon-button" aria-label={$t('workbench.zoomOut')}>-</button>
-			<button type="button" class="icon-button" aria-label={$t('workbench.zoomIn')}>+</button>
+			<span class="toolbar-muted">/ {totalPages}</span>
+			<button
+				type="button"
+				class="icon-button"
+				aria-label={$t('workbench.zoomOut')}
+				on:click={() => changeZoom(-1)}>-</button
+			>
+			<button
+				type="button"
+				class="icon-button"
+				aria-label={$t('workbench.zoomIn')}
+				on:click={() => changeZoom(1)}>+</button
+			>
 			<select bind:value={zoom} aria-label={$t('workbench.zoomLabel')}>
 				{#each zoomLevels as level}
 					<option value={level}>{level}</option>
 				{/each}
 			</select>
-			<button type="button" class="icon-button" aria-label={$t('workbench.fitWidth')}>F</button>
+			<button
+				type="button"
+				class="icon-button"
+				aria-label={$t('workbench.fitWidth')}
+				on:click={() => (zoom = 'Fit')}>F</button
+			>
 			<button type="button" class="icon-button" aria-label={$t('workbench.searchSource')}>S</button>
 			{#if sourceFileUrl}
 				<a class="icon-button" href={sourceFileUrl} aria-label={$t('workbench.downloadSource')}
 					>DL</a
 				>
 			{:else}
-				<button type="button" class="icon-button" aria-label={$t('workbench.downloadSource')}>
-					DL
-				</button>
+				<button type="button" class="icon-button" aria-label={$t('workbench.downloadSource')}
+					>DL</button
+				>
+			{/if}
+			{#if activePendingAnchor}
+				<span class="source-pending-badge">{$t('workbench.preciseRegionPending')}</span>
 			{/if}
 		</div>
 
-		<div class="pdf-canvas">
-			{#if readerMode === 'pdf'}
-				<div class="pdf-object-stage" id={`pdf-page-${currentPage}`}>
-					<object data={pdfSourceUrl} type="application/pdf" title={title}>
-						<div class="empty-state">
-							<h3>{$t('workbench.sourceUnavailableTitle')}</h3>
-							<p>{$t('workbench.sourceUnavailableBody')}</p>
-						</div>
-					</object>
-				</div>
+		<div class="pdf-scroll-container" bind:this={pdfScrollContainer}>
+			<div class="reader-tool-rail" aria-label={$t('workbench.readerToolsLabel')}>
+				<button type="button" aria-label={$t('workbench.selectTool')}>T</button>
+				<button type="button" aria-label={$t('workbench.panTool')}>P</button>
+				<button type="button" aria-label={$t('workbench.commentTool')}>C</button>
+				<button type="button" aria-label={$t('workbench.penTool')}>/</button>
+				<button type="button" aria-label={$t('workbench.searchTool')}>S</button>
+			</div>
 
-				{#if sourceTargetMessageKey}
-					<div class="source-target-note">
-						<strong>{sourceTarget?.label}</strong>
-						<span>{$t(sourceTargetMessageKey)}</span>
-					</div>
-				{/if}
-
-				<div class="parsed-source-strip" aria-label={$t('workbench.parsedSourceFallback')}>
-					{#each pages as page, pageIndex}
-						<section class="parsed-page" id={`parsed-page-${page.page_number}`}>
-							{#each page.paragraphs as paragraph, paragraphIndex}
-								{#if shouldShowSectionHeading(pageIndex, paragraphIndex, paragraph.section)}
-									<h3>{paragraph.section}</h3>
-								{/if}
-								<button
-									type="button"
-									id={paragraph.source_span_id ? `pdf-source-${paragraph.source_span_id}` : undefined}
-									class:source-span--active={paragraph.source_span_id === activeSourceSpanId}
-									class="pdf-paragraph"
-									on:click={() => selectParagraph(paragraph.source_span_id)}
-									on:keydown={(event) => handleParagraphKeydown(event, paragraph.source_span_id)}
-								>
-									{paragraph.text}
-								</button>
-							{/each}
-						</section>
-					{/each}
-				</div>
-			{:else if readerMode === 'text'}
-				<div class="selection-popover" aria-label={$t('workbench.selectionActions')}>
-					<button type="button">{$t('workbench.explain')}</button>
-					<button type="button">{$t('workbench.summarize')}</button>
-					<button type="button">{$t('workbench.addNote')}</button>
-					<button type="button">{$t('workbench.more')}</button>
-				</div>
-
-				<div class="reader-tool-rail" aria-label={$t('workbench.readerToolsLabel')}>
-					<button type="button" aria-label={$t('workbench.selectTool')}>T</button>
-					<button type="button" aria-label={$t('workbench.panTool')}>P</button>
-					<button type="button" aria-label={$t('workbench.commentTool')}>C</button>
-					<button type="button" aria-label={$t('workbench.penTool')}>/</button>
-					<button type="button" aria-label={$t('workbench.searchTool')}>S</button>
-				</div>
-
-				{#each pages as page, pageIndex}
-					<section class="pdf-page" id={`pdf-page-${page.page_number}`} aria-label={page.label}>
-						{#if page.page_number === 1}
-							<h2>{title}</h2>
-							<p class="authors">{metadata.slice(0, 2).join(' | ')}</p>
-						{/if}
-						{#each page.paragraphs as paragraph, paragraphIndex}
-							{#if shouldShowSectionHeading(pageIndex, paragraphIndex, paragraph.section)}
-								<h3>{paragraph.section}</h3>
+			{#if hasPdfSource && pdfPageStates.length}
+				{#each pdfPageStates as page}
+					<section
+						class="pdf-page-shell"
+						data-testid="pdf-page-shell"
+						id={`pdf-page-${page.pageNumber}`}
+						aria-label={page.label}
+						style={`width: ${page.width}px; height: ${page.height}px;`}
+					>
+						<canvas class="pdf-canvas-layer" use:canvasPage={page.pageNumber}></canvas>
+						<div class="pdf-text-layer" aria-hidden="true"></div>
+						<div class="pdf-highlight-layer" aria-hidden="true">
+							{#if activeSourceAnchor && activeSourceAnchor.pageIndex === page.pageNumber - 1}
+								{#key sourceJumpToken}
+									{#each activeSourceAnchor.rects as rect}
+										<span class="pdf-highlight" data-testid="pdf-highlight" style={rectStyle(rect)}
+										></span>
+									{/each}
+								{/key}
 							{/if}
-							<button
-								type="button"
-								id={paragraph.source_span_id ? `pdf-source-${paragraph.source_span_id}` : undefined}
-								class:source-span--active={paragraph.source_span_id === activeSourceSpanId}
-								class="pdf-paragraph"
-								on:click={() => selectParagraph(paragraph.source_span_id)}
-								on:keydown={(event) => handleParagraphKeydown(event, paragraph.source_span_id)}
-							>
-								{paragraph.text}
-							</button>
-						{/each}
+						</div>
+						{#if page.status === 'error'}
+							<div class="page-error">
+								<strong>{$t('workbench.pdfPageRenderError')}</strong>
+								<span>{page.error}</span>
+							</div>
+						{/if}
 					</section>
 				{/each}
+			{:else if hasPdfSource && pdfLoading}
+				<div class="empty-state empty-state--reader">
+					<div class="skeleton skeleton--wide"></div>
+					<div class="skeleton"></div>
+					<p>{$t('workbench.pdfLoading')}</p>
+				</div>
 			{:else}
 				<div class="empty-state empty-state--reader">
 					<h3>{$t('workbench.sourceUnavailableTitle')}</h3>
-					<p>{$t('workbench.sourceUnavailableBody')}</p>
+					<p>
+						{#if pdfError}
+							{$t('workbench.pdfLoadFailed')}
+						{:else}
+							{$t('workbench.sourceUnavailableBody')}
+						{/if}
+					</p>
 				</div>
 			{/if}
 		</div>
@@ -527,146 +734,88 @@
 		font-size: 13px;
 	}
 
-	.pdf-canvas {
+	.source-pending-badge {
+		display: inline-flex;
+		height: 26px;
+		align-items: center;
+		padding: 0 10px;
+		border: 1px solid #bfdbfe;
+		border-radius: 999px;
+		background: #eff6ff;
+		color: #1d4ed8;
+		font-size: 12px;
+		font-weight: 700;
+		white-space: nowrap;
+	}
+
+	.pdf-scroll-container {
 		position: relative;
 		flex: 1;
+		min-height: 0;
 		padding: 24px 18px;
 		overflow: auto;
 		background: #f8fafc;
 	}
 
-	.pdf-object-stage {
-		width: min(100%, 680px);
-		height: calc(100% - 106px);
-		min-height: 620px;
-		margin: 0 auto 16px;
+	.pdf-page-shell {
+		position: relative;
+		margin: 0 auto 24px;
 		overflow: hidden;
 		border: 1px solid #e5e7eb;
 		background: #ffffff;
 		box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 	}
 
-	.pdf-object-stage object {
-		display: block;
+	.pdf-canvas-layer,
+	.pdf-text-layer,
+	.pdf-highlight-layer {
+		position: absolute;
+		inset: 0;
 		width: 100%;
 		height: 100%;
-		border: 0;
 	}
 
-	.source-target-note {
-		display: flex;
-		width: min(100%, 680px);
-		margin: 0 auto 12px;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		padding: 10px 12px;
-		border: 1px solid #bfdbfe;
-		border-radius: 12px;
-		background: #eff6ff;
-		color: #1e40af;
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.source-target-note strong {
-		color: #0f172a;
-		font-weight: 700;
-	}
-
-	.parsed-source-strip {
-		width: min(100%, 680px);
-		max-height: 190px;
-		margin: 0 auto;
-		overflow-y: auto;
-		padding: 12px;
-		border: 1px solid #e2e8f0;
-		border-radius: 14px;
-		background: #ffffff;
-	}
-
-	.parsed-page + .parsed-page {
-		margin-top: 12px;
-	}
-
-	.pdf-page {
-		width: 600px;
-		min-height: 820px;
-		margin: 0 auto 24px;
-		padding: 32px 42px;
-		border: 1px solid #e5e7eb;
-		background: #ffffff;
-		box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-	}
-
-	.pdf-page h2 {
-		margin: 0 auto 18px;
-		max-width: 430px;
-		text-align: center;
-		color: #111827;
-		font-family: Georgia, 'Times New Roman', serif;
-		font-size: 20px;
-		font-weight: 700;
-		line-height: 1.25;
-	}
-
-	.authors {
-		margin: 0 0 24px;
-		text-align: center;
-		color: #334155;
-		font-family: Georgia, 'Times New Roman', serif;
-		font-size: 12px;
-		line-height: 1.55;
-	}
-
-	.pdf-page h3 {
-		margin: 18px 0 8px;
-		font-family: Georgia, 'Times New Roman', serif;
-		font-size: 15px;
-		font-weight: 700;
-		line-height: 1.35;
-	}
-
-	.parsed-page h3 {
-		margin: 0 0 8px;
-		color: #0f172a;
-		font-size: 13px;
-		font-weight: 700;
-		line-height: 18px;
-	}
-
-	.pdf-paragraph {
+	.pdf-canvas-layer {
 		display: block;
-		width: 100%;
-		margin: 0 0 12px;
-		padding: 3px 4px;
-		scroll-margin-top: 80px;
-		border: 1px solid transparent;
+	}
+
+	.pdf-text-layer {
+		pointer-events: none;
+	}
+
+	.pdf-highlight-layer {
+		pointer-events: none;
+	}
+
+	.pdf-highlight {
+		position: absolute;
+		display: block;
+		border: 1px solid #60a5fa;
 		border-radius: 4px;
-		background: transparent;
-		color: #111827;
-		font-family: Georgia, 'Times New Roman', serif;
-		font-size: 12px;
-		line-height: 1.55;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.parsed-source-strip .pdf-paragraph {
-		font-family:
-			system-ui,
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			sans-serif;
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.source-span--active {
-		border-color: #60a5fa;
-		background: #dbeafe;
+		background: rgba(59, 130, 246, 0.22);
 		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+		animation: highlight-focus 1.1s ease-out;
+	}
+
+	.page-error {
+		position: absolute;
+		inset: 16px;
+		display: grid;
+		place-content: center;
+		gap: 6px;
+		padding: 16px;
+		border: 1px dashed #cbd5e1;
+		border-radius: 14px;
+		background: rgba(248, 250, 252, 0.94);
+		color: #64748b;
+		text-align: center;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.page-error strong {
+		color: #0f172a;
+		font-size: 15px;
 	}
 
 	.empty-state {
@@ -701,36 +850,22 @@
 		min-height: 320px;
 	}
 
-	.selection-popover {
-		position: sticky;
-		top: 374px;
-		z-index: 2;
-		display: flex;
-		width: fit-content;
-		height: 44px;
-		margin: 0 auto -44px;
-		align-items: center;
-		gap: 10px;
-		padding: 0 12px;
-		border: 1px solid #e2e8f0;
-		border-radius: 12px;
-		background: #ffffff;
-		box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+	.skeleton {
+		width: 280px;
+		height: 16px;
+		margin: 0 auto;
+		border-radius: 8px;
+		background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);
 	}
 
-	.selection-popover button {
-		border: 0;
-		background: transparent;
-		color: #334155;
-		font-size: 13px;
-		font-weight: 600;
-		cursor: pointer;
+	.skeleton--wide {
+		width: 420px;
 	}
 
 	.reader-tool-rail {
 		position: sticky;
-		top: 390px;
-		z-index: 3;
+		top: 366px;
+		z-index: 4;
 		display: grid;
 		width: 44px;
 		margin: 24px 0 -236px auto;
@@ -752,6 +887,24 @@
 		cursor: pointer;
 	}
 
+	@keyframes highlight-focus {
+		0% {
+			box-shadow:
+				0 0 0 2px rgba(37, 99, 235, 0.1),
+				0 0 0 0 rgba(37, 99, 235, 0.35);
+		}
+		55% {
+			box-shadow:
+				0 0 0 2px rgba(37, 99, 235, 0.16),
+				0 0 0 8px rgba(37, 99, 235, 0.12);
+		}
+		100% {
+			box-shadow:
+				0 0 0 2px rgba(37, 99, 235, 0.12),
+				0 0 0 0 rgba(37, 99, 235, 0);
+		}
+	}
+
 	@media (max-width: 1024px) {
 		.paper-reader-grid {
 			grid-template-columns: 1fr;
@@ -759,10 +912,6 @@
 
 		.thumbnail-rail {
 			display: none;
-		}
-
-		.pdf-page {
-			width: min(600px, 100%);
 		}
 	}
 </style>

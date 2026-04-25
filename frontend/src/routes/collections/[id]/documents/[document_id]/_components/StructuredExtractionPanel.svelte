@@ -11,6 +11,7 @@
 	export let selectedItemId = '';
 	export let onSelectItem: (id: string, tab?: WorkbenchTab) => void = () => {};
 	export let onJumpToSource: (sourceSpanId: string) => void = () => {};
+	export let onOpenTab: (tab: WorkbenchTab) => void = () => {};
 
 	function selectMethod(index: number) {
 		onSelectItem(`method-${index}`, 'methods');
@@ -25,7 +26,7 @@
 </script>
 
 <section class="extraction-panel" aria-label={$t('workbench.extractionLabel')}>
-	<ExtractionTabs {activeTab} onChange={(tab) => (activeTab = tab)} />
+	<ExtractionTabs {activeTab} onChange={onOpenTab} />
 
 	<div class="panel-content">
 		{#if activeTab === 'summary'}

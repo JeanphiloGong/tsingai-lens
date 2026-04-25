@@ -202,6 +202,23 @@ export type SourceTargetPrecision =
 	| 'quote-search'
 	| 'unavailable';
 
+export type SourceAnchorPrecision = 'pdf-region' | 'pdf-page' | 'pending';
+
+export type SourceAnchorRect = {
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+};
+
+export type SourceAnchor = {
+	pageIndex: number;
+	rects: SourceAnchorRect[];
+	quote?: string;
+	section?: string;
+	precision?: SourceAnchorPrecision;
+};
+
 export type WorkbenchSourceTarget = {
 	documentId: string;
 	label: string;
@@ -213,6 +230,7 @@ export type WorkbenchSourceTarget = {
 	quote: string | null;
 	precision: SourceTargetPrecision;
 	userMessage: string | null;
+	anchor: SourceAnchor;
 };
 
 export type WorkbenchSourceSpan = {
@@ -355,6 +373,7 @@ export type DocumentWorkbenchModel = {
 	pages: WorkbenchPdfPage[];
 	source_spans: WorkbenchSourceSpan[];
 	source_targets_by_span_id: Record<string, WorkbenchSourceTarget>;
+	source_anchors_by_span_id: Record<string, SourceAnchor>;
 	summary_cards: WorkbenchSummaryCard[];
 	method_rows: WorkbenchMethodRow[];
 	key_results: WorkbenchKeyResultCard[];
@@ -1079,9 +1098,9 @@ function sourceTargetPrecision(block: DocumentContentBlock): SourceTargetPrecisi
 
 function sourceTargetMessage(precision: SourceTargetPrecision) {
 	if (precision === 'pdf-region') {
-		return 'PDF region metadata is available; this reader opens the source page until region overlays are enabled.';
+		return 'PDF region metadata is available for source highlighting.';
 	}
-	if (precision === 'text-range') return 'Parsed text range is available for highlighting.';
+	if (precision === 'text-range') return 'Parsed text range is available; PDF region is pending.';
 	if (precision === 'pdf-page') return 'Precise PDF region is unavailable; page fallback is used.';
 	if (precision === 'section') {
 		return 'Location precision is limited; review the nearby source section.';
@@ -1090,13 +1109,80 @@ function sourceTargetMessage(precision: SourceTargetPrecision) {
 	return 'Source location is unavailable for this item.';
 }
 
+function clampPercent(value: number) {
+	return Math.max(0, Math.min(100, value));
+}
+
+function rectFromPercentBBox(bbox: PdfBoundingBox): SourceAnchorRect | null {
+	if (
+		bbox.x0 < 0 ||
+		bbox.y0 < 0 ||
+		bbox.x1 > 100 ||
+		bbox.y1 > 100 ||
+		bbox.x1 <= bbox.x0 ||
+		bbox.y1 <= bbox.y0
+	) {
+		return null;
+	}
+
+	return {
+		left: clampPercent(bbox.x0),
+		top: clampPercent(bbox.y0),
+		width: clampPercent(bbox.x1 - bbox.x0),
+		height: clampPercent(bbox.y1 - bbox.y0)
+	};
+}
+
+function fixtureAnchorRects(index: number): SourceAnchorRect[] {
+	const rows: SourceAnchorRect[][] = [
+		[
+			{ left: 18, top: 20, width: 64, height: 4.5 },
+			{ left: 18, top: 25.5, width: 58, height: 4.5 }
+		],
+		[
+			{ left: 18, top: 37, width: 66, height: 4.5 },
+			{ left: 18, top: 42.5, width: 52, height: 4.5 }
+		],
+		[
+			{ left: 18, top: 56, width: 60, height: 4.5 },
+			{ left: 18, top: 61.5, width: 46, height: 4.5 }
+		],
+		[
+			{ left: 18, top: 68, width: 63, height: 4.5 },
+			{ left: 18, top: 73.5, width: 54, height: 4.5 }
+		]
+	];
+	return rows[index % rows.length];
+}
+
+function buildSourceAnchor(
+	block: DocumentContentBlock,
+	index: number,
+	useFixtureRects: boolean
+): SourceAnchor {
+	const pageIndex = Math.max(0, (block.page ?? Math.floor(index / 3) + 1) - 1);
+	const section = sectionForWorkbenchBlock(block, index);
+	const bboxRect = block.bbox ? rectFromPercentBBox(block.bbox) : null;
+	const rects = bboxRect ? [bboxRect] : useFixtureRects ? fixtureAnchorRects(index) : [];
+
+	return {
+		pageIndex,
+		rects,
+		quote: block.text || undefined,
+		section,
+		precision: rects.length ? 'pdf-region' : block.page !== null ? 'pdf-page' : 'pending'
+	};
+}
+
 function buildWorkbenchSourceTarget(
 	documentId: string,
 	block: DocumentContentBlock,
-	index: number
+	index: number,
+	useFixtureRects: boolean
 ): WorkbenchSourceTarget {
 	const label = sectionForWorkbenchBlock(block, index);
 	const precision = sourceTargetPrecision(block);
+	const anchor = buildSourceAnchor(block, index, useFixtureRects);
 	return {
 		documentId,
 		label,
@@ -1109,7 +1195,8 @@ function buildWorkbenchSourceTarget(
 		headingPath: block.heading_path,
 		quote: block.text || null,
 		precision,
-		userMessage: sourceTargetMessage(precision)
+		userMessage: sourceTargetMessage(precision),
+		anchor
 	};
 }
 
@@ -1121,7 +1208,8 @@ function buildDocumentSourceFileUrl(collectionId: string, documentId: string) {
 
 function buildWorkbenchSourceSpans(
 	documentId: string,
-	blocks: DocumentContentBlock[]
+	blocks: DocumentContentBlock[],
+	useFixtureRects: boolean
 ): WorkbenchSourceSpan[] {
 	return blocks.map((block, index) => ({
 		id: sourceSpanIdForBlock(block),
@@ -1130,7 +1218,7 @@ function buildWorkbenchSourceSpans(
 		section: sectionForWorkbenchBlock(block, index),
 		quote: block.text,
 		evidence_id: null,
-		target: buildWorkbenchSourceTarget(documentId, block, index)
+		target: buildWorkbenchSourceTarget(documentId, block, index, useFixtureRects)
 	}));
 }
 
@@ -1690,9 +1778,12 @@ export function buildDocumentWorkbenchModel({
 }): DocumentWorkbenchModel {
 	const hasBackendBlocks = Boolean(content?.blocks.length);
 	const blocks = sortedWorkbenchBlocks(content);
-	const sourceSpans = buildWorkbenchSourceSpans(documentId, blocks);
+	const sourceSpans = buildWorkbenchSourceSpans(documentId, blocks, !hasBackendBlocks);
 	const sourceTargetsBySpanId = Object.fromEntries(
 		sourceSpans.map((span) => [span.id, span.target])
+	);
+	const sourceAnchorsBySpanId = Object.fromEntries(
+		sourceSpans.map((span) => [span.id, span.target.anchor])
 	);
 	const pages = buildWorkbenchPages(blocks, sourceSpans, !hasBackendBlocks);
 	const contexts = flattenWorkbenchChains(comparisonSemantics?.variant_dossiers);
@@ -1734,6 +1825,7 @@ export function buildDocumentWorkbenchModel({
 		pages,
 		source_spans: sourceSpans,
 		source_targets_by_span_id: sourceTargetsBySpanId,
+		source_anchors_by_span_id: sourceAnchorsBySpanId,
 		summary_cards: summaryCards,
 		method_rows: methodRows,
 		key_results: keyResults,

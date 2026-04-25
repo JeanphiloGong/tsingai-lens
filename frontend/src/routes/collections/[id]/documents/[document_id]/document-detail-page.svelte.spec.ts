@@ -10,7 +10,7 @@ type DocumentDetailPageState = {
 	url: URL;
 };
 
-const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
+const { pageStore, setPage, fetchMock, getDocumentMock } = vi.hoisted(() => {
 	const subscribers = new Set<(value: DocumentDetailPageState) => void>();
 	let current: DocumentDetailPageState = {
 		params: { id: 'col_123', document_id: 'doc_1' },
@@ -29,12 +29,22 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 			current = next;
 			for (const run of subscribers) run(next);
 		},
-		fetchMock: vi.fn()
+		fetchMock: vi.fn(),
+		getDocumentMock: vi.fn()
 	};
 });
 
 vi.mock('$app/stores', () => ({
 	page: pageStore
+}));
+
+vi.mock('pdfjs-dist', () => ({
+	GlobalWorkerOptions: { workerSrc: '' },
+	getDocument: getDocumentMock
+}));
+
+vi.mock('pdfjs-dist/build/pdf.worker.mjs?url', () => ({
+	default: '/mock-pdf-worker.mjs'
 }));
 
 vi.stubGlobal('fetch', fetchMock);
@@ -58,6 +68,24 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/documents/doc_1')
 		});
 		fetchMock.mockReset();
+		getDocumentMock.mockReset();
+		getDocumentMock.mockImplementation(() => ({
+			promise: Promise.resolve({
+				numPages: 4,
+				destroy: vi.fn(),
+				getPage: vi.fn(async () => ({
+					getViewport: ({ scale }: { scale: number }) => ({
+						width: 600 * scale,
+						height: 820 * scale
+					}),
+					render: vi.fn(() => ({
+						promise: Promise.resolve(),
+						cancel: vi.fn()
+					}))
+				}))
+			}),
+			destroy: vi.fn()
+		}));
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
 				typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -81,7 +109,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							text: 'Conductivity improved to 12 mS/cm.',
 							start_offset: 9,
 							end_offset: 43,
-							text_unit_ids: []
+							text_unit_ids: [],
+							page: 1,
+							bbox: { x0: 18, y0: 20, x1: 82, y1: 24.5, coord_origin: 'percent' }
 						},
 						{
 							block_id: 'methods',
@@ -92,7 +122,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							text: 'The sample was annealed at 700 C.',
 							start_offset: 56,
 							end_offset: 89,
-							text_unit_ids: []
+							text_unit_ids: [],
+							page: 2,
+							bbox: { x0: 22, y0: 44, x1: 72, y1: 48.5, coord_origin: 'percent' }
 						},
 						{
 							block_id: 'results',
@@ -103,7 +135,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							text: 'Conductivity improved to 12 mS/cm under EIS.',
 							start_offset: 98,
 							end_offset: 143,
-							text_unit_ids: []
+							text_unit_ids: [],
+							page: 3,
+							bbox: { x0: 18, y0: 62, x1: 76, y1: 66.5, coord_origin: 'percent' }
 						}
 					],
 					warnings: []
@@ -232,10 +266,20 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Parsed source fallback')).not.toBeInTheDocument();
 
 		await browserPage.getByRole('tab', { name: 'Results' }).click();
 		await expect.element(browserPage.getByText('oxide cathode').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Comparable').first()).toBeInTheDocument();
+		await browserPage.getByText('oxide cathode').first().click();
+		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
+		const resultHighlightStyle = browserPage
+			.getByTestId('pdf-highlight')
+			.first()
+			.element()
+			.getAttribute('style');
+		expect(resultHighlightStyle).toContain('left: 22%');
 
 		await browserPage.getByRole('tab', { name: 'Evidence' }).click();
 		await expect
@@ -244,5 +288,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Jump to source' }).first())
 			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Jump to source' }).first().click();
+		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
 	});
 });

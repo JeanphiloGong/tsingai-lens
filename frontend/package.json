@@ -46,6 +46,7 @@
 	},
 	"dependencies": {
 		"cytoscape": "^3.33.2",
-		"cytoscape-fcose": "^2.2.0"
+		"cytoscape-fcose": "^2.2.0",
+		"pdfjs-dist": "^5.6.205"
 	}
 }

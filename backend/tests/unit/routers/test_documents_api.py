@@ -18,6 +18,16 @@ from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from controllers.core import documents as documents_controller
 from infra.source.runtime.source_evidence import build_blocks
+from tests.support.pbf_acceptance_fixture import (
+    PBF_BASELINE_LABEL,
+    PBF_DOCUMENT_ID,
+    PBF_ELONGATION_COMPARABLE_ID,
+    PBF_S3_VARIANT_ID,
+    PBF_YIELD_25_COMPARABLE_ID,
+    PBF_YIELD_200_COMPARABLE_ID,
+    PBF_YIELD_SERIES_KEY,
+    write_pbf_acceptance_artifacts,
+)
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -54,157 +64,6 @@ def _write_semantic_comparison_artifacts(
         output_dir / "collection_comparable_results.parquet",
         index=False,
     )
-
-
-def _write_evidence_chain_fact_artifacts(output_dir: Path) -> None:
-    pd.DataFrame(
-        [
-            {
-                "variant_id": "var-1",
-                "document_id": "paper-1",
-                "collection_id": "test",
-                "domain_profile": "pbf_metal",
-                "variant_label": "optimized VED + HIP",
-                "host_material_system": {
-                    "family": "titanium alloy",
-                    "composition": "Ti-6Al-4V",
-                },
-                "composition": "Ti-6Al-4V",
-                "variable_axis_type": None,
-                "variable_value": None,
-                "process_context": {
-                    "laser_power_w": 280,
-                    "scan_speed_mm_s": 1200,
-                    "layer_thickness_um": 30,
-                    "hatch_spacing_um": 100,
-                    "build_orientation": "vertical",
-                    "post_treatment_summary": "HIP",
-                },
-                "profile_payload": {},
-                "structure_feature_ids": [],
-                "source_anchor_ids": ["anchor-process"],
-                "confidence": 0.9,
-                "epistemic_status": "normalized_from_evidence",
-            }
-        ]
-    ).to_parquet(output_dir / "sample_variants.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "test_condition_id": "tc-25",
-                "document_id": "paper-1",
-                "collection_id": "test",
-                "domain_profile": "pbf_metal",
-                "property_type": "yield_strength",
-                "template_type": "mechanical",
-                "scope_level": "result",
-                "condition_payload": {
-                    "method": "tensile",
-                    "test_temperature_c": 25.0,
-                    "strain_rate_s-1": 0.001,
-                    "loading_direction": "vertical",
-                    "sample_orientation": "vertical",
-                },
-                "condition_completeness": "complete",
-                "missing_fields": [],
-                "evidence_anchor_ids": ["anchor-test-25"],
-                "confidence": 0.9,
-                "epistemic_status": "normalized_from_evidence",
-            },
-            {
-                "test_condition_id": "tc-200",
-                "document_id": "paper-1",
-                "collection_id": "test",
-                "domain_profile": "pbf_metal",
-                "property_type": "yield_strength",
-                "template_type": "mechanical",
-                "scope_level": "result",
-                "condition_payload": {
-                    "method": "tensile",
-                    "test_temperature_c": 200.0,
-                    "strain_rate_s-1": 0.001,
-                    "loading_direction": "vertical",
-                    "sample_orientation": "vertical",
-                },
-                "condition_completeness": "complete",
-                "missing_fields": [],
-                "evidence_anchor_ids": ["anchor-test-200"],
-                "confidence": 0.9,
-                "epistemic_status": "normalized_from_evidence",
-            },
-        ]
-    ).to_parquet(output_dir / "test_conditions.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "baseline_id": "base-1",
-                "document_id": "paper-1",
-                "collection_id": "test",
-                "domain_profile": "pbf_metal",
-                "variant_id": "var-1",
-                "baseline_type": "same_paper_control",
-                "baseline_label": "optimized VED without HIP",
-                "baseline_scope": "current_paper",
-                "evidence_anchor_ids": ["anchor-baseline"],
-                "confidence": 0.9,
-                "epistemic_status": "normalized_from_evidence",
-            }
-        ]
-    ).to_parquet(output_dir / "baseline_references.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "result_id": "res-temp-25",
-                "document_id": "paper-1",
-                "collection_id": "test",
-                "domain_profile": "pbf_metal",
-                "variant_id": "var-1",
-                "property_normalized": "yield_strength",
-                "result_type": "scalar",
-                "claim_scope": "current_work",
-                "value_payload": {
-                    "value": 940.0,
-                    "source_value_text": "940",
-                    "source_unit_text": "MPa",
-                    "value_origin": "reported",
-                },
-                "unit": "MPa",
-                "test_condition_id": "tc-25",
-                "baseline_id": "base-1",
-                "structure_feature_ids": [],
-                "characterization_observation_ids": [],
-                "evidence_anchor_ids": ["anchor-1"],
-                "traceability_status": "direct",
-                "result_source_type": "text",
-                "epistemic_status": "normalized_from_evidence",
-            },
-            {
-                "result_id": "res-temp-200",
-                "document_id": "paper-1",
-                "collection_id": "test",
-                "domain_profile": "pbf_metal",
-                "variant_id": "var-1",
-                "property_normalized": "yield_strength",
-                "result_type": "scalar",
-                "claim_scope": "current_work",
-                "value_payload": {
-                    "value": 820.0,
-                    "source_value_text": "820",
-                    "source_unit_text": "MPa",
-                    "value_origin": "reported",
-                },
-                "unit": "MPa",
-                "test_condition_id": "tc-200",
-                "baseline_id": "base-1",
-                "structure_feature_ids": [],
-                "characterization_observation_ids": [],
-                "evidence_anchor_ids": ["anchor-3"],
-                "traceability_status": "direct",
-                "result_source_type": "text",
-                "epistemic_status": "normalized_from_evidence",
-            },
-        ]
-    ).to_parquet(output_dir / "measurement_results.parquet", index=False)
 
 
 def _build_semantic_comparison_record(
@@ -582,7 +441,7 @@ def test_document_comparison_semantics_route_can_include_projected_rows(
     assert payload.items[0].projected_rows[0].source_document_id == "paper-1"
 
 
-def test_document_comparison_semantics_route_can_include_grouped_variant_dossiers(
+def test_document_comparison_semantics_route_returns_pbf_acceptance_chain(
     document_services,
     monkeypatch,
 ):
@@ -593,64 +452,58 @@ def test_document_comparison_semantics_route_can_include_grouped_variant_dossier
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
 
-    first_result, first_scope = _build_semantic_comparison_record(
-        collection_id=collection_id,
-        comparable_result_id="cres-temp-25",
-        source_document_id="paper-1",
-    )
-    first_result["source_result_id"] = "res-temp-25"
-    first_result["binding"]["test_condition_id"] = "tc-25"
-    first_result["normalized_context"]["material_system_normalized"] = "Ti-6Al-4V"
-    first_result["normalized_context"]["test_condition_normalized"] = "tensile"
-    first_result["value"]["property_normalized"] = "yield_strength"
-    first_result["value"]["numeric_value"] = 940.0
-    first_result["value"]["summary"] = "YS 940 MPa"
-    first_result["variant_label"] = "optimized VED + HIP"
-    first_result["baseline_reference"] = "optimized VED without HIP"
-    second_result, second_scope = _build_semantic_comparison_record(
-        collection_id=collection_id,
-        comparable_result_id="cres-temp-200",
-        source_document_id="paper-1",
-        sort_order=1,
-    )
-    second_result["source_result_id"] = "res-temp-200"
-    second_result["binding"]["test_condition_id"] = "tc-200"
-    second_result["normalized_context"]["material_system_normalized"] = "Ti-6Al-4V"
-    second_result["normalized_context"]["test_condition_normalized"] = "tensile"
-    second_result["value"]["property_normalized"] = "yield_strength"
-    second_result["value"]["numeric_value"] = 820.0
-    second_result["value"]["summary"] = "YS 820 MPa"
-    second_result["variant_label"] = "optimized VED + HIP"
-    second_result["baseline_reference"] = "optimized VED without HIP"
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [first_result, second_result],
-        [first_scope, second_scope],
-    )
-    _write_evidence_chain_fact_artifacts(output_dir)
+    write_pbf_acceptance_artifacts(output_dir, collection_id=collection_id)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         documents_controller.get_collection_document_comparison_semantics(
             collection_id,
-            "paper-1",
+            PBF_DOCUMENT_ID,
             include_grouped_projections=True,
         )
     )
 
+    assert payload.total == 3
     assert payload.variant_dossiers is not None
     assert len(payload.variant_dossiers) == 1
     dossier = payload.variant_dossiers[0]
-    assert dossier.variant_id == "var-1"
-    assert dossier.variant_label == "optimized VED + HIP"
+    assert dossier.variant_id == PBF_S3_VARIANT_ID
+    assert dossier.variant_label == "S3 optimized VED + HIP"
     assert dossier.material.label == "Ti-6Al-4V"
+    assert dossier.material.composition == "Ti-6Al-4V"
     assert dossier.shared_process_state["laser_power_w"] == 280
+    assert dossier.shared_process_state["scan_speed_mm_s"] == 1200
+    assert dossier.shared_process_state["hatch_spacing_um"] == 100
+    assert dossier.shared_process_state["layer_thickness_um"] == 30
+    assert dossier.shared_process_state["energy_density_j_mm3"] == 78
+    assert dossier.shared_process_state["energy_density_origin"] == "reported"
+    assert dossier.shared_process_state["build_orientation"] == "vertical"
     assert dossier.shared_process_state["post_treatment_summary"] == "HIP"
-    assert dossier.series[0].series_key == "yield_strength:test_temperature_c"
-    assert dossier.series[0].varying_axis.axis_name == "test_temperature_c"
-    assert [chain.test_condition.test_temperature_c for chain in dossier.series[0].chains] == [
+    series_by_key = {series.series_key: series for series in dossier.series}
+    assert PBF_YIELD_SERIES_KEY in series_by_key
+    yield_series = series_by_key[PBF_YIELD_SERIES_KEY]
+    assert yield_series.varying_axis.axis_name == "test_temperature_c"
+    assert [chain.result_id for chain in yield_series.chains] == [
+        PBF_YIELD_25_COMPARABLE_ID,
+        PBF_YIELD_200_COMPARABLE_ID,
+    ]
+    assert [chain.test_condition.test_temperature_c for chain in yield_series.chains] == [
         25.0,
         200.0,
     ]
-    assert dossier.series[0].chains[0].baseline.reference == "optimized VED without HIP"
-    assert dossier.series[0].chains[0].value_provenance.value_origin == "reported"
+    assert [chain.test_condition.strain_rate_s_1 for chain in yield_series.chains] == [
+        0.001,
+        0.001,
+    ]
+    assert [chain.measurement.value for chain in yield_series.chains] == [940.0, 820.0]
+    assert yield_series.chains[0].baseline.reference == PBF_BASELINE_LABEL
+    assert yield_series.chains[0].value_provenance.value_origin == "reported"
+    assert yield_series.chains[0].value_provenance.source_value_text == "940"
+    elongation_chain = next(
+        chain
+        for series in dossier.series
+        for chain in series.chains
+        if chain.result_id == PBF_ELONGATION_COMPARABLE_ID
+    )
+    assert elongation_chain.measurement.property == "elongation"
+    assert elongation_chain.measurement.value == 15.0

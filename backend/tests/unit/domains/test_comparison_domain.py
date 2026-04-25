@@ -34,6 +34,13 @@ from domain.shared.enums import (
     TRACEABILITY_STATUS_MISSING,
     TRACEABILITY_STATUS_PARTIAL,
 )
+from tests.support.pbf_acceptance_fixture import (
+    PBF_BASELINE_ID,
+    PBF_BASELINE_LABEL,
+    PBF_S3_VARIANT_ID,
+    PBF_YIELD_25_COMPARABLE_ID,
+    pbf_acceptance_assessment_context,
+)
 
 
 def _build_comparable_result(
@@ -205,6 +212,43 @@ def test_evaluate_comparison_assessment_applies_pbf_tensile_missingness() -> Non
         "missing strain rate" in warning
         for warning in missing_strain_rate.comparability_warnings
     )
+
+
+def test_pbf_acceptance_fixture_missing_strain_rate_is_limited() -> None:
+    complete = evaluate_comparison_assessment(
+        _build_comparable_result(
+            comparable_result_id=PBF_YIELD_25_COMPARABLE_ID,
+            variant_id=PBF_S3_VARIANT_ID,
+            baseline_id=PBF_BASELINE_ID,
+            baseline_reference=PBF_BASELINE_LABEL,
+            test_condition_id="tc-25",
+            property_normalized="yield_strength",
+            result_summary="YS 940 MPa at 25 C",
+            numeric_value=940.0,
+        ),
+        assessment_context=pbf_acceptance_assessment_context(),
+    )
+    missing_strain_rate = evaluate_comparison_assessment(
+        _build_comparable_result(
+            comparable_result_id=PBF_YIELD_25_COMPARABLE_ID,
+            variant_id=PBF_S3_VARIANT_ID,
+            baseline_id=PBF_BASELINE_ID,
+            baseline_reference=PBF_BASELINE_LABEL,
+            test_condition_id="tc-25",
+            property_normalized="yield_strength",
+            result_summary="YS 940 MPa at 25 C",
+            numeric_value=940.0,
+        ),
+        assessment_context=pbf_acceptance_assessment_context(
+            include_strain_rate=False,
+        ),
+    )
+
+    assert complete.comparability_status == COMPARABILITY_STATUS_COMPARABLE
+    assert "pbf_context_detected" in complete.comparability_basis
+    assert "strain_rate_reported" in complete.comparability_basis
+    assert missing_strain_rate.comparability_status == COMPARABILITY_STATUS_LIMITED
+    assert "strain_rate_s-1" in missing_strain_rate.missing_critical_context
 
 
 def test_evaluate_comparison_assessment_flags_energy_density_provenance() -> None:

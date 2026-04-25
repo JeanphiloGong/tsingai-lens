@@ -17,7 +17,8 @@ page.
 
 ## Review Workspace
 
-The default desktop layout should be a two-column review workspace:
+The default desktop layout should be a three-column review workspace when
+screen width allows it:
 
 ```text
 Document Evidence Review
@@ -25,14 +26,14 @@ Document Evidence Review
 │  ├─ paper title, source filename, and return action
 │  ├─ optional source mode: parsed text now, PDF later
 │  └─ secondary actions such as open result detail or open original source
-└─ Split view
+└─ Review view
    ├─ Left: Source Reader
    │  ├─ full parsed source blocks by default
    │  ├─ PDF facsimile later
    │  ├─ block navigation
    │  ├─ active anchor highlight
    │  └─ source-first reading width
-   └─ Right: Evidence Review Panel
+   ├─ Middle: Evidence Review Panel
       ├─ paper summary
       ├─ traceback status and source anchors
       ├─ variant dossiers
@@ -40,11 +41,18 @@ Document Evidence Review
       ├─ result chains
       ├─ baseline, test-condition, missing-context cues
       └─ result detail and related result links
+   └─ Right: Local Evidence Graph
+      ├─ selected material
+      ├─ selected variant or sample state
+      ├─ selected result chain
+      ├─ baseline and traceability state
+      └─ selected source anchor
 ```
 
-The right panel may become top-stacked on small screens, but the desktop
-acceptance surface should remain side-by-side so source text and extracted
-chains can be compared without route switching.
+The local graph should collapse below the source and evidence columns on medium
+screens, and all regions should stack on small screens. The desktop acceptance
+surface should keep source text, extracted chains, and the selected local graph
+visible without route switching.
 
 ## Source Reader
 
@@ -76,7 +84,7 @@ Future PDF behavior:
 
 ## Evidence Review Panel
 
-The right evidence review panel should organize the paper's extracted chain
+The middle evidence review panel should organize the paper's extracted chain
 model while keeping source-location actions close to each chain.
 
 The first implementation does not need a tab system if a single scrollable
@@ -89,6 +97,22 @@ panel is clearer. Whether rendered as cards or tabs, the panel should cover:
 - result chains under each series
 - missingness and comparability warnings
 - source-location and result-detail actions
+
+## Local Evidence Graph
+
+The right local graph should be a compact relationship view for the selected
+result chain, not a whole-collection graph.
+
+Required first-slice behavior:
+
+- derive the graph directly from backend-authored variant dossiers and result
+  chains
+- show material, variant, result value, result series, baseline, and source
+  anchor nodes
+- fall back to the first available chain when no chain is selected
+- avoid adding a graph library until node interactions or layout complexity
+  justify it
+- keep the graph secondary to source verification and evidence review
 
 ## Paper Overview
 

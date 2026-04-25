@@ -223,7 +223,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		});
 	});
 
-	it('renders a split source and evidence review workspace', async () => {
+	it('renders source, evidence, and local graph workspace regions', async () => {
 		render(Page);
 
 		await expect
@@ -231,6 +231,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Evidence review' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Local evidence graph' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Conductivity improved to 12 mS/cm.'))
@@ -246,7 +249,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Document evidence chains' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('optimized VED + HIP')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('optimized VED + HIP').first()).toBeInTheDocument();
 
 		const chainLink = browserPage.getByRole('link', { name: 'conductivity · 12 mS/cm' });
 		await expect.element(chainLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');

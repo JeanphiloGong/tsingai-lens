@@ -23,6 +23,12 @@
 		type TracebackAnchor
 	} from '../../../../_shared/traceback';
 
+	type ChainContext = {
+		dossier: DocumentVariantDossier;
+		series: DocumentResultSeries;
+		chain: DocumentResultChain;
+	};
+
 	let content: DocumentContentResponse | null = null;
 	let traceback: EvidenceTracebackResponse | null = null;
 	let loading = false;
@@ -61,6 +67,8 @@
 	$: variantDossiers = comparisonSemantics?.variant_dossiers ?? [];
 	$: selectedChainContext = findChainContext(variantDossiers, selectedChainId);
 	$: selectedChain = selectedChainContext?.chain ?? null;
+	$: localGraphContext = selectedChainContext ?? firstChainContext(variantDossiers);
+	$: localGraphChain = localGraphContext?.chain ?? null;
 	$: if (collectionId && routeDocumentId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		void loadDocumentViewer();
@@ -261,15 +269,21 @@
 	function findChainContext(
 		dossiers: DocumentVariantDossier[],
 		chainId: string
-	): {
-		dossier: DocumentVariantDossier;
-		series: DocumentResultSeries;
-		chain: DocumentResultChain;
-	} | null {
+	): ChainContext | null {
 		if (!chainId) return null;
 		for (const dossier of dossiers) {
 			for (const series of dossier.series) {
 				const chain = series.chains.find((item) => item.result_id === chainId);
+				if (chain) return { dossier, series, chain };
+			}
+		}
+		return null;
+	}
+
+	function firstChainContext(dossiers: DocumentVariantDossier[]): ChainContext | null {
+		for (const dossier of dossiers) {
+			for (const series of dossier.series) {
+				const chain = series.chains[0];
 				if (chain) return { dossier, series, chain };
 			}
 		}
@@ -436,14 +450,30 @@
 		return $t('traceback.sourceSelectPromptBody');
 	}
 
-	function selectedVariantLabel(context: typeof selectedChainContext) {
+	function selectedVariantLabel(context: ChainContext | null) {
 		if (!context) return '--';
 		return context.dossier.variant_label || context.dossier.material.label;
 	}
 
-	function selectedSeriesLabel(context: typeof selectedChainContext) {
+	function selectedSeriesLabel(context: ChainContext | null) {
 		if (!context) return '--';
 		return `${context.series.property_family} · ${context.series.test_family}`;
+	}
+
+	function localGraphResultLabel(chain: DocumentResultChain | null) {
+		if (!chain) return '--';
+		return `${chain.measurement.property} · ${formatMeasurementValue(
+			chain.measurement.value,
+			chain.measurement.unit
+		)}`;
+	}
+
+	function localGraphSourceLabel(
+		anchor: TracebackAnchor | null,
+		chain: DocumentResultChain | null
+	) {
+		if (anchor) return sourceBlockIdForAnchor(anchor) || locatorLabel(anchor);
+		return chain?.evidence.traceability_status ?? '--';
 	}
 </script>
 
@@ -863,6 +893,74 @@
 					</article>
 				{/if}
 			</aside>
+
+			<aside class="local-graph-panel" aria-labelledby="local-graph-title">
+				<article class="result-card local-graph-card">
+					<div class="table-main">
+						<h3 id="local-graph-title">{$t('traceback.localGraphTitle')}</h3>
+						<p class="note">{$t('traceback.localGraphLead')}</p>
+					</div>
+
+					{#if localGraphContext && localGraphChain}
+						{@const graphContext = localGraphContext}
+						{@const graphChain = localGraphChain}
+						<div class="local-graph-canvas" aria-labelledby="local-graph-title">
+							<svg class="local-graph-edges" viewBox="0 0 100 100" aria-hidden="true">
+								<line x1="50" y1="48" x2="50" y2="13" />
+								<line x1="50" y1="48" x2="18" y2="40" />
+								<line x1="50" y1="48" x2="82" y2="40" />
+								<line x1="50" y1="54" x2="25" y2="82" />
+								<line x1="50" y1="54" x2="76" y2="82" />
+							</svg>
+
+							<div class="graph-node graph-node--top">
+								<div class="graph-node__label">{$t('results.fieldMaterial')}</div>
+								<div class="graph-node__value">{graphContext.dossier.material.label}</div>
+							</div>
+
+							<div class="graph-node graph-node--left">
+								<div class="graph-node__label">{$t('results.fieldVariant')}</div>
+								<div class="graph-node__value">{selectedVariantLabel(graphContext)}</div>
+							</div>
+
+							<div class="graph-node graph-node--center graph-node--primary">
+								<div class="graph-node__label">{$t('results.fieldValue')}</div>
+								<div class="graph-node__value">{localGraphResultLabel(graphChain)}</div>
+							</div>
+
+							<div class="graph-node graph-node--right">
+								<div class="graph-node__label">{$t('results.fieldSeries')}</div>
+								<div class="graph-node__value">{selectedSeriesLabel(graphContext)}</div>
+							</div>
+
+							<div class="graph-node graph-node--bottom-left">
+								<div class="graph-node__label">{$t('results.fieldBaseline')}</div>
+								<div class="graph-node__value">{graphChain.baseline.label || '--'}</div>
+							</div>
+
+							<div class="graph-node graph-node--bottom-right">
+								<div class="graph-node__label">{$t('traceback.graphSourceNode')}</div>
+								<div class="graph-node__value">
+									{localGraphSourceLabel(selectedAnchor, graphChain)}
+								</div>
+							</div>
+						</div>
+
+						<dl class="detail-list local-graph-detail">
+							<div class="detail-row">
+								<dt>{$t('results.fieldComparability')}</dt>
+								<dd>{graphChain.assessment.comparability_status}</dd>
+							</div>
+							<div class="detail-row">
+								<dt>{$t('results.fieldTraceability')}</dt>
+								<dd>{graphChain.evidence.traceability_status}</dd>
+							</div>
+						</dl>
+					{:else}
+						<p class="note">{$t('traceback.localGraphEmpty')}</p>
+					{/if}
+				</article>
+			</aside>
 		</div>
 	{/if}
 </section>
@@ -885,20 +983,22 @@
 
 	.document-review-layout {
 		display: grid;
-		grid-template-columns: minmax(0, 2.1fr) minmax(320px, 0.9fr);
+		grid-template-columns: minmax(420px, 1.35fr) minmax(360px, 0.95fr) minmax(260px, 0.55fr);
 		gap: 16px;
 		align-items: start;
 		margin-top: 16px;
 	}
 
 	.source-reader,
-	.evidence-review-panel {
+	.evidence-review-panel,
+	.local-graph-panel {
 		display: grid;
 		gap: 12px;
 		align-content: start;
 	}
 
-	.evidence-review-panel {
+	.evidence-review-panel,
+	.local-graph-panel {
 		position: sticky;
 		top: 1rem;
 	}
@@ -973,13 +1073,173 @@
 		gap: 0.75rem;
 	}
 
+	.local-graph-card {
+		display: grid;
+		gap: 1rem;
+		overflow: hidden;
+	}
+
+	.local-graph-canvas {
+		position: relative;
+		min-height: 330px;
+		border: 1px solid var(--color-line);
+		border-radius: 18px;
+		background:
+			radial-gradient(circle at 50% 48%, rgba(47, 91, 210, 0.14), transparent 24%),
+			linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(245, 248, 255, 0.68));
+	}
+
+	.local-graph-edges {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+	}
+
+	.local-graph-edges line {
+		stroke: color-mix(in srgb, var(--accent, #2f5bd2) 34%, var(--color-muted));
+		stroke-width: 0.75;
+		stroke-linecap: round;
+	}
+
+	.graph-node {
+		position: absolute;
+		display: grid;
+		gap: 0.2rem;
+		width: 104px;
+		min-height: 76px;
+		padding: 0.65rem;
+		border: 1px solid color-mix(in srgb, var(--accent, #2f5bd2) 26%, var(--color-line));
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.92);
+		box-shadow: 0 14px 36px rgba(27, 42, 79, 0.08);
+		place-content: center;
+		text-align: center;
+		transform: translate(-50%, -50%);
+	}
+
+	.graph-node--primary {
+		width: 120px;
+		min-height: 88px;
+		border-color: var(--accent, #2f5bd2);
+		background: color-mix(in srgb, var(--accent, #2f5bd2) 12%, white);
+	}
+
+	.graph-node--top {
+		left: 50%;
+		top: 13%;
+	}
+
+	.graph-node--left {
+		left: 18%;
+		top: 40%;
+	}
+
+	.graph-node--center {
+		left: 50%;
+		top: 50%;
+	}
+
+	.graph-node--right {
+		left: 82%;
+		top: 40%;
+	}
+
+	.graph-node--bottom-left {
+		left: 25%;
+		top: 82%;
+	}
+
+	.graph-node--bottom-right {
+		left: 76%;
+		top: 82%;
+	}
+
+	.graph-node__label {
+		color: var(--color-muted);
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.graph-node__value {
+		display: -webkit-box;
+		overflow: hidden;
+		font-size: 0.78rem;
+		font-weight: 800;
+		line-height: 1.25;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+	}
+
+	.local-graph-detail {
+		margin-top: 0;
+	}
+
+	@media (max-width: 1280px) {
+		.document-review-layout {
+			grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.8fr);
+		}
+
+		.local-graph-panel {
+			grid-column: 1 / -1;
+			position: static;
+		}
+	}
+
 	@media (max-width: 980px) {
 		.document-review-layout {
 			grid-template-columns: 1fr;
 		}
 
-		.evidence-review-panel {
+		.evidence-review-panel,
+		.local-graph-panel {
 			position: static;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.local-graph-canvas {
+			min-height: 520px;
+		}
+
+		.graph-node--top,
+		.graph-node--left,
+		.graph-node--center,
+		.graph-node--right,
+		.graph-node--bottom-left,
+		.graph-node--bottom-right {
+			left: 50%;
+		}
+
+		.graph-node--top {
+			top: 10%;
+		}
+
+		.graph-node--left {
+			top: 26%;
+		}
+
+		.graph-node--center {
+			top: 43%;
+		}
+
+		.graph-node--right {
+			top: 60%;
+		}
+
+		.graph-node--bottom-left {
+			top: 77%;
+		}
+
+		.graph-node--bottom-right {
+			top: 92%;
+		}
+
+		.local-graph-edges {
+			display: none;
 		}
 	}
 </style>

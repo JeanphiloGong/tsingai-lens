@@ -617,6 +617,11 @@ const translations: Record<Language, Translations> = {
 			evidenceReviewTitle: 'Evidence review',
 			evidenceReviewLead:
 				'Compare the paper source with variant dossiers, result series, and result chains.',
+			localGraphTitle: 'Local evidence graph',
+			localGraphLead:
+				'Inspect the selected chain as material, variant, result, baseline, and source.',
+			localGraphEmpty: 'Select or load a result chain to render its local evidence graph.',
+			graphSourceNode: 'Source',
 			documentCardTitle: 'Document',
 			documentLabel: 'Title',
 			sourceFileLabel: 'Source file',
@@ -1608,6 +1613,10 @@ const translations: Record<Language, Translations> = {
 			sourceReaderLead: '在核查右侧证据链时，左侧始终保留解析后的原文文本块。',
 			evidenceReviewTitle: '证据核查区',
 			evidenceReviewLead: '把原文和样品状态档案、结果系列、结果链放在同一页对照。',
+			localGraphTitle: '局部证据关系图',
+			localGraphLead: '把当前结果链拆成材料、样品、结果、对照和原文来源来核查。',
+			localGraphEmpty: '选择或加载一条结果链后，这里会显示它的局部证据关系图。',
+			graphSourceNode: '来源',
 			documentCardTitle: '文档信息',
 			documentLabel: '标题',
 			sourceFileLabel: '源文件',

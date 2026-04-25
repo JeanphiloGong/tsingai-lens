@@ -113,6 +113,30 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					]
 				});
 			}
+			if (url.pathname === '/api/v1/collections/col_123/evidence/ev_1/traceback') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					evidence_id: 'ev_1',
+					traceback_status: 'ready',
+					anchors: [
+						{
+							anchor_id: 'anc_1',
+							document_id: 'doc_1',
+							locator_type: 'char_range',
+							locator_confidence: 'high',
+							page: 4,
+							quote: 'Conductivity improved to 12 mS/cm.',
+							section_id: 'results',
+							char_range: {
+								start: 0,
+								end: 33
+							},
+							bbox: null,
+							deep_link: null
+						}
+					]
+				});
+			}
 			if (
 				url.pathname === '/api/v1/collections/col_123/documents/doc_1/comparison-semantics' &&
 				url.searchParams.get('include_grouped_projections') === 'true'
@@ -199,8 +223,15 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		});
 	});
 
-	it('renders related results that drill back into result detail', async () => {
+	it('renders a split source and evidence review workspace', async () => {
 		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Source reader' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence review' }))
+			.toBeInTheDocument();
 
 		const sectionHeading = browserPage.getByRole('heading', { name: 'Results from this document' });
 		await expect.element(sectionHeading).toBeInTheDocument();
@@ -215,5 +246,14 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		const chainLink = browserPage.getByRole('link', { name: 'conductivity · 12 mS/cm' });
 		await expect.element(chainLink).toHaveAttribute('href', '/collections/col_123/results/cres_1');
+
+		const locateButton = browserPage.getByRole('button', { name: 'Locate source' });
+		await locateButton.click();
+
+		expect(fetchMock).toHaveBeenCalledWith(
+			'/api/v1/collections/col_123/evidence/ev_1/traceback',
+			expect.objectContaining({ method: 'GET' })
+		);
+		await expect.element(browserPage.getByText('Source located')).toBeInTheDocument();
 	});
 });

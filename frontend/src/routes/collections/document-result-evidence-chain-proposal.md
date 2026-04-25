@@ -70,6 +70,7 @@ questions quickly:
 4. Which parts of the result change because the test condition changed?
 5. What structure or defect evidence supports the reported behavior?
 6. Which missing fields or warnings limit cross-paper comparison?
+7. Which exact source passage supports the currently selected chain?
 
 ## Core Reading Model
 
@@ -241,96 +242,33 @@ characterization result.
 
 ## Document Page Proposal
 
-The document page should become a source-reading page with an evidence review
-panel, not only a content viewer plus related result links.
+The document page should become an evidence review split view, not a generic
+document details page and not a standalone PDF reader.
 
-### Layout
+The core user task is source-to-claim alignment:
 
-- left: source viewer or content viewer with anchor highlighting
-- right: evidence review panel
-- bottom or secondary panel: cross-paper entry points when needed
+- the left side answers what the paper source says
+- the right side answers what Lens extracted from that source
+- selecting a chain on the right should locate the supporting source context
+  on the left whenever anchors are available
 
-### Evidence Review Panel
+This makes the document page the place where a researcher checks whether a
+paper-level evidence chain is actually grounded in the paper.
 
-The right panel should have these top-level tabs:
+The concrete layout, interaction model, state model, and acceptance checks live
+in
+[`document-evidence-review-split-view-plan.md`](document-evidence-review-split-view-plan.md).
+This parent proposal only owns the reading model so it does not become a
+catch-all implementation plan.
 
-- `Overview`
-- `Variants`
-- `Chains`
-- `Missingness`
+At a high level, the document page should keep:
 
-### Overview Tab
-
-This tab should summarize:
-
-- paper scope
-- material system
-- process route
-- primary properties covered
-- number of variants
-- number of result chains
-- paper-level missingness or traceability warnings
-
-### Variants Tab
-
-This should list one card per variant dossier.
-
-Each card should show:
-
-- normalized variant label
-- material system
-- shared process or sample state
-- properties covered
-- shared evidence summary
-- shared missingness badges
-
-Selecting a dossier should expand its child result series.
-
-### Result Series In Document View
-
-Inside one dossier, result chains should be grouped into series when possible.
-
-Example:
-
-```text
-Variant S3 = optimized VED + HIP
-
-Shared state
-P=280 W, v=1200 mm/s, h=100 um, t=30 um
-HIP=yes
-
-Tensile vs test temperature
-25 C  -> YS 940, UTS 1040, EL 15%
-400 C -> YS 780, UTS 860, EL 18%
-650 C -> YS 520, UTS 610, EL 22%
-```
-
-Each row should expose:
-
-- the varying axis value
-- primary result values
-- baseline label
-- comparability status
-- missingness or warning badges
-- an action to open full chain detail
-
-### Chain Detail Drawer
-
-Clicking a row should open a detail drawer or side panel that shows the full
-result chain:
-
-- variant summary
-- process or sample state
-- test condition
-- structure or defect evidence
-- result values
-- baseline
-- mechanism claim
-- support evidence
-- comparability warnings
-- source anchors
-
-Each anchor should support direct jump back into the source viewer.
+- parsed source sections on the left first, with PDF mode added later only when
+  stable source-file URLs and useful anchors exist
+- paper overview, variant dossiers, result series, and result chains on the
+  right
+- chain selection and source-location behavior inside the same page
+- explicit missing-source states when anchors cannot be resolved
 
 ## Result Detail Page Proposal
 
@@ -400,18 +338,36 @@ when the backend has not resolved them.
 
 ## First Delivery Slice
 
-The first implementation wave should stay narrow.
+The first implementation wave should stay narrow and split responsibilities
+clearly:
 
-1. Add a `Variant dossier` panel to the document page.
-2. Render result chains as grouped series inside each dossier.
-3. Add a chain detail drawer with anchor jump actions.
-4. Reframe the result detail page around one chain plus its parent dossier.
+- the document page first slice is defined in
+  [`document-evidence-review-split-view-plan.md`](document-evidence-review-split-view-plan.md)
+- the result detail page should present one chain plus its parent dossier
+- comparison rows should continue to open result or document drilldowns instead
+  of absorbing the full chain detail inline
 
 This is enough to test whether the frontend is presenting a real evidence
-chain rather than only a result card and a source link.
+chain rather than only a result card, a source link, and a disconnected
+document content view.
+
+## Acceptance Checks
+
+The evidence-chain frontend model is accepted only when these checks pass:
+
+- right panel shows `variant dossier -> result series -> result chain`
+- process temperature, test temperature, and characterization temperature are
+  shown in distinct contexts
+- one fixed variant with multiple test temperatures is rendered as a result
+  series, not as unrelated cards
+- selecting a chain can trace back to source anchors when anchors exist
+- missing source anchors are visible as a limitation, not hidden
+- result detail still works as the deeper atomic chain drilldown
 
 ## Related Docs
 
+- [`document-evidence-review-split-view-plan.md`](document-evidence-review-split-view-plan.md)
+  Concrete document-page split-view layout, interaction, and acceptance plan
 - [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
   Collection route-family product hierarchy and broad page responsibilities
 - [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md)

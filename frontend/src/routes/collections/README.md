@@ -46,6 +46,9 @@ This node owns the collection workspace route family in the frontend.
 - [`document-result-evidence-chain-proposal.md`](document-result-evidence-chain-proposal.md)
   Frontend-local proposal for reading documents and results as variant dossiers,
   result chains, and result series
+- [`document-evidence-review-split-view-plan.md`](document-evidence-review-split-view-plan.md)
+  Frontend-local plan for the document detail split view that aligns source
+  text with selected evidence chains
 - [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md)
   Claim-to-source navigation contract for comparison/evidence to document
   traceback behavior

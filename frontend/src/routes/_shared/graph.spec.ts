@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCollectionGraphmlUrl, parseGraphNodeId } from './graph';
+import { buildCollectionGraphmlUrl, formatGraphLabel, parseGraphNodeId } from './graph';
 
 describe('graph shared helpers', () => {
 	it('builds graphml urls with only lean graph query parameters', () => {
@@ -44,5 +44,13 @@ describe('graph shared helpers', () => {
 			kind: 'unknown',
 			resourceId: ''
 		});
+	});
+
+	it('formats raw graph labels for display', () => {
+		expect(formatGraphLabel('process_complexity_equipment_cost')).toBe(
+			'Process Complexity Equipment Cost'
+		);
+		expect(formatGraphLabel(' total_crack_length ')).toBe('Total Crack Length');
+		expect(formatGraphLabel('17-4 PH steel')).toBe('17-4 PH Steel');
 	});
 });

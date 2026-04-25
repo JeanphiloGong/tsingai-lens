@@ -835,12 +835,16 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		graph: {
-			title: 'Graph',
-			lead: 'Use this as a secondary relationship view after you have already read the main collection pages.',
+			title: 'Collection Evidence Graph',
+			lead: 'Explore material, property, comparison, and source-evidence relationships across this collection.',
 			filtersTitle: 'Graph filters',
 			filtersLead:
 				'Keep the canvas focused on research objects, then reveal source nodes when needed.',
 			insightTitle: 'Selected insight',
+			relationshipMapTitle: 'Collection relationship graph',
+			relationshipMapLead:
+				'Readable labels are display-only; evidence verification stays in the panels below.',
+			unspecifiedLabel: 'Unspecified',
 			previewLoad: 'Refresh preview',
 			previewLoading: 'Loading preview...',
 			previewLoaded: 'Preview loaded',
@@ -1836,11 +1840,14 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		graph: {
-			title: '图谱',
-			lead: '把图谱当成主要页面之后的次级关系视图，而不是集合理解的第一入口。',
+			title: '文献集合图谱',
+			lead: '面向多篇论文的主题、证据与关系探索。',
 			filtersTitle: '图谱筛选',
 			filtersLead: '优先保留科研对象，需要时再打开来源类节点。',
 			insightTitle: '选中对象解释',
+			relationshipMapTitle: '集合关系图谱',
+			relationshipMapLead: '节点标签为阅读优化后的显示文本，证据核查仍以下方和右侧面板为准。',
+			unspecifiedLabel: '未指定',
 			previewLoad: '刷新预览',
 			previewLoading: '预览加载中...',
 			previewLoaded: '预览已加载',

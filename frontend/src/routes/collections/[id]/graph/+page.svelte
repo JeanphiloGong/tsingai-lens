@@ -21,6 +21,7 @@
 		buildCollectionGraphmlUrl,
 		fetchCollectionGraph,
 		fetchCollectionGraphNeighbors,
+		formatGraphLabel,
 		parseGraphNodeId,
 		type GraphEdge,
 		type GraphNode,
@@ -55,7 +56,11 @@
 		| 'process';
 	type Position = { x: number; y: number };
 	type ViewportState = { zoom: number; pan: Position };
-	type SelectedNode = GraphNode & { kind: NodeKind | 'unknown'; resourceId: string | null };
+	type SelectedNode = GraphNode & {
+		kind: NodeKind | 'unknown';
+		resourceId: string | null;
+		displayLabel: string;
+	};
 	type NodeDetail =
 		| { kind: 'document'; data: DocumentProfile }
 		| { kind: 'evidence'; data: EvidenceCard }
@@ -301,6 +306,18 @@
 		return `${normalized.slice(0, Math.max(limit - 1, 1)).trimEnd()}…`;
 	}
 
+	function displayGraphLabel(label: string, type?: string | null) {
+		const kind = asNodeKind(type);
+		const formatted = formatGraphLabel(label || '');
+		const normalized = formatted.toLowerCase();
+		if (normalized === '--' || normalized === 'unknown' || normalized.startsWith('unspecified')) {
+			return kind
+				? `${$t('graph.unspecifiedLabel')} ${nodeTypeLabel(kind)}`
+				: $t('graph.unspecifiedLabel');
+		}
+		return formatted;
+	}
+
 	function nodeColor(type?: string | null) {
 		const kind = asNodeKind(type);
 		return kind ? nodeTypeMeta[kind].color : '#2b6ff7';
@@ -314,15 +331,23 @@
 
 	function nodeDisplayLabel(label: string, type?: string | null) {
 		const kind = asNodeKind(type);
-		return truncateText(label || '', isAggregateNodeKind(kind) ? 54 : 22) || '--';
+		const cleaned = truncateText(
+			displayGraphLabel(label, type),
+			isAggregateNodeKind(kind) ? 42 : 24
+		);
+		if (!kind) return cleaned || '--';
+		if (isAggregateNodeKind(kind)) return `${nodeTypeLabel(kind)}\n${cleaned}`;
+		if (kind === 'comparison') return `${nodeTypeLabel(kind)}\n${cleaned}`;
+		return cleaned || '--';
 	}
 
 	function estimatedLineCount(label: string, type?: string | null) {
 		const kind = asNodeKind(type);
-		const charsPerLine = isAggregateNodeKind(kind) ? 16 : 12;
-		const maxLines = isAggregateNodeKind(kind) ? 3 : 2;
-		const normalized = label.replace(/\s+/g, ' ').trim();
-		return clamp(Math.ceil(Math.max(normalized.length, 1) / charsPerLine), 1, maxLines);
+		const charsPerLine = isAggregateNodeKind(kind) ? 18 : 14;
+		const maxLines = isAggregateNodeKind(kind) || kind === 'comparison' ? 4 : 3;
+		const normalized = displayGraphLabel(label, type).replace(/\s+/g, ' ').trim();
+		const typeLine = kind && (isAggregateNodeKind(kind) || kind === 'comparison') ? 1 : 0;
+		return clamp(typeLine + Math.ceil(Math.max(normalized.length, 1) / charsPerLine), 1, maxLines);
 	}
 
 	function nodeLayoutMetrics(node: GraphNode) {
@@ -356,7 +381,9 @@
 	function getNodeLabel(nodeId: string) {
 		if (!cy) return nodeId;
 		const node = cy.$id(nodeId);
-		return node.empty() ? nodeId : String(node.data('fullLabel') ?? nodeId);
+		return node.empty()
+			? nodeId
+			: String(node.data('displayLabel') ?? node.data('fullLabel') ?? nodeId);
 	}
 
 	function edgeRelationLabel(description?: string | null) {
@@ -521,7 +548,7 @@
 		const position = node.renderedPosition();
 		hoverPreview = {
 			nodeId: node.id(),
-			label: String(node.data('fullLabel') ?? node.id()),
+			label: String(node.data('displayLabel') ?? node.data('fullLabel') ?? node.id()),
 			typeLabel: selectedNodeTypeLabel(
 				typeof node.data('entityType') === 'string' ? node.data('entityType') : null
 			),
@@ -603,11 +630,16 @@
 		cy.batch(() => {
 			cy?.nodes().forEach((node) => {
 				const label = String(node.data('fullLabel') ?? '').toLowerCase();
+				const displayLabel = String(node.data('displayLabel') ?? '').toLowerCase();
 				const type = asNodeKind(
 					typeof node.data('entityType') === 'string' ? node.data('entityType') : null
 				);
 				const typeVisible = type ? visibleNodeTypes[type] : true;
-				const matches = !query || label.includes(query) || node.id().toLowerCase().includes(query);
+				const matches =
+					!query ||
+					label.includes(query) ||
+					displayLabel.includes(query) ||
+					node.id().toLowerCase().includes(query);
 				node.toggleClass('is-hidden', !(typeVisible && matches));
 			});
 
@@ -681,6 +713,7 @@
 		const nextSelectedNode: SelectedNode = {
 			id: nodeId,
 			label: String(node.data('fullLabel') ?? nodeId),
+			displayLabel: String(node.data('displayLabel') ?? node.data('fullLabel') ?? nodeId),
 			type: typeof node.data('entityType') === 'string' ? node.data('entityType') : null,
 			degree: typeof node.data('degree') === 'number' ? node.data('degree') : null,
 			kind: parsed.kind,
@@ -799,6 +832,7 @@
 					id: node.id,
 					label: metrics.displayLabel,
 					fullLabel: node.label,
+					displayLabel: displayGraphLabel(node.label, node.type),
 					entityType: node.type ?? null,
 					degree: node.degree ?? 0,
 					color: nodeColor(node.type),
@@ -1421,6 +1455,34 @@
 					bind:this={graphContainer}
 					aria-label={$t('graph.previewCanvasLabel')}
 				>
+					<div class="graph-canvas-header" aria-hidden="true">
+						<div>
+							<h3>{$t('graph.relationshipMapTitle')}</h3>
+							<p>{$t('graph.relationshipMapLead')}</p>
+						</div>
+						<div class="graph-canvas-legend">
+							<span
+								><i style={`background:${nodeColor('material')};`}></i>{nodeTypeLabel(
+									'material'
+								)}</span
+							>
+							<span
+								><i style={`background:${nodeColor('property')};`}></i>{nodeTypeLabel(
+									'property'
+								)}</span
+							>
+							<span
+								><i style={`background:${nodeColor('comparison')};`}></i>{nodeTypeLabel(
+									'comparison'
+								)}</span
+							>
+							<span
+								><i style={`background:${nodeColor('evidence')};`}></i>{nodeTypeLabel(
+									'evidence'
+								)}</span
+							>
+						</div>
+					</div>
 					{#if loading}
 						<div class="graph-empty">{$t('graph.previewLoading')}</div>
 					{:else if !visibleNodes}
@@ -1471,7 +1533,7 @@
 						</div>
 					</div>
 					<div class="detail-primary">
-						<span class="detail-name">{selectedNode.label}</span>
+						<span class="detail-name">{selectedNode.displayLabel}</span>
 						{#if selectedNode.type}
 							<span class="detail-tag">{selectedNodeTypeLabel(selectedNode.type)}</span>
 						{/if}
@@ -1496,7 +1558,7 @@
 							</div>
 							<div class="detail-row detail-row--wide">
 								<dt>{$t('graph.detailAggregateValue')}</dt>
-								<dd>{selectedNode.label}</dd>
+								<dd>{selectedNode.displayLabel}</dd>
 							</div>
 						{:else if selectedNodeDetail?.kind === 'document'}
 							<div class="detail-row">
@@ -1555,7 +1617,12 @@
 							</div>
 							<div class="detail-row">
 								<dt>{$t('graph.detailProperty')}</dt>
-								<dd>{selectedNodeDetail.data.display.property_normalized}</dd>
+								<dd>
+									{displayGraphLabel(
+										selectedNodeDetail.data.display.property_normalized,
+										'property'
+									)}
+								</dd>
 							</div>
 							<div class="detail-row">
 								<dt>{$t('graph.detailComparability')}</dt>
@@ -1636,7 +1703,10 @@
 					<article class="result-card graph-evidence-row">
 						<div class="table-main">
 							<div class="table-title">
-								{row.display.material_system_normalized} · {row.display.property_normalized}
+								{displayGraphLabel(row.display.material_system_normalized, 'material')} · {displayGraphLabel(
+									row.display.property_normalized,
+									'property'
+								)}
 							</div>
 							<div class="table-sub">{row.assessment.comparability_status}</div>
 						</div>
@@ -1644,15 +1714,17 @@
 						<dl class="detail-list graph-evidence-row__details">
 							<div class="detail-row">
 								<dt>{$t('graph.detailProcess')}</dt>
-								<dd>{row.display.process_normalized}</dd>
+								<dd>{displayGraphLabel(row.display.process_normalized, 'process')}</dd>
 							</div>
 							<div class="detail-row">
 								<dt>{$t('graph.detailTest')}</dt>
-								<dd>{row.display.test_condition_normalized}</dd>
+								<dd>
+									{displayGraphLabel(row.display.test_condition_normalized, 'test_condition')}
+								</dd>
 							</div>
 							<div class="detail-row">
 								<dt>{$t('graph.detailBaseline')}</dt>
-								<dd>{row.display.baseline_normalized}</dd>
+								<dd>{displayGraphLabel(row.display.baseline_normalized, 'baseline')}</dd>
 							</div>
 							<div class="detail-row">
 								<dt>{$t('graph.detailEvidenceIds')}</dt>
@@ -1704,6 +1776,64 @@
 
 	.graph-canvas {
 		min-height: min(690px, calc(100vh - 300px));
+		overflow: hidden;
+		background:
+			radial-gradient(circle at 45% 35%, rgba(43, 111, 247, 0.1), transparent 38%),
+			linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(248, 252, 255, 0.68));
+	}
+
+	.graph-canvas-header {
+		position: absolute;
+		z-index: 2;
+		top: 16px;
+		left: 16px;
+		right: 16px;
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+		pointer-events: none;
+	}
+
+	.graph-canvas-header h3 {
+		margin: 0;
+		font-size: 0.98rem;
+	}
+
+	.graph-canvas-header p {
+		margin: 0.2rem 0 0;
+		max-width: 34rem;
+		font-size: 0.78rem;
+		color: var(--color-subtle);
+	}
+
+	.graph-canvas-legend {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 0.45rem;
+		max-width: 340px;
+	}
+
+	.graph-canvas-legend span {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.32rem 0.55rem;
+		border: 1px solid var(--color-line);
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.86);
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: var(--color-muted);
+		box-shadow: 0 8px 18px rgba(15, 27, 45, 0.08);
+	}
+
+	.graph-canvas-legend i {
+		width: 0.55rem;
+		height: 0.55rem;
+		border-radius: 999px;
+		display: inline-block;
 	}
 
 	.graph-insight-card {
@@ -1835,6 +1965,16 @@
 
 		.graph-canvas {
 			min-height: 420px;
+		}
+
+		.graph-canvas-header {
+			position: static;
+			margin: 12px;
+			display: grid;
+		}
+
+		.graph-canvas-legend {
+			justify-content: flex-start;
 		}
 
 		.graph-evidence-card__header {

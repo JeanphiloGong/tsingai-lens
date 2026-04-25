@@ -89,3 +89,11 @@ export function parseGraphNodeId(nodeId: string): GraphNodeRef {
 	if (prefix === 'base') return { kind: 'baseline', resourceId };
 	return { kind: 'unknown', resourceId };
 }
+
+export function formatGraphLabel(value: string) {
+	const normalized = value.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+
+	if (!normalized) return '--';
+
+	return normalized.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}

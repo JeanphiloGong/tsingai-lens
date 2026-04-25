@@ -71,6 +71,11 @@ not yet claim that the backend graph can express stable process-to-property or
 mechanism relationships. Those require a later Lens-native graph projection
 that adds process nodes and relation-level evidence aggregation.
 
+The frontend may normalize labels for display, for example by replacing raw
+underscore-separated values with readable title-cased text and adding node-kind
+context inside the canvas node. This display label must not replace the raw
+graph label used for canonical comparison filters or backend lookups.
+
 ### 1. Treat Single Click As Selection Plus Focus
 
 Single click on a node should:

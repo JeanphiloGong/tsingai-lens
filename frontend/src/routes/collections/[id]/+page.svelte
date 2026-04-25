@@ -10,15 +10,23 @@
 	import { t } from '../../_shared/i18n';
 	import { createBuildTask, getTask, isTaskActive, type Task } from '../../_shared/tasks';
 	import {
-		countActionablePrimaryViews,
+		buildOverviewPipelineSteps,
 		fetchWorkspaceOverview,
-		getCollectionWorkspaceState,
+		getOverviewReadinessState,
 		getWorkspaceSurfaceState,
-		stageIsActionable,
-		type CollectionWorkspaceState,
-		type WorkspaceSurfaceState,
-		type WorkspaceOverview
+		type OverviewPipelineStatus,
+		type OverviewPipelineStep,
+		type OverviewReadinessState,
+		type WorkspaceOverview,
+		type WorkspaceSurfaceKey,
+		type WorkspaceSurfaceState
 	} from '../../_shared/workspace';
+
+	type PaperMixRow = {
+		key: 'review' | 'experimental' | 'mixed' | 'uncertain' | 'benchmark';
+		label: string;
+		count: number;
+	};
 
 	let workspace: WorkspaceOverview | null = null;
 	let loading = false;
@@ -29,7 +37,6 @@
 
 	let selectedFiles: File[] = [];
 	let isDragging = false;
-	let buildAfterUpload = true;
 	let uploadLoading = false;
 	let uploadError = '';
 	let uploadResult: { count: number; items: CollectionFile[] } | null = null;
@@ -38,30 +45,17 @@
 	let filesLoading = false;
 	let filesError = '';
 
-	let advancedOpen = false;
-	const primaryViewKeys = ['comparisons', 'documents'] as const;
-	const setupPreviewKeys = ['comparisons', 'documents', 'protocol'] as const;
-
 	$: collectionId = $page.params.id ?? '';
-	$: if ($page.url.hash.startsWith('#advanced')) {
-		advancedOpen = true;
-	}
 	$: effectiveFileCount = Math.max(workspace?.file_count ?? 0, collectionFiles.length);
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
-	$: workspaceState = getCollectionWorkspaceState(stateWorkspace);
-	$: actionablePrimaryViews = countActionablePrimaryViews(stateWorkspace);
-	$: protocolState = getWorkspaceSurfaceState(stateWorkspace, 'protocol');
-	$: graphState = getWorkspaceSurfaceState(stateWorkspace, 'graph');
-	$: isEmptyState = workspaceState === 'empty';
-	$: isReadyToProcessState = workspaceState === 'ready_to_process';
-	$: isProcessingState = workspaceState === 'processing';
-	$: isAnalysisState =
-		workspaceState === 'ready' ||
-		workspaceState === 'ready_with_limits' ||
-		workspaceState === 'failed';
-	$: showAdditionalViews = Boolean(
-		workspace && isAnalysisState && (protocolState !== 'not_applicable' || graphState === 'ready')
-	);
+	$: readinessState = getOverviewReadinessState(stateWorkspace);
+	$: pipelineSteps = buildOverviewPipelineSteps(stateWorkspace);
+	$: paperCount = stateWorkspace?.document_summary.total_documents ?? effectiveFileCount;
+	$: showUploadPanel =
+		readinessState === 'empty' ||
+		readinessState === 'ready_to_process' ||
+		selectedFiles.length > 0 ||
+		Boolean(uploadError || uploadResult);
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		clearPoll();
@@ -117,12 +111,8 @@
 		try {
 			workspace = await fetchWorkspaceOverview(collectionId);
 			const latestTask = workspace.latest_task;
-			if (latestTask) {
-				if (isTaskActive(latestTask)) {
-					schedulePoll(latestTask.task_id);
-				} else {
-					clearPoll();
-				}
+			if (latestTask && isTaskActive(latestTask)) {
+				schedulePoll(latestTask.task_id);
 			} else {
 				clearPoll();
 			}
@@ -146,6 +136,10 @@
 		} finally {
 			filesLoading = false;
 		}
+	}
+
+	async function refreshAll() {
+		await Promise.all([loadWorkspace(), loadFiles()]);
 	}
 
 	function browseFiles() {
@@ -178,143 +172,6 @@
 			event.preventDefault();
 			browseFiles();
 		}
-	}
-
-	function formatStatus(status?: string | null) {
-		if (!status) return $t('overview.statusUnknown');
-		const key = `overview.status.${status}`;
-		const translated = $t(key);
-		return translated === key ? status : translated;
-	}
-
-	function formatTaskStatus(status?: string | null) {
-		if (!status) return $t('tasks.statusUnknown');
-		const key = `tasks.status.${status}`;
-		const translated = $t(key);
-		return translated === key ? status : translated;
-	}
-
-	function formatTaskStage(stage?: string | null) {
-		if (!stage) return $t('tasks.stageUnknown');
-		const key = `tasks.stage.${stage}`;
-		const translated = $t(key);
-		return translated === key ? stage : translated;
-	}
-
-	function formatCount(value?: number | null) {
-		return typeof value === 'number' && Number.isFinite(value) ? String(value) : '--';
-	}
-
-	function formatDate(value?: string | null) {
-		if (!value) return '--';
-		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) return value;
-		return date.toLocaleString();
-	}
-
-	function formatPercent(value?: number | null) {
-		if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
-		return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
-	}
-
-	function formatBytes(value?: number) {
-		if (value === undefined || value === null || Number.isNaN(value)) return '--';
-		if (value < 1024) return `${value} B`;
-		const kb = value / 1024;
-		if (kb < 1024) return `${kb.toFixed(1)} KB`;
-		const mb = kb / 1024;
-		if (mb < 1024) return `${mb.toFixed(1)} MB`;
-		return `${(mb / 1024).toFixed(1)} GB`;
-	}
-
-	function workflowRows() {
-		if (!workspace) return [];
-		return [
-			['comparisons', workspace.workflow.comparisons],
-			['results', workspace.workflow.results],
-			['documents', workspace.workflow.documents],
-			['protocol', workspace.workflow.protocol]
-		] as Array<[string, string]>;
-	}
-
-	function formatWorkflowStatus(status?: string | null) {
-		if (!status) return $t('overview.statusUnknown');
-		const key = `overview.workflowStates.${status}`;
-		const translated = $t(key);
-		return translated === key ? status : translated;
-	}
-
-	function documentTypeRows() {
-		if (!workspace) return [];
-		const counts = workspace.document_summary.doc_type_counts;
-		const rows: Array<[string, number]> = [
-			[$t('overview.docTypeExperimental'), counts.experimental],
-			[$t('overview.docTypeReview'), counts.review],
-			[$t('overview.docTypeMixed'), counts.mixed],
-			[$t('overview.docTypeUncertain'), counts.uncertain]
-		];
-		return rows.filter(([, count]) => count > 0);
-	}
-
-	function protocolSuitabilityRows() {
-		if (!workspace) return [];
-		const counts = workspace.document_summary.protocol_extractable_counts;
-		const rows: Array<[string, number]> = [
-			[$t('overview.protocolExtractableYes'), counts.yes],
-			[$t('overview.protocolExtractablePartial'), counts.partial],
-			[$t('overview.protocolExtractableNo'), counts.no],
-			[$t('overview.protocolExtractableUncertain'), counts.uncertain]
-		];
-		return rows.filter(([, count]) => count > 0);
-	}
-
-	function getFileLabel(file: CollectionFile) {
-		return file.original_filename || $t('documents.untitledFile');
-	}
-
-	function primaryActionLabel() {
-		if (!workspace) return $t('overview.primaryActionUpload');
-		if (!effectiveFileCount) return $t('overview.primaryActionUpload');
-		if (workspace.latest_task && isTaskActive(workspace.latest_task))
-			return $t('overview.primaryActionTrack');
-		if (workspace.capabilities.can_view_comparisons) return $t('overview.primaryActionComparisons');
-		if (workspace.capabilities.can_view_documents) return $t('overview.primaryActionDocuments');
-		if (workspace.capabilities.can_generate_sop || workspace.capabilities.can_view_protocol_steps) {
-			return $t('overview.primaryActionProtocol');
-		}
-		return $t('overview.primaryActionProcess');
-	}
-
-	function openPrimaryAction() {
-		const latestTask = workspace?.latest_task;
-		if (!workspace) return;
-
-		if (!effectiveFileCount) {
-			location.hash = 'files';
-			return;
-		}
-
-		if (latestTask && isTaskActive(latestTask)) {
-			location.hash = 'status';
-			return;
-		}
-
-		if (workspace.capabilities.can_view_comparisons) {
-			location.href = workspace.links.comparisons;
-			return;
-		}
-
-		if (workspace.capabilities.can_view_documents) {
-			location.href = workspace.links.documents;
-			return;
-		}
-
-		if (workspace.capabilities.can_generate_sop || workspace.capabilities.can_view_protocol_steps) {
-			location.href = workspace.links.protocol;
-			return;
-		}
-
-		void startBuildRun();
 	}
 
 	async function startBuildRun() {
@@ -350,9 +207,6 @@
 			if (fileInput) fileInput.value = '';
 			await Promise.all([loadFiles(false), loadWorkspace(false)]);
 			actionStatus = $t('documents.uploadDone');
-			if (buildAfterUpload) {
-				await startBuildRun();
-			}
 		} catch (err) {
 			uploadError = errorMessage(err);
 		} finally {
@@ -360,104 +214,176 @@
 		}
 	}
 
-	function collectionStateLabel(state: CollectionWorkspaceState) {
-		return $t(`overview.collectionStates.${state}.label`);
-	}
-
-	function collectionStateTitle(state: CollectionWorkspaceState) {
-		return $t(`overview.collectionStates.${state}.title`);
-	}
-
-	function collectionStateBody(state: CollectionWorkspaceState) {
-		return $t(`overview.collectionStates.${state}.body`);
-	}
-
-	function surfaceStatusLabel(status: WorkspaceSurfaceState) {
-		return $t(`overview.surfaceStates.${status}`);
-	}
-
-	function surfaceStatusNote(status: WorkspaceSurfaceState) {
-		return $t(`overview.surfaceStateNotes.${status}`);
-	}
-
-	function viewLink(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
-		if (!workspace) return '#';
-		if (key === 'graph') return `/collections/${collectionId}/graph`;
-		return workspace.links[key];
-	}
-
-	function viewLead(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
-		if (key === 'comparisons') return $t('overview.resultComparisonsLead');
-		if (key === 'documents') return $t('overview.resultDocumentsLead');
-		if (key === 'protocol') return $t('overview.resultProtocolLead');
-		return $t('overview.resultGraphLead');
-	}
-
-	function viewState(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
-		if (key === 'graph') return graphState;
-		if (key === 'protocol') return protocolState;
-		return stateWorkspace ? getWorkspaceSurfaceState(stateWorkspace, key) : 'empty';
-	}
-
-	function showViewAction(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
-		return viewState(key) === 'ready' || viewState(key) === 'limited';
-	}
-
-	function viewActionLabel(key: (typeof primaryViewKeys)[number] | 'protocol' | 'graph') {
-		if (key === 'comparisons') return $t('overview.nextComparisons');
-		if (key === 'documents') return $t('overview.nextDocuments');
-		if (key === 'protocol') return $t('overview.nextProtocol');
-		return $t('overview.nextGraph');
-	}
-
-	function actionStatusTone(value: string) {
-		return value.startsWith('4') || value.startsWith('5') ? 'status--error' : '';
-	}
-
-	function compactPreviewLead(key: (typeof setupPreviewKeys)[number]) {
-		if (key === 'comparisons') return $t('overview.previewComparisonsLead');
-		if (key === 'documents') return $t('overview.previewDocumentsLead');
-		return $t('overview.previewProtocolLead');
-	}
-
-	function setupTitle() {
-		if (isReadyToProcessState) return $t('overview.setupReadyTitle');
-		return $t('overview.setupEmptyTitle');
-	}
-
-	function setupBody() {
-		if (isReadyToProcessState) return $t('overview.setupReadyLead');
-		return $t('overview.setupEmptyLead');
-	}
-
-	function processingTitle() {
-		return $t('overview.processingTitle');
-	}
-
-	function processingBody() {
-		return $t('overview.processingLead');
-	}
-
-	function setupPrimaryLabel() {
-		if (selectedFiles.length) {
-			return uploadLoading ? $t('documents.uploading') : $t('overview.startUploadCta');
-		}
-		if (isReadyToProcessState) {
-			return $t('overview.startAnalysisCta');
-		}
-		return $t('overview.addPapersCta');
-	}
-
-	async function handleSetupPrimaryAction() {
+	async function handleUploadPrimary() {
 		if (selectedFiles.length) {
 			await submitUpload();
 			return;
 		}
-		if (isReadyToProcessState) {
-			await startBuildRun();
-			return;
-		}
 		browseFiles();
+	}
+
+	function formatPercent(value?: number | null) {
+		if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
+		return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
+	}
+
+	function formatTaskStatus(status?: string | null) {
+		if (!status) return $t('tasks.statusUnknown');
+		const key = `tasks.status.${status}`;
+		const translated = $t(key);
+		return translated === key ? status : translated;
+	}
+
+	function formatTaskStage(stage?: string | null) {
+		if (!stage) return $t('tasks.stageUnknown');
+		const key = `tasks.stage.${stage}`;
+		const translated = $t(key);
+		return translated === key ? stage : translated;
+	}
+
+	function getFileLabel(file: CollectionFile) {
+		return file.original_filename || $t('documents.untitledFile');
+	}
+
+	function pipelineStepLabel(step: OverviewPipelineStep) {
+		return $t(`overview.pipeline.steps.${step.key}`);
+	}
+
+	function pipelineStatusLabel(status: OverviewPipelineStatus) {
+		return $t(`overview.pipeline.statuses.${status}`);
+	}
+
+	function readinessTitle(state: OverviewReadinessState) {
+		return $t(`overview.readiness.${state}.title`);
+	}
+
+	function readinessBody(state: OverviewReadinessState) {
+		return $t(`overview.readiness.${state}.body`, { count: paperCount });
+	}
+
+	function readyPrimaryHref() {
+		if (!stateWorkspace) return '#';
+		if (stateWorkspace.capabilities.can_view_comparisons) return stateWorkspace.links.comparisons;
+		if (stateWorkspace.capabilities.can_view_documents) return stateWorkspace.links.documents;
+		return stateWorkspace.links.workspace;
+	}
+
+	function readyPrimaryLabel() {
+		if (stateWorkspace?.capabilities.can_view_comparisons) {
+			return $t('overview.actions.enterComparisons');
+		}
+		if (stateWorkspace?.capabilities.can_view_documents) {
+			return $t('overview.actions.viewDocuments');
+		}
+		return $t('overview.actions.refreshStatus');
+	}
+
+	function evidenceHref() {
+		return stateWorkspace?.links.evidence ?? stateWorkspace?.links.documents ?? '#';
+	}
+
+	function surfaceStatus(surface: WorkspaceSurfaceKey): WorkspaceSurfaceState {
+		return getWorkspaceSurfaceState(stateWorkspace, surface);
+	}
+
+	function surfaceLabel(surface: WorkspaceSurfaceKey) {
+		return $t(`overview.surfaceStates.${surfaceStatus(surface)}`);
+	}
+
+	function surfaceTone(surface: WorkspaceSurfaceKey) {
+		const status = surfaceStatus(surface);
+		if (status === 'ready' || status === 'limited') return 'ready';
+		if (status === 'processing') return 'processing';
+		if (status === 'failed') return 'failed';
+		return 'pending';
+	}
+
+	function stepStatus(key: OverviewPipelineStep['key']) {
+		return pipelineSteps.find((step) => step.key === key)?.status ?? 'pending';
+	}
+
+	function statusChecklist() {
+		return [
+			{
+				label: $t('overview.cards.currentStatus.uploaded', { count: paperCount }),
+				done: stepStatus('upload') === 'completed'
+			},
+			{
+				label: $t('overview.cards.currentStatus.parsed'),
+				done: stepStatus('parse') === 'completed'
+			},
+			{
+				label: $t('overview.cards.currentStatus.evidence'),
+				done: stepStatus('evidence') === 'completed'
+			},
+			{
+				label: $t('overview.cards.currentStatus.comparison'),
+				done: stepStatus('comparisons') === 'completed'
+			},
+			{
+				label: $t('overview.cards.currentStatus.graph'),
+				done: stepStatus('graph') === 'completed'
+			}
+		];
+	}
+
+	function paperMixRows(): PaperMixRow[] {
+		const counts = stateWorkspace?.document_summary.doc_type_counts ?? {
+			experimental: 0,
+			review: 0,
+			mixed: 0,
+			uncertain: 0
+		};
+		return [
+			{ key: 'review', label: $t('overview.docTypeReview'), count: counts.review },
+			{ key: 'experimental', label: $t('overview.docTypeExperimental'), count: counts.experimental },
+			{ key: 'mixed', label: $t('overview.docTypeMixed'), count: counts.mixed },
+			{ key: 'uncertain', label: $t('overview.docTypeUncertain'), count: counts.uncertain },
+			{ key: 'benchmark', label: $t('overview.docTypeBenchmark'), count: 0 }
+		];
+	}
+
+	function paperMixMax() {
+		return Math.max(1, ...paperMixRows().map((row) => row.count));
+	}
+
+	function isReviewDominant() {
+		const rows = paperMixRows();
+		const review = rows.find((row) => row.key === 'review')?.count ?? 0;
+		return paperCount > 0 && review >= Math.max(1, paperCount / 2);
+	}
+
+	function nextStepItems() {
+		if (readinessState === 'empty') {
+			return [
+				$t('overview.cards.next.emptyUpload'),
+				$t('overview.cards.next.emptyDescribe'),
+				$t('overview.cards.next.emptyStart')
+			];
+		}
+		if (readinessState === 'processing' || readinessState === 'ready_to_process') {
+			return [
+				$t('overview.cards.next.processingWait'),
+				$t('overview.cards.next.processingLogs'),
+				$t('overview.cards.next.processingRefresh')
+			];
+		}
+		if (readinessState === 'failed') {
+			return [
+				$t('overview.cards.next.failedErrors'),
+				$t('overview.cards.next.failedRetry'),
+				$t('overview.cards.next.failedEvidence')
+			];
+		}
+		return [
+			$t('overview.cards.next.readyTypes'),
+			$t('overview.cards.next.readyEvidence'),
+			$t('overview.cards.next.readyCompare')
+		];
+	}
+
+	function actionStatusTone(value: string) {
+		return value.startsWith('4') || value.startsWith('5') ? 'status--error' : '';
 	}
 </script>
 
@@ -473,512 +399,67 @@
 	<section class="card fade-up">
 		<div class="status status--error" role="alert">{error}</div>
 	</section>
-{:else if workspace}
-	<section id="status" class="card fade-up">
-		<div class="card-header-inline">
-			<div>
-				<h2>{workspace.collection.name || $t('collection.unknownName')}</h2>
-				<p class="lead">{$t('overview.lead')}</p>
-				{#if workspace.collection.description}
-					<p class="note">{workspace.collection.description}</p>
-				{/if}
-				<div class="detail-chips">
-					<span class="detail-chip">{collectionStateLabel(workspaceState)}</span>
-					<span class="detail-chip detail-chip--muted"
-						>{formatStatus(workspace.status_summary)}</span
-					>
-					<span class="detail-chip detail-chip--muted"
-						>{$t('overview.filesCount', { count: effectiveFileCount })}</span
-					>
-					<span class="detail-chip detail-chip--muted">
-						{$t('overview.readyViewsCount', { count: actionablePrimaryViews })}
-					</span>
-				</div>
+{:else if stateWorkspace}
+	<section class="overview-stack fade-up">
+		<article class={`readiness-card readiness-card--${readinessState}`}>
+			<div class="readiness-card__icon" aria-hidden="true">
+				<span></span>
 			</div>
-			<div class="table-actions">
-				<button
-					class="btn btn--ghost btn--small"
-					type="button"
-					on:click={() => Promise.all([loadWorkspace(), loadFiles()])}
-				>
-					{$t('overview.refresh')}
-				</button>
-				{#if !isEmptyState && !isReadyToProcessState}
-					<button class="btn btn--primary" type="button" on:click={openPrimaryAction}>
-						{primaryActionLabel()}
+			<div class="readiness-card__body">
+				<h2>{readinessTitle(readinessState)}</h2>
+				<p>{readinessBody(readinessState)}</p>
+			</div>
+			<div class="readiness-card__actions">
+				{#if readinessState === 'ready'}
+					<a class="btn btn--primary" href={readyPrimaryHref()}>
+						{readyPrimaryLabel()}
+						<span aria-hidden="true">-&gt;</span>
+					</a>
+					<a class="btn btn--ghost" href={evidenceHref()}>{$t('overview.actions.viewEvidence')}</a>
+					<button class="btn btn--ghost" type="button" on:click={refreshAll}>
+						{$t('overview.actions.refreshStatus')}
 					</button>
+				{:else if readinessState === 'processing'}
+					<a class="btn btn--primary" href="#pipeline">{$t('overview.actions.viewProgress')}</a>
+					<button class="btn btn--ghost" type="button" on:click={refreshAll}>
+						{$t('overview.actions.refreshStatus')}
+					</button>
+				{:else if readinessState === 'ready_to_process'}
+					<button class="btn btn--primary" type="button" on:click={startBuildRun}>
+						{$t('overview.actions.startProcessing')}
+					</button>
+					<button class="btn btn--ghost" type="button" on:click={browseFiles}>
+						{$t('overview.actions.uploadDocuments')}
+					</button>
+				{:else if readinessState === 'failed'}
+					<a class="btn btn--primary" href="#status-card">{$t('overview.actions.viewErrors')}</a>
+					<button class="btn btn--ghost" type="button" on:click={startBuildRun}>
+						{$t('overview.actions.retryProcessing')}
+					</button>
+				{:else}
+					<button
+						class="btn btn--primary"
+						type="button"
+						disabled={uploadLoading}
+						on:click={handleUploadPrimary}
+					>
+						{selectedFiles.length ? $t('documents.upload') : $t('overview.actions.uploadDocuments')}
+					</button>
+					<a class="btn btn--ghost" href="/">{$t('collection.backToCollections')}</a>
 				{/if}
 			</div>
-		</div>
-	</section>
+		</article>
 
-	{#if isEmptyState || isReadyToProcessState}
-		<section id="files" class="card">
-			<div class="workspace-setup">
-				<article class="result-card workspace-setup__hero">
-					<h3>{setupTitle()}</h3>
-					<p class="lead">{setupBody()}</p>
-					<p class="note">
-						{#if isReadyToProcessState}
-							{$t('overview.setupReadyHint')}
-						{:else}
-							{$t('overview.setupEmptyHint')}
-						{/if}
-					</p>
-
-					<div
-						class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
-						on:drop={handleDrop}
-						on:dragover={handleDragOver}
-						on:dragleave={handleDragLeave}
-						on:click={browseFiles}
-						on:keydown={handleDropzoneKeydown}
-						role="button"
-						tabindex="0"
-					>
-						<input
-							class="dropzone-input"
-							bind:this={fileInput}
-							type="file"
-							multiple
-							on:change={(event) => handleFiles((event.currentTarget as HTMLInputElement).files)}
-						/>
-						<div class="dropzone-title">{$t('documents.dropHint')}</div>
-						<div class="dropzone-sub">{$t('documents.browse')}</div>
-						{#if selectedFiles.length}
-							<div class="dropzone-files">
-								{$t('documents.selectedCount', { count: selectedFiles.length })}
-							</div>
-						{/if}
-					</div>
-
-					{#if !isReadyToProcessState}
-						<div class="toggle-row">
-							<label>
-								<input type="checkbox" bind:checked={buildAfterUpload} />
-								{$t('documents.indexAfterLabel')}
-							</label>
-						</div>
-					{/if}
-
-					{#if uploadError}
-						<div class="status status--error" role="alert">{uploadError}</div>
-					{/if}
-					{#if actionStatus}
-						<div class={`status ${actionStatusTone(actionStatus)}`} role="status">
-							{actionStatus}
-						</div>
-					{/if}
-
-					<div class="table-actions">
-						<button
-							class="btn btn--primary"
-							type="button"
-							on:click={handleSetupPrimaryAction}
-							disabled={uploadLoading}
-						>
-							{setupPrimaryLabel()}
-						</button>
-						{#if isReadyToProcessState}
-							<button class="btn btn--ghost" type="button" on:click={browseFiles}>
-								{$t('overview.addMorePapersCta')}
-							</button>
-						{/if}
-					</div>
-
-					{#if uploadResult}
-						<div class="detail-section">
-							<div class="detail-section__title">{$t('documents.uploadResultTitle')}</div>
-							<p class="meta-text">
-								{$t('documents.uploadResultDesc', { count: uploadResult.count })}
-							</p>
-							<ul class="result-list">
-								{#each uploadResult.items as item}
-									<li>{item.original_filename || item.stored_filename}</li>
-								{/each}
-							</ul>
-						</div>
-					{/if}
-				</article>
-
-				<article class="result-card workspace-setup__sidebar">
-					<h4>{$t('overview.statusTitle')}</h4>
-					<dl class="detail-list">
-						<div class="detail-row">
-							<dt>{$t('overview.statusLabel')}</dt>
-							<dd>{collectionStateLabel(workspaceState)}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('overview.statusFiles')}</dt>
-							<dd>{formatCount(effectiveFileCount)}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('overview.statusUpdated')}</dt>
-							<dd>
-								{formatDate(workspace.collection.updated_at || workspace.artifacts.updated_at)}
-							</dd>
-						</div>
-					</dl>
-
-					{#if filesLoading}
-						<div class="status" role="status" aria-live="polite">{$t('documents.listLoading')}</div>
-					{:else if filesError}
-						<div class="status status--error" role="alert">{filesError}</div>
-					{:else if collectionFiles.length}
-						<div class="detail-section">
-							<div class="detail-section__title">{$t('documents.listTitle')}</div>
-							<ul class="result-list workspace-file-list">
-								{#each collectionFiles.slice(0, 6) as file}
-									<li>{getFileLabel(file)}</li>
-								{/each}
-							</ul>
-						</div>
-					{:else}
-						<p class="note">{$t('documents.listEmptyDesc')}</p>
-					{/if}
-				</article>
-			</div>
-		</section>
-
-		<section class="card">
-			<div class="card-header-inline">
-				<div>
-					<h3>{$t('overview.afterUploadTitle')}</h3>
-					<p class="meta-text">{$t('overview.afterUploadLead')}</p>
-				</div>
-			</div>
-
-			<div class="workspace-preview-grid">
-				{#each setupPreviewKeys as key}
-					<article class="result-card workspace-preview-card">
-						<div class="table-title">{$t(`overview.capabilities.${key}`)}</div>
-						<p class="result-text">{compactPreviewLead(key)}</p>
-					</article>
-				{/each}
-			</div>
-		</section>
-	{:else if isProcessingState}
-		<section class="card">
-			<div class="result-grid result-grid--tasks">
-				<article class="result-card">
-					<h3>{processingTitle()}</h3>
-					<p class="result-text">{processingBody()}</p>
-
-					{#if actionStatus}
-						<div class={`status ${actionStatusTone(actionStatus)}`} role="status">
-							{actionStatus}
-						</div>
-					{/if}
-
-					<dl class="detail-list">
-						<div class="detail-row">
-							<dt>{$t('overview.statusLatestTask')}</dt>
-							<dd>
-								{workspace.latest_task ? formatTaskStatus(workspace.latest_task.status) : '--'}
-							</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('overview.statusStage')}</dt>
-							<dd>
-								{workspace.latest_task
-									? formatTaskStage(workspace.latest_task.current_stage)
-									: '--'}
-							</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('overview.statusProgress')}</dt>
-							<dd>
-								{workspace.latest_task
-									? formatPercent(workspace.latest_task.progress_percent)
-									: '--'}
-							</dd>
-						</div>
-					</dl>
-
-					<div class="detail-section">
-						<div class="detail-section__title">{$t('overview.statusWorkflowTitle')}</div>
-						<div class="detail-chips">
-							{#each workflowRows() as [key, status]}
-								<span
-									class={`detail-chip ${stageIsActionable(status as any) ? '' : 'detail-chip--muted'}`}
-								>
-									{$t(`collection.tabs.${key}`)}: {formatWorkflowStatus(status)}
-								</span>
-							{/each}
-						</div>
-					</div>
-
-					{#if workspace.latest_task?.errors.length}
-						<div class="status status--error" role="alert">
-							{workspace.latest_task.errors.join(' | ')}
-						</div>
-					{:else if workspace.latest_task?.warnings.length}
-						<div class="status" role="status">{workspace.latest_task.warnings.join(' | ')}</div>
-					{/if}
-				</article>
-
-				<article class="result-card">
-					<h3>{$t('documents.listTitle')}</h3>
-					<p class="meta-text">{$t('overview.filesCount', { count: collectionFiles.length })}</p>
-
-					{#if filesLoading}
-						<div class="status" role="status" aria-live="polite">{$t('documents.listLoading')}</div>
-					{:else if filesError}
-						<div class="status status--error" role="alert">{filesError}</div>
-					{:else if !collectionFiles.length}
-						<p class="note">{$t('documents.listEmptyDesc')}</p>
-					{:else}
-						<div class="table-wrapper">
-							<table class="data-table">
-								<thead>
-									<tr>
-										<th>{$t('documents.tableName')}</th>
-										<th>{$t('documents.tableStatus')}</th>
-										<th>{$t('documents.tableCreated')}</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each collectionFiles as file}
-										<tr>
-											<td>{getFileLabel(file)}</td>
-											<td>{file.status}</td>
-											<td>{formatDate(file.created_at)}</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					{/if}
-				</article>
-			</div>
-
-			{#if workspace.warnings.length}
-				<div class="detail-section">
-					<div class="detail-section__title">{$t('overview.warningsTitle')}</div>
-					<ul class="result-list">
-						{#each workspace.warnings as item}
-							<li>{item}</li>
-						{/each}
-					</ul>
-				</div>
-			{/if}
-		</section>
-	{:else}
-		<section class="card">
-			<div class="result-grid result-grid--tasks">
-				<article class="result-card">
-					<h4>{$t('overview.statusTitle')}</h4>
-					<dl class="detail-list">
-						<div class="detail-row">
-							<dt>{$t('overview.statusLabel')}</dt>
-							<dd>{formatStatus(workspace.status_summary)}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('overview.statusFiles')}</dt>
-							<dd>{formatCount(effectiveFileCount)}</dd>
-						</div>
-						<div class="detail-row">
-							<dt>{$t('overview.statusUpdated')}</dt>
-							<dd>
-								{formatDate(workspace.collection.updated_at || workspace.artifacts.updated_at)}
-							</dd>
-						</div>
-						{#if workspace.latest_task}
-							<div class="detail-row">
-								<dt>{$t('overview.statusLatestTask')}</dt>
-								<dd>{formatTaskStatus(workspace.latest_task.status)}</dd>
-							</div>
-							<div class="detail-row">
-								<dt>{$t('overview.statusStage')}</dt>
-								<dd>{formatTaskStage(workspace.latest_task.current_stage)}</dd>
-							</div>
-							<div class="detail-row">
-								<dt>{$t('overview.statusProgress')}</dt>
-								<dd>{formatPercent(workspace.latest_task.progress_percent)}</dd>
-							</div>
-						{/if}
-					</dl>
-				</article>
-
-				<article class="result-card">
-					<h4>{collectionStateTitle(workspaceState)}</h4>
-					<p class="result-text">{collectionStateBody(workspaceState)}</p>
-
-					{#if actionStatus}
-						<div class={`status ${actionStatusTone(actionStatus)}`} role="status">
-							{actionStatus}
-						</div>
-					{/if}
-
-					<div class="detail-section">
-						<div class="detail-section__title">{$t('overview.statusWorkflowTitle')}</div>
-						<p class="meta-text">{$t('overview.statusWorkflowLead')}</p>
-					</div>
-					<div class="detail-chips">
-						{#each workflowRows() as [key, status]}
-							<span
-								class={`detail-chip ${stageIsActionable(status as any) ? '' : 'detail-chip--muted'}`}
-							>
-								{$t(`collection.tabs.${key}`)}: {formatWorkflowStatus(status)}
-							</span>
-						{/each}
-					</div>
-				</article>
-
-				<article class="result-card">
-					<h4>{$t('overview.documentSummaryTitle')}</h4>
-					<p class="meta-text">{$t('overview.documentSummaryLead')}</p>
-					<dl class="detail-list">
-						<div class="detail-row">
-							<dt>{$t('overview.documentSummaryTotal')}</dt>
-							<dd>{workspace.document_summary.total_documents}</dd>
-						</div>
-						{#each documentTypeRows() as [label, count]}
-							<div class="detail-row">
-								<dt>{label}</dt>
-								<dd>{count}</dd>
-							</div>
-						{/each}
-					</dl>
-
-					{#if protocolSuitabilityRows().length}
-						<div class="detail-section">
-							<div class="detail-section__title">{$t('overview.protocolSuitabilityTitle')}</div>
-							<div class="detail-chips">
-								{#each protocolSuitabilityRows() as [label, count]}
-									<span class="detail-chip">{label}: {count}</span>
-								{/each}
-							</div>
-						</div>
-					{/if}
-				</article>
-			</div>
-
-			{#if workspace.warnings.length}
-				<div class="detail-section">
-					<div class="detail-section__title">{$t('overview.warningsTitle')}</div>
-					<ul class="result-list">
-						{#each workspace.warnings as item}
-							<li>{item}</li>
-						{/each}
-					</ul>
-				</div>
-			{/if}
-		</section>
-
-		<section class="card">
-			<div class="card-header-inline">
-				<div>
-					<h3>{$t('overview.primaryViewsTitle')}</h3>
-					<p class="meta-text">{$t('overview.primaryViewsLead')}</p>
-					<p class="note">{$t('overview.resultsFlow')}</p>
-				</div>
-			</div>
-
-			<div class="result-grid result-grid--tasks">
-				{#each primaryViewKeys as key}
-					<article class="result-card">
-						<div class="table-main">
-							<div class="table-title">{$t(`overview.capabilities.${key}`)}</div>
-							<div class="table-sub">{viewLead(key)}</div>
-						</div>
-						<div class="detail-section">
-							<div class="detail-section__title">{$t('overview.viewStatusTitle')}</div>
-							<div class="detail-chips">
-								<span class={`detail-chip ${showViewAction(key) ? '' : 'detail-chip--muted'}`}>
-									{surfaceStatusLabel(viewState(key))}
-								</span>
-							</div>
-							<p class="note">{surfaceStatusNote(viewState(key))}</p>
-						</div>
-						{#if showViewAction(key)}
-							<div class="table-actions">
-								<a class="btn btn--ghost btn--small" href={viewLink(key)}>
-									{viewActionLabel(key)}
-								</a>
-							</div>
-						{/if}
-					</article>
-				{/each}
-			</div>
-		</section>
-
-		{#if showAdditionalViews}
-			<section class="card">
-				<div class="card-header-inline">
-					<div>
-						<h3>{$t('overview.additionalViewsTitle')}</h3>
-						<p class="meta-text">{$t('overview.additionalViewsLead')}</p>
-					</div>
-				</div>
-
-				<div class="result-grid result-grid--tasks">
-					{#if protocolState !== 'not_applicable'}
-						<article class="result-card">
-							<div class="table-main">
-								<div class="table-title">{$t('overview.capabilities.protocol')}</div>
-								<div class="table-sub">{viewLead('protocol')}</div>
-							</div>
-							<div class="detail-section">
-								<div class="detail-section__title">{$t('overview.viewStatusTitle')}</div>
-								<div class="detail-chips">
-									<span
-										class={`detail-chip ${showViewAction('protocol') ? '' : 'detail-chip--muted'}`}
-									>
-										{surfaceStatusLabel(protocolState)}
-									</span>
-								</div>
-								<p class="note">{surfaceStatusNote(protocolState)}</p>
-							</div>
-							{#if showViewAction('protocol')}
-								<div class="table-actions">
-									<a class="btn btn--ghost btn--small" href={viewLink('protocol')}>
-										{viewActionLabel('protocol')}
-									</a>
-								</div>
-							{/if}
-						</article>
-					{/if}
-
-					{#if graphState === 'ready'}
-						<article class="result-card">
-							<div class="table-main">
-								<div class="table-title">{$t('overview.capabilities.graph')}</div>
-								<div class="table-sub">{viewLead('graph')}</div>
-							</div>
-							<div class="detail-section">
-								<div class="detail-section__title">{$t('overview.viewStatusTitle')}</div>
-								<div class="detail-chips">
-									<span class="detail-chip">{surfaceStatusLabel(graphState)}</span>
-								</div>
-								<p class="note">{surfaceStatusNote(graphState)}</p>
-							</div>
-							<div class="table-actions">
-								<a class="btn btn--ghost btn--small" href={viewLink('graph')}>
-									{viewActionLabel('graph')}
-								</a>
-							</div>
-						</article>
-					{/if}
-				</div>
-			</section>
+		{#if actionStatus}
+			<div class={`status ${actionStatusTone(actionStatus)}`} role="status">{actionStatus}</div>
 		{/if}
 
-		<section id="files" class="card">
-			<details class="advanced">
-				<summary>{$t('overview.uploadTitle')}</summary>
-				<p class="note">{$t('overview.uploadLead')}</p>
-
-				<div class="table-actions">
-					<button class="btn btn--ghost btn--small" type="button" on:click={browseFiles}>
-						{$t('overview.addMorePapersCta')}
-					</button>
+		{#if showUploadPanel}
+			<section id="upload" class="overview-card overview-upload-card">
+				<div>
+					<h2>{$t('overview.uploadFormTitle')}</h2>
+					<p>{$t('overview.uploadFormLead')}</p>
 				</div>
-
-				{#if uploadError}
-					<div class="status status--error" role="alert">{uploadError}</div>
-				{/if}
-
 				<div
 					class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
 					on:drop={handleDrop}
@@ -1004,7 +485,6 @@
 						</div>
 					{/if}
 				</div>
-
 				<div class="table-actions">
 					<button
 						class="btn btn--primary"
@@ -1014,108 +494,149 @@
 					>
 						{uploadLoading ? $t('documents.uploading') : $t('documents.upload')}
 					</button>
+					{#if effectiveFileCount > 0}
+						<button class="btn btn--ghost" type="button" on:click={startBuildRun}>
+							{$t('overview.actions.startProcessing')}
+						</button>
+					{/if}
 				</div>
-
-				<div class="table-wrapper">
-					<table class="data-table">
-						<thead>
-							<tr>
-								<th>{$t('documents.tableName')}</th>
-								<th>{$t('documents.tableStatus')}</th>
-								<th>{$t('documents.tableSize')}</th>
-								<th>{$t('documents.tableCreated')}</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each collectionFiles as file}
-								<tr>
-									<td>{getFileLabel(file)}</td>
-									<td>{file.status}</td>
-									<td>{formatBytes(file.size_bytes)}</td>
-									<td>{formatDate(file.created_at)}</td>
-								</tr>
+				{#if uploadError}
+					<div class="status status--error" role="alert">{uploadError}</div>
+				{/if}
+				{#if filesLoading}
+					<div class="status" role="status">{$t('documents.listLoading')}</div>
+				{:else if filesError}
+					<div class="status status--error" role="alert">{filesError}</div>
+				{:else if uploadResult}
+					<div class="detail-section">
+						<div class="detail-section__title">{$t('documents.uploadResultTitle')}</div>
+						<ul class="result-list">
+							{#each uploadResult.items as item}
+								<li>{getFileLabel(item)}</li>
 							{/each}
-						</tbody>
-					</table>
-				</div>
-			</details>
+						</ul>
+					</div>
+				{/if}
+			</section>
+		{/if}
+
+		<section id="pipeline" class="overview-card pipeline-card">
+			<div class="overview-card__header">
+				<h2>{$t('overview.pipeline.title')}</h2>
+			</div>
+			<ol class="pipeline-steps">
+				{#each pipelineSteps as step}
+					<li class={`pipeline-step pipeline-step--${step.status}`}>
+						<div class="pipeline-step__marker" aria-hidden="true"><span></span></div>
+						<div class="pipeline-step__content">
+							<div class="pipeline-step__title">{pipelineStepLabel(step)}</div>
+							<div class="pipeline-step__status">{pipelineStatusLabel(step.status)}</div>
+						</div>
+					</li>
+				{/each}
+			</ol>
 		</section>
 
-		<section class="card">
-			<details class="advanced" bind:open={advancedOpen}>
-				<summary>{$t('overview.advancedTitle')}</summary>
-				<p class="note">{$t('overview.advancedLead')}</p>
-
-				<div class="result-grid result-grid--tasks">
-					<section class="result-card">
-						<h4>{$t('tasks.title')}</h4>
-						{#if workspace.recent_tasks.length}
-							<div class="table-wrapper">
-								<table class="data-table">
-									<thead>
-										<tr>
-											<th>{$t('tasks.tableStatus')}</th>
-											<th>{$t('tasks.tableStage')}</th>
-											<th>{$t('tasks.tableProgress')}</th>
-											<th>{$t('home.tableUpdated')}</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each workspace.recent_tasks as task}
-											<tr>
-												<td>{formatTaskStatus(task.status)}</td>
-												<td>{formatTaskStage(task.current_stage)}</td>
-												<td>{formatPercent(task.progress_percent)}</td>
-												<td>{formatDate(task.finished_at || task.updated_at || task.created_at)}</td
-												>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{:else}
-							<p class="note">{$t('overview.noTasks')}</p>
-						{/if}
-					</section>
-
-					<section id="advanced-settings" class="result-card">
-						<h4>{$t('settings.title')}</h4>
-						<dl class="detail-list">
-							<div class="detail-row">
-								<dt>{$t('create.nameLabel')}</dt>
-								<dd>{workspace.collection.name || '--'}</dd>
-							</div>
-							<div class="detail-row">
-								<dt>{$t('create.descLabel')}</dt>
-								<dd>{workspace.collection.description || '--'}</dd>
-							</div>
-							<div class="detail-row">
-								<dt>{$t('tasks.tableCreated')}</dt>
-								<dd>{formatDate(workspace.collection.created_at)}</dd>
-							</div>
-							<div class="detail-row">
-								<dt>{$t('home.tableUpdated')}</dt>
-								<dd>{formatDate(workspace.collection.updated_at)}</dd>
-							</div>
-						</dl>
-					</section>
-				</div>
-
-				<section id="advanced-reports" class="result-grid result-grid--tasks">
-					<div class="result-card">
-						<h4>{$t('reports.title')}</h4>
-						<p class="meta-text">{$t('reports.degradedLead')}</p>
-						<p class="note">{$t('reports.degradedNote')}</p>
-					</div>
-
-					<div class="result-card">
-						<div class="detail-section">
-							<div class="detail-section__title">{$t('reports.degradedTitle')}</div>
-							<p class="result-text">{$t('reports.degradedBody')}</p>
+		<section class="overview-card-grid">
+			<article id="status-card" class="overview-card overview-info-card">
+				<h3>{$t('overview.cards.currentStatus.title')}</h3>
+				<ul class="check-list">
+					{#each statusChecklist() as item}
+						<li class:complete={item.done}>
+							<span aria-hidden="true"></span>
+							{item.label}
+						</li>
+					{/each}
+				</ul>
+				<a class="btn btn--ghost btn--small card-action" href="#pipeline">
+					{$t('overview.cards.currentStatus.logs')}
+				</a>
+				{#if stateWorkspace.latest_task}
+					<div class="task-mini">
+						<div>
+							<span>{$t('overview.statusLatestTask')}</span>
+							<strong>{formatTaskStatus(stateWorkspace.latest_task.status)}</strong>
+						</div>
+						<div>
+							<span>{$t('overview.statusStage')}</span>
+							<strong>{formatTaskStage(stateWorkspace.latest_task.current_stage)}</strong>
+						</div>
+						<div>
+							<span>{$t('overview.statusProgress')}</span>
+							<strong>{formatPercent(stateWorkspace.latest_task.progress_percent)}</strong>
 						</div>
 					</div>
-				</section>
-			</details>
+					{#if stateWorkspace.latest_task.errors.length}
+						<div class="status status--error" role="alert">
+							{stateWorkspace.latest_task.errors.join(' | ')}
+						</div>
+					{/if}
+				{/if}
+			</article>
+
+			<article class="overview-card overview-info-card">
+				<h3>{$t('overview.cards.trust.title')}</h3>
+				<p>{$t('overview.cards.trust.body')}</p>
+				<div class="trust-chip-row">
+					<span class={`trust-chip trust-chip--${surfaceTone('comparisons')}`}>
+						{$t('overview.cards.trust.comparison')}: {surfaceLabel('comparisons')}
+					</span>
+					<span class={`trust-chip trust-chip--${surfaceTone('evidence')}`}>
+						{$t('overview.cards.trust.evidence')}: {surfaceLabel('evidence')}
+					</span>
+					<span class={`trust-chip trust-chip--${surfaceTone('documents')}`}>
+						{$t('overview.cards.trust.documents')}: {surfaceLabel('documents')}
+					</span>
+					<span class={`trust-chip trust-chip--${surfaceTone('protocol')}`}>
+						Protocol: {surfaceLabel('protocol')}
+					</span>
+				</div>
+				<div class="split-actions">
+					<a class="btn btn--ghost btn--small" href={evidenceHref()}>
+						{$t('overview.actions.viewEvidence')}
+					</a>
+					<a class="btn btn--primary btn--small" href={readyPrimaryHref()}>
+						{$t('overview.actions.enterComparisonShort')}
+					</a>
+				</div>
+			</article>
+
+			<article class="overview-card overview-info-card">
+				<h3>{$t('overview.cards.paperMix.title')}</h3>
+				<p>{$t('overview.cards.paperMix.body')}</p>
+				<div class="paper-mix">
+					{#each paperMixRows() as row}
+						<div class="paper-mix__row">
+							<span>{row.label}</span>
+							<div class="paper-mix__bar" aria-hidden="true">
+								<span style={`width: ${(row.count / paperMixMax()) * 100}%`}></span>
+							</div>
+							<strong>{row.count}</strong>
+						</div>
+					{/each}
+				</div>
+				{#if isReviewDominant()}
+					<p class="overview-hint">{$t('overview.cards.paperMix.reviewHint')}</p>
+				{/if}
+				<a class="btn btn--ghost btn--small card-action" href={stateWorkspace.links.documents}>
+					{$t('overview.actions.viewDocumentList')}
+				</a>
+			</article>
+
+			<article class="overview-card overview-info-card">
+				<h3>{$t('overview.cards.next.title')}</h3>
+				<ul class="next-list">
+					{#each nextStepItems() as item}
+						<li>{item}</li>
+					{/each}
+				</ul>
+				<a class="guide-link" href="/docs">
+					{$t('overview.cards.next.guide')}
+					<span aria-hidden="true">-&gt;</span>
+				</a>
+			</article>
 		</section>
-	{/if}
+
+		<div class="overview-footer-note">{$t('overview.footerNote')}</div>
+	</section>
 {/if}

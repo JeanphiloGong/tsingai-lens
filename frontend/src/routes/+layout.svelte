@@ -3,6 +3,7 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { API_DOCS_PATH } from './_shared/base';
+  import { collections } from './_shared/collections';
   import { language, t } from './_shared/i18n';
   import { themePreference } from './_shared/theme';
   import type { ThemePreference } from './_shared/theme';
@@ -11,6 +12,15 @@
   let langMenu: HTMLDivElement | null = null;
   let isThemeOpen = false;
   let themeMenu: HTMLDivElement | null = null;
+  let globalSearch = '';
+
+  function decodeRoutePart(value: string) {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
 
   function toggleLangMenu() {
     isLangOpen = !isLangOpen;
@@ -71,31 +81,56 @@
   });
 
   $: isGraphRoute = /^\/collections\/[^/]+\/graph\/?$/.test($page.url.pathname);
+  $: collectionRouteMatch = /^\/collections\/([^/]+)/.exec($page.url.pathname);
+  $: isCollectionRoute = Boolean(collectionRouteMatch);
+  $: headerCollectionId = collectionRouteMatch?.[1]
+    ? decodeRoutePart(collectionRouteMatch[1])
+    : '';
+  $: headerCollection = $collections.find((item) => item.id === headerCollectionId);
+  $: headerCollectionName = headerCollection?.name || headerCollectionId;
 </script>
 
 <div class="app-shell">
   <div class="bg-grid" aria-hidden="true"></div>
 
-  <header class="site-header">
-    <a class="brand" href="/">
-      <div class="brand-mark">L</div>
-      <div class="brand-text">
-        <div class="brand-title">{$t('brand.title')}</div>
-        {#if $t('brand.sub')}
-          <div class="brand-sub">{$t('brand.sub')}</div>
-        {/if}
-      </div>
-    </a>
+  <header class="site-header" class:site-header--collection={isCollectionRoute}>
+    <div class="header-left">
+      <a class="brand" href="/">
+        <div class="brand-mark">L</div>
+        <div class="brand-text">
+          <div class="brand-title">{$t('brand.title')}</div>
+          {#if $t('brand.sub')}
+            <div class="brand-sub">{$t('brand.sub')}</div>
+          {/if}
+        </div>
+      </a>
+
+      {#if isCollectionRoute}
+        <nav class="header-breadcrumb" aria-label={$t('header.breadcrumbLabel')}>
+          <a href="/">{ $t('header.breadcrumbWorkspace') }</a>
+          <span aria-hidden="true">/</span>
+          <a href="/">{ $t('header.breadcrumbCollection') }</a>
+          <span aria-hidden="true">/</span>
+          <span class="header-breadcrumb__current">{headerCollectionName}</span>
+        </nav>
+      {/if}
+    </div>
+
+    <form class="global-search" role="search" on:submit|preventDefault>
+      <span class="global-search__icon" aria-hidden="true"></span>
+      <label class="sr-only" for="global-search-input">{$t('header.globalSearchLabel')}</label>
+      <input
+        id="global-search-input"
+        bind:value={globalSearch}
+        placeholder={$t('header.globalSearchPlaceholder')}
+      />
+      <span class="global-search__kbd" aria-hidden="true">Ctrl K</span>
+    </form>
 
     <div class="header-actions">
-      <a
-        class="header-action header-action--new"
-        href="/?create=collection"
-        aria-label={$t('home.primaryAction')}
-      >
-        <span aria-hidden="true">+</span>
-        {$t('home.primaryAction')}
-      </a>
+      <button class="icon-button" type="button" aria-label={$t('header.notificationsLabel')}>
+        <span class="notification-icon" aria-hidden="true"></span>
+      </button>
       <div
         class="theme-menu"
         bind:this={themeMenu}
@@ -164,6 +199,9 @@
           </div>
         {/if}
       </div>
+      <button class="avatar-placeholder" type="button" aria-label={$t('header.userMenuLabel')}>
+        <span aria-hidden="true">U</span>
+      </button>
     </div>
   </header>
 

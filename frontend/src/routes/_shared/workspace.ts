@@ -107,6 +107,22 @@ export type WorkspaceSurfaceState =
 
 export type WorkspaceSurfaceKey = keyof WorkspaceWorkflow | 'graph';
 
+export type OverviewReadinessState =
+	| 'empty'
+	| 'ready_to_process'
+	| 'processing'
+	| 'ready'
+	| 'failed';
+
+export type OverviewPipelineStepKey = 'upload' | 'parse' | 'evidence' | 'comparisons' | 'graph';
+
+export type OverviewPipelineStatus = 'completed' | 'processing' | 'pending' | 'failed';
+
+export type OverviewPipelineStep = {
+	key: OverviewPipelineStepKey;
+	status: OverviewPipelineStatus;
+};
+
 const PRIMARY_WORKFLOW_KEYS = ['comparisons', 'documents'] as const;
 
 const DEFAULT_DOC_TYPE_COUNTS = {
@@ -172,7 +188,7 @@ function defaultLinks(collectionId: string): WorkspaceLinks {
 		workspace: `/collections/${encoded}`,
 		documents: `/collections/${encoded}/documents`,
 		results: `/collections/${encoded}/results`,
-		evidence: `/collections/${encoded}/documents`,
+		evidence: `/collections/${encoded}/evidence`,
 		comparisons: `/collections/${encoded}/comparisons`,
 		protocol: `/collections/${encoded}/protocol`,
 		graph: `/collections/${encoded}/graph`
@@ -194,7 +210,7 @@ function normalizeWorkspaceRoute(
 		workspace: `/collections/${encoded}`,
 		documents: `/collections/${encoded}/documents`,
 		results: `/collections/${encoded}/results`,
-		evidence: `/collections/${encoded}/documents`,
+		evidence: `/collections/${encoded}/evidence`,
 		comparisons: `/collections/${encoded}/comparisons`,
 		protocol: `/collections/${encoded}/protocol`,
 		graph: `/collections/${encoded}/graph`
@@ -360,6 +376,75 @@ export function getWorkspaceSurfaceState(
 	}
 
 	return stage;
+}
+
+export function getOverviewReadinessState(
+	workspace: WorkspaceOverview | null | undefined
+): OverviewReadinessState {
+	const workspaceState = getCollectionWorkspaceState(workspace);
+
+	if (workspaceState === 'ready' || workspaceState === 'ready_with_limits') {
+		return 'ready';
+	}
+
+	return workspaceState;
+}
+
+function workflowToPipelineStatus(
+	status: WorkflowStageStatus | WorkspaceSurfaceState | null | undefined,
+	latestTask: Task | null | undefined
+): OverviewPipelineStatus {
+	if (status === 'ready' || status === 'limited') return 'completed';
+	if (status === 'failed') return 'failed';
+	if (status === 'processing' || isTaskActive(latestTask)) return 'processing';
+	return 'pending';
+}
+
+export function buildOverviewPipelineSteps(
+	workspace: WorkspaceOverview | null | undefined,
+	latestTask: Task | null | undefined = workspace?.latest_task
+): OverviewPipelineStep[] {
+	if (!workspace) {
+		return [
+			{ key: 'upload', status: 'pending' },
+			{ key: 'parse', status: 'pending' },
+			{ key: 'evidence', status: 'pending' },
+			{ key: 'comparisons', status: 'pending' },
+			{ key: 'graph', status: 'pending' }
+		];
+	}
+
+	const hasFiles = workspace.file_count > 0;
+	const graphState = getWorkspaceSurfaceState(workspace, 'graph');
+
+	return [
+		{ key: 'upload', status: hasFiles ? 'completed' : 'pending' },
+		{
+			key: 'parse',
+			status: hasFiles ? workflowToPipelineStatus(workspace.workflow.documents, latestTask) : 'pending'
+		},
+		{
+			key: 'evidence',
+			status: hasFiles ? workflowToPipelineStatus(workspace.workflow.evidence, latestTask) : 'pending'
+		},
+		{
+			key: 'comparisons',
+			status: hasFiles
+				? workflowToPipelineStatus(workspace.workflow.comparisons, latestTask)
+				: 'pending'
+		},
+		{
+			key: 'graph',
+			status:
+				graphState === 'ready' || graphState === 'limited'
+					? 'completed'
+					: graphState === 'failed'
+						? 'failed'
+						: graphState === 'processing'
+							? 'processing'
+							: 'pending'
+		}
+	];
 }
 
 function normalizeCollection(item: unknown): Collection | null {

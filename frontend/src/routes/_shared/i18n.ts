@@ -22,6 +22,13 @@ const translations: Record<Language, Translations> = {
 		},
 		header: {
 			authNone: 'Auth: none',
+			breadcrumbLabel: 'Workspace breadcrumb',
+			breadcrumbWorkspace: 'Workspace',
+			breadcrumbCollection: 'Collection',
+			globalSearchLabel: 'Global search',
+			globalSearchPlaceholder: 'Search papers, authors, materials, methods...',
+			notificationsLabel: 'Notifications',
+			userMenuLabel: 'User menu',
 			languageLabel: 'Language',
 			themeLabel: 'Theme',
 			themeSystem: 'System',
@@ -136,9 +143,12 @@ const translations: Record<Language, Translations> = {
 			eyebrow: 'Collection',
 			idLabel: 'ID',
 			unknownName: 'Untitled collection',
+			defaultSubtitle: 'For literature comparison and evidence analysis',
+			editName: 'Rename collection',
+			tabsLabel: 'Collection navigation',
 			moreLabel: 'More',
 			tabs: {
-				overview: 'Workspace',
+				overview: 'Overview',
 				comparisons: 'Comparisons',
 				results: 'Results',
 				evidence: 'Evidence',
@@ -146,16 +156,124 @@ const translations: Record<Language, Translations> = {
 				protocol: 'Protocol',
 				graph: 'Graph'
 			},
+			actionsLabel: 'Collection actions',
 			backToCollections: 'Back to collections',
 			delete: 'Delete collection',
 			deleting: 'Deleting...',
+			moreActions: 'More collection actions',
+			metaDocuments: '{count} document(s)',
+			metaUpdated: 'Updated: {time}',
 			deleteConfirm:
 				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.'
 		},
 		overview: {
-			title: 'Collection workspace',
-			lead: 'Start here to see what this paper set says, which papers are usable, and where to read next.',
+			title: 'Collection Overview',
+			lead: 'Start here to check whether the collection is ready, where processing stands, and which research view to open next.',
 			loading: 'Loading workspace...',
+			readinessLabels: {
+				empty: 'No documents',
+				ready_to_process: 'Ready to process',
+				processing: 'Processing',
+				ready: 'Complete',
+				failed: 'Failed'
+			},
+			readiness: {
+				ready: {
+					title: 'Collection is ready',
+					body:
+						'This collection contains {count} document(s), and parsing plus evidence extraction are complete. You can enter the comparison view or inspect evidence and source documents.'
+				},
+				processing: {
+					title: 'Collection is processing',
+					body:
+						'Document parsing, evidence extraction, or comparison generation is still running. Comparison and graph views become useful after processing completes.'
+				},
+				ready_to_process: {
+					title: 'Collection is waiting for processing',
+					body:
+						'Documents are uploaded, but Lens still needs to parse them, extract evidence, and prepare comparison results.'
+				},
+				empty: {
+					title: 'This collection has no documents yet',
+					body:
+						'Upload papers or technical documents, then Lens will prepare parsing, evidence extraction, and comparison readiness.'
+				},
+				failed: {
+					title: 'Processing ran into a problem',
+					body: 'Some tasks failed. Check the task errors or rerun processing before trusting the outputs.'
+				}
+			},
+			actions: {
+				enterComparisons: 'Enter comparison view',
+				enterComparisonShort: 'Enter comparison',
+				viewEvidence: 'View evidence',
+				refreshStatus: 'Refresh status',
+				viewProgress: 'View processing progress',
+				uploadDocuments: 'Upload documents',
+				startProcessing: 'Start processing',
+				viewErrors: 'View errors',
+				retryProcessing: 'Retry processing',
+				viewDocuments: 'View documents',
+				viewDocumentList: 'View document list'
+			},
+			pipeline: {
+				title: 'Processing pipeline',
+				steps: {
+					upload: 'Document upload',
+					parse: 'Document parsing',
+					evidence: 'Evidence extraction',
+					comparisons: 'Comparison generation',
+					graph: 'Graph construction'
+				},
+				statuses: {
+					completed: 'Completed',
+					processing: 'Processing',
+					pending: 'Pending',
+					failed: 'Failed'
+				}
+			},
+			cards: {
+				currentStatus: {
+					title: 'Current status',
+					uploaded: '{count} document(s) uploaded',
+					parsed: 'Document parsing complete',
+					evidence: 'Evidence extraction complete',
+					comparison: 'Comparison view available',
+					graph: 'Graph construction pending',
+					logs: 'View processing log'
+				},
+				trust: {
+					title: 'Trust reminder',
+					body:
+						'This collection may be usable, but comparison results still need human review. Check evidence sources, missing conditions, and comparability warnings first.',
+					comparison: 'Comparison',
+					evidence: 'Evidence',
+					documents: 'Documents'
+				},
+				paperMix: {
+					title: 'Literature mix',
+					body: 'Review the current paper type distribution before relying on downstream comparison results.',
+					reviewHint:
+						'This collection is mostly review material. For experimental result comparison, add experimental or methods papers.'
+				},
+				next: {
+					title: 'Recommended next step',
+					readyTypes: 'Check document types',
+					readyEvidence: 'Review evidence and comparability',
+					readyCompare: 'Enter comparison view',
+					processingWait: 'Wait for tasks to finish',
+					processingLogs: 'Check processing log',
+					processingRefresh: 'Refresh status',
+					emptyUpload: 'Upload documents',
+					emptyDescribe: 'Add collection description',
+					emptyStart: 'Start parsing',
+					failedErrors: 'Review task errors',
+					failedRetry: 'Retry processing',
+					failedEvidence: 'Check any partial evidence',
+					guide: 'View user guide'
+				}
+			},
+			footerNote: 'Lens makes literature comparison more trustworthy and research evidence traceable.',
 			collectionStates: {
 				empty: {
 					label: 'Empty',
@@ -310,6 +428,7 @@ const translations: Record<Language, Translations> = {
 			docTypeReview: 'Review',
 			docTypeMixed: 'Mixed',
 			docTypeUncertain: 'Uncertain',
+			docTypeBenchmark: 'Benchmark',
 			protocolSuitabilityTitle: 'Protocol suitability',
 			protocolExtractableYes: 'Good',
 			protocolExtractablePartial: 'Partial',
@@ -1207,6 +1326,13 @@ const translations: Record<Language, Translations> = {
 		},
 		header: {
 			authNone: '鉴权：无',
+			breadcrumbLabel: '工作区面包屑',
+			breadcrumbWorkspace: '工作区',
+			breadcrumbCollection: '集合',
+			globalSearchLabel: '全局搜索',
+			globalSearchPlaceholder: '搜索文献、作者、材料、方法...',
+			notificationsLabel: '通知',
+			userMenuLabel: '用户菜单',
 			languageLabel: '语言',
 			themeLabel: '主题',
 			themeSystem: '跟随系统',
@@ -1320,9 +1446,12 @@ const translations: Record<Language, Translations> = {
 			eyebrow: '集合',
 			idLabel: 'ID',
 			unknownName: '未命名集合',
+			defaultSubtitle: '用于文献比较与证据分析',
+			editName: '重命名集合',
+			tabsLabel: '集合导航',
 			moreLabel: '更多',
 			tabs: {
-				overview: '工作区',
+				overview: '概览',
 				comparisons: '比较',
 				results: '结果',
 				evidence: '证据',
@@ -1330,15 +1459,120 @@ const translations: Record<Language, Translations> = {
 				protocol: 'Protocol',
 				graph: '图谱'
 			},
+			actionsLabel: '集合操作',
 			backToCollections: '返回集合列表',
 			delete: '删除集合',
 			deleting: '删除中...',
+			moreActions: '更多集合操作',
+			metaDocuments: '{count} 篇文档',
+			metaUpdated: '最近更新：{time}',
 			deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。'
 		},
 		overview: {
-			title: '集合工作区',
-			lead: '先在这里判断这批论文能说明什么、哪些论文可用、下一步该看哪里。',
+			title: '集合概览',
+			lead: '先在这里判断集合是否准备好、处理流程走到哪一步，以及下一步该进入哪个研究视图。',
 			loading: '工作区加载中...',
+			readinessLabels: {
+				empty: '暂无文档',
+				ready_to_process: '待处理',
+				processing: '处理中',
+				ready: '已完成',
+				failed: '失败'
+			},
+			readiness: {
+				ready: {
+					title: '集合已准备好',
+					body:
+						'该集合包含 {count} 篇文档，解析与证据提取已完成。你可以进入比较视图查看跨文献结果，或检查证据与文档来源。'
+				},
+				processing: {
+					title: '集合正在处理中',
+					body: '文档解析、证据提取或比较结果生成仍在进行中。完成后即可进入比较和图谱视图。'
+				},
+				ready_to_process: {
+					title: '集合等待处理',
+					body: '文档已经上传，但 Lens 还需要完成解析、证据提取与比较结果准备。'
+				},
+				empty: {
+					title: '集合还没有文档',
+					body: '上传论文或技术文档后，Lens 会进行解析、证据提取与比较准备。'
+				},
+				failed: {
+					title: '处理遇到问题',
+					body: '部分任务失败，请查看任务日志或重新处理。'
+				}
+			},
+			actions: {
+				enterComparisons: '进入比较视图',
+				enterComparisonShort: '进入比较',
+				viewEvidence: '查看证据',
+				refreshStatus: '刷新状态',
+				viewProgress: '查看处理进度',
+				uploadDocuments: '上传文档',
+				startProcessing: '开始处理',
+				viewErrors: '查看错误',
+				retryProcessing: '重新处理',
+				viewDocuments: '查看文档',
+				viewDocumentList: '查看文档列表'
+			},
+			pipeline: {
+				title: '处理流程',
+				steps: {
+					upload: '文档上传',
+					parse: '文档解析',
+					evidence: '证据提取',
+					comparisons: '比较结果生成',
+					graph: '图谱构建'
+				},
+				statuses: {
+					completed: '已完成',
+					processing: '处理中',
+					pending: '等待中',
+					failed: '失败'
+				}
+			},
+			cards: {
+				currentStatus: {
+					title: '当前状态',
+					uploaded: '{count} 篇文档已上传',
+					parsed: '文档解析完成',
+					evidence: '证据提取完成',
+					comparison: '比较视图可用',
+					graph: '图谱构建待生成',
+					logs: '查看处理日志'
+				},
+				trust: {
+					title: '可信度提醒',
+					body:
+						'该集合已经可用，但比较结果仍需要人工审核。请优先检查证据来源、缺失条件和可比性提示。',
+					comparison: '比较',
+					evidence: '证据',
+					documents: '文档'
+				},
+				paperMix: {
+					title: '文献构成',
+					body: '查看当前集合的论文类型构成，再决定是否使用下游比较结果。',
+					reviewHint:
+						'当前集合以综述为主。若要进行实验结果比较，建议加入实验论文或方法论文。'
+				},
+				next: {
+					title: '推荐下一步',
+					readyTypes: '检查文档类型',
+					readyEvidence: '查看证据与可比性',
+					readyCompare: '进入比较视图',
+					processingWait: '等待任务完成',
+					processingLogs: '查看处理日志',
+					processingRefresh: '刷新状态',
+					emptyUpload: '上传文档',
+					emptyDescribe: '添加集合说明',
+					emptyStart: '开始解析',
+					failedErrors: '查看任务错误',
+					failedRetry: '重新处理',
+					failedEvidence: '检查部分证据',
+					guide: '查看使用指南'
+				}
+			},
+			footerNote: 'Lens 让文献比较更可信，让研究证据可追溯。',
 			collectionStates: {
 				empty: {
 					label: '空集合',
@@ -1469,6 +1703,7 @@ const translations: Record<Language, Translations> = {
 			docTypeReview: '综述',
 			docTypeMixed: '混合',
 			docTypeUncertain: '不确定',
+			docTypeBenchmark: 'Benchmark',
 			protocolSuitabilityTitle: 'Protocol 适配性',
 			protocolExtractableYes: '适合',
 			protocolExtractablePartial: '部分适合',

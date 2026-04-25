@@ -13,6 +13,13 @@ from application.core.semantic_build.llm.schemas import (
     SampleVariantPayload,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
+    StructuredTextWindowMentions,
+    TextWindowBaselineMentionPayload,
+    TextWindowConditionMentionPayload,
+    TextWindowMaterialMentionPayload,
+    TextWindowMethodMentionPayload,
+    TextWindowResultClaimPayload,
+    TextWindowVariantMentionPayload,
 )
 
 
@@ -134,7 +141,7 @@ class FakeCoreLLMStructuredExtractor:
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
 
-    def extract_text_window_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
+    def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
         document_title = str(payload.get("document_title") or "")
         document_profile = payload.get("document_profile") or {}
         text_window = payload.get("text_window") or {}
@@ -147,57 +154,43 @@ class FakeCoreLLMStructuredExtractor:
             and "experimental section" not in text.lower()
             and window_role != "methods"
         ):
-            return StructuredExtractionBundle()
+            return StructuredTextWindowMentions()
 
         material_system = self._infer_material_system(document_title, text)
         process_context = self._extract_process_context(text)
         methods = self._extract_methods(text)
         baseline_label = self._extract_baseline_label(text)
+        first_statement = self._first_statement(text)
 
-        method_facts: list[MethodFactPayload] = []
-        sample_variants: list[SampleVariantPayload] = []
-        test_conditions: list[ExtractedTestConditionPayload] = []
-        baseline_references: list[BaselineReferencePayload] = []
-        measurement_results: list[MeasurementResultPayload] = []
+        method_mentions: list[TextWindowMethodMentionPayload] = []
+        material_mentions: list[TextWindowMaterialMentionPayload] = []
+        variant_mentions: list[TextWindowVariantMentionPayload] = []
+        condition_mentions: list[TextWindowConditionMentionPayload] = []
+        baseline_mentions: list[TextWindowBaselineMentionPayload] = []
+        result_claims: list[TextWindowResultClaimPayload] = []
 
         if window_role == "methods":
-            sentence = self._first_statement(text)
-            if sentence:
-                method_facts.append(
-                    MethodFactPayload(
+            if first_statement:
+                method_mentions.append(
+                    TextWindowMethodMentionPayload(
                         method_role="process",
                         method_name="sample preparation",
-                        method_payload={
-                            "temperatures_c": process_context.get("temperatures_c") or [],
-                            "durations": process_context.get("durations") or [],
-                            "atmosphere": process_context.get("atmosphere"),
-                            "details": sentence,
-                        },
-                        anchors=[
-                            EvidenceAnchorPayload(
-                                quote=sentence,
-                                source_type="method",
-                            )
-                        ],
+                        details=first_statement,
+                        evidence_quote=first_statement,
                         confidence=0.82,
                     )
                 )
 
         if window_role == "characterization" and methods:
-            anchor = EvidenceAnchorPayload(
-                quote=self._first_statement(text) or text[:160],
-                source_type="text",
-            )
             for index, method_name in enumerate(methods, start=1):
-                method_facts.append(
-                    MethodFactPayload(
+                evidence_quote = first_statement or text[:160]
+                if evidence_quote:
+                    method_mentions.append(
+                        TextWindowMethodMentionPayload(
                         method_role="characterization",
                         method_name=method_name,
-                        method_payload={
-                            "methods": [method_name],
-                            "details": text[:400],
-                        },
-                        anchors=[anchor],
+                        details=text[:400],
+                        evidence_quote=evidence_quote,
                         confidence=0.78,
                     )
                 )
@@ -210,83 +203,99 @@ class FakeCoreLLMStructuredExtractor:
             and self._infer_property(sentence) is not None
         ]
         if property_sentences:
-            sample_variants.append(
-                SampleVariantPayload(
-                    variant_label=self._default_variant_label(
-                        material_system.get("family"),
-                        document_title,
-                    ),
-                    host_material_system=material_system,
-                    composition=material_system.get("composition"),
-                    variable_axis_type=None,
-                    variable_value=None,
-                    process_context=process_context,
-                    confidence=0.66,
-                    epistemic_status="inferred_with_low_confidence",
-                    source_kind="text_window",
-                )
+            evidence_quote = property_sentences[0]
+            material_label = self._default_variant_label(
+                material_system.get("family"),
+                document_title,
             )
+            if material_system.get("family") and material_system.get("family") != "unspecified material system":
+                material_mentions.append(
+                    TextWindowMaterialMentionPayload(
+                        material_label=material_label,
+                        family=material_system.get("family"),
+                        composition=material_system.get("composition"),
+                        evidence_quote=evidence_quote,
+                        confidence=0.72,
+                    )
+                )
 
-        if property_sentences and (
-            methods
-            or process_context.get("temperatures_c")
-            or process_context.get("durations")
-        ):
-            property_name = self._infer_property(property_sentences[0]) or "qualitative"
-            test_conditions.append(
-                ExtractedTestConditionPayload(
-                    property_type=property_name,
-                    condition_payload={
-                        "method": methods[0] if len(methods) == 1 else None,
-                        "methods": methods,
-                        "temperatures_c": process_context.get("temperatures_c") or [],
-                        "durations": process_context.get("durations") or [],
-                        "atmosphere": process_context.get("atmosphere"),
-                    },
-                    confidence=0.8,
+        if first_statement:
+            for temperature in process_context.get("temperatures_c") or []:
+                condition_mentions.append(
+                    TextWindowConditionMentionPayload(
+                        condition_type="temperature",
+                        condition_text=first_statement,
+                        normalized_value=temperature,
+                        unit="C",
+                        evidence_quote=first_statement,
+                        confidence=0.8,
+                    )
                 )
-            )
+            for duration in process_context.get("durations") or []:
+                condition_mentions.append(
+                    TextWindowConditionMentionPayload(
+                        condition_type="duration",
+                        condition_text=duration,
+                        normalized_value=None,
+                        unit=None,
+                        evidence_quote=first_statement,
+                        confidence=0.8,
+                    )
+                )
+            if process_context.get("atmosphere"):
+                condition_mentions.append(
+                    TextWindowConditionMentionPayload(
+                        condition_type="atmosphere",
+                        condition_text=first_statement,
+                        normalized_value=process_context.get("atmosphere"),
+                        unit=None,
+                        evidence_quote=first_statement,
+                        confidence=0.8,
+                    )
+                )
 
         if property_sentences and baseline_label:
-            baseline_references.append(
-                BaselineReferencePayload(
+            baseline_mentions.append(
+                TextWindowBaselineMentionPayload(
                     baseline_label=baseline_label,
+                    baseline_type="as-built" if baseline_label == "as-built" else "untreated" if "untreated" in baseline_label.lower() else "reference",
+                    evidence_quote=property_sentences[0],
                     confidence=0.8,
-                    epistemic_status="normalized_from_evidence",
                 )
             )
 
         for index, sentence in enumerate(property_sentences, start=1):
             parsed = self._parse_result_sentence(sentence)
-            if parsed is None:
-                continue
             property_name = self._infer_property(sentence) or "qualitative"
-            result_type, value_payload, unit = parsed
-            measurement_results.append(
-                MeasurementResultPayload(
+            claim_scope = self._classify_claim_scope(sentence)
+            if parsed is None:
+                result_type = "trend"
+                unit = None
+                value_text = None
+            else:
+                result_type, value_payload, unit = parsed
+                value_text = sentence if value_payload.model_dump(exclude_none=True) else None
+            result_claims.append(
+                TextWindowResultClaimPayload(
                     claim_text=sentence,
                     property_normalized=property_name,
                     result_type=result_type,
-                    value_payload=value_payload,
+                    value_text=value_text,
                     unit=unit,
-                    variant_label=sample_variants[0].variant_label if sample_variants else None,
-                    baseline_label=baseline_label if baseline_references else None,
-                    anchors=[
-                        EvidenceAnchorPayload(
-                            quote=sentence,
-                            source_type="text",
-                        )
-                    ],
+                    claim_scope=claim_scope,
+                    eligible_for_measurement_result=(claim_scope == "current_work"),
+                    evidence_quote=sentence,
                     confidence=0.84,
                 )
             )
 
-        return StructuredExtractionBundle(
-            method_facts=method_facts,
-            sample_variants=sample_variants,
-            test_conditions=test_conditions,
-            baseline_references=baseline_references,
-            measurement_results=measurement_results,
+        return StructuredTextWindowMentions(
+            method_mentions=method_mentions,
+            material_mentions=material_mentions,
+            variant_mentions=variant_mentions,
+            condition_mentions=condition_mentions,
+            baseline_mentions=baseline_mentions,
+            result_claims=result_claims,
         )
 
     def extract_table_row_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
@@ -504,6 +513,16 @@ class FakeCoreLLMStructuredExtractor:
             if token in lowered:
                 return normalized
         return None
+
+    def _classify_claim_scope(self, text: str) -> str:
+        lowered = str(text or "").lower()
+        if "previous work" in lowered:
+            return "prior_work"
+        if "review" in lowered or "survey" in lowered:
+            return "review_summary"
+        if "literature" in lowered or "reported in prior studies" in lowered:
+            return "literature_summary"
+        return "current_work"
 
     def _parse_result_sentence(
         self,

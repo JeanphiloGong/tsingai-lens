@@ -9,15 +9,14 @@ You are extracting structured research facts for a materials-literature backend.
 
 Non-negotiable rules:
 - Extract only facts directly supported by the provided input.
+- Return exactly one JSON object and nothing else.
 - If evidence is missing or ambiguous, use null or an empty list.
 - Never infer material systems from filenames.
 - Never treat years, citation numbers, row numbers, or footnote markers as result values.
 - Never treat years, reference numbers, or numbering artifacts as units.
 - Reject literature-summary rows or review-summary rows that are not directly attributable.
-- Preserve anchors needed for downstream traceback using quoted evidence only.
 - Never emit backend-facing ids or locator fields such as `section_id`, `block_id`, `snippet_id`, or `figure_or_table`.
-- Never emit bundle ref fields such as `method_ref`, `variant_ref`, `test_condition_ref`, `baseline_ref`, or `result_ref`.
-- If a result needs to point to a variant or baseline, repeat the human-readable label instead.
+- Never emit backend persistence ids, Source ids, or bundle ref fields such as `method_ref`, `variant_ref`, `test_condition_ref`, `baseline_ref`, or `result_ref`.
 - Prefer fewer, higher-signal outputs over speculative coverage.
 """.strip()
 
@@ -27,13 +26,222 @@ You are doing document triage for a materials-literature backend.
 
 Non-negotiable rules:
 - This is coarse document classification, not knowledge extraction.
-- Return schema-valid structured data only.
+- Return exactly one JSON object and nothing else.
 - Do not write natural-language summaries or explanations.
 - `doc_type` must be one of: experimental, review, mixed, uncertain.
 - `protocol_extractable` must be one of: yes, partial, no, uncertain.
 - `protocol_extractability_signals` must always be an empty list.
 - `parsing_warnings` may only use: insufficient_content, classification_uncertain.
 - If the input is weak or ambiguous, return `uncertain`.
+""".strip()
+
+
+_TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE = """
+JSON compliance rules for text-window extraction:
+- Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, `warnings`, `anchors`, or `measurement_results`.
+- Arrays must stay arrays. When empty, use `[]`. Never use `null` for top-level mention arrays.
+- `evidence_quote` is required on every emitted item.
+- `evidence_quote` must be an exact contiguous substring copied from `text_window.text`.
+- Do not paraphrase, shorten with ellipses, or merge non-contiguous spans.
+- Do not emit page, source_type, section_id, block_id, snippet_id, figure_or_table, char_range, bbox, or deep_link.
+- Do not emit final `measurement_results` in this stage.
+- Classify every `result_claim` with `claim_scope`.
+- Only set `eligible_for_measurement_result` to true when the claim is an explicit current-work result.
+- `method_role` must be one of: process, characterization, test, other. If none fit exactly, use `other`.
+- `condition_type` must be one of: temperature, duration, atmosphere, rate, frequency, location, direction, other. If none fit exactly, use `other`.
+- `baseline_type` must be one of: control, untreated, as-built, reference, without-treatment, other. If none fit exactly, use `other`.
+- `claim_scope` must be one of: current_work, prior_work, literature_summary, review_summary, unclear. If unsure, use `unclear`.
+- Use confidence between 0.5 and 1.0. Do not emit facts below 0.5 confidence.
+
+Valid result claim example:
+```json
+{
+  "claim_text": "Residual stress was similarly reduced when annealing was only performed once every 5 layers.",
+  "property_normalized": "residual stress",
+  "result_type": "trend",
+  "value_text": null,
+  "unit": null,
+  "claim_scope": "current_work",
+  "eligible_for_measurement_result": true,
+  "evidence_quote": "the residual stress was similarly reduced",
+  "confidence": 0.85
+}
+```
+
+Valid condition mention example:
+```json
+{
+  "condition_type": "temperature",
+  "condition_text": "tested at 25 C",
+  "normalized_value": 25,
+  "unit": "C",
+  "evidence_quote": "tested at 25 C",
+  "confidence": 0.9
+}
+```
+
+Invalid counterexamples. Do not copy these shapes:
+```json
+{
+  "keywords": ["yield strength"],
+  "method_mentions": [],
+  "material_mentions": [],
+  "variant_mentions": [],
+  "condition_mentions": [],
+  "baseline_mentions": [],
+  "result_claims": []
+}
+```
+
+```json
+{
+  "result_claims": [
+    {
+      "claim_text": "Previous work demonstrated over 90% reduction.",
+      "property_normalized": "residual stress",
+      "result_type": "trend",
+      "value_text": "over 90%",
+      "unit": "%",
+      "claim_scope": "current_work",
+      "eligible_for_measurement_result": true,
+      "evidence_quote": "Previous work demonstrated over 90% reduction.",
+      "confidence": 0.85
+    }
+  ]
+}
+```
+
+```json
+{
+  "result_claims": [
+    {
+      "claim_text": "Yield strength reached 560 MPa.",
+      "property_normalized": "yield strength",
+      "result_type": "scalar",
+      "value_text": "560 MPa",
+      "unit": "MPa",
+      "claim_scope": "current_work",
+      "eligible_for_measurement_result": true,
+      "evidence_quote": "yield strength reached ... 560 MPa",
+      "confidence": 0.85
+    }
+  ]
+}
+```
+""".strip()
+
+
+_TABLE_ROW_JSON_COMPLIANCE_GUIDANCE = """
+JSON compliance rules for this extraction:
+- Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, or `warnings`.
+- Arrays must stay arrays. When empty, use `[]`. Never use `null` for arrays such as `temperatures_c`, `durations`, `methods`, or any top-level list.
+- Required nested objects must stay objects. Never use `null` for `method_payload`, `process_context`, `condition_payload`, or `value_payload`.
+- Put nullable scalars inside those required objects instead of nulling the whole object.
+- `unit` belongs at `measurement_results[*].unit`, never inside `value_payload`.
+- `host_material_system` may be `null`, but `process_context` may not be `null`.
+- Extract row-grounded facts only. Use `supporting_text_windows` only to disambiguate row labels, abbreviations, or column meaning.
+- Do not mine `supporting_text_windows` for extra standalone facts that are not needed to interpret this row.
+- If a fact cannot be grounded to the row or a short disambiguating support quote, omit it.
+- Do not repeat the same fact in multiple arrays.
+- Keep `anchors[*].quote` short, exact, and contiguous.
+- Emit at most 2 `method_facts`, 2 `sample_variants`, 2 `test_conditions`, 2 `baseline_references`, and 4 `measurement_results` for one row.
+- If evidence is weak or absent, return the valid empty-shape object with empty lists and null scalar leaves.
+
+Valid nested object example:
+```json
+{
+  "method_payload": {
+    "temperatures_c": [],
+    "durations": [],
+    "atmosphere": null,
+    "methods": [],
+    "details": null
+  },
+  "process_context": {
+    "temperatures_c": [],
+    "durations": [],
+    "atmosphere": null
+  },
+  "condition_payload": {
+    "method": null,
+    "methods": [],
+    "temperatures_c": [],
+    "durations": [],
+    "atmosphere": null
+  },
+  "value_payload": {
+    "value": null,
+    "min": null,
+    "max": null,
+    "retention_percent": null,
+    "direction": null,
+    "statement": null
+  }
+}
+```
+
+Valid measurement result example:
+```json
+{
+  "claim_text": "Yield strength reached 560 MPa.",
+  "property_normalized": "yield strength",
+  "result_type": "scalar",
+  "value_payload": {
+    "value": 560,
+    "min": null,
+    "max": null,
+    "retention_percent": null,
+    "direction": null,
+    "statement": null
+  },
+  "unit": "MPa",
+  "variant_label": null,
+  "baseline_label": null,
+  "anchors": [
+    {
+      "quote": "yield strength reached 560 MPa",
+      "source_type": "table",
+      "page": 5
+    }
+  ],
+  "confidence": 0.85
+}
+```
+
+Invalid counterexamples. Do not copy these shapes:
+```json
+{
+  "keywords": ["yield strength"],
+  "method_facts": [],
+  "sample_variants": [],
+  "test_conditions": [],
+  "baseline_references": [],
+  "measurement_results": []
+}
+```
+
+```json
+{
+  "method_payload": {
+    "temperatures_c": null,
+    "durations": null
+  },
+  "process_context": null,
+  "condition_payload": {
+    "methods": null
+  },
+  "value_payload": null
+}
+```
+
+```json
+{
+  "value_payload": {
+    "value": 560,
+    "unit": "MPa"
+  }
+}
+```
 """.strip()
 
 
@@ -48,14 +256,19 @@ def build_document_profile_prompt(payload: dict[str, Any]) -> tuple[str, str]:
 
 def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
-        "Extract text-window-grounded research facts from this one bounded document window.\n\n"
+        "Extract atomic research mentions from this one bounded document window.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "You may emit method facts, sample variants, test conditions, baseline "
-        "references, and measurement results only if they are directly grounded in "
-        "this text window. Anchors may include quote, source_type, and page only. "
-        "Do not emit backend locators, ids, or bundle refs. Use human-readable labels "
-        "instead of refs when a result must identify a variant or baseline. Do not emit "
-        "reader-facing summaries or cards."
+        "Extract only directly stated information from `text_window.text`.\n"
+        "Do not infer from filename, title, heading text, citation numbers, or general domain knowledge.\n"
+        "Return only atomic mentions in this stage: method_mentions, material_mentions, "
+        "variant_mentions, condition_mentions, baseline_mentions, and result_claims.\n"
+        "Do not emit anchors.\n"
+        "For every emitted item, output `evidence_quote` only.\n"
+        "Do not emit final `measurement_results` in this stage.\n"
+        "Do not bind results to variants or baselines unless the text explicitly states the relation.\n"
+        "Do not treat previous work, citations, or literature background as current-work results.\n"
+        "Do not emit test-condition semantics for characterization methods alone.\n\n"
+        f"{_TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
 
@@ -68,6 +281,10 @@ def build_table_row_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str
         "summary rather than a directly attributable study row. Anchors may include "
         "quote, source_type, and page only. Do not emit backend locators, ids, or "
         "bundle refs. Use human-readable labels instead of refs when a result must "
-        "identify a variant or baseline. Return facts only, not reader-facing cards."
+        "identify a variant or baseline. Return facts only, not reader-facing cards.\n"
+        "Use `supporting_text_windows` only when they are required to interpret the row.\n"
+        "If the row is mostly metadata, labels, or literature summary text, return the "
+        "smallest valid object instead of expanding speculative outputs.\n\n"
+        f"{_TABLE_ROW_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt

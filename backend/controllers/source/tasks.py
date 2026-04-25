@@ -56,7 +56,7 @@ async def create_build_task(
         payload.verbose,
     )
     background_tasks.add_task(
-        build_task_runner.run_build_task,
+        build_task_runner.run_build_task_blocking,
         task["task_id"],
         collection_id,
         verbose=payload.verbose,

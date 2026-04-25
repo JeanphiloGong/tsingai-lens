@@ -85,8 +85,8 @@ This plan covers:
   semantic-build path
 - preserving the current `Source -> Core -> derived` ownership direction while
   making the Source-to-Core handoff seam more legible
-- keeping `infra/llm/openai_structured_client.py` as the infra-owned transport
-  implementation
+- keeping the OpenAI-compatible transport implementation inside the owning Core
+  extractor path unless a later wave explicitly re-separates that seam
 
 This plan does not cover:
 
@@ -148,15 +148,15 @@ collection-facing aggregators such as:
 - infra-owned transport details
 
 The extraction contract belongs to Core semantic build, not to infra and not
-to a generic application client bag. The transport seam should remain where it
-already fits:
+to a generic application client bag. The current transport implementation now
+lives directly in the owning Core extractor path:
 
-- [`../../../infra/llm/openai_structured_client.py`](../../../infra/llm/openai_structured_client.py)
+- [`../../../application/core/semantic_build/llm/extractor.py`](../../../application/core/semantic_build/llm/extractor.py)
 
 Therefore:
 
 - Core keeps `llm/prompts.py`, `llm/schemas.py`, and `llm/extractor.py`
-- infra keeps the actual OpenAI-compatible transport client
+- Core currently also owns the concrete OpenAI-compatible transport call path
 
 ## Ownership Boundary After Refactor
 

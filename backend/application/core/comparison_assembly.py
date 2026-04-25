@@ -96,6 +96,12 @@ class ComparableResultAssembler:
         for sort_order, (_, result_row) in enumerate(
             frames.measurement_results.iterrows()
         ):
+            assessment_context = self.build_assessment_context(
+                result_row=result_row,
+                sample_lookup=sample_lookup,
+                test_condition_lookup=test_condition_lookup,
+                baseline_lookup=baseline_lookup,
+            )
             comparable_result = self.assemble_comparable_result(
                 result_row=result_row,
                 sample_lookup=sample_lookup,
@@ -108,6 +114,7 @@ class ComparableResultAssembler:
                 collection_id=collection_id,
                 comparable_result=comparable_result,
                 sort_order=sort_order,
+                assessment_context=assessment_context,
             )
             existing_comparable_result = comparable_results_by_id.get(
                 comparable_result.comparable_result_id
@@ -308,8 +315,12 @@ class ComparableResultAssembler:
         collection_id: str,
         comparable_result: ComparableResult,
         sort_order: int | None,
+        assessment_context: dict[str, Any] | None = None,
     ) -> CollectionComparableResult:
-        assessment = evaluate_comparison_assessment(comparable_result)
+        assessment = evaluate_comparison_assessment(
+            comparable_result,
+            assessment_context=assessment_context,
+        )
         return CollectionComparableResult(
             collection_id=collection_id,
             comparable_result_id=comparable_result.comparable_result_id,
@@ -325,6 +336,24 @@ class ComparableResultAssembler:
             ),
             reassessment_triggers=DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS,
         )
+
+    def build_assessment_context(
+        self,
+        *,
+        result_row: pd.Series,
+        sample_lookup: dict[str, dict[str, Any]],
+        test_condition_lookup: dict[str, dict[str, Any]],
+        baseline_lookup: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        variant_id = self.safe_text(result_row.get("variant_id"))
+        test_condition_id = self.safe_text(result_row.get("test_condition_id"))
+        baseline_id = self.safe_text(result_row.get("baseline_id"))
+        return {
+            "variant": sample_lookup.get(variant_id or "", {}),
+            "test_condition": test_condition_lookup.get(test_condition_id or "", {}),
+            "baseline": baseline_lookup.get(baseline_id or "", {}),
+            "measurement_result": dict(result_row),
+        }
 
     def normalize_comparable_results_table(self, results: pd.DataFrame) -> pd.DataFrame:
         if results is None or results.empty:
@@ -526,16 +555,55 @@ class ComparableResultAssembler:
             return "unspecified test condition"
 
         parts: list[str] = []
-        method = self.safe_text(payload.get("method"))
+        method = self.safe_text(payload.get("test_method")) or self.safe_text(
+            payload.get("method")
+        )
         methods = self.normalize_string_list(payload.get("methods"))
         if method:
             parts.append(method)
         elif methods:
             parts.append(", ".join(methods))
 
-        temperatures = payload.get("temperatures_c")
-        if isinstance(temperatures, list) and temperatures:
-            parts.append(" / ".join(f"{float(value):g} C" for value in temperatures))
+        test_temperature = self.safe_float(payload.get("test_temperature_c"))
+        if test_temperature is not None:
+            parts.append(f"{test_temperature:g} C")
+        else:
+            temperatures = payload.get("temperatures_c")
+            if isinstance(temperatures, list) and temperatures:
+                parts.append(" / ".join(f"{float(value):g} C" for value in temperatures))
+
+        strain_rate = (
+            payload.get("strain_rate_s-1")
+            or payload.get("strain_rate_s_1")
+            or payload.get("strain_rate")
+        )
+        strain_rate_value = self.normalize_scalar_or_text(strain_rate)
+        if strain_rate_value not in (None, "", [], {}):
+            parts.append(f"strain_rate={strain_rate_value} s^-1")
+
+        loading_direction = self.safe_text(payload.get("loading_direction"))
+        if loading_direction:
+            parts.append(f"loading={loading_direction}")
+
+        sample_orientation = self.safe_text(payload.get("sample_orientation"))
+        if sample_orientation:
+            parts.append(f"sample={sample_orientation}")
+
+        frequency = self.safe_float(payload.get("frequency_hz"))
+        if frequency is not None:
+            parts.append(f"f={frequency:g} Hz")
+
+        environment = self.safe_text(payload.get("environment"))
+        if environment:
+            parts.append(f"env={environment}")
+
+        surface_state = self.safe_text(payload.get("surface_state"))
+        if surface_state:
+            parts.append(f"surface={surface_state}")
+
+        specimen_geometry = self.safe_text(payload.get("specimen_geometry"))
+        if specimen_geometry:
+            parts.append(f"specimen={specimen_geometry}")
 
         durations = self.normalize_string_list(payload.get("durations"))
         if durations:
@@ -576,20 +644,61 @@ class ComparableResultAssembler:
             return "unspecified process"
 
         parts: list[str] = []
+        consumed_keys: set[str] = set()
+        pbf_key_specs = (
+            ("laser_power_w", "P", "W"),
+            ("scan_speed_mm_s", "v", "mm/s"),
+            ("hatch_spacing_um", "h", "um"),
+            ("layer_thickness_um", "t", "um"),
+            ("spot_size_um", "spot", "um"),
+            ("energy_density_j_mm3", "VED", "J/mm3"),
+            ("preheat_temperature_c", "preheat", "C"),
+            ("oxygen_level_ppm", "O2", "ppm"),
+        )
+        for key, label, unit in pbf_key_specs:
+            numeric = self.safe_float(payload.get(key))
+            if numeric is not None:
+                parts.append(f"{label}={numeric:g} {unit}")
+                consumed_keys.add(key)
+
+        energy_density_origin = self.safe_text(payload.get("energy_density_origin"))
+        if energy_density_origin:
+            parts.append(f"VED_origin={energy_density_origin}")
+            consumed_keys.add("energy_density_origin")
+
+        for key, label in (
+            ("scan_strategy", "scan"),
+            ("build_orientation", "build"),
+            ("shielding_gas", "gas"),
+            ("powder_size_distribution_um", "powder"),
+        ):
+            value = self.normalize_scalar_or_text(payload.get(key))
+            if value not in (None, "", [], {}):
+                parts.append(f"{label}={value}")
+                consumed_keys.add(key)
+
+        post_treatment = self.safe_text(payload.get("post_treatment_summary"))
+        if post_treatment:
+            parts.append(post_treatment)
+            consumed_keys.add("post_treatment_summary")
+
         temperatures = payload.get("temperatures_c")
         if isinstance(temperatures, list) and temperatures:
             parts.append(" / ".join(f"{float(value):g} C" for value in temperatures))
+            consumed_keys.add("temperatures_c")
 
         durations = self.normalize_string_list(payload.get("durations"))
         if durations:
             parts.append(" / ".join(durations))
+            consumed_keys.add("durations")
 
         atmosphere = self.safe_text(payload.get("atmosphere"))
         if atmosphere:
             parts.append(f"under {atmosphere}")
+            consumed_keys.add("atmosphere")
 
         for key, value in payload.items():
-            if key in {"temperatures_c", "durations", "atmosphere"}:
+            if key in consumed_keys:
                 continue
             normalized = self.normalize_scalar_or_text(value)
             if normalized not in (None, "", [], {}):

@@ -16,6 +16,9 @@ The family keeps three live pages because this local subject now needs:
 - a backend drilldown plan that explains how Core should expose variant
   dossiers, result chains, and result-series projections without adding a new
   top-level artifact family
+- a fact-thickening plan that turns the landed evidence-chain read projection
+  into concrete PBF-metal schema, prompt, normalization, policy, and fixture
+  work
 - an implementation plan that turns that direction into executable delivery
   slices, file areas, and verification commands
 
@@ -30,6 +33,10 @@ The family keeps three live pages because this local subject now needs:
 - [`variant-dossier-and-result-chain-backend-plan.md`](variant-dossier-and-result-chain-backend-plan.md)
   Narrow backend plan for dossier, chain, and series projections over the
   existing Core semantic backbone
+- [`evidence-chain-fact-thickening-plan.md`](evidence-chain-fact-thickening-plan.md)
+  Detailed next backend plan for PBF-metal schema, prompt, normalization,
+  comparability policy, and acceptance fixture work after read projection
+  landing
 - [`implementation-plan.md`](implementation-plan.md)
   Delivery slices, owned file areas, verification commands, and acceptance
   gates for the execution wave

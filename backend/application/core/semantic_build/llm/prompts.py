@@ -139,6 +139,11 @@ JSON compliance rules for this extraction:
 - Put nullable scalars inside those required objects instead of nulling the whole object.
 - `unit` belongs at `measurement_results[*].unit`, never inside `value_payload`.
 - `host_material_system` may be `null`, but `process_context` may not be `null`.
+- For PBF metal rows, put laser/process/sample-state facts in `process_context`; do not put test temperature or strain rate there.
+- Put mechanical test facts in `condition_payload`: `test_method`, `test_temperature_c`, `strain_rate_s-1`, `loading_direction`, and `sample_orientation`.
+- Put value provenance in `value_payload`: `value_origin`, `source_value_text`, `source_unit_text`, `derivation_formula`, and `derivation_inputs`.
+- Use `value_origin: "reported"` only for directly reported values, `derived` only when the row gives enough inputs and a formula, and `estimated` only when the row itself marks the value as approximate.
+- Omit weakly grounded PBF fields. Do not infer missing laser power, scan speed, orientations, strain rate, or energy density from general domain knowledge.
 - Extract row-grounded facts only. Use `supporting_text_windows` only to disambiguate row labels, abbreviations, or column meaning.
 - Do not mine `supporting_text_windows` for extra standalone facts that are not needed to interpret this row.
 - If a fact cannot be grounded to the row or a short disambiguating support quote, omit it.
@@ -160,14 +165,37 @@ Valid nested object example:
   "process_context": {
     "temperatures_c": [],
     "durations": [],
-    "atmosphere": null
+    "atmosphere": null,
+    "laser_power_w": null,
+    "scan_speed_mm_s": null,
+    "layer_thickness_um": null,
+    "hatch_spacing_um": null,
+    "spot_size_um": null,
+    "energy_density_j_mm3": null,
+    "energy_density_origin": null,
+    "scan_strategy": null,
+    "build_orientation": null,
+    "preheat_temperature_c": null,
+    "shielding_gas": null,
+    "oxygen_level_ppm": null,
+    "powder_size_distribution_um": null,
+    "post_treatment_summary": null
   },
   "condition_payload": {
     "method": null,
     "methods": [],
     "temperatures_c": [],
     "durations": [],
-    "atmosphere": null
+    "atmosphere": null,
+    "test_method": null,
+    "test_temperature_c": null,
+    "strain_rate_s-1": null,
+    "loading_direction": null,
+    "sample_orientation": null,
+    "environment": null,
+    "frequency_hz": null,
+    "specimen_geometry": null,
+    "surface_state": null
   },
   "value_payload": {
     "value": null,
@@ -175,8 +203,100 @@ Valid nested object example:
     "max": null,
     "retention_percent": null,
     "direction": null,
-    "statement": null
+    "statement": null,
+    "value_origin": null,
+    "source_value_text": null,
+    "source_unit_text": null,
+    "derivation_formula": null,
+    "derivation_inputs": null
   }
+}
+```
+
+Valid PBF metal row example:
+```json
+{
+  "method_facts": [],
+  "sample_variants": [
+    {
+      "variant_label": "S3",
+      "host_material_system": {
+        "family": "titanium alloy",
+        "composition": "Ti-6Al-4V"
+      },
+      "composition": "Ti-6Al-4V",
+      "variable_axis_type": "post_treatment",
+      "variable_value": "optimized VED + HIP",
+      "process_context": {
+        "temperatures_c": [],
+        "durations": [],
+        "atmosphere": null,
+        "laser_power_w": 280,
+        "scan_speed_mm_s": 1200,
+        "layer_thickness_um": 30,
+        "hatch_spacing_um": 100,
+        "energy_density_j_mm3": 78,
+        "energy_density_origin": "reported",
+        "build_orientation": "vertical",
+        "post_treatment_summary": "HIP"
+      },
+      "confidence": 0.86,
+      "epistemic_status": "normalized_from_evidence",
+      "source_kind": "table_row"
+    }
+  ],
+  "test_conditions": [
+    {
+      "property_type": "yield_strength",
+      "condition_payload": {
+        "method": "tensile",
+        "methods": ["tensile"],
+        "temperatures_c": [],
+        "durations": [],
+        "atmosphere": null,
+        "test_method": "tensile",
+        "test_temperature_c": 25,
+        "strain_rate_s-1": 0.001,
+        "loading_direction": "vertical",
+        "sample_orientation": "vertical"
+      },
+      "confidence": 0.86,
+      "epistemic_status": "normalized_from_evidence"
+    }
+  ],
+  "baseline_references": [
+    {
+      "baseline_label": "S2",
+      "confidence": 0.86,
+      "epistemic_status": "normalized_from_evidence"
+    }
+  ],
+  "measurement_results": [
+    {
+      "claim_text": "S3 showed a yield strength of 940 MPa at 25 C.",
+      "property_normalized": "yield_strength",
+      "result_type": "scalar",
+      "value_payload": {
+        "value": 940,
+        "statement": "S3 showed a yield strength of 940 MPa at 25 C.",
+        "value_origin": "reported",
+        "source_value_text": "940",
+        "source_unit_text": "MPa"
+      },
+      "unit": "MPa",
+      "variant_label": "S3",
+      "baseline_label": "S2",
+      "anchors": [
+        {
+          "quote": "S3 showed a yield strength of 940 MPa at 25 C",
+          "source_type": "table",
+          "page": 5
+        }
+      ],
+      "claim_scope": "current_work",
+      "confidence": 0.86
+    }
+  ]
 }
 ```
 
@@ -192,7 +312,12 @@ Valid measurement result example:
     "max": null,
     "retention_percent": null,
     "direction": null,
-    "statement": null
+    "statement": null,
+    "value_origin": "reported",
+    "source_value_text": "560",
+    "source_unit_text": "MPa",
+    "derivation_formula": null,
+    "derivation_inputs": null
   },
   "unit": "MPa",
   "variant_label": null,

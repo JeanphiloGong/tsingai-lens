@@ -758,6 +758,7 @@ class ComparisonService:
         comparable_results: pd.DataFrame,
         scoped_records_by_result_id: dict[str, CollectionComparableResult],
     ) -> ComparisonSemanticTables:
+        projection_context = self._load_optional_projection_context(output_dir)
         refreshed_scoped_records: list[CollectionComparableResult] = []
         next_generated_sort_order = (
             max(
@@ -789,6 +790,10 @@ class ComparisonService:
                 collection_id=collection_id,
                 comparable_result=comparable_record,
                 sort_order=effective_sort_order,
+                assessment_context=self._build_assessment_context_for_comparable_record(
+                    comparable_record,
+                    projection_context,
+                ),
             )
             if existing_scoped_record is not None:
                 refreshed_scoped_record = CollectionComparableResult(
@@ -836,6 +841,34 @@ class ComparisonService:
             comparable_results=comparable_results,
             collection_comparable_results=refreshed_scoped_results,
         )
+
+    def _build_assessment_context_for_comparable_record(
+        self,
+        comparable_record: ComparableResult,
+        projection_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        variant_id = self._safe_text(comparable_record.binding.variant_id)
+        test_condition_id = self._safe_text(comparable_record.binding.test_condition_id)
+        baseline_id = self._safe_text(comparable_record.binding.baseline_id)
+        source_result_id = self._safe_text(comparable_record.source_result_id)
+        return {
+            "variant": projection_context.get("sample_variants_by_id", {}).get(
+                variant_id or "",
+                {},
+            ),
+            "test_condition": projection_context.get("test_conditions_by_id", {}).get(
+                test_condition_id or "",
+                {},
+            ),
+            "baseline": projection_context.get("baseline_references_by_id", {}).get(
+                baseline_id or "",
+                {},
+            ),
+            "measurement_result": projection_context.get(
+                "measurement_results_by_id",
+                {},
+            ).get(source_result_id or "", {}),
+        }
 
     def build_comparison_rows(
         self,

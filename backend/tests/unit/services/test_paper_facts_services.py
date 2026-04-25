@@ -19,6 +19,8 @@ from application.core.semantic_build.llm.prompts import (
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.semantic_build.llm.schemas import (
     EvidenceAnchorPayload,
+    ExtractedTestConditionPayload,
+    MeasurementResultPayload,
     MethodFactPayload,
     SampleVariantPayload,
     StructuredDocumentProfile,
@@ -294,6 +296,85 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"unit": "MPa"' in table_row_prompt
     assert "Use `supporting_text_windows` only when they are required to interpret the row." in table_row_prompt
     assert "Emit at most 2 `method_facts`" in table_row_prompt
+    assert '"laser_power_w": null' in table_row_prompt
+    assert '"strain_rate_s-1": null' in table_row_prompt
+    assert '"value_origin": "reported"' in table_row_prompt
+
+
+def test_pbf_fact_schema_accepts_process_test_and_value_provenance_fields():
+    bundle = StructuredExtractionBundle(
+        method_facts=[
+            MethodFactPayload(
+                method_role="process",
+                method_name="LPBF",
+                method_payload={
+                    "laser_power_w": 280,
+                    "scan_speed_mm_s": 1200,
+                    "layer_thickness_um": 30,
+                    "hatch_spacing_um": 100,
+                    "energy_density_j_mm3": 78,
+                    "energy_density_origin": "reported",
+                    "build_orientation": "vertical",
+                    "post_treatment_summary": "HIP",
+                },
+            )
+        ],
+        sample_variants=[
+            SampleVariantPayload(
+                variant_label="S3",
+                host_material_system={
+                    "family": "titanium alloy",
+                    "composition": "Ti-6Al-4V",
+                },
+                composition="Ti-6Al-4V",
+                variable_axis_type="post_treatment",
+                variable_value="optimized VED + HIP",
+                process_context={
+                    "laser_power_w": 280,
+                    "scan_speed_mm_s": 1200,
+                    "layer_thickness_um": 30,
+                    "hatch_spacing_um": 100,
+                    "energy_density_j_mm3": 78,
+                    "energy_density_origin": "reported",
+                    "build_orientation": "vertical",
+                    "post_treatment_summary": "HIP",
+                },
+            )
+        ],
+        test_conditions=[
+            ExtractedTestConditionPayload(
+                property_type="yield_strength",
+                condition_payload={
+                    "test_method": "tensile",
+                    "test_temperature_c": 25,
+                    "strain_rate_s-1": 0.001,
+                    "loading_direction": "vertical",
+                    "sample_orientation": "vertical",
+                },
+            )
+        ],
+        measurement_results=[
+            MeasurementResultPayload(
+                claim_text="S3 showed a yield strength of 940 MPa.",
+                property_normalized="yield_strength",
+                result_type="scalar",
+                value_payload={
+                    "value": 940,
+                    "value_origin": "reported",
+                    "source_value_text": "940",
+                    "source_unit_text": "MPa",
+                },
+                unit="MPa",
+                variant_label="S3",
+                baseline_label="S2",
+            )
+        ],
+    )
+
+    assert bundle.method_facts[0].method_payload.laser_power_w == 280
+    assert bundle.sample_variants[0].process_context.energy_density_origin == "reported"
+    assert bundle.test_conditions[0].condition_payload.strain_rate_s_1 == 0.001
+    assert bundle.measurement_results[0].value_payload.source_value_text == "940"
 
 
 def test_paper_facts_service_reads_extraction_concurrency_from_env(monkeypatch):
@@ -1755,6 +1836,146 @@ def test_comparison_service_builds_rows_from_array_backed_nested_contexts(tmp_pa
         "result_type:scalar",
     ]
     assert row.assessment_epistemic_status == "normalized_from_evidence"
+
+
+def test_pbf_comparison_assembly_uses_process_test_and_value_context():
+    assembler = ComparableResultAssembler()
+    result_row = pd.Series(
+        {
+            "result_id": "res-s3-25",
+            "document_id": "paper-1",
+            "variant_id": "var-s3",
+            "property_normalized": "yield_strength",
+            "result_type": "scalar",
+            "value_payload": {
+                "value": 940.0,
+                "statement": "S3 showed a yield strength of 940 MPa at 25 C.",
+                "value_origin": "reported",
+                "source_value_text": "940",
+                "source_unit_text": "MPa",
+            },
+            "unit": "MPa",
+            "test_condition_id": "tc-25",
+            "baseline_id": "base-s2",
+            "structure_feature_ids": ["sf-porosity"],
+            "characterization_observation_ids": [],
+            "evidence_anchor_ids": ["anchor-s3-25"],
+            "traceability_status": "direct",
+            "result_source_type": "table",
+            "claim_scope": "current_work",
+        }
+    )
+    sample_lookup = {
+        "var-s3": {
+            "variant_id": "var-s3",
+            "domain_profile": "pbf_metal",
+            "variant_label": "S3",
+            "variable_axis_type": "post_treatment",
+            "variable_value": "optimized VED + HIP",
+            "host_material_system": {
+                "family": "titanium alloy",
+                "composition": "Ti-6Al-4V",
+            },
+            "process_context": {
+                "laser_power_w": 280,
+                "scan_speed_mm_s": 1200,
+                "hatch_spacing_um": 100,
+                "layer_thickness_um": 30,
+                "energy_density_j_mm3": 78,
+                "energy_density_origin": "reported",
+                "build_orientation": "vertical",
+                "post_treatment_summary": "HIP",
+            },
+            "source_anchor_ids": ["anchor-process"],
+        }
+    }
+    test_condition_lookup = {
+        "tc-25": {
+            "test_condition_id": "tc-25",
+            "condition_payload": {
+                "test_method": "tensile",
+                "test_temperature_c": 25,
+                "strain_rate_s-1": 0.001,
+                "loading_direction": "vertical",
+                "sample_orientation": "vertical",
+            },
+            "evidence_anchor_ids": ["anchor-test"],
+        }
+    }
+    baseline_lookup = {
+        "base-s2": {
+            "baseline_id": "base-s2",
+            "baseline_label": "S2 optimized VED without HIP",
+            "baseline_type": "same_paper_control",
+            "baseline_scope": "current_paper",
+            "evidence_anchor_ids": ["anchor-baseline"],
+        }
+    }
+
+    comparable_result = assembler.assemble_comparable_result(
+        result_row=result_row,
+        sample_lookup=sample_lookup,
+        test_condition_lookup=test_condition_lookup,
+        baseline_lookup=baseline_lookup,
+    )
+    assert comparable_result is not None
+    assessment_context = assembler.build_assessment_context(
+        result_row=result_row,
+        sample_lookup=sample_lookup,
+        test_condition_lookup=test_condition_lookup,
+        baseline_lookup=baseline_lookup,
+    )
+    scoped_result = assembler.build_collection_comparable_result(
+        collection_id="col-1",
+        comparable_result=comparable_result,
+        sort_order=0,
+        assessment_context=assessment_context,
+    )
+
+    assert comparable_result.normalized_context.process_normalized == (
+        "P=280 W, v=1200 mm/s, h=100 um, t=30 um, VED=78 J/mm3, "
+        "VED_origin=reported, build=vertical, HIP"
+    )
+    assert comparable_result.normalized_context.test_condition_normalized == (
+        "tensile, 25 C, strain_rate=0.001 s^-1, loading=vertical, sample=vertical"
+    )
+    assert scoped_result.assessment.comparability_status == "comparable"
+    assert "pbf_context_detected" in scoped_result.assessment.comparability_basis
+    assert "build_orientation_reported" in scoped_result.assessment.comparability_basis
+    assert "strain_rate_reported" in scoped_result.assessment.comparability_basis
+
+    missing_strain_lookup = {
+        "tc-25": {
+            **test_condition_lookup["tc-25"],
+            "condition_payload": {
+                "test_method": "tensile",
+                "test_temperature_c": 25,
+                "loading_direction": "vertical",
+                "sample_orientation": "vertical",
+            },
+        }
+    }
+    limited_result = assembler.assemble_comparable_result(
+        result_row=result_row,
+        sample_lookup=sample_lookup,
+        test_condition_lookup=missing_strain_lookup,
+        baseline_lookup=baseline_lookup,
+    )
+    assert limited_result is not None
+    limited_scope = assembler.build_collection_comparable_result(
+        collection_id="col-1",
+        comparable_result=limited_result,
+        sort_order=0,
+        assessment_context=assembler.build_assessment_context(
+            result_row=result_row,
+            sample_lookup=sample_lookup,
+            test_condition_lookup=missing_strain_lookup,
+            baseline_lookup=baseline_lookup,
+        ),
+    )
+
+    assert limited_scope.assessment.comparability_status == "limited"
+    assert "strain_rate_s-1" in limited_scope.assessment.missing_critical_context
 
 
 def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):

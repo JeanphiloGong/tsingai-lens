@@ -44,6 +44,7 @@ def _build_comparable_result(
     baseline_reference: str | None = "untreated baseline",
     test_condition_id: str | None = "tc-1",
     traceability_status: str = TRACEABILITY_STATUS_DIRECT,
+    property_normalized: str = "strength",
     result_type: str = "scalar",
     result_summary: str = "97 MPa",
     numeric_value: float | None = 97.0,
@@ -71,7 +72,7 @@ def _build_comparable_result(
             axis_unit=None,
         ),
         value=ResultValue(
-            property_normalized="strength",
+            property_normalized=property_normalized,
             result_type=result_type,
             numeric_value=numeric_value,
             unit="MPa",
@@ -142,6 +143,128 @@ def test_evaluate_comparison_assessment_detects_not_comparable_without_baseline_
     assert assessment.comparability_status == COMPARABILITY_STATUS_NOT_COMPARABLE
     assert "baseline_reference" in assessment.missing_critical_context
     assert "test_condition" in assessment.missing_critical_context
+
+
+def test_evaluate_comparison_assessment_applies_pbf_tensile_missingness() -> None:
+    context = {
+        "variant": {
+            "domain_profile": "pbf_metal",
+            "process_context": {
+                "laser_power_w": 280,
+                "scan_speed_mm_s": 1200,
+                "layer_thickness_um": 30,
+                "hatch_spacing_um": 100,
+                "energy_density_j_mm3": 78,
+                "energy_density_origin": "reported",
+                "build_orientation": "vertical",
+                "post_treatment_summary": "HIP",
+            },
+        },
+        "test_condition": {
+            "condition_payload": {
+                "test_method": "tensile",
+                "test_temperature_c": 25,
+                "strain_rate_s-1": 0.001,
+                "loading_direction": "vertical",
+                "sample_orientation": "vertical",
+            }
+        },
+        "measurement_result": {
+            "value_payload": {
+                "value": 940,
+                "value_origin": "reported",
+            }
+        },
+    }
+
+    complete = evaluate_comparison_assessment(
+        _build_comparable_result(property_normalized="yield_strength"),
+        assessment_context=context,
+    )
+    missing_strain_rate = evaluate_comparison_assessment(
+        _build_comparable_result(property_normalized="yield_strength"),
+        assessment_context={
+            **context,
+            "test_condition": {
+                "condition_payload": {
+                    "test_method": "tensile",
+                    "test_temperature_c": 25,
+                    "loading_direction": "vertical",
+                    "sample_orientation": "vertical",
+                }
+            },
+        },
+    )
+
+    assert complete.comparability_status == COMPARABILITY_STATUS_COMPARABLE
+    assert "pbf_context_detected" in complete.comparability_basis
+    assert "strain_rate_reported" in complete.comparability_basis
+    assert missing_strain_rate.comparability_status == COMPARABILITY_STATUS_LIMITED
+    assert "strain_rate_s-1" in missing_strain_rate.missing_critical_context
+    assert any(
+        "missing strain rate" in warning
+        for warning in missing_strain_rate.comparability_warnings
+    )
+
+
+def test_evaluate_comparison_assessment_flags_energy_density_provenance() -> None:
+    base_context = {
+        "variant": {
+            "domain_profile": "pbf_metal",
+            "process_context": {
+                "laser_power_w": 280,
+                "scan_speed_mm_s": 1200,
+                "layer_thickness_um": 30,
+                "hatch_spacing_um": 100,
+                "energy_density_j_mm3": 78,
+                "build_orientation": "vertical",
+            },
+        },
+        "test_condition": {
+            "condition_payload": {
+                "test_method": "tensile",
+                "test_temperature_c": 25,
+                "strain_rate_s-1": 0.001,
+                "loading_direction": "vertical",
+                "sample_orientation": "vertical",
+            }
+        },
+    }
+
+    derived = evaluate_comparison_assessment(
+        _build_comparable_result(property_normalized="yield_strength"),
+        assessment_context={
+            **base_context,
+            "variant": {
+                **base_context["variant"],
+                "process_context": {
+                    **base_context["variant"]["process_context"],
+                    "energy_density_origin": "derived",
+                },
+            },
+        },
+    )
+    estimated = evaluate_comparison_assessment(
+        _build_comparable_result(property_normalized="yield_strength"),
+        assessment_context={
+            **base_context,
+            "variant": {
+                **base_context["variant"],
+                "process_context": {
+                    **base_context["variant"]["process_context"],
+                    "energy_density_origin": "estimated",
+                },
+            },
+        },
+    )
+
+    assert derived.comparability_status == COMPARABILITY_STATUS_COMPARABLE
+    assert derived.requires_expert_review is False
+    assert "energy_density_origin:derived" in derived.comparability_basis
+    assert any("Energy density was derived" in warning for warning in derived.comparability_warnings)
+    assert estimated.comparability_status == COMPARABILITY_STATUS_LIMITED
+    assert estimated.requires_expert_review is True
+    assert "energy_density_estimated" in estimated.missing_critical_context
 
 
 def test_comparison_row_record_normalizes_lists_and_defaults() -> None:

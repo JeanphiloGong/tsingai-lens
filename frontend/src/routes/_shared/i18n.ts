@@ -180,23 +180,19 @@ const translations: Record<Language, Translations> = {
 			readiness: {
 				ready: {
 					title: 'Collection is ready',
-					body:
-						'This collection contains {count} document(s), and parsing plus evidence extraction are complete. You can enter the comparison view or inspect evidence and source documents.'
+					body: 'This collection contains {count} document(s), and parsing plus evidence extraction are complete. You can enter the comparison view or inspect evidence and source documents.'
 				},
 				processing: {
 					title: 'Collection is processing',
-					body:
-						'Document parsing, evidence extraction, or comparison generation is still running. Comparison and graph views become useful after processing completes.'
+					body: 'Document parsing, evidence extraction, or comparison generation is still running. Comparison and graph views become useful after processing completes.'
 				},
 				ready_to_process: {
 					title: 'Collection is waiting for processing',
-					body:
-						'Documents are uploaded, but Lens still needs to parse them, extract evidence, and prepare comparison results.'
+					body: 'Documents are uploaded, but Lens still needs to parse them, extract evidence, and prepare comparison results.'
 				},
 				empty: {
 					title: 'This collection has no documents yet',
-					body:
-						'Upload papers or technical documents, then Lens will prepare parsing, evidence extraction, and comparison readiness.'
+					body: 'Upload papers or technical documents, then Lens will prepare parsing, evidence extraction, and comparison readiness.'
 				},
 				failed: {
 					title: 'Processing ran into a problem',
@@ -244,8 +240,7 @@ const translations: Record<Language, Translations> = {
 				},
 				trust: {
 					title: 'Trust reminder',
-					body:
-						'This collection may be usable, but comparison results still need human review. Check evidence sources, missing conditions, and comparability warnings first.',
+					body: 'This collection may be usable, but comparison results still need human review. Check evidence sources, missing conditions, and comparability warnings first.',
 					comparison: 'Comparison',
 					evidence: 'Evidence',
 					documents: 'Documents'
@@ -273,7 +268,8 @@ const translations: Record<Language, Translations> = {
 					guide: 'View user guide'
 				}
 			},
-			footerNote: 'Lens makes literature comparison more trustworthy and research evidence traceable.',
+			footerNote:
+				'Lens makes literature comparison more trustworthy and research evidence traceable.',
 			collectionStates: {
 				empty: {
 					label: 'Empty',
@@ -581,32 +577,153 @@ const translations: Record<Language, Translations> = {
 			uploadResultDesc: '{count} file(s) uploaded into this collection.'
 		},
 		profiles: {
-			title: 'Paper screening',
+			title: 'Document Profile',
+			description:
+				'Identify document types and suitability, then decide which papers are useful for evidence extraction and comparison.',
 			lead: 'Use this page to separate experimental papers from reviews and spot papers that should not drive downstream decisions.',
-			loading: 'Loading paper screening...',
-			empty: 'No paper screening results are available yet.',
+			loading: 'Loading document profiles...',
+			error: 'Could not load document profiles',
+			empty: 'No document profile results are available yet.',
 			summaryTitle: 'Collection document summary',
 			warningsTitle: 'Profile warnings',
 			emptyWarnings: 'No collection-level profile warnings.',
 			filterDocType: 'Paper type',
-			filterExtractable: 'Step extraction suitability',
+			filterExtractable: 'Protocol suitability',
 			allOption: 'All',
 			totalLabel: 'Papers',
-			docTypeExperimental: 'Experimental',
+			docTypeExperimental: 'Experimental paper',
 			docTypeReview: 'Review',
+			docTypeMethod: 'Methods paper',
+			docTypeComputational: 'Computational paper',
 			docTypeMixed: 'Mixed',
 			docTypeUncertain: 'Uncertain',
-			extractableYes: 'Good',
-			extractablePartial: 'Partial',
+			extractableYes: 'Suitable',
+			extractablePartial: 'Partially suitable',
 			extractableNo: 'Not suitable',
 			extractableUncertain: 'Uncertain',
-			tableDocument: 'Paper',
-			tableType: 'Paper type',
-			tableProtocol: 'Step extraction',
+			tableDocument: 'Document',
+			tableType: 'Type',
+			tableProtocol: 'Protocol suitability',
 			tableConfidence: 'Confidence',
-			tableWarnings: 'Issues',
-			tableActions: 'Read next',
-			signalsLabel: 'Why'
+			tableWarnings: 'Hint',
+			tableActions: 'Next step',
+			signalsLabel: 'Reason',
+			meta: {
+				documentCount: '{count} document(s)',
+				updatedAt: 'Updated: {time}'
+			},
+			filters: {
+				title: 'Document profile filters',
+				type: 'Paper type',
+				suitability: 'Protocol suitability',
+				all: 'All',
+				showing: 'Showing {filtered} / {total} documents'
+			},
+			conclusion: {
+				title: 'Profile conclusion',
+				reviewRisk:
+					'This collection is mostly review material and is not suitable for direct experimental result comparison yet. Add experimental or methods papers before entering comparison and graph analysis.',
+				ready:
+					'This collection contains documents that can support step extraction and evidence comparison. Review evidence sources first, then enter comparison.',
+				fewDocuments:
+					'This collection has few documents, so comparison results may be unstable. Add more related papers to improve comparability.',
+				limitedReady:
+					'This collection has some usable procedural or evidence material, but parts of the comparison should still be reviewed carefully.',
+				limited:
+					'This collection does not yet show strong protocol suitability. Review the documents and evidence before using downstream comparisons.',
+				pending:
+					'Document profiles have not been generated yet. Refresh or rerun processing after the uploaded documents are ready.'
+			},
+			stats: {
+				documentType: 'Document type distribution',
+				protocolSuitability: 'Protocol suitability',
+				countPercent: '{count} ({percent}%)'
+			},
+			warning: {
+				title: 'Protocol suitability reminder',
+				noSuitableBody:
+					'No document suitable for step extraction was detected in this collection. To generate experimental steps, parameter matrices, or validation plans, add experimental papers, methods papers, or papers with explicit procedures.',
+				readyBody:
+					'This collection contains documents suitable for step extraction. Check original evidence, parameter conditions, and experimental context before using generated output.'
+			},
+			list: {
+				title: 'Document list',
+				count: '{count} document(s)',
+				emptyFiltered: 'No documents match the current filters.'
+			},
+			actions: {
+				uploadMore: 'Upload more documents',
+				uploadDocument: 'Upload document',
+				viewEvidence: 'View evidence',
+				viewDocument: 'View document',
+				openComparison: 'Enter comparison',
+				refresh: 'Refresh',
+				viewProgress: 'View progress',
+				viewError: 'View error',
+				retryProcessing: 'Retry processing',
+				manualMark: 'Manual mark',
+				viewSuitabilityGuide: 'View suitability guide',
+				reanalyze: 'Reanalyze',
+				more: 'More actions'
+			},
+			docTypes: {
+				experimental: 'Experimental paper',
+				review: 'Review',
+				method: 'Methods paper',
+				computational: 'Computational paper',
+				mixed: 'Mixed',
+				uncertain: 'Uncertain'
+			},
+			suitability: {
+				yes: 'Suitable',
+				partial: 'Partially suitable',
+				no: 'Not suitable',
+				uncertain: 'Uncertain'
+			},
+			table: {
+				document: 'Document',
+				type: 'Type',
+				suitability: 'Protocol suitability',
+				confidence: 'Confidence',
+				hint: 'Hint',
+				next: 'Next step'
+			},
+			file: {
+				pdf: 'PDF',
+				pages: '{count} pages'
+			},
+			status: {
+				pending: 'Pending',
+				processing: 'Processing',
+				completed: 'Processed',
+				failed: 'Failed',
+				limited: 'Partially complete',
+				unknown: 'Status unknown'
+			},
+			reasons: {
+				label: 'Reason',
+				review: 'Review paper',
+				extractable: 'Procedural details detected',
+				partial: 'Procedural information is incomplete',
+				noProtocol: 'No clear protocol details',
+				insufficient: 'Insufficient information'
+			},
+			hints: {
+				noProtocol: 'No clear experimental steps, parameters, or method details were detected.',
+				extractable: 'Experimental workflow was detected and can support step extraction.',
+				partial: 'Some procedural information exists, but manual review is still needed.',
+				insufficient: 'Information is insufficient and should be checked manually.',
+				processing: 'This document is still being processed. Check progress before analysis.',
+				failed: 'Processing failed for this document. Check the error before trusting output.'
+			},
+			emptyState: {
+				title: 'No documents yet',
+				body: 'After you upload papers or technical documents, Lens will identify document types, judge Protocol suitability, and prepare evidence extraction and comparison analysis.'
+			},
+			pending: {
+				title: 'Document profiles pending',
+				body: 'Documents exist in this collection, but profile data is not available yet. Refresh after processing finishes or rerun analysis from the workspace.'
+			}
 		},
 		evidence: {
 			title: 'Evidence',
@@ -1482,8 +1599,7 @@ const translations: Record<Language, Translations> = {
 			readiness: {
 				ready: {
 					title: '集合已准备好',
-					body:
-						'该集合包含 {count} 篇文档，解析与证据提取已完成。你可以进入比较视图查看跨文献结果，或检查证据与文档来源。'
+					body: '该集合包含 {count} 篇文档，解析与证据提取已完成。你可以进入比较视图查看跨文献结果，或检查证据与文档来源。'
 				},
 				processing: {
 					title: '集合正在处理中',
@@ -1543,8 +1659,7 @@ const translations: Record<Language, Translations> = {
 				},
 				trust: {
 					title: '可信度提醒',
-					body:
-						'该集合已经可用，但比较结果仍需要人工审核。请优先检查证据来源、缺失条件和可比性提示。',
+					body: '该集合已经可用，但比较结果仍需要人工审核。请优先检查证据来源、缺失条件和可比性提示。',
 					comparison: '比较',
 					evidence: '证据',
 					documents: '文档'
@@ -1552,8 +1667,7 @@ const translations: Record<Language, Translations> = {
 				paperMix: {
 					title: '文献构成',
 					body: '查看当前集合的论文类型构成，再决定是否使用下游比较结果。',
-					reviewHint:
-						'当前集合以综述为主。若要进行实验结果比较，建议加入实验论文或方法论文。'
+					reviewHint: '当前集合以综述为主。若要进行实验结果比较，建议加入实验论文或方法论文。'
 				},
 				next: {
 					title: '推荐下一步',
@@ -1848,18 +1962,22 @@ const translations: Record<Language, Translations> = {
 		},
 		profiles: {
 			title: '文档画像',
-			lead: '先用这个页面分清实验论文和综述，并找出不适合继续往下用的材料。',
+			description: '识别文档类型与适配性，判断哪些文献适合继续用于证据提取和比较。',
+			lead: '识别文档类型与适配性，判断哪些文献适合继续用于证据提取和比较。',
 			loading: '正在加载文档画像...',
+			error: '无法加载文档画像',
 			empty: '当前还没有文档画像结果。',
 			summaryTitle: '集合文档概览',
 			warningsTitle: '画像提醒',
 			emptyWarnings: '当前没有集合级画像提醒。',
 			filterDocType: '论文类型',
-			filterExtractable: '步骤抽取适配性',
+			filterExtractable: 'Protocol 适配性',
 			allOption: '全部',
 			totalLabel: '论文数',
-			docTypeExperimental: '实验',
+			docTypeExperimental: '实验论文',
 			docTypeReview: '综述',
+			docTypeMethod: '方法论文',
+			docTypeComputational: '计算论文',
 			docTypeMixed: '混合',
 			docTypeUncertain: '不确定',
 			extractableYes: '适合',
@@ -1872,7 +1990,120 @@ const translations: Record<Language, Translations> = {
 			tableConfidence: '置信度',
 			tableWarnings: '问题',
 			tableActions: '下一步',
-			signalsLabel: '原因'
+			signalsLabel: '原因',
+			meta: {
+				documentCount: '{count} 篇文档',
+				updatedAt: '最近更新：{time}'
+			},
+			filters: {
+				title: '文档画像筛选',
+				type: '论文类型',
+				suitability: 'Protocol 适配性',
+				all: '全部',
+				showing: '显示 {filtered} / {total} 篇文档'
+			},
+			conclusion: {
+				title: '画像结论',
+				reviewRisk:
+					'当前集合以综述为主，暂不适合直接进行实验结果比较。建议补充实验论文或方法论文后，再进入比较与图谱分析。',
+				ready: '当前集合包含可用于步骤抽取和证据比较的文档。建议先查看证据来源，再进入比较视图。',
+				fewDocuments: '当前集合文档较少，比较结果可能不稳定。建议补充更多相关论文以提高可比性。',
+				limitedReady:
+					'当前集合包含部分可用的步骤或证据信息，但进入比较前仍应检查原文证据和参数条件。',
+				limited:
+					'当前集合尚未显示出明确的 Protocol 适配性。建议先查看文档和证据，再决定是否进入下游比较。',
+				pending: '当前集合的文档画像尚未生成。请在处理完成后刷新，或回到工作区重新分析。'
+			},
+			stats: {
+				documentType: '文档类型分布',
+				protocolSuitability: 'Protocol 适配性',
+				countPercent: '{count} ({percent}%)'
+			},
+			warning: {
+				title: 'Protocol 适配性提醒',
+				noSuitableBody:
+					'当前集合没有检测到适合步骤抽取的文档。若要生成实验步骤、参数矩阵或验证计划，建议补充实验论文、方法论文或包含明确实验流程的文献。',
+				readyBody:
+					'当前集合包含适合步骤抽取的文档。请在使用生成结果前检查原文证据、参数条件和实验上下文。'
+			},
+			list: {
+				title: '文档列表',
+				count: '共 {count} 篇',
+				emptyFiltered: '当前筛选条件下没有文档。'
+			},
+			actions: {
+				uploadMore: '上传更多文档',
+				uploadDocument: '上传文档',
+				viewEvidence: '查看证据',
+				viewDocument: '查看文档',
+				openComparison: '进入比较',
+				refresh: '刷新',
+				viewProgress: '查看进度',
+				viewError: '查看错误',
+				retryProcessing: '重新处理',
+				manualMark: '人工标记',
+				viewSuitabilityGuide: '查看适配性说明',
+				reanalyze: '重新分析',
+				more: '更多操作'
+			},
+			docTypes: {
+				experimental: '实验论文',
+				review: '综述',
+				method: '方法论文',
+				computational: '计算论文',
+				mixed: '混合',
+				uncertain: '不确定'
+			},
+			suitability: {
+				yes: '适合',
+				partial: '部分适合',
+				no: '不适合',
+				uncertain: '不确定'
+			},
+			table: {
+				document: '文档',
+				type: '类型',
+				suitability: 'Protocol 适配性',
+				confidence: '置信度',
+				hint: '提示',
+				next: '下一步'
+			},
+			file: {
+				pdf: 'PDF',
+				pages: '{count} 页'
+			},
+			status: {
+				pending: '待处理',
+				processing: '处理中',
+				completed: '处理完成',
+				failed: '处理失败',
+				limited: '部分完成',
+				unknown: '状态未知'
+			},
+			reasons: {
+				label: '原因',
+				review: '综述型文献',
+				extractable: '检测到实验流程',
+				partial: '步骤信息不完整',
+				noProtocol: '缺少明确实验步骤',
+				insufficient: '信息不足'
+			},
+			hints: {
+				noProtocol: '未检测到明确的实验步骤、参数或方法细节。',
+				extractable: '检测到实验流程，可用于步骤抽取。',
+				partial: '检测到部分方法信息，需要人工检查上下文。',
+				insufficient: '信息不足，需要人工检查。',
+				processing: '文档仍在处理中，请先查看进度。',
+				failed: '文档处理失败，请先查看错误再继续分析。'
+			},
+			emptyState: {
+				title: '还没有文档',
+				body: '上传论文或技术文档后，Lens 会识别文档类型、判断 Protocol 适配性，并为证据提取和比较分析做准备。'
+			},
+			pending: {
+				title: '画像待生成',
+				body: '集合中已有文档，但文档画像数据暂不可用。请在处理完成后刷新，或回到工作区重新分析。'
+			}
 		},
 		evidence: {
 			title: '证据',

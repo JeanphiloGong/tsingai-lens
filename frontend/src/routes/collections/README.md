@@ -6,12 +6,15 @@ This node owns the collection workspace route family in the frontend.
 
 - `collections/[id]/+layout.svelte`
 - `collections/[id]/+page.svelte`
+- `collections/[id]/documents/+page.svelte`
 - `collections/[id]/evidence/+page.svelte`
 - `collections/[id]/documents/[document_id]/+page.svelte`
 
 ## Responsibilities
 
 - render the collection workspace
+- render collection-level document profile screening and Protocol suitability
+  signals
 - render collection-level evidence cards and source-anchor entry points
 - render document detail as a paper reader plus structured understanding workbench
 - coordinate file upload and task-start actions

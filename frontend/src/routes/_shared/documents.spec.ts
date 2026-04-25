@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DocumentProfile } from './documents';
 
 const { requestJson } = vi.hoisted(() => ({
 	requestJson: vi.fn()
@@ -8,7 +9,31 @@ vi.mock('./api', () => ({
 	requestJson
 }));
 
-const { fetchDocumentComparisonSemantics } = await import('./documents');
+const {
+	buildDocumentTypeStats,
+	buildProfileConclusion,
+	buildProtocolSuitabilityStats,
+	fetchDocumentComparisonSemantics,
+	formatConfidence,
+	getDocumentNextActions,
+	getDocumentTypeBadge,
+	getSuitabilityBadge
+} = await import('./documents');
+
+function profile(overrides: Partial<DocumentProfile>): DocumentProfile {
+	return {
+		document_id: 'doc_1',
+		collection_id: 'col_123',
+		title: null,
+		source_filename: null,
+		doc_type: 'uncertain',
+		protocol_extractable: 'uncertain',
+		protocol_extractability_signals: [],
+		parsing_warnings: [],
+		confidence: null,
+		...overrides
+	};
+}
 
 describe('documents shared helpers', () => {
 	beforeEach(() => {
@@ -110,5 +135,99 @@ describe('documents shared helpers', () => {
 		expect(response.variant_dossiers[0].series[0].chains[0].assessment.comparability_status).toBe(
 			'limited'
 		);
+	});
+
+	it('builds document profile stats with percentages and dominant rows', () => {
+		const profiles = [
+			profile({ document_id: 'review', doc_type: 'review', protocol_extractable: 'no' }),
+			profile({ document_id: 'exp', doc_type: 'experimental', protocol_extractable: 'yes' }),
+			profile({ document_id: 'method', doc_type: 'method', protocol_extractable: 'partial' }),
+			profile({
+				document_id: 'computational',
+				doc_type: 'computational',
+				protocol_extractable: 'uncertain'
+			})
+		];
+
+		const documentTypes = buildDocumentTypeStats(profiles);
+		const suitability = buildProtocolSuitabilityStats(profiles);
+
+		expect(documentTypes.find((item) => item.key === 'review')).toMatchObject({
+			count: 1,
+			percent: 25,
+			dominant: true
+		});
+		expect(documentTypes.find((item) => item.key === 'mixed')).toMatchObject({
+			count: 0,
+			percent: 0,
+			dominant: false
+		});
+		expect(suitability.find((item) => item.key === 'no')).toMatchObject({
+			count: 1,
+			percent: 25,
+			tone: 'warning'
+		});
+	});
+
+	it('chooses profile conclusions from collection-level usability signals', () => {
+		const reviewProfiles = [profile({ doc_type: 'review', protocol_extractable: 'no' })];
+		const reviewStats = {
+			total: reviewProfiles.length,
+			documentTypeStats: buildDocumentTypeStats(reviewProfiles),
+			protocolSuitabilityStats: buildProtocolSuitabilityStats(reviewProfiles)
+		};
+
+		expect(buildProfileConclusion(reviewStats)).toMatchObject({
+			tone: 'warning',
+			messageKey: 'profiles.conclusion.reviewRisk',
+			actionKeys: ['upload_more', 'view_evidence']
+		});
+
+		const readyProfiles = [profile({ doc_type: 'experimental', protocol_extractable: 'yes' })];
+		const readyStats = {
+			total: readyProfiles.length,
+			documentTypeStats: buildDocumentTypeStats(readyProfiles),
+			protocolSuitabilityStats: buildProtocolSuitabilityStats(readyProfiles)
+		};
+
+		expect(buildProfileConclusion(readyStats)).toMatchObject({
+			tone: 'ready',
+			messageKey: 'profiles.conclusion.ready',
+			actionKeys: ['view_evidence', 'open_comparison']
+		});
+	});
+
+	it('returns document-specific next actions instead of always opening comparisons', () => {
+		expect(
+			getDocumentNextActions(profile({ doc_type: 'review', protocol_extractable: 'no' }))
+		).toEqual(['view_document', 'view_evidence']);
+		expect(
+			getDocumentNextActions(profile({ doc_type: 'experimental', protocol_extractable: 'yes' }))
+		).toEqual(['view_evidence', 'open_comparison']);
+		expect(
+			getDocumentNextActions(profile({ doc_type: 'uncertain', protocol_extractable: 'uncertain' }))
+		).toEqual(['view_document', 'manual_mark']);
+		expect(getDocumentNextActions(profile({ processing_status: 'processing' }))).toEqual([
+			'view_progress',
+			'refresh'
+		]);
+		expect(getDocumentNextActions(profile({ processing_status: 'failed' }))).toEqual([
+			'view_error',
+			'retry_processing'
+		]);
+	});
+
+	it('formats confidence and badge metadata for the profile page', () => {
+		expect(formatConfidence(0.904)).toBe('90%');
+		expect(formatConfidence(86)).toBe('86%');
+		expect(formatConfidence(null)).toBe('--');
+		expect(getDocumentTypeBadge('method')).toMatchObject({
+			labelKey: 'profiles.docTypes.method',
+			tone: 'method'
+		});
+		expect(getSuitabilityBadge('no')).toMatchObject({
+			labelKey: 'profiles.suitability.no',
+			tone: 'warning'
+		});
 	});
 });

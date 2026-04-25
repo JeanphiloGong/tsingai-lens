@@ -2,8 +2,20 @@ import { buildApiUrl, requestJson } from './api';
 import { USE_API_FIXTURES } from './base';
 import type { ResultListItem } from './results';
 
-export type DocumentType = 'experimental' | 'review' | 'mixed' | 'uncertain';
+export type DocumentType =
+	| 'experimental'
+	| 'review'
+	| 'method'
+	| 'computational'
+	| 'mixed'
+	| 'uncertain';
 export type ProtocolExtractable = 'yes' | 'partial' | 'no' | 'uncertain';
+export type DocumentProcessingStatus =
+	| 'pending'
+	| 'processing'
+	| 'completed'
+	| 'failed'
+	| 'unknown';
 
 export type DocumentProfile = {
 	document_id: string;
@@ -15,6 +27,9 @@ export type DocumentProfile = {
 	protocol_extractability_signals: string[];
 	parsing_warnings: string[];
 	confidence: number | null;
+	page_count?: number | null;
+	updated_at?: string | null;
+	processing_status?: DocumentProcessingStatus;
 };
 
 export type DocumentProfilesResponse = {
@@ -354,6 +369,8 @@ export type DocumentWorkbenchModel = {
 const DEFAULT_DOC_TYPE_COUNTS: Record<DocumentType, number> = {
 	experimental: 0,
 	review: 0,
+	method: 0,
+	computational: 0,
 	mixed: 0,
 	uncertain: 0
 };
@@ -364,6 +381,268 @@ const DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS: Record<ProtocolExtractable, number> =
 	no: 0,
 	uncertain: 0
 };
+
+const DOCUMENT_TYPE_KEYS: DocumentType[] = [
+	'review',
+	'experimental',
+	'method',
+	'computational',
+	'mixed',
+	'uncertain'
+];
+
+const PROTOCOL_SUITABILITY_KEYS: ProtocolExtractable[] = ['yes', 'partial', 'no', 'uncertain'];
+
+const DOCUMENT_TYPE_VALUES = new Set<DocumentType>(DOCUMENT_TYPE_KEYS);
+const PROTOCOL_SUITABILITY_VALUES = new Set<ProtocolExtractable>(PROTOCOL_SUITABILITY_KEYS);
+
+export type DocumentTypeStat = {
+	key: DocumentType;
+	labelKey: string;
+	count: number;
+	percent: number;
+	dominant: boolean;
+	tone: DocumentType;
+};
+
+export type ProtocolSuitabilityStat = {
+	key: ProtocolExtractable;
+	labelKey: string;
+	count: number;
+	percent: number;
+	dominant: boolean;
+	tone: 'ready' | 'partial' | 'warning' | 'neutral';
+};
+
+export type ProfileConclusionStats = {
+	total: number;
+	documentTypeStats: DocumentTypeStat[];
+	protocolSuitabilityStats: ProtocolSuitabilityStat[];
+};
+
+export type ProfileConclusionTone = 'warning' | 'ready' | 'limited' | 'neutral';
+
+export type DocumentProfileAction =
+	| 'upload_more'
+	| 'view_evidence'
+	| 'view_document'
+	| 'open_comparison'
+	| 'view_progress'
+	| 'refresh'
+	| 'view_error'
+	| 'retry_processing'
+	| 'manual_mark';
+
+export type ProfileConclusion = {
+	tone: ProfileConclusionTone;
+	messageKey: string;
+	actionKeys: DocumentProfileAction[];
+};
+
+export type ProfileBadge = {
+	key: string;
+	labelKey: string;
+	tone: string;
+};
+
+function normalizeDocumentTypeValue(value: unknown): DocumentType {
+	const type = String(value ?? '')
+		.trim()
+		.toLowerCase();
+	if (DOCUMENT_TYPE_VALUES.has(type as DocumentType)) return type as DocumentType;
+	if (['methodology', 'methods', 'method_paper', 'methods_paper'].includes(type)) {
+		return 'method';
+	}
+	if (['computation', 'computational_modeling', 'simulation', 'modeling'].includes(type)) {
+		return 'computational';
+	}
+	return 'uncertain';
+}
+
+function normalizeProtocolExtractableValue(value: unknown): ProtocolExtractable {
+	const suitability = String(value ?? '')
+		.trim()
+		.toLowerCase();
+	if (PROTOCOL_SUITABILITY_VALUES.has(suitability as ProtocolExtractable)) {
+		return suitability as ProtocolExtractable;
+	}
+	if (['true', 'good', 'suitable', 'extractable'].includes(suitability)) return 'yes';
+	if (['limited', 'partially', 'partially_suitable'].includes(suitability)) return 'partial';
+	if (['false', 'not_suitable', 'not_extractable'].includes(suitability)) return 'no';
+	return 'uncertain';
+}
+
+function normalizeProcessingStatusValue(value: unknown): DocumentProcessingStatus {
+	const status = String(value ?? '')
+		.trim()
+		.toLowerCase();
+	if (['pending', 'queued', 'uploaded', 'ready_to_process'].includes(status)) return 'pending';
+	if (['processing', 'running', 'started', 'in_progress'].includes(status)) return 'processing';
+	if (
+		['completed', 'complete', 'ready', 'success', 'parsed', 'document_profiled'].includes(status)
+	) {
+		return 'completed';
+	}
+	if (['failed', 'failure', 'error'].includes(status)) return 'failed';
+	return 'unknown';
+}
+
+function percentage(count: number, total: number) {
+	if (total < 1) return 0;
+	return Math.round((count / total) * 100);
+}
+
+function findStatCount<K extends string>(stats: Array<{ key: K; count: number }>, key: K) {
+	return stats.find((item) => item.key === key)?.count ?? 0;
+}
+
+function protocolSuitabilityTone(key: ProtocolExtractable): ProtocolSuitabilityStat['tone'] {
+	if (key === 'yes') return 'ready';
+	if (key === 'partial') return 'partial';
+	if (key === 'no') return 'warning';
+	return 'neutral';
+}
+
+export function buildDocumentTypeStats(profiles: DocumentProfile[]): DocumentTypeStat[] {
+	const counts = { ...DEFAULT_DOC_TYPE_COUNTS };
+	for (const profile of profiles) {
+		const key = normalizeDocumentTypeValue(profile.doc_type);
+		counts[key] += 1;
+	}
+
+	const total = profiles.length;
+	const maxCount = Math.max(0, ...DOCUMENT_TYPE_KEYS.map((key) => counts[key]));
+	return DOCUMENT_TYPE_KEYS.map((key) => ({
+		key,
+		labelKey: `profiles.docTypes.${key}`,
+		count: counts[key],
+		percent: percentage(counts[key], total),
+		dominant: counts[key] > 0 && counts[key] === maxCount,
+		tone: key
+	}));
+}
+
+export function buildProtocolSuitabilityStats(
+	profiles: DocumentProfile[]
+): ProtocolSuitabilityStat[] {
+	const counts = { ...DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS };
+	for (const profile of profiles) {
+		const key = normalizeProtocolExtractableValue(profile.protocol_extractable);
+		counts[key] += 1;
+	}
+
+	const total = profiles.length;
+	const maxCount = Math.max(0, ...PROTOCOL_SUITABILITY_KEYS.map((key) => counts[key]));
+	return PROTOCOL_SUITABILITY_KEYS.map((key) => ({
+		key,
+		labelKey: `profiles.suitability.${key}`,
+		count: counts[key],
+		percent: percentage(counts[key], total),
+		dominant: counts[key] > 0 && counts[key] === maxCount,
+		tone: protocolSuitabilityTone(key)
+	}));
+}
+
+export function buildProfileConclusion(stats: ProfileConclusionStats): ProfileConclusion {
+	const reviewCount = findStatCount(stats.documentTypeStats, 'review');
+	const experimentalCount = findStatCount(stats.documentTypeStats, 'experimental');
+	const methodCount = findStatCount(stats.documentTypeStats, 'method');
+	const suitableCount = findStatCount(stats.protocolSuitabilityStats, 'yes');
+	const partialCount = findStatCount(stats.protocolSuitabilityStats, 'partial');
+	const notSuitableCount = findStatCount(stats.protocolSuitabilityStats, 'no');
+	const reviewDominant = stats.total > 0 && reviewCount >= Math.ceil(stats.total / 2);
+	const notSuitableDominant = stats.total > 0 && notSuitableCount >= Math.ceil(stats.total / 2);
+
+	if (stats.total < 1) {
+		return {
+			tone: 'limited',
+			messageKey: 'profiles.conclusion.pending',
+			actionKeys: ['upload_more', 'refresh']
+		};
+	}
+
+	if (reviewDominant && notSuitableDominant) {
+		return {
+			tone: 'warning',
+			messageKey: 'profiles.conclusion.reviewRisk',
+			actionKeys: ['upload_more', 'view_evidence']
+		};
+	}
+
+	if (suitableCount > 0 && experimentalCount + methodCount > 0) {
+		return {
+			tone: 'ready',
+			messageKey: 'profiles.conclusion.ready',
+			actionKeys: ['view_evidence', 'open_comparison']
+		};
+	}
+
+	if (stats.total < 2) {
+		return {
+			tone: 'warning',
+			messageKey: 'profiles.conclusion.fewDocuments',
+			actionKeys: ['upload_more']
+		};
+	}
+
+	if (suitableCount + partialCount > 0) {
+		return {
+			tone: 'ready',
+			messageKey: 'profiles.conclusion.limitedReady',
+			actionKeys: ['view_evidence', 'open_comparison']
+		};
+	}
+
+	return {
+		tone: 'limited',
+		messageKey: 'profiles.conclusion.limited',
+		actionKeys: ['upload_more', 'view_evidence']
+	};
+}
+
+export function getDocumentNextActions(profile: DocumentProfile): DocumentProfileAction[] {
+	const status = normalizeProcessingStatusValue(profile.processing_status);
+	if (status === 'pending' || status === 'processing') return ['view_progress', 'refresh'];
+	if (status === 'failed') return ['view_error', 'retry_processing'];
+
+	const docType = normalizeDocumentTypeValue(profile.doc_type);
+	const suitability = normalizeProtocolExtractableValue(profile.protocol_extractable);
+
+	if (docType === 'review' && suitability === 'no') return ['view_document', 'view_evidence'];
+	if ((docType === 'experimental' || docType === 'method') && suitability === 'yes') {
+		return ['view_evidence', 'open_comparison'];
+	}
+	if (docType === 'uncertain' || suitability === 'uncertain') {
+		return ['view_document', 'manual_mark'];
+	}
+	return ['view_document', 'view_evidence'];
+}
+
+export function formatConfidence(confidence?: number | null) {
+	if (typeof confidence !== 'number' || !Number.isFinite(confidence)) return '--';
+	const percent = confidence <= 1 ? confidence * 100 : confidence;
+	return `${Math.max(0, Math.min(100, Math.round(percent)))}%`;
+}
+
+export function getDocumentTypeBadge(type: DocumentProfile['doc_type']): ProfileBadge {
+	const key = normalizeDocumentTypeValue(type);
+	return {
+		key,
+		labelKey: `profiles.docTypes.${key}`,
+		tone: key
+	};
+}
+
+export function getSuitabilityBadge(
+	suitability: DocumentProfile['protocol_extractable']
+): ProfileBadge {
+	const key = normalizeProtocolExtractableValue(suitability);
+	return {
+		key,
+		labelKey: `profiles.suitability.${key}`,
+		tone: protocolSuitabilityTone(key)
+	};
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === 'object' && !Array.isArray(value)
@@ -499,10 +778,6 @@ function normalizeProfile(value: unknown, collectionId: string): DocumentProfile
 	const document_id = String(record.document_id ?? record.id ?? '').trim();
 	if (!document_id) return null;
 
-	const doc_type = String(record.doc_type ?? 'uncertain').trim() as DocumentType;
-	const protocol_extractable = String(
-		record.protocol_extractable ?? 'uncertain'
-	).trim() as ProtocolExtractable;
 	const confidence = toNumber(record.confidence);
 
 	return {
@@ -513,15 +788,16 @@ function normalizeProfile(value: unknown, collectionId: string): DocumentProfile
 			toOptionalText(record.source_filename) ??
 			toOptionalText(record.original_filename) ??
 			toOptionalText(record.source_file_name),
-		doc_type: ['experimental', 'review', 'mixed', 'uncertain'].includes(doc_type)
-			? doc_type
-			: 'uncertain',
-		protocol_extractable: ['yes', 'partial', 'no', 'uncertain'].includes(protocol_extractable)
-			? protocol_extractable
-			: 'uncertain',
+		doc_type: normalizeDocumentTypeValue(record.doc_type),
+		protocol_extractable: normalizeProtocolExtractableValue(record.protocol_extractable),
 		protocol_extractability_signals: toStringList(record.protocol_extractability_signals),
 		parsing_warnings: toStringList(record.parsing_warnings),
-		confidence: Number.isFinite(confidence) ? confidence : null
+		confidence: Number.isFinite(confidence) ? confidence : null,
+		page_count: toPositiveInteger(record.page_count ?? record.pages),
+		updated_at: toOptionalText(record.updated_at ?? record.modified_at ?? record.created_at),
+		processing_status: normalizeProcessingStatusValue(
+			record.processing_status ?? record.status ?? record.profile_status
+		)
 	};
 }
 
@@ -827,7 +1103,9 @@ function buildWorkbenchSourceTarget(
 		page: block.page,
 		bbox: block.bbox,
 		charRange: block.charRange,
-		sectionId: block.heading_path ? `section-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : null,
+		sectionId: block.heading_path
+			? `section-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+			: null,
 		headingPath: block.heading_path,
 		quote: block.text || null,
 		precision,
@@ -1444,7 +1722,8 @@ export function buildDocumentWorkbenchModel({
 			toOptionalText(content?.title) ||
 			toOptionalText(content?.source_filename) ||
 			'Graph Prompting for Low-Resource Knowledge Graph Completion',
-		source_filename: toOptionalText(content?.source_filename) || (content ? null : 'fixture-paper.txt'),
+		source_filename:
+			toOptionalText(content?.source_filename) || (content ? null : 'fixture-paper.txt'),
 		sourceFileUrl: buildDocumentSourceFileUrl(collectionId, content?.document_id || documentId),
 		metadata: [
 			'Wang et al.',
@@ -1478,7 +1757,10 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
 			protocol_extractable: 'partial',
 			protocol_extractability_signals: ['methods density', 'condition completeness'],
 			parsing_warnings: [],
-			confidence: 0.88
+			confidence: 0.88,
+			page_count: 12,
+			updated_at: '2026-04-25T12:41:00Z',
+			processing_status: 'completed'
 		},
 		{
 			document_id: 'doc_b',
@@ -1489,7 +1771,10 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
 			protocol_extractable: 'no',
 			protocol_extractability_signals: ['review contamination'],
 			parsing_warnings: ['Weak procedural continuity'],
-			confidence: 0.93
+			confidence: 0.93,
+			page_count: 18,
+			updated_at: '2026-04-25T12:41:00Z',
+			processing_status: 'completed'
 		},
 		{
 			document_id: 'doc_c',
@@ -1500,7 +1785,10 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
 			protocol_extractable: 'uncertain',
 			protocol_extractability_signals: ['critical parameter missingness'],
 			parsing_warnings: ['Baseline definition varies across sections'],
-			confidence: 0.64
+			confidence: 0.64,
+			page_count: null,
+			updated_at: '2026-04-25T12:41:00Z',
+			processing_status: 'completed'
 		}
 	];
 
@@ -1513,6 +1801,8 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
 			doc_type_counts: {
 				experimental: 1,
 				review: 1,
+				method: 0,
+				computational: 0,
 				mixed: 1,
 				uncertain: 0
 			},

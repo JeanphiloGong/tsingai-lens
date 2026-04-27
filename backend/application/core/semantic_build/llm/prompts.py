@@ -152,64 +152,77 @@ JSON compliance rules for this extraction:
 - Emit at most 2 `method_facts`, 2 `sample_variants`, 2 `test_conditions`, 2 `baseline_references`, and 4 `measurement_results` for one row.
 - If evidence is weak or absent, return the valid empty-shape object with empty lists and null scalar leaves.
 
-Valid nested object example:
+Nested object placement examples. These are fragments only; never return them
+as the top-level object.
+
+For `method_facts[*].method_payload`:
 ```json
 {
-  "method_payload": {
-    "temperatures_c": [],
-    "durations": [],
-    "atmosphere": null,
-    "methods": [],
-    "details": null
-  },
-  "process_context": {
-    "temperatures_c": [],
-    "durations": [],
-    "atmosphere": null,
-    "laser_power_w": null,
-    "scan_speed_mm_s": null,
-    "layer_thickness_um": null,
-    "hatch_spacing_um": null,
-    "spot_size_um": null,
-    "energy_density_j_mm3": null,
-    "energy_density_origin": null,
-    "scan_strategy": null,
-    "build_orientation": null,
-    "preheat_temperature_c": null,
-    "shielding_gas": null,
-    "oxygen_level_ppm": null,
-    "powder_size_distribution_um": null,
-    "post_treatment_summary": null
-  },
-  "condition_payload": {
-    "method": null,
-    "methods": [],
-    "temperatures_c": [],
-    "durations": [],
-    "atmosphere": null,
-    "test_method": null,
-    "test_temperature_c": null,
-    "strain_rate_s-1": null,
-    "loading_direction": null,
-    "sample_orientation": null,
-    "environment": null,
-    "frequency_hz": null,
-    "specimen_geometry": null,
-    "surface_state": null
-  },
-  "value_payload": {
-    "value": null,
-    "min": null,
-    "max": null,
-    "retention_percent": null,
-    "direction": null,
-    "statement": null,
-    "value_origin": null,
-    "source_value_text": null,
-    "source_unit_text": null,
-    "derivation_formula": null,
-    "derivation_inputs": null
-  }
+  "temperatures_c": [],
+  "durations": [],
+  "atmosphere": null,
+  "methods": [],
+  "details": null
+}
+```
+
+For `sample_variants[*].process_context`:
+```json
+{
+  "temperatures_c": [],
+  "durations": [],
+  "atmosphere": null,
+  "laser_power_w": null,
+  "scan_speed_mm_s": null,
+  "layer_thickness_um": null,
+  "hatch_spacing_um": null,
+  "spot_size_um": null,
+  "energy_density_j_mm3": null,
+  "energy_density_origin": null,
+  "scan_strategy": null,
+  "build_orientation": null,
+  "preheat_temperature_c": null,
+  "shielding_gas": null,
+  "oxygen_level_ppm": null,
+  "powder_size_distribution_um": null,
+  "post_treatment_summary": null
+}
+```
+
+For `test_conditions[*].condition_payload`:
+```json
+{
+  "method": null,
+  "methods": [],
+  "temperatures_c": [],
+  "durations": [],
+  "atmosphere": null,
+  "test_method": null,
+  "test_temperature_c": null,
+  "strain_rate_s-1": null,
+  "loading_direction": null,
+  "sample_orientation": null,
+  "environment": null,
+  "frequency_hz": null,
+  "specimen_geometry": null,
+  "surface_state": null
+}
+```
+
+For `measurement_results[*].value_payload`:
+```json
+{
+  "value": null,
+  "min": null,
+  "max": null,
+  "retention_percent": null,
+  "direction": null,
+  "statement": null,
+  "value_origin": null,
+  "source_value_text": null,
+  "source_unit_text": null,
+  "derivation_formula": null,
+  "derivation_inputs": null
 }
 ```
 

@@ -296,6 +296,10 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"unit": "MPa"' in table_row_prompt
     assert "Use `supporting_text_windows` only when they are required to interpret the row." in table_row_prompt
     assert "Emit at most 2 `method_facts`" in table_row_prompt
+    assert "Nested object placement examples." in table_row_prompt
+    assert "For `method_facts[*].method_payload`" in table_row_prompt
+    assert '"method_payload": {\n    "temperatures_c": []' not in table_row_prompt
+    assert '"process_context": {\n    "temperatures_c": []' not in table_row_prompt
     assert '"laser_power_w": null' in table_row_prompt
     assert '"strain_rate_s-1": null' in table_row_prompt
     assert '"value_origin": "reported"' in table_row_prompt

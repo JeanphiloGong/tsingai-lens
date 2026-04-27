@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 ClaimScope = Literal[
@@ -467,6 +467,25 @@ class StructuredExtractionBundle(_StrictModel):
     test_conditions: list[ExtractedTestConditionPayload] = Field(default_factory=list)
     baseline_references: list[BaselineReferencePayload] = Field(default_factory=list)
     measurement_results: list[MeasurementResultPayload] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_misplaced_nested_payloads(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        misplaced_nested_keys = {
+            "method_payload",
+            "process_context",
+            "condition_payload",
+            "value_payload",
+        }
+        if not misplaced_nested_keys.intersection(value):
+            return value
+        return {
+            key: item
+            for key, item in value.items()
+            if key not in misplaced_nested_keys
+        }
 
     @field_validator(
         "method_facts",

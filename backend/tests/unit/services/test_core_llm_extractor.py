@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.schemas import (
     StructuredExtractionBundle,
@@ -259,6 +262,73 @@ def test_core_llm_extractor_coerces_null_nested_table_row_fields():
     assert bundle.measurement_results[0].value_payload.value is None
     assert bundle.measurement_results[0].anchors == []
     assert bundle.measurement_results[0].claim_scope == "current_work"
+
+
+def test_core_llm_extractor_drops_misplaced_table_row_nested_payloads():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "method_payload": {
+            "temperatures_c": [],
+            "durations": [],
+            "atmosphere": null,
+            "methods": [],
+            "details": null
+          },
+          "process_context": {
+            "temperatures_c": [],
+            "durations": [],
+            "atmosphere": null,
+            "post_treatment_summary": null
+          },
+          "method_facts": [],
+          "sample_variants": [],
+          "test_conditions": [],
+          "baseline_references": [],
+          "measurement_results": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    bundle = extractor.extract_table_row_bundle(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "table_row": {"row_summary": "Sample A | no grounded result", "cells": []},
+            "supporting_text_windows": [],
+        }
+    )
+
+    assert bundle == StructuredExtractionBundle()
+
+
+def test_core_llm_extractor_still_rejects_unknown_table_row_extra_keys():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "keywords": ["yield strength"],
+          "method_facts": [],
+          "sample_variants": [],
+          "test_conditions": [],
+          "baseline_references": [],
+          "measurement_results": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    with pytest.raises(ValidationError) as exc_info:
+        extractor.extract_table_row_bundle(
+            {
+                "document_title": "LPBF Paper",
+                "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+                "table_row": {"row_summary": "Sample A | 560 MPa", "cells": []},
+                "supporting_text_windows": [],
+            }
+        )
+
+    assert "keywords" in str(exc_info.value)
 
 
 def test_core_llm_extractor_falls_back_to_json_text_for_invalid_mode(monkeypatch, caplog):

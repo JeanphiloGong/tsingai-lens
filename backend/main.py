@@ -1,6 +1,7 @@
 import os
 from time import perf_counter
 
+from config import DATA_DIR
 from controllers.core import comparable_results, comparisons, documents, evidence, results, workspace
 from controllers.derived import graph, protocol, reports
 from controllers.goal import intake as goals
@@ -9,7 +10,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from config import DATA_DIR
 from utils.logger import (
     REQUEST_ID_HEADER,
     bind_request_id,

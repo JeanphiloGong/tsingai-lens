@@ -79,6 +79,13 @@ def _normalize_object_container(value: object) -> object:
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
+    @field_validator("confidence", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_default_confidence(cls, value: object) -> object:
+        if value is not None:
+            return value
+        return cls.model_fields["confidence"].get_default(call_default_factory=True)
+
 
 class MaterialSystemPayload(_StrictModel):
     family: str | None = None

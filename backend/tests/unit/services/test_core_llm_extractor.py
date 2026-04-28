@@ -207,12 +207,24 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_rows
     assert parse_call["max_completion_tokens"] == 4096
 
 
-def test_core_llm_extractor_coerces_null_nested_table_row_fields():
+def test_core_llm_extractor_coerces_null_nested_table_row_fields_and_confidence():
     client = _FakeOpenAIClient(
         """
         {
           "method_facts": [],
-          "sample_variants": [],
+          "sample_variants": [
+            {
+              "variant_label": "Sample A",
+              "host_material_system": null,
+              "composition": null,
+              "variable_axis_type": null,
+              "variable_value": null,
+              "process_context": null,
+              "confidence": null,
+              "epistemic_status": "normalized_from_evidence",
+              "source_kind": "table_row"
+            }
+          ],
           "test_conditions": [
             {
               "property_type": "hardness",
@@ -239,7 +251,7 @@ def test_core_llm_extractor_coerces_null_nested_table_row_fields():
               "baseline_label": null,
               "anchors": null,
               "claim_scope": "current work",
-              "confidence": 0.81
+              "confidence": null
             }
           ]
         }
@@ -256,12 +268,15 @@ def test_core_llm_extractor_coerces_null_nested_table_row_fields():
         }
     )
 
+    assert bundle.sample_variants[0].process_context.temperatures_c == []
+    assert bundle.sample_variants[0].confidence == 0.85
     assert bundle.test_conditions[0].condition_payload.methods == []
     assert bundle.test_conditions[0].condition_payload.temperatures_c == []
     assert bundle.test_conditions[0].condition_payload.durations == []
     assert bundle.measurement_results[0].value_payload.value is None
     assert bundle.measurement_results[0].anchors == []
     assert bundle.measurement_results[0].claim_scope == "current_work"
+    assert bundle.measurement_results[0].confidence == 0.85
 
 
 def test_core_llm_extractor_drops_misplaced_table_row_nested_payloads():

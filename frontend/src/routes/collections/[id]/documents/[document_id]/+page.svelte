@@ -27,6 +27,10 @@
 	let graphCollapsed = false;
 	let sourceJumpToken = 0;
 
+	type SelectItemOptions = {
+		preserveGraphNodeId?: string;
+	};
+
 	$: collectionId = $page.params.id ?? '';
 	$: routeDocumentId = $page.params.document_id ?? '';
 	$: requestedResultId = $page.url.searchParams.get('result_id')?.trim() ?? '';
@@ -148,7 +152,7 @@
 		return currentModel.source_anchors_by_span_id[sourceSpanId] ?? null;
 	}
 
-	function selectItem(itemId: string, tab?: WorkbenchTab) {
+	function selectItem(itemId: string, tab?: WorkbenchTab, options: SelectItemOptions = {}) {
 		if (!model || !itemId) return;
 		const item = model.selectable_items.find((candidate) => candidate.id === itemId);
 		if (!item) return;
@@ -157,16 +161,21 @@
 		selectedSourceSpanId = item.source_span_id;
 		sourceJumpToken += 1;
 		const graph = graphForSelection(model, item.id);
-		selectedGraphNodeId = graph?.nodes.find((node) => node.position === 'center')?.id ?? '';
+		const preservedNodeId = options.preserveGraphNodeId;
+		selectedGraphNodeId =
+			preservedNodeId && graph?.nodes.some((node) => node.id === preservedNodeId)
+				? preservedNodeId
+				: (graph?.nodes.find((node) => node.position === 'center')?.id ?? '');
 	}
 
 	function jumpToSource(sourceSpanId: string) {
+		const preservedNodeId = selectedGraphNodeId;
 		const linkedItem =
 			model?.selectable_items.find(
 				(item) => item.source_span_id === sourceSpanId && item.tab === activeTab
 			) ?? model?.selectable_items.find((item) => item.source_span_id === sourceSpanId);
 		if (linkedItem) {
-			selectItem(linkedItem.id, linkedItem.tab);
+			selectItem(linkedItem.id, linkedItem.tab, { preserveGraphNodeId: preservedNodeId });
 			return;
 		}
 		selectedSourceSpanId = sourceSpanId;
@@ -182,7 +191,7 @@
 	}
 
 	function handleGraphItemSelect(itemId: string) {
-		selectItem(itemId);
+		selectItem(itemId, undefined, { preserveGraphNodeId: selectedGraphNodeId });
 	}
 
 	function openTab(tab: WorkbenchTab) {

@@ -166,7 +166,7 @@ const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
 	property: {
 		color: '#06B6D4',
 		background: '#ECFEFF',
-		shape: 'ellipse',
+		shape: 'round-rectangle',
 		icon: 'property'
 	},
 	test_condition: {
@@ -293,7 +293,10 @@ export function buildNodeTypeCounts(graph: GraphResponse | null | undefined) {
 	return counts;
 }
 
-export function filterGraphElements(graph: GraphResponse | null | undefined, filters: GraphFilters) {
+export function filterGraphElements(
+	graph: GraphResponse | null | undefined,
+	filters: GraphFilters
+) {
 	const graphNodes = graph?.nodes ?? [];
 	const graphEdges = graph?.edges ?? [];
 	const query = normalizeSearch(filters.search);
@@ -340,8 +343,62 @@ export function getEdgeTypeStyle(type?: string | null): GraphEdgeStyle {
 
 export function getNodeLabel(node: GraphNode | GraphSelectedNode, limit = 34) {
 	const label = formatGraphLabel(node.label || node.id);
+	return truncateGraphLabel(label, limit);
+}
+
+function truncateGraphLabel(label: string, limit: number) {
 	if (label.length <= limit) return label;
 	return `${label.slice(0, Math.max(1, limit - 1)).trimEnd()}...`;
+}
+
+function isAggregateNodeType(type: GraphNodeType) {
+	return (
+		type === 'material' || type === 'property' || type === 'test_condition' || type === 'baseline'
+	);
+}
+
+function graphNodeDimensions(type: GraphNodeType, label: string, degree: number) {
+	const aggregate = isAggregateNodeType(type);
+	const degreeBoost = Math.min(Math.max(degree, 0), 6);
+	if (aggregate) {
+		const textWidth = Math.min(176, Math.max(118, label.length * 5.8));
+		const textRows = Math.max(1, Math.min(3, Math.ceil(label.length / 22)));
+		return {
+			width: textWidth + degreeBoost * 4,
+			height: 52 + textRows * 16 + degreeBoost * 2,
+			textMaxWidth: Math.max(96, textWidth - 18),
+			fontSize: 11,
+			layoutWeight: 26000
+		};
+	}
+
+	if (type === 'comparison') {
+		return {
+			width: 104 + degreeBoost * 4,
+			height: 72 + degreeBoost * 2,
+			textMaxWidth: 86,
+			fontSize: 10,
+			layoutWeight: 20000
+		};
+	}
+
+	if (type === 'document' || type === 'evidence') {
+		return {
+			width: 108 + degreeBoost * 3,
+			height: 58 + degreeBoost * 2,
+			textMaxWidth: 88,
+			fontSize: 10,
+			layoutWeight: 13500
+		};
+	}
+
+	return {
+		width: 104 + degreeBoost * 3,
+		height: 58 + degreeBoost * 2,
+		textMaxWidth: 84,
+		fontSize: 11,
+		layoutWeight: 13000
+	};
 }
 
 export function getNodeDescription(node: GraphNode | GraphSelectedNode) {
@@ -349,12 +406,15 @@ export function getNodeDescription(node: GraphNode | GraphSelectedNode) {
 	const label = getNodeLabel(node, 72);
 	if (type === 'document') return `${label} is a source document in this collection.`;
 	if (type === 'evidence') return `${label} is an extracted evidence claim linked to source text.`;
-	if (type === 'comparison') return `${label} is a comparison row connecting evidence and review context.`;
-	if (type === 'material') return `${label} is a material or material system shared by collection results.`;
+	if (type === 'comparison')
+		return `${label} is a comparison row connecting evidence and review context.`;
+	if (type === 'material')
+		return `${label} is a material or material system shared by collection results.`;
 	if (type === 'property') return `${label} is a measured or reported property.`;
 	if (type === 'test_condition') return `${label} is an experimental or evaluation condition.`;
 	if (type === 'baseline') return `${label} is a baseline or control reference.`;
-	if (type === 'process') return `${label} is a method or process context extracted from the collection.`;
+	if (type === 'process')
+		return `${label} is a method or process context extracted from the collection.`;
 	if (type === 'variant') return `${label} is a variant or experimental branch.`;
 	return `${label} is a graph object in this collection.`;
 }
@@ -424,31 +484,35 @@ export function buildCytoscapeElements(
 	for (const [index, node] of graph.nodes.entries()) {
 		const style = getNodeTypeStyle(node.type);
 		const type = normalizeGraphNodeType(node.type);
-		const label = getNodeLabel(node, type === 'comparison' ? 26 : 30);
+		const fullLabel = formatGraphLabel(node.label || node.id);
+		const label = truncateGraphLabel(
+			fullLabel,
+			isAggregateNodeType(type) ? 48 : type === 'comparison' ? 30 : 28
+		);
 		const degree = node.degree ?? 0;
-		const width = type === 'comparison' ? 102 : type === 'property' ? 78 : 112;
-		const height = type === 'comparison' ? 72 : type === 'property' ? 78 : 58;
+		const dimensions = graphNodeDimensions(type, label, degree);
 		elements.push({
 			group: 'nodes',
 			data: {
 				id: node.id,
 				label,
-				fullLabel: formatGraphLabel(node.label || node.id),
-				displayLabel: formatGraphLabel(node.label || node.id),
+				fullLabel,
+				displayLabel: fullLabel,
 				entityType: type,
 				typeColor: style.color,
 				typeBackground: style.background,
 				typeShape: style.shape,
 				typeIcon: style.icon,
 				degree,
-				width: width + Math.min(Math.max(degree, 0), 6) * 4,
-				height: height + Math.min(Math.max(degree, 0), 6) * 2,
-				textMaxWidth: width - 18,
-				fontSize: type === 'document' || type === 'comparison' ? 10 : 11,
-				layoutWeight: type === 'comparison' || type === 'material' ? 18000 : 12000
+				width: dimensions.width,
+				height: dimensions.height,
+				textMaxWidth: dimensions.textMaxWidth,
+				fontSize: dimensions.fontSize,
+				layoutWeight: dimensions.layoutWeight
 			},
 			position:
-				options.previousPositions?.get(node.id) ?? fallbackPosition(node.id, index, graph.nodes.length)
+				options.previousPositions?.get(node.id) ??
+				fallbackPosition(node.id, index, graph.nodes.length)
 		});
 	}
 
@@ -460,8 +524,8 @@ export function buildCytoscapeElements(
 		const hubEdge =
 			sourceType === 'comparison' ||
 			targetType === 'comparison' ||
-			sourceType === 'material' ||
-			targetType === 'material';
+			isAggregateNodeType(sourceType) ||
+			isAggregateNodeType(targetType);
 		elements.push({
 			group: 'edges',
 			data: {
@@ -473,7 +537,7 @@ export function buildCytoscapeElements(
 				weight: edge.weight ?? null,
 				width: edgeWidth(edge.weight),
 				lineStyle: style.lineStyle,
-				idealLength: hubEdge ? 150 : 120
+				idealLength: hubEdge ? 185 : 132
 			}
 		});
 	}
@@ -602,7 +666,10 @@ export function buildCytoscapeStyles(theme: CytoscapeThemeName = 'light') {
 
 export async function runGraphLayout(cy: Core, layoutName = 'fcose') {
 	if (cy.nodes().length < 2) return;
-	const name = layoutName === 'grid' || layoutName === 'circle' || layoutName === 'cose' ? layoutName : 'fcose';
+	const name =
+		layoutName === 'grid' || layoutName === 'circle' || layoutName === 'cose'
+			? layoutName
+			: 'fcose';
 
 	await new Promise<void>((resolve) => {
 		const options =
@@ -616,16 +683,16 @@ export async function runGraphLayout(cy: Core, layoutName = 'fcose') {
 						padding: 72,
 						nodeDimensionsIncludeLabels: true,
 						uniformNodeDimensions: false,
-						nodeSeparation: 100,
+						nodeSeparation: 124,
 						nodeRepulsion: (node: NodeSingular) => Number(node.data('layoutWeight') ?? 12000),
 						idealEdgeLength: (edge: EdgeSingular) => Number(edge.data('idealLength') ?? 132),
-						edgeElasticity: 0.22,
-						gravity: 0.14,
-						gravityRange: 3.8,
-						numIter: 3200,
+						edgeElasticity: 0.18,
+						gravity: 0.1,
+						gravityRange: 4.4,
+						numIter: 3600,
 						tile: true,
-						tilingPaddingVertical: 24,
-						tilingPaddingHorizontal: 24
+						tilingPaddingVertical: 34,
+						tilingPaddingHorizontal: 34
 					} as unknown as LayoutOptions)
 				: ({
 						name,
@@ -715,7 +782,9 @@ function selectedMatchesEvidence(selected: GraphSelectedObject, evidence: Eviden
 	if (ref.kind === 'document') return evidence.document_id === ref.resourceId;
 	if (ref.kind === 'comparison') return false;
 
-	const needle = normalizeSearch(selected.node.label || selected.node.displayLabel || ref.resourceId);
+	const needle = normalizeSearch(
+		selected.node.label || selected.node.displayLabel || ref.resourceId
+	);
 	if (!needle) return false;
 	return normalizeSearch(
 		[
@@ -756,7 +825,10 @@ function selectedMatchesComparison(
 	return nodeLabelMatchesComparison(ref.kind, label, comparison);
 }
 
-function selectedMatchesDocument(selected: GraphSelectedObject, document: DocumentProfile): boolean {
+function selectedMatchesDocument(
+	selected: GraphSelectedObject,
+	document: DocumentProfile
+): boolean {
 	if (selected.kind === 'edge') {
 		return (
 			selectedMatchesDocument(nodeSelection(selected.edge.source), document) ||
@@ -766,9 +838,13 @@ function selectedMatchesDocument(selected: GraphSelectedObject, document: Docume
 
 	const ref = parseSelectedNode(selected.node);
 	if (ref.kind === 'document') return document.document_id === ref.resourceId;
-	const needle = normalizeSearch(selected.node.label || selected.node.displayLabel || ref.resourceId);
+	const needle = normalizeSearch(
+		selected.node.label || selected.node.displayLabel || ref.resourceId
+	);
 	if (!needle) return false;
-	return normalizeSearch(`${document.title ?? ''} ${document.source_filename ?? ''}`).includes(needle);
+	return normalizeSearch(`${document.title ?? ''} ${document.source_filename ?? ''}`).includes(
+		needle
+	);
 }
 
 function parseSelectedNode(node: GraphSelectedNode): GraphNodeRef {

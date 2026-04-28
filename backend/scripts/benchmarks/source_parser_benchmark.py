@@ -381,10 +381,12 @@ def summarize_source_bundle(bundle: Any) -> dict[str, Any]:
     text_units = bundle.text_units
     blocks = bundle.blocks
     figures = bundle.figures
+    tables = getattr(bundle, "tables", None)
     table_rows = bundle.table_rows
     table_cells = bundle.table_cells
 
     block_count = len(blocks)
+    table_count = len(tables) if tables is not None else 0
     table_cell_count = len(table_cells)
     figure_count = len(figures)
     text_chars = _frame_text_chars(documents, "text")
@@ -402,6 +404,7 @@ def summarize_source_bundle(bundle: Any) -> dict[str, Any]:
             "text_units": len(text_units),
             "blocks": block_count,
             "figures": figure_count,
+            "tables": table_count,
             "table_rows": len(table_rows),
             "table_cells": table_cell_count,
         },
@@ -411,12 +414,20 @@ def summarize_source_bundle(bundle: Any) -> dict[str, Any]:
         "heading_count": _equals_count(blocks, "block_type", "heading"),
         "figure_caption_count": _equals_count(blocks, "block_type", "figure_caption"),
         "table_caption_count": _equals_count(blocks, "block_type", "table_caption"),
-        "table_count": _unique_count(table_cells, "table_id"),
+        "table_count": table_count or _unique_count(table_cells, "table_id"),
+        "table_context": {
+            "tables_with_markdown": _non_empty_count(tables, "table_markdown"),
+            "tables_with_text": _non_empty_count(tables, "table_text"),
+            "tables_with_caption": _non_empty_count(tables, "caption_text"),
+            "tables_with_column_headers": _non_empty_count(tables, "column_headers"),
+        },
         "figure_asset_count": len(getattr(bundle, "figure_assets", {}) or {}),
         "locator_counts": {
             "blocks_with_page": _non_empty_count(blocks, "page"),
             "blocks_with_bbox": _non_empty_count(blocks, "bbox"),
             "blocks_with_char_range": _non_empty_count(blocks, "char_range"),
+            "tables_with_page": _non_empty_count(tables, "page"),
+            "tables_with_bbox": _non_empty_count(tables, "bbox"),
             "table_cells_with_page": _non_empty_count(table_cells, "page"),
             "table_cells_with_bbox": _non_empty_count(table_cells, "bbox"),
             "figures_with_page": _non_empty_count(figures, "page"),
@@ -425,6 +436,7 @@ def summarize_source_bundle(bundle: Any) -> dict[str, Any]:
         "locator_ratios": {
             "blocks_with_page": _ratio(_non_empty_count(blocks, "page"), block_count),
             "blocks_with_bbox": _ratio(_non_empty_count(blocks, "bbox"), block_count),
+            "tables_with_page": _ratio(_non_empty_count(tables, "page"), table_count),
             "table_cells_with_page": _ratio(
                 _non_empty_count(table_cells, "page"),
                 table_cell_count,
@@ -473,6 +485,9 @@ def summarize_mineru_content_items(items: list[dict[str, Any]]) -> dict[str, Any
     text_chars = 0
     page_locator_count = 0
     bbox_locator_count = 0
+    table_html_count = 0
+    table_markdown_count = 0
+    table_text_count = 0
 
     for item in items:
         kind = _classify_mineru_item(item)
@@ -480,6 +495,19 @@ def summarize_mineru_content_items(items: list[dict[str, Any]]) -> dict[str, Any
         if kind == "heading":
             counts["text"] += 1
         text_chars += len(_item_text(item))
+        if kind == "table":
+            if _first_non_empty_item_value(
+                item,
+                ("table_body", "table_html", "html", "table"),
+            ):
+                table_html_count += 1
+            if _first_non_empty_item_value(
+                item,
+                ("table_markdown", "markdown", "md", "table_md"),
+            ):
+                table_markdown_count += 1
+            if _item_text(item):
+                table_text_count += 1
         if _has_any_key(item, ("page", "page_idx", "page_no", "page_number")):
             page_locator_count += 1
         if _has_any_key(item, ("bbox", "poly", "polygon")):
@@ -492,6 +520,11 @@ def summarize_mineru_content_items(items: list[dict[str, Any]]) -> dict[str, Any
         "text_chars": text_chars,
         "heading_count": counts["heading"],
         "table_count": counts["table"],
+        "table_context": {
+            "tables_with_html": table_html_count,
+            "tables_with_markdown": table_markdown_count,
+            "tables_with_text": table_text_count,
+        },
         "figure_count": counts["figure"],
         "equation_count": counts["equation"],
         "page_locator_count": page_locator_count,
@@ -857,6 +890,14 @@ def _coerce_text(value: Any) -> str:
             text for text in (_coerce_text(item) for item in value.values()) if text
         ).strip()
     return str(value).strip()
+
+
+def _first_non_empty_item_value(item: dict[str, Any], keys: Iterable[str]) -> str | None:
+    for key in keys:
+        text = _coerce_text(item.get(key))
+        if text:
+            return text
+    return None
 
 
 def _has_any_key(item: dict[str, Any], keys: Iterable[str]) -> bool:

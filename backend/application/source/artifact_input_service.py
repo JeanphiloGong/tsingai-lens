@@ -15,6 +15,7 @@ class CollectionArtifactPaths:
     text_units: Path
     blocks: Path
     figures: Path
+    tables: Path
     table_rows: Path
     table_cells: Path
     image_assets_dir: Path
@@ -29,6 +30,7 @@ def resolve_collection_artifact_paths(base_dir: str | Path) -> CollectionArtifac
         text_units=base_path / "text_units.parquet",
         blocks=base_path / "blocks.parquet",
         figures=base_path / "figures.parquet",
+        tables=base_path / "tables.parquet",
         table_rows=base_path / "table_rows.parquet",
         table_cells=base_path / "table_cells.parquet",
         image_assets_dir=base_path / "image_assets",
@@ -102,6 +104,18 @@ def load_figures_artifact(base_dir: str | Path) -> pd.DataFrame:
 
     figures = pd.read_parquet(paths.figures)
     normalized = figures.copy()
+    if "document_id" not in normalized.columns:
+        normalized["document_id"] = None
+    return normalized
+
+
+def load_tables_artifact(base_dir: str | Path) -> pd.DataFrame:
+    paths = resolve_collection_artifact_paths(base_dir)
+    if not paths.tables.is_file():
+        raise FileNotFoundError(paths.tables)
+
+    tables = pd.read_parquet(paths.tables)
+    normalized = tables.copy()
     if "document_id" not in normalized.columns:
         normalized["document_id"] = None
     return normalized

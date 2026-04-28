@@ -45,6 +45,7 @@ from application.source.artifact_input_service import (
     build_document_records,
     load_blocks_artifact,
     load_collection_inputs,
+    load_tables_artifact,
     load_table_rows_artifact,
     load_table_cells_artifact,
 )
@@ -125,6 +126,7 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _MAX_SUPPORTING_TEXT_WINDOWS = 3
 _MAX_TABLE_ROW_SUPPORTING_TEXT_CHARS = 1200
+_MAX_TABLE_CONTEXT_CHARS = 6000
 _MAX_TEXT_WINDOWS_PER_DOCUMENT = 24
 _INTRODUCTION_WINDOW_LIMIT = 1
 _CHARACTERIZATION_COLUMNS = [
@@ -586,6 +588,7 @@ class PaperFactsService:
         documents, text_units = load_collection_inputs(base_dir)
         try:
             blocks = load_blocks_artifact(base_dir)
+            tables = load_tables_artifact(base_dir)
             table_rows = load_table_rows_artifact(base_dir)
             table_cells = load_table_cells_artifact(base_dir)
         except FileNotFoundError as exc:
@@ -593,6 +596,7 @@ class PaperFactsService:
 
         document_records = build_document_records(documents, text_units)
         all_text_windows_by_doc = self._build_text_windows_by_document(blocks)
+        tables_by_doc = self._group_tables_by_document(tables)
         table_rows_by_doc = self._group_table_rows_by_document(table_rows)
         table_cells_by_doc = self._group_table_cells_by_document(table_cells)
         profile_by_doc = {
@@ -630,10 +634,11 @@ class PaperFactsService:
             total_extraction_units += len(selected_text_windows) + len(selected_table_rows)
         completed_extraction_units = 0
         logger.info(
-            "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_row_count=%s table_cell_count=%s total_extraction_units=%s",
+            "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_count=%s table_row_count=%s table_cell_count=%s total_extraction_units=%s",
             collection_id,
             total_documents,
             len(blocks),
+            len(tables),
             len(table_rows),
             len(table_cells),
             total_extraction_units,
@@ -675,6 +680,7 @@ class PaperFactsService:
             doc_text_windows = selected_text_windows_by_doc.get(document_id, [])
             raw_doc_table_rows = table_rows_by_doc.get(document_id, [])
             doc_table_rows = selected_table_rows_by_doc.get(document_id, [])
+            doc_tables_by_id = self._group_tables_by_id(tables_by_doc.get(document_id, []))
             grouped_row_cells = self._group_table_cells_by_row(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
             document_total_units = len(doc_text_windows) + len(doc_table_rows)
@@ -817,14 +823,17 @@ class PaperFactsService:
                 table_id = str(row.get("table_id") or "")
                 row_index = self._safe_int(row.get("row_index"))
                 row_cells = grouped_row_cells.get((table_id, row_index), [])
+                table_context = doc_tables_by_id.get(table_id)
                 table_row_jobs.append(
                     {
                         "row": row,
                         "row_cells": row_cells,
+                        "table_context": table_context,
                         "payload": self._build_table_row_extraction_payload(
                             title=title,
                             source_filename=source_filename,
                             profile=profile,
+                            table_context=table_context,
                             table_row=row,
                             row_cells=row_cells,
                             text_windows=all_doc_text_windows,
@@ -1200,6 +1209,7 @@ class PaperFactsService:
         title: str,
         source_filename: str | None,
         profile: dict[str, Any],
+        table_context: dict[str, Any] | None,
         table_row: dict[str, Any],
         row_cells: list[dict[str, Any]],
         text_windows: list[dict[str, Any]],
@@ -1215,6 +1225,10 @@ class PaperFactsService:
                 "doc_type": str(profile.get("doc_type") or ""),
                 "protocol_extractable": str(profile.get("protocol_extractable") or ""),
             },
+            "table_context": self._build_table_context_payload(
+                table_context=table_context,
+                table_row=table_row,
+            ),
             "table_row": {
                 "row_summary": self._normalize_scalar_text(table_row.get("row_text"))
                 or self._build_table_row_summary(row_cells),
@@ -3161,6 +3175,41 @@ class PaperFactsService:
             grouped.setdefault((table_id, row_index), []).append(cell)
         return grouped
 
+    def _build_table_context_payload(
+        self,
+        *,
+        table_context: dict[str, Any] | None,
+        table_row: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not table_context:
+            return {
+                "caption_text": None,
+                "heading_path": self._normalize_scalar_text(table_row.get("heading_path")),
+                "column_headers": [],
+                "table_markdown": None,
+                "table_text": None,
+                "page": self._safe_int(table_row.get("page")),
+            }
+
+        return {
+            "caption_text": self._normalize_scalar_text(table_context.get("caption_text")),
+            "heading_path": self._normalize_scalar_text(
+                table_context.get("heading_path")
+            )
+            or self._normalize_scalar_text(table_row.get("heading_path")),
+            "column_headers": self._normalize_list(table_context.get("column_headers")),
+            "table_markdown": self._truncate_context_text(
+                table_context.get("table_markdown"),
+                _MAX_TABLE_CONTEXT_CHARS,
+            ),
+            "table_text": self._truncate_context_text(
+                table_context.get("table_text"),
+                _MAX_TABLE_CONTEXT_CHARS,
+            ),
+            "page": self._safe_int(table_context.get("page"))
+            or self._safe_int(table_row.get("page")),
+        }
+
     def _build_text_windows_by_document(
         self,
         blocks: pd.DataFrame,
@@ -3214,6 +3263,14 @@ class PaperFactsService:
                 continue
             parts.append(f"{header}: {value}" if header else value)
         return "; ".join(parts)
+
+    def _truncate_context_text(self, value: Any, limit: int) -> str | None:
+        text = self._normalize_scalar_text(value)
+        if text is None:
+            return None
+        if limit <= 0 or len(text) <= limit:
+            return text
+        return text[:limit].rstrip()
 
     def _normalize_property_name(self, value: Any) -> str:
         raw = str(value or "").strip().lower()
@@ -3556,6 +3613,34 @@ class PaperFactsService:
                     self._safe_int(item.get("row_index")) or 0,
                 ),
             )
+        return grouped
+
+    def _group_tables_by_document(
+        self,
+        tables: pd.DataFrame,
+    ) -> dict[str, list[dict[str, Any]]]:
+        if tables is None or tables.empty:
+            return {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for _, row in tables.iterrows():
+            document_id = str(row.get("document_id") or row.get("id") or "")
+            grouped.setdefault(document_id, []).append(dict(row))
+        for document_id, items in grouped.items():
+            grouped[document_id] = sorted(
+                items,
+                key=lambda item: self._safe_int(item.get("table_order")) or 0,
+            )
+        return grouped
+
+    def _group_tables_by_id(
+        self,
+        tables: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for table in tables:
+            table_id = self._normalize_scalar_text(table.get("table_id"))
+            if table_id:
+                grouped[table_id] = table
         return grouped
 
     def _group_table_cells_by_document(

@@ -144,7 +144,9 @@ JSON compliance rules for this extraction:
 - Put value provenance in `value_payload`: `value_origin`, `source_value_text`, `source_unit_text`, `derivation_formula`, and `derivation_inputs`.
 - Use `value_origin: "reported"` only for directly reported values, `derived` only when the row gives enough inputs and a formula, and `estimated` only when the row itself marks the value as approximate.
 - Omit weakly grounded PBF fields. Do not infer missing laser power, scan speed, orientations, strain rate, or energy density from general domain knowledge.
-- Extract row-grounded facts only. Use `supporting_text_windows` only to disambiguate row labels, abbreviations, or column meaning.
+- Extract target-row-grounded facts only. Use `table_context` to interpret captions, headers, units, groups, baselines, and row meaning.
+- Treat non-target rows inside `table_context.table_markdown` or `table_context.table_text` as context only. Do not copy their values into facts for the target row.
+- Use `supporting_text_windows` only to disambiguate row labels, abbreviations, or column meaning.
 - Do not mine `supporting_text_windows` for extra standalone facts that are not needed to interpret this row.
 - If a fact cannot be grounded to the row or a short disambiguating support quote, omit it.
 - Do not repeat the same fact in multiple arrays.
@@ -413,9 +415,11 @@ def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, s
 
 def build_table_row_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
-        "Extract row-grounded research facts from this one table row.\n\n"
+        "Extract target-row-grounded research facts using the provided table context.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Use the row and header context only. Skip outputs when the row is a literature "
+        "Use `table_context` to interpret the target row's caption, headers, units, "
+        "row groups, and table-wide labels. Non-target rows are context only; do not "
+        "extract their values as target-row facts. Skip outputs when the target row is a literature "
         "summary rather than a directly attributable study row. Anchors may include "
         "quote, source_type, and page only. Do not emit backend locators, ids, or "
         "bundle refs. Use human-readable labels instead of refs when a result must "

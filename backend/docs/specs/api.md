@@ -119,8 +119,8 @@
   已退役，不再属于公开或内部活动合同
 - Source 结构产物当前包括
   `documents.parquet`、`text_units.parquet`、`blocks.parquet`、
-  `figures.parquet`、`table_rows.parquet`、`table_cells.parquet`
-  以及 `image_assets/`
+  `figures.parquet`、`tables.parquet`、`table_rows.parquet`、
+  `table_cells.parquet` 以及 `image_assets/`
 - `GET /api/v1/tasks/{task_id}/artifacts`
   与 workspace 内的 `artifacts` 都应对 comparison semantic 相关产物额外暴露
   `*_stale` 字段，用来表达：

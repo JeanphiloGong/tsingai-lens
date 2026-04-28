@@ -625,7 +625,7 @@ export function getDocumentNextActions(profile: DocumentProfile): DocumentProfil
 
 	if (docType === 'review' && suitability === 'no') return ['view_document', 'view_evidence'];
 	if ((docType === 'experimental' || docType === 'method') && suitability === 'yes') {
-		return ['view_evidence', 'open_comparison'];
+		return ['view_document', 'view_evidence', 'open_comparison'];
 	}
 	if (docType === 'uncertain' || suitability === 'uncertain') {
 		return ['view_document', 'manual_mark'];

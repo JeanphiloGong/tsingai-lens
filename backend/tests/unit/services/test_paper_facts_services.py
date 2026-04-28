@@ -13,7 +13,7 @@ from application.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.llm.prompts import (
-    build_table_row_extraction_prompt,
+    build_table_row_mentions_prompt,
     build_text_window_extraction_prompt,
 )
 from application.core.semantic_build.paper_facts_service import PaperFactsService
@@ -25,6 +25,11 @@ from application.core.semantic_build.llm.schemas import (
     SampleVariantPayload,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
+    StructuredTableRowMentions,
+    TableRowBaselineMentionPayload,
+    TableRowFactMentionPayload,
+    TableRowResultClaimPayload,
+    TableRowSubjectMentionPayload,
     StructuredTextWindowMentions,
     TextWindowBaselineMentionPayload,
     TextWindowConditionMentionPayload,
@@ -193,8 +198,8 @@ class EvidenceOnlyExtractor:
             ]
         )
 
-    def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-        return StructuredExtractionBundle()
+    def extract_table_row_mentions(self, payload):  # noqa: ANN001, ARG002
+        return StructuredTableRowMentions()
 
 
 def test_paper_facts_prompt_payloads_exclude_internal_ids():
@@ -288,7 +293,7 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
             }
         ],
     )
-    _, table_row_prompt = build_table_row_extraction_prompt(table_row_payload)
+    _, table_row_prompt = build_table_row_mentions_prompt(table_row_payload)
     for field in (
         "document_id",
         "window_id",
@@ -308,18 +313,21 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"table_markdown"' in table_row_prompt
     assert "Use exactly the schema keys and no others." in table_row_prompt
     assert '"keywords"' in table_row_prompt
-    assert '"temperatures_c": []' in table_row_prompt
+    assert '"row_subjects": [' in table_row_prompt
     assert '"unit": "MPa"' in table_row_prompt
     assert "Non-target rows are context only" in table_row_prompt
     assert "Use `supporting_text_windows` only when they are required to interpret the row." in table_row_prompt
-    assert "Emit at most 2 `method_facts`" in table_row_prompt
-    assert "Nested object placement examples." in table_row_prompt
-    assert "For `method_facts[*].method_payload`" in table_row_prompt
-    assert '"method_payload": {\n    "temperatures_c": []' not in table_row_prompt
-    assert '"process_context": {\n    "temperatures_c": []' not in table_row_prompt
-    assert '"laser_power_w": null' in table_row_prompt
-    assert '"strain_rate_s-1": null' in table_row_prompt
-    assert '"value_origin": "reported"' in table_row_prompt
+    assert "Emit at most 2 `row_subjects`" in table_row_prompt
+    assert "Do not emit `confidence`, `epistemic_status`" in table_row_prompt
+    assert '"method_facts"' not in table_row_prompt
+    assert '"measurement_results"' in table_row_prompt
+    assert '"process_context": {' not in table_row_prompt
+    assert '"value_payload": {"value": 940}' in table_row_prompt
+    assert '"name": "laser_power_w"' in table_row_prompt
+    assert "strain_rate_s-1" in table_row_prompt
+    assert '"laser_power_w": null' not in table_row_prompt
+    assert '"strain_rate_s-1": null' not in table_row_prompt
+    assert '"result_claims": [' in table_row_prompt
 
 
 def test_pbf_fact_schema_accepts_process_test_and_value_provenance_fields():
@@ -983,9 +991,9 @@ def test_paper_facts_service_prunes_low_value_text_windows_before_model_calls(
             self.text_payloads.append(payload)
             return StructuredTextWindowMentions()
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001
+        def extract_table_row_mentions(self, payload):  # noqa: ANN001
             self.table_payloads.append(payload)
-            return StructuredExtractionBundle()
+            return StructuredTableRowMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1089,9 +1097,9 @@ def test_paper_facts_service_passes_table_artifact_context_to_row_extraction(
         def extract_text_window_mentions(self, payload):  # noqa: ANN001, ARG002
             return StructuredTextWindowMentions()
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001
+        def extract_table_row_mentions(self, payload):  # noqa: ANN001
             self.table_payloads.append(payload)
-            return StructuredExtractionBundle()
+            return StructuredTableRowMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1251,8 +1259,8 @@ def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_p
                 ],
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_row_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableRowMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1371,8 +1379,8 @@ def test_prior_work_text_window_claims_do_not_materialize_measurement_results(mo
                 ],
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_row_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableRowMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1469,8 +1477,8 @@ def test_paper_facts_service_persists_mixed_variant_values_with_real_parquet(tmp
                 ]
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_row_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableRowMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1572,8 +1580,8 @@ def test_paper_facts_service_normalizes_null_like_variant_values_before_parquet(
                 ]
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_row_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableRowMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1680,8 +1688,8 @@ def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatc
                 ]
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_row_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableRowMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")

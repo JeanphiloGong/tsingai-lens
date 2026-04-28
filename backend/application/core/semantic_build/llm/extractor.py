@@ -12,13 +12,13 @@ from pydantic import BaseModel
 
 from .schemas import (
     StructuredDocumentProfile,
-    StructuredExtractionBundle,
+    StructuredTableRowMentions,
     StructuredTextWindowMentions,
 )
 from .prompts import (
     build_document_profile_prompt,
+    build_table_row_mentions_prompt,
     build_text_window_extraction_prompt,
-    build_table_row_extraction_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,14 +75,14 @@ class CoreLLMStructuredExtractor:
             raise TypeError("unexpected text window extraction response type")
         return response
 
-    def extract_table_row_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
-        system_prompt, user_prompt = build_table_row_extraction_prompt(payload)
+    def extract_table_row_mentions(self, payload: dict[str, Any]) -> StructuredTableRowMentions:
+        system_prompt, user_prompt = build_table_row_mentions_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredExtractionBundle,
+            response_model=StructuredTableRowMentions,
         )
-        if not isinstance(response, StructuredExtractionBundle):
+        if not isinstance(response, StructuredTableRowMentions):
             raise TypeError("unexpected table row extraction response type")
         return response
 
@@ -186,7 +186,7 @@ class CoreLLMStructuredExtractor:
             "messages": messages,
             "response_format": response_model,
         }
-        if response_model is StructuredExtractionBundle:
+        if response_model is StructuredTableRowMentions:
             request_kwargs["max_completion_tokens"] = (
                 _TABLE_ROW_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
             )

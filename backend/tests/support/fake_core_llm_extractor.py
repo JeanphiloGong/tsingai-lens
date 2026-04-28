@@ -4,16 +4,14 @@ import re
 from typing import Any
 
 from application.core.semantic_build.llm.schemas import (
-    BaselineReferencePayload,
-    EvidenceAnchorPayload,
-    ExtractedTestConditionPayload,
-    MeasurementResultPayload,
     MeasurementValuePayload,
-    MethodFactPayload,
-    SampleVariantPayload,
     StructuredDocumentProfile,
-    StructuredExtractionBundle,
+    StructuredTableRowMentions,
     StructuredTextWindowMentions,
+    TableRowBaselineMentionPayload,
+    TableRowFactMentionPayload,
+    TableRowResultClaimPayload,
+    TableRowSubjectMentionPayload,
     TextWindowBaselineMentionPayload,
     TextWindowConditionMentionPayload,
     TextWindowMaterialMentionPayload,
@@ -298,7 +296,7 @@ class FakeCoreLLMStructuredExtractor:
             result_claims=result_claims,
         )
 
-    def extract_table_row_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
+    def extract_table_row_mentions(self, payload: dict[str, Any]) -> StructuredTableRowMentions:
         document_title = str(payload.get("document_title") or "")
         document_profile = payload.get("document_profile") or {}
         row = payload.get("table_row") or {}
@@ -308,7 +306,7 @@ class FakeCoreLLMStructuredExtractor:
             else []
         )
         if str(document_profile.get("doc_type") or "") == "review":
-            return StructuredExtractionBundle()
+            return StructuredTableRowMentions()
 
         row_summary = str(row.get("row_summary") or "")
         cells = row.get("cells") if isinstance(row.get("cells"), list) else []
@@ -350,92 +348,97 @@ class FakeCoreLLMStructuredExtractor:
                 variable_value = self._normalize_numeric_or_text(value)
 
         if not property_cells:
-            return StructuredExtractionBundle()
+            return StructuredTableRowMentions()
 
         variant_label = sample_label or self._default_variant_label(
             material_system.get("family"),
             document_title,
         )
-        sample_variants = [
-            SampleVariantPayload(
+        row_subjects = [
+            TableRowSubjectMentionPayload(
                 variant_label=variant_label,
-                host_material_system=material_system,
+                family=material_system.get("family"),
                 composition=material_system.get("composition"),
                 variable_axis_type=variable_axis_type,
                 variable_value=variable_value,
-                process_context=process_context,
-                confidence=0.86,
-                epistemic_status="normalized_from_evidence",
-                source_kind="table_row",
+                quote=variant_label,
             )
         ]
 
-        test_conditions = [
-            ExtractedTestConditionPayload(
-                property_type=property_cells[0][0],
-                condition_payload={
-                    "method": methods[0] if len(methods) == 1 else None,
-                    "methods": methods,
-                    "temperatures_c": process_context.get("temperatures_c") or [],
-                    "durations": process_context.get("durations") or [],
-                    "atmosphere": process_context.get("atmosphere"),
-                },
-                confidence=0.82,
+        process_mentions: list[TableRowFactMentionPayload] = []
+        for temperature in process_context.get("temperatures_c") or []:
+            process_mentions.append(
+                TableRowFactMentionPayload(
+                    name="temperature_c",
+                    value_text=temperature,
+                    unit="C",
+                    quote=f"{temperature:g} C",
+                )
             )
-        ] if (
-            methods
-            or process_context.get("temperatures_c")
-            or process_context.get("durations")
-        ) else []
+        for duration in process_context.get("durations") or []:
+            process_mentions.append(
+                TableRowFactMentionPayload(
+                    name="duration",
+                    value_text=duration,
+                    unit=None,
+                    quote=duration,
+                )
+            )
+        if process_context.get("atmosphere"):
+            process_mentions.append(
+                TableRowFactMentionPayload(
+                    name="atmosphere",
+                    value_text=process_context.get("atmosphere"),
+                    unit=None,
+                    quote=str(process_context.get("atmosphere")),
+                )
+            )
 
-        baseline_references = [
-            BaselineReferencePayload(
+        test_condition_mentions = [
+            TableRowFactMentionPayload(
+                name="method",
+                value_text=method,
+                unit=None,
+                quote=method,
+            )
+            for method in methods
+        ]
+
+        baseline_mentions = [
+            TableRowBaselineMentionPayload(
                 baseline_label=baseline_label,
-                confidence=0.82,
-                epistemic_status="normalized_from_evidence",
+                quote=baseline_label,
             )
         ] if baseline_label else []
 
-        measurement_results: list[MeasurementResultPayload] = []
+        result_claims: list[TableRowResultClaimPayload] = []
         for index, (property_name, value, unit) in enumerate(property_cells, start=1):
             parsed_value = self._normalize_numeric_or_text(value)
             if property_name == "retention":
-                value_payload = MeasurementValuePayload(
-                    retention_percent=float(parsed_value),
-                    statement=f"{property_name} of {parsed_value} {unit or '%'}".strip(),
-                )
                 result_type = "retention"
                 unit = unit or "%"
             else:
-                value_payload = MeasurementValuePayload(
-                    value=float(parsed_value),
-                    statement=f"{property_name} of {parsed_value} {unit or ''}".strip(),
-                )
                 result_type = "scalar"
-            measurement_results.append(
-                MeasurementResultPayload(
+            result_claims.append(
+                TableRowResultClaimPayload(
                     claim_text=f"{variant_label} reported {property_name} of {parsed_value} {unit or ''}".strip(),
                     property_normalized=property_name,
                     result_type=result_type,
-                    value_payload=value_payload,
+                    value_text=value,
                     unit=unit,
                     variant_label=variant_label,
-                    baseline_label=baseline_label if baseline_references else None,
-                    anchors=[
-                        EvidenceAnchorPayload(
-                            quote=row_summary,
-                            source_type="table",
-                        )
-                    ],
-                    confidence=0.9,
+                    baseline_label=baseline_label if baseline_mentions else None,
+                    claim_scope="current_work",
+                    quote=row_summary,
                 )
             )
 
-        return StructuredExtractionBundle(
-            sample_variants=sample_variants,
-            test_conditions=test_conditions,
-            baseline_references=baseline_references,
-            measurement_results=measurement_results,
+        return StructuredTableRowMentions(
+            row_subjects=row_subjects,
+            process_mentions=process_mentions,
+            test_condition_mentions=test_condition_mentions,
+            baseline_mentions=baseline_mentions,
+            result_claims=result_claims,
         )
 
     def _classify_text_window_role(self, heading_path: str, text: str) -> str | None:

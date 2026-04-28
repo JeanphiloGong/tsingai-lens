@@ -33,6 +33,7 @@ from .llm.schemas import (
     ProcessContextPayload,
     SampleVariantPayload,
     StructuredExtractionBundle,
+    StructuredTableRowMentions,
     StructuredTextWindowMentions,
     TestConditionPayloadModel,
     TestContextPayload,
@@ -891,7 +892,13 @@ class PaperFactsService:
                         round(result["elapsed_s"] * 1000),
                     )
                     raise result["error"]
-                bundle = result["parsed"]
+                mentions = result["parsed"]
+                bundle = self._bind_table_row_mentions_to_bundle(
+                    mentions=mentions,
+                    table_row=row,
+                    row_cells=row_cells,
+                    table_context=job["table_context"],
+                )
                 table_row_elapsed_s = result["elapsed_s"]
                 table_row_elapsed_ms = round(table_row_elapsed_s * 1000)
                 self._materialize_bundle(
@@ -1302,6 +1309,401 @@ class PaperFactsService:
             baseline_references=baseline_references,
             measurement_results=measurement_results,
         )
+
+    def _bind_table_row_mentions_to_bundle(
+        self,
+        *,
+        mentions: StructuredTableRowMentions,
+        table_row: dict[str, Any],
+        row_cells: list[dict[str, Any]],
+        table_context: dict[str, Any] | None,
+    ) -> StructuredExtractionBundle:
+        process_context = self._build_table_row_process_context(
+            mentions.process_mentions
+        )
+        current_work_claims = [
+            claim
+            for claim in mentions.result_claims
+            if str(claim.claim_scope or "").strip() == "current_work"
+        ]
+        sample_variants = self._build_table_row_sample_variants(
+            mentions=mentions,
+            process_context=process_context,
+            result_claims=current_work_claims,
+            table_row=table_row,
+            row_cells=row_cells,
+        )
+        baseline_references = self._build_table_row_baseline_references(
+            mentions=mentions,
+            result_claims=current_work_claims,
+        )
+        test_conditions = self._build_table_row_test_conditions(
+            mentions=mentions,
+            result_claims=current_work_claims,
+        )
+        measurement_results = self._build_table_row_measurement_results(
+            result_claims=current_work_claims,
+            table_row=table_row,
+            table_context=table_context,
+        )
+        return StructuredExtractionBundle(
+            sample_variants=sample_variants,
+            test_conditions=test_conditions,
+            baseline_references=baseline_references,
+            measurement_results=measurement_results,
+        )
+
+    def _build_table_row_process_context(
+        self,
+        mentions: list[Any],
+    ) -> ProcessContextPayload:
+        payload: dict[str, Any] = {
+            "temperatures_c": [],
+            "durations": [],
+        }
+        numeric_fields = {
+            "laser_power_w",
+            "scan_speed_mm_s",
+            "layer_thickness_um",
+            "hatch_spacing_um",
+            "spot_size_um",
+            "energy_density_j_mm3",
+            "preheat_temperature_c",
+            "oxygen_level_ppm",
+        }
+        text_fields = {
+            "atmosphere",
+            "scan_strategy",
+            "build_orientation",
+            "shielding_gas",
+            "powder_size_distribution_um",
+            "post_treatment_summary",
+        }
+        for mention in mentions:
+            field_name = self._normalize_table_row_field_name(mention.name)
+            value = self._normalize_scalar_text(mention.value_text)
+            quote = self._normalize_scalar_text(mention.quote)
+            if not field_name or not (value or quote):
+                continue
+            source_text = value or quote or ""
+            if field_name in {"temperature", "temperature_c"}:
+                numeric = self._coerce_numeric_text_window_value(source_text, quote)
+                if numeric is not None:
+                    payload["temperatures_c"].append(float(numeric))
+            elif field_name == "duration":
+                payload["durations"].append(source_text)
+            elif field_name in numeric_fields:
+                numeric = self._coerce_numeric_text_window_value(source_text, quote)
+                if numeric is not None:
+                    payload[field_name] = float(numeric)
+            elif field_name in text_fields:
+                payload[field_name] = source_text
+
+        payload["temperatures_c"] = self._dedupe_preserving_order(
+            [round(float(item), 4) for item in payload["temperatures_c"]]
+        )
+        payload["durations"] = self._dedupe_preserving_order(payload["durations"])
+        return ProcessContextPayload(**payload)
+
+    def _build_table_row_sample_variants(
+        self,
+        *,
+        mentions: StructuredTableRowMentions,
+        process_context: ProcessContextPayload,
+        result_claims: list[Any],
+        table_row: dict[str, Any],
+        row_cells: list[dict[str, Any]],
+    ) -> list[SampleVariantPayload]:
+        rows: list[SampleVariantPayload] = []
+        seen: set[str] = set()
+        for subject in mentions.row_subjects:
+            variant_label = self._normalize_scalar_text(subject.variant_label)
+            if not variant_label or variant_label.lower() in seen:
+                continue
+            seen.add(variant_label.lower())
+            family = self._sanitize_material_family(subject.family)
+            composition = self._normalize_scalar_text(subject.composition)
+            rows.append(
+                SampleVariantPayload(
+                    variant_label=variant_label,
+                    host_material_system=(
+                        {"family": family, "composition": composition}
+                        if family or composition
+                        else None
+                    ),
+                    composition=composition,
+                    variable_axis_type=subject.variable_axis_type,
+                    variable_value=subject.variable_value,
+                    process_context=process_context,
+                    source_kind="table_row",
+                )
+            )
+
+        if rows:
+            return rows
+
+        for claim in result_claims:
+            variant_label = self._normalize_scalar_text(claim.variant_label)
+            if not variant_label or variant_label.lower() in seen:
+                continue
+            seen.add(variant_label.lower())
+            rows.append(
+                SampleVariantPayload(
+                    variant_label=variant_label,
+                    process_context=process_context,
+                    source_kind="table_row",
+                )
+            )
+
+        if rows:
+            return rows
+
+        sample_label = self._infer_table_row_sample_label(row_cells)
+        if sample_label:
+            return [
+                SampleVariantPayload(
+                    variant_label=sample_label,
+                    process_context=process_context,
+                    source_kind="table_row",
+                )
+            ]
+
+        row_summary = self._normalize_scalar_text(table_row.get("row_text"))
+        if row_summary and result_claims:
+            return [
+                SampleVariantPayload(
+                    variant_label=row_summary.split("|", 1)[0].strip(),
+                    process_context=process_context,
+                    source_kind="table_row",
+                )
+            ]
+        return []
+
+    def _build_table_row_baseline_references(
+        self,
+        *,
+        mentions: StructuredTableRowMentions,
+        result_claims: list[Any],
+    ) -> list[BaselineReferencePayload]:
+        rows: list[BaselineReferencePayload] = []
+        seen: set[str] = set()
+        labels = [
+            self._normalize_scalar_text(mention.baseline_label)
+            for mention in mentions.baseline_mentions
+        ]
+        labels.extend(
+            self._normalize_scalar_text(claim.baseline_label)
+            for claim in result_claims
+        )
+        for label in labels:
+            if not label or label.lower() in seen:
+                continue
+            seen.add(label.lower())
+            rows.append(BaselineReferencePayload(baseline_label=label))
+        return rows
+
+    def _build_table_row_test_conditions(
+        self,
+        *,
+        mentions: StructuredTableRowMentions,
+        result_claims: list[Any],
+    ) -> list[ExtractedTestConditionPayload]:
+        condition_payload = self._build_table_row_test_condition_payload(
+            mentions.test_condition_mentions
+        )
+        payload_dict = condition_payload.model_dump(exclude_none=True, by_alias=True)
+        if not any(value not in (None, [], {}) for value in payload_dict.values()):
+            return []
+
+        rows: list[ExtractedTestConditionPayload] = []
+        seen: set[str] = set()
+        for claim in result_claims:
+            property_type = self._normalize_property_name(claim.property_normalized)
+            if property_type in seen:
+                continue
+            seen.add(property_type)
+            rows.append(
+                ExtractedTestConditionPayload(
+                    property_type=property_type,
+                    condition_payload=payload_dict,
+                )
+            )
+        return rows
+
+    def _build_table_row_test_condition_payload(
+        self,
+        mentions: list[Any],
+    ) -> TestConditionPayloadModel:
+        payload: dict[str, Any] = {
+            "methods": [],
+            "temperatures_c": [],
+            "durations": [],
+        }
+        for mention in mentions:
+            field_name = self._normalize_table_row_field_name(mention.name)
+            value = self._normalize_scalar_text(mention.value_text)
+            quote = self._normalize_scalar_text(mention.quote)
+            if not field_name or not (value or quote):
+                continue
+            source_text = value or quote or ""
+            if field_name in {"method", "test_method"}:
+                payload["methods"].append(source_text)
+                payload.setdefault("method", source_text)
+                payload["test_method"] = source_text
+            elif field_name in {"temperature", "temperature_c", "test_temperature_c"}:
+                numeric = self._coerce_numeric_text_window_value(source_text, quote)
+                if numeric is not None:
+                    payload["test_temperature_c"] = float(numeric)
+            elif field_name == "duration":
+                payload["durations"].append(source_text)
+            elif field_name == "atmosphere":
+                payload["atmosphere"] = source_text
+            elif field_name in {
+                "strain_rate_s-1",
+                "loading_direction",
+                "sample_orientation",
+                "environment",
+                "frequency_hz",
+                "specimen_geometry",
+                "surface_state",
+            }:
+                if field_name == "frequency_hz":
+                    numeric = self._coerce_numeric_text_window_value(source_text, quote)
+                    payload[field_name] = float(numeric) if numeric is not None else source_text
+                else:
+                    payload[field_name] = source_text
+
+        payload["methods"] = self._dedupe_preserving_order(payload["methods"])
+        payload["temperatures_c"] = self._dedupe_preserving_order(
+            payload["temperatures_c"]
+        )
+        payload["durations"] = self._dedupe_preserving_order(payload["durations"])
+        return TestConditionPayloadModel(**payload)
+
+    def _build_table_row_measurement_results(
+        self,
+        *,
+        result_claims: list[Any],
+        table_row: dict[str, Any],
+        table_context: dict[str, Any] | None,
+    ) -> list[MeasurementResultPayload]:
+        rows: list[MeasurementResultPayload] = []
+        for claim in result_claims:
+            value_payload, unit = self._build_measurement_value_from_table_row_claim(
+                claim
+            )
+            quote = self._normalize_table_row_quote(
+                claim.quote,
+                table_row=table_row,
+            )
+            claim_text = (
+                self._normalize_scalar_text(claim.claim_text)
+                or quote
+                or self._build_table_row_claim_text(claim, unit)
+            )
+            rows.append(
+                MeasurementResultPayload(
+                    claim_text=claim_text,
+                    property_normalized=self._normalize_property_name(
+                        claim.property_normalized
+                    ),
+                    result_type=str(claim.result_type or "").strip() or "scalar",
+                    value_payload=value_payload,
+                    unit=unit,
+                    variant_label=claim.variant_label,
+                    baseline_label=claim.baseline_label,
+                    anchors=[
+                        EvidenceAnchorPayload(
+                            quote=quote,
+                            source_type="table",
+                            page=self._table_row_page(table_row, table_context),
+                        )
+                    ],
+                    claim_scope=claim.claim_scope,
+                )
+            )
+        return rows
+
+    def _build_measurement_value_from_table_row_claim(
+        self,
+        claim: Any,
+    ) -> tuple[MeasurementValuePayload, str | None]:
+        return self._build_measurement_value_from_text_window_claim(claim)
+
+    def _build_table_row_claim_text(
+        self,
+        claim: Any,
+        unit: str | None,
+    ) -> str:
+        parts = [
+            self._normalize_scalar_text(claim.variant_label),
+            self._normalize_property_name(claim.property_normalized),
+            self._normalize_scalar_text(claim.value_text),
+            unit,
+        ]
+        return " ".join(part for part in parts if part)
+
+    def _normalize_table_row_quote(
+        self,
+        quote: Any,
+        *,
+        table_row: dict[str, Any],
+    ) -> str | None:
+        return (
+            self._normalize_scalar_text(quote)
+            or self._normalize_scalar_text(table_row.get("row_text"))
+            or self._normalize_scalar_text(table_row.get("row_summary"))
+        )
+
+    def _table_row_page(
+        self,
+        table_row: dict[str, Any],
+        table_context: dict[str, Any] | None,
+    ) -> int | None:
+        return (
+            self._safe_int((table_context or {}).get("page"))
+            or self._safe_int(table_row.get("page"))
+        )
+
+    def _infer_table_row_sample_label(
+        self,
+        row_cells: list[dict[str, Any]],
+    ) -> str | None:
+        for cell in row_cells:
+            header = str(cell.get("header_path") or "").lower()
+            if any(token in header for token in ("sample", "group", "variant")):
+                return self._normalize_scalar_text(cell.get("cell_text"))
+        return None
+
+    def _normalize_table_row_field_name(
+        self,
+        value: Any,
+    ) -> str | None:
+        text = self._normalize_scalar_text(value)
+        if text is None:
+            return None
+        normalized = re.sub(r"[^a-z0-9-]+", "_", text.lower()).strip("_")
+        aliases = {
+            "laser_power": "laser_power_w",
+            "power": "laser_power_w",
+            "scan_speed": "scan_speed_mm_s",
+            "layer_thickness": "layer_thickness_um",
+            "hatch_spacing": "hatch_spacing_um",
+            "spot_size": "spot_size_um",
+            "energy_density": "energy_density_j_mm3",
+            "ved": "energy_density_j_mm3",
+            "temperature": "temperature_c",
+            "temp": "temperature_c",
+            "preheat_temperature": "preheat_temperature_c",
+            "preheat": "preheat_temperature_c",
+            "time": "duration",
+            "method_name": "method",
+            "test": "test_method",
+            "strain_rate": "strain_rate_s-1",
+            "strain_rate_s_1": "strain_rate_s-1",
+            "orientation": "sample_orientation",
+        }
+        return aliases.get(normalized, normalized)
 
     def _build_text_window_method_facts(
         self,
@@ -2956,7 +3358,7 @@ class PaperFactsService:
             if kind == "text_window":
                 parsed = extractor.extract_text_window_mentions(job["payload"])
             elif kind == "table_row":
-                parsed = extractor.extract_table_row_bundle(job["payload"])
+                parsed = extractor.extract_table_row_mentions(job["payload"])
             else:
                 raise ValueError(f"unsupported extraction job kind: {kind}")
         except Exception as exc:

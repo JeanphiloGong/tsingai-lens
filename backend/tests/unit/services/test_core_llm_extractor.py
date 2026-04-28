@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.schemas import (
     StructuredExtractionBundle,
+    StructuredTableRowMentions,
     StructuredTextWindowMentions,
 )
 
@@ -189,10 +190,10 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_rows
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient("unused", parsed=StructuredExtractionBundle())
+    client = _FakeOpenAIClient("unused", parsed=StructuredTableRowMentions())
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    bundle = extractor.extract_table_row_bundle(
+    mentions = extractor.extract_table_row_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
@@ -201,57 +202,47 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_rows
         }
     )
 
-    assert bundle == StructuredExtractionBundle()
+    assert mentions == StructuredTableRowMentions()
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredExtractionBundle
+    assert parse_call["response_format"] is StructuredTableRowMentions
     assert parse_call["max_completion_tokens"] == 4096
 
 
-def test_core_llm_extractor_coerces_null_nested_table_row_fields_and_confidence():
+def test_core_llm_extractor_validates_lightweight_table_row_mentions():
     client = _FakeOpenAIClient(
         """
         {
-          "method_facts": [],
-          "sample_variants": [
+          "row_subjects": [
             {
               "variant_label": "Sample A",
-              "host_material_system": null,
+              "family": null,
               "composition": null,
               "variable_axis_type": null,
               "variable_value": null,
-              "process_context": null,
-              "confidence": null,
-              "epistemic_status": "normalized_from_evidence",
-              "source_kind": "table_row"
+              "quote": "Sample A"
             }
           ],
-          "test_conditions": [
+          "process_mentions": null,
+          "test_condition_mentions": [
             {
-              "property_type": "hardness",
-              "condition_payload": {
-                "method": null,
-                "methods": null,
-                "temperatures_c": null,
-                "durations": null,
-                "atmosphere": null
-              },
-              "confidence": 0.78,
-              "epistemic_status": "normalized_from_evidence"
+              "name": "test temperature",
+              "value_text": "25",
+              "unit": "C",
+              "quote": "25 C"
             }
           ],
-          "baseline_references": [],
-          "measurement_results": [
+          "baseline_mentions": [],
+          "result_claims": [
             {
-              "claim_text": "Hardness reached 210 HV.",
               "property_normalized": "hardness",
               "result_type": "scalar",
-              "value_payload": null,
+              "value_text": "210",
               "unit": "HV",
-              "variant_label": null,
+              "variant_label": "Sample A",
               "baseline_label": null,
-              "anchors": null,
               "claim_scope": "current work",
-              "confidence": null
+              "claim_text": "Hardness reached 210 HV.",
+              "quote": "210 HV"
             }
           ]
         }
@@ -259,7 +250,7 @@ def test_core_llm_extractor_coerces_null_nested_table_row_fields_and_confidence(
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    bundle = extractor.extract_table_row_bundle(
+    mentions = extractor.extract_table_row_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
@@ -268,45 +259,53 @@ def test_core_llm_extractor_coerces_null_nested_table_row_fields_and_confidence(
         }
     )
 
-    assert bundle.sample_variants[0].process_context.temperatures_c == []
+    assert mentions.row_subjects[0].variant_label == "Sample A"
+    assert mentions.process_mentions == []
+    assert mentions.test_condition_mentions[0].name == "test temperature"
+    assert mentions.result_claims[0].claim_scope == "current_work"
+
+
+def test_structured_bundle_defaults_null_backend_metadata():
+    bundle = StructuredExtractionBundle.model_validate(
+        {
+            "sample_variants": [
+                {
+                    "variant_label": "Sample A",
+                    "confidence": None,
+                    "epistemic_status": None,
+                }
+            ],
+            "measurement_results": [
+                {
+                    "claim_text": "Hardness reached 210 HV.",
+                    "property_normalized": "hardness",
+                    "result_type": "scalar",
+                    "confidence": None,
+                }
+            ],
+        }
+    )
+
     assert bundle.sample_variants[0].confidence == 0.85
-    assert bundle.test_conditions[0].condition_payload.methods == []
-    assert bundle.test_conditions[0].condition_payload.temperatures_c == []
-    assert bundle.test_conditions[0].condition_payload.durations == []
-    assert bundle.measurement_results[0].value_payload.value is None
-    assert bundle.measurement_results[0].anchors == []
-    assert bundle.measurement_results[0].claim_scope == "current_work"
+    assert bundle.sample_variants[0].epistemic_status == "normalized_from_evidence"
     assert bundle.measurement_results[0].confidence == 0.85
 
 
-def test_core_llm_extractor_drops_misplaced_table_row_nested_payloads():
+def test_core_llm_extractor_accepts_empty_table_row_mentions():
     client = _FakeOpenAIClient(
         """
         {
-          "method_payload": {
-            "temperatures_c": [],
-            "durations": [],
-            "atmosphere": null,
-            "methods": [],
-            "details": null
-          },
-          "process_context": {
-            "temperatures_c": [],
-            "durations": [],
-            "atmosphere": null,
-            "post_treatment_summary": null
-          },
-          "method_facts": [],
-          "sample_variants": [],
-          "test_conditions": [],
-          "baseline_references": [],
-          "measurement_results": []
+          "row_subjects": [],
+          "process_mentions": [],
+          "test_condition_mentions": [],
+          "baseline_mentions": [],
+          "result_claims": []
         }
         """
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    bundle = extractor.extract_table_row_bundle(
+    mentions = extractor.extract_table_row_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
@@ -315,7 +314,7 @@ def test_core_llm_extractor_drops_misplaced_table_row_nested_payloads():
         }
     )
 
-    assert bundle == StructuredExtractionBundle()
+    assert mentions == StructuredTableRowMentions()
 
 
 def test_core_llm_extractor_still_rejects_unknown_table_row_extra_keys():
@@ -323,18 +322,18 @@ def test_core_llm_extractor_still_rejects_unknown_table_row_extra_keys():
         """
         {
           "keywords": ["yield strength"],
-          "method_facts": [],
-          "sample_variants": [],
-          "test_conditions": [],
-          "baseline_references": [],
-          "measurement_results": []
+          "row_subjects": [],
+          "process_mentions": [],
+          "test_condition_mentions": [],
+          "baseline_mentions": [],
+          "result_claims": []
         }
         """
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
     with pytest.raises(ValidationError) as exc_info:
-        extractor.extract_table_row_bundle(
+        extractor.extract_table_row_mentions(
             {
                 "document_title": "LPBF Paper",
                 "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},

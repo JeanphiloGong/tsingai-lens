@@ -86,6 +86,15 @@ class _StrictModel(BaseModel):
             return value
         return cls.model_fields["confidence"].get_default(call_default_factory=True)
 
+    @field_validator("epistemic_status", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_default_epistemic_status(cls, value: object) -> object:
+        if value is not None:
+            return value
+        return cls.model_fields["epistemic_status"].get_default(
+            call_default_factory=True
+        )
+
 
 class MaterialSystemPayload(_StrictModel):
     family: str | None = None
@@ -459,6 +468,68 @@ class StructuredTextWindowMentions(_StrictModel):
         "material_mentions",
         "variant_mentions",
         "condition_mentions",
+        "baseline_mentions",
+        "result_claims",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class TableRowSubjectMentionPayload(_StrictModel):
+    variant_label: str
+    family: str | None = None
+    composition: str | None = None
+    variable_axis_type: str | None = None
+    variable_value: str | int | float | None = None
+    quote: str | None = None
+
+
+class TableRowFactMentionPayload(_StrictModel):
+    name: str
+    value_text: str | int | float | None = None
+    unit: str | None = None
+    quote: str | None = None
+
+
+class TableRowBaselineMentionPayload(_StrictModel):
+    baseline_label: str
+    quote: str | None = None
+
+
+class TableRowResultClaimPayload(_StrictModel):
+    property_normalized: str
+    result_type: str = "scalar"
+    value_text: str | int | float | None = None
+    unit: str | None = None
+    variant_label: str | None = None
+    baseline_label: str | None = None
+    claim_scope: ClaimScope = "current_work"
+    claim_text: str | None = None
+    quote: str | None = None
+
+    @field_validator("claim_scope", mode="before")
+    @classmethod
+    def _normalize_claim_scope(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_CLAIM_SCOPES,
+            default="unclear",
+        )
+
+
+class StructuredTableRowMentions(_StrictModel):
+    row_subjects: list[TableRowSubjectMentionPayload] = Field(default_factory=list)
+    process_mentions: list[TableRowFactMentionPayload] = Field(default_factory=list)
+    test_condition_mentions: list[TableRowFactMentionPayload] = Field(default_factory=list)
+    baseline_mentions: list[TableRowBaselineMentionPayload] = Field(default_factory=list)
+    result_claims: list[TableRowResultClaimPayload] = Field(default_factory=list)
+
+    @field_validator(
+        "row_subjects",
+        "process_mentions",
+        "test_condition_mentions",
         "baseline_mentions",
         "result_claims",
         mode="before",

@@ -20,7 +20,7 @@
 	let model: DocumentWorkbenchModel | null = null;
 	let loading = false;
 	let loadedKey = '';
-	let activeTab: WorkbenchTab = 'summary';
+	let activeTab: WorkbenchTab = 'overview';
 	let selectedItemId = '';
 	let selectedSourceSpanId = '';
 	let selectedGraphNodeId = '';
@@ -233,8 +233,8 @@
 		</label>
 
 		<div class="top-actions">
-			<button type="button" on:click={() => openTab('summary')}
-				>{$t('workbench.actionSummary')}</button
+			<button type="button" on:click={() => openTab('overview')}
+				>{$t('workbench.actionOverview')}</button
 			>
 			<button type="button" on:click={() => openTab('evidence')}
 				>{$t('workbench.actionEvidence')}</button

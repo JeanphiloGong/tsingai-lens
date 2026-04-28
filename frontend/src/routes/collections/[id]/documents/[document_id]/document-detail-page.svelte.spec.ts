@@ -282,10 +282,15 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText('Lens')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('tab', { name: 'Summary' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('tab', { name: 'Methods' })).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('tab', { name: 'Q&A' })).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Graph').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Method overview' }).first())
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();

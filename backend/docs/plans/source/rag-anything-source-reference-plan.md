@@ -169,7 +169,8 @@ Do not introduce LightRAG storage, graph construction, or query modes as part
 of the Source runtime.
 
 Do not keep MinerU, Docling, and PaddleOCR as parallel production parser
-branches without a measured and approved reason.
+branches without a measured and approved reason. MinerU may be installed only
+to make the offline benchmark route reproducible.
 
 Do not let Source-generated image, table, or equation descriptions become
 research facts.
@@ -196,9 +197,9 @@ Minimum first matrix:
 - Docling active path
 - MinerU automatic parsing
 
-Do not add MinerU to the backend dependency set or active runtime as part of
-this benchmark freeze. Treat the MinerU run as an isolated measurement until a
-separate implementation decision is approved.
+Keep MinerU out of the active Source runtime as part of this benchmark freeze.
+Treat the MinerU run as an isolated measurement until a separate production
+parser decision is approved.
 
 Verification:
 

@@ -221,5 +221,6 @@ data/collections/*/import_manifest.json
 data/collections/*/artifacts.json
 data/collections/*/input/
 data/collections/*/output/
+data/traces/
 
 data/vector_store/

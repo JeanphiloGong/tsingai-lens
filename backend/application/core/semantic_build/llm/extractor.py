@@ -121,7 +121,7 @@ class CoreLLMStructuredExtractor:
             )
             raise
         elapsed_s = perf_counter() - started_at
-        logger.info(
+        logger.debug(
             "Core LLM extraction finished mode=%s model=%s response_model=%s elapsed_s=%.3f validated=true",
             self.extraction_mode,
             self.model,

@@ -18,6 +18,9 @@ path assumptions or a fixed `backend/.env` location.
 - `paper_facts_collection_benchmark.py`
   Collection-level extraction cost benchmark with window-pruning and
   table-row accounting
+- `source_parser_benchmark.py`
+  Offline Source parser benchmark for the active Docling path and optional
+  MinerU CLI comparison without changing production parser behavior
 - `_common.py`
   Shared runtime resolution, env-file precedence, JSON summary helpers, and
   response-text utilities used by the benchmark entrypoints
@@ -28,8 +31,9 @@ Scripts in this directory should follow these rules:
 
 - do not assume the caller's working directory
 - do not assume a sibling `../backend` path
-- accept explicit overrides for `--backend-root`, `--env-file`, `--base-url`,
-  `--model`, and `--api-key`
+- accept explicit overrides for `--backend-root`
+- LLM-backed scripts should also accept explicit overrides for `--env-file`,
+  `--base-url`, `--model`, and `--api-key`
 - prefer CLI arguments over environment variables, and environment variables
   over optional env-file loading
 - write machine-readable JSON summaries so before/after runs can be compared
@@ -58,6 +62,7 @@ cd backend
 python scripts/benchmarks/llm_connectivity_probe.py --help
 python scripts/benchmarks/text_window_probe.py --help
 python scripts/benchmarks/paper_facts_collection_benchmark.py --help
+python scripts/benchmarks/source_parser_benchmark.py --help
 ```
 
 ## Boundary

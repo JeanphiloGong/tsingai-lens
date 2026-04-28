@@ -243,7 +243,27 @@ Primary concerns:
 - mapping discipline is still required so Source does not absorb parser-native
   abstractions into its public contract
 
-### Route B: PyMuPDF-First
+### Route B: MinerU Comparison
+
+Why it is worth comparing:
+
+- RAG-Anything treats MinerU as a first-class document parser
+- it is designed for high-fidelity document structure extraction across
+  complex layouts
+- it may improve figure, table, equation-like, and multimodal element recovery
+  compared with the active Docling path on some scientific PDFs
+
+Primary concerns:
+
+- dependency and model-download cost
+- possible GPU or platform-specific runtime expectations
+- mapping cost from MinerU output into the fixed Lens Source artifact contract
+- risk of accidentally adding a production multi-parser compatibility layer
+
+MinerU should therefore be evaluated as an isolated benchmark route, not as a
+second production parser path.
+
+### Route C: PyMuPDF-First
 
 Why it is a top candidate:
 
@@ -257,7 +277,7 @@ Primary concerns:
 - more in-house logic is required for heading, section, and table structure
 - table extraction quality may need more custom work than Docling
 
-### Route C: GROBID
+### Route D: GROBID
 
 Why it remains worth evaluating:
 
@@ -273,7 +293,7 @@ Primary concerns:
 
 ### Second-Tier Candidates
 
-These can be tested only if the first three fail to meet the contract-quality
+These can be tested only if the first four fail to meet the contract-quality
 bar:
 
 - `pdfplumber`
@@ -286,14 +306,17 @@ These should not be the first wave unless a concrete blocker appears.
 
 The recommended evaluation order is:
 
-1. Docling-first spike
-2. PyMuPDF-first spike
-3. GROBID control comparison
+1. Docling-first baseline or active-path measurement
+2. MinerU comparison spike
+3. PyMuPDF-first fallback spike
+4. GROBID control comparison if scholarly structure remains unresolved
 
 This is the best ordering for the current repository because:
 
 - the product now depends heavily on section and table quality
 - the active corpus is born-digital and layout-sensitive
+- RAG-Anything's MinerU use is relevant enough to measure, but not enough to
+  justify production adoption without Lens-specific evidence
 - the team does not currently need OCR or scanned-PDF handling
 - Source contract mapping discipline matters more than generic extraction
   breadth
@@ -318,6 +341,7 @@ ownership explicit.
 ### Wave B: Candidate Spikes
 
 - build one isolated parsing spike for Docling
+- build one isolated MinerU comparison spike
 - build one isolated parsing spike for PyMuPDF
 - optionally build one narrower GROBID comparison spike
 - do not cut over the active pipeline in this wave

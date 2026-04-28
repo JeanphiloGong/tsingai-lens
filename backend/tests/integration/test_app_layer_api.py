@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,6 +36,19 @@ class DummyWorkflowOutput:
     def __init__(self, workflow: str = "build", errors: list[str] | None = None):
         self.workflow = workflow
         self.errors = errors
+
+
+def _wait_for_task_terminal(app_client, task_id: str, timeout_s: float = 5.0) -> dict:  # noqa: ANN001
+    deadline = time.monotonic() + timeout_s
+    last_body: dict | None = None
+    while time.monotonic() < deadline:
+        response = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
+        assert response.status_code == 200
+        last_body = response.json()
+        if last_body["status"] in {"completed", "partial_success", "failed"}:
+            return last_body
+        time.sleep(0.02)
+    raise AssertionError(f"task {task_id} did not finish before timeout: {last_body}")
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -100,6 +115,26 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
     pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "table_id": "tbl-1",
+                "document_id": "paper-1",
+                "table_order": 0,
+                "caption_text": "Processing summary",
+                "caption_block_id": None,
+                "page": None,
+                "bbox": None,
+                "heading_path": ["Experimental Section"],
+                "row_count": 1,
+                "col_count": 2,
+                "column_headers": ["condition", "result"],
+                "table_markdown": "| condition | result |\n| --- | --- |\n| annealed | 97 MPa |",
+                "table_text": "condition: annealed; result: 97 MPa",
+                "metadata": {},
+            }
+        ]
+    ).to_parquet(output_dir / "tables.parquet", index=False)
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
@@ -319,6 +354,8 @@ def _create_built_collection(app_client, name: str = "Composite Set") -> tuple[s
     task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
     assert task_resp.status_code == 200
     task_id = task_resp.json()["task_id"]
+    final_task = _wait_for_task_terminal(app_client, task_id)
+    assert final_task["status"] == "completed"
     return collection_id, task_id
 
 
@@ -362,22 +399,26 @@ def test_request_id_is_echoed_and_propagated_to_background_build(app_client, mon
 
     assert task_resp.status_code == 200
     assert task_resp.headers[REQUEST_ID_HEADER] == request_id
+    final_task = _wait_for_task_terminal(app_client, task_resp.json()["task_id"])
+    assert final_task["status"] == "completed"
     assert captured["bound_request_id"] == request_id
 
 
-def test_build_task_route_uses_blocking_background_entry(app_client, monkeypatch):
+def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, monkeypatch):
     from controllers.source import tasks as tasks_controller
 
     captured: dict[str, object] = {}
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
 
     def fake_run_build_task_blocking(*args, **kwargs):  # noqa: ANN002, ANN003
         captured["args"] = args
         captured["kwargs"] = kwargs
-        return {
-            "task_id": args[0],
-            "collection_id": args[1],
-            "status": "queued",
-        }
+        started.set()
+        release.wait(timeout=5)
+        finished.set()
+        return {"task_id": args[0], "collection_id": args[1], "status": "queued"}
 
     def fail_run_build_task(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("async build entry should not be scheduled directly")
@@ -403,10 +444,16 @@ def test_build_task_route_uses_blocking_background_entry(app_client, monkeypatch
     )
     assert upload_resp.status_code == 200
 
-    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
+    try:
+        task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
 
-    assert task_resp.status_code == 200
-    assert captured["args"][1] == collection_id
+        assert task_resp.status_code == 200
+        assert started.wait(timeout=2)
+        assert captured["args"][1] == collection_id
+        assert not finished.is_set()
+    finally:
+        release.set()
+        finished.wait(timeout=2)
 
 
 def test_legacy_index_task_route_is_not_registered(app_client):
@@ -619,7 +666,7 @@ def test_collection_task_flow(app_client):
     assert body["structure_features_generated"] is True
     assert body["structure_features_ready"] is False
     assert body["test_conditions_generated"] is True
-    assert body["test_conditions_ready"] is False
+    assert body["test_conditions_ready"] is True
     assert body["baseline_references_generated"] is True
     assert body["baseline_references_ready"] is True
     assert body["sample_variants_generated"] is True
@@ -1416,10 +1463,9 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert task_resp.status_code == 200
 
     task_id = task_resp.json()["task_id"]
-    task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
-    assert task_status.status_code == 200
-    assert task_status.json()["task_type"] == "build"
-    assert task_status.json()["status"] == "completed"
+    task_status = _wait_for_task_terminal(app_client, task_id)
+    assert task_status["task_type"] == "build"
+    assert task_status["status"] == "completed"
 
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
     assert "is_update_run" not in captured

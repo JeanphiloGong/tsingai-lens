@@ -51,3 +51,6 @@ python3 ../scripts/check_docs_governance.py
   `/api/v1/*` for business APIs.
 - Collection artifact readiness should be checked before calling graph or
   protocol endpoints from clients.
+- Collection build tasks run in a dedicated single-worker thread inside the
+  backend process. The task creation request returns after queueing, and
+  clients should poll `GET /api/v1/tasks/{task_id}` for progress.

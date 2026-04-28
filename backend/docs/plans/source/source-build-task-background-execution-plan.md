@@ -109,8 +109,11 @@ The real build chain must run outside the main request event loop.
 
 The minimum acceptable implementation for the current single-node backend is:
 
-- schedule a synchronous background entrypoint
-- run the full build chain in a worker thread or equivalent isolated executor
+- submit the synchronous background entrypoint to a dedicated Source build
+  executor
+- run the full build chain in that worker thread
+- keep only one build active per backend process, leaving additional build
+  tasks queued in task state until the worker is available
 - keep task-state updates in `TaskService` as the observable progress contract
 
 This plan intentionally chooses the smallest isolated runtime that fits the
@@ -119,6 +122,7 @@ current repository:
 - no new queue infrastructure
 - no new deployment dependency
 - no compatibility layer between the route and the real runner
+- no reliance on FastAPI `BackgroundTasks` for the long-running build itself
 
 #### 4. Task status polling stays the primary progress surface
 
@@ -163,7 +167,8 @@ The smallest correct fix is therefore:
 
 - keep the current build-task API contract
 - keep the current task registry model
-- move the long-running execution off the main request loop
+- move the long-running execution off the main request loop and out of
+  Starlette's request background callback
 
 Anything larger should be deferred until the repository actually needs:
 

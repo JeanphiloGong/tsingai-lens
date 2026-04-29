@@ -33,7 +33,7 @@ from .llm.schemas import (
     ProcessContextPayload,
     SampleVariantPayload,
     StructuredExtractionBundle,
-    StructuredTableRowMentions,
+    StructuredTableBatchRowMentions,
     StructuredTextWindowMentions,
     TestConditionPayloadModel,
     TestContextPayload,
@@ -68,7 +68,6 @@ from domain.shared.enums import (
     EPISTEMIC_DIRECTLY_OBSERVED,
     EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
     EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
-    EPISTEMIC_UNRESOLVED,
     TRACEABILITY_STATUS_DIRECT,
     TRACEABILITY_STATUS_MISSING,
 )
@@ -128,6 +127,7 @@ _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _MAX_SUPPORTING_TEXT_WINDOWS = 3
 _MAX_TABLE_ROW_SUPPORTING_TEXT_CHARS = 1200
 _MAX_TABLE_CONTEXT_CHARS = 6000
+_TABLE_ROWS_PER_EXTRACTION_BATCH = 5
 _MAX_TEXT_WINDOWS_PER_DOCUMENT = 24
 _INTRODUCTION_WINDOW_LIMIT = 1
 _CHARACTERIZATION_COLUMNS = [
@@ -608,6 +608,7 @@ class PaperFactsService:
         total_extraction_units = 0
         selected_text_windows_by_doc: dict[str, list[dict[str, Any]]] = {}
         selected_table_rows_by_doc: dict[str, list[dict[str, Any]]] = {}
+        selected_table_row_batches_by_doc: dict[str, list[list[dict[str, Any]]]] = {}
         for _, candidate_row in document_records.iterrows():
             candidate_document_id = str(candidate_row.get("paper_id") or "")
             candidate_profile = profile_by_doc.get(candidate_document_id)
@@ -630,9 +631,15 @@ class PaperFactsService:
                     table_rows=candidate_table_rows,
                     grouped_row_cells=grouped_row_cells,
                 )
+            selected_table_row_batches = self._batch_table_rows_for_extraction(
+                selected_table_rows
+            )
             selected_text_windows_by_doc[candidate_document_id] = selected_text_windows
             selected_table_rows_by_doc[candidate_document_id] = selected_table_rows
-            total_extraction_units += len(selected_text_windows) + len(selected_table_rows)
+            selected_table_row_batches_by_doc[candidate_document_id] = (
+                selected_table_row_batches
+            )
+            total_extraction_units += len(selected_text_windows) + len(selected_table_row_batches)
         completed_extraction_units = 0
         logger.info(
             "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_count=%s table_row_count=%s table_cell_count=%s total_extraction_units=%s",
@@ -681,13 +688,14 @@ class PaperFactsService:
             doc_text_windows = selected_text_windows_by_doc.get(document_id, [])
             raw_doc_table_rows = table_rows_by_doc.get(document_id, [])
             doc_table_rows = selected_table_rows_by_doc.get(document_id, [])
+            doc_table_row_batches = selected_table_row_batches_by_doc.get(document_id, [])
             doc_tables_by_id = self._group_tables_by_id(tables_by_doc.get(document_id, []))
             grouped_row_cells = self._group_table_cells_by_row(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
-            document_total_units = len(doc_text_windows) + len(doc_table_rows)
+            document_total_units = len(doc_text_windows) + len(doc_table_row_batches)
             document_completed_units = 0
             logger.info(
-                "Paper facts extraction document started collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s text_window_count=%s raw_text_window_count=%s table_row_count=%s raw_table_row_count=%s doc_type=%s completed_units=%s total_units=%s remaining_units=%s document_total_units=%s",
+                "Paper facts extraction document started collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s text_window_count=%s raw_text_window_count=%s table_batch_count=%s table_row_count=%s raw_table_row_count=%s doc_type=%s completed_units=%s total_units=%s remaining_units=%s document_total_units=%s",
                 collection_id,
                 document_id,
                 document_position,
@@ -695,6 +703,7 @@ class PaperFactsService:
                 total_documents - document_position,
                 len(doc_text_windows),
                 len(all_doc_text_windows),
+                len(doc_table_row_batches),
                 len(doc_table_rows),
                 len(raw_doc_table_rows),
                 profile.get("doc_type"),
@@ -819,45 +828,60 @@ class PaperFactsService:
                     max(document_total_units - document_completed_units, 0),
                 )
 
-            table_row_jobs = []
-            for row in doc_table_rows:
-                table_id = str(row.get("table_id") or "")
-                row_index = self._safe_int(row.get("row_index"))
-                row_cells = grouped_row_cells.get((table_id, row_index), [])
+            table_batch_jobs = []
+            for batch_rows in doc_table_row_batches:
+                if not batch_rows:
+                    continue
+                first_row = batch_rows[0]
+                table_id = str(first_row.get("table_id") or "")
                 table_context = doc_tables_by_id.get(table_id)
-                table_row_jobs.append(
+                row_cells_by_index = {
+                    self._safe_int(row.get("row_index")): grouped_row_cells.get(
+                        (table_id, self._safe_int(row.get("row_index"))),
+                        [],
+                    )
+                    for row in batch_rows
+                }
+                table_batch_jobs.append(
                     {
-                        "row": row,
-                        "row_cells": row_cells,
+                        "rows": batch_rows,
+                        "row_cells_by_index": row_cells_by_index,
+                        "table_id": table_id,
                         "table_context": table_context,
-                        "payload": self._build_table_row_extraction_payload(
+                        "payload": self._build_table_batch_extraction_payload(
                             title=title,
                             source_filename=source_filename,
                             profile=profile,
                             table_context=table_context,
-                            table_row=row,
-                            row_cells=row_cells,
+                            table_rows=batch_rows,
+                            row_cells_by_index=row_cells_by_index,
                             text_windows=all_doc_text_windows,
                         ),
                     }
                 )
-            for table_row_position, job in enumerate(table_row_jobs, start=1):
-                row = job["row"]
-                table_id = str(row.get("table_id") or "")
-                row_index = self._safe_int(row.get("row_index"))
-                row_cells = job["row_cells"]
+            for table_batch_position, job in enumerate(table_batch_jobs, start=1):
+                rows = job["rows"]
+                table_id = job["table_id"]
+                row_indices = [
+                    self._safe_int(row.get("row_index"))
+                    for row in rows
+                ]
+                cell_count = sum(
+                    len(job["row_cells_by_index"].get(row_index, []))
+                    for row_index in row_indices
+                )
                 logger.info(
-                    "Paper facts table-row extraction started collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s cell_count=%s heading_path=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+                    "Paper facts table-batch extraction started collection_id=%s document_id=%s document_position=%s document_count=%s batch_position=%s table_batch_count=%s table_id=%s row_indices=%s row_count=%s cell_count=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                     collection_id,
                     document_id,
                     document_position,
                     total_documents,
-                    table_row_position,
-                    len(doc_table_rows),
+                    table_batch_position,
+                    len(table_batch_jobs),
                     table_id,
-                    row_index,
-                    len(row_cells),
-                    self._normalize_scalar_text(row.get("heading_path")),
+                    row_indices,
+                    len(rows),
+                    cell_count,
                     completed_extraction_units,
                     total_extraction_units,
                     max(total_extraction_units - completed_extraction_units, 0),
@@ -865,77 +889,104 @@ class PaperFactsService:
                     document_total_units,
                     max(document_total_units - document_completed_units, 0),
                 )
-            table_row_results = self._execute_extraction_jobs(
+            table_batch_results = self._execute_extraction_jobs(
                 extractor=extractor,
-                jobs=table_row_jobs,
-                kind="table_row",
+                jobs=table_batch_jobs,
+                kind="table_batch",
                 max_extraction_concurrency=max_extraction_concurrency,
             )
-            for table_row_position, (job, result) in enumerate(
-                zip(table_row_jobs, table_row_results, strict=False),
+            for table_batch_position, (job, result) in enumerate(
+                zip(table_batch_jobs, table_batch_results, strict=False),
                 start=1,
             ):
-                row = job["row"]
-                row_cells = job["row_cells"]
-                table_id = str(row.get("table_id") or "")
-                row_index = self._safe_int(row.get("row_index"))
+                rows = job["rows"]
+                table_id = job["table_id"]
+                row_by_index = {
+                    self._safe_int(row.get("row_index")): row
+                    for row in rows
+                }
+                row_indices = list(row_by_index)
                 if result["error"] is not None:
                     logger.error(
-                        "Paper facts table-row extraction failed collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s",
+                        "Paper facts table-batch extraction failed collection_id=%s document_id=%s batch_position=%s table_batch_count=%s table_id=%s row_indices=%s elapsed_s=%.3f elapsed_ms=%s",
                         collection_id,
                         document_id,
-                        table_row_position,
-                        len(doc_table_rows),
+                        table_batch_position,
+                        len(table_batch_jobs),
                         table_id,
-                        row_index,
+                        row_indices,
                         result["elapsed_s"],
                         round(result["elapsed_s"] * 1000),
                     )
                     raise result["error"]
                 mentions = result["parsed"]
-                bundle = self._bind_table_row_mentions_to_bundle(
-                    mentions=mentions,
-                    table_row=row,
-                    row_cells=row_cells,
-                    table_context=job["table_context"],
-                )
-                table_row_elapsed_s = result["elapsed_s"]
-                table_row_elapsed_ms = round(table_row_elapsed_s * 1000)
-                self._materialize_bundle(
-                    bundle=bundle,
-                    collection_id=collection_id,
-                    document_id=document_id,
-                    text_window=None,
-                    table_id=table_id,
-                    row_index=row_index,
-                    evidence_anchor_rows=evidence_anchor_rows,
-                    method_fact_rows=method_fact_rows,
-                    sample_variant_rows=sample_variant_rows,
-                    test_condition_rows=test_condition_rows,
-                    baseline_rows=baseline_rows,
-                    measurement_rows=measurement_rows,
-                    document_state=document_state,
-                )
+                table_batch_elapsed_s = result["elapsed_s"]
+                table_batch_elapsed_ms = round(table_batch_elapsed_s * 1000)
+                batch_method_count = 0
+                batch_variant_count = 0
+                batch_condition_count = 0
+                batch_baseline_count = 0
+                batch_measurement_count = 0
+                for row_mentions in mentions.row_results:
+                    row_index = self._safe_int(row_mentions.row_index)
+                    row = row_by_index.get(row_index)
+                    if row is None:
+                        logger.warning(
+                            "Paper facts table-batch extraction returned unknown row_index collection_id=%s document_id=%s table_id=%s row_index=%s target_row_indices=%s",
+                            collection_id,
+                            document_id,
+                            table_id,
+                            row_index,
+                            row_indices,
+                        )
+                        continue
+                    row_cells = job["row_cells_by_index"].get(row_index, [])
+                    bundle = self._bind_table_row_mentions_to_bundle(
+                        mentions=row_mentions,
+                        table_row=row,
+                        row_cells=row_cells,
+                        table_context=job["table_context"],
+                    )
+                    self._materialize_bundle(
+                        bundle=bundle,
+                        collection_id=collection_id,
+                        document_id=document_id,
+                        text_window=None,
+                        table_id=table_id,
+                        row_index=row_index,
+                        evidence_anchor_rows=evidence_anchor_rows,
+                        method_fact_rows=method_fact_rows,
+                        sample_variant_rows=sample_variant_rows,
+                        test_condition_rows=test_condition_rows,
+                        baseline_rows=baseline_rows,
+                        measurement_rows=measurement_rows,
+                        document_state=document_state,
+                    )
+                    batch_method_count += len(bundle.method_facts)
+                    batch_variant_count += len(bundle.sample_variants)
+                    batch_condition_count += len(bundle.test_conditions)
+                    batch_baseline_count += len(bundle.baseline_references)
+                    batch_measurement_count += len(bundle.measurement_results)
                 completed_extraction_units += 1
                 document_completed_units += 1
                 logger.info(
-                    "Paper facts table-row extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+                    "Paper facts table-batch extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s batch_position=%s table_batch_count=%s table_id=%s row_indices=%s rows_returned=%s elapsed_s=%.3f elapsed_ms=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                     collection_id,
                     document_id,
                     document_position,
                     total_documents,
-                    table_row_position,
-                    len(doc_table_rows),
+                    table_batch_position,
+                    len(table_batch_jobs),
                     table_id,
-                    row_index,
-                    table_row_elapsed_s,
-                    table_row_elapsed_ms,
-                    len(row_cells),
-                    len(bundle.method_facts),
-                    len(bundle.sample_variants),
-                    len(bundle.test_conditions),
-                    len(bundle.baseline_references),
-                    len(bundle.measurement_results),
+                    row_indices,
+                    len(mentions.row_results),
+                    table_batch_elapsed_s,
+                    table_batch_elapsed_ms,
+                    batch_method_count,
+                    batch_variant_count,
+                    batch_condition_count,
+                    batch_baseline_count,
+                    batch_measurement_count,
                     completed_extraction_units,
                     total_extraction_units,
                     max(total_extraction_units - completed_extraction_units, 0),
@@ -1210,21 +1261,22 @@ class PaperFactsService:
             },
         }
 
-    def _build_table_row_extraction_payload(
+    def _build_table_batch_extraction_payload(
         self,
         *,
         title: str,
         source_filename: str | None,
         profile: dict[str, Any],
         table_context: dict[str, Any] | None,
-        table_row: dict[str, Any],
-        row_cells: list[dict[str, Any]],
+        table_rows: list[dict[str, Any]],
+        row_cells_by_index: dict[int | None, list[dict[str, Any]]],
         text_windows: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        supporting_text_windows = self._select_supporting_text_windows(
+        supporting_text_windows = self._select_batch_supporting_text_windows(
             text_windows=text_windows,
-            table_row=table_row,
+            table_rows=table_rows,
         )
+        first_row = table_rows[0] if table_rows else {}
         return {
             "document_title": title,
             "source_filename": source_filename,
@@ -1234,23 +1286,15 @@ class PaperFactsService:
             },
             "table_context": self._build_table_context_payload(
                 table_context=table_context,
-                table_row=table_row,
+                table_row=first_row,
             ),
-            "table_row": {
-                "row_summary": self._normalize_scalar_text(table_row.get("row_text"))
-                or self._build_table_row_summary(row_cells),
-                "cells": [
-                    {
-                        "header_path": self._normalize_scalar_text(cell.get("header_path")),
-                        "cell_text": self._normalize_scalar_text(cell.get("cell_text")),
-                        "unit_hint": self._normalize_scalar_text(cell.get("unit_hint")),
-                    }
-                    for cell in sorted(
-                        row_cells,
-                        key=lambda item: self._safe_int(item.get("col_index")) or 0,
-                    )
-                ],
-            },
+            "target_rows": [
+                self._build_table_batch_target_row_payload(
+                    table_row=row,
+                    row_cells=row_cells_by_index.get(self._safe_int(row.get("row_index")), []),
+                )
+                for row in table_rows
+            ],
             "supporting_text_windows": [
                 {
                     "heading": self._normalize_scalar_text(window.get("heading")),
@@ -1261,6 +1305,29 @@ class PaperFactsService:
                     "page": self._safe_int(window.get("page")),
                 }
                 for window in supporting_text_windows
+            ],
+        }
+
+    def _build_table_batch_target_row_payload(
+        self,
+        *,
+        table_row: dict[str, Any],
+        row_cells: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "row_index": self._safe_int(table_row.get("row_index")),
+            "row_summary": self._normalize_scalar_text(table_row.get("row_text"))
+            or self._build_table_row_summary(row_cells),
+            "cells": [
+                {
+                    "header_path": self._normalize_scalar_text(cell.get("header_path")),
+                    "cell_text": self._normalize_scalar_text(cell.get("cell_text")),
+                    "unit_hint": self._normalize_scalar_text(cell.get("unit_hint")),
+                }
+                for cell in sorted(
+                    row_cells,
+                    key=lambda item: self._safe_int(item.get("col_index")) or 0,
+                )
             ],
         }
 
@@ -1313,7 +1380,7 @@ class PaperFactsService:
     def _bind_table_row_mentions_to_bundle(
         self,
         *,
-        mentions: StructuredTableRowMentions,
+        mentions: StructuredTableBatchRowMentions,
         table_row: dict[str, Any],
         row_cells: list[dict[str, Any]],
         table_context: dict[str, Any] | None,
@@ -1408,7 +1475,7 @@ class PaperFactsService:
     def _build_table_row_sample_variants(
         self,
         *,
-        mentions: StructuredTableRowMentions,
+        mentions: StructuredTableBatchRowMentions,
         process_context: ProcessContextPayload,
         result_claims: list[Any],
         table_row: dict[str, Any],
@@ -1482,7 +1549,7 @@ class PaperFactsService:
     def _build_table_row_baseline_references(
         self,
         *,
-        mentions: StructuredTableRowMentions,
+        mentions: StructuredTableBatchRowMentions,
         result_claims: list[Any],
     ) -> list[BaselineReferencePayload]:
         rows: list[BaselineReferencePayload] = []
@@ -1505,7 +1572,7 @@ class PaperFactsService:
     def _build_table_row_test_conditions(
         self,
         *,
-        mentions: StructuredTableRowMentions,
+        mentions: StructuredTableBatchRowMentions,
         result_claims: list[Any],
     ) -> list[ExtractedTestConditionPayload]:
         condition_payload = self._build_table_row_test_condition_payload(
@@ -3148,6 +3215,32 @@ class PaperFactsService:
         ]
         return selected[:_MAX_SUPPORTING_TEXT_WINDOWS]
 
+    def _select_batch_supporting_text_windows(
+        self,
+        *,
+        text_windows: list[dict[str, Any]],
+        table_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        seen: set[tuple[str | None, str | None, int | None]] = set()
+        selected: list[dict[str, Any]] = []
+        for row in table_rows:
+            for window in self._select_supporting_text_windows(
+                text_windows=text_windows,
+                table_row=row,
+            ):
+                key = (
+                    self._normalize_scalar_text(window.get("heading_path")),
+                    self._normalize_scalar_text(window.get("text")),
+                    self._safe_int(window.get("page")),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                selected.append(window)
+                if len(selected) >= _MAX_SUPPORTING_TEXT_WINDOWS:
+                    return selected
+        return selected
+
     def _select_text_windows_for_extraction(
         self,
         *,
@@ -3215,6 +3308,30 @@ class PaperFactsService:
             if self._should_extract_table_row(row=row, row_cells=row_cells):
                 selected.append(row)
         return selected
+
+    def _batch_table_rows_for_extraction(
+        self,
+        table_rows: list[dict[str, Any]],
+    ) -> list[list[dict[str, Any]]]:
+        batches: list[list[dict[str, Any]]] = []
+        current_table_id: str | None = None
+        current_batch: list[dict[str, Any]] = []
+        for row in table_rows:
+            table_id = str(row.get("table_id") or "")
+            if (
+                current_batch
+                and (
+                    table_id != current_table_id
+                    or len(current_batch) >= _TABLE_ROWS_PER_EXTRACTION_BATCH
+                )
+            ):
+                batches.append(current_batch)
+                current_batch = []
+            current_table_id = table_id
+            current_batch.append(row)
+        if current_batch:
+            batches.append(current_batch)
+        return batches
 
     def _score_text_window_for_extraction(
         self,
@@ -3357,8 +3474,8 @@ class PaperFactsService:
         try:
             if kind == "text_window":
                 parsed = extractor.extract_text_window_mentions(job["payload"])
-            elif kind == "table_row":
-                parsed = extractor.extract_table_row_mentions(job["payload"])
+            elif kind == "table_batch":
+                parsed = extractor.extract_table_batch_mentions(job["payload"])
             else:
                 raise ValueError(f"unsupported extraction job kind: {kind}")
         except Exception as exc:

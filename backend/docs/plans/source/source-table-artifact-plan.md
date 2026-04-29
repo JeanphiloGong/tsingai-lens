@@ -51,9 +51,10 @@ The active Source runtime already emits structured table evidence:
 - `table_rows.parquet` carries row-level evidence with `row_text`,
   `heading_path`, page, and row bounding boxes.
 
-Core currently builds table extraction payloads from the selected row and its
-cells. The prompt asks the model to extract facts from one table row and to use
-supporting text windows only when needed.
+Core currently builds table extraction payloads from selected row batches, row
+cells, and the matching complete table context. The prompt asks the model to
+extract facts for target rows while using supporting text windows only when
+needed.
 
 This keeps extraction anchored, but it loses important table context:
 
@@ -154,8 +155,8 @@ Target payload shape:
 }
 ```
 
-The extraction prompt should change from "this one table row" to "this target
-row using table context".
+The extraction prompt should keep the target-row boundary, but pass several
+target rows in one batch using shared table context.
 
 The model should be told:
 
@@ -186,7 +187,7 @@ The first implementation should be deliberately narrow:
 - add `tables.parquet` for the active Docling PDF path
 - keep `table_rows.parquet` and `table_cells.parquet` unchanged
 - expose `tables.parquet` through the Source artifact loader
-- pass table context into Core table-row extraction
+- pass table context into Core table-batch extraction
 - keep the extraction unit as the selected target row
 
 The first implementation should not:
@@ -228,7 +229,7 @@ Update `backend/application/core/semantic_build/paper_facts_service.py`:
 
 - load `tables.parquet`
 - group table records by `table_id`
-- pass the matching table record into table-row extraction payload building
+- pass the matching table record into table-batch extraction payload building
 - keep target row selection and evidence binding unchanged
 
 Update `backend/application/core/semantic_build/llm/prompts.py`:
@@ -313,7 +314,7 @@ Verification:
 ### 4. Add Table Context To Core Extraction
 
 Update `PaperFactsService` so it loads `tables.parquet`, groups tables by
-`table_id`, and passes table context into table-row extraction payloads.
+`table_id`, and passes table context into table-batch extraction payloads.
 
 The row remains the extraction unit. The table is context.
 
@@ -391,7 +392,7 @@ This plan is successful when:
 - Source emits `tables.parquet` as a stable artifact
 - Core can include whole-table context without reconstructing tables from
   cells
-- table-row extraction remains anchored to selected rows
+- table-batch extraction remains anchored to selected target rows
 - Docling and MinerU can be compared on table-level context quality
 - no Source-generated table description becomes a research fact
 

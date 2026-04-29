@@ -12,12 +12,12 @@ from pydantic import BaseModel
 
 from .schemas import (
     StructuredDocumentProfile,
-    StructuredTableRowMentions,
+    StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
 from .prompts import (
     build_document_profile_prompt,
-    build_table_row_mentions_prompt,
+    build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
 
@@ -27,7 +27,7 @@ _JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_JSON_TEXT
-_TABLE_ROW_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
+_TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
 _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
     _EXTRACTION_MODE_PROVIDER_PARSE,
@@ -75,15 +75,15 @@ class CoreLLMStructuredExtractor:
             raise TypeError("unexpected text window extraction response type")
         return response
 
-    def extract_table_row_mentions(self, payload: dict[str, Any]) -> StructuredTableRowMentions:
-        system_prompt, user_prompt = build_table_row_mentions_prompt(payload)
+    def extract_table_batch_mentions(self, payload: dict[str, Any]) -> StructuredTableBatchMentions:
+        system_prompt, user_prompt = build_table_batch_mentions_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredTableRowMentions,
+            response_model=StructuredTableBatchMentions,
         )
-        if not isinstance(response, StructuredTableRowMentions):
-            raise TypeError("unexpected table row extraction response type")
+        if not isinstance(response, StructuredTableBatchMentions):
+            raise TypeError("unexpected table batch extraction response type")
         return response
 
     def _parse_structured_response(
@@ -186,9 +186,9 @@ class CoreLLMStructuredExtractor:
             "messages": messages,
             "response_format": response_model,
         }
-        if response_model is StructuredTableRowMentions:
+        if response_model is StructuredTableBatchMentions:
             request_kwargs["max_completion_tokens"] = (
-                _TABLE_ROW_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
+                _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
             )
         completion = self.client.beta.chat.completions.parse(**request_kwargs)
         if not completion.choices:

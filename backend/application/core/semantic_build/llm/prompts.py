@@ -131,19 +131,21 @@ Invalid counterexamples. Do not copy these shapes:
 """.strip()
 
 
-_TABLE_ROW_JSON_COMPLIANCE_GUIDANCE = """
+_TABLE_BATCH_JSON_COMPLIANCE_GUIDANCE = """
 JSON compliance rules for this extraction:
 - Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, or `warnings`.
 - Arrays must stay arrays. When empty, use `[]`. Never use `null` for top-level lists.
-- Extract only lightweight row mentions. Do not emit final backend artifacts.
+- Extract only lightweight row mentions grouped under `row_results`. Do not emit final backend artifacts.
 - Do not emit `method_facts`, `sample_variants`, `test_conditions`, `baseline_references`, or `measurement_results`.
 - Do not emit `confidence`, `epistemic_status`, `anchors`, `source_type`, `page`, `process_context`, `condition_payload`, `value_payload`, backend ids, or refs.
+- Every `row_results[*]` item must include a `row_index` copied from one of the provided `target_rows`.
 - Put process facts in `process_mentions` using exact names such as `laser_power_w`, `scan_speed_mm_s`, `layer_thickness_um`, `hatch_spacing_um`, `energy_density_j_mm3`, `build_orientation`, `post_treatment_summary`, `temperature_c`, `duration`, or `atmosphere`.
 - Put test facts in `test_condition_mentions` using exact names such as `method`, `test_method`, `test_temperature_c`, `strain_rate_s-1`, `loading_direction`, `sample_orientation`, `environment`, or `frequency_hz`.
 - Put result values in `result_claims[*].value_text` and `result_claims[*].unit`.
 - Omit weakly grounded PBF fields. Do not infer missing laser power, scan speed, orientations, strain rate, or energy density from general domain knowledge.
 - Extract target-row-grounded facts only. Use `table_context` to interpret captions, headers, units, groups, baselines, and row meaning.
-- Treat non-target rows inside `table_context.table_markdown` or `table_context.table_text` as context only. Do not copy their values into facts for the target row.
+- Treat non-target rows inside `table_context.table_markdown` or `table_context.table_text` as context only. Do not copy their values into facts for a target row.
+- Do not mix values across target rows. Put each extracted value under the matching `row_index`.
 - Use `supporting_text_windows` only to disambiguate row labels, abbreviations, or column meaning.
 - Do not mine `supporting_text_windows` for extra standalone facts that are not needed to interpret this row.
 - If a fact cannot be grounded to the row or a short disambiguating support quote, omit it.
@@ -151,73 +153,78 @@ JSON compliance rules for this extraction:
 - Keep `quote` short, exact, and contiguous when possible.
 - Classify every `result_claim` with `claim_scope`.
 - Only use `claim_scope: "current_work"` for directly attributable current-paper results.
-- Emit at most 2 `row_subjects`, 8 `process_mentions`, 8 `test_condition_mentions`, 2 `baseline_mentions`, and 4 `result_claims` for one row.
-- If evidence is weak or absent, return the valid empty-shape object with empty lists and null scalar leaves.
+- Emit at most 2 `row_subjects`, 8 `process_mentions`, 8 `test_condition_mentions`, 2 `baseline_mentions`, and 4 `result_claims` for one row result.
+- If evidence is weak or absent for a target row, include that `row_index` with empty arrays.
 
 Valid PBF metal row example:
 ```json
 {
-  "row_subjects": [
+  "row_results": [
     {
-      "variant_label": "S3",
-      "family": "titanium alloy",
-      "composition": "Ti-6Al-4V",
-      "variable_axis_type": "post_treatment",
-      "variable_value": "optimized VED + HIP",
-      "quote": "S3"
-    }
-  ],
-  "process_mentions": [
-    {
-      "name": "laser_power_w",
-      "value_text": "280",
-      "unit": "W",
-      "quote": "280 W"
-    },
-    {
-      "name": "scan_speed_mm_s",
-      "value_text": "1200",
-      "unit": "mm/s",
-      "quote": "1200 mm/s"
-    },
-    {
-      "name": "post_treatment_summary",
-      "value_text": "HIP",
-      "unit": null,
-      "quote": "HIP"
-    }
-  ],
-  "test_condition_mentions": [
-    {
-      "name": "test_method",
-      "value_text": "tensile",
-      "unit": null,
-      "quote": "tensile"
-    },
-    {
-      "name": "test_temperature_c",
-      "value_text": "25",
-      "unit": "C",
-      "quote": "25 C"
-    }
-  ],
-  "baseline_mentions": [
-    {
-      "baseline_label": "S2",
-      "quote": "S2"
-    }
-  ],
-  "result_claims": [
-    {
-      "property_normalized": "yield_strength",
-      "result_type": "scalar",
-      "value_text": "940",
-      "unit": "MPa",
-      "variant_label": "S3",
-      "baseline_label": "S2",
-      "claim_scope": "current_work",
-      "claim_text": "S3 showed a yield strength of 940 MPa at 25 C.",
-      "quote": "S3 showed a yield strength of 940 MPa at 25 C"
+      "row_index": 3,
+      "row_subjects": [
+        {
+          "variant_label": "S3",
+          "family": "titanium alloy",
+          "composition": "Ti-6Al-4V",
+          "variable_axis_type": "post_treatment",
+          "variable_value": "optimized VED + HIP",
+          "quote": "S3"
+        }
+      ],
+      "process_mentions": [
+        {
+          "name": "laser_power_w",
+          "value_text": "280",
+          "unit": "W",
+          "quote": "280 W"
+        },
+        {
+          "name": "scan_speed_mm_s",
+          "value_text": "1200",
+          "unit": "mm/s",
+          "quote": "1200 mm/s"
+        },
+        {
+          "name": "post_treatment_summary",
+          "value_text": "HIP",
+          "unit": null,
+          "quote": "HIP"
+        }
+      ],
+      "test_condition_mentions": [
+        {
+          "name": "test_method",
+          "value_text": "tensile",
+          "unit": null,
+          "quote": "tensile"
+        },
+        {
+          "name": "test_temperature_c",
+          "value_text": "25",
+          "unit": "C",
+          "quote": "25 C"
+        }
+      ],
+      "baseline_mentions": [
+        {
+          "baseline_label": "S2",
+          "quote": "S2"
+        }
+      ],
+      "result_claims": [
+        {
+          "property_normalized": "yield_strength",
+          "result_type": "scalar",
+          "value_text": "940",
+          "unit": "MPa",
+          "variant_label": "S3",
+          "baseline_label": "S2",
+          "claim_scope": "current_work",
+          "claim_text": "S3 showed a yield strength of 940 MPa at 25 C.",
+          "quote": "S3 showed a yield strength of 940 MPa at 25 C"
+        }
+      ]
     }
   ]
 }
@@ -226,21 +233,26 @@ Valid PBF metal row example:
 Valid measurement result example:
 ```json
 {
-  "row_subjects": [],
-  "process_mentions": [],
-  "test_condition_mentions": [],
-  "baseline_mentions": [],
-  "result_claims": [
+  "row_results": [
     {
-      "property_normalized": "yield strength",
-      "result_type": "scalar",
-      "value_text": "560",
-      "unit": "MPa",
-      "variant_label": null,
-      "baseline_label": null,
-      "claim_scope": "current_work",
-      "claim_text": "Yield strength reached 560 MPa.",
-      "quote": "yield strength reached 560 MPa"
+      "row_index": 1,
+      "row_subjects": [],
+      "process_mentions": [],
+      "test_condition_mentions": [],
+      "baseline_mentions": [],
+      "result_claims": [
+        {
+          "property_normalized": "yield strength",
+          "result_type": "scalar",
+          "value_text": "560",
+          "unit": "MPa",
+          "variant_label": null,
+          "baseline_label": null,
+          "claim_scope": "current_work",
+          "claim_text": "Yield strength reached 560 MPa.",
+          "quote": "yield strength reached 560 MPa"
+        }
+      ]
     }
   ]
 }
@@ -250,21 +262,26 @@ Invalid counterexamples. Do not copy these shapes:
 ```json
 {
   "keywords": ["yield strength"],
-  "row_subjects": [],
-  "process_mentions": [],
-  "test_condition_mentions": [],
-  "baseline_mentions": [],
-  "result_claims": []
+  "row_results": []
 }
 ```
 
 ```json
 {
-  "row_subjects": [
+  "row_results": [
     {
-      "variant_label": "S3",
-      "confidence": 0.86,
-      "epistemic_status": "normalized_from_evidence"
+      "row_index": 3,
+      "row_subjects": [
+        {
+          "variant_label": "S3",
+          "confidence": 0.86,
+          "epistemic_status": "normalized_from_evidence"
+        }
+      ],
+      "process_mentions": [],
+      "test_condition_mentions": [],
+      "baseline_mentions": [],
+      "result_claims": []
     }
   ]
 }
@@ -311,20 +328,21 @@ def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, s
     return _COMMON_SYSTEM_PROMPT, user_prompt
 
 
-def build_table_row_mentions_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+def build_table_batch_mentions_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
-        "Extract target-row-grounded lightweight mentions using the provided table context.\n\n"
+        "Extract target-row-grounded lightweight mentions for this batch using the provided table context.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Use `table_context` to interpret the target row's caption, headers, units, "
+        "Use `table_context` to interpret the target rows' caption, headers, units, "
         "row groups, and table-wide labels. Non-target rows are context only; do not "
-        "extract their values as target-row facts. Skip outputs when the target row is a literature "
-        "summary rather than a directly attributable study row. Do not emit backend "
+        "extract their values as target-row facts. Skip outputs when a target row is a literature "
+        "summary rather than a directly attributable study row. Do not mix values across "
+        "target rows. Do not emit backend "
         "artifacts, locators, ids, or bundle refs. Use human-readable labels when a "
         "result must identify a variant or baseline. Return mentions only, not "
         "reader-facing cards.\n"
-        "Use `supporting_text_windows` only when they are required to interpret the row.\n"
-        "If the row is mostly metadata, labels, or literature summary text, return the "
-        "smallest valid object instead of expanding speculative outputs.\n\n"
-        f"{_TABLE_ROW_JSON_COMPLIANCE_GUIDANCE}"
+        "Use `supporting_text_windows` only when they are required to interpret a row.\n"
+        "If a row is mostly metadata, labels, or literature summary text, return that "
+        "row_index with empty arrays instead of expanding speculative outputs.\n\n"
+        f"{_TABLE_BATCH_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt

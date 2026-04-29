@@ -539,6 +539,19 @@ class StructuredTableRowMentions(_StrictModel):
         return _normalize_list_container(value)
 
 
+class StructuredTableBatchRowMentions(StructuredTableRowMentions):
+    row_index: int
+
+
+class StructuredTableBatchMentions(_StrictModel):
+    row_results: list[StructuredTableBatchRowMentions] = Field(default_factory=list)
+
+    @field_validator("row_results", mode="before")
+    @classmethod
+    def _normalize_row_results(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
 class StructuredExtractionBundle(_StrictModel):
     method_facts: list[MethodFactPayload] = Field(default_factory=list)
     sample_variants: list[SampleVariantPayload] = Field(default_factory=list)

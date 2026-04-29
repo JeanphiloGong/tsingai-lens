@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.schemas import (
     StructuredExtractionBundle,
-    StructuredTableRowMentions,
+    StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
 
@@ -186,63 +186,68 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
     assert mentions.result_claims[0].claim_scope == "prior_work"
 
 
-def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_rows(
+def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batches(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient("unused", parsed=StructuredTableRowMentions())
+    client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_table_row_mentions(
+    mentions = extractor.extract_table_batch_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
-            "table_row": {"row_summary": "Sample A | 560 MPa", "cells": []},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
             "supporting_text_windows": [],
         }
     )
 
-    assert mentions == StructuredTableRowMentions()
+    assert mentions == StructuredTableBatchMentions()
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredTableRowMentions
+    assert parse_call["response_format"] is StructuredTableBatchMentions
     assert parse_call["max_completion_tokens"] == 4096
 
 
-def test_core_llm_extractor_validates_lightweight_table_row_mentions():
+def test_core_llm_extractor_validates_lightweight_table_batch_mentions():
     client = _FakeOpenAIClient(
         """
         {
-          "row_subjects": [
+          "row_results": [
             {
-              "variant_label": "Sample A",
-              "family": null,
-              "composition": null,
-              "variable_axis_type": null,
-              "variable_value": null,
-              "quote": "Sample A"
-            }
-          ],
-          "process_mentions": null,
-          "test_condition_mentions": [
-            {
-              "name": "test temperature",
-              "value_text": "25",
-              "unit": "C",
-              "quote": "25 C"
-            }
-          ],
-          "baseline_mentions": [],
-          "result_claims": [
-            {
-              "property_normalized": "hardness",
-              "result_type": "scalar",
-              "value_text": "210",
-              "unit": "HV",
-              "variant_label": "Sample A",
-              "baseline_label": null,
-              "claim_scope": "current work",
-              "claim_text": "Hardness reached 210 HV.",
-              "quote": "210 HV"
+              "row_index": 1,
+              "row_subjects": [
+                {
+                  "variant_label": "Sample A",
+                  "family": null,
+                  "composition": null,
+                  "variable_axis_type": null,
+                  "variable_value": null,
+                  "quote": "Sample A"
+                }
+              ],
+              "process_mentions": null,
+              "test_condition_mentions": [
+                {
+                  "name": "test temperature",
+                  "value_text": "25",
+                  "unit": "C",
+                  "quote": "25 C"
+                }
+              ],
+              "baseline_mentions": [],
+              "result_claims": [
+                {
+                  "property_normalized": "hardness",
+                  "result_type": "scalar",
+                  "value_text": "210",
+                  "unit": "HV",
+                  "variant_label": "Sample A",
+                  "baseline_label": null,
+                  "claim_scope": "current work",
+                  "claim_text": "Hardness reached 210 HV.",
+                  "quote": "210 HV"
+                }
+              ]
             }
           ]
         }
@@ -250,19 +255,21 @@ def test_core_llm_extractor_validates_lightweight_table_row_mentions():
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_table_row_mentions(
+    mentions = extractor.extract_table_batch_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
-            "table_row": {"row_summary": "Sample A | 210 HV", "cells": []},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 210 HV", "cells": []}],
             "supporting_text_windows": [],
         }
     )
 
-    assert mentions.row_subjects[0].variant_label == "Sample A"
-    assert mentions.process_mentions == []
-    assert mentions.test_condition_mentions[0].name == "test temperature"
-    assert mentions.result_claims[0].claim_scope == "current_work"
+    row_result = mentions.row_results[0]
+    assert row_result.row_index == 1
+    assert row_result.row_subjects[0].variant_label == "Sample A"
+    assert row_result.process_mentions == []
+    assert row_result.test_condition_mentions[0].name == "test temperature"
+    assert row_result.result_claims[0].claim_scope == "current_work"
 
 
 def test_structured_bundle_defaults_null_backend_metadata():
@@ -291,53 +298,45 @@ def test_structured_bundle_defaults_null_backend_metadata():
     assert bundle.measurement_results[0].confidence == 0.85
 
 
-def test_core_llm_extractor_accepts_empty_table_row_mentions():
+def test_core_llm_extractor_accepts_empty_table_batch_mentions():
     client = _FakeOpenAIClient(
         """
         {
-          "row_subjects": [],
-          "process_mentions": [],
-          "test_condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": []
+          "row_results": []
         }
         """
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_table_row_mentions(
+    mentions = extractor.extract_table_batch_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
-            "table_row": {"row_summary": "Sample A | no grounded result", "cells": []},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | no grounded result", "cells": []}],
             "supporting_text_windows": [],
         }
     )
 
-    assert mentions == StructuredTableRowMentions()
+    assert mentions == StructuredTableBatchMentions()
 
 
-def test_core_llm_extractor_still_rejects_unknown_table_row_extra_keys():
+def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
     client = _FakeOpenAIClient(
         """
         {
           "keywords": ["yield strength"],
-          "row_subjects": [],
-          "process_mentions": [],
-          "test_condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": []
+          "row_results": []
         }
         """
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
     with pytest.raises(ValidationError) as exc_info:
-        extractor.extract_table_row_mentions(
+        extractor.extract_table_batch_mentions(
             {
                 "document_title": "LPBF Paper",
                 "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
-                "table_row": {"row_summary": "Sample A | 560 MPa", "cells": []},
+                "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
                 "supporting_text_windows": [],
             }
         )

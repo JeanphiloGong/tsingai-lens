@@ -6,6 +6,8 @@ from typing import Any
 from application.core.semantic_build.llm.schemas import (
     MeasurementValuePayload,
     StructuredDocumentProfile,
+    StructuredTableBatchMentions,
+    StructuredTableBatchRowMentions,
     StructuredTableRowMentions,
     StructuredTextWindowMentions,
     TableRowBaselineMentionPayload,
@@ -296,18 +298,47 @@ class FakeCoreLLMStructuredExtractor:
             result_claims=result_claims,
         )
 
-    def extract_table_row_mentions(self, payload: dict[str, Any]) -> StructuredTableRowMentions:
+    def extract_table_batch_mentions(self, payload: dict[str, Any]) -> StructuredTableBatchMentions:
         document_title = str(payload.get("document_title") or "")
         document_profile = payload.get("document_profile") or {}
-        row = payload.get("table_row") or {}
         supporting_windows = (
             payload.get("supporting_text_windows")
             if isinstance(payload.get("supporting_text_windows"), list)
             else []
         )
+        target_rows = (
+            payload.get("target_rows")
+            if isinstance(payload.get("target_rows"), list)
+            else []
+        )
         if str(document_profile.get("doc_type") or "") == "review":
-            return StructuredTableRowMentions()
+            return StructuredTableBatchMentions()
 
+        row_results: list[StructuredTableBatchRowMentions] = []
+        for row in target_rows:
+            if not isinstance(row, dict):
+                continue
+            row_index = int(row.get("row_index") or 0)
+            mentions = self._extract_table_row_mentions(
+                document_title=document_title,
+                row=row,
+                supporting_windows=supporting_windows,
+            )
+            row_results.append(
+                StructuredTableBatchRowMentions(
+                    row_index=row_index,
+                    **mentions.model_dump(),
+                )
+            )
+        return StructuredTableBatchMentions(row_results=row_results)
+
+    def _extract_table_row_mentions(
+        self,
+        *,
+        document_title: str,
+        row: dict[str, Any],
+        supporting_windows: list[Any],
+    ) -> StructuredTableRowMentions:
         row_summary = str(row.get("row_summary") or "")
         cells = row.get("cells") if isinstance(row.get("cells"), list) else []
         support_text = "\n\n".join(

@@ -91,8 +91,8 @@ This plan explicitly rejects:
 
 This child plan covers:
 
-- production prompt hardening for text-window and table-row extraction
-- narrowing table-row extraction to lightweight mentions that the backend binds
+- production prompt hardening for text-window and table-batch extraction
+- narrowing table-batch extraction to lightweight row mentions that the backend binds
   into final Core artifacts
 - one environment-variable switch for the two extraction modes
 - targeted extractor logging so mode-specific failures are attributable
@@ -115,17 +115,18 @@ Move the benchmark-proven JSON compliance guidance into
 `application/core/semantic_build/llm/prompts.py` for:
 
 - `build_text_window_extraction_prompt(...)`
-- `build_table_row_mentions_prompt(...)`
+- `build_table_batch_mentions_prompt(...)`
 
 The production prompt guidance should explicitly state:
 
 - output must use exactly the schema keys and no extras
 - array fields must stay arrays and use `[]` when empty
-- table-row responses must not emit backend artifact fields such as
+- table-batch responses must not emit backend artifact fields such as
   `confidence`, `epistemic_status`, `value_payload`, `process_context`,
   `condition_payload`, or artifact ids
-- table-row `unit` belongs on lightweight result claims, not inside a backend
+- table-batch `unit` belongs on lightweight result claims, not inside a backend
   `value_payload`
+- table-batch output must keep each row result under the matching `row_index`
 - uncertainty should resolve to empty arrays and null scalar leaves, not to
   invalid object shapes
 
@@ -158,7 +159,7 @@ Supported values:
 
 The branch should live only inside the internal response-parsing path. Callers
 such as `extract_text_window_mentions(...)` and
-`extract_table_row_mentions(...)` should stay direct and schema-specific.
+`extract_table_batch_mentions(...)` should stay direct and schema-specific.
 
 ### Mode Invariants
 

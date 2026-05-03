@@ -7,7 +7,7 @@ This is a narrow Core topic-proof family. It does not own the shared
 evidence-chain contract and it does not replace the backend-wide implementation
 family for product-surface cutover.
 
-The family keeps three live pages because this local subject now needs:
+The family keeps multiple live pages because this local subject now needs:
 
 - a proposal page that explains why this wave exists, what semantic center it
   protects, and what outcomes it is trying to prove
@@ -19,6 +19,9 @@ The family keeps three live pages because this local subject now needs:
 - a fact-thickening plan that turns the landed evidence-chain read projection
   into concrete PBF-metal schema, prompt, normalization, policy, and fixture
   work
+- an expert gold-set evaluation plan that explains how human-filled annotation
+  tables become backend quality measurements, error reports, and regression
+  tests
 - an implementation plan that turns that direction into executable delivery
   slices, file areas, and verification commands
 
@@ -37,6 +40,9 @@ The family keeps three live pages because this local subject now needs:
   Detailed next backend plan for PBF-metal schema, prompt, normalization,
   comparability policy, and acceptance fixture work after read projection
   landing
+- [`expert-gold-set-evaluation-plan.md`](expert-gold-set-evaluation-plan.md)
+  Convert expert-filled annotation tables into a gold set, compare them with
+  normal Core extraction output, classify errors, and drive regression tests
 - [`implementation-plan.md`](implementation-plan.md)
   Delivery slices, owned file areas, verification commands, and acceptance
   gates for the execution wave

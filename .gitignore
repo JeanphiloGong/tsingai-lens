@@ -8,3 +8,6 @@ agent.log
 .env.*
 !.env.example
 !.env.test
+
+# Local-only expert gold-set fixtures
+backend/tests/fixtures/local_expert_gold/

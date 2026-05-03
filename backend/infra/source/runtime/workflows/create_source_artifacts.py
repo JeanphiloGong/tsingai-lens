@@ -22,6 +22,7 @@ from infra.source.contracts.artifact_schemas import (
     DOCUMENTS_FINAL_COLUMNS,
     FIGURES_FINAL_COLUMNS,
     TABLE_CELLS_FINAL_COLUMNS,
+    TABLES_FINAL_COLUMNS,
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
@@ -53,6 +54,7 @@ class SourceArtifactBundle:
     text_units: pd.DataFrame
     blocks: pd.DataFrame
     figures: pd.DataFrame
+    tables: pd.DataFrame
     table_rows: pd.DataFrame
     table_cells: pd.DataFrame
     figure_assets: dict[str, bytes]
@@ -76,6 +78,7 @@ async def run_workflow(
     await write_table_to_storage(output.text_units, "text_units", context.output_storage)
     await write_table_to_storage(output.blocks, "blocks", context.output_storage)
     await write_table_to_storage(output.figures, "figures", context.output_storage)
+    await write_table_to_storage(output.tables, "tables", context.output_storage)
     await write_table_to_storage(output.table_rows, "table_rows", context.output_storage)
     await write_table_to_storage(output.table_cells, "table_cells", context.output_storage)
     await _clear_directory_storage(context.output_storage, "image_assets")
@@ -132,6 +135,7 @@ async def create_source_artifacts(
     text_units = _concat_frames([bundle.text_units for bundle in bundles], TEXT_UNITS_FINAL_COLUMNS)
     blocks = _concat_frames([bundle.blocks for bundle in bundles], BLOCKS_FINAL_COLUMNS)
     figures = _concat_frames([bundle.figures for bundle in bundles], FIGURES_FINAL_COLUMNS)
+    tables = _concat_frames([bundle.tables for bundle in bundles], TABLES_FINAL_COLUMNS)
     table_rows = _concat_frames([bundle.table_rows for bundle in bundles], TABLE_ROWS_FINAL_COLUMNS)
     table_cells = _concat_frames(
         [bundle.table_cells for bundle in bundles],
@@ -150,6 +154,7 @@ async def create_source_artifacts(
         text_units=text_units.loc[:, TEXT_UNITS_FINAL_COLUMNS],
         blocks=blocks.loc[:, BLOCKS_FINAL_COLUMNS],
         figures=figures.loc[:, FIGURES_FINAL_COLUMNS],
+        tables=tables.loc[:, TABLES_FINAL_COLUMNS],
         table_rows=table_rows.loc[:, TABLE_ROWS_FINAL_COLUMNS],
         table_cells=table_cells.loc[:, TABLE_CELLS_FINAL_COLUMNS],
         figure_assets=dict(figure_assets),
@@ -199,6 +204,7 @@ def _build_text_bundle(
         text_units=final_text_units.loc[:, TEXT_UNITS_FINAL_COLUMNS],
         blocks=final_blocks.loc[:, BLOCKS_FINAL_COLUMNS],
         figures=pd.DataFrame(columns=FIGURES_FINAL_COLUMNS),
+        tables=pd.DataFrame(columns=TABLES_FINAL_COLUMNS),
         table_rows=final_table_rows.loc[:, TABLE_ROWS_FINAL_COLUMNS],
         table_cells=final_table_cells.loc[:, TABLE_CELLS_FINAL_COLUMNS],
         figure_assets={},
@@ -250,6 +256,12 @@ def _build_pdf_bundle(
         text_items=text_items,
         payload=payload,
     )
+    final_tables = _build_pdf_tables(
+        document_id=document_id,
+        document=document,
+        blocks=final_blocks,
+        text_items=text_items,
+    )
     final_table_cells = _build_pdf_table_cells(
         document_id=document_id,
         document=document,
@@ -264,6 +276,7 @@ def _build_pdf_bundle(
         text_units=text_units.loc[:, TEXT_UNITS_FINAL_COLUMNS],
         blocks=final_blocks.loc[:, BLOCKS_FINAL_COLUMNS],
         figures=final_figures.loc[:, FIGURES_FINAL_COLUMNS],
+        tables=final_tables.loc[:, TABLES_FINAL_COLUMNS],
         table_rows=final_table_rows.loc[:, TABLE_ROWS_FINAL_COLUMNS],
         table_cells=final_table_cells.loc[:, TABLE_CELLS_FINAL_COLUMNS],
         figure_assets=figure_assets,
@@ -435,6 +448,92 @@ def _build_pdf_blocks(
     return pd.DataFrame(rows, columns=BLOCKS_FINAL_COLUMNS)
 
 
+def _build_pdf_tables(
+    *,
+    document_id: str,
+    document: Any,
+    blocks: pd.DataFrame,
+    text_items: list[dict[str, Any]],
+) -> pd.DataFrame:
+    tables = getattr(document, "tables", []) or []
+    if not tables:
+        return pd.DataFrame(columns=TABLES_FINAL_COLUMNS)
+
+    heading_blocks = _build_heading_blocks(blocks)
+    text_item_by_ref = {
+        str(item.get("ref")): item
+        for item in text_items
+        if str(item.get("ref") or "").strip()
+    }
+    table_caption_blocks = _build_table_caption_blocks(blocks)
+    used_caption_block_ids: set[str] = set()
+    rows: list[dict[str, Any]] = []
+
+    for table_order, table in enumerate(tables, start=1):
+        table_id = make_table_id(document_id, table_order, None)
+        page = _first_page(getattr(table, "prov", None))
+        bbox = _serialize_prov_bbox(getattr(table, "prov", None))
+        caption_text, caption_ref, linkage_method = _extract_table_caption(
+            table=table,
+            document=document,
+        )
+        caption_block_id = None
+        if caption_ref is not None:
+            caption_item = text_item_by_ref.get(caption_ref)
+            if caption_item is not None:
+                caption_block_id = _normalize_optional_text(caption_item.get("block_id"))
+        if caption_block_id is None:
+            fallback_block = _find_nearest_caption_block(
+                page=page,
+                target_bbox=bbox,
+                caption_blocks=table_caption_blocks,
+                used_block_ids=used_caption_block_ids,
+            )
+            if fallback_block is not None:
+                caption_block_id = str(fallback_block["block_id"])
+                caption_text = caption_text or _normalize_optional_text(
+                    fallback_block.get("text")
+                )
+                linkage_method = "same_page_nearest_caption"
+        if caption_block_id is not None:
+            used_caption_block_ids.add(caption_block_id)
+
+        matrix = _build_docling_table_matrix(table)
+        row_count = len(matrix)
+        col_count = max((len(row) for row in matrix), default=0)
+        header_paths = _build_docling_header_paths(table)
+        column_headers = [
+            header_paths.get(col_index) or f"column_{col_index + 1}"
+            for col_index in range(col_count)
+        ]
+
+        rows.append(
+            {
+                "table_id": table_id,
+                "document_id": document_id,
+                "table_order": table_order,
+                "caption_text": caption_text,
+                "caption_block_id": caption_block_id,
+                "page": page,
+                "bbox": bbox,
+                "heading_path": _resolve_heading_path_for_page(page, heading_blocks),
+                "row_count": row_count,
+                "col_count": col_count,
+                "column_headers": column_headers,
+                "table_markdown": _render_markdown_table(matrix, column_headers),
+                "table_text": _render_plain_table_text(matrix),
+                "metadata": {
+                    "docling_ref": f"#/tables/{table_order - 1}",
+                    "table_label": _normalize_label(getattr(table, "label", None)),
+                    "caption_linkage_method": linkage_method,
+                    "column_header_count": len(header_paths),
+                },
+            }
+        )
+
+    return pd.DataFrame(rows, columns=TABLES_FINAL_COLUMNS)
+
+
 def _build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for table_index, table in enumerate(getattr(document, "tables", []) or [], start=1):
@@ -563,7 +662,7 @@ def _build_pdf_figures(
             if caption_block_id is None:
                 fallback_block = _find_nearest_caption_block(
                     page=page,
-                    figure_bbox=bbox,
+                    target_bbox=bbox,
                     caption_blocks=figure_caption_blocks,
                     used_block_ids=used_caption_block_ids,
                 )
@@ -689,6 +788,25 @@ def _build_figure_caption_blocks(blocks: pd.DataFrame | None) -> list[dict[str, 
     return rows
 
 
+def _build_table_caption_blocks(blocks: pd.DataFrame | None) -> list[dict[str, Any]]:
+    if blocks is None or blocks.empty:
+        return []
+    rows = []
+    for item in blocks.to_dict(orient="records"):
+        if str(item.get("block_type") or "").strip() != "table_caption":
+            continue
+        rows.append(
+            {
+                "block_id": str(item.get("block_id") or ""),
+                "text": str(item.get("text") or "").strip(),
+                "page": _safe_int(item.get("page")),
+                "bbox": item.get("bbox"),
+                "block_order": int(item.get("block_order") or 0),
+            }
+        )
+    return rows
+
+
 def _extract_picture_caption(*, picture: Any, document: Any) -> tuple[str | None, str | None, str]:
     caption_text = None
     if hasattr(picture, "caption_text"):
@@ -708,10 +826,29 @@ def _extract_picture_caption(*, picture: Any, document: Any) -> tuple[str | None
     return caption_text, caption_ref, "none"
 
 
+def _extract_table_caption(*, table: Any, document: Any) -> tuple[str | None, str | None, str]:
+    caption_text = None
+    if hasattr(table, "caption_text"):
+        caption_text = _normalize_optional_text(table.caption_text(document))
+    caption_ref = None
+    for ref in getattr(table, "captions", []) or []:
+        caption_ref = _normalize_optional_text(getattr(ref, "cref", None))
+        if caption_ref is None:
+            continue
+        if caption_text is not None:
+            return caption_text, caption_ref, "docling_caption_ref"
+        try:
+            caption_text = _normalize_optional_text(ref.resolve(document).text)
+        except Exception:  # noqa: BLE001
+            caption_text = None
+        return caption_text, caption_ref, "docling_caption_ref"
+    return caption_text, caption_ref, "none"
+
+
 def _find_nearest_caption_block(
     *,
     page: int | None,
-    figure_bbox: str | None,
+    target_bbox: str | None,
     caption_blocks: list[dict[str, Any]],
     used_block_ids: set[str],
 ) -> dict[str, Any] | None:
@@ -728,7 +865,7 @@ def _find_nearest_caption_block(
     return min(
         candidates,
         key=lambda item: (
-            _caption_distance_score(figure_bbox, item.get("bbox")),
+            _caption_distance_score(target_bbox, item.get("bbox")),
             int(item.get("block_order") or 0),
         ),
     )
@@ -851,6 +988,90 @@ def _build_docling_header_paths(table: Any) -> dict[int, str]:
         for col_index, values in header_by_col.items()
         if values
     }
+
+
+def _build_docling_table_matrix(table: Any) -> list[list[str]]:
+    cells = list(getattr(getattr(table, "data", None), "table_cells", []) or [])
+    if not cells:
+        return []
+
+    row_count = _safe_int(getattr(getattr(table, "data", None), "num_rows", None)) or 0
+    col_count = _safe_int(getattr(getattr(table, "data", None), "num_cols", None)) or 0
+    for cell in cells:
+        start_row = int(getattr(cell, "start_row_offset_idx", 0))
+        end_row = int(getattr(cell, "end_row_offset_idx", start_row + 1))
+        start_col = int(getattr(cell, "start_col_offset_idx", 0))
+        end_col = int(getattr(cell, "end_col_offset_idx", start_col + 1))
+        row_count = max(row_count, end_row, start_row + 1)
+        col_count = max(col_count, end_col, start_col + 1)
+
+    if row_count <= 0 or col_count <= 0:
+        return []
+
+    matrix = [["" for _ in range(col_count)] for _ in range(row_count)]
+    for cell in cells:
+        text = " ".join(str(getattr(cell, "text", "") or "").split())
+        start_row = int(getattr(cell, "start_row_offset_idx", 0))
+        end_row = int(getattr(cell, "end_row_offset_idx", start_row + 1))
+        start_col = int(getattr(cell, "start_col_offset_idx", 0))
+        end_col = int(getattr(cell, "end_col_offset_idx", start_col + 1))
+        if end_row <= start_row:
+            end_row = start_row + 1
+        if end_col <= start_col:
+            end_col = start_col + 1
+        for row_index in range(max(start_row, 0), min(end_row, row_count)):
+            for col_index in range(max(start_col, 0), min(end_col, col_count)):
+                existing = matrix[row_index][col_index]
+                matrix[row_index][col_index] = (
+                    text if not existing or existing == text else f"{existing} {text}"
+                )
+    return matrix
+
+
+def _render_markdown_table(matrix: list[list[str]], column_headers: list[str]) -> str | None:
+    if not matrix:
+        return None
+
+    col_count = max(len(column_headers), max((len(row) for row in matrix), default=0))
+    if col_count <= 0:
+        return None
+    normalized_rows = [_normalize_table_row(row, col_count) for row in matrix]
+    header = _normalize_table_row(normalized_rows[0] if normalized_rows else column_headers, col_count)
+    if not any(header):
+        header = _normalize_table_row(column_headers, col_count)
+    if not any(header):
+        header = [f"column_{index + 1}" for index in range(col_count)]
+
+    body_rows = normalized_rows[1:] if normalized_rows else []
+    lines = [
+        "| " + " | ".join(_escape_markdown_cell(value) for value in header) + " |",
+        "| " + " | ".join("---" for _ in range(col_count)) + " |",
+    ]
+    for row in body_rows:
+        lines.append("| " + " | ".join(_escape_markdown_cell(value) for value in row) + " |")
+    return "\n".join(lines)
+
+
+def _render_plain_table_text(matrix: list[list[str]]) -> str | None:
+    if not matrix:
+        return None
+    lines = []
+    for row in matrix:
+        line = " | ".join(str(cell).strip() for cell in row if str(cell).strip())
+        if line:
+            lines.append(line)
+    return "\n".join(lines) or None
+
+
+def _normalize_table_row(row: list[str], col_count: int) -> list[str]:
+    values = [" ".join(str(value or "").split()) for value in row[:col_count]]
+    if len(values) < col_count:
+        values.extend([""] * (col_count - len(values)))
+    return values
+
+
+def _escape_markdown_cell(value: str) -> str:
+    return str(value or "").replace("|", "\\|").strip()
 
 
 def _resolve_document_id(row: pd.Series) -> str:

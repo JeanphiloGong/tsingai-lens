@@ -173,6 +173,23 @@ BLOCKS_FINAL_COLUMNS = [
     "heading_level",
 ]
 
+TABLES_FINAL_COLUMNS = [
+    "table_id",
+    "document_id",
+    "table_order",
+    "caption_text",
+    "caption_block_id",
+    "page",
+    "bbox",
+    "heading_path",
+    "row_count",
+    "col_count",
+    "column_headers",
+    "table_markdown",
+    "table_text",
+    METADATA,
+]
+
 TABLE_ROWS_FINAL_COLUMNS = [
     "row_id",
     "document_id",

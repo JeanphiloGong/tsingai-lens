@@ -13,21 +13,20 @@ from application.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.llm.prompts import (
-    build_table_row_extraction_prompt,
+    build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.semantic_build.llm.schemas import (
-    EvidenceAnchorPayload,
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
     MethodFactPayload,
     SampleVariantPayload,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
+    StructuredTableBatchMentions,
     StructuredTextWindowMentions,
     TextWindowBaselineMentionPayload,
-    TextWindowConditionMentionPayload,
     TextWindowMethodMentionPayload,
     TextWindowResultClaimPayload,
     TextWindowVariantMentionPayload,
@@ -55,6 +54,7 @@ from infra.source.runtime.source_evidence import (
     build_table_cells,
     build_table_rows,
 )
+from infra.source.contracts.artifact_schemas import TABLES_FINAL_COLUMNS
 
 
 def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
@@ -74,8 +74,13 @@ def _write_source_artifacts(
     output_dir: Path,
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
+    tables: pd.DataFrame | None = None,
 ) -> None:
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    (tables if tables is not None else pd.DataFrame(columns=TABLES_FINAL_COLUMNS)).to_parquet(
+        output_dir / "tables.parquet",
+        index=False,
+    )
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
@@ -187,8 +192,8 @@ class EvidenceOnlyExtractor:
             ]
         )
 
-    def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-        return StructuredExtractionBundle()
+    def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
+        return StructuredTableBatchMentions()
 
 
 def test_paper_facts_prompt_payloads_exclude_internal_ids():
@@ -218,7 +223,6 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
         "text_unit_ids",
         "block_ids",
         "table_id",
-        "row_index",
         "method_ref",
         "variant_ref",
         "test_condition_ref",
@@ -235,33 +239,43 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert "If none fit exactly, use `other`." in text_window_prompt
     assert "If unsure, use `unclear`." in text_window_prompt
 
-    table_row_payload = service._build_table_row_extraction_payload(
+    table_batch_payload = service._build_table_batch_extraction_payload(
         title="Prompt Boundary Paper",
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
             "protocol_extractable": "yes",
         },
-        table_row={
+        table_context={
+            "caption_text": "Table 1 Mechanical results.",
+            "heading_path": "Results > Table 1",
+            "column_headers": ["Sample", "Strength"],
+            "table_markdown": "| Sample | Strength |\n| --- | --- |\n| A | 12 MPa |",
+            "table_text": "Sample | Strength\nA | 12 MPa",
+            "page": 5,
+        },
+        table_rows=[{
             "table_id": "tbl-1",
             "row_index": 2,
             "row_text": "Sample A | 12 MPa | as-built",
             "heading_path": "Results > Table 1",
+        }],
+        row_cells_by_index={
+            2: [
+                {
+                    "header_path": "Sample",
+                    "cell_text": "A",
+                    "unit_hint": None,
+                    "col_index": 0,
+                },
+                {
+                    "header_path": "Strength",
+                    "cell_text": "12",
+                    "unit_hint": "MPa",
+                    "col_index": 1,
+                },
+            ],
         },
-        row_cells=[
-            {
-                "header_path": "Sample",
-                "cell_text": "A",
-                "unit_hint": None,
-                "col_index": 0,
-            },
-            {
-                "header_path": "Strength",
-                "cell_text": "12",
-                "unit_hint": "MPa",
-                "col_index": 1,
-            },
-        ],
         text_windows=[
             {
                 "window_id": "win-2",
@@ -274,31 +288,43 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
             }
         ],
     )
-    _, table_row_prompt = build_table_row_extraction_prompt(table_row_payload)
+    _, table_batch_prompt = build_table_batch_mentions_prompt(table_batch_payload)
     for field in (
         "document_id",
         "window_id",
         "text_unit_ids",
         "block_ids",
         "table_id",
-        "row_index",
         "method_ref",
         "variant_ref",
         "test_condition_ref",
         "baseline_ref",
         "result_ref",
     ):
-        assert f'"{field}"' not in table_row_prompt
-    assert '"page"' in table_row_prompt
-    assert "Use exactly the schema keys and no others." in table_row_prompt
-    assert '"keywords"' in table_row_prompt
-    assert '"temperatures_c": []' in table_row_prompt
-    assert '"unit": "MPa"' in table_row_prompt
-    assert "Use `supporting_text_windows` only when they are required to interpret the row." in table_row_prompt
-    assert "Emit at most 2 `method_facts`" in table_row_prompt
-    assert '"laser_power_w": null' in table_row_prompt
-    assert '"strain_rate_s-1": null' in table_row_prompt
-    assert '"value_origin": "reported"' in table_row_prompt
+        assert f'"{field}"' not in table_batch_prompt
+    assert '"page"' in table_batch_prompt
+    assert '"table_context"' in table_batch_prompt
+    assert '"table_markdown"' in table_batch_prompt
+    assert "Use exactly the schema keys and no others." in table_batch_prompt
+    assert '"keywords"' in table_batch_prompt
+    assert '"row_subjects": [' in table_batch_prompt
+    assert '"unit": "MPa"' in table_batch_prompt
+    assert "Non-target rows are context only" in table_batch_prompt
+    assert "Use `supporting_text_windows` only when they are required to interpret a row." in table_batch_prompt
+    assert "Emit at most 2 `row_subjects`" in table_batch_prompt
+    assert "Do not emit `confidence`, `epistemic_status`" in table_batch_prompt
+    assert '"target_rows"' in table_batch_prompt
+    assert '"row_results": [' in table_batch_prompt
+    assert '"row_index": 2' in table_batch_prompt
+    assert '"method_facts"' not in table_batch_prompt
+    assert '"measurement_results"' in table_batch_prompt
+    assert '"process_context": {' not in table_batch_prompt
+    assert '"value_payload": {"value": 940}' in table_batch_prompt
+    assert '"name": "laser_power_w"' in table_batch_prompt
+    assert "strain_rate_s-1" in table_batch_prompt
+    assert '"laser_power_w": null' not in table_batch_prompt
+    assert '"strain_rate_s-1": null' not in table_batch_prompt
+    assert '"result_claims": [' in table_batch_prompt
 
 
 def test_pbf_fact_schema_accepts_process_test_and_value_provenance_fields():
@@ -402,30 +428,33 @@ def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
     )
 
 
-def test_table_row_payload_truncates_supporting_window_text():
+def test_table_batch_payload_truncates_supporting_window_text():
     service = PaperFactsService()
 
-    payload = service._build_table_row_extraction_payload(
+    payload = service._build_table_batch_extraction_payload(
         title="Prompt Boundary Paper",
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
             "protocol_extractable": "yes",
         },
-        table_row={
+        table_context=None,
+        table_rows=[{
             "table_id": "tbl-1",
             "row_index": 2,
             "row_text": "Sample A | 12 MPa | as-built",
             "heading_path": "Results > Table 1",
+        }],
+        row_cells_by_index={
+            2: [
+                {
+                    "header_path": "Sample",
+                    "cell_text": "A",
+                    "unit_hint": None,
+                    "col_index": 0,
+                }
+            ],
         },
-        row_cells=[
-            {
-                "header_path": "Sample",
-                "cell_text": "A",
-                "unit_hint": None,
-                "col_index": 0,
-            }
-        ],
         text_windows=[
             {
                 "window_id": "win-2",
@@ -441,6 +470,62 @@ def test_table_row_payload_truncates_supporting_window_text():
 
     assert len(payload["supporting_text_windows"]) == 1
     assert len(payload["supporting_text_windows"][0]["text"]) == 1200
+
+
+def test_table_batch_payload_includes_source_table_context():
+    service = PaperFactsService()
+
+    payload = service._build_table_batch_extraction_payload(
+        title="Prompt Boundary Paper",
+        source_filename="prompt-boundary.pdf",
+        profile={
+            "doc_type": "experimental",
+            "protocol_extractable": "yes",
+        },
+        table_context={
+            "caption_text": "Table 1 Mechanical properties.",
+            "heading_path": "Results > Mechanical Properties",
+            "column_headers": ["Sample", "Yield strength (MPa)", "Baseline"],
+            "table_markdown": "| Sample | Yield strength (MPa) | Baseline |\n| --- | --- | --- |\n| A | 560 | as-built |",
+            "table_text": "Sample | Yield strength (MPa) | Baseline\nA | 560 | as-built",
+            "page": 5,
+        },
+        table_rows=[{
+            "table_id": "tbl-1",
+            "row_index": 1,
+            "row_text": "A | 560 | as-built",
+            "heading_path": "Results > Mechanical Properties",
+            "page": 5,
+        }],
+        row_cells_by_index={
+            1: [
+                {
+                    "header_path": "Sample",
+                    "cell_text": "A",
+                    "unit_hint": None,
+                    "col_index": 0,
+                },
+                {
+                    "header_path": "Yield strength (MPa)",
+                    "cell_text": "560",
+                    "unit_hint": "MPa",
+                    "col_index": 1,
+                },
+            ],
+        },
+        text_windows=[],
+    )
+
+    assert payload["table_context"] == {
+        "caption_text": "Table 1 Mechanical properties.",
+        "heading_path": "Results > Mechanical Properties",
+        "column_headers": ["Sample", "Yield strength (MPa)", "Baseline"],
+        "table_markdown": "| Sample | Yield strength (MPa) | Baseline |\n| --- | --- | --- |\n| A | 560 | as-built |",
+        "table_text": "Sample | Yield strength (MPa) | Baseline\nA | 560 | as-built",
+        "page": 5,
+    }
+    assert payload["target_rows"][0]["row_summary"] == "A | 560 | as-built"
+    assert payload["target_rows"][0]["row_index"] == 1
 
 
 def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):
@@ -853,15 +938,16 @@ def test_paper_facts_service_logs_window_and_table_progress(monkeypatch, tmp_pat
         for record in caplog.records
     )
     assert any(
-        "Paper facts table-row extraction started" in record.message
-        and "row_position=" in record.message
-        and "table_row_count=" in record.message
+        "Paper facts table-batch extraction started" in record.message
+        and "batch_position=" in record.message
+        and "table_batch_count=" in record.message
+        and "row_count=" in record.message
         and "completed_units=" in record.message
         and "remaining_units=" in record.message
         for record in caplog.records
     )
     assert any(
-        "Paper facts table-row extraction finished" in record.message
+        "Paper facts table-batch extraction finished" in record.message
         and "elapsed_s=" in record.message
         and "elapsed_ms=" in record.message
         and "completed_units=" in record.message
@@ -908,9 +994,9 @@ def test_paper_facts_service_prunes_low_value_text_windows_before_model_calls(
             self.text_payloads.append(payload)
             return StructuredTextWindowMentions()
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001
+        def extract_table_batch_mentions(self, payload):  # noqa: ANN001
             self.table_payloads.append(payload)
-            return StructuredExtractionBundle()
+            return StructuredTableBatchMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -987,6 +1073,190 @@ def test_paper_facts_service_prunes_low_value_text_windows_before_model_calls(
         "Relative density reached 99.1%.",
     ]
     assert len(extractor.table_payloads) == 1
+
+
+def test_paper_facts_service_batches_table_rows_before_model_calls(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class CountingExtractor:
+        def __init__(self) -> None:
+            self.table_payloads: list[dict[str, object]] = []
+
+        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                protocol_extractable="yes",
+                protocol_extractability_signals=[],
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+        def extract_text_window_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTextWindowMentions()
+
+        def extract_table_batch_mentions(self, payload):  # noqa: ANN001
+            self.table_payloads.append(payload)
+            return StructuredTableBatchMentions()
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = CountingExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+
+    collection = collection_service.create_collection("Table Batch Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    table_lines = [
+        "Sample | Tensile Strength (MPa)",
+        "A1 | 951",
+        "A2 | 952",
+        "A3 | 953",
+        "A4 | 954",
+        "A5 | 955",
+        "A6 | 956",
+    ]
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Table Batch Paper",
+                "text": "\n".join(["Results", "Table 1 Mechanical Results", *table_lines]),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    paper_facts_service.build_paper_facts(collection_id, output_dir)
+
+    assert [len(payload["target_rows"]) for payload in extractor.table_payloads] == [5, 1]
+
+
+def test_paper_facts_service_passes_table_artifact_context_to_batch_extraction(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_parquet(monkeypatch)
+
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    class CapturingExtractor:
+        def __init__(self) -> None:
+            self.table_payloads: list[dict[str, object]] = []
+
+        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                protocol_extractable="yes",
+                protocol_extractability_signals=[],
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+        def extract_text_window_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTextWindowMentions()
+
+        def extract_table_batch_mentions(self, payload):  # noqa: ANN001
+            self.table_payloads.append(payload)
+            return StructuredTableBatchMentions()
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    extractor = CapturingExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        structured_extractor=extractor,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+        document_profile_service,
+        structured_extractor=extractor,
+    )
+
+    collection = collection_service.create_collection("Table Batch Context Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Table Context Paper",
+                "text": "\n".join(
+                    [
+                        "Results",
+                        "Table 1 Mechanical Results",
+                        "Sample | Tensile Strength (MPa) | Baseline",
+                        "A1 | 950 | as-built",
+                    ]
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
+    tables = pd.DataFrame(
+        [
+            {
+                "table_id": "tbl_paper-1_1_1_mechanical_results",
+                "document_id": "paper-1",
+                "table_order": 1,
+                "caption_text": "Table 1 Mechanical Results",
+                "caption_block_id": "blk_paper-1_2",
+                "page": 5,
+                "bbox": None,
+                "heading_path": "Results",
+                "row_count": 2,
+                "col_count": 3,
+                "column_headers": ["Sample", "Tensile Strength (MPa)", "Baseline"],
+                "table_markdown": "| Sample | Tensile Strength (MPa) | Baseline |\n| --- | --- | --- |\n| A1 | 950 | as-built |",
+                "table_text": "Sample | Tensile Strength (MPa) | Baseline\nA1 | 950 | as-built",
+                "metadata": {"source": "test"},
+            }
+        ],
+        columns=TABLES_FINAL_COLUMNS,
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units, tables=tables)
+    artifact_registry.upsert(collection_id, output_dir)
+
+    document_profile_service.build_document_profiles(collection_id, output_dir)
+    paper_facts_service.build_paper_facts(collection_id, output_dir)
+
+    assert len(extractor.table_payloads) == 1
+    table_context = extractor.table_payloads[0]["table_context"]
+    assert table_context["caption_text"] == "Table 1 Mechanical Results"
+    assert table_context["column_headers"] == [
+        "Sample",
+        "Tensile Strength (MPa)",
+        "Baseline",
+    ]
+    assert "A1 | 950 | as-built" in table_context["table_markdown"]
+    assert extractor.table_payloads[0]["target_rows"][0]["row_summary"] == "A1 | 950 | as-built"
+    assert extractor.table_payloads[0]["target_rows"][0]["row_index"] is not None
 
 
 def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_path):
@@ -1070,8 +1340,8 @@ def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_p
                 ],
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableBatchMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1190,8 +1460,8 @@ def test_prior_work_text_window_claims_do_not_materialize_measurement_results(mo
                 ],
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableBatchMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1288,8 +1558,8 @@ def test_paper_facts_service_persists_mixed_variant_values_with_real_parquet(tmp
                 ]
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableBatchMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1391,8 +1661,8 @@ def test_paper_facts_service_normalizes_null_like_variant_values_before_parquet(
                 ]
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableBatchMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
@@ -1499,8 +1769,8 @@ def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatc
                 ]
             )
 
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
+        def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
+            return StructuredTableBatchMentions()
 
     collection_service = CollectionService(tmp_path / "collections")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")

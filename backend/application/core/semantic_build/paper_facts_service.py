@@ -33,6 +33,7 @@ from .llm.schemas import (
     ProcessContextPayload,
     SampleVariantPayload,
     StructuredExtractionBundle,
+    StructuredTableBatchRowMentions,
     StructuredTextWindowMentions,
     TestConditionPayloadModel,
     TestContextPayload,
@@ -45,6 +46,7 @@ from application.source.artifact_input_service import (
     build_document_records,
     load_blocks_artifact,
     load_collection_inputs,
+    load_tables_artifact,
     load_table_rows_artifact,
     load_table_cells_artifact,
 )
@@ -66,7 +68,6 @@ from domain.shared.enums import (
     EPISTEMIC_DIRECTLY_OBSERVED,
     EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
     EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
-    EPISTEMIC_UNRESOLVED,
     TRACEABILITY_STATUS_DIRECT,
     TRACEABILITY_STATUS_MISSING,
 )
@@ -125,6 +126,8 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _MAX_SUPPORTING_TEXT_WINDOWS = 3
 _MAX_TABLE_ROW_SUPPORTING_TEXT_CHARS = 1200
+_MAX_TABLE_CONTEXT_CHARS = 6000
+_TABLE_ROWS_PER_EXTRACTION_BATCH = 5
 _MAX_TEXT_WINDOWS_PER_DOCUMENT = 24
 _INTRODUCTION_WINDOW_LIMIT = 1
 _CHARACTERIZATION_COLUMNS = [
@@ -586,6 +589,7 @@ class PaperFactsService:
         documents, text_units = load_collection_inputs(base_dir)
         try:
             blocks = load_blocks_artifact(base_dir)
+            tables = load_tables_artifact(base_dir)
             table_rows = load_table_rows_artifact(base_dir)
             table_cells = load_table_cells_artifact(base_dir)
         except FileNotFoundError as exc:
@@ -593,6 +597,7 @@ class PaperFactsService:
 
         document_records = build_document_records(documents, text_units)
         all_text_windows_by_doc = self._build_text_windows_by_document(blocks)
+        tables_by_doc = self._group_tables_by_document(tables)
         table_rows_by_doc = self._group_table_rows_by_document(table_rows)
         table_cells_by_doc = self._group_table_cells_by_document(table_cells)
         profile_by_doc = {
@@ -603,6 +608,7 @@ class PaperFactsService:
         total_extraction_units = 0
         selected_text_windows_by_doc: dict[str, list[dict[str, Any]]] = {}
         selected_table_rows_by_doc: dict[str, list[dict[str, Any]]] = {}
+        selected_table_row_batches_by_doc: dict[str, list[list[dict[str, Any]]]] = {}
         for _, candidate_row in document_records.iterrows():
             candidate_document_id = str(candidate_row.get("paper_id") or "")
             candidate_profile = profile_by_doc.get(candidate_document_id)
@@ -625,15 +631,22 @@ class PaperFactsService:
                     table_rows=candidate_table_rows,
                     grouped_row_cells=grouped_row_cells,
                 )
+            selected_table_row_batches = self._batch_table_rows_for_extraction(
+                selected_table_rows
+            )
             selected_text_windows_by_doc[candidate_document_id] = selected_text_windows
             selected_table_rows_by_doc[candidate_document_id] = selected_table_rows
-            total_extraction_units += len(selected_text_windows) + len(selected_table_rows)
+            selected_table_row_batches_by_doc[candidate_document_id] = (
+                selected_table_row_batches
+            )
+            total_extraction_units += len(selected_text_windows) + len(selected_table_row_batches)
         completed_extraction_units = 0
         logger.info(
-            "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_row_count=%s table_cell_count=%s total_extraction_units=%s",
+            "Paper facts extraction started collection_id=%s document_count=%s block_count=%s table_count=%s table_row_count=%s table_cell_count=%s total_extraction_units=%s",
             collection_id,
             total_documents,
             len(blocks),
+            len(tables),
             len(table_rows),
             len(table_cells),
             total_extraction_units,
@@ -675,12 +688,14 @@ class PaperFactsService:
             doc_text_windows = selected_text_windows_by_doc.get(document_id, [])
             raw_doc_table_rows = table_rows_by_doc.get(document_id, [])
             doc_table_rows = selected_table_rows_by_doc.get(document_id, [])
+            doc_table_row_batches = selected_table_row_batches_by_doc.get(document_id, [])
+            doc_tables_by_id = self._group_tables_by_id(tables_by_doc.get(document_id, []))
             grouped_row_cells = self._group_table_cells_by_row(table_cells_by_doc.get(document_id, []))
             document_state = self._build_document_state()
-            document_total_units = len(doc_text_windows) + len(doc_table_rows)
+            document_total_units = len(doc_text_windows) + len(doc_table_row_batches)
             document_completed_units = 0
             logger.info(
-                "Paper facts extraction document started collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s text_window_count=%s raw_text_window_count=%s table_row_count=%s raw_table_row_count=%s doc_type=%s completed_units=%s total_units=%s remaining_units=%s document_total_units=%s",
+                "Paper facts extraction document started collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s text_window_count=%s raw_text_window_count=%s table_batch_count=%s table_row_count=%s raw_table_row_count=%s doc_type=%s completed_units=%s total_units=%s remaining_units=%s document_total_units=%s",
                 collection_id,
                 document_id,
                 document_position,
@@ -688,6 +703,7 @@ class PaperFactsService:
                 total_documents - document_position,
                 len(doc_text_windows),
                 len(all_doc_text_windows),
+                len(doc_table_row_batches),
                 len(doc_table_rows),
                 len(raw_doc_table_rows),
                 profile.get("doc_type"),
@@ -812,42 +828,60 @@ class PaperFactsService:
                     max(document_total_units - document_completed_units, 0),
                 )
 
-            table_row_jobs = []
-            for row in doc_table_rows:
-                table_id = str(row.get("table_id") or "")
-                row_index = self._safe_int(row.get("row_index"))
-                row_cells = grouped_row_cells.get((table_id, row_index), [])
-                table_row_jobs.append(
+            table_batch_jobs = []
+            for batch_rows in doc_table_row_batches:
+                if not batch_rows:
+                    continue
+                first_row = batch_rows[0]
+                table_id = str(first_row.get("table_id") or "")
+                table_context = doc_tables_by_id.get(table_id)
+                row_cells_by_index = {
+                    self._safe_int(row.get("row_index")): grouped_row_cells.get(
+                        (table_id, self._safe_int(row.get("row_index"))),
+                        [],
+                    )
+                    for row in batch_rows
+                }
+                table_batch_jobs.append(
                     {
-                        "row": row,
-                        "row_cells": row_cells,
-                        "payload": self._build_table_row_extraction_payload(
+                        "rows": batch_rows,
+                        "row_cells_by_index": row_cells_by_index,
+                        "table_id": table_id,
+                        "table_context": table_context,
+                        "payload": self._build_table_batch_extraction_payload(
                             title=title,
                             source_filename=source_filename,
                             profile=profile,
-                            table_row=row,
-                            row_cells=row_cells,
+                            table_context=table_context,
+                            table_rows=batch_rows,
+                            row_cells_by_index=row_cells_by_index,
                             text_windows=all_doc_text_windows,
                         ),
                     }
                 )
-            for table_row_position, job in enumerate(table_row_jobs, start=1):
-                row = job["row"]
-                table_id = str(row.get("table_id") or "")
-                row_index = self._safe_int(row.get("row_index"))
-                row_cells = job["row_cells"]
+            for table_batch_position, job in enumerate(table_batch_jobs, start=1):
+                rows = job["rows"]
+                table_id = job["table_id"]
+                row_indices = [
+                    self._safe_int(row.get("row_index"))
+                    for row in rows
+                ]
+                cell_count = sum(
+                    len(job["row_cells_by_index"].get(row_index, []))
+                    for row_index in row_indices
+                )
                 logger.info(
-                    "Paper facts table-row extraction started collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s cell_count=%s heading_path=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+                    "Paper facts table-batch extraction started collection_id=%s document_id=%s document_position=%s document_count=%s batch_position=%s table_batch_count=%s table_id=%s row_indices=%s row_count=%s cell_count=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                     collection_id,
                     document_id,
                     document_position,
                     total_documents,
-                    table_row_position,
-                    len(doc_table_rows),
+                    table_batch_position,
+                    len(table_batch_jobs),
                     table_id,
-                    row_index,
-                    len(row_cells),
-                    self._normalize_scalar_text(row.get("heading_path")),
+                    row_indices,
+                    len(rows),
+                    cell_count,
                     completed_extraction_units,
                     total_extraction_units,
                     max(total_extraction_units - completed_extraction_units, 0),
@@ -855,71 +889,104 @@ class PaperFactsService:
                     document_total_units,
                     max(document_total_units - document_completed_units, 0),
                 )
-            table_row_results = self._execute_extraction_jobs(
+            table_batch_results = self._execute_extraction_jobs(
                 extractor=extractor,
-                jobs=table_row_jobs,
-                kind="table_row",
+                jobs=table_batch_jobs,
+                kind="table_batch",
                 max_extraction_concurrency=max_extraction_concurrency,
             )
-            for table_row_position, (job, result) in enumerate(
-                zip(table_row_jobs, table_row_results, strict=False),
+            for table_batch_position, (job, result) in enumerate(
+                zip(table_batch_jobs, table_batch_results, strict=False),
                 start=1,
             ):
-                row = job["row"]
-                row_cells = job["row_cells"]
-                table_id = str(row.get("table_id") or "")
-                row_index = self._safe_int(row.get("row_index"))
+                rows = job["rows"]
+                table_id = job["table_id"]
+                row_by_index = {
+                    self._safe_int(row.get("row_index")): row
+                    for row in rows
+                }
+                row_indices = list(row_by_index)
                 if result["error"] is not None:
                     logger.error(
-                        "Paper facts table-row extraction failed collection_id=%s document_id=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s",
+                        "Paper facts table-batch extraction failed collection_id=%s document_id=%s batch_position=%s table_batch_count=%s table_id=%s row_indices=%s elapsed_s=%.3f elapsed_ms=%s",
                         collection_id,
                         document_id,
-                        table_row_position,
-                        len(doc_table_rows),
+                        table_batch_position,
+                        len(table_batch_jobs),
                         table_id,
-                        row_index,
+                        row_indices,
                         result["elapsed_s"],
                         round(result["elapsed_s"] * 1000),
                     )
                     raise result["error"]
-                bundle = result["parsed"]
-                table_row_elapsed_s = result["elapsed_s"]
-                table_row_elapsed_ms = round(table_row_elapsed_s * 1000)
-                self._materialize_bundle(
-                    bundle=bundle,
-                    collection_id=collection_id,
-                    document_id=document_id,
-                    text_window=None,
-                    table_id=table_id,
-                    row_index=row_index,
-                    evidence_anchor_rows=evidence_anchor_rows,
-                    method_fact_rows=method_fact_rows,
-                    sample_variant_rows=sample_variant_rows,
-                    test_condition_rows=test_condition_rows,
-                    baseline_rows=baseline_rows,
-                    measurement_rows=measurement_rows,
-                    document_state=document_state,
-                )
+                mentions = result["parsed"]
+                table_batch_elapsed_s = result["elapsed_s"]
+                table_batch_elapsed_ms = round(table_batch_elapsed_s * 1000)
+                batch_method_count = 0
+                batch_variant_count = 0
+                batch_condition_count = 0
+                batch_baseline_count = 0
+                batch_measurement_count = 0
+                for row_mentions in mentions.row_results:
+                    row_index = self._safe_int(row_mentions.row_index)
+                    row = row_by_index.get(row_index)
+                    if row is None:
+                        logger.warning(
+                            "Paper facts table-batch extraction returned unknown row_index collection_id=%s document_id=%s table_id=%s row_index=%s target_row_indices=%s",
+                            collection_id,
+                            document_id,
+                            table_id,
+                            row_index,
+                            row_indices,
+                        )
+                        continue
+                    row_cells = job["row_cells_by_index"].get(row_index, [])
+                    bundle = self._bind_table_row_mentions_to_bundle(
+                        mentions=row_mentions,
+                        table_row=row,
+                        row_cells=row_cells,
+                        table_context=job["table_context"],
+                    )
+                    self._materialize_bundle(
+                        bundle=bundle,
+                        collection_id=collection_id,
+                        document_id=document_id,
+                        text_window=None,
+                        table_id=table_id,
+                        row_index=row_index,
+                        evidence_anchor_rows=evidence_anchor_rows,
+                        method_fact_rows=method_fact_rows,
+                        sample_variant_rows=sample_variant_rows,
+                        test_condition_rows=test_condition_rows,
+                        baseline_rows=baseline_rows,
+                        measurement_rows=measurement_rows,
+                        document_state=document_state,
+                    )
+                    batch_method_count += len(bundle.method_facts)
+                    batch_variant_count += len(bundle.sample_variants)
+                    batch_condition_count += len(bundle.test_conditions)
+                    batch_baseline_count += len(bundle.baseline_references)
+                    batch_measurement_count += len(bundle.measurement_results)
                 completed_extraction_units += 1
                 document_completed_units += 1
                 logger.info(
-                    "Paper facts table-row extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s row_position=%s table_row_count=%s table_id=%s row_index=%s elapsed_s=%.3f elapsed_ms=%s cell_count=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
+                    "Paper facts table-batch extraction finished collection_id=%s document_id=%s document_position=%s document_count=%s batch_position=%s table_batch_count=%s table_id=%s row_indices=%s rows_returned=%s elapsed_s=%.3f elapsed_ms=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s document_completed_units=%s document_total_units=%s document_remaining_units=%s",
                     collection_id,
                     document_id,
                     document_position,
                     total_documents,
-                    table_row_position,
-                    len(doc_table_rows),
+                    table_batch_position,
+                    len(table_batch_jobs),
                     table_id,
-                    row_index,
-                    table_row_elapsed_s,
-                    table_row_elapsed_ms,
-                    len(row_cells),
-                    len(bundle.method_facts),
-                    len(bundle.sample_variants),
-                    len(bundle.test_conditions),
-                    len(bundle.baseline_references),
-                    len(bundle.measurement_results),
+                    row_indices,
+                    len(mentions.row_results),
+                    table_batch_elapsed_s,
+                    table_batch_elapsed_ms,
+                    batch_method_count,
+                    batch_variant_count,
+                    batch_condition_count,
+                    batch_baseline_count,
+                    batch_measurement_count,
                     completed_extraction_units,
                     total_extraction_units,
                     max(total_extraction_units - completed_extraction_units, 0),
@@ -1194,20 +1261,22 @@ class PaperFactsService:
             },
         }
 
-    def _build_table_row_extraction_payload(
+    def _build_table_batch_extraction_payload(
         self,
         *,
         title: str,
         source_filename: str | None,
         profile: dict[str, Any],
-        table_row: dict[str, Any],
-        row_cells: list[dict[str, Any]],
+        table_context: dict[str, Any] | None,
+        table_rows: list[dict[str, Any]],
+        row_cells_by_index: dict[int | None, list[dict[str, Any]]],
         text_windows: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        supporting_text_windows = self._select_supporting_text_windows(
+        supporting_text_windows = self._select_batch_supporting_text_windows(
             text_windows=text_windows,
-            table_row=table_row,
+            table_rows=table_rows,
         )
+        first_row = table_rows[0] if table_rows else {}
         return {
             "document_title": title,
             "source_filename": source_filename,
@@ -1215,21 +1284,17 @@ class PaperFactsService:
                 "doc_type": str(profile.get("doc_type") or ""),
                 "protocol_extractable": str(profile.get("protocol_extractable") or ""),
             },
-            "table_row": {
-                "row_summary": self._normalize_scalar_text(table_row.get("row_text"))
-                or self._build_table_row_summary(row_cells),
-                "cells": [
-                    {
-                        "header_path": self._normalize_scalar_text(cell.get("header_path")),
-                        "cell_text": self._normalize_scalar_text(cell.get("cell_text")),
-                        "unit_hint": self._normalize_scalar_text(cell.get("unit_hint")),
-                    }
-                    for cell in sorted(
-                        row_cells,
-                        key=lambda item: self._safe_int(item.get("col_index")) or 0,
-                    )
-                ],
-            },
+            "table_context": self._build_table_context_payload(
+                table_context=table_context,
+                table_row=first_row,
+            ),
+            "target_rows": [
+                self._build_table_batch_target_row_payload(
+                    table_row=row,
+                    row_cells=row_cells_by_index.get(self._safe_int(row.get("row_index")), []),
+                )
+                for row in table_rows
+            ],
             "supporting_text_windows": [
                 {
                     "heading": self._normalize_scalar_text(window.get("heading")),
@@ -1240,6 +1305,29 @@ class PaperFactsService:
                     "page": self._safe_int(window.get("page")),
                 }
                 for window in supporting_text_windows
+            ],
+        }
+
+    def _build_table_batch_target_row_payload(
+        self,
+        *,
+        table_row: dict[str, Any],
+        row_cells: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "row_index": self._safe_int(table_row.get("row_index")),
+            "row_summary": self._normalize_scalar_text(table_row.get("row_text"))
+            or self._build_table_row_summary(row_cells),
+            "cells": [
+                {
+                    "header_path": self._normalize_scalar_text(cell.get("header_path")),
+                    "cell_text": self._normalize_scalar_text(cell.get("cell_text")),
+                    "unit_hint": self._normalize_scalar_text(cell.get("unit_hint")),
+                }
+                for cell in sorted(
+                    row_cells,
+                    key=lambda item: self._safe_int(item.get("col_index")) or 0,
+                )
             ],
         }
 
@@ -1288,6 +1376,401 @@ class PaperFactsService:
             baseline_references=baseline_references,
             measurement_results=measurement_results,
         )
+
+    def _bind_table_row_mentions_to_bundle(
+        self,
+        *,
+        mentions: StructuredTableBatchRowMentions,
+        table_row: dict[str, Any],
+        row_cells: list[dict[str, Any]],
+        table_context: dict[str, Any] | None,
+    ) -> StructuredExtractionBundle:
+        process_context = self._build_table_row_process_context(
+            mentions.process_mentions
+        )
+        current_work_claims = [
+            claim
+            for claim in mentions.result_claims
+            if str(claim.claim_scope or "").strip() == "current_work"
+        ]
+        sample_variants = self._build_table_row_sample_variants(
+            mentions=mentions,
+            process_context=process_context,
+            result_claims=current_work_claims,
+            table_row=table_row,
+            row_cells=row_cells,
+        )
+        baseline_references = self._build_table_row_baseline_references(
+            mentions=mentions,
+            result_claims=current_work_claims,
+        )
+        test_conditions = self._build_table_row_test_conditions(
+            mentions=mentions,
+            result_claims=current_work_claims,
+        )
+        measurement_results = self._build_table_row_measurement_results(
+            result_claims=current_work_claims,
+            table_row=table_row,
+            table_context=table_context,
+        )
+        return StructuredExtractionBundle(
+            sample_variants=sample_variants,
+            test_conditions=test_conditions,
+            baseline_references=baseline_references,
+            measurement_results=measurement_results,
+        )
+
+    def _build_table_row_process_context(
+        self,
+        mentions: list[Any],
+    ) -> ProcessContextPayload:
+        payload: dict[str, Any] = {
+            "temperatures_c": [],
+            "durations": [],
+        }
+        numeric_fields = {
+            "laser_power_w",
+            "scan_speed_mm_s",
+            "layer_thickness_um",
+            "hatch_spacing_um",
+            "spot_size_um",
+            "energy_density_j_mm3",
+            "preheat_temperature_c",
+            "oxygen_level_ppm",
+        }
+        text_fields = {
+            "atmosphere",
+            "scan_strategy",
+            "build_orientation",
+            "shielding_gas",
+            "powder_size_distribution_um",
+            "post_treatment_summary",
+        }
+        for mention in mentions:
+            field_name = self._normalize_table_row_field_name(mention.name)
+            value = self._normalize_scalar_text(mention.value_text)
+            quote = self._normalize_scalar_text(mention.quote)
+            if not field_name or not (value or quote):
+                continue
+            source_text = value or quote or ""
+            if field_name in {"temperature", "temperature_c"}:
+                numeric = self._coerce_numeric_text_window_value(source_text, quote)
+                if numeric is not None:
+                    payload["temperatures_c"].append(float(numeric))
+            elif field_name == "duration":
+                payload["durations"].append(source_text)
+            elif field_name in numeric_fields:
+                numeric = self._coerce_numeric_text_window_value(source_text, quote)
+                if numeric is not None:
+                    payload[field_name] = float(numeric)
+            elif field_name in text_fields:
+                payload[field_name] = source_text
+
+        payload["temperatures_c"] = self._dedupe_preserving_order(
+            [round(float(item), 4) for item in payload["temperatures_c"]]
+        )
+        payload["durations"] = self._dedupe_preserving_order(payload["durations"])
+        return ProcessContextPayload(**payload)
+
+    def _build_table_row_sample_variants(
+        self,
+        *,
+        mentions: StructuredTableBatchRowMentions,
+        process_context: ProcessContextPayload,
+        result_claims: list[Any],
+        table_row: dict[str, Any],
+        row_cells: list[dict[str, Any]],
+    ) -> list[SampleVariantPayload]:
+        rows: list[SampleVariantPayload] = []
+        seen: set[str] = set()
+        for subject in mentions.row_subjects:
+            variant_label = self._normalize_scalar_text(subject.variant_label)
+            if not variant_label or variant_label.lower() in seen:
+                continue
+            seen.add(variant_label.lower())
+            family = self._sanitize_material_family(subject.family)
+            composition = self._normalize_scalar_text(subject.composition)
+            rows.append(
+                SampleVariantPayload(
+                    variant_label=variant_label,
+                    host_material_system=(
+                        {"family": family, "composition": composition}
+                        if family or composition
+                        else None
+                    ),
+                    composition=composition,
+                    variable_axis_type=subject.variable_axis_type,
+                    variable_value=subject.variable_value,
+                    process_context=process_context,
+                    source_kind="table_row",
+                )
+            )
+
+        if rows:
+            return rows
+
+        for claim in result_claims:
+            variant_label = self._normalize_scalar_text(claim.variant_label)
+            if not variant_label or variant_label.lower() in seen:
+                continue
+            seen.add(variant_label.lower())
+            rows.append(
+                SampleVariantPayload(
+                    variant_label=variant_label,
+                    process_context=process_context,
+                    source_kind="table_row",
+                )
+            )
+
+        if rows:
+            return rows
+
+        sample_label = self._infer_table_row_sample_label(row_cells)
+        if sample_label:
+            return [
+                SampleVariantPayload(
+                    variant_label=sample_label,
+                    process_context=process_context,
+                    source_kind="table_row",
+                )
+            ]
+
+        row_summary = self._normalize_scalar_text(table_row.get("row_text"))
+        if row_summary and result_claims:
+            return [
+                SampleVariantPayload(
+                    variant_label=row_summary.split("|", 1)[0].strip(),
+                    process_context=process_context,
+                    source_kind="table_row",
+                )
+            ]
+        return []
+
+    def _build_table_row_baseline_references(
+        self,
+        *,
+        mentions: StructuredTableBatchRowMentions,
+        result_claims: list[Any],
+    ) -> list[BaselineReferencePayload]:
+        rows: list[BaselineReferencePayload] = []
+        seen: set[str] = set()
+        labels = [
+            self._normalize_scalar_text(mention.baseline_label)
+            for mention in mentions.baseline_mentions
+        ]
+        labels.extend(
+            self._normalize_scalar_text(claim.baseline_label)
+            for claim in result_claims
+        )
+        for label in labels:
+            if not label or label.lower() in seen:
+                continue
+            seen.add(label.lower())
+            rows.append(BaselineReferencePayload(baseline_label=label))
+        return rows
+
+    def _build_table_row_test_conditions(
+        self,
+        *,
+        mentions: StructuredTableBatchRowMentions,
+        result_claims: list[Any],
+    ) -> list[ExtractedTestConditionPayload]:
+        condition_payload = self._build_table_row_test_condition_payload(
+            mentions.test_condition_mentions
+        )
+        payload_dict = condition_payload.model_dump(exclude_none=True, by_alias=True)
+        if not any(value not in (None, [], {}) for value in payload_dict.values()):
+            return []
+
+        rows: list[ExtractedTestConditionPayload] = []
+        seen: set[str] = set()
+        for claim in result_claims:
+            property_type = self._normalize_property_name(claim.property_normalized)
+            if property_type in seen:
+                continue
+            seen.add(property_type)
+            rows.append(
+                ExtractedTestConditionPayload(
+                    property_type=property_type,
+                    condition_payload=payload_dict,
+                )
+            )
+        return rows
+
+    def _build_table_row_test_condition_payload(
+        self,
+        mentions: list[Any],
+    ) -> TestConditionPayloadModel:
+        payload: dict[str, Any] = {
+            "methods": [],
+            "temperatures_c": [],
+            "durations": [],
+        }
+        for mention in mentions:
+            field_name = self._normalize_table_row_field_name(mention.name)
+            value = self._normalize_scalar_text(mention.value_text)
+            quote = self._normalize_scalar_text(mention.quote)
+            if not field_name or not (value or quote):
+                continue
+            source_text = value or quote or ""
+            if field_name in {"method", "test_method"}:
+                payload["methods"].append(source_text)
+                payload.setdefault("method", source_text)
+                payload["test_method"] = source_text
+            elif field_name in {"temperature", "temperature_c", "test_temperature_c"}:
+                numeric = self._coerce_numeric_text_window_value(source_text, quote)
+                if numeric is not None:
+                    payload["test_temperature_c"] = float(numeric)
+            elif field_name == "duration":
+                payload["durations"].append(source_text)
+            elif field_name == "atmosphere":
+                payload["atmosphere"] = source_text
+            elif field_name in {
+                "strain_rate_s-1",
+                "loading_direction",
+                "sample_orientation",
+                "environment",
+                "frequency_hz",
+                "specimen_geometry",
+                "surface_state",
+            }:
+                if field_name == "frequency_hz":
+                    numeric = self._coerce_numeric_text_window_value(source_text, quote)
+                    payload[field_name] = float(numeric) if numeric is not None else source_text
+                else:
+                    payload[field_name] = source_text
+
+        payload["methods"] = self._dedupe_preserving_order(payload["methods"])
+        payload["temperatures_c"] = self._dedupe_preserving_order(
+            payload["temperatures_c"]
+        )
+        payload["durations"] = self._dedupe_preserving_order(payload["durations"])
+        return TestConditionPayloadModel(**payload)
+
+    def _build_table_row_measurement_results(
+        self,
+        *,
+        result_claims: list[Any],
+        table_row: dict[str, Any],
+        table_context: dict[str, Any] | None,
+    ) -> list[MeasurementResultPayload]:
+        rows: list[MeasurementResultPayload] = []
+        for claim in result_claims:
+            value_payload, unit = self._build_measurement_value_from_table_row_claim(
+                claim
+            )
+            quote = self._normalize_table_row_quote(
+                claim.quote,
+                table_row=table_row,
+            )
+            claim_text = (
+                self._normalize_scalar_text(claim.claim_text)
+                or quote
+                or self._build_table_row_claim_text(claim, unit)
+            )
+            rows.append(
+                MeasurementResultPayload(
+                    claim_text=claim_text,
+                    property_normalized=self._normalize_property_name(
+                        claim.property_normalized
+                    ),
+                    result_type=str(claim.result_type or "").strip() or "scalar",
+                    value_payload=value_payload,
+                    unit=unit,
+                    variant_label=claim.variant_label,
+                    baseline_label=claim.baseline_label,
+                    anchors=[
+                        EvidenceAnchorPayload(
+                            quote=quote,
+                            source_type="table",
+                            page=self._table_row_page(table_row, table_context),
+                        )
+                    ],
+                    claim_scope=claim.claim_scope,
+                )
+            )
+        return rows
+
+    def _build_measurement_value_from_table_row_claim(
+        self,
+        claim: Any,
+    ) -> tuple[MeasurementValuePayload, str | None]:
+        return self._build_measurement_value_from_text_window_claim(claim)
+
+    def _build_table_row_claim_text(
+        self,
+        claim: Any,
+        unit: str | None,
+    ) -> str:
+        parts = [
+            self._normalize_scalar_text(claim.variant_label),
+            self._normalize_property_name(claim.property_normalized),
+            self._normalize_scalar_text(claim.value_text),
+            unit,
+        ]
+        return " ".join(part for part in parts if part)
+
+    def _normalize_table_row_quote(
+        self,
+        quote: Any,
+        *,
+        table_row: dict[str, Any],
+    ) -> str | None:
+        return (
+            self._normalize_scalar_text(quote)
+            or self._normalize_scalar_text(table_row.get("row_text"))
+            or self._normalize_scalar_text(table_row.get("row_summary"))
+        )
+
+    def _table_row_page(
+        self,
+        table_row: dict[str, Any],
+        table_context: dict[str, Any] | None,
+    ) -> int | None:
+        return (
+            self._safe_int((table_context or {}).get("page"))
+            or self._safe_int(table_row.get("page"))
+        )
+
+    def _infer_table_row_sample_label(
+        self,
+        row_cells: list[dict[str, Any]],
+    ) -> str | None:
+        for cell in row_cells:
+            header = str(cell.get("header_path") or "").lower()
+            if any(token in header for token in ("sample", "group", "variant")):
+                return self._normalize_scalar_text(cell.get("cell_text"))
+        return None
+
+    def _normalize_table_row_field_name(
+        self,
+        value: Any,
+    ) -> str | None:
+        text = self._normalize_scalar_text(value)
+        if text is None:
+            return None
+        normalized = re.sub(r"[^a-z0-9-]+", "_", text.lower()).strip("_")
+        aliases = {
+            "laser_power": "laser_power_w",
+            "power": "laser_power_w",
+            "scan_speed": "scan_speed_mm_s",
+            "layer_thickness": "layer_thickness_um",
+            "hatch_spacing": "hatch_spacing_um",
+            "spot_size": "spot_size_um",
+            "energy_density": "energy_density_j_mm3",
+            "ved": "energy_density_j_mm3",
+            "temperature": "temperature_c",
+            "temp": "temperature_c",
+            "preheat_temperature": "preheat_temperature_c",
+            "preheat": "preheat_temperature_c",
+            "time": "duration",
+            "method_name": "method",
+            "test": "test_method",
+            "strain_rate": "strain_rate_s-1",
+            "strain_rate_s_1": "strain_rate_s-1",
+            "orientation": "sample_orientation",
+        }
+        return aliases.get(normalized, normalized)
 
     def _build_text_window_method_facts(
         self,
@@ -2732,6 +3215,32 @@ class PaperFactsService:
         ]
         return selected[:_MAX_SUPPORTING_TEXT_WINDOWS]
 
+    def _select_batch_supporting_text_windows(
+        self,
+        *,
+        text_windows: list[dict[str, Any]],
+        table_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        seen: set[tuple[str | None, str | None, int | None]] = set()
+        selected: list[dict[str, Any]] = []
+        for row in table_rows:
+            for window in self._select_supporting_text_windows(
+                text_windows=text_windows,
+                table_row=row,
+            ):
+                key = (
+                    self._normalize_scalar_text(window.get("heading_path")),
+                    self._normalize_scalar_text(window.get("text")),
+                    self._safe_int(window.get("page")),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                selected.append(window)
+                if len(selected) >= _MAX_SUPPORTING_TEXT_WINDOWS:
+                    return selected
+        return selected
+
     def _select_text_windows_for_extraction(
         self,
         *,
@@ -2799,6 +3308,30 @@ class PaperFactsService:
             if self._should_extract_table_row(row=row, row_cells=row_cells):
                 selected.append(row)
         return selected
+
+    def _batch_table_rows_for_extraction(
+        self,
+        table_rows: list[dict[str, Any]],
+    ) -> list[list[dict[str, Any]]]:
+        batches: list[list[dict[str, Any]]] = []
+        current_table_id: str | None = None
+        current_batch: list[dict[str, Any]] = []
+        for row in table_rows:
+            table_id = str(row.get("table_id") or "")
+            if (
+                current_batch
+                and (
+                    table_id != current_table_id
+                    or len(current_batch) >= _TABLE_ROWS_PER_EXTRACTION_BATCH
+                )
+            ):
+                batches.append(current_batch)
+                current_batch = []
+            current_table_id = table_id
+            current_batch.append(row)
+        if current_batch:
+            batches.append(current_batch)
+        return batches
 
     def _score_text_window_for_extraction(
         self,
@@ -2941,8 +3474,8 @@ class PaperFactsService:
         try:
             if kind == "text_window":
                 parsed = extractor.extract_text_window_mentions(job["payload"])
-            elif kind == "table_row":
-                parsed = extractor.extract_table_row_bundle(job["payload"])
+            elif kind == "table_batch":
+                parsed = extractor.extract_table_batch_mentions(job["payload"])
             else:
                 raise ValueError(f"unsupported extraction job kind: {kind}")
         except Exception as exc:
@@ -3161,6 +3694,41 @@ class PaperFactsService:
             grouped.setdefault((table_id, row_index), []).append(cell)
         return grouped
 
+    def _build_table_context_payload(
+        self,
+        *,
+        table_context: dict[str, Any] | None,
+        table_row: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not table_context:
+            return {
+                "caption_text": None,
+                "heading_path": self._normalize_scalar_text(table_row.get("heading_path")),
+                "column_headers": [],
+                "table_markdown": None,
+                "table_text": None,
+                "page": self._safe_int(table_row.get("page")),
+            }
+
+        return {
+            "caption_text": self._normalize_scalar_text(table_context.get("caption_text")),
+            "heading_path": self._normalize_scalar_text(
+                table_context.get("heading_path")
+            )
+            or self._normalize_scalar_text(table_row.get("heading_path")),
+            "column_headers": self._normalize_list(table_context.get("column_headers")),
+            "table_markdown": self._truncate_context_text(
+                table_context.get("table_markdown"),
+                _MAX_TABLE_CONTEXT_CHARS,
+            ),
+            "table_text": self._truncate_context_text(
+                table_context.get("table_text"),
+                _MAX_TABLE_CONTEXT_CHARS,
+            ),
+            "page": self._safe_int(table_context.get("page"))
+            or self._safe_int(table_row.get("page")),
+        }
+
     def _build_text_windows_by_document(
         self,
         blocks: pd.DataFrame,
@@ -3214,6 +3782,14 @@ class PaperFactsService:
                 continue
             parts.append(f"{header}: {value}" if header else value)
         return "; ".join(parts)
+
+    def _truncate_context_text(self, value: Any, limit: int) -> str | None:
+        text = self._normalize_scalar_text(value)
+        if text is None:
+            return None
+        if limit <= 0 or len(text) <= limit:
+            return text
+        return text[:limit].rstrip()
 
     def _normalize_property_name(self, value: Any) -> str:
         raw = str(value or "").strip().lower()
@@ -3556,6 +4132,34 @@ class PaperFactsService:
                     self._safe_int(item.get("row_index")) or 0,
                 ),
             )
+        return grouped
+
+    def _group_tables_by_document(
+        self,
+        tables: pd.DataFrame,
+    ) -> dict[str, list[dict[str, Any]]]:
+        if tables is None or tables.empty:
+            return {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for _, row in tables.iterrows():
+            document_id = str(row.get("document_id") or row.get("id") or "")
+            grouped.setdefault(document_id, []).append(dict(row))
+        for document_id, items in grouped.items():
+            grouped[document_id] = sorted(
+                items,
+                key=lambda item: self._safe_int(item.get("table_order")) or 0,
+            )
+        return grouped
+
+    def _group_tables_by_id(
+        self,
+        tables: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for table in tables:
+            table_id = self._normalize_scalar_text(table.get("table_id"))
+            if table_id:
+                grouped[table_id] = table
         return grouped
 
     def _group_table_cells_by_document(

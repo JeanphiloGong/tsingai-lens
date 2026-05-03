@@ -309,11 +309,6 @@ export type WorkbenchEvidenceCard = {
 	result_id: string | null;
 };
 
-export type WorkbenchQaSuggestion = {
-	id: string;
-	text: string;
-};
-
 export type WorkbenchGraphNodeType =
 	| 'task'
 	| 'material'
@@ -363,7 +358,7 @@ export type WorkbenchSelectableItem = {
 	graph_id: string;
 };
 
-export type WorkbenchTab = 'summary' | 'methods' | 'results' | 'evidence' | 'qa';
+export type WorkbenchTab = 'overview' | 'results' | 'evidence';
 
 export type DocumentWorkbenchModel = {
 	collection_id: string;
@@ -381,7 +376,6 @@ export type DocumentWorkbenchModel = {
 	key_results: WorkbenchKeyResultCard[];
 	result_rows: WorkbenchResultRow[];
 	evidence_cards: WorkbenchEvidenceCard[];
-	qa_suggestions: WorkbenchQaSuggestion[];
 	selectable_items: WorkbenchSelectableItem[];
 	graphs_by_item_id: Record<string, WorkbenchLocalGraph>;
 	default_item_id: string;
@@ -631,7 +625,7 @@ export function getDocumentNextActions(profile: DocumentProfile): DocumentProfil
 
 	if (docType === 'review' && suitability === 'no') return ['view_document', 'view_evidence'];
 	if ((docType === 'experimental' || docType === 'method') && suitability === 'yes') {
-		return ['view_evidence', 'open_comparison'];
+		return ['view_document', 'view_evidence', 'open_comparison'];
 	}
 	if (docType === 'uncertain' || suitability === 'uncertain') {
 		return ['view_document', 'manual_mark'];
@@ -1767,15 +1761,6 @@ function buildWorkbenchEvidenceCards(resultRows: WorkbenchResultRow[]): Workbenc
 	});
 }
 
-function buildWorkbenchQaSuggestions(resultRows: WorkbenchResultRow[]): WorkbenchQaSuggestion[] {
-	const firstProperty = resultRows[0]?.property || 'the main result';
-	return [
-		{ id: 'qa-source', text: `Where does the paper support ${firstProperty}?` },
-		{ id: 'qa-baseline', text: 'Which baseline should I compare against?' },
-		{ id: 'qa-limits', text: 'What context is missing or uncertain?' }
-	];
-}
-
 function graphNode(
 	id: string,
 	label: string,
@@ -1890,7 +1875,7 @@ function buildWorkbenchSelectableItems(
 		...summaryCards.map((card) => ({
 			id: card.id,
 			kind: 'summary' as const,
-			tab: 'summary' as const,
+			tab: 'overview' as const,
 			title: card.title,
 			source_span_id: card.source_span_id,
 			graph_id: `graph-${card.id}`
@@ -1898,7 +1883,7 @@ function buildWorkbenchSelectableItems(
 		...methodRows.map((row, index) => ({
 			id: `method-${index}`,
 			kind: 'method' as const,
-			tab: 'methods' as const,
+			tab: 'overview' as const,
 			title: row.label,
 			source_span_id: row.source_span_id,
 			graph_id: `graph-method-${index}`
@@ -1966,7 +1951,6 @@ export function buildDocumentWorkbenchModel({
 	const methodRows = buildWorkbenchMethodRows(contexts, resultRows, sourceSpans);
 	const keyResults = buildWorkbenchKeyResults(contexts, relatedResults, resultRows, sourceSpans);
 	const evidenceCards = buildWorkbenchEvidenceCards(resultRows);
-	const qaSuggestions = buildWorkbenchQaSuggestions(resultRows);
 	const selectableItems = buildWorkbenchSelectableItems(
 		summaryCards,
 		methodRows,
@@ -2005,7 +1989,6 @@ export function buildDocumentWorkbenchModel({
 		key_results: keyResults,
 		result_rows: resultRows,
 		evidence_cards: evidenceCards,
-		qa_suggestions: qaSuggestions,
 		selectable_items: selectableItems,
 		graphs_by_item_id: graphsByItemId,
 		default_item_id: defaultItem?.id ?? ''

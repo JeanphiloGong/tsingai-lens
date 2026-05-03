@@ -1,20 +1,19 @@
 <script lang="ts">
 	import { t } from '../../../../../_shared/i18n';
 	import type { DocumentWorkbenchModel, WorkbenchTab } from '../../../../../_shared/documents';
-	import DocumentQaPanel from './DocumentQaPanel.svelte';
 	import EvidenceCard from './EvidenceCard.svelte';
 	import ExtractionTabs from './ExtractionTabs.svelte';
 	import ResultTable from './ResultTable.svelte';
 
 	export let model: DocumentWorkbenchModel;
-	export let activeTab: WorkbenchTab = 'summary';
+	export let activeTab: WorkbenchTab = 'overview';
 	export let selectedItemId = '';
 	export let onSelectItem: (id: string, tab?: WorkbenchTab) => void = () => {};
 	export let onJumpToSource: (sourceSpanId: string) => void = () => {};
 	export let onOpenTab: (tab: WorkbenchTab) => void = () => {};
 
 	function selectMethod(index: number) {
-		onSelectItem(`method-${index}`, 'methods');
+		onSelectItem(`method-${index}`, 'overview');
 	}
 
 	function handleMethodKeydown(event: KeyboardEvent, index: number) {
@@ -29,10 +28,10 @@
 	<ExtractionTabs {activeTab} onChange={onOpenTab} />
 
 	<div class="panel-content">
-		{#if activeTab === 'summary'}
+		{#if activeTab === 'overview'}
 			{#each model.summary_cards as card}
 				<article class:selected={selectedItemId === card.id} class="info-card">
-					<button class="card-main" type="button" on:click={() => onSelectItem(card.id, 'summary')}>
+					<button class="card-main" type="button" on:click={() => onSelectItem(card.id, 'overview')}>
 						<div class="card-title-row">
 							<h3>{card.title}</h3>
 							<span>{card.source_label}</span>
@@ -49,26 +48,6 @@
 				</article>
 			{/each}
 
-			<section class="key-results" aria-labelledby="key-results-title">
-				<div class="section-title-row">
-					<h3 id="key-results-title">{$t('workbench.keyResults')}</h3>
-					<span class="badge">{$t('workbench.keyFinding')}</span>
-				</div>
-				<div class="key-result-grid">
-					{#each model.key_results as result}
-						<button
-							type="button"
-							class="key-result-card"
-							on:click={() => onJumpToSource(result.source_span_id)}
-						>
-							<span>{result.label}</span>
-							<strong>{result.value}</strong>
-							<small>{result.trend}</small>
-						</button>
-					{/each}
-				</div>
-			</section>
-		{:else if activeTab === 'methods'}
 			<section class="info-card method-card">
 				<div class="card-title-row">
 					<h3>{$t('workbench.methodOverview')}</h3>
@@ -91,6 +70,26 @@
 					</tbody>
 				</table>
 			</section>
+
+			<section class="key-results" aria-labelledby="key-results-title">
+				<div class="section-title-row">
+					<h3 id="key-results-title">{$t('workbench.keyResults')}</h3>
+					<span class="badge">{$t('workbench.keyFinding')}</span>
+				</div>
+				<div class="key-result-grid">
+					{#each model.key_results as result}
+						<button
+							type="button"
+							class="key-result-card"
+							on:click={() => onJumpToSource(result.source_span_id)}
+						>
+							<span>{result.label}</span>
+							<strong>{result.value}</strong>
+							<small>{result.trend}</small>
+						</button>
+					{/each}
+				</div>
+			</section>
 		{:else if activeTab === 'results'}
 			<ResultTable
 				rows={model.result_rows}
@@ -107,8 +106,6 @@
 					{onJumpToSource}
 				/>
 			{/each}
-		{:else}
-			<DocumentQaPanel suggestions={model.qa_suggestions} />
 		{/if}
 	</div>
 </section>

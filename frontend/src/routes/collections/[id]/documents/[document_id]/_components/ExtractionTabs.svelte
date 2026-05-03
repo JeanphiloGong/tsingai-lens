@@ -2,15 +2,13 @@
 	import { t } from '../../../../../_shared/i18n';
 	import type { WorkbenchTab } from '../../../../../_shared/documents';
 
-	export let activeTab: WorkbenchTab = 'summary';
+	export let activeTab: WorkbenchTab = 'overview';
 	export let onChange: (tab: WorkbenchTab) => void = () => {};
 
 	const tabs: { id: WorkbenchTab; labelKey: string }[] = [
-		{ id: 'summary', labelKey: 'workbench.tabSummary' },
-		{ id: 'methods', labelKey: 'workbench.tabMethods' },
+		{ id: 'overview', labelKey: 'workbench.tabOverview' },
 		{ id: 'results', labelKey: 'workbench.tabResults' },
-		{ id: 'evidence', labelKey: 'workbench.tabEvidence' },
-		{ id: 'qa', labelKey: 'workbench.tabQa' }
+		{ id: 'evidence', labelKey: 'workbench.tabEvidence' }
 	];
 </script>
 

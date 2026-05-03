@@ -202,9 +202,13 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
             self.bbox = FakeBBox()
 
     class FakeTable:
-        def __init__(self) -> None:
+        def __init__(self, caption_item: FakeTextItem) -> None:
+            self.label = SimpleNamespace(value="table")
+            self.captions = [FakeRef("#/texts/4", caption_item)]
             self.prov = [FakeProv(1, 0, 0)]
             self.data = SimpleNamespace(
+                num_rows=2,
+                num_cols=2,
                 table_cells=[
                     FakeTableCell(row_index=0, col_index=0, text="Sample", column_header=True),
                     FakeTableCell(row_index=0, col_index=1, text="Strength (MPa)", column_header=True),
@@ -212,6 +216,9 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
                     FakeTableCell(row_index=1, col_index=1, text="123"),
                 ]
             )
+
+        def caption_text(self, document) -> str:  # noqa: ANN001
+            return self.captions[0].resolve(document).text
 
     class FakeRef:
         def __init__(self, cref: str, item: FakeTextItem) -> None:
@@ -224,7 +231,7 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
     class FakePicture:
         def __init__(self, caption_item: FakeTextItem) -> None:
             self.label = SimpleNamespace(value="picture")
-            self.captions = [FakeRef("#/texts/4", caption_item)]
+            self.captions = [FakeRef("#/texts/5", caption_item)]
             self.prov = [FakeProv(1, 115, 145)]
 
         def caption_text(self, document) -> str:  # noqa: ANN001
@@ -235,16 +242,18 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
 
     class FakeDocument:
         def __init__(self) -> None:
-            caption_item = FakeTextItem("Figure 1 SEM image of the annealed powder.", "caption", 115, 156)
+            table_caption_item = FakeTextItem("Table 1 Mechanical results.", "caption", 115, 142)
+            figure_caption_item = FakeTextItem("Figure 1 SEM image of the annealed powder.", "caption", 143, 184)
             self.texts = [
                 FakeTextItem("Methods", "section_header", 0, 7),
                 FakeTextItem("Powders were mixed and annealed at 600 C.", "text", 8, 48),
                 FakeTextItem("Characterization", "section_header", 49, 65),
                 FakeTextItem("XRD and SEM were used to characterize the sample.", "text", 66, 114),
-                caption_item,
+                table_caption_item,
+                figure_caption_item,
             ]
-            self.tables = [FakeTable()]
-            self.pictures = [FakePicture(caption_item)]
+            self.tables = [FakeTable(table_caption_item)]
+            self.pictures = [FakePicture(figure_caption_item)]
 
         def export_to_text(self) -> str:
             return "\n".join(item.text for item in self.texts)
@@ -277,10 +286,20 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
     assert bundle.figures.iloc[0]["image_path"].startswith("image_assets/")
     assert bundle.figures.iloc[0]["image_mime_type"] == "image/png"
     assert bundle.figures.iloc[0]["image_width"] == 20
-    assert bundle.figures.iloc[0]["caption_block_id"] == "blk_doc-1_6"
+    assert bundle.figures.iloc[0]["caption_block_id"] == "blk_doc-1_7"
     assert bundle.figures.iloc[0]["figure_label"] == "Figure 1"
     assert bundle.figure_assets
+    assert not bundle.tables.empty
+    table = bundle.tables.iloc[0]
+    assert table["caption_text"] == "Table 1 Mechanical results."
+    assert table["caption_block_id"] == "blk_doc-1_6"
+    assert table["row_count"] == 2
+    assert table["col_count"] == 2
+    assert table["column_headers"] == ["Sample", "Strength (MPa)"]
+    assert "| Sample | Strength (MPa) |" in table["table_markdown"]
+    assert "A | 123" in table["table_text"]
     assert not bundle.table_rows.empty
     assert not bundle.table_cells.empty
+    assert set(bundle.tables["table_id"]) == set(bundle.table_rows["table_id"])
     assert "Strength (MPa)" in set(bundle.table_cells["header_path"].dropna())
     assert "MPa" in set(bundle.table_cells["unit_hint"].dropna())

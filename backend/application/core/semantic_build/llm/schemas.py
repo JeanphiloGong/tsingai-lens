@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 ClaimScope = Literal[
@@ -78,6 +78,22 @@ def _normalize_object_container(value: object) -> object:
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    @field_validator("confidence", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_default_confidence(cls, value: object) -> object:
+        if value is not None:
+            return value
+        return cls.model_fields["confidence"].get_default(call_default_factory=True)
+
+    @field_validator("epistemic_status", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_default_epistemic_status(cls, value: object) -> object:
+        if value is not None:
+            return value
+        return cls.model_fields["epistemic_status"].get_default(
+            call_default_factory=True
+        )
 
 
 class MaterialSystemPayload(_StrictModel):
@@ -461,12 +477,106 @@ class StructuredTextWindowMentions(_StrictModel):
         return _normalize_list_container(value)
 
 
+class TableRowSubjectMentionPayload(_StrictModel):
+    variant_label: str
+    family: str | None = None
+    composition: str | None = None
+    variable_axis_type: str | None = None
+    variable_value: str | int | float | None = None
+    quote: str | None = None
+
+
+class TableRowFactMentionPayload(_StrictModel):
+    name: str
+    value_text: str | int | float | None = None
+    unit: str | None = None
+    quote: str | None = None
+
+
+class TableRowBaselineMentionPayload(_StrictModel):
+    baseline_label: str
+    quote: str | None = None
+
+
+class TableRowResultClaimPayload(_StrictModel):
+    property_normalized: str
+    result_type: str = "scalar"
+    value_text: str | int | float | None = None
+    unit: str | None = None
+    variant_label: str | None = None
+    baseline_label: str | None = None
+    claim_scope: ClaimScope = "current_work"
+    claim_text: str | None = None
+    quote: str | None = None
+
+    @field_validator("claim_scope", mode="before")
+    @classmethod
+    def _normalize_claim_scope(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_CLAIM_SCOPES,
+            default="unclear",
+        )
+
+
+class StructuredTableRowMentions(_StrictModel):
+    row_subjects: list[TableRowSubjectMentionPayload] = Field(default_factory=list)
+    process_mentions: list[TableRowFactMentionPayload] = Field(default_factory=list)
+    test_condition_mentions: list[TableRowFactMentionPayload] = Field(default_factory=list)
+    baseline_mentions: list[TableRowBaselineMentionPayload] = Field(default_factory=list)
+    result_claims: list[TableRowResultClaimPayload] = Field(default_factory=list)
+
+    @field_validator(
+        "row_subjects",
+        "process_mentions",
+        "test_condition_mentions",
+        "baseline_mentions",
+        "result_claims",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredTableBatchRowMentions(StructuredTableRowMentions):
+    row_index: int
+
+
+class StructuredTableBatchMentions(_StrictModel):
+    row_results: list[StructuredTableBatchRowMentions] = Field(default_factory=list)
+
+    @field_validator("row_results", mode="before")
+    @classmethod
+    def _normalize_row_results(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
 class StructuredExtractionBundle(_StrictModel):
     method_facts: list[MethodFactPayload] = Field(default_factory=list)
     sample_variants: list[SampleVariantPayload] = Field(default_factory=list)
     test_conditions: list[ExtractedTestConditionPayload] = Field(default_factory=list)
     baseline_references: list[BaselineReferencePayload] = Field(default_factory=list)
     measurement_results: list[MeasurementResultPayload] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_misplaced_nested_payloads(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        misplaced_nested_keys = {
+            "method_payload",
+            "process_context",
+            "condition_payload",
+            "value_payload",
+        }
+        if not misplaced_nested_keys.intersection(value):
+            return value
+        return {
+            key: item
+            for key, item in value.items()
+            if key not in misplaced_nested_keys
+        }
 
     @field_validator(
         "method_facts",

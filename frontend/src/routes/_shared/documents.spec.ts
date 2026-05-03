@@ -203,7 +203,7 @@ describe('documents shared helpers', () => {
 		).toEqual(['view_document', 'view_evidence']);
 		expect(
 			getDocumentNextActions(profile({ doc_type: 'experimental', protocol_extractable: 'yes' }))
-		).toEqual(['view_evidence', 'open_comparison']);
+		).toEqual(['view_document', 'view_evidence', 'open_comparison']);
 		expect(
 			getDocumentNextActions(profile({ doc_type: 'uncertain', protocol_extractable: 'uncertain' }))
 		).toEqual(['view_document', 'manual_mark']);

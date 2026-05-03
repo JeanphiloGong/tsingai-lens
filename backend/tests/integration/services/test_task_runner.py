@@ -88,6 +88,26 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
     pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "table_id": "tbl-1",
+                "document_id": "paper-1",
+                "table_order": 0,
+                "caption_text": "Processing summary",
+                "caption_block_id": None,
+                "page": None,
+                "bbox": None,
+                "heading_path": ["Experimental Section"],
+                "row_count": 1,
+                "col_count": 2,
+                "column_headers": ["condition", "result"],
+                "table_markdown": "| condition | result |\n| --- | --- |\n| annealed | 97 MPa |",
+                "table_text": "condition: annealed; result: 97 MPa",
+                "metadata": {},
+            }
+        ]
+    ).to_parquet(output_dir / "tables.parquet", index=False)
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
@@ -116,6 +136,24 @@ def _write_review_only_outputs(output_dir: Path) -> None:
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
     build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
     pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
+    pd.DataFrame(
+        columns=[
+            "table_id",
+            "document_id",
+            "table_order",
+            "caption_text",
+            "caption_block_id",
+            "page",
+            "bbox",
+            "heading_path",
+            "row_count",
+            "col_count",
+            "column_headers",
+            "table_markdown",
+            "table_text",
+            "metadata",
+        ]
+    ).to_parquet(output_dir / "tables.parquet", index=False)
     build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
     build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
@@ -168,7 +206,7 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["structure_features_generated"] is True
     assert artifacts["structure_features_ready"] is False
     assert artifacts["test_conditions_generated"] is True
-    assert artifacts["test_conditions_ready"] is False
+    assert artifacts["test_conditions_ready"] is True
     assert artifacts["baseline_references_generated"] is True
     assert artifacts["baseline_references_ready"] is True
     assert artifacts["sample_variants_generated"] is True

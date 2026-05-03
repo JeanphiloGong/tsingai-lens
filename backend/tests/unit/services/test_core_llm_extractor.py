@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.schemas import (
     StructuredExtractionBundle,
+    StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
 
@@ -182,61 +186,68 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
     assert mentions.result_claims[0].claim_scope == "prior_work"
 
 
-def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_rows(
+def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batches(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient("unused", parsed=StructuredExtractionBundle())
+    client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    bundle = extractor.extract_table_row_bundle(
+    mentions = extractor.extract_table_batch_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
-            "table_row": {"row_summary": "Sample A | 560 MPa", "cells": []},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
             "supporting_text_windows": [],
         }
     )
 
-    assert bundle == StructuredExtractionBundle()
+    assert mentions == StructuredTableBatchMentions()
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredExtractionBundle
+    assert parse_call["response_format"] is StructuredTableBatchMentions
     assert parse_call["max_completion_tokens"] == 4096
 
 
-def test_core_llm_extractor_coerces_null_nested_table_row_fields():
+def test_core_llm_extractor_validates_lightweight_table_batch_mentions():
     client = _FakeOpenAIClient(
         """
         {
-          "method_facts": [],
-          "sample_variants": [],
-          "test_conditions": [
+          "row_results": [
             {
-              "property_type": "hardness",
-              "condition_payload": {
-                "method": null,
-                "methods": null,
-                "temperatures_c": null,
-                "durations": null,
-                "atmosphere": null
-              },
-              "confidence": 0.78,
-              "epistemic_status": "normalized_from_evidence"
-            }
-          ],
-          "baseline_references": [],
-          "measurement_results": [
-            {
-              "claim_text": "Hardness reached 210 HV.",
-              "property_normalized": "hardness",
-              "result_type": "scalar",
-              "value_payload": null,
-              "unit": "HV",
-              "variant_label": null,
-              "baseline_label": null,
-              "anchors": null,
-              "claim_scope": "current work",
-              "confidence": 0.81
+              "row_index": 1,
+              "row_subjects": [
+                {
+                  "variant_label": "Sample A",
+                  "family": null,
+                  "composition": null,
+                  "variable_axis_type": null,
+                  "variable_value": null,
+                  "quote": "Sample A"
+                }
+              ],
+              "process_mentions": null,
+              "test_condition_mentions": [
+                {
+                  "name": "test temperature",
+                  "value_text": "25",
+                  "unit": "C",
+                  "quote": "25 C"
+                }
+              ],
+              "baseline_mentions": [],
+              "result_claims": [
+                {
+                  "property_normalized": "hardness",
+                  "result_type": "scalar",
+                  "value_text": "210",
+                  "unit": "HV",
+                  "variant_label": "Sample A",
+                  "baseline_label": null,
+                  "claim_scope": "current work",
+                  "claim_text": "Hardness reached 210 HV.",
+                  "quote": "210 HV"
+                }
+              ]
             }
           ]
         }
@@ -244,21 +255,93 @@ def test_core_llm_extractor_coerces_null_nested_table_row_fields():
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    bundle = extractor.extract_table_row_bundle(
+    mentions = extractor.extract_table_batch_mentions(
         {
             "document_title": "LPBF Paper",
             "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
-            "table_row": {"row_summary": "Sample A | 210 HV", "cells": []},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 210 HV", "cells": []}],
             "supporting_text_windows": [],
         }
     )
 
-    assert bundle.test_conditions[0].condition_payload.methods == []
-    assert bundle.test_conditions[0].condition_payload.temperatures_c == []
-    assert bundle.test_conditions[0].condition_payload.durations == []
-    assert bundle.measurement_results[0].value_payload.value is None
-    assert bundle.measurement_results[0].anchors == []
-    assert bundle.measurement_results[0].claim_scope == "current_work"
+    row_result = mentions.row_results[0]
+    assert row_result.row_index == 1
+    assert row_result.row_subjects[0].variant_label == "Sample A"
+    assert row_result.process_mentions == []
+    assert row_result.test_condition_mentions[0].name == "test temperature"
+    assert row_result.result_claims[0].claim_scope == "current_work"
+
+
+def test_structured_bundle_defaults_null_backend_metadata():
+    bundle = StructuredExtractionBundle.model_validate(
+        {
+            "sample_variants": [
+                {
+                    "variant_label": "Sample A",
+                    "confidence": None,
+                    "epistemic_status": None,
+                }
+            ],
+            "measurement_results": [
+                {
+                    "claim_text": "Hardness reached 210 HV.",
+                    "property_normalized": "hardness",
+                    "result_type": "scalar",
+                    "confidence": None,
+                }
+            ],
+        }
+    )
+
+    assert bundle.sample_variants[0].confidence == 0.85
+    assert bundle.sample_variants[0].epistemic_status == "normalized_from_evidence"
+    assert bundle.measurement_results[0].confidence == 0.85
+
+
+def test_core_llm_extractor_accepts_empty_table_batch_mentions():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "row_results": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    mentions = extractor.extract_table_batch_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | no grounded result", "cells": []}],
+            "supporting_text_windows": [],
+        }
+    )
+
+    assert mentions == StructuredTableBatchMentions()
+
+
+def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "keywords": ["yield strength"],
+          "row_results": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    with pytest.raises(ValidationError) as exc_info:
+        extractor.extract_table_batch_mentions(
+            {
+                "document_title": "LPBF Paper",
+                "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+                "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
+                "supporting_text_windows": [],
+            }
+        )
+
+    assert "keywords" in str(exc_info.value)
 
 
 def test_core_llm_extractor_falls_back_to_json_text_for_invalid_mode(monkeypatch, caplog):

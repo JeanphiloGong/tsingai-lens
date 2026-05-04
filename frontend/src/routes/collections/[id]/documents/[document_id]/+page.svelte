@@ -5,14 +5,19 @@
 		fetchDocumentComparisonSemantics,
 		fetchDocumentContent,
 		type DocumentComparisonSemanticsResponse,
+		type DocumentContentResponse,
 		type DocumentWorkbenchModel,
 		type SourceAnchor,
 		type WorkbenchLocalGraph,
+		type WorkbenchSelectableItem,
 		type WorkbenchTab
 	} from '../../../../_shared/documents';
 	import { t } from '../../../../_shared/i18n';
-	import { fetchCollectionResults } from '../../../../_shared/results';
-	import { fetchEvidenceTraceback } from '../../../../_shared/traceback';
+	import { fetchCollectionResults, type ResultListItem } from '../../../../_shared/results';
+	import {
+		fetchEvidenceTraceback,
+		type EvidenceTracebackResponse
+	} from '../../../../_shared/traceback';
 	import LocalGraphPanel from './_components/LocalGraphPanel.svelte';
 	import PaperReader from './_components/PaperReader.svelte';
 	import StructuredExtractionPanel from './_components/StructuredExtractionPanel.svelte';
@@ -20,15 +25,23 @@
 	let model: DocumentWorkbenchModel | null = null;
 	let loading = false;
 	let loadedKey = '';
+	let appliedRequestKey = '';
+	let loadGeneration = 0;
 	let activeTab: WorkbenchTab = 'overview';
 	let selectedItemId = '';
 	let selectedSourceSpanId = '';
 	let selectedGraphNodeId = '';
 	let graphCollapsed = false;
 	let sourceJumpToken = 0;
+	let contentForModel: DocumentContentResponse | null = null;
+	let comparisonSemanticsForModel: DocumentComparisonSemanticsResponse | null = null;
+	let relatedResultsForModel: ResultListItem[] = [];
+	let evidenceTracebacksById = new Map<string, EvidenceTracebackResponse>();
+	let loadingTracebackIds = new Set<string>();
 
 	type SelectItemOptions = {
 		preserveGraphNodeId?: string;
+		skipTracebackFetch?: boolean;
 	};
 
 	$: collectionId = $page.params.id ?? '';
@@ -36,15 +49,21 @@
 	$: requestedResultId = $page.url.searchParams.get('result_id')?.trim() ?? '';
 	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
 	$: requestedAnchorId = $page.url.searchParams.get('anchor_id')?.trim() ?? '';
-	$: loadKey = `${collectionId}:${routeDocumentId}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}`;
+	$: documentLoadKey = `${collectionId}:${routeDocumentId}`;
+	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}`;
 	$: selectedGraph = graphForSelection(model, selectedItemId);
 	$: selectedSourceAnchor = sourceAnchorForSelection(model, selectedSourceSpanId);
 	$: if (selectedGraph && !selectedGraph.nodes.some((node) => node.id === selectedGraphNodeId)) {
 		selectedGraphNodeId = selectedGraph.nodes.find((node) => node.position === 'center')?.id ?? '';
 	}
-	$: if (collectionId && routeDocumentId && loadKey !== loadedKey) {
-		loadedKey = loadKey;
+	$: if (collectionId && routeDocumentId && documentLoadKey !== loadedKey) {
+		loadedKey = documentLoadKey;
+		appliedRequestKey = '';
 		void loadWorkbench();
+	}
+	$: if (model && documentLoadKey === loadedKey && requestKey !== appliedRequestKey) {
+		appliedRequestKey = requestKey;
+		applyRequestedSelection();
 	}
 
 	function backHref() {
@@ -52,76 +71,67 @@
 	}
 
 	async function loadWorkbench() {
+		const generation = ++loadGeneration;
+		const currentCollectionId = collectionId;
+		const currentDocumentId = routeDocumentId;
+		const currentRequestedEvidenceId = requestedEvidenceId;
+
 		loading = true;
+		model = null;
+		contentForModel = null;
+		comparisonSemanticsForModel = null;
+		relatedResultsForModel = [];
+		evidenceTracebacksById = new Map();
+		loadingTracebackIds = new Set();
 
 		const [contentResult, resultsResult, semanticsResult] = await Promise.allSettled([
-			fetchDocumentContent(collectionId, routeDocumentId),
-			fetchCollectionResults(collectionId, {
-				source_document_id: routeDocumentId,
+			fetchDocumentContent(currentCollectionId, currentDocumentId),
+			fetchCollectionResults(currentCollectionId, {
+				source_document_id: currentDocumentId,
 				limit: 20
 			}),
-			fetchDocumentComparisonSemantics(collectionId, routeDocumentId, {
+			fetchDocumentComparisonSemantics(currentCollectionId, currentDocumentId, {
 				includeGroupedProjections: true
 			})
 		]);
+		if (generation !== loadGeneration) return;
 
-		const content = contentResult.status === 'fulfilled' ? contentResult.value : null;
-		const relatedResults = resultsResult.status === 'fulfilled' ? resultsResult.value.items : [];
-		const comparisonSemantics =
+		contentForModel = contentResult.status === 'fulfilled' ? contentResult.value : null;
+		relatedResultsForModel = resultsResult.status === 'fulfilled' ? resultsResult.value.items : [];
+		comparisonSemanticsForModel =
 			semanticsResult.status === 'fulfilled' ? semanticsResult.value : null;
-		const evidenceTracebacks = await loadEvidenceTracebacks(comparisonSemantics);
 
-		const nextModel = buildDocumentWorkbenchModel({
-			collectionId,
-			documentId: routeDocumentId,
-			content,
-			comparisonSemantics,
-			relatedResults,
-			evidenceTracebacks
-		});
-		model = nextModel;
+		let requestedTraceback: EvidenceTracebackResponse | null = null;
+		if (currentRequestedEvidenceId) {
+			try {
+				requestedTraceback = await fetchEvidenceTraceback(
+					currentCollectionId,
+					currentRequestedEvidenceId
+				);
+			} catch {
+				requestedTraceback = null;
+			}
+		}
+		if (generation !== loadGeneration) return;
+		if (requestedTraceback) {
+			evidenceTracebacksById = new Map([[currentRequestedEvidenceId, requestedTraceback]]);
+		}
 
-		const requestedItemId =
-			nextModel.selectable_items.find((item) => item.id === requestedResultId)?.id ||
-			nextModel.selectable_items.find((item) => item.id === requestedEvidenceId)?.id ||
-			nextModel.default_item_id;
-		selectItem(requestedItemId);
-		selectRequestedAnchor(nextModel);
+		rebuildWorkbenchModel();
+		applyRequestedSelection();
+		appliedRequestKey = requestKey;
 		loading = false;
 	}
 
-	function evidenceIdsForTraceback(
-		comparisonSemantics: DocumentComparisonSemanticsResponse | null
-	) {
-		const ids = new Set<string>();
-		if (requestedEvidenceId) ids.add(requestedEvidenceId);
-
-		for (const dossier of comparisonSemantics?.variant_dossiers ?? []) {
-			for (const series of dossier.series) {
-				for (const chain of series.chains) {
-					for (const evidenceId of chain.evidence.evidence_ids) {
-						if (evidenceId) ids.add(evidenceId);
-					}
-				}
-			}
-		}
-
-		return Array.from(ids);
-	}
-
-	async function loadEvidenceTracebacks(
-		comparisonSemantics: DocumentComparisonSemanticsResponse | null
-	) {
-		const evidenceIds = evidenceIdsForTraceback(comparisonSemantics);
-		if (!evidenceIds.length) return [];
-
-		const tracebacks = await Promise.allSettled(
-			evidenceIds.map((evidenceId) => fetchEvidenceTraceback(collectionId, evidenceId))
-		);
-
-		return tracebacks
-			.filter((result) => result.status === 'fulfilled')
-			.map((result) => result.value);
+	function rebuildWorkbenchModel() {
+		model = buildDocumentWorkbenchModel({
+			collectionId,
+			documentId: routeDocumentId,
+			content: contentForModel,
+			comparisonSemantics: comparisonSemanticsForModel,
+			relatedResults: relatedResultsForModel,
+			evidenceTracebacks: Array.from(evidenceTracebacksById.values())
+		});
 	}
 
 	function selectRequestedAnchor(nextModel: DocumentWorkbenchModel) {
@@ -152,6 +162,16 @@
 		return currentModel.source_anchors_by_span_id[sourceSpanId] ?? null;
 	}
 
+	function applyRequestedSelection() {
+		if (!model) return;
+		const requestedItemId =
+			model.selectable_items.find((item) => item.id === requestedResultId)?.id ||
+			model.selectable_items.find((item) => item.id === requestedEvidenceId)?.id ||
+			model.default_item_id;
+		selectItem(requestedItemId);
+		selectRequestedAnchor(model);
+	}
+
 	function selectItem(itemId: string, tab?: WorkbenchTab, options: SelectItemOptions = {}) {
 		if (!model || !itemId) return;
 		const item = model.selectable_items.find((candidate) => candidate.id === itemId);
@@ -166,6 +186,52 @@
 			preservedNodeId && graph?.nodes.some((node) => node.id === preservedNodeId)
 				? preservedNodeId
 				: (graph?.nodes.find((node) => node.position === 'center')?.id ?? '');
+		if (!options.skipTracebackFetch) void ensureTracebackForItem(item, item.tab);
+	}
+
+	function evidenceIdForItem(item: WorkbenchSelectableItem) {
+		if (!model) return '';
+		if (item.kind === 'result') {
+			return model.result_rows.find((row) => row.id === item.id)?.evidence_id ?? '';
+		}
+		if (item.kind === 'evidence') {
+			const card = model.evidence_cards.find((candidate) => candidate.id === item.id);
+			return model.result_rows.find((row) => row.id === card?.result_id)?.evidence_id ?? '';
+		}
+		return '';
+	}
+
+	async function ensureTracebackForItem(item: WorkbenchSelectableItem, tab: WorkbenchTab) {
+		const evidenceId = evidenceIdForItem(item);
+		if (
+			!evidenceId ||
+			evidenceTracebacksById.has(evidenceId) ||
+			loadingTracebackIds.has(evidenceId)
+		) {
+			return;
+		}
+
+		const generation = loadGeneration;
+		const graphNodeId = selectedGraphNodeId;
+		loadingTracebackIds = new Set(loadingTracebackIds).add(evidenceId);
+		let traceback: EvidenceTracebackResponse | null = null;
+		try {
+			traceback = await fetchEvidenceTraceback(collectionId, evidenceId);
+		} catch {
+			traceback = null;
+		}
+		loadingTracebackIds = new Set(
+			Array.from(loadingTracebackIds).filter((candidate) => candidate !== evidenceId)
+		);
+		if (!traceback || generation !== loadGeneration) return;
+
+		evidenceTracebacksById = new Map(evidenceTracebacksById).set(evidenceId, traceback);
+		rebuildWorkbenchModel();
+		selectItem(item.id, tab, {
+			preserveGraphNodeId: graphNodeId,
+			skipTracebackFetch: true
+		});
+		if (model && requestedEvidenceId === evidenceId) selectRequestedAnchor(model);
 	}
 
 	function jumpToSource(sourceSpanId: string) {

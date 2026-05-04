@@ -61,6 +61,18 @@ function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
 	});
 }
 
+function requestPath(input: string | URL | Request) {
+	const rawUrl =
+		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+	return new URL(rawUrl, 'http://localhost').pathname;
+}
+
+function tracebackCallPaths() {
+	return fetchMock.mock.calls
+		.map(([input]) => requestPath(input as string | URL | Request))
+		.filter((path) => path.endsWith('/traceback'));
+}
+
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -242,6 +254,48 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 												characterization_observation_ids: [],
 												traceability_status: 'direct'
 											}
+										},
+										{
+											result_id: 'cres_2',
+											source_result_id: 'mr_2',
+											measurement: {
+												property: 'capacity',
+												value: 145,
+												unit: 'mAh/g',
+												result_type: 'scalar',
+												summary: '145 mAh/g'
+											},
+											test_condition: {
+												test_method: 'cycling',
+												test_temperature_c: 25
+											},
+											baseline: {
+												label: 'as-prepared',
+												reference: 'same-paper control',
+												baseline_type: 'same_document',
+												resolved: true
+											},
+											assessment: {
+												comparability_status: 'limited',
+												warnings: ['Cycle count is not fully specified.'],
+												basis: [],
+												missing_context: ['cycle_count'],
+												requires_expert_review: true,
+												assessment_epistemic_status: 'partial'
+											},
+											value_provenance: {
+												value_origin: 'reported',
+												source_value_text: '145',
+												source_unit_text: 'mAh/g'
+											},
+											evidence: {
+												evidence_ids: ['ev_2'],
+												direct_anchor_ids: ['anc_2'],
+												contextual_anchor_ids: [],
+												structure_feature_ids: [],
+												characterization_observation_ids: [],
+												traceability_status: 'direct'
+											}
 										}
 									]
 								}
@@ -282,6 +336,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText('Lens')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		expect(tracebackCallPaths()).toEqual([]);
 		await expect.element(browserPage.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('tab', { name: 'Methods' })).not.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('tab', { name: 'Q&A' })).not.toBeInTheDocument();
@@ -301,6 +356,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Comparable').first()).toBeInTheDocument();
 		await browserPage.getByText('oxide cathode').first().click();
 		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
+		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
 		const resultHighlightStyle = browserPage
 			.getByTestId('pdf-highlight')
 			.first()
@@ -318,5 +375,20 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Jump to source' }).first().click();
 		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
+	});
+
+	it('loads only the requested traceback for a document source deep link', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?evidence_id=ev_1&anchor_id=anc_1'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
+		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
 	});
 });

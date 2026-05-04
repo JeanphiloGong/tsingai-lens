@@ -22,6 +22,8 @@ The family keeps multiple live pages because this local subject now needs:
 - an expert gold-set evaluation plan that explains how human-filled annotation
   tables become backend quality measurements, error reports, and regression
   tests
+- a P001 repair plan that turns the first expert-gold evaluation results into
+  concrete extraction, normalization, and binding fixes
 - an implementation plan that turns that direction into executable delivery
   slices, file areas, and verification commands
 
@@ -43,6 +45,10 @@ The family keeps multiple live pages because this local subject now needs:
 - [`expert-gold-set-evaluation-plan.md`](expert-gold-set-evaluation-plan.md)
   Convert expert-filled annotation tables into a gold set, compare them with
   normal Core extraction output, classify errors, and drive regression tests
+- [`p001-extraction-quality-repair-plan.md`](p001-extraction-quality-repair-plan.md)
+  Repair the first P001 evaluator findings: duplicate measurements, conceptual
+  sample variants, process parameter column shifts, and fragmented test
+  conditions
 - [`implementation-plan.md`](implementation-plan.md)
   Delivery slices, owned file areas, verification commands, and acceptance
   gates for the execution wave

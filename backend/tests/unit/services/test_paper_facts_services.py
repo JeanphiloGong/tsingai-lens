@@ -327,6 +327,189 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"result_claims": [' in table_batch_prompt
 
 
+def test_table_row_process_context_uses_cell_header_bindings():
+    service = PaperFactsService()
+
+    context = service._build_table_row_process_context(
+        [],
+        row_cells=[
+            {"col_index": 1, "header_path": "Sample number", "cell_text": "5"},
+            {"col_index": 2, "header_path": "Hatch space (mm)", "cell_text": "0.111"},
+            {"col_index": 3, "header_path": "Scan strategy", "cell_text": "A"},
+            {"col_index": 4, "header_path": "Scanning speed (mm/s)", "cell_text": "0.12"},
+            {"col_index": 5, "header_path": "Energy density (J/mm 3 )", "cell_text": "150"},
+        ],
+    )
+
+    assert context.hatch_spacing_um == 111.0
+    assert context.scan_strategy == "A"
+    assert context.scan_speed_mm_s == 0.12
+    assert context.energy_density_j_mm3 == 150.0
+
+
+def test_text_window_test_conditions_skip_empty_payload():
+    service = PaperFactsService()
+    text_window = {
+        "text": "Yield strength reached 560 MPa.",
+        "window_id": "window-1",
+    }
+    claim = TextWindowResultClaimPayload(
+        claim_text="Yield strength reached 560 MPa.",
+        property_normalized="yield_strength",
+        result_type="scalar",
+        value_text="560",
+        unit="MPa",
+        claim_scope="current_work",
+        eligible_for_measurement_result=True,
+        evidence_quote="Yield strength reached 560 MPa.",
+    )
+
+    conditions = service._build_text_window_test_conditions(
+        StructuredTextWindowMentions(result_claims=[claim]),
+        text_window,
+        [claim],
+    )
+
+    assert conditions == []
+
+
+def test_generic_text_samples_are_removed_when_table_samples_exist():
+    service = PaperFactsService()
+    samples = service._normalize_sample_variants_table(
+        pd.DataFrame(
+            [
+                {
+                    "variant_id": "var-generic",
+                    "document_id": "paper-1",
+                    "collection_id": "collection-1",
+                    "variant_label": "316L stainless steel samples",
+                    "host_material_system": {},
+                    "composition": None,
+                    "variable_axis_type": None,
+                    "variable_value": None,
+                    "process_context": {},
+                    "profile_payload": {"source_kind": "text_window"},
+                    "structure_feature_ids": [],
+                    "source_anchor_ids": [],
+                    "confidence": 0.8,
+                    "epistemic_status": "inferred_with_low_confidence",
+                },
+                {
+                    "variant_id": "var-1",
+                    "document_id": "paper-1",
+                    "collection_id": "collection-1",
+                    "variant_label": "1",
+                    "host_material_system": {},
+                    "composition": None,
+                    "variable_axis_type": None,
+                    "variable_value": None,
+                    "process_context": {},
+                    "profile_payload": {"source_kind": "table_row"},
+                    "structure_feature_ids": [],
+                    "source_anchor_ids": [],
+                    "confidence": 0.9,
+                    "epistemic_status": "normalized_from_evidence",
+                },
+            ]
+        ),
+        None,
+    )
+    filtered, removed_ids = service._filter_generic_text_sample_variants(samples)
+
+    assert set(filtered["variant_label"]) == {"1"}
+    assert removed_ids == {"var-generic"}
+
+    measurements = service._normalize_measurement_results_table(
+        pd.DataFrame(
+            [
+                {
+                    "result_id": "res-1",
+                    "document_id": "paper-1",
+                    "collection_id": "collection-1",
+                    "variant_id": "var-generic",
+                    "property_normalized": "density",
+                    "result_type": "scalar",
+                    "claim_scope": "current_work",
+                    "value_payload": {"value": 95.0, "statement": "Relative density was 95%."},
+                    "unit": "%",
+                    "evidence_anchor_ids": ["anchor-1"],
+                    "traceability_status": "direct",
+                    "result_source_type": "text",
+                }
+            ]
+        ),
+        None,
+    )
+    cleared = service._clear_removed_variant_ids_from_measurements(
+        measurements,
+        removed_ids,
+    )
+
+    assert cleared.iloc[0]["variant_id"] is None
+
+
+def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistics():
+    service = PaperFactsService()
+    measurements = service._normalize_measurement_results_table(
+        pd.DataFrame(
+            [
+                {
+                    "result_id": "res-1",
+                    "document_id": "paper-1",
+                    "collection_id": "collection-1",
+                    "variant_id": "var-1",
+                    "property_normalized": "hardness",
+                    "result_type": "scalar",
+                    "claim_scope": "current_work",
+                    "value_payload": {"value": 187.7, "statement": "Microhardness is 187.7 HV."},
+                    "unit": None,
+                    "evidence_anchor_ids": ["anchor-1"],
+                    "traceability_status": "direct",
+                    "result_source_type": "table",
+                },
+                {
+                    "result_id": "res-2",
+                    "document_id": "paper-1",
+                    "collection_id": "collection-1",
+                    "variant_id": "var-1",
+                    "property_normalized": "hardness",
+                    "result_type": "scalar",
+                    "claim_scope": "current_work",
+                    "value_payload": {"value": 187.7, "statement": "Microhardness measured at 187.7."},
+                    "unit": "HV",
+                    "evidence_anchor_ids": ["anchor-2"],
+                    "traceability_status": "direct",
+                    "result_source_type": "table",
+                },
+                {
+                    "result_id": "res-std",
+                    "document_id": "paper-1",
+                    "collection_id": "collection-1",
+                    "variant_id": "var-1",
+                    "property_normalized": "hardness",
+                    "result_type": "scalar",
+                    "claim_scope": "current_work",
+                    "value_payload": {
+                        "value": 11.4,
+                        "statement": "Standard deviation of microhardness is 11.4 HV.",
+                    },
+                    "unit": "HV",
+                    "evidence_anchor_ids": ["anchor-std"],
+                    "traceability_status": "direct",
+                    "result_source_type": "table",
+                },
+            ]
+        ),
+        None,
+    )
+
+    deduped = service._deduplicate_measurement_results_table(measurements)
+
+    assert len(deduped) == 1
+    assert deduped.iloc[0]["unit"] == "HV"
+    assert set(deduped.iloc[0]["evidence_anchor_ids"]) == {"anchor-1", "anchor-2"}
+
+
 def test_pbf_fact_schema_accepts_process_test_and_value_provenance_fields():
     bundle = StructuredExtractionBundle(
         method_facts=[

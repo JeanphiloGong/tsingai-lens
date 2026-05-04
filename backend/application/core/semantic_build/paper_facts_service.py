@@ -297,6 +297,24 @@ _PBF_PROCESS_PAYLOAD_KEYS = (
     "powder_size_distribution_um",
     "post_treatment_summary",
 )
+_GENERIC_TEXT_VARIANT_TERMS = (
+    "alloy",
+    "material",
+    "powder",
+    "process",
+    "sample",
+    "samples",
+    "scan strategy",
+    "scanning strategy",
+    "strategies",
+    "stainless steel",
+)
+_STATISTIC_MEASUREMENT_TERMS = (
+    "standard deviation",
+    "std deviation",
+    "std. deviation",
+    "std dev",
+)
 _OBSERVED_VALUE_PATTERN = re.compile(
     r"([-+]?\d+(?:\.\d+)?)\s*(nm|um|μm|mm|cm|m2/g|m\^2/g|m²/g|mpa|gpa|pa|%)\b",
     re.IGNORECASE,
@@ -1027,6 +1045,9 @@ class PaperFactsService:
             pd.DataFrame(sample_variant_rows, columns=_SAMPLE_VARIANT_COLUMNS),
             collection_id,
         )
+        sample_variants, removed_variant_ids = self._filter_generic_text_sample_variants(
+            sample_variants
+        )
         test_conditions = self._normalize_test_conditions_table(
             pd.DataFrame(test_condition_rows, columns=_TEST_CONDITION_COLUMNS),
             collection_id,
@@ -1038,6 +1059,10 @@ class PaperFactsService:
         measurement_results = self._normalize_measurement_results_table(
             pd.DataFrame(measurement_rows, columns=_MEASUREMENT_RESULT_COLUMNS),
             collection_id,
+        )
+        measurement_results = self._clear_removed_variant_ids_from_measurements(
+            measurement_results,
+            removed_variant_ids,
         )
         if not method_facts.empty and measurement_results.empty:
             logger.warning(
@@ -1070,6 +1095,9 @@ class PaperFactsService:
             measurement_results=measurement_results,
             characterization=characterization,
             structure_features=structure_features,
+        )
+        measurement_results = self._deduplicate_measurement_results_table(
+            measurement_results
         )
 
         base_dir.mkdir(parents=True, exist_ok=True)
@@ -1238,6 +1266,92 @@ class PaperFactsService:
             "baseline_records_by_id": {},
         }
 
+    def _filter_generic_text_sample_variants(
+        self,
+        sample_variants: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, set[str]]:
+        if sample_variants is None or sample_variants.empty:
+            return self._normalize_sample_variants_table(sample_variants, None), set()
+
+        table_variant_documents = {
+            self._normalize_scalar_text(row.get("document_id"))
+            for _, row in sample_variants.iterrows()
+            if self._sample_variant_source_kind(row) == "table_row"
+        }
+        if not table_variant_documents:
+            return sample_variants, set()
+
+        kept_rows: list[dict[str, Any]] = []
+        removed_variant_ids: set[str] = set()
+        for _, row in sample_variants.iterrows():
+            document_id = self._normalize_scalar_text(row.get("document_id"))
+            if (
+                document_id in table_variant_documents
+                and self._is_generic_text_sample_variant(row)
+            ):
+                variant_id = self._normalize_scalar_text(row.get("variant_id"))
+                if variant_id:
+                    removed_variant_ids.add(variant_id)
+                continue
+            kept_rows.append(dict(row))
+
+        if not removed_variant_ids:
+            return sample_variants, set()
+        return (
+            self._normalize_sample_variants_table(
+                pd.DataFrame(kept_rows, columns=_SAMPLE_VARIANT_COLUMNS),
+                None,
+            ),
+            removed_variant_ids,
+        )
+
+    def _sample_variant_source_kind(self, row: Any) -> str | None:
+        profile_payload = self._normalize_object(row.get("profile_payload"))
+        if not isinstance(profile_payload, dict):
+            return None
+        return self._normalize_scalar_text(profile_payload.get("source_kind"))
+
+    def _is_generic_text_sample_variant(self, row: Any) -> bool:
+        if self._sample_variant_source_kind(row) != "text_window":
+            return False
+        if self._normalize_scalar_text(row.get("variable_axis_type")):
+            return False
+        if self._normalize_scalar_variant_value(row.get("variable_value")) is not None:
+            return False
+
+        label = (self._normalize_scalar_text(row.get("variant_label")) or "").lower()
+        if not label:
+            return True
+        epistemic_status = (
+            self._normalize_scalar_text(row.get("epistemic_status")) or ""
+        ).lower()
+        return (
+            epistemic_status == "inferred_with_low_confidence"
+            or any(term in label for term in _GENERIC_TEXT_VARIANT_TERMS)
+        )
+
+    def _clear_removed_variant_ids_from_measurements(
+        self,
+        measurement_results: pd.DataFrame,
+        removed_variant_ids: set[str],
+    ) -> pd.DataFrame:
+        if (
+            measurement_results is None
+            or measurement_results.empty
+            or not removed_variant_ids
+            or "variant_id" not in measurement_results.columns
+        ):
+            return self._normalize_measurement_results_table(measurement_results, None)
+
+        normalized = measurement_results.copy()
+        normalized.loc[
+            normalized["variant_id"].apply(
+                lambda value: self._normalize_scalar_text(value) in removed_variant_ids
+            ),
+            "variant_id",
+        ] = None
+        return self._normalize_measurement_results_table(normalized, None)
+
     def _build_text_window_extraction_payload(
         self,
         *,
@@ -1386,7 +1500,8 @@ class PaperFactsService:
         table_context: dict[str, Any] | None,
     ) -> StructuredExtractionBundle:
         process_context = self._build_table_row_process_context(
-            mentions.process_mentions
+            mentions.process_mentions,
+            row_cells=row_cells,
         )
         current_work_claims = [
             claim
@@ -1423,11 +1538,12 @@ class PaperFactsService:
     def _build_table_row_process_context(
         self,
         mentions: list[Any],
+        *,
+        row_cells: list[dict[str, Any]] | None = None,
     ) -> ProcessContextPayload:
-        payload: dict[str, Any] = {
-            "temperatures_c": [],
-            "durations": [],
-        }
+        payload = self._build_table_row_process_context_from_cells(row_cells or [])
+        payload.setdefault("temperatures_c", [])
+        payload.setdefault("durations", [])
         numeric_fields = {
             "laser_power_w",
             "scan_speed_mm_s",
@@ -1461,9 +1577,9 @@ class PaperFactsService:
                 payload["durations"].append(source_text)
             elif field_name in numeric_fields:
                 numeric = self._coerce_numeric_text_window_value(source_text, quote)
-                if numeric is not None:
+                if numeric is not None and field_name not in payload:
                     payload[field_name] = float(numeric)
-            elif field_name in text_fields:
+            elif field_name in text_fields and field_name not in payload:
                 payload[field_name] = source_text
 
         payload["temperatures_c"] = self._dedupe_preserving_order(
@@ -1471,6 +1587,87 @@ class PaperFactsService:
         )
         payload["durations"] = self._dedupe_preserving_order(payload["durations"])
         return ProcessContextPayload(**payload)
+
+    def _build_table_row_process_context_from_cells(
+        self,
+        row_cells: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for cell in sorted(
+            row_cells,
+            key=lambda item: self._safe_int(item.get("col_index")) or 0,
+        ):
+            header = self._normalize_scalar_text(cell.get("header_path"))
+            value_text = self._normalize_scalar_text(cell.get("cell_text"))
+            if not header or not value_text:
+                continue
+            field_name = self._process_context_field_from_table_header(header)
+            if field_name is None:
+                continue
+            if field_name in {
+                "scan_strategy",
+                "build_orientation",
+                "shielding_gas",
+                "post_treatment_summary",
+            }:
+                payload[field_name] = value_text
+                continue
+
+            numeric = self._coerce_numeric_text_window_value(value_text, value_text)
+            if numeric is None:
+                continue
+            payload[field_name] = self._convert_table_process_value(
+                field_name=field_name,
+                value=float(numeric),
+                header=header,
+                unit_hint=self._normalize_scalar_text(cell.get("unit_hint")),
+            )
+        return payload
+
+    def _process_context_field_from_table_header(self, header: str) -> str | None:
+        normalized = re.sub(r"[^a-z0-9]+", " ", header.lower()).strip()
+        if not normalized:
+            return None
+        if "condition" in normalized or "sample" in normalized:
+            return None
+        if "laser" in normalized and "power" in normalized:
+            return "laser_power_w"
+        if ("scan" in normalized or "scanning" in normalized) and "speed" in normalized:
+            return "scan_speed_mm_s"
+        if "hatch" in normalized and ("space" in normalized or "spacing" in normalized):
+            return "hatch_spacing_um"
+        if "layer" in normalized and "thickness" in normalized:
+            return "layer_thickness_um"
+        if "spot" in normalized and "size" in normalized:
+            return "spot_size_um"
+        if "energy" in normalized and "density" in normalized:
+            return "energy_density_j_mm3"
+        if ("scan" in normalized or "scanning" in normalized) and "strategy" in normalized:
+            return "scan_strategy"
+        if "build" in normalized and "orientation" in normalized:
+            return "build_orientation"
+        if "preheat" in normalized and "temperature" in normalized:
+            return "preheat_temperature_c"
+        if "oxygen" in normalized:
+            return "oxygen_level_ppm"
+        return None
+
+    def _convert_table_process_value(
+        self,
+        *,
+        field_name: str,
+        value: float,
+        header: str,
+        unit_hint: str | None,
+    ) -> float:
+        unit_text = " ".join(
+            part.lower()
+            for part in (header, unit_hint)
+            if self._normalize_scalar_text(part)
+        )
+        if field_name.endswith("_um") and re.search(r"\bmm\b", unit_text):
+            return round(value * 1000.0, 6)
+        return value
 
     def _build_table_row_sample_variants(
         self,
@@ -1579,7 +1776,7 @@ class PaperFactsService:
             mentions.test_condition_mentions
         )
         payload_dict = condition_payload.model_dump(exclude_none=True, by_alias=True)
-        if not any(value not in (None, [], {}) for value in payload_dict.values()):
+        if not self._has_meaningful_condition_payload(payload_dict):
             return []
 
         rows: list[ExtractedTestConditionPayload] = []
@@ -1655,7 +1852,10 @@ class PaperFactsService:
         table_context: dict[str, Any] | None,
     ) -> list[MeasurementResultPayload]:
         rows: list[MeasurementResultPayload] = []
+        seen_keys: set[tuple[Any, ...]] = set()
         for claim in result_claims:
+            if self._is_non_measurement_statistic_claim(claim):
+                continue
             value_payload, unit = self._build_measurement_value_from_table_row_claim(
                 claim
             )
@@ -1668,12 +1868,30 @@ class PaperFactsService:
                 or quote
                 or self._build_table_row_claim_text(claim, unit)
             )
+            property_name = self._normalize_property_name(claim.property_normalized)
+            unit = self._infer_measurement_unit_from_parts(
+                property_normalized=property_name,
+                result_type=str(claim.result_type or "").strip() or "scalar",
+                value_payload=value_payload.model_dump(exclude_none=True),
+                explicit_unit=unit,
+                text=claim_text,
+            )
+            dedupe_key = (
+                self._normalize_scalar_text(claim.variant_label),
+                property_name,
+                str(claim.result_type or "").strip() or "scalar",
+                self._measurement_value_signature(
+                    value_payload.model_dump(exclude_none=True)
+                ),
+                self._canonical_unit_text(unit),
+            )
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
             rows.append(
                 MeasurementResultPayload(
                     claim_text=claim_text,
-                    property_normalized=self._normalize_property_name(
-                        claim.property_normalized
-                    ),
+                    property_normalized=property_name,
                     result_type=str(claim.result_type or "").strip() or "scalar",
                     value_payload=value_payload,
                     unit=unit,
@@ -1978,8 +2196,8 @@ class PaperFactsService:
             mentions,
             text_window,
         )
-        payload_dict = condition_payload.model_dump(exclude_none=True)
-        if not payload_dict:
+        payload_dict = condition_payload.model_dump(exclude_none=True, by_alias=True)
+        if not self._has_meaningful_condition_payload(payload_dict):
             return []
         rows: list[ExtractedTestConditionPayload] = []
         seen: set[str] = set()
@@ -2072,6 +2290,9 @@ class PaperFactsService:
             durations=self._dedupe_preserving_order(durations),
             atmosphere=atmosphere,
         )
+
+    def _has_meaningful_condition_payload(self, payload: dict[str, Any]) -> bool:
+        return any(value not in (None, "", [], {}) for value in payload.values())
 
     def _build_text_window_measurement_results(
         self,
@@ -2328,6 +2549,8 @@ class PaperFactsService:
 
     def _extract_unit_from_text(self, value: str) -> str | None:
         text = str(value or "")
+        if re.search(r"\bHV\b", text, re.IGNORECASE):
+            return "HV"
         if re.search(r"\bMPa\b", text, re.IGNORECASE):
             return "MPa"
         if re.search(r"\bGPa\b", text, re.IGNORECASE):
@@ -4874,8 +5097,284 @@ class PaperFactsService:
             payload["evidence_anchor_ids"] = self._normalize_list(
                 row.get("evidence_anchor_ids")
             )
-            records.append(MeasurementResult.from_mapping(payload).to_record())
+            record = MeasurementResult.from_mapping(payload).to_record()
+            record["unit"] = self._infer_measurement_unit(record)
+            if self._is_non_measurement_statistic_result(record):
+                continue
+            records.append(record)
         return pd.DataFrame(records, columns=_MEASUREMENT_RESULT_COLUMNS)
+
+    def _deduplicate_measurement_results_table(
+        self,
+        measurement_results: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if measurement_results is None or measurement_results.empty:
+            return pd.DataFrame(columns=_MEASUREMENT_RESULT_COLUMNS)
+
+        records_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+        loose_records: list[dict[str, Any]] = []
+        for _, row in measurement_results.iterrows():
+            record = MeasurementResult.from_mapping(dict(row)).to_record()
+            record["unit"] = self._infer_measurement_unit(record)
+            if self._is_non_measurement_statistic_result(record):
+                continue
+            key = self._measurement_result_dedupe_key(record)
+            if key is None:
+                loose_records.append(record)
+                continue
+            existing = records_by_key.get(key)
+            records_by_key[key] = (
+                self._merge_measurement_result_records(existing, record)
+                if existing is not None
+                else record
+            )
+
+        records = [*records_by_key.values(), *loose_records]
+        return self._normalize_measurement_results_table(
+            pd.DataFrame(records, columns=_MEASUREMENT_RESULT_COLUMNS),
+            None,
+        )
+
+    def _measurement_result_dedupe_key(
+        self,
+        record: dict[str, Any],
+    ) -> tuple[Any, ...] | None:
+        property_name = self._normalize_property_name(record.get("property_normalized"))
+        result_type = self._normalize_result_type(record.get("result_type"))
+        value_signature = self._measurement_value_signature(record.get("value_payload"))
+        if value_signature is None:
+            return None
+        return (
+            self._normalize_scalar_text(record.get("document_id")),
+            self._normalize_scalar_text(record.get("variant_id")),
+            property_name,
+            result_type,
+            self._normalize_scalar_text(record.get("claim_scope")) or "current_work",
+            value_signature,
+            self._canonical_unit_text(record.get("unit")),
+        )
+
+    def _measurement_value_signature(self, value_payload: Any) -> tuple[Any, ...] | None:
+        payload = self._normalize_object(value_payload)
+        if not isinstance(payload, dict):
+            return None
+        numeric_parts: list[tuple[str, float]] = []
+        for key in ("value", "retention_percent", "min", "max"):
+            numeric = self._coerce_float(payload.get(key))
+            if numeric is not None:
+                numeric_parts.append((key, round(numeric, 8)))
+        if numeric_parts:
+            return tuple(numeric_parts)
+        direction = self._normalize_scalar_text(payload.get("direction"))
+        if direction:
+            return (("direction", direction.lower()),)
+        statement = self._normalize_scalar_text(payload.get("statement"))
+        if statement:
+            normalized = re.sub(r"\s+", " ", statement.lower()).strip()
+            return (("statement", normalized),)
+        return None
+
+    def _merge_measurement_result_records(
+        self,
+        existing: dict[str, Any],
+        incoming: dict[str, Any],
+    ) -> dict[str, Any]:
+        preferred = self._preferred_measurement_record(existing, incoming)
+        secondary = incoming if preferred is existing else existing
+        merged = dict(preferred)
+        for column in (
+            "structure_feature_ids",
+            "characterization_observation_ids",
+            "evidence_anchor_ids",
+        ):
+            merged[column] = self._dedupe_preserving_order(
+                [
+                    *self._normalize_list(preferred.get(column)),
+                    *self._normalize_list(secondary.get(column)),
+                ]
+            )
+        for column in ("test_condition_id", "baseline_id", "variant_id", "unit"):
+            if not self._normalize_scalar_text(merged.get(column)):
+                merged[column] = secondary.get(column)
+        if self._normalize_scalar_text(incoming.get("result_source_type")) == "table":
+            merged["result_source_type"] = "table"
+        if TRACEABILITY_STATUS_DIRECT in {
+            self._normalize_scalar_text(existing.get("traceability_status")),
+            self._normalize_scalar_text(incoming.get("traceability_status")),
+        }:
+            merged["traceability_status"] = TRACEABILITY_STATUS_DIRECT
+        if EPISTEMIC_DIRECTLY_OBSERVED in {
+            self._normalize_scalar_text(existing.get("epistemic_status")),
+            self._normalize_scalar_text(incoming.get("epistemic_status")),
+        }:
+            merged["epistemic_status"] = EPISTEMIC_DIRECTLY_OBSERVED
+        return MeasurementResult.from_mapping(merged).to_record()
+
+    def _preferred_measurement_record(
+        self,
+        existing: dict[str, Any],
+        incoming: dict[str, Any],
+    ) -> dict[str, Any]:
+        existing_score = self._measurement_record_quality_score(existing)
+        incoming_score = self._measurement_record_quality_score(incoming)
+        return incoming if incoming_score > existing_score else existing
+
+    def _measurement_record_quality_score(self, record: dict[str, Any]) -> tuple[int, int, int]:
+        return (
+            1 if self._normalize_scalar_text(record.get("result_source_type")) == "table" else 0,
+            1 if self._normalize_scalar_text(record.get("unit")) else 0,
+            len(self._normalize_list(record.get("evidence_anchor_ids"))),
+        )
+
+    def _infer_measurement_unit(self, record: dict[str, Any]) -> str | None:
+        value_payload = self._normalize_object(record.get("value_payload"))
+        return self._infer_measurement_unit_from_parts(
+            property_normalized=self._normalize_property_name(
+                record.get("property_normalized")
+            ),
+            result_type=self._normalize_result_type(record.get("result_type")),
+            value_payload=value_payload if isinstance(value_payload, dict) else {},
+            explicit_unit=record.get("unit"),
+            text=self._normalize_scalar_text(
+                (value_payload or {}).get("statement")
+                if isinstance(value_payload, dict)
+                else None
+            ),
+        )
+
+    def _infer_measurement_unit_from_parts(
+        self,
+        *,
+        property_normalized: str,
+        result_type: str,
+        value_payload: dict[str, Any],
+        explicit_unit: Any,
+        text: str | None,
+    ) -> str | None:
+        unit = self._canonical_unit_text(explicit_unit) or self._canonical_unit_text(
+            value_payload.get("source_unit_text")
+        )
+        if unit:
+            return unit
+        unit = self._extract_unit_from_text(text or "")
+        if unit:
+            return unit
+        return self._default_unit_for_measurement(
+            property_normalized=property_normalized,
+            result_type=result_type,
+            value_payload=value_payload,
+            text=text,
+        )
+
+    def _default_unit_for_measurement(
+        self,
+        *,
+        property_normalized: str,
+        result_type: str,
+        value_payload: dict[str, Any],
+        text: str | None,
+    ) -> str | None:
+        if result_type == "retention" or property_normalized in {"elongation"}:
+            return "%"
+        if property_normalized in {
+            "yield_strength",
+            "tensile_strength",
+            "flexural_strength",
+        }:
+            return "MPa"
+        if property_normalized == "hardness":
+            return "HV"
+        if property_normalized == "density":
+            value = self._measurement_numeric_value(value_payload)
+            lowered = (text or "").lower()
+            if "%" in lowered or "relative" in lowered or "densification" in lowered:
+                return "%"
+            if value is not None and 20 <= value <= 100:
+                return "%"
+        return None
+
+    def _canonical_unit_text(self, value: Any) -> str | None:
+        text = self._sanitize_unit(value)
+        if text is None:
+            return None
+        normalized = text.strip().replace("μ", "u")
+        lowered = normalized.lower().replace(" ", "")
+        aliases = {
+            "%": "%",
+            "percent": "%",
+            "mpa": "MPa",
+            "gpa": "GPa",
+            "pa": "Pa",
+            "hv": "HV",
+            "vickers": "HV",
+            "c": "C",
+            "degc": "C",
+            "°c": "C",
+            "j/mm3": "J/mm3",
+            "j/mm^3": "J/mm3",
+            "jmm-3": "J/mm3",
+        }
+        return aliases.get(lowered, text)
+
+    def _measurement_numeric_value(self, value_payload: dict[str, Any]) -> float | None:
+        for key in ("value", "retention_percent", "min", "max"):
+            numeric = self._coerce_float(value_payload.get(key))
+            if numeric is not None:
+                return numeric
+        return None
+
+    def _coerce_float(self, value: Any) -> float | None:
+        normalized = normalize_backbone_value(value)
+        if isinstance(normalized, bool):
+            return None
+        if isinstance(normalized, (int, float)):
+            try:
+                numeric = float(normalized)
+            except (TypeError, ValueError):
+                return None
+            if pd.isna(numeric):
+                return None
+            return numeric
+        text = self._normalize_scalar_text(normalized)
+        if text is None:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    def _is_non_measurement_statistic_claim(self, claim: Any) -> bool:
+        text = " ".join(
+            part
+            for part in (
+                self._normalize_scalar_text(getattr(claim, "claim_text", None)),
+                self._normalize_scalar_text(getattr(claim, "quote", None)),
+                self._normalize_scalar_text(getattr(claim, "property_normalized", None)),
+            )
+            if part
+        )
+        return self._is_statistic_text(text)
+
+    def _is_non_measurement_statistic_result(self, record: dict[str, Any]) -> bool:
+        value_payload = self._normalize_object(record.get("value_payload"))
+        statement = (
+            self._normalize_scalar_text(value_payload.get("statement"))
+            if isinstance(value_payload, dict)
+            else None
+        )
+        text = " ".join(
+            part
+            for part in (
+                statement,
+                self._normalize_scalar_text(record.get("property_normalized")),
+            )
+            if part
+        )
+        return self._is_statistic_text(text)
+
+    def _is_statistic_text(self, text: str) -> bool:
+        lowered = str(text or "").lower()
+        return any(term in lowered for term in _STATISTIC_MEASUREMENT_TERMS)
 
     def _normalize_characterization_table(
         self,

@@ -63,6 +63,8 @@ Supporting research binaries live under `docs/research/assets/`.
   then
   [`decisions/rfc-comparison-result-document-product-flow.md`](decisions/rfc-comparison-result-document-product-flow.md),
   then
+  [`decisions/rfc-research-view-aggregation-layer.md`](decisions/rfc-research-view-aggregation-layer.md),
+  then
   [`decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md`](decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md),
   then
   [`decisions/rfc-document-result-evidence-chain-contract-freeze.md`](decisions/rfc-document-result-evidence-chain-contract-freeze.md),
@@ -78,7 +80,9 @@ Supporting research binaries live under `docs/research/assets/`.
   then
   [`architecture/lens-v1-architecture-boundary.md`](architecture/lens-v1-architecture-boundary.md),
   then
-  [`contracts/lens-core-artifact-contracts.md`](contracts/lens-core-artifact-contracts.md)
+  [`contracts/lens-core-artifact-contracts.md`](contracts/lens-core-artifact-contracts.md),
+  then
+  [`contracts/research-view-aggregation-contract.md`](contracts/research-view-aggregation-contract.md)
 - Historical or proposed shared decisions:
   use docs under [`decisions/`](decisions/)
 - Backend implementation and API:
@@ -127,6 +131,7 @@ Contracts:
 
 - [`contracts/lens-v1-definition.md`](contracts/lens-v1-definition.md)
 - [`contracts/lens-core-artifact-contracts.md`](contracts/lens-core-artifact-contracts.md)
+- [`contracts/research-view-aggregation-contract.md`](contracts/research-view-aggregation-contract.md)
 
 Decisions:
 
@@ -135,6 +140,7 @@ Decisions:
 - [`decisions/rfc-paper-facts-primary-domain-model.md`](decisions/rfc-paper-facts-primary-domain-model.md)
 - [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
 - [`decisions/rfc-comparison-result-document-product-flow.md`](decisions/rfc-comparison-result-document-product-flow.md)
+- [`decisions/rfc-research-view-aggregation-layer.md`](decisions/rfc-research-view-aggregation-layer.md)
 - [`decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md`](decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md)
 - [`decisions/rfc-document-result-evidence-chain-contract-freeze.md`](decisions/rfc-document-result-evidence-chain-contract-freeze.md)
 - [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md)

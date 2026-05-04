@@ -155,10 +155,20 @@ class WorkspaceService:
             "protocol_steps.parquet",
         )
         comparisons_generated = self._comparisons_generated(artifacts)
+        paper_facts_generated = self._artifact_generated(
+            artifacts,
+            "sample_variants_generated",
+            "sample_variants.parquet",
+        ) or self._artifact_generated(
+            artifacts,
+            "measurement_results_generated",
+            "measurement_results.parquet",
+        )
         return {
             "can_view_graph": graph_ready,
             "can_view_results": comparisons_generated,
             "can_view_comparable_results": comparisons_generated,
+            "can_view_research_view": paper_facts_generated,
             "can_download_graphml": graph_ready,
             "can_view_protocol_steps": protocol_generated,
             "can_search_protocol": protocol_generated,
@@ -475,6 +485,11 @@ class WorkspaceService:
             "documents_profiles": f"/api/v1/collections/{collection_id}/documents/profiles",
             "evidence": f"/api/v1/collections/{collection_id}/evidence/cards",
             "evidence_cards": f"/api/v1/collections/{collection_id}/evidence/cards",
+            "research_view": f"/api/v1/collections/{collection_id}/research-view",
+            "research_documents": (
+                f"/api/v1/collections/{collection_id}/documents/"
+                "{document_id}/research-view"
+            ),
             "comparisons": f"/api/v1/collections/{collection_id}/comparisons",
             "results": f"/api/v1/collections/{collection_id}/results",
             "comparable_results": f"/api/v1/comparable-results?collection_id={collection_id}",

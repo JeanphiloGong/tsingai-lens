@@ -34,6 +34,12 @@ This node owns the collection workspace route family in the frontend.
   wave
 - [`../../../../docs/decisions/rfc-comparison-result-document-product-flow.md`](../../../../docs/decisions/rfc-comparison-result-document-product-flow.md)
   Shared product-flow decision for comparison, result, and document drilldown
+- [`../../../../docs/contracts/research-view-aggregation-contract.md`](../../../../docs/contracts/research-view-aggregation-contract.md)
+  Shared frontend/backend target contract for paper matrices, collection
+  comparable groups, cross-paper matrices, and evidence-backed values
+- [`../../../docs/research-view-aggregation/README.md`](../../../docs/research-view-aggregation/README.md)
+  Frontend implementation topic for research-view aggregation navigation,
+  route state, matrices, evidence drawers, and debug placement
 - [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
   Collection-facing interface spec for the Lens v1 workspace flow
 - [`core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md`](core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md)

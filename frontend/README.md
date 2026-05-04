@@ -27,6 +27,9 @@ to code.
   Frontend same-origin API integration guide
 - [`docs/goal-copilot-proposal.md`](docs/goal-copilot-proposal.md)
   Proposal for a workflow-first, Core-grounded goal chat entry
+- [`docs/research-view-aggregation/README.md`](docs/research-view-aggregation/README.md)
+  Frontend implementation topic for collection research-view navigation,
+  paper matrices, comparison matrices, evidence drawers, and debug placement
 - [`src/routes/collections/lens-v1-interface-spec.md`](src/routes/collections/lens-v1-interface-spec.md)
   Lens v1 collection UI migration spec for workspace, comparisons, evidence,
   documents, protocol, and graph surfaces

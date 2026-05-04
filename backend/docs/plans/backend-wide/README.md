@@ -21,6 +21,9 @@ order in root `docs/`.
 - [`evidence-chain-product-surface/README.md`](evidence-chain-product-surface/README.md)
   Backend implementation family for dossier, chain, and series delivery on
   the current semantic backbone
+- [`research-view-aggregation/README.md`](research-view-aggregation/README.md)
+  Backend implementation family for paper matrices, condition series,
+  collection coverage, comparable groups, and research-view endpoints
 - [`core-first-product-surface/README.md`](core-first-product-surface/README.md)
   Backend-local cutover family for the Core-first product surface shift
 - [`frontend-facing-contract-cleanup/README.md`](frontend-facing-contract-cleanup/README.md)
@@ -40,6 +43,8 @@ order in root `docs/`.
   start at [`goal-source-core-layering/README.md`](goal-source-core-layering/README.md)
 - Backend evidence-chain delivery:
   start at [`evidence-chain-product-surface/README.md`](evidence-chain-product-surface/README.md)
+- Backend research-view aggregation:
+  start at [`research-view-aggregation/README.md`](research-view-aggregation/README.md)
 - Backend-local materials comparison direction:
   start at [`materials-comparison-v2/README.md`](materials-comparison-v2/README.md)
 

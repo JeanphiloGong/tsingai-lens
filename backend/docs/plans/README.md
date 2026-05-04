@@ -33,6 +33,9 @@ order in root `docs/`.
   Topic-family entry for the `goal / source / core / derived` layering wave
 - [`backend-wide/evidence-chain-product-surface/README.md`](backend-wide/evidence-chain-product-surface/README.md)
   Backend-owned implementation family for the evidence-chain product surface
+- [`backend-wide/research-view-aggregation/README.md`](backend-wide/research-view-aggregation/README.md)
+  Backend-owned implementation family for research-view aggregation services,
+  schemas, endpoints, and expert-gold verification
 
 ## Reading Paths By Intent
 
@@ -41,6 +44,8 @@ order in root `docs/`.
   then move to [`backend-wide/README.md`](backend-wide/README.md)
 - Backend-wide evidence-chain delivery:
   start at [`backend-wide/evidence-chain-product-surface/README.md`](backend-wide/evidence-chain-product-surface/README.md)
+- Backend research-view aggregation:
+  start at [`backend-wide/research-view-aggregation/README.md`](backend-wide/research-view-aggregation/README.md)
 - Source runtime and parser work:
   start at [`source/README.md`](source/README.md)
 - Core quality, traceback, and domain semantics:

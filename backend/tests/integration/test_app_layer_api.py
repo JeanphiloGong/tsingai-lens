@@ -471,6 +471,33 @@ def test_legacy_index_task_route_is_not_registered(app_client):
     assert task_resp.status_code == 404
 
 
+def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_client):
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Research View Empty"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    response = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/research-view"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["collection_id"] == collection_id
+    assert body["state"] == "empty"
+    assert body["paper_coverage"] == []
+    assert body["comparable_groups"] == []
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    workspace_body = workspace.json()
+    assert workspace_body["links"]["research_view"] == (
+        f"/api/v1/collections/{collection_id}/research-view"
+    )
+    assert workspace_body["capabilities"]["can_view_research_view"] is False
+
+
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
@@ -480,6 +507,7 @@ def app_client(monkeypatch, tmp_path):
     from controllers.core import comparisons as comparisons_controller
     from controllers.core import documents as documents_controller
     from controllers.core import evidence as evidence_controller
+    from controllers.core import research_view as research_view_controller
     from controllers.core import results as results_controller
     from controllers.goal import intake as goals_controller
     from controllers.derived import graph as graph_controller
@@ -500,6 +528,9 @@ def app_client(monkeypatch, tmp_path):
     from application.core.comparison_service import ComparisonService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
+    from application.core.research_view_aggregation_service import (
+        ResearchViewAggregationService,
+    )
     from application.goal.brief_service import GoalService
     from application.source.collection_build_task_runner import CollectionBuildTaskRunner
     from application.source.task_service import TaskService
@@ -533,6 +564,15 @@ def app_client(monkeypatch, tmp_path):
         task_service,
         artifact_registry,
         document_profile_service,
+    )
+    research_view_service = ResearchViewAggregationService(
+        collection_service=collection_service,
+        task_service=task_service,
+        artifact_registry_service=artifact_registry,
+        document_profile_service=document_profile_service,
+        paper_facts_service=paper_facts_service,
+        comparison_service=comparison_service,
+        workspace_service=workspace_service,
     )
     goal_service = GoalService(collection_service)
 
@@ -611,6 +651,7 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(comparable_results_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
+    monkeypatch.setattr(research_view_controller, "research_view_service", research_view_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(results_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(

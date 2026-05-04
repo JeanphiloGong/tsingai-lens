@@ -94,6 +94,7 @@ class WorkspaceCapabilitiesResponse(BaseModel):
         default=False,
         description="是否可查看 collection-filtered corpus comparable results",
     )
+    can_view_research_view: bool = Field(default=False, description="是否可查看 research view 聚合")
     can_download_graphml: bool = Field(default=False, description="是否可导出 GraphML")
     can_view_protocol_steps: bool = Field(default=False, description="是否可查看 protocol steps")
     can_search_protocol: bool = Field(default=False, description="是否可检索 protocol steps")
@@ -144,6 +145,11 @@ class WorkspaceLinksResponse(BaseModel):
     documents_profiles: str | None = Field(default=None, description="documents/profiles 路径")
     evidence: str | None = Field(default=None, description="evidence 主路径")
     evidence_cards: str | None = Field(default=None, description="evidence/cards 路径")
+    research_view: str | None = Field(default=None, description="collection research-view 路径")
+    research_documents: str | None = Field(
+        default=None,
+        description="document research-view 路径模板",
+    )
     comparisons: str | None = Field(default=None, description="comparisons 路径")
     results: str | None = Field(default=None, description="results 路径")
     comparable_results: str | None = Field(

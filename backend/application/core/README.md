@@ -11,5 +11,9 @@ artifacts.
   evaluation, collection-first comparison-row projection from
   `collection_comparable_results` plus `comparable_results`, and optional
   corpus comparable-result cache materialization for accelerated corpus reads
+- `research_view_aggregation_service.py`
+  research-facing aggregation over paper facts and comparison projections for
+  paper sample matrices, condition series, paper coverage, comparable groups,
+  and cross-paper matrices
 - `workspace_overview_service.py`
   Collection-facing overview assembled from Source state and Core artifacts

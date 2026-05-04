@@ -183,6 +183,12 @@
   如果继续暴露，应直接给出当前 collection 对应的 filtered corpus retrieval
   路径，即 `/api/v1/comparable-results?collection_id={collection_id}`
   - 它是 semantic inspection / retrieval surface，不应替代 `links.results`
+- `links.research_view`
+  指向 collection research aggregation，即
+  `/api/v1/collections/{collection_id}/research-view`
+- `links.research_documents`
+  是 document research aggregation 路径模板，即
+  `/api/v1/collections/{collection_id}/documents/{document_id}/research-view`
 - `artifacts` 对每类产物应同时提供
   `*_generated` 与 `*_ready` 两类布尔值：
   - `generated` 表示该阶段产物文件已生成（可能为空）
@@ -219,6 +225,71 @@
   已生成时为 `true`
   - 它表达 collection-filtered corpus comparable-result surface 可被消费
   - 不要求 `comparison_rows.parquet` 预先存在
+- `capabilities.can_view_research_view`
+  应在 paper facts 已生成时为 `true`
+  - 它表达 sample matrix / paper coverage 聚合有可消费输入
+  - 空 collection 仍可请求 research-view endpoint，但状态应为 `empty`
+
+### Research View
+
+- `GET /api/v1/collections/{collection_id}/research-view`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view`
+
+这是 research-facing 聚合合同，用来把 raw paper facts 组织成样品矩阵、
+条件序列、文献覆盖和 collection 比较组。
+
+它不是 raw `measurement_results` 或 result-card list 的兼容包装；前端不应在
+主界面重新从一条条 fact 自行拼矩阵。
+
+Collection research-view 最小返回结构：
+
+- `collection_id`
+- `state`
+- `overview`
+- `paper_coverage`
+- `comparable_groups`
+- `cross_paper_matrices`
+- `trend_series`
+- `evidence_links`
+- `debug_links`
+- `warnings`
+
+Paper research-view 最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `paper_title`
+- `state`
+- `overview`
+- `sample_matrix`
+- `condition_series`
+- `evidence_links`
+- `debug_links`
+- `warnings`
+
+状态值使用：
+
+```text
+empty | processing | partial | ready | failed
+```
+
+语义要求：
+
+- `paper_coverage` 每篇文献一行，表达样品数、工艺参数数、measurement 数、
+  condition 数、evidence 数和主要 warning
+- `sample_matrix.rows` 应优先是一行一个真实 sample / variant
+- generic material/process mention 不应成为主矩阵样品行
+- 重复 measurement facts 应折叠到同一 `EvidenceBackedValue.duplicate_count`
+  中，而不是产生重复 visible rows
+- 温度、时间、应变率、频率等条件轴应形成 `condition_series`
+- 每个 observed value 应保留 `evidence_refs`，无法保留时应给出结构化
+  warning
+
+错误语义：
+
+- collection 不存在：`404`
+- paper facts 尚未生成且 collection 非空：`409 research_view_not_ready`
+- document research-view 指向不存在文档：`404 research_view_document_not_found`
 
 ### Documents
 

@@ -38,6 +38,14 @@ python3 scripts/evaluation/expert_gold/export_prediction_bundle.py \
   --collection-id <collection_id>
 ```
 
+Evaluate the generated gold and prediction bundles:
+
+```bash
+cd backend
+python3 scripts/evaluation/expert_gold/evaluate_gold_vs_prediction.py \
+  --gold-paper-id P001
+```
+
 ## Extraction Trace Export
 
 Use `export_extraction_trace.py` when you want to inspect the concrete Source

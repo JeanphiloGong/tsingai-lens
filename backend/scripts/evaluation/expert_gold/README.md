@@ -108,3 +108,38 @@ possible:
 It also preserves system-specific raw families such as `comparison_rows`,
 `comparable_results`, `baseline_references`, and `structure_features` with
 artifact row references for later debugging.
+
+## Evaluate Gold Versus Prediction
+
+After both bundles exist, generate the first-pass evaluation report:
+
+```bash
+python3 scripts/evaluation/expert_gold/evaluate_gold_vs_prediction.py
+```
+
+The default inputs are:
+
+```text
+tests/fixtures/local_expert_gold/generated/gold_bundle.json
+tests/fixtures/local_expert_gold/generated/prediction_bundle.json
+```
+
+The default output is:
+
+```text
+tests/fixtures/local_expert_gold/generated/evaluation_report.json
+```
+
+For a single paper:
+
+```bash
+python3 scripts/evaluation/expert_gold/evaluate_gold_vs_prediction.py \
+  --gold-paper-id P001
+```
+
+The report is a structural first pass. It measures paper mapping, sample
+recall, core measurement value matching, test-condition family coverage,
+evidence coverage, extra predictions, and duplicate predictions. Expert-style
+pairwise comparison matching is reported as deferred because current prediction
+comparison rows are projected result rows rather than pairwise sample-control
+facts.

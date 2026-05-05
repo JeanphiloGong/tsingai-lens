@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	buildCollectionOverviewGraph,
 	buildCollectionGraphmlUrl,
 	buildGraphMeta,
 	buildNodeTypeCounts,
@@ -111,6 +112,79 @@ describe('graph shared helpers', () => {
 		});
 		expect(filtered.nodes).toHaveLength(3);
 		expect(filtered.edges.map((edge) => edge.id)).toEqual(['e1']);
+	});
+
+	it('projects collection graphs into aggregate overview maps', () => {
+		const graph: GraphResponse = {
+			collection_id: 'col_1',
+			truncated: false,
+			nodes: [
+				{ id: 'doc:d1', label: 'Paper A', type: 'document', degree: 1 },
+				{ id: 'evi:ev1', label: 'Evidence 1', type: 'evidence', degree: 2 },
+				{ id: 'cmp:c1', label: 'Hardness result', type: 'comparison', degree: 4 },
+				{ id: 'mat:steel', label: '316L stainless steel', type: 'material', degree: 1 },
+				{ id: 'prop:hardness', label: 'hardness', type: 'property', degree: 1 },
+				{ id: 'tc:lpbf', label: 'LPBF', type: 'test_condition', degree: 1 }
+			],
+			edges: [
+				{
+					id: 'e1',
+					source: 'doc:d1',
+					target: 'evi:ev1',
+					weight: 0.9,
+					edge_description: 'document_to_evidence'
+				},
+				{
+					id: 'e2',
+					source: 'evi:ev1',
+					target: 'cmp:c1',
+					weight: 0.9,
+					edge_description: 'evidence_to_comparison'
+				},
+				{
+					id: 'e3',
+					source: 'cmp:c1',
+					target: 'mat:steel',
+					weight: 0.9,
+					edge_description: 'comparison_to_material'
+				},
+				{
+					id: 'e4',
+					source: 'cmp:c1',
+					target: 'prop:hardness',
+					weight: 0.9,
+					edge_description: 'comparison_to_property'
+				},
+				{
+					id: 'e5',
+					source: 'cmp:c1',
+					target: 'tc:lpbf',
+					weight: 0.9,
+					edge_description: 'comparison_to_test_condition'
+				}
+			]
+		};
+
+		const overview = buildCollectionOverviewGraph(graph);
+
+		expect(overview.nodes.map((node) => node.type)).toEqual([
+			'document',
+			'material',
+			'property',
+			'test_condition'
+		]);
+		expect(overview.edges.map((edge) => edge.edge_description).sort()).toEqual([
+			'overview_document_material',
+			'overview_material_context',
+			'overview_material_property'
+		]);
+		expect(overview.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: 'doc:d1', target: 'mat:steel' }),
+				expect.objectContaining({ source: 'mat:steel', target: 'prop:hardness' }),
+				expect.objectContaining({ source: 'mat:steel', target: 'tc:lpbf' })
+			])
+		);
 	});
 
 	it('links selected aggregate nodes to comparison rows', () => {

@@ -272,6 +272,10 @@ const translations: Record<Language, Translations> = {
 						title: 'Samples and process parameters',
 						body: 'Review the samples and how their process conditions differ.'
 					},
+					graph: {
+						title: 'Material graph',
+						body: 'Navigate how this material connects process variables, samples, measured properties, findings, and evidence anchors.'
+					},
 					performance: {
 						title: 'Supporting data: performance matrix',
 						body: 'Use the matrix to verify which samples, conditions, values, and evidence support the findings.'
@@ -381,6 +385,38 @@ const translations: Record<Language, Translations> = {
 					caption:
 						'Under comparable process context, the changed variable can shift performance values.',
 					empty: 'No numeric trend is available yet.'
+				},
+				graph: {
+					label: 'Material-scoped relationship graph',
+					selectNode: 'Select graph node {label}',
+					emptyColumn: 'No node yet',
+					selectPrompt:
+						'Select a material, process variable, sample, property, or finding to reveal related evidence anchors.',
+					evidenceAnchors: 'Evidence anchors',
+					noEvidence: 'No evidence anchor is attached to this graph node yet.',
+					materialMeta: '{papers} paper(s), {samples} sample(s), {properties} property group(s)',
+					changedVariable: 'Changed process variable',
+					controlledVariable: 'Controlled process variable',
+					processFamily: 'Process family',
+					processFamilyDetail: 'Process family reported for this material.',
+					bestValue: 'Best observed value: {value} in {sample}',
+					noPropertyValue: 'No observed value yet',
+					propertyUnit: 'Unit: {unit}',
+					propertyNoUnit: 'No unit reported',
+					columns: {
+						material: 'Material',
+						process: 'Process variables',
+						samples: 'Samples',
+						properties: 'Properties',
+						findings: 'Findings'
+					},
+					types: {
+						material: 'Material',
+						process: 'Process',
+						sample: 'Sample',
+						property: 'Property',
+						finding: 'Finding'
+					}
 				},
 				narrative: {
 					mainLabel: 'Narrative material research dossier',
@@ -1955,7 +1991,7 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		graph: {
-			title: 'Collection Evidence Graph',
+			title: 'Collection Knowledge Map',
 			lead: 'Explore material, property, comparison, and source-evidence relationships across this collection.',
 			filtersTitle: 'Graph filters',
 			filtersLead:
@@ -2060,7 +2096,7 @@ const translations: Record<Language, Translations> = {
 			detailComparability: 'Comparability',
 			detailEvidenceIds: 'Evidence IDs',
 			description:
-				'Explore themes, materials, methods, evidence, and comparison relationships in this collection.',
+				'Review the collection structure across papers, materials, properties, process context, and review buckets.',
 			meta: {
 				label: 'Graph metadata',
 				nodes: '{count} nodes',
@@ -2094,10 +2130,25 @@ const translations: Record<Language, Translations> = {
 				refreshStatus: 'Refresh status'
 			},
 			workspace: {
-				label: 'Graph exploration workspace'
+				label: 'Collection map workspace'
+			},
+			overview: {
+				title: 'Collection overview',
+				lead: 'Aggregated map of papers, materials, properties, process context, and review buckets.',
+				metricsLabel: 'Collection overview metrics',
+				materials: 'Materials',
+				documents: 'Papers',
+				properties: 'Properties',
+				themes: 'Themes',
+				reviewBuckets: 'Review buckets',
+				detailNodes: '{count} comparison/evidence nodes kept out of the default map',
+				coreMaterials: 'Core materials',
+				denseThemes: 'Dense themes',
+				qualityIssues: 'Needs review',
+				emptyList: 'None yet'
 			},
 			controls: {
-				title: 'Graph controls',
+				title: 'Overview controls',
 				search: 'Search nodes',
 				searchPlaceholder: 'Search node name or keyword...',
 				focusSearch: 'Focus matching node',
@@ -2118,14 +2169,14 @@ const translations: Record<Language, Translations> = {
 				circle: 'Circle layout'
 			},
 			canvas: {
-				title: 'Collection relationship graph',
+				title: 'Collection overview map',
 				meta: 'Nodes {nodes} · Edges {edges}',
 				fit: 'Fit canvas',
 				zoomIn: 'Zoom in',
 				zoomOut: 'Zoom out',
 				center: 'Center',
 				layout: 'Layout',
-				ariaLabel: 'Interactive collection graph canvas',
+				ariaLabel: 'Interactive collection overview map canvas',
 				empty: 'No visible graph elements match the current controls.'
 			},
 			legend: {
@@ -2144,7 +2195,7 @@ const translations: Record<Language, Translations> = {
 			detail: {
 				title: 'Selected object detail',
 				empty:
-					'Click a graph node or relationship to inspect source evidence, related comparisons, and original document locations.',
+					'Click a material, paper, theme, or review bucket to inspect related comparisons and source locations.',
 				clear: 'Clear',
 				loading: 'Loading detail...',
 				relatedEvidence: 'Evidence',
@@ -2156,6 +2207,7 @@ const translations: Record<Language, Translations> = {
 				noRelations: 'No visible relations for this object.',
 				viewEvidence: 'View evidence',
 				openComparison: 'Open comparison',
+				openMaterialGraph: 'Open material graph',
 				locateSource: 'Locate source',
 				expand: 'Expand neighbors',
 				expanding: 'Expanding...',
@@ -2189,7 +2241,7 @@ const translations: Record<Language, Translations> = {
 			empty: {
 				title: 'Graph has not been built',
 				description:
-					'After document parsing and evidence extraction finish, Lens can generate a collection graph for exploring themes, evidence, and comparison relationships.',
+					'After document parsing and evidence extraction finish, Lens can generate a collection map for navigating papers, materials, properties, themes, and review buckets.',
 				action: 'Generate graph'
 			}
 		},
@@ -2582,6 +2634,10 @@ const translations: Record<Language, Translations> = {
 						title: '样品与工艺参数',
 						body: '了解有哪些样品及其工艺条件差异。'
 					},
+					graph: {
+						title: '材料图谱',
+						body: '查看该材料如何连接工艺变量、样品、性能、关键发现和证据锚点。'
+					},
 					performance: {
 						title: '支撑数据：性能矩阵',
 						body: '用矩阵核对每条发现背后的样品、条件、数值和证据。'
@@ -2688,6 +2744,37 @@ const translations: Record<Language, Translations> = {
 					title: '趋势图：关键性能对比',
 					caption: '在可比工艺上下文下，变化变量会影响性能数值。',
 					empty: '暂无可绘制的数值趋势。'
+				},
+				graph: {
+					label: '材料范围关系图',
+					selectNode: '选择图谱节点 {label}',
+					emptyColumn: '暂无节点',
+					selectPrompt: '选择材料、工艺变量、样品、性能或发现后，这里会显示关联证据锚点。',
+					evidenceAnchors: '证据锚点',
+					noEvidence: '当前图谱节点暂未关联证据锚点。',
+					materialMeta: '{papers} 篇文献，{samples} 个样品，{properties} 组性能',
+					changedVariable: '变化工艺变量',
+					controlledVariable: '控制工艺变量',
+					processFamily: '工艺族',
+					processFamilyDetail: '该材料在文献中报告的工艺族。',
+					bestValue: '最高观测值：{sample} 中的 {value}',
+					noPropertyValue: '暂无观测值',
+					propertyUnit: '单位：{unit}',
+					propertyNoUnit: '未报告单位',
+					columns: {
+						material: '材料',
+						process: '工艺变量',
+						samples: '样品',
+						properties: '性能',
+						findings: '发现'
+					},
+					types: {
+						material: '材料',
+						process: '工艺',
+						sample: '样品',
+						property: '性能',
+						finding: '发现'
+					}
 				},
 				narrative: {
 					mainLabel: '叙事型材料研究档案',
@@ -4192,7 +4279,7 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		graph: {
-			title: '文献集合图谱',
+			title: '文献集合知识地图',
 			lead: '面向多篇论文的主题、证据与关系探索。',
 			filtersTitle: '图谱筛选',
 			filtersLead: '优先保留科研对象，需要时再打开来源类节点。',
@@ -4289,7 +4376,7 @@ const translations: Record<Language, Translations> = {
 			detailResult: '结果摘要',
 			detailComparability: '可比性',
 			detailEvidenceIds: '证据 ID',
-			description: '探索集合中的主题、材料、方法、证据和比较关系。',
+			description: '查看集合中的文献、材料、性能、工艺上下文和待审归属结构。',
 			meta: {
 				label: '图谱元信息',
 				nodes: '{count} 个节点',
@@ -4323,10 +4410,25 @@ const translations: Record<Language, Translations> = {
 				refreshStatus: '刷新状态'
 			},
 			workspace: {
-				label: '图谱探索工作台'
+				label: '集合地图工作台'
+			},
+			overview: {
+				title: '集合总览',
+				lead: '聚合展示文献、材料、性能、工艺上下文和待审归属节点。',
+				metricsLabel: '集合总览指标',
+				materials: '材料',
+				documents: '文献',
+				properties: '性能',
+				themes: '主题',
+				reviewBuckets: '待审 bucket',
+				detailNodes: '默认地图已收起 {count} 个比较/证据细节点',
+				coreMaterials: '核心材料',
+				denseThemes: '密集主题',
+				qualityIssues: '需要复核',
+				emptyList: '暂无'
 			},
 			controls: {
-				title: '图谱控制',
+				title: '总览控制',
 				search: '搜索节点',
 				searchPlaceholder: '搜索节点名称或关键词...',
 				focusSearch: '定位匹配节点',
@@ -4347,14 +4449,14 @@ const translations: Record<Language, Translations> = {
 				circle: '环形布局'
 			},
 			canvas: {
-				title: '集合关系图谱',
+				title: '集合总览地图',
 				meta: '节点 {nodes} · 边 {edges}',
 				fit: '适配画布',
 				zoomIn: '放大',
 				zoomOut: '缩小',
 				center: '居中',
 				layout: '布局',
-				ariaLabel: '可交互的集合图谱画布',
+				ariaLabel: '可交互的集合总览地图画布',
 				empty: '当前控制条件下没有可见图谱元素。'
 			},
 			legend: {
@@ -4372,7 +4474,7 @@ const translations: Record<Language, Translations> = {
 			},
 			detail: {
 				title: '选中对象详情',
-				empty: '点击图谱中的节点或关系，查看它的来源证据、关联比较和原文位置。',
+				empty: '点击材料、文献、主题或待审节点，查看关联比较和原文位置。',
 				clear: '清除',
 				loading: '正在加载详情...',
 				relatedEvidence: '关联证据',
@@ -4384,6 +4486,7 @@ const translations: Record<Language, Translations> = {
 				noRelations: '当前对象暂无可见关系。',
 				viewEvidence: '查看证据',
 				openComparison: '打开比较',
+				openMaterialGraph: '打开材料图谱',
 				locateSource: '定位原文',
 				expand: '展开邻域',
 				expanding: '展开中...',
@@ -4416,7 +4519,7 @@ const translations: Record<Language, Translations> = {
 			empty: {
 				title: '图谱尚未构建',
 				description:
-					'完成文档解析和证据提取后，Lens 可以生成文献集合图谱，用于探索主题、证据和比较关系。',
+					'完成文档解析和证据提取后，Lens 可以生成集合地图，用于导航文献、材料、性能、主题和待审归属节点。',
 				action: '生成图谱'
 			}
 		},

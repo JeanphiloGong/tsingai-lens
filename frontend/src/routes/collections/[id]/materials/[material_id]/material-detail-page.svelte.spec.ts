@@ -387,6 +387,9 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Trend interpretation' }))
 			.toBeInTheDocument();
 		await expect
+			.element(browserPage.getByRole('heading', { name: 'Material graph' }))
+			.toBeInTheDocument();
+		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting data: performance matrix' }))
 			.toBeInTheDocument();
 		await expect
@@ -404,6 +407,11 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: '95.4%' }).first())
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'))
+			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Select graph node Hardness' }).click();
+		await expect.element(browserPage.getByText('Unit: HV')).toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
 		).toEqual([

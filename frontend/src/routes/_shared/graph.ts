@@ -208,6 +208,11 @@ const edgeTypeLabels: Record<string, string> = {
 	comparison_to_property: 'property',
 	comparison_to_test_condition: 'test condition',
 	comparison_to_baseline: 'baseline',
+	overview_document_material: 'studies',
+	overview_material_property: 'property',
+	overview_material_context: 'context',
+	overview_document_topic: 'mentions',
+	overview_relation: 'overview',
 	evidence_supports: 'supports',
 	related_to: 'related',
 	missing_context: 'missing context',
@@ -267,7 +272,12 @@ export function formatGraphLabel(value: string) {
 	return normalized.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }
 
-export function buildGraphMeta(graph: GraphResponse | null | undefined): GraphMeta {
+export function buildGraphMeta(
+	graph:
+		| (Pick<GraphResponse, 'nodes' | 'edges'> & Partial<Pick<GraphResponse, 'truncated'>>)
+		| null
+		| undefined
+): GraphMeta {
 	const nodes = graph?.nodes ?? [];
 	const nodeTypes = new Set(
 		nodes.map((node) => normalizeGraphNodeType(node.type)).filter((type) => type !== 'unknown')
@@ -281,7 +291,7 @@ export function buildGraphMeta(graph: GraphResponse | null | undefined): GraphMe
 	};
 }
 
-export function buildNodeTypeCounts(graph: GraphResponse | null | undefined) {
+export function buildNodeTypeCounts(graph: Pick<GraphResponse, 'nodes'> | null | undefined) {
 	const counts: Record<string, number> = {};
 	for (const type of graphNodeTypeOrder) {
 		counts[type] = 0;
@@ -294,7 +304,7 @@ export function buildNodeTypeCounts(graph: GraphResponse | null | undefined) {
 }
 
 export function filterGraphElements(
-	graph: GraphResponse | null | undefined,
+	graph: Pick<GraphResponse, 'nodes' | 'edges'> | null | undefined,
 	filters: GraphFilters
 ) {
 	const graphNodes = graph?.nodes ?? [];
@@ -324,6 +334,109 @@ export function filterGraphElements(
 	);
 
 	return { nodes, edges };
+}
+
+export function buildCollectionOverviewGraph(
+	graph: GraphResponse | null | undefined
+): GraphResponse {
+	const emptyGraph: GraphResponse = {
+		collection_id: graph?.collection_id ?? '',
+		nodes: [],
+		edges: [],
+		truncated: Boolean(graph?.truncated)
+	};
+	if (!graph) return emptyGraph;
+
+	const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+	const adjacency = buildAdjacency(graph.edges);
+	const keptNodes = graph.nodes.filter((node) =>
+		isCollectionOverviewNodeType(normalizeGraphNodeType(node.type))
+	);
+	const keptNodeIds = new Set(keptNodes.map((node) => node.id));
+	const relations = new Map<
+		string,
+		{ source: string; target: string; edgeDescription: string; count: number }
+	>();
+
+	function addRelation(source: string, target: string, edgeDescription: string) {
+		if (source === target || !keptNodeIds.has(source) || !keptNodeIds.has(target)) return;
+		const key = `${source}\n${target}\n${edgeDescription}`;
+		const current = relations.get(key);
+		if (current) {
+			current.count += 1;
+			return;
+		}
+		relations.set(key, { source, target, edgeDescription, count: 1 });
+	}
+
+	for (const edge of graph.edges) {
+		if (keptNodeIds.has(edge.source) && keptNodeIds.has(edge.target)) {
+			addRelation(edge.source, edge.target, edge.edge_description ?? 'overview_relation');
+		}
+	}
+
+	for (const node of graph.nodes) {
+		if (normalizeGraphNodeType(node.type) !== 'comparison') continue;
+		const buckets = collectComparisonOverviewBuckets(node.id, nodeById, adjacency);
+
+		for (const documentId of buckets.documents) {
+			for (const materialId of buckets.materials) {
+				addRelation(documentId, materialId, 'overview_document_material');
+			}
+		}
+
+		for (const materialId of buckets.materials) {
+			for (const propertyId of buckets.properties) {
+				addRelation(materialId, propertyId, 'overview_material_property');
+			}
+			for (const contextId of buckets.contexts) {
+				addRelation(materialId, contextId, 'overview_material_context');
+			}
+		}
+
+		if (!buckets.materials.size) {
+			for (const documentId of buckets.documents) {
+				for (const propertyId of buckets.properties) {
+					addRelation(documentId, propertyId, 'overview_document_topic');
+				}
+				for (const contextId of buckets.contexts) {
+					addRelation(documentId, contextId, 'overview_document_topic');
+				}
+			}
+		}
+	}
+
+	const maxCount = Math.max(1, ...Array.from(relations.values(), (relation) => relation.count));
+	const overviewDegrees = new Map<string, number>();
+	const edges = Array.from(relations.values()).map((relation, index) => {
+		overviewDegrees.set(
+			relation.source,
+			(overviewDegrees.get(relation.source) ?? 0) + relation.count
+		);
+		overviewDegrees.set(
+			relation.target,
+			(overviewDegrees.get(relation.target) ?? 0) + relation.count
+		);
+		return {
+			id: `overview:${index}`,
+			source: relation.source,
+			target: relation.target,
+			weight: relation.count / maxCount,
+			edge_description: relation.edgeDescription
+		};
+	});
+
+	const nodes = keptNodes.map((node) => ({
+		...node,
+		degree: Math.max(Number(node.degree ?? 0), overviewDegrees.get(node.id) ?? 0)
+	}));
+
+	return {
+		collection_id: graph.collection_id,
+		nodes,
+		edges,
+		truncated: graph.truncated
+	};
 }
 
 export function getNodeTypeStyle(type?: string | null): GraphTypeStyle {
@@ -737,6 +850,73 @@ function normalizeGraphNodeType(type?: string | null): GraphNodeType {
 	return graphNodeTypeOrder.includes(normalized as GraphNodeType)
 		? (normalized as GraphNodeType)
 		: 'unknown';
+}
+
+function isCollectionOverviewNodeType(type: GraphNodeType) {
+	return type !== 'comparison' && type !== 'evidence';
+}
+
+function isOverviewContextType(type: GraphNodeType) {
+	return (
+		type === 'process' ||
+		type === 'variant' ||
+		type === 'test_condition' ||
+		type === 'baseline' ||
+		type === 'unknown'
+	);
+}
+
+function buildAdjacency(edges: GraphEdge[]) {
+	const adjacency = new Map<string, GraphEdge[]>();
+	for (const edge of edges) {
+		const sourceEdges = adjacency.get(edge.source) ?? [];
+		sourceEdges.push(edge);
+		adjacency.set(edge.source, sourceEdges);
+
+		const targetEdges = adjacency.get(edge.target) ?? [];
+		targetEdges.push(edge);
+		adjacency.set(edge.target, targetEdges);
+	}
+	return adjacency;
+}
+
+function connectedNodeIds(adjacency: Map<string, GraphEdge[]>, nodeId: string) {
+	return (adjacency.get(nodeId) ?? []).map((edge) =>
+		edge.source === nodeId ? edge.target : edge.source
+	);
+}
+
+function collectComparisonOverviewBuckets(
+	comparisonNodeId: string,
+	nodeById: Map<string, GraphNode>,
+	adjacency: Map<string, GraphEdge[]>
+) {
+	const buckets = {
+		documents: new Set<string>(),
+		materials: new Set<string>(),
+		properties: new Set<string>(),
+		contexts: new Set<string>()
+	};
+
+	for (const neighborId of connectedNodeIds(adjacency, comparisonNodeId)) {
+		const neighbor = nodeById.get(neighborId);
+		const type = normalizeGraphNodeType(neighbor?.type);
+		if (type === 'document') buckets.documents.add(neighborId);
+		if (type === 'material') buckets.materials.add(neighborId);
+		if (type === 'property') buckets.properties.add(neighborId);
+		if (isOverviewContextType(type)) buckets.contexts.add(neighborId);
+
+		if (type === 'evidence') {
+			for (const evidenceNeighborId of connectedNodeIds(adjacency, neighborId)) {
+				const evidenceNeighbor = nodeById.get(evidenceNeighborId);
+				if (normalizeGraphNodeType(evidenceNeighbor?.type) === 'document') {
+					buckets.documents.add(evidenceNeighborId);
+				}
+			}
+		}
+	}
+
+	return buckets;
 }
 
 function normalizeSearch(value?: string | null) {

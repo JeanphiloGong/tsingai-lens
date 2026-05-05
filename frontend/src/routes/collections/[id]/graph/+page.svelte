@@ -7,6 +7,7 @@
 	import {
 		buildCytoscapeElements,
 		buildCytoscapeStyles,
+		buildCollectionOverviewGraph,
 		buildGraphMeta,
 		buildNodeTypeCounts,
 		downloadGraphml as downloadGraphmlFile,
@@ -85,6 +86,20 @@
 		label: string;
 		target: string;
 	};
+	type OverviewNodePreview = {
+		id: string;
+		label: string;
+		type: GraphNodeType;
+		degree: number;
+	};
+	type OverviewStats = {
+		materials: number;
+		documents: number;
+		properties: number;
+		themes: number;
+		reviewBuckets: number;
+		hiddenDetailNodes: number;
+	};
 
 	const defaultMaxNodes = 200;
 	const defaultMinWeight = 0;
@@ -129,9 +144,18 @@
 	let documentItems: DocumentProfile[] = [];
 
 	$: collectionId = $page.params.id ?? '';
-	$: graphMeta = buildGraphMeta(graphData);
-	$: nodeTypeCounts = buildNodeTypeCounts(graphData);
+	$: overviewGraphData = buildCollectionOverviewGraph(graphData);
+	$: graphMeta = buildGraphMeta(overviewGraphData);
+	$: nodeTypeCounts = buildNodeTypeCounts(overviewGraphData);
 	$: availableNodeTypes = graphNodeTypeOrder.filter((type) => nodeTypeCounts[type] > 0);
+	$: overviewStats = buildOverviewStats(graphData, overviewGraphData);
+	$: coreMaterialNodes = topOverviewNodes(overviewGraphData, ['material'], 4);
+	$: denseTopicNodes = topOverviewNodes(
+		overviewGraphData,
+		['property', 'process', 'variant', 'test_condition', 'baseline'],
+		4
+	);
+	$: reviewBucketNodes = buildReviewBucketNodes(overviewGraphData, 4);
 	$: surfaceState = getWorkspaceSurfaceState(workspace, 'graph');
 	$: selectedObject = selectedNode
 		? ({ kind: 'node', node: selectedNode } as GraphSelectedObject)
@@ -152,7 +176,8 @@
 		documents: linkedDocuments.length
 	};
 	$: commonRelations = buildCommonRelations();
-	$: showEmptyGraph = !loading && (!graphData || !graphData.nodes.length || (notFound && !visibleNodes));
+	$: showEmptyGraph =
+		!loading && (!graphData || !overviewGraphData.nodes.length || (notFound && !visibleNodes));
 	$: if (cy) {
 		searchQuery;
 		visibleNodeTypes;
@@ -243,7 +268,7 @@
 
 	function buildVisibleGraphPayload() {
 		if (!graphData) return { nodes: [], edges: [] };
-		return filterGraphElements(graphData, {
+		return filterGraphElements(buildCollectionOverviewGraph(graphData), {
 			maxNodes,
 			minWeight,
 			visibleNodeTypes
@@ -520,11 +545,9 @@
 		try {
 			if (graphResult.status !== 'fulfilled') throw graphResult.reason;
 			graphData = graphResult.value;
-			visibleNodeTypes = ensureVisibleTypes(graphData);
+			visibleNodeTypes = ensureVisibleTypes(buildCollectionOverviewGraph(graphData));
 			await renderGraph();
-			status = graphData.truncated
-				? $t('graph.status.loadedTruncated')
-				: $t('graph.status.loaded');
+			status = graphData.truncated ? $t('graph.status.loadedTruncated') : $t('graph.status.loaded');
 		} catch (err) {
 			const errorCode = getApiErrorCode(err);
 			error = errorMessage(err);
@@ -645,6 +668,76 @@
 		return next;
 	}
 
+	function buildOverviewStats(
+		sourceGraph: GraphResponse | null,
+		overviewGraph: GraphResponse
+	): OverviewStats {
+		const counts = buildNodeTypeCounts(overviewGraph);
+		return {
+			materials: counts.material,
+			documents: counts.document,
+			properties: counts.property,
+			themes:
+				counts.process + counts.variant + counts.test_condition + counts.baseline + counts.unknown,
+			reviewBuckets: buildReviewBucketNodes(overviewGraph, Number.POSITIVE_INFINITY).length,
+			hiddenDetailNodes: (sourceGraph?.nodes ?? []).filter((node) => {
+				const type = String(node.type ?? 'unknown');
+				return type === 'comparison' || type === 'evidence';
+			}).length
+		};
+	}
+
+	function topOverviewNodes(
+		graph: GraphResponse,
+		types: GraphNodeType[],
+		limit: number
+	): OverviewNodePreview[] {
+		const typeSet = new Set(types);
+		return graph.nodes
+			.filter((node) => typeSet.has(String(node.type ?? 'unknown') as GraphNodeType))
+			.sort(
+				(a, b) => Number(b.degree ?? 0) - Number(a.degree ?? 0) || a.label.localeCompare(b.label)
+			)
+			.slice(0, limit)
+			.map((node) => ({
+				id: node.id,
+				label: formatGraphLabel(node.label || node.id),
+				type: String(node.type ?? 'unknown') as GraphNodeType,
+				degree: Number(node.degree ?? 0)
+			}));
+	}
+
+	function buildReviewBucketNodes(graph: GraphResponse, limit: number): OverviewNodePreview[] {
+		return graph.nodes
+			.filter(isReviewBucketNode)
+			.sort(
+				(a, b) => Number(b.degree ?? 0) - Number(a.degree ?? 0) || a.label.localeCompare(b.label)
+			)
+			.slice(0, limit)
+			.map((node) => ({
+				id: node.id,
+				label: formatGraphLabel(node.label || node.id),
+				type: String(node.type ?? 'unknown') as GraphNodeType,
+				degree: Number(node.degree ?? 0)
+			}));
+	}
+
+	function isReviewBucketNode(node: GraphNode) {
+		const label = `${node.id} ${node.label}`.toLowerCase();
+		const type = String(node.type ?? 'unknown');
+		return (
+			type === 'unknown' ||
+			label.includes('unspecified') ||
+			label.includes('unknown') ||
+			label.includes('unassigned') ||
+			label.includes('missing') ||
+			label.includes('not reported') ||
+			label.includes('未指定') ||
+			label.includes('未知') ||
+			label.includes('未归属')
+		);
+	}
+
 	function toggleNodeType(type: GraphNodeType, checked: boolean) {
 		visibleNodeTypes = { ...visibleNodeTypes, [type]: checked };
 	}
@@ -729,6 +822,13 @@
 			});
 		}
 		return null;
+	}
+
+	function selectedMaterialHref() {
+		if (selectedNode?.kind !== 'material' || !selectedNode.resourceId) return null;
+		return `/collections/${encodeURIComponent(collectionId)}/materials/${encodeURIComponent(
+			selectedNode.resourceId
+		)}`;
 	}
 
 	function selectedNodeComparisonFilter() {
@@ -988,6 +1088,93 @@
 			{/if}
 		</section>
 	{:else}
+		<section class="graph-page-card graph-overview-panel" aria-labelledby="graph-overview-title">
+			<div class="graph-overview-header">
+				<div>
+					<h2 id="graph-overview-title">{$t('graph.overview.title')}</h2>
+					<p>{$t('graph.overview.lead')}</p>
+				</div>
+				<span>{$t('graph.overview.detailNodes', { count: overviewStats.hiddenDetailNodes })}</span>
+			</div>
+
+			<div class="graph-overview-metrics" aria-label={$t('graph.overview.metricsLabel')}>
+				<div>
+					<span>{$t('graph.overview.materials')}</span>
+					<strong>{overviewStats.materials}</strong>
+				</div>
+				<div>
+					<span>{$t('graph.overview.documents')}</span>
+					<strong>{overviewStats.documents}</strong>
+				</div>
+				<div>
+					<span>{$t('graph.overview.properties')}</span>
+					<strong>{overviewStats.properties}</strong>
+				</div>
+				<div>
+					<span>{$t('graph.overview.themes')}</span>
+					<strong>{overviewStats.themes}</strong>
+				</div>
+				<div>
+					<span>{$t('graph.overview.reviewBuckets')}</span>
+					<strong>{overviewStats.reviewBuckets}</strong>
+				</div>
+			</div>
+
+			<div class="graph-overview-lists">
+				<div>
+					<h3>{$t('graph.overview.coreMaterials')}</h3>
+					{#if coreMaterialNodes.length}
+						<ul>
+							{#each coreMaterialNodes as node (node.id)}
+								<li>
+									<button type="button" on:click={() => void selectNode(node.id, { focus: true })}>
+										<span>{node.label}</span>
+										<strong>{node.degree}</strong>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{:else}
+						<p>{$t('graph.overview.emptyList')}</p>
+					{/if}
+				</div>
+				<div>
+					<h3>{$t('graph.overview.denseThemes')}</h3>
+					{#if denseTopicNodes.length}
+						<ul>
+							{#each denseTopicNodes as node (node.id)}
+								<li>
+									<button type="button" on:click={() => void selectNode(node.id, { focus: true })}>
+										<span>{node.label}</span>
+										<strong>{node.degree}</strong>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{:else}
+						<p>{$t('graph.overview.emptyList')}</p>
+					{/if}
+				</div>
+				<div>
+					<h3>{$t('graph.overview.qualityIssues')}</h3>
+					{#if reviewBucketNodes.length}
+						<ul>
+							{#each reviewBucketNodes as node (node.id)}
+								<li>
+									<button type="button" on:click={() => void selectNode(node.id, { focus: true })}>
+										<span>{node.label}</span>
+										<strong>{node.degree}</strong>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{:else}
+						<p>{$t('graph.overview.emptyList')}</p>
+					{/if}
+				</div>
+			</div>
+		</section>
+
 		<div class="graph-workspace" aria-label={$t('graph.workspace.label')}>
 			<aside class="graph-page-card graph-controls-panel" aria-labelledby="graph-controls-title">
 				<div class="graph-panel-header">
@@ -1257,14 +1444,37 @@
 					</div>
 
 					<div class="graph-detail-actions">
-						<a class="graph-button graph-button--primary" href={selectedActionHref('evidence') ?? '#'}>
+						{#if selectedMaterialHref()}
+							<a class="graph-button graph-button--primary" href={selectedMaterialHref() ?? '#'}>
+								{$t('graph.detail.openMaterialGraph')}
+							</a>
+						{:else}
+							<a
+								class="graph-button graph-button--primary"
+								href={selectedActionHref('comparison') ?? '#'}
+							>
+								{$t('graph.detail.openComparison')}
+							</a>
+						{/if}
+						{#if selectedMaterialHref()}
+							<a
+								class="graph-button graph-button--ghost"
+								href={selectedActionHref('comparison') ?? '#'}
+							>
+								{$t('graph.detail.openComparison')}
+							</a>
+						{/if}
+						<a
+							class="graph-button graph-button--ghost"
+							href={selectedActionHref('evidence') ?? '#'}
+						>
 							{$t('graph.detail.viewEvidence')}
 						</a>
-						<a class="graph-button graph-button--ghost" href={selectedActionHref('comparison') ?? '#'}>
-							{$t('graph.detail.openComparison')}
-						</a>
 						{#if selectedActionHref('source')}
-							<a class="graph-button graph-button--ghost" href={selectedActionHref('source') ?? '#'}>
+							<a
+								class="graph-button graph-button--ghost"
+								href={selectedActionHref('source') ?? '#'}
+							>
 								{$t('graph.detail.locateSource')}
 							</a>
 						{/if}
@@ -1737,6 +1947,146 @@
 		border-color: #fecaca;
 		background: #fee2e2;
 		color: #b91c1c;
+	}
+
+	.graph-overview-panel {
+		display: grid;
+		gap: 16px;
+		padding: 18px;
+	}
+
+	.graph-overview-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+	}
+
+	.graph-overview-header h2,
+	.graph-overview-lists h3 {
+		margin: 0;
+		color: #0f172a;
+		font-weight: 700;
+		letter-spacing: 0;
+	}
+
+	.graph-overview-header h2 {
+		font-size: 18px;
+		line-height: 26px;
+	}
+
+	.graph-overview-header p {
+		max-width: 760px;
+		margin: 4px 0 0;
+		color: #64748b;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.graph-overview-header > span {
+		flex: 0 0 auto;
+		padding: 5px 10px;
+		border-radius: 999px;
+		background: #f8fafc;
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.graph-overview-metrics {
+		display: grid;
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.graph-overview-metrics div {
+		min-width: 0;
+		display: grid;
+		gap: 3px;
+		padding: 12px;
+		border: 1px solid #e6ebf2;
+		border-radius: 12px;
+		background: #fbfdff;
+	}
+
+	.graph-overview-metrics span,
+	.graph-overview-lists p {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.graph-overview-metrics strong {
+		color: #0f172a;
+		font-size: 22px;
+		line-height: 28px;
+	}
+
+	.graph-overview-lists {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 12px;
+	}
+
+	.graph-overview-lists > div {
+		min-width: 0;
+		display: grid;
+		align-content: start;
+		gap: 8px;
+	}
+
+	.graph-overview-lists h3 {
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.graph-overview-lists ul {
+		display: grid;
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.graph-overview-lists button {
+		width: 100%;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+		min-height: 34px;
+		padding: 7px 9px;
+		border: 1px solid #e6ebf2;
+		border-radius: 10px;
+		background: #ffffff;
+		color: #0f172a;
+		text-align: left;
+		font-size: 13px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.graph-overview-lists button:hover {
+		border-color: #bfdbfe;
+		background: #eff6ff;
+	}
+
+	.graph-overview-lists button span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.graph-overview-lists button strong {
+		min-width: 28px;
+		padding: 1px 7px;
+		border-radius: 999px;
+		background: #f1f5f9;
+		color: #64748b;
+		text-align: center;
+		font-size: 12px;
 	}
 
 	.graph-empty-state {
@@ -2545,6 +2895,22 @@
 			grid-template-columns: 1fr;
 		}
 
+		.graph-overview-header {
+			display: grid;
+		}
+
+		.graph-overview-header > span {
+			width: max-content;
+		}
+
+		.graph-overview-metrics {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.graph-overview-lists {
+			grid-template-columns: 1fr;
+		}
+
 		.graph-controls-panel {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			align-items: start;
@@ -2570,6 +2936,7 @@
 		}
 
 		.graph-header-card,
+		.graph-overview-panel,
 		.graph-linked-panel {
 			padding: 16px;
 		}
@@ -2589,6 +2956,10 @@
 		}
 
 		.graph-controls-panel {
+			grid-template-columns: 1fr;
+		}
+
+		.graph-overview-metrics {
 			grid-template-columns: 1fr;
 		}
 
@@ -2630,6 +3001,10 @@
 	:global(:root[data-theme='dark']) .graph-panel-header h2,
 	:global(:root[data-theme='dark']) .graph-canvas-toolbar h2,
 	:global(:root[data-theme='dark']) .graph-linked-header h2,
+	:global(:root[data-theme='dark']) .graph-overview-header h2,
+	:global(:root[data-theme='dark']) .graph-overview-lists h3,
+	:global(:root[data-theme='dark']) .graph-overview-metrics strong,
+	:global(:root[data-theme='dark']) .graph-overview-lists button,
 	:global(:root[data-theme='dark']) .graph-selected-summary h3,
 	:global(:root[data-theme='dark']) .graph-edge-detail h3,
 	:global(:root[data-theme='dark']) .graph-linked-card h3,
@@ -2646,6 +3021,10 @@
 	:global(:root[data-theme='dark']) .graph-meta-row,
 	:global(:root[data-theme='dark']) .graph-canvas-toolbar p,
 	:global(:root[data-theme='dark']) .graph-linked-header p,
+	:global(:root[data-theme='dark']) .graph-overview-header p,
+	:global(:root[data-theme='dark']) .graph-overview-header > span,
+	:global(:root[data-theme='dark']) .graph-overview-metrics span,
+	:global(:root[data-theme='dark']) .graph-overview-lists p,
 	:global(:root[data-theme='dark']) .graph-detail-section p,
 	:global(:root[data-theme='dark']) .graph-edge-detail p,
 	:global(:root[data-theme='dark']) .graph-linked-card p,
@@ -2662,6 +3041,9 @@
 	:global(:root[data-theme='dark']) .graph-search-control,
 	:global(:root[data-theme='dark']) .graph-node-type-row,
 	:global(:root[data-theme='dark']) .graph-control-status,
+	:global(:root[data-theme='dark']) .graph-overview-header > span,
+	:global(:root[data-theme='dark']) .graph-overview-metrics div,
+	:global(:root[data-theme='dark']) .graph-overview-lists button,
 	:global(:root[data-theme='dark']) .graph-detail-stat-grid div,
 	:global(:root[data-theme='dark']) .graph-compact-list li,
 	:global(:root[data-theme='dark']) .graph-relation-list li,

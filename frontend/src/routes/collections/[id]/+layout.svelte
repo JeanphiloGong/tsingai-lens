@@ -40,6 +40,7 @@
 		!workspace || getWorkspaceSurfaceState(workspace, 'protocol') !== 'not_applicable';
 	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/evidence`;
 	$: moreActive =
+		$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/results`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`);
@@ -154,16 +155,16 @@
 		{$t('collection.tabs.overview')}
 	</a>
 	<a
+		href={`/collections/${collectionId}/materials`}
+		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/materials`)}
+	>
+		{$t('collection.tabs.materials')}
+	</a>
+	<a
 		href={`/collections/${collectionId}/documents`}
 		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/documents`)}
 	>
-		{$t('collection.tabs.documents')}
-	</a>
-	<a
-		href={`/collections/${collectionId}/comparisons`}
-		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`)}
-	>
-		{$t('collection.tabs.comparison')}
+		{$t('collection.tabs.papers')}
 	</a>
 	<a
 		href={`/collections/${collectionId}/graph`}
@@ -174,6 +175,12 @@
 	<details class="collection-tabs__more" class:active={moreActive}>
 		<summary>{$t('collection.moreLabel')}</summary>
 		<div class="collection-tabs__menu">
+			<a
+				href={`/collections/${collectionId}/comparisons`}
+				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`)}
+			>
+				{$t('collection.tabs.allComparisons')}
+			</a>
 			<a
 				href={evidenceHref}
 				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`)}

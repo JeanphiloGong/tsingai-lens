@@ -6,6 +6,8 @@ This node owns the collection workspace route family in the frontend.
 
 - `collections/[id]/+layout.svelte`
 - `collections/[id]/+page.svelte`
+- `collections/[id]/materials/+page.svelte`
+- `collections/[id]/materials/[material_id]/+page.svelte`
 - `collections/[id]/documents/+page.svelte`
 - `collections/[id]/evidence/+page.svelte`
 - `collections/[id]/comparisons/+page.svelte`
@@ -16,9 +18,9 @@ This node owns the collection workspace route family in the frontend.
 - render the collection workspace
 - render collection-level document profile screening and Protocol suitability
   signals
+- render canonical collection materials and collection-scoped material profiles
 - render collection-level evidence cards and source-anchor entry points
-- render comparison review for cross-paper comparability, missing context, and
-  next actions
+- render global comparison review as a More / All Comparisons surface
 - render document detail as a paper reader plus structured understanding workbench
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness

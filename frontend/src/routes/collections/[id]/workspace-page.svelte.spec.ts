@@ -165,14 +165,14 @@ describe('collections/[id]/+page.svelte', () => {
 		});
 	});
 
-	it('shows comparisons as the primary action when comparisons are available', async () => {
+	it('shows materials as the primary action when the collection is ready', async () => {
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'Enter comparison view' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter materials' });
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 
-	it('keeps comparison as the primary research action when comparisons are unavailable', async () => {
+	it('keeps materials as the primary research action when comparisons are unavailable', async () => {
 		workspacePayload = buildWorkspacePayload({
 			workflow: {
 				documents: 'ready',
@@ -196,11 +196,11 @@ describe('collections/[id]/+page.svelte', () => {
 
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'Enter comparison view' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter materials' });
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 
-	it('keeps comparison as the primary research action when only documents are available', async () => {
+	it('keeps materials as the primary research action when only documents are available', async () => {
 		workspacePayload = buildWorkspacePayload({
 			workflow: {
 				documents: 'ready',
@@ -224,7 +224,7 @@ describe('collections/[id]/+page.svelte', () => {
 
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'Enter comparison view' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter materials' });
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 });

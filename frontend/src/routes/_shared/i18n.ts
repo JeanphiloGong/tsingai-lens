@@ -155,6 +155,9 @@ const translations: Record<Language, Translations> = {
 				extractedFacts: 'Extracted Facts',
 				evidence: 'Evidence',
 				documents: 'Documents',
+				materials: 'Materials',
+				papers: 'Papers',
+				allComparisons: 'All Comparisons',
 				protocol: 'Protocol',
 				graph: 'Graph'
 			},
@@ -200,6 +203,47 @@ const translations: Record<Language, Translations> = {
 				variables: 'Variables',
 				properties: 'Properties'
 			},
+			materials: {
+				title: 'Materials',
+				body: 'Canonical materials detected in this collection, with paper coverage, sample counts, measured properties, and evidence status.',
+				loading: 'Loading materials...',
+				errorTitle: 'Materials are unavailable',
+				emptyTitle: 'No material profiles yet',
+				emptyBody: 'The material aggregation endpoint returned no material summaries for this collection.',
+				refresh: 'Refresh materials',
+				summaryTitle: 'Material summary',
+				materialCount: '{count} material(s)',
+				paperCount: '{count} paper(s)',
+				sampleCount: '{count} sample(s)',
+				aliases: 'Aliases',
+				papers: 'Papers',
+				comparisons: 'Comparisons',
+				evidenceCoverage: 'Evidence coverage',
+				openProfile: 'Open material profile'
+			},
+			materialProfile: {
+				title: 'Material profile',
+				body: 'Collection-scoped material profile with papers, samples, process ranges, properties, comparisons, condition series, and evidence.',
+				back: 'Back to materials',
+				loading: 'Loading material profile...',
+				errorTitle: 'Material profile is unavailable',
+				emptyTitle: 'No material profile',
+				emptyBody: 'The material profile endpoint returned no data for this material.',
+				refresh: 'Refresh profile',
+				summaryTitle: 'Material profile summary',
+				overview: 'Overview',
+				papers: 'Papers using this material',
+				processRanges: 'Process parameter ranges',
+				propertySummaries: 'Property summaries',
+				comparisons: 'Comparisons for this material',
+				rangeCoverage: '{samples} sample(s), {papers} paper(s)',
+				noProcessRanges: 'No process ranges were returned for this material.',
+				noPropertySummaries: 'No property summaries were returned for this material.',
+				seriesCount: '{count} series'
+			},
+			paperMaterials: {
+				title: 'Materials in this paper'
+			},
 			documents: {
 				title: 'Documents',
 				directBody: 'Read paper coverage directly from the research-view aggregation contract.',
@@ -226,9 +270,9 @@ const translations: Record<Language, Translations> = {
 				noIssues: 'No issues'
 			},
 			comparison: {
-				title: 'Research comparison',
+				title: 'All comparisons',
 				directBody:
-					'Inspect comparable groups and cross-paper matrices built by the research-view aggregation layer.',
+					'Advanced browser for comparable groups and cross-paper matrices built by the research-view aggregation layer.',
 				loading: 'Loading research comparison...',
 				errorTitle: 'Research comparison is unavailable',
 				emptyTitle: 'No comparable groups',
@@ -290,7 +334,7 @@ const translations: Record<Language, Translations> = {
 			readiness: {
 				ready: {
 					title: 'Collection is ready',
-					body: 'This collection contains {count} document(s), and parsing plus evidence extraction are complete. You can enter the comparison view or inspect evidence and source documents.'
+					body: 'This collection contains {count} document(s), and parsing plus evidence extraction are complete. Start from Materials, then inspect papers, evidence, and comparisons as needed.'
 				},
 				processing: {
 					title: 'Collection is processing',
@@ -311,6 +355,7 @@ const translations: Record<Language, Translations> = {
 			},
 			actions: {
 				enterComparisons: 'Enter comparison view',
+				enterMaterials: 'Enter materials',
 				enterComparisonShort: 'Enter comparison',
 				viewEvidence: 'View evidence',
 				refreshStatus: 'Refresh status',
@@ -365,7 +410,7 @@ const translations: Record<Language, Translations> = {
 					title: 'Recommended next step',
 					readyTypes: 'Check document types',
 					readyEvidence: 'Review evidence and comparability',
-					readyCompare: 'Enter comparison view',
+					readyCompare: 'Open material profiles',
 					processingWait: 'Wait for tasks to finish',
 					processingLogs: 'Check processing log',
 					processingRefresh: 'Refresh status',
@@ -2203,6 +2248,9 @@ const translations: Record<Language, Translations> = {
 				extractedFacts: '抽取事实',
 				evidence: '证据',
 				documents: '文档',
+				materials: '材料',
+				papers: '文献',
+				allComparisons: '全部比较',
 				protocol: 'Protocol',
 				graph: '图谱'
 			},
@@ -2246,6 +2294,47 @@ const translations: Record<Language, Translations> = {
 				variables: '变量',
 				properties: '性能'
 			},
+			materials: {
+				title: '材料',
+				body: '集合中识别出的规范材料，包含文献覆盖、样品数量、已测性能和证据状态。',
+				loading: '正在加载材料...',
+				errorTitle: '材料视图不可用',
+				emptyTitle: '暂无材料档案',
+				emptyBody: '材料聚合接口没有返回该集合的材料摘要。',
+				refresh: '刷新材料',
+				summaryTitle: '材料摘要',
+				materialCount: '{count} 个材料',
+				paperCount: '{count} 篇文献',
+				sampleCount: '{count} 个样品',
+				aliases: '别名',
+				papers: '文献',
+				comparisons: '比较',
+				evidenceCoverage: '证据覆盖',
+				openProfile: '打开材料档案'
+			},
+			materialProfile: {
+				title: '材料档案',
+				body: '集合范围内的材料档案，包含文献、样品、工艺范围、性能、比较、条件序列和证据。',
+				back: '返回材料列表',
+				loading: '正在加载材料档案...',
+				errorTitle: '材料档案不可用',
+				emptyTitle: '暂无材料档案',
+				emptyBody: '材料档案接口没有返回这个材料的数据。',
+				refresh: '刷新档案',
+				summaryTitle: '材料档案摘要',
+				overview: '概览',
+				papers: '使用该材料的文献',
+				processRanges: '工艺参数范围',
+				propertySummaries: '性能摘要',
+				comparisons: '该材料下的比较',
+				rangeCoverage: '{samples} 个样品，{papers} 篇文献',
+				noProcessRanges: '这个材料还没有返回工艺参数范围。',
+				noPropertySummaries: '这个材料还没有返回性能摘要。',
+				seriesCount: '{count} 个序列'
+			},
+			paperMaterials: {
+				title: '本文献中的材料'
+			},
 			documents: {
 				title: '文档',
 				directBody: '直接读取 research-view 聚合后的文献覆盖结果。',
@@ -2271,8 +2360,8 @@ const translations: Record<Language, Translations> = {
 				noIssues: '无明显问题'
 			},
 			comparison: {
-				title: '研究比较',
-				directBody: '查看由 research-view 聚合层生成的可比较组和跨文献矩阵。',
+				title: '全部比较',
+				directBody: '高级浏览入口，用于查看 research-view 聚合层生成的可比较组和跨文献矩阵。',
 				loading: '正在加载研究比较...',
 				errorTitle: '研究比较不可用',
 				emptyTitle: '暂无可比较组',
@@ -2334,7 +2423,7 @@ const translations: Record<Language, Translations> = {
 			readiness: {
 				ready: {
 					title: '集合已准备好',
-					body: '该集合包含 {count} 篇文档，解析与证据提取已完成。你可以进入比较视图查看跨文献结果，或检查证据与文档来源。'
+					body: '该集合包含 {count} 篇文档，解析与证据提取已完成。建议先进入材料视图，再按需要查看文献、证据和比较。'
 				},
 				processing: {
 					title: '集合正在处理中',
@@ -2355,6 +2444,7 @@ const translations: Record<Language, Translations> = {
 			},
 			actions: {
 				enterComparisons: '进入比较视图',
+				enterMaterials: '进入材料视图',
 				enterComparisonShort: '进入比较',
 				viewEvidence: '查看证据',
 				refreshStatus: '刷新状态',
@@ -2408,7 +2498,7 @@ const translations: Record<Language, Translations> = {
 					title: '推荐下一步',
 					readyTypes: '检查文档类型',
 					readyEvidence: '查看证据与可比性',
-					readyCompare: '进入比较视图',
+					readyCompare: '打开材料档案',
 					processingWait: '等待任务完成',
 					processingLogs: '查看处理日志',
 					processingRefresh: '刷新状态',

@@ -9,8 +9,10 @@ vi.mock('./api', () => ({
 }));
 
 const {
+	fetchCollectionMaterials,
 	fetchCollectionResearchView,
 	fetchDocumentResearchView,
+	fetchMaterialResearchView,
 	formatEvidenceBackedValue,
 	getResearchViewStateTone,
 	hasObservedValue,
@@ -52,6 +54,48 @@ describe('research view shared helpers', () => {
 			'/collections/col_123/documents/doc_1/research-view'
 		);
 		expect(paper.paper_title).toBe('SLM 316L');
+
+		requestJson.mockResolvedValueOnce({
+			items: [
+				{
+					material_id: 'mat_316l',
+					canonical_name: '316L stainless steel',
+					aliases: ['316L'],
+					paper_count: 2,
+					sample_count: 6,
+					evidence_coverage: 0.8,
+					state: 'ready'
+				}
+			]
+		});
+
+		const materials = await fetchCollectionMaterials('col_123');
+
+		expect(requestJson).toHaveBeenLastCalledWith('/collections/col_123/materials');
+		expect(materials[0]).toMatchObject({
+			material_id: 'mat_316l',
+			canonical_name: '316L stainless steel',
+			sample_count: 6
+		});
+
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			material_id: 'mat_316l',
+			canonical_name: '316L stainless steel',
+			state: 'ready',
+			papers: [{ document_id: 'doc_1', title: 'Paper A', state: 'ready' }],
+			sample_matrix: {
+				rows: [{ row_id: 'row_1', sample_id: 'S1', sample_label: 'S1', material: '316L' }]
+			}
+		});
+
+		const materialProfile = await fetchMaterialResearchView('col_123', 'mat_316l');
+
+		expect(requestJson).toHaveBeenLastCalledWith(
+			'/collections/col_123/materials/mat_316l/research-view'
+		);
+		expect(materialProfile.papers[0].document_id).toBe('doc_1');
+		expect(materialProfile.sample_matrix.rows[0].sample_id).toBe('S1');
 	});
 
 	it('normalizes collection aggregation into coverage, groups, matrices, and warnings', () => {
@@ -68,6 +112,14 @@ describe('research view shared helpers', () => {
 					variable_axes: ['scanning speed'],
 					measured_properties: ['density']
 				},
+				materials: [
+					{
+						material_id: 'mat_316l',
+						canonical_name: '316L stainless steel',
+						paper_count: 1,
+						sample_count: 2
+					}
+				],
 				paper_coverage: [
 					{
 						document_id: 'doc_1',
@@ -114,6 +166,7 @@ describe('research view shared helpers', () => {
 		);
 
 		expect(collection.overview.variable_axes).toEqual(['scanning speed']);
+		expect(collection.materials[0].material_id).toBe('mat_316l');
 		expect(collection.paper_coverage[0].primary_warnings[0].message).toBe('condition missing');
 		expect(collection.comparable_groups[0].matrix.columns[0]).toMatchObject({
 			key: 'density',
@@ -143,6 +196,14 @@ describe('research view shared helpers', () => {
 					measured_properties: ['yield strength'],
 					condition_families: ['test temperature']
 				},
+				materials: [
+					{
+						material_id: 'mat_316l',
+						canonical_name: '316L',
+						sample_count: 1,
+						measured_properties: ['yield strength']
+					}
+				],
 				sample_matrix: {
 					matrix_id: 'sample_mx',
 					columns: [
@@ -185,6 +246,7 @@ describe('research view shared helpers', () => {
 			'doc_1'
 		);
 
+		expect(paper.materials[0].canonical_name).toBe('316L');
 		expect(paper.sample_matrix.rows[0].values.yield_strength.duplicate_count).toBe(2);
 		expect(paper.sample_matrix.columns[0]).toMatchObject({
 			key: 'yield_strength',

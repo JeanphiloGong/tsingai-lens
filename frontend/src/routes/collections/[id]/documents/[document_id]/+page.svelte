@@ -35,6 +35,7 @@
 	let model: DocumentWorkbenchModel | null = null;
 	let paperAggregation: PaperAggregation | null = null;
 	let paperResearchError = '';
+	let selectedPaperMaterialId = '';
 	let selectedMatrixValue: EvidenceBackedValue | null = null;
 	let loading = false;
 	let loadedKey = '';
@@ -66,8 +67,22 @@
 	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}`;
 	$: selectedGraph = graphForSelection(model, selectedItemId);
 	$: selectedSourceAnchor = sourceAnchorForSelection(model, selectedSourceSpanId);
+	$: paperMaterialRows = paperAggregation?.materials ?? [];
+	$: activePaperMaterial =
+		paperMaterialRows.find((material) => material.material_id === selectedPaperMaterialId) ??
+		paperMaterialRows[0] ??
+		null;
 	$: paperSampleRows = paperAggregation?.sample_matrix.rows ?? [];
 	$: sampleColumns = sampleMatrixColumns(paperAggregation, paperSampleRows);
+	$: if (
+		paperMaterialRows.length &&
+		!paperMaterialRows.some((material) => material.material_id === selectedPaperMaterialId)
+	) {
+		selectedPaperMaterialId = paperMaterialRows[0].material_id;
+	}
+	$: if (!paperMaterialRows.length && selectedPaperMaterialId) {
+		selectedPaperMaterialId = '';
+	}
 	$: if (selectedGraph && !selectedGraph.nodes.some((node) => node.id === selectedGraphNodeId)) {
 		selectedGraphNodeId = selectedGraph.nodes.find((node) => node.position === 'center')?.id ?? '';
 	}
@@ -100,6 +115,7 @@
 		loadingTracebackIds = new Set();
 		paperAggregation = null;
 		paperResearchError = '';
+		selectedPaperMaterialId = '';
 		selectedMatrixValue = null;
 
 		const researchPromise = loadPaperResearchView(currentCollectionId, currentDocumentId);
@@ -306,6 +322,10 @@
 		return paperSampleRows;
 	}
 
+	function selectPaperMaterial(materialId: string) {
+		selectedPaperMaterialId = materialId;
+	}
+
 	function sampleMatrixColumns(
 		aggregation: PaperAggregation | null = paperAggregation,
 		rows: SampleMatrixRow[] = paperSampleRows
@@ -449,6 +469,66 @@
 								>
 							</div>
 						</div>
+
+						{#if paperMaterialRows.length}
+							<section class="paper-research-section">
+								<h3>{$t('research.paperMaterials.title')}</h3>
+								<div class="paper-material-tabs" aria-label={$t('research.paperMaterials.title')}>
+									{#each paperMaterialRows as material (material.material_id)}
+										<button
+											type="button"
+											class:active={activePaperMaterial?.material_id === material.material_id}
+											on:click={() => selectPaperMaterial(material.material_id)}
+										>
+											{material.canonical_name}
+										</button>
+									{/each}
+								</div>
+								{#if activePaperMaterial}
+									<div class="paper-material-card">
+										<div>
+											<span>{$t('research.materials.aliases')}</span>
+											<strong
+												>{activePaperMaterial.aliases.join(', ') ||
+													$t('research.emptyValue')}</strong
+											>
+										</div>
+										<div>
+											<span>{$t('research.overview.samples')}</span>
+											<strong>{activePaperMaterial.sample_count}</strong>
+										</div>
+										<div>
+											<span>{$t('research.overview.processes')}</span>
+											<strong
+												>{activePaperMaterial.process_families.join(', ') ||
+													$t('research.emptyValue')}</strong
+											>
+										</div>
+										<div>
+											<span>{$t('research.overview.properties')}</span>
+											<strong
+												>{activePaperMaterial.measured_properties.join(', ') ||
+													$t('research.emptyValue')}</strong
+											>
+										</div>
+										<div>
+											<span>{$t('research.materials.comparisons')}</span>
+											<strong>{activePaperMaterial.comparison_count}</strong>
+										</div>
+									</div>
+									{#if activePaperMaterial.warnings.length}
+										<div class="paper-material-warning" role="status">
+											<strong>{$t('research.warnings')}</strong>
+											<span
+												>{activePaperMaterial.warnings
+													.map((warning) => warning.message)
+													.join(' | ')}</span
+											>
+										</div>
+									{/if}
+								{/if}
+							</section>
+						{/if}
 
 						{#if sampleMatrixRows().length}
 							<section class="paper-research-section">
@@ -849,6 +929,71 @@
 	.paper-research-section {
 		display: grid;
 		gap: 8px;
+	}
+
+	.paper-material-tabs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+
+	.paper-material-tabs button {
+		min-height: 28px;
+		padding: 4px 8px;
+		border: 1px solid #dbeafe;
+		border-radius: 8px;
+		background: #ffffff;
+		color: #1d4ed8;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.paper-material-tabs button.active {
+		background: #eff6ff;
+	}
+
+	.paper-material-card {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+		padding: 10px;
+		border: 1px solid #e2e8f0;
+		border-radius: 12px;
+		background: #f8fafc;
+	}
+
+	.paper-material-card div {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.paper-material-card span {
+		color: #64748b;
+		font-size: 11px;
+		font-weight: 700;
+		line-height: 16px;
+	}
+
+	.paper-material-card strong {
+		overflow-wrap: anywhere;
+		color: #0f172a;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.paper-material-warning {
+		display: grid;
+		gap: 4px;
+		padding: 8px;
+		border: 1px solid #fde68a;
+		border-radius: 10px;
+		background: #fef3c7;
+		color: #b45309;
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.paper-matrix-wrapper {

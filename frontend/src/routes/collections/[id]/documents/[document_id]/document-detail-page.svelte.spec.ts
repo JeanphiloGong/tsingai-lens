@@ -85,6 +85,17 @@ function buildResearchPayload() {
 			main_process_variables: ['anneal temperature'],
 			measured_properties: ['conductivity']
 		},
+		materials: [
+			{
+				material_id: 'oxide_cathode',
+				canonical_name: 'oxide cathode',
+				aliases: ['LiNiO2'],
+				sample_count: 1,
+				process_families: ['annealing'],
+				measured_properties: ['conductivity'],
+				comparison_count: 1
+			}
+		],
 		sample_matrix: {
 			matrix_id: 'sample_matrix',
 			columns: [{ value_key: 'conductivity', label: 'Conductivity' }],
@@ -444,6 +455,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Paper research view' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Materials in this paper' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Sample matrix' }))

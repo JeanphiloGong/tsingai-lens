@@ -42,6 +42,34 @@ export type EvidenceBackedValue = {
 	warnings: ResearchViewWarning[];
 };
 
+export type MaterialSummary = {
+	material_id: string;
+	canonical_name: string;
+	aliases: string[];
+	paper_count: number;
+	sample_count: number;
+	process_families: string[];
+	measured_properties: string[];
+	comparison_count: number;
+	evidence_coverage: string | number | null;
+	state: ResearchViewState;
+	links: Record<string, string>;
+	warnings: ResearchViewWarning[];
+};
+
+export type PaperMaterialSummary = {
+	material_id: string;
+	canonical_name: string;
+	aliases: string[];
+	sample_count: number;
+	process_families: string[];
+	measured_properties: string[];
+	comparison_count: number;
+	evidence_coverage: string | number | null;
+	links: Record<string, string>;
+	warnings: ResearchViewWarning[];
+};
+
 export type SampleMatrixColumn = {
 	column_id: string;
 	key: string;
@@ -144,6 +172,91 @@ export type ComparableGroup = {
 	warnings: ResearchViewWarning[];
 };
 
+export type MaterialPaperCoverage = {
+	document_id: string;
+	title: string;
+	state: ResearchViewState;
+	sample_count: number;
+	process_families: string[];
+	measured_properties: string[];
+	evidence_count: number;
+	issue_count: number;
+	links: Record<string, string>;
+	warnings: ResearchViewWarning[];
+};
+
+export type ProcessParameterRange = {
+	parameter: string;
+	display_range: string;
+	min_value: string | number | null;
+	max_value: string | number | null;
+	unit: string | null;
+	sample_count: number;
+	document_count: number;
+	evidence_refs: EvidenceReference[];
+	warnings: ResearchViewWarning[];
+};
+
+export type PropertySummary = {
+	property: string;
+	display_range: string;
+	min_value: string | number | null;
+	max_value: string | number | null;
+	unit: string | null;
+	sample_count: number;
+	document_count: number;
+	evidence_refs: EvidenceReference[];
+	warnings: ResearchViewWarning[];
+};
+
+export type MaterialProfileOverview = {
+	paper_count: number;
+	sample_count: number;
+	comparison_count: number;
+	condition_series_count: number;
+	evidence_count: number;
+	process_families: string[];
+	measured_properties: string[];
+	variable_axes: string[];
+};
+
+export type MaterialProfile = {
+	collection_id: string;
+	material_id: string;
+	canonical_name: string;
+	aliases: string[];
+	state: ResearchViewState;
+	overview: MaterialProfileOverview;
+	papers: MaterialPaperCoverage[];
+	sample_matrix: SampleMatrix;
+	process_parameter_ranges: ProcessParameterRange[];
+	measured_properties: PropertySummary[];
+	comparison_groups: ComparableGroup[];
+	condition_series: ConditionSeries[];
+	evidence_refs: EvidenceReference[];
+	debug_links: Record<string, string>;
+	warnings: ResearchViewWarning[];
+};
+
+export type DocumentMaterialProfile = {
+	collection_id: string;
+	document_id: string;
+	material_id: string;
+	canonical_name: string;
+	aliases: string[];
+	state: ResearchViewState;
+	overview: MaterialProfileOverview;
+	sample_matrix: SampleMatrix;
+	process_conditions: Record<string, string>[];
+	test_conditions: Record<string, string>[];
+	measured_properties: PropertySummary[];
+	within_paper_comparisons: ComparableGroup[];
+	condition_series: ConditionSeries[];
+	evidence_refs: EvidenceReference[];
+	debug_links: Record<string, string>;
+	warnings: ResearchViewWarning[];
+};
+
 export type PaperAggregationOverview = {
 	material_systems: string[];
 	sample_variant_count: number;
@@ -160,6 +273,7 @@ export type PaperAggregation = {
 	paper_title: string;
 	state: ResearchViewState;
 	overview: PaperAggregationOverview;
+	materials: PaperMaterialSummary[];
 	sample_matrix: SampleMatrix;
 	condition_series: ConditionSeries[];
 	evidence_links: Record<string, string>;
@@ -183,6 +297,7 @@ export type CollectionAggregation = {
 	collection_id: string;
 	state: ResearchViewState;
 	overview: CollectionAggregationOverview;
+	materials: MaterialSummary[];
 	paper_coverage: PaperCoverageRow[];
 	comparable_groups: ComparableGroup[];
 	cross_paper_matrices: CrossPaperMatrix[];
@@ -284,6 +399,20 @@ function normalizeContextRecord(value: unknown, fallbackKey: string): Record<str
 
 function normalizeLinkRecord(value: unknown): Record<string, string> {
 	return normalizeStringRecord(value);
+}
+
+function normalizeObjectList(value: unknown, key: string): unknown[] {
+	if (Array.isArray(value)) return value;
+	const record = asRecord(value);
+	return asArray(record?.[key] ?? record?.items);
+}
+
+function normalizeEvidenceCoverage(value: unknown): string | number | null {
+	const scalar = toScalar(value);
+	if (scalar !== null) return scalar;
+
+	const record = asRecord(value);
+	return toScalar(record?.display_value ?? record?.display ?? record?.value ?? record?.coverage);
 }
 
 function locatorText(value: unknown): string | null {
@@ -521,6 +650,146 @@ export function normalizeConditionSeries(value: unknown): ConditionSeries | null
 	};
 }
 
+export function normalizeMaterialSummary(value: unknown): MaterialSummary | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const canonicalName = toText(
+		record.canonical_name ?? record.name ?? record.material_system ?? record.material
+	);
+	const materialId = toText(record.material_id ?? record.id ?? record.key, canonicalName);
+	if (!materialId && !canonicalName) return null;
+
+	return {
+		material_id: materialId || canonicalName,
+		canonical_name: canonicalName || materialId,
+		aliases: toStringList(record.aliases ?? record.names),
+		paper_count: toNumber(record.paper_count ?? record.document_count),
+		sample_count: toNumber(record.sample_count ?? record.sample_variant_count),
+		process_families: toStringList(record.process_families ?? record.processes),
+		measured_properties: toStringList(record.measured_properties ?? record.properties),
+		comparison_count: toNumber(record.comparison_count ?? record.comparable_group_count),
+		evidence_coverage: normalizeEvidenceCoverage(record.evidence_coverage),
+		state: normalizeResearchState(record.state, 'partial'),
+		links: normalizeLinkRecord(record.links),
+		warnings: normalizeWarnings(record.warnings)
+	};
+}
+
+export function normalizePaperMaterialSummary(value: unknown): PaperMaterialSummary | null {
+	const material = normalizeMaterialSummary(value);
+	if (!material) return null;
+
+	return {
+		material_id: material.material_id,
+		canonical_name: material.canonical_name,
+		aliases: material.aliases,
+		sample_count: material.sample_count,
+		process_families: material.process_families,
+		measured_properties: material.measured_properties,
+		comparison_count: material.comparison_count,
+		evidence_coverage: material.evidence_coverage,
+		links: material.links,
+		warnings: material.warnings
+	};
+}
+
+function normalizeMaterialPaperCoverage(value: unknown): MaterialPaperCoverage | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const documentId = toText(record.document_id ?? record.id);
+	if (!documentId) return null;
+
+	return {
+		document_id: documentId,
+		title: toText(record.title ?? record.paper_title ?? record.source_filename, documentId),
+		state: normalizeResearchState(record.state, 'partial'),
+		sample_count: toNumber(record.sample_count ?? record.sample_variant_count),
+		process_families: toStringList(record.process_families ?? record.processes),
+		measured_properties: toStringList(record.measured_properties ?? record.properties),
+		evidence_count: toNumber(record.evidence_count),
+		issue_count: toNumber(record.issue_count),
+		links: normalizeLinkRecord(record.links),
+		warnings: normalizeWarnings(record.warnings ?? record.primary_warnings)
+	};
+}
+
+export function normalizeProcessParameterRange(value: unknown): ProcessParameterRange | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const parameter = toText(record.parameter ?? record.name ?? record.key);
+	if (!parameter) return null;
+
+	const minValue = toScalar(record.min_value ?? record.min);
+	const maxValue = toScalar(record.max_value ?? record.max);
+	const unit = nonEmptyText(record.unit);
+	const displayRange =
+		toText(record.display_range ?? record.range ?? record.display) ||
+		(minValue !== null && maxValue !== null
+			? `${minValue}${unit ? ` ${unit}` : ''} - ${maxValue}${unit ? ` ${unit}` : ''}`
+			: '');
+
+	return {
+		parameter,
+		display_range: displayRange || '--',
+		min_value: minValue,
+		max_value: maxValue,
+		unit,
+		sample_count: toNumber(record.sample_count),
+		document_count: toNumber(record.document_count ?? record.paper_count),
+		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence),
+		warnings: normalizeWarnings(record.warnings)
+	};
+}
+
+export function normalizePropertySummary(value: unknown): PropertySummary | null {
+	if (typeof value === 'string') {
+		const property = value.trim();
+		return property
+			? {
+					property,
+					display_range: '--',
+					min_value: null,
+					max_value: null,
+					unit: null,
+					sample_count: 0,
+					document_count: 0,
+					evidence_refs: [],
+					warnings: []
+				}
+			: null;
+	}
+
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const property = toText(record.property ?? record.name ?? record.key);
+	if (!property) return null;
+
+	const minValue = toScalar(record.min_value ?? record.min);
+	const maxValue = toScalar(record.max_value ?? record.max);
+	const unit = nonEmptyText(record.unit);
+	const displayRange =
+		toText(record.display_range ?? record.range ?? record.display) ||
+		(minValue !== null && maxValue !== null
+			? `${minValue}${unit ? ` ${unit}` : ''} - ${maxValue}${unit ? ` ${unit}` : ''}`
+			: '');
+
+	return {
+		property,
+		display_range: displayRange || '--',
+		min_value: minValue,
+		max_value: maxValue,
+		unit,
+		sample_count: toNumber(record.sample_count),
+		document_count: toNumber(record.document_count ?? record.paper_count),
+		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence),
+		warnings: normalizeWarnings(record.warnings)
+	};
+}
+
 function normalizePaperCoverageRow(value: unknown): PaperCoverageRow | null {
 	const record = asRecord(value);
 	if (!record) return null;
@@ -646,6 +915,125 @@ function normalizePaperOverview(value: unknown): PaperAggregationOverview {
 	};
 }
 
+function normalizeMaterialProfileOverview(value: unknown): MaterialProfileOverview {
+	const record = asRecord(value);
+
+	return {
+		paper_count: toNumber(record?.paper_count ?? record?.document_count),
+		sample_count: toNumber(record?.sample_count ?? record?.sample_variant_count),
+		comparison_count: toNumber(record?.comparison_count ?? record?.comparable_group_count),
+		condition_series_count: toNumber(record?.condition_series_count ?? record?.series_count),
+		evidence_count: toNumber(record?.evidence_count),
+		process_families: toStringList(record?.process_families ?? record?.processes),
+		measured_properties: toStringList(record?.measured_properties ?? record?.properties),
+		variable_axes: toStringList(record?.variable_axes ?? record?.main_process_variables)
+	};
+}
+
+function normalizeConditionRecords(value: unknown): Record<string, string>[] {
+	return asArray(value)
+		.map((item) => normalizeStringRecord(item))
+		.filter((item) => Object.keys(item).length > 0);
+}
+
+export function normalizeMaterialProfile(
+	value: unknown,
+	collectionId: string,
+	materialId: string
+): MaterialProfile {
+	const record = asRecord(value);
+	const sampleMatrix = normalizeSampleMatrix(record?.sample_matrix);
+	const comparisonGroups = normalizeObjectList(
+		record?.comparison_groups ?? record?.comparable_groups,
+		'items'
+	)
+		.map((item) => normalizeComparableGroup(item))
+		.filter((item): item is ComparableGroup => item !== null);
+
+	return {
+		collection_id: toText(record?.collection_id, collectionId),
+		material_id: toText(record?.material_id ?? record?.id, materialId),
+		canonical_name: toText(record?.canonical_name ?? record?.name ?? record?.material_system, materialId),
+		aliases: toStringList(record?.aliases ?? record?.names),
+		state: normalizeResearchState(
+			record?.state,
+			sampleMatrix.rows.length || comparisonGroups.length ? 'partial' : 'empty'
+		),
+		overview: normalizeMaterialProfileOverview(record?.overview),
+		papers: normalizeObjectList(record?.papers ?? record?.paper_coverage, 'items')
+			.map((item) => normalizeMaterialPaperCoverage(item))
+			.filter((item): item is MaterialPaperCoverage => item !== null),
+		sample_matrix: sampleMatrix,
+		process_parameter_ranges: normalizeObjectList(
+			record?.process_parameter_ranges ?? record?.process_ranges,
+			'items'
+		)
+			.map((item) => normalizeProcessParameterRange(item))
+			.filter((item): item is ProcessParameterRange => item !== null),
+		measured_properties: normalizeObjectList(
+			record?.measured_properties ?? record?.property_summaries ?? record?.properties,
+			'items'
+		)
+			.map((item) => normalizePropertySummary(item))
+			.filter((item): item is PropertySummary => item !== null),
+		comparison_groups: comparisonGroups,
+		condition_series: normalizeObjectList(record?.condition_series ?? record?.trend_series, 'items')
+			.map((item) => normalizeConditionSeries(item))
+			.filter((item): item is ConditionSeries => item !== null),
+		evidence_refs: normalizeEvidenceReferences(record?.evidence_refs ?? record?.evidence),
+		debug_links: normalizeLinkRecord(record?.debug_links),
+		warnings: normalizeWarnings(record?.warnings)
+	};
+}
+
+export function normalizeDocumentMaterialProfile(
+	value: unknown,
+	collectionId: string,
+	documentId: string,
+	materialId: string
+): DocumentMaterialProfile {
+	const record = asRecord(value);
+	const sampleMatrix = normalizeSampleMatrix(record?.sample_matrix);
+	const comparisons = normalizeObjectList(
+		record?.within_paper_comparisons ?? record?.comparison_groups ?? record?.comparable_groups,
+		'items'
+	)
+		.map((item) => normalizeComparableGroup(item))
+		.filter((item): item is ComparableGroup => item !== null);
+
+	return {
+		collection_id: toText(record?.collection_id, collectionId),
+		document_id: toText(record?.document_id, documentId),
+		material_id: toText(record?.material_id ?? record?.id, materialId),
+		canonical_name: toText(record?.canonical_name ?? record?.name ?? record?.material_system, materialId),
+		aliases: toStringList(record?.aliases ?? record?.names),
+		state: normalizeResearchState(
+			record?.state,
+			sampleMatrix.rows.length || comparisons.length ? 'partial' : 'empty'
+		),
+		overview: normalizeMaterialProfileOverview(record?.overview),
+		sample_matrix: {
+			...sampleMatrix,
+			document_id: sampleMatrix.document_id || documentId
+		},
+		process_conditions: normalizeConditionRecords(record?.process_conditions),
+		test_conditions: normalizeConditionRecords(record?.test_conditions),
+		measured_properties: normalizeObjectList(
+			record?.measured_properties ?? record?.property_summaries ?? record?.properties,
+			'items'
+		)
+			.map((item) => normalizePropertySummary(item))
+			.filter((item): item is PropertySummary => item !== null),
+		within_paper_comparisons: comparisons,
+		condition_series: normalizeObjectList(record?.condition_series, 'items')
+			.map((item) => normalizeConditionSeries(item))
+			.filter((item): item is ConditionSeries => item !== null),
+		evidence_refs: normalizeEvidenceReferences(record?.evidence_refs ?? record?.evidence),
+		debug_links: normalizeLinkRecord(record?.debug_links),
+		warnings: normalizeWarnings(record?.warnings)
+	};
+}
+
 export function normalizeCollectionAggregation(
 	value: unknown,
 	collectionId: string
@@ -659,6 +1047,9 @@ export function normalizeCollectionAggregation(
 		collection_id: toText(record?.collection_id, collectionId),
 		state: normalizeResearchState(record?.state, 'empty'),
 		overview: normalizeCollectionOverview(record?.overview),
+		materials: normalizeObjectList(record?.materials, 'materials')
+			.map((item) => normalizeMaterialSummary(item))
+			.filter((item): item is MaterialSummary => item !== null),
 		paper_coverage: asArray(record?.paper_coverage)
 			.map((item) => normalizePaperCoverageRow(item))
 			.filter((item): item is PaperCoverageRow => item !== null),
@@ -689,6 +1080,9 @@ export function normalizePaperAggregation(
 		paper_title: toText(record?.paper_title ?? record?.title, documentId),
 		state: normalizeResearchState(record?.state, sampleMatrix.rows.length ? 'partial' : 'empty'),
 		overview: normalizePaperOverview(record?.overview),
+		materials: normalizeObjectList(record?.materials ?? record?.paper_materials, 'items')
+			.map((item) => normalizePaperMaterialSummary(item))
+			.filter((item): item is PaperMaterialSummary => item !== null),
 		sample_matrix: {
 			...sampleMatrix,
 			document_id: sampleMatrix.document_id || documentId
@@ -710,6 +1104,26 @@ export async function fetchCollectionResearchView(
 	return normalizeCollectionAggregation(data, collectionId);
 }
 
+export async function fetchCollectionMaterials(collectionId: string): Promise<MaterialSummary[]> {
+	const encoded = encodeURIComponent(collectionId);
+	const data = await requestJson(`/collections/${encoded}/materials`);
+	return normalizeObjectList(data, 'materials')
+		.map((item) => normalizeMaterialSummary(item))
+		.filter((item): item is MaterialSummary => item !== null);
+}
+
+export async function fetchMaterialResearchView(
+	collectionId: string,
+	materialId: string
+): Promise<MaterialProfile> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedMaterial = encodeURIComponent(materialId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/materials/${encodedMaterial}/research-view`
+	);
+	return normalizeMaterialProfile(data, collectionId, materialId);
+}
+
 export async function fetchDocumentResearchView(
 	collectionId: string,
 	documentId: string
@@ -720,6 +1134,34 @@ export async function fetchDocumentResearchView(
 		`/collections/${encodedCollection}/documents/${encodedDocument}/research-view`
 	);
 	return normalizePaperAggregation(data, collectionId, documentId);
+}
+
+export async function fetchDocumentMaterials(
+	collectionId: string,
+	documentId: string
+): Promise<PaperMaterialSummary[]> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedDocument = encodeURIComponent(documentId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/documents/${encodedDocument}/materials`
+	);
+	return normalizeObjectList(data, 'materials')
+		.map((item) => normalizePaperMaterialSummary(item))
+		.filter((item): item is PaperMaterialSummary => item !== null);
+}
+
+export async function fetchDocumentMaterialResearchView(
+	collectionId: string,
+	documentId: string,
+	materialId: string
+): Promise<DocumentMaterialProfile> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedDocument = encodeURIComponent(documentId);
+	const encodedMaterial = encodeURIComponent(materialId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/documents/${encodedDocument}/materials/${encodedMaterial}/research-view`
+	);
+	return normalizeDocumentMaterialProfile(data, collectionId, documentId, materialId);
 }
 
 export function getResearchViewStateTone(state: ResearchViewState): string {

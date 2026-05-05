@@ -280,15 +280,15 @@
 	}
 
 	function readyPrimaryHref() {
-		return stateWorkspace?.links.comparisons ?? `/collections/${collectionId}/comparisons`;
+		return `/collections/${collectionId}/materials`;
 	}
 
 	function readyPrimaryLabel() {
-		return $t('overview.actions.enterComparisons');
+		return $t('overview.actions.enterMaterials');
 	}
 
 	function primaryResearchHref() {
-		return stateWorkspace?.links.comparisons ?? `/collections/${collectionId}/comparisons`;
+		return `/collections/${collectionId}/materials`;
 	}
 
 	function researchStateLabel(state: ResearchViewState) {
@@ -566,7 +566,7 @@
 
 				<div class="split-actions">
 					<a class="btn btn--primary btn--small" href={primaryResearchHref()}>
-						{$t('overview.actions.enterComparisons')}
+						{$t('overview.actions.enterMaterials')}
 					</a>
 					<a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/documents`}>
 						{$t('overview.actions.viewDocumentList')}

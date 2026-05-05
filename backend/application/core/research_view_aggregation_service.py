@@ -392,11 +392,17 @@ class ResearchViewAggregationService:
                 if self._has_observed_value(value)
             }
         )
+        document_material_keys = self._single_material_key_by_document(frames, [])
         material_systems = sorted(
             {
-                material
+                label
                 for variant in real_variants
-                if (material := self._material_from_variant(variant))
+                if (
+                    label := self._material_label_from_variant(
+                        variant,
+                        document_material_keys,
+                    )
+                )
             }
         )
         measured_properties = sorted(
@@ -469,6 +475,10 @@ class ResearchViewAggregationService:
                 {
                     "document_id": document_id,
                     "title": self._document_title(profiles, document_id),
+                    "source_filename": self._document_source_filename(
+                        profiles,
+                        document_id,
+                    ),
                     "state": self._derive_paper_state(
                         sample_count=sample_count,
                         measurement_count=measurement_count,
@@ -602,6 +612,7 @@ class ResearchViewAggregationService:
             variant_id = self._safe_text(record.get("variant_id")) or "unassigned"
             measurements_by_variant[variant_id].append(record)
 
+        document_material_keys = self._single_material_key_by_document(frames, [])
         rows = [
             self._build_sample_matrix_row(
                 variant_row,
@@ -610,6 +621,7 @@ class ResearchViewAggregationService:
                     [],
                 ),
                 frames,
+                document_material_keys,
             )
             for variant_row in variant_rows
         ]
@@ -701,6 +713,7 @@ class ResearchViewAggregationService:
         variant_row: dict[str, Any] | pd.Series,
         measurements: list[dict[str, Any]],
         frames: dict[str, pd.DataFrame],
+        document_material_keys: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         variant = (
             self._series_to_dict(variant_row)
@@ -741,7 +754,11 @@ class ResearchViewAggregationService:
             "document_id": self._safe_text(variant.get("document_id")),
             "sample_id": variant_id,
             "sample_label": self._safe_text(variant.get("variant_label")) or variant_id,
-            "material": self._material_from_variant(variant),
+            "material": self._material_label_from_variant(
+                variant,
+                document_material_keys,
+            )
+            or self._material_from_variant(variant),
             "process_context": self._as_mapping(variant.get("process_context")),
             "variable_axis": self._safe_text(variant.get("variable_axis_type")),
             "variable_value": self._clean_value(variant.get("variable_value")),
@@ -1380,13 +1397,21 @@ class ResearchViewAggregationService:
         frames: dict[str, pd.DataFrame],
         comparable_groups: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        document_material_keys = self._single_material_key_by_document(
+            frames,
+            comparable_groups,
+        )
         index = self._build_material_index(frames, comparable_groups)
         summaries: list[dict[str, Any]] = []
         for material_key, entry in sorted(
             index.items(),
             key=lambda item: item[1]["canonical_name"].lower(),
         ):
-            material_frames = self._filter_frames_for_material_key(material_key, frames)
+            material_frames = self._filter_frames_for_material_key(
+                material_key,
+                frames,
+                document_material_keys,
+            )
             warnings = self._material_binding_warnings(entry)
             summaries.append(
                 {
@@ -1428,7 +1453,15 @@ class ResearchViewAggregationService:
         )
         if material_key is None:
             return None
-        material_frames = self._filter_frames_for_material_key(material_key, frames)
+        document_material_keys = self._single_material_key_by_document(
+            frames,
+            comparable_groups,
+        )
+        material_frames = self._filter_frames_for_material_key(
+            material_key,
+            frames,
+            document_material_keys,
+        )
         material_index = self._build_material_index(
             material_frames,
             self._filter_comparable_groups_for_material(
@@ -1447,6 +1480,7 @@ class ResearchViewAggregationService:
         sample_matrix = self._build_material_sample_matrix(
             material_key,
             material_frames,
+            document_material_keys,
         )
         papers = self._build_material_paper_coverage(
             collection_id,
@@ -1523,10 +1557,7 @@ class ResearchViewAggregationService:
         profiles = frames.get("document_profiles", pd.DataFrame())
         rows: list[dict[str, Any]] = []
         for document_id in sorted(self._document_ids_from_frames(frames)):
-            document_frames = self._filter_frames_for_material_key(
-                material_key,
-                self._document_frames(frames, document_id),
-            )
+            document_frames = self._document_frames(frames, document_id)
             variants = document_frames.get("sample_variants", pd.DataFrame())
             measurements = document_frames.get("measurement_results", pd.DataFrame())
             evidence_anchors = document_frames.get("evidence_anchors", pd.DataFrame())
@@ -1553,6 +1584,10 @@ class ResearchViewAggregationService:
                 {
                     "document_id": document_id,
                     "title": self._document_title(profiles, document_id),
+                    "source_filename": self._document_source_filename(
+                        profiles,
+                        document_id,
+                    ),
                     "state": self._derive_paper_state(
                         sample_count=sample_count,
                         measurement_count=int(len(measurements)),
@@ -1588,13 +1623,18 @@ class ResearchViewAggregationService:
         self,
         material_key: str,
         frames: dict[str, pd.DataFrame],
+        document_material_keys: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         variants = frames.get("sample_variants", pd.DataFrame())
         measurements = frames.get("measurement_results", pd.DataFrame())
+        material_document_keys = document_material_keys or {
+            document_id: material_key
+            for document_id in self._document_ids_from_frames(frames)
+        }
         variant_rows = [
             self._series_to_dict(row)
             for _, row in variants.iterrows()
-            if self._material_key_from_variant(row) == material_key
+            if self._material_key_from_variant(row, material_document_keys) == material_key
             and self._is_real_sample_variant(row)
         ]
         measurements_by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1611,6 +1651,7 @@ class ResearchViewAggregationService:
                     [],
                 ),
                 frames,
+                material_document_keys,
             )
             for variant_row in variant_rows
         ]
@@ -1981,6 +2022,94 @@ class ResearchViewAggregationService:
             if self._material_key_from_label(group.get("material_system")) == material_key
         ]
 
+    def _single_material_key_by_document(
+        self,
+        frames: dict[str, pd.DataFrame],
+        comparable_groups: list[dict[str, Any]],
+    ) -> dict[str, str]:
+        candidates: dict[str, set[str]] = defaultdict(set)
+        profiles = frames.get("document_profiles", pd.DataFrame())
+        for document_id in self._document_ids_from_frames(frames):
+            candidates[document_id].update(
+                self._material_keys_from_document_profile(profiles, document_id)
+            )
+
+        variants = frames.get("sample_variants", pd.DataFrame())
+        for _, row in variants.iterrows():
+            variant = self._series_to_dict(row)
+            if not self._is_real_sample_variant(variant):
+                continue
+            document_id = self._safe_text(variant.get("document_id"))
+            material_key = self._material_key_from_label(self._material_from_variant(variant))
+            if document_id and material_key:
+                candidates[document_id].add(material_key)
+
+        for group in comparable_groups:
+            material_key = self._material_key_from_label(group.get("material_system"))
+            if material_key is None:
+                continue
+            for document_id in group.get("documents", []):
+                if document_id_text := self._safe_text(document_id):
+                    candidates[document_id_text].add(material_key)
+
+        return {
+            document_id: next(iter(material_keys))
+            for document_id, material_keys in candidates.items()
+            if len(material_keys) == 1
+        }
+
+    def _material_keys_from_document_profile(
+        self,
+        profiles: pd.DataFrame,
+        document_id: str,
+    ) -> set[str]:
+        if profiles is None or profiles.empty or "document_id" not in profiles.columns:
+            return set()
+        matched = profiles[
+            profiles["document_id"].apply(lambda value: self._safe_text(value) == document_id)
+        ]
+        if matched.empty:
+            return set()
+        profile = self._series_to_dict(matched.iloc[0])
+        material_keys: set[str] = set()
+        for key in (
+            "title",
+            "source_filename",
+            "filename",
+            "document_title",
+            "name",
+        ):
+            if material_key := self._material_key_from_document_text(profile.get(key)):
+                material_keys.add(material_key)
+        return material_keys
+
+    def _material_key_from_document_text(self, value: Any) -> str | None:
+        text = self._safe_text(value)
+        if text is None:
+            return None
+        compact = re.sub(r"[^a-z0-9]", "", text.lower())
+        if "316l" in compact:
+            return self._material_key_from_label("316L stainless steel")
+        if "ti6al4v" in compact or "ti64" in compact:
+            return self._material_key_from_label("Ti-6Al-4V")
+        if "inconel718" in compact:
+            return self._material_key_from_label("Inconel 718")
+        if "alsi10mg" in compact:
+            return self._material_key_from_label("AlSi10Mg")
+        return None
+
+    def _material_label_from_variant(
+        self,
+        variant: dict[str, Any],
+        document_material_keys: dict[str, str] | None = None,
+    ) -> str | None:
+        material_key = self._material_key_from_variant(variant, document_material_keys)
+        if material_key is None:
+            return None
+        return self._canonical_material_label(self._material_from_variant(variant)) or (
+            self._canonical_material_label(material_key)
+        )
+
     def _build_material_index(
         self,
         frames: dict[str, pd.DataFrame],
@@ -1988,18 +2117,28 @@ class ResearchViewAggregationService:
     ) -> dict[str, dict[str, Any]]:
         index: dict[str, dict[str, Any]] = {}
         variant_to_key: dict[str, str] = {}
+        document_material_keys = self._single_material_key_by_document(
+            frames,
+            comparable_groups,
+        )
         variants = frames.get("sample_variants", pd.DataFrame())
         for _, row in variants.iterrows():
             variant = self._series_to_dict(row)
             if not self._is_real_sample_variant(variant):
                 continue
-            material_key = self._material_key_from_variant(variant)
+            material_key = self._material_key_from_variant(
+                variant,
+                document_material_keys,
+            )
             if material_key is None:
                 continue
+            display_material = self._material_from_variant(variant)
+            if self._material_key_from_label(display_material) is None:
+                display_material = material_key
             entry = self._ensure_material_entry(
                 index,
                 material_key,
-                self._material_from_variant(variant),
+                display_material,
             )
             entry["aliases"].update(self._material_aliases_from_variant(variant))
             if document_id := self._safe_text(variant.get("document_id")):
@@ -2064,7 +2203,11 @@ class ResearchViewAggregationService:
         material_key: str,
         display_name: Any,
     ) -> dict[str, Any]:
-        canonical_name = self._canonical_material_label(display_name) or material_key
+        canonical_name = (
+            self._canonical_material_label(display_name)
+            or self._canonical_material_label(material_key)
+            or material_key
+        )
         entry = index.get(material_key)
         if entry is None:
             entry = {
@@ -2113,7 +2256,11 @@ class ResearchViewAggregationService:
         self,
         material_key: str,
         frames: dict[str, pd.DataFrame],
+        document_material_keys: dict[str, str] | None = None,
     ) -> dict[str, pd.DataFrame]:
+        material_keys_by_document = document_material_keys or (
+            self._single_material_key_by_document(frames, [])
+        )
         variants = frames.get("sample_variants", pd.DataFrame())
         if variants is None or variants.empty:
             selected_variants = pd.DataFrame(
@@ -2122,7 +2269,11 @@ class ResearchViewAggregationService:
         else:
             selected_variants = variants[
                 variants.apply(
-                    lambda row: self._material_key_from_variant(row) == material_key
+                    lambda row: self._material_key_from_variant(
+                        row,
+                        material_keys_by_document,
+                    )
+                    == material_key
                     and self._is_real_sample_variant(row),
                     axis=1,
                 )
@@ -2199,13 +2350,25 @@ class ResearchViewAggregationService:
             anchors["anchor_id"].apply(lambda value: self._safe_text(value) in wanted)
         ].copy()
 
-    def _material_key_from_variant(self, variant_row: dict[str, Any] | pd.Series) -> str | None:
+    def _material_key_from_variant(
+        self,
+        variant_row: dict[str, Any] | pd.Series,
+        document_material_keys: dict[str, str] | None = None,
+    ) -> str | None:
         variant = (
             self._series_to_dict(variant_row)
             if isinstance(variant_row, pd.Series)
             else dict(variant_row)
         )
-        return self._material_key_from_label(self._material_from_variant(variant))
+        material_key = self._material_key_from_label(self._material_from_variant(variant))
+        if material_key is not None:
+            return material_key
+        if document_material_keys is None:
+            return None
+        document_id = self._safe_text(variant.get("document_id"))
+        if document_id is None:
+            return None
+        return document_material_keys.get(document_id)
 
     def _material_key_from_comparison_row(
         self,
@@ -2231,13 +2394,23 @@ class ResearchViewAggregationService:
         lowered = normalized.lower()
         if lowered in {
             "unspecified material",
+            "unspecified material system",
+            "unspecified_material_system",
             "unknown material",
+            "unknown material system",
             "unknown",
             "material",
             "materials",
         }:
             return None
         compact = re.sub(r"[^a-z0-9]", "", lowered)
+        if compact in {
+            "unspecifiedmaterial",
+            "unspecifiedmaterialsystem",
+            "unknownmaterial",
+            "unknownmaterialsystem",
+        }:
+            return None
         if compact in {"316l", "ss316l", "aisi316l"} or "316l" in compact:
             return "316L stainless steel"
         if compact in {"ti6al4v", "ti64"} or "ti6al4v" in compact:
@@ -2271,9 +2444,11 @@ class ResearchViewAggregationService:
         host = self._as_mapping(variant.get("host_material_system"))
         for key in ("composition", "name", "material", "family"):
             if alias := self._safe_text(host.get(key)):
-                aliases.add(alias)
+                if self._canonical_material_label(alias):
+                    aliases.add(alias)
         if alias := self._safe_text(variant.get("composition")):
-            aliases.add(alias)
+            if self._canonical_material_label(alias):
+                aliases.add(alias)
         return aliases
 
     def _process_family_from_variant(
@@ -2529,9 +2704,14 @@ class ResearchViewAggregationService:
             "document_id": document_id,
             "material_systems": sorted(
                 {
-                    material
+                    label
                     for variant in real_variants
-                    if (material := self._material_from_variant(variant))
+                    if (
+                        label := self._material_label_from_variant(
+                            variant,
+                            self._single_material_key_by_document(frames, []),
+                        )
+                    )
                 }
             ),
             "sample_variant_count": len(sample_matrix.get("rows", [])),
@@ -2609,6 +2789,24 @@ class ResearchViewAggregationService:
         if matched.empty:
             return None
         return self._safe_text(matched.iloc[0].get("title"))
+
+    def _document_source_filename(
+        self,
+        profiles: pd.DataFrame,
+        document_id: str,
+    ) -> str | None:
+        if profiles is None or profiles.empty or "document_id" not in profiles.columns:
+            return None
+        matched = profiles[
+            profiles["document_id"].apply(lambda value: self._safe_text(value) == document_id)
+        ]
+        if matched.empty:
+            return None
+        row = matched.iloc[0]
+        for key in ("source_filename", "filename", "source_file"):
+            if source_filename := self._safe_text(row.get(key)):
+                return source_filename
+        return None
 
     def _document_count(
         self,

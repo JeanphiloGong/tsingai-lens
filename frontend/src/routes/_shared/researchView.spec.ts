@@ -13,6 +13,7 @@ const {
 	fetchCollectionResearchView,
 	fetchDocumentResearchView,
 	fetchMaterialResearchView,
+	formatShortIdentifier,
 	formatEvidenceBackedValue,
 	getResearchViewStateTone,
 	hasObservedValue,
@@ -83,7 +84,7 @@ describe('research view shared helpers', () => {
 			material_id: 'mat_316l',
 			canonical_name: '316L stainless steel',
 			state: 'ready',
-			papers: [{ document_id: 'doc_1', title: 'Paper A', state: 'ready' }],
+			papers: [{ document_id: 'doc_1', source_filename: 'paper-a.pdf', state: 'ready' }],
 			sample_matrix: {
 				rows: [{ row_id: 'row_1', sample_id: 'S1', sample_label: 'S1', material: '316L' }]
 			}
@@ -95,7 +96,16 @@ describe('research view shared helpers', () => {
 			'/collections/col_123/materials/mat_316l/research-view'
 		);
 		expect(materialProfile.papers[0].document_id).toBe('doc_1');
+		expect(materialProfile.papers[0].title).toBe('paper-a.pdf');
+		expect(materialProfile.papers[0].source_filename).toBe('paper-a.pdf');
 		expect(materialProfile.sample_matrix.rows[0].sample_id).toBe('S1');
+	});
+
+	it('shortens long internal identifiers for display fallback', () => {
+		expect(formatShortIdentifier('8a5426cb65c3c0ae6ddc934a84fbbcd2b0cc4')).toBe(
+			'8a5426cb65...2b0cc4'
+		);
+		expect(formatShortIdentifier('doc_1')).toBe('doc_1');
 	});
 
 	it('normalizes collection aggregation into coverage, groups, matrices, and warnings', () => {

@@ -229,6 +229,7 @@ class PaperCoverageRowResponse(BaseModel):
 
     document_id: str = Field(..., description="文档 ID")
     title: str | None = Field(default=None, description="标题")
+    source_filename: str | None = Field(default=None, description="源文件名")
     state: ResearchViewState = Field(..., description="文档聚合状态")
     sample_count: int = Field(default=0, description="样品数")
     process_param_count: int = Field(default=0, description="工艺参数数")
@@ -308,6 +309,7 @@ class MaterialPaperCoverageResponse(BaseModel):
 
     document_id: str = Field(..., description="文档 ID")
     title: str | None = Field(default=None, description="标题")
+    source_filename: str | None = Field(default=None, description="源文件名")
     state: ResearchViewState = Field(..., description="文档聚合状态")
     sample_count: int = Field(default=0, description="材料样品数")
     process_families: list[str] = Field(default_factory=list, description="工艺族")

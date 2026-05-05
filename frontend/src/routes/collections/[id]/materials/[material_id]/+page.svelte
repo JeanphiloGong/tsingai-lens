@@ -5,6 +5,7 @@
 	import { t } from '../../../../_shared/i18n';
 	import {
 		fetchMaterialResearchView,
+		formatShortIdentifier,
 		formatEvidenceBackedValue,
 		getResearchViewStateTone,
 		type ComparableGroup,
@@ -85,6 +86,10 @@
 
 	function materialConditionSeries(): ConditionSeries[] {
 		return materialProfile?.condition_series ?? [];
+	}
+
+	function rowDocumentLabel(row: SampleMatrixRow): string {
+		return formatShortIdentifier(row.document_id ?? row.evidence_refs[0]?.document_id);
 	}
 
 	function openEvidenceDrawer(value: EvidenceBackedValue) {
@@ -253,7 +258,7 @@
 								<tr>
 									<td>
 										<strong>{paper.title}</strong>
-										<span>{paper.document_id}</span>
+										<span title={paper.document_id}>{formatShortIdentifier(paper.document_id)}</span>
 									</td>
 									<td>
 										<span
@@ -307,7 +312,7 @@
 							{#each sampleRows as row (row.row_id)}
 								<tr>
 									<td>{row.sample_label}</td>
-									<td>{row.evidence_refs[0]?.document_id ?? materialId}</td>
+									<td>{rowDocumentLabel(row)}</td>
 									<td>{recordSummary(row.process_context)}</td>
 									{#each sampleColumns as column (column.column_id)}
 										{@const value = row.values[column.key]}

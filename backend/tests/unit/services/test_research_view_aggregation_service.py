@@ -270,6 +270,21 @@ def _service(
     )
 
 
+def _service_from_frames(
+    profiles: pd.DataFrame,
+    frames: dict[str, pd.DataFrame],
+    *,
+    comparison_rows: pd.DataFrame | None = None,
+) -> ResearchViewAggregationService:
+    return ResearchViewAggregationService(
+        collection_service=FakeCollectionService(),
+        document_profile_service=FakeDocumentProfileService(profiles),
+        paper_facts_service=FakePaperFactsService(frames),
+        comparison_service=FakeComparisonService(comparison_rows),
+        workspace_service=SimpleNamespace(),
+    )
+
+
 def test_document_research_view_builds_sample_matrix_and_condition_series():
     service = _service(comparison_rows=_comparison_rows())
 
@@ -385,3 +400,69 @@ def test_document_material_profile_stays_inside_one_paper():
         "tc-25",
         "tc-200",
     }
+
+
+def test_material_profile_inherits_single_document_material_and_keeps_filename():
+    profiles, frames = _frames()
+    profiles.loc[0, "title"] = None
+    profiles.loc[
+        0,
+        "source_filename",
+    ] = "Effect of energy density on 316L stainless steel.pdf"
+    variants = frames["sample_variants"].copy()
+    variants.at[0, "host_material_system"] = {
+        "name": "unspecified material system",
+    }
+    variants.at[0, "composition"] = "unspecified material system"
+    frames["sample_variants"] = variants
+
+    service = _service_from_frames(profiles, frames)
+
+    materials = service.list_collection_materials("col-1")
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    assert [item["material_id"] for item in materials["materials"]] == [
+        "mat-316l-stainless-steel"
+    ]
+    assert materials["materials"][0]["sample_count"] == 1
+    assert profile["canonical_name"] == "316L stainless steel"
+    assert profile["papers"][0].get("title") is None
+    assert profile["papers"][0]["source_filename"] == (
+        "Effect of energy density on 316L stainless steel.pdf"
+    )
+    assert profile["sample_matrix"]["rows"][0]["material"] == "316L stainless steel"
+
+
+def test_material_profile_inherits_single_document_comparison_material():
+    profiles, frames = _frames()
+    profiles.loc[0, "title"] = "PBF Sample Study"
+    variants = frames["sample_variants"].copy()
+    variants.at[0, "host_material_system"] = {
+        "name": "unspecified material system",
+    }
+    variants.at[0, "composition"] = "unspecified material system"
+    frames["sample_variants"] = variants
+    comparison_rows = _comparison_rows()
+    comparison_rows["material_system_normalized"] = "316L stainless steel"
+
+    service = _service_from_frames(
+        profiles,
+        frames,
+        comparison_rows=comparison_rows,
+    )
+
+    materials = service.list_collection_materials("col-1")
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    assert [item["material_id"] for item in materials["materials"]] == [
+        "mat-316l-stainless-steel"
+    ]
+    assert profile["canonical_name"] == "316L stainless steel"
+    assert profile["overview"]["sample_count"] == 1
+    assert profile["sample_matrix"]["rows"][0]["material"] == "316L stainless steel"

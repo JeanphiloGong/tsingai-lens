@@ -80,6 +80,7 @@ export type SampleMatrixColumn = {
 
 export type SampleMatrixRow = {
 	row_id: string;
+	document_id: string | null;
 	sample_id: string;
 	sample_label: string;
 	material: string;
@@ -175,6 +176,7 @@ export type ComparableGroup = {
 export type MaterialPaperCoverage = {
 	document_id: string;
 	title: string;
+	source_filename: string | null;
 	state: ResearchViewState;
 	sample_count: number;
 	process_families: string[];
@@ -327,6 +329,13 @@ function toText(value: unknown, fallback = ''): string {
 	if (typeof value === 'string') return value.trim() || fallback;
 	if (typeof value === 'number' && Number.isFinite(value)) return String(value);
 	return fallback;
+}
+
+export function formatShortIdentifier(value: string | null | undefined): string {
+	const text = String(value ?? '').trim();
+	if (!text) return '--';
+	if (text.length <= 24) return text;
+	return `${text.slice(0, 10)}...${text.slice(-6)}`;
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -578,6 +587,7 @@ export function normalizeSampleMatrixRow(value: unknown): SampleMatrixRow | null
 
 	return {
 		row_id: rowId || sampleId,
+		document_id: nonEmptyText(record.document_id ?? record.source_document_id),
 		sample_id: sampleId || rowId,
 		sample_label: toText(
 			record.sample_label ?? record.variant_label ?? record.label,
@@ -703,7 +713,11 @@ function normalizeMaterialPaperCoverage(value: unknown): MaterialPaperCoverage |
 
 	return {
 		document_id: documentId,
-		title: toText(record.title ?? record.paper_title ?? record.source_filename, documentId),
+		title: toText(
+			record.title ?? record.paper_title ?? record.source_filename,
+			formatShortIdentifier(documentId)
+		),
+		source_filename: nonEmptyText(record.source_filename),
 		state: normalizeResearchState(record.state, 'partial'),
 		sample_count: toNumber(record.sample_count ?? record.sample_variant_count),
 		process_families: toStringList(record.process_families ?? record.processes),

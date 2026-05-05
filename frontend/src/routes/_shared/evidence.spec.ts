@@ -168,4 +168,30 @@ describe('evidence shared helpers', () => {
 			sortEvidenceItems([low, direct], 'confidence_desc').map((item) => item.evidence_id)
 		).toEqual(['direct', 'low']);
 	});
+
+	it('keeps generated source ids out of display metadata', () => {
+		const documentId = '379b94edc51960220c54e32d0fcb3ed7b996c53a';
+		const blockId = `blk_${documentId}_0`;
+		const baseAnchor = card({}).evidence_anchors[0];
+		const noisy = card({
+			document_id: documentId,
+			source_document_title: null,
+			evidence_anchors: [
+				{
+					...baseAnchor,
+					document_id: documentId,
+					section_id: blockId,
+					block_id: blockId,
+					page: 1,
+					label: blockId
+				}
+			]
+		});
+
+		expect(getEvidenceSourceLocation(noisy)).toMatchObject({
+			documentLabel: '379b94edc5...96c53a',
+			location: 'Page 1'
+		});
+		expect(getEvidenceQuote(noisy).citation).toBe('379b94edc5...96c53a, Page 1');
+	});
 });

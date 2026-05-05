@@ -181,6 +181,26 @@ function toOptionalText(value: unknown) {
 	return text ? text : null;
 }
 
+function formatShortIdentifier(value: string | null | undefined): string {
+	const text = String(value ?? '').trim();
+	if (!text) return '--';
+	if (text.length <= 24) return text;
+	return `${text.slice(0, 10)}...${text.slice(-6)}`;
+}
+
+function isGeneratedLocator(value: string | null | undefined): boolean {
+	const text = String(value ?? '').trim();
+	if (!text) return false;
+	const stripped = text.replace(/^blk[_:-]?/i, '').replace(/[_:-]\d+$/u, '');
+	return stripped.length >= 32 && /^[a-f0-9]+$/iu.test(stripped);
+}
+
+function displayLocator(value: string | null | undefined): string | null {
+	const text = toOptionalText(value);
+	if (!text || isGeneratedLocator(text)) return null;
+	return text;
+}
+
 function toOptionalBoolean(value: unknown): boolean | null {
 	if (typeof value === 'boolean') return value;
 	if (typeof value === 'string') {
@@ -785,13 +805,15 @@ export function getEvidenceActions(evidence: EvidenceCard): EvidenceAction[] {
 export function getEvidenceSourceLocation(evidence: EvidenceCard): EvidenceSourceLocation {
 	const primaryAnchor = evidence.evidence_anchors[0] ?? null;
 	const sourceType = primaryAnchor?.source_type ?? evidence.evidence_source_type;
-	const section = usefulText(primaryAnchor?.section_id);
-	const figureOrTable = usefulText(primaryAnchor?.figure_or_table);
+	const section = displayLocator(primaryAnchor?.section_id);
+	const figureOrTable = displayLocator(primaryAnchor?.figure_or_table);
+	const blockId = displayLocator(primaryAnchor?.block_id);
+	const anchorLabel = displayLocator(primaryAnchor?.label);
 	const locationParts = [
 		typeof primaryAnchor?.page === 'number' ? `Page ${primaryAnchor.page}` : '',
 		section ? (/^section\b/i.test(section) ? section : `Section ${section}`) : '',
 		figureOrTable,
-		usefulText(primaryAnchor?.block_id) ? `Block ${primaryAnchor?.block_id}` : ''
+		blockId ? `Block ${blockId}` : ''
 	].filter(Boolean);
 	const contextValues = [
 		...evidence.condition_context.process,
@@ -800,14 +822,15 @@ export function getEvidenceSourceLocation(evidence: EvidenceCard): EvidenceSourc
 	];
 	const materials = uniqueNonEmpty([...evidence.materials, usefulText(evidence.material_system)]);
 	const parameters = uniqueNonEmpty([...evidence.parameters, ...contextValues]);
+	const documentId = usefulText(evidence.document_id);
 
 	return {
 		documentLabel:
 			usefulText(evidence.source_document_title) ||
-			usefulText(evidence.document_id) ||
+			(documentId ? formatShortIdentifier(documentId) : null) ||
 			evidence.evidence_id,
 		sourceType,
-		location: locationParts.join(', ') || primaryAnchor?.label || '--',
+		location: locationParts.join(', ') || anchorLabel || '--',
 		materials,
 		parameters,
 		tags: uniqueNonEmpty(evidence.tags.length ? evidence.tags : parameters.slice(0, 3))

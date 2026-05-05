@@ -29,6 +29,7 @@
 		type EvidenceTraceabilityFilter,
 		type EvidenceTypeFilter
 	} from '../../../_shared/evidence';
+	import { fetchDocumentProfiles, type DocumentProfile } from '../../../_shared/documents';
 	import { t } from '../../../_shared/i18n';
 	import { createBuildTask } from '../../../_shared/tasks';
 	import {
@@ -102,6 +103,7 @@
 
 	let response: EvidenceCardsResponse | null = null;
 	let workspace: WorkspaceOverview | null = null;
+	let documentProfiles: DocumentProfile[] = [];
 	let loading = false;
 	let error = '';
 	let actionStatus = '';
@@ -117,7 +119,10 @@
 	let comparabilityFilter: EvidenceComparabilityFilter = '';
 	let sortMode: EvidenceSortMode = 'confidence_desc';
 
-	$: evidenceItems = response?.items ?? [];
+	$: documentLabelById = buildDocumentLabelById(documentProfiles);
+	$: evidenceItems = (response?.items ?? []).map((item) =>
+		applyDocumentProfileLabel(item, documentLabelById)
+	);
 	$: evidenceFilters = {
 		search,
 		type: typeFilter,
@@ -150,12 +155,15 @@
 		if (clearActionStatus) actionStatus = '';
 		notFound = false;
 
-		const [evidenceResult, workspaceResult] = await Promise.allSettled([
+		const [evidenceResult, workspaceResult, documentProfilesResult] = await Promise.allSettled([
 			fetchEvidenceCards(collectionId),
-			fetchWorkspaceOverview(collectionId)
+			fetchWorkspaceOverview(collectionId),
+			fetchDocumentProfiles(collectionId)
 		]);
 
 		workspace = workspaceResult.status === 'fulfilled' ? workspaceResult.value : null;
+		documentProfiles =
+			documentProfilesResult.status === 'fulfilled' ? documentProfilesResult.value.items : [];
 
 		if (evidenceResult.status === 'fulfilled') {
 			response = evidenceResult.value;
@@ -167,6 +175,24 @@
 		notFound = isHttpStatusError(evidenceResult.reason, 404);
 		error = errorMessage(evidenceResult.reason);
 		loading = false;
+	}
+
+	function buildDocumentLabelById(profiles: DocumentProfile[]) {
+		const labels = new Map<string, string>();
+		for (const profile of profiles) {
+			const label = profile.title?.trim() || profile.source_filename?.trim();
+			if (profile.document_id && label) labels.set(profile.document_id, label);
+		}
+		return labels;
+	}
+
+	function applyDocumentProfileLabel(
+		item: EvidenceCard,
+		labels: Map<string, string>
+	): EvidenceCard {
+		if (item.source_document_title?.trim()) return item;
+		const label = labels.get(item.document_id);
+		return label ? { ...item, source_document_title: label } : item;
 	}
 
 	function refreshEvidence() {
@@ -1233,6 +1259,7 @@
 		color: #334155;
 		font-size: 14px;
 		line-height: 22px;
+		overflow-wrap: anywhere;
 	}
 
 	.evidence-quote-block cite {
@@ -1240,6 +1267,7 @@
 		font-size: 13px;
 		font-style: normal;
 		line-height: 20px;
+		overflow-wrap: anywhere;
 	}
 
 	.evidence-meta-list {
@@ -1269,8 +1297,9 @@
 	}
 
 	.evidence-meta-item dd {
+		min-width: 0;
 		margin: 0;
-		word-break: break-word;
+		overflow-wrap: anywhere;
 	}
 
 	.evidence-meta-item dd.success-value {

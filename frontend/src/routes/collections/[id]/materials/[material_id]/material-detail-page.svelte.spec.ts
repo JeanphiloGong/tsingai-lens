@@ -475,6 +475,29 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		});
 	});
 
+	it('renders the narrative research tab from the same material profile data', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.toBeInTheDocument();
+		await browserPage.getByRole('tab', { name: 'Narrative research' }).click();
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'What does this literature set study?' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'How are the samples designed?' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'What are the main performance findings?' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText(/mainly through LPBF\/SLM/)).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: /Relative density/ }).first())
+			.toBeInTheDocument();
+	});
+
 	it('opens evidence details from a performance value', async () => {
 		render(Page);
 

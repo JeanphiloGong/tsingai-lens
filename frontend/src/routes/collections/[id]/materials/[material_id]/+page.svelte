@@ -26,6 +26,8 @@
 
 	type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
+	type MaterialDossierTab = 'structured' | 'narrative';
+
 	type PropertyColumn = {
 		key: string;
 		label: string;
@@ -165,6 +167,7 @@
 	let loading = false;
 	let error = '';
 	let loadedKey = '';
+	let activeDossierTab: MaterialDossierTab = 'structured';
 
 	$: collectionId = $page.params.id ?? '';
 	$: materialId = $page.params.material_id ?? '';
@@ -187,6 +190,12 @@
 		sampleRows,
 		propertyColumns,
 		processSummary,
+		evidenceCodeMap,
+		$t
+	);
+	$: bestPropertyValues = buildBestPropertyValues(
+		sampleRows,
+		propertyColumns,
 		evidenceCodeMap,
 		$t
 	);
@@ -602,6 +611,19 @@
 			.sort((first, second) => (second.numeric ?? 0) - (first.numeric ?? 0))[0];
 	}
 
+	function buildBestPropertyValues(
+		rows: SampleMatrixRow[],
+		columns: PropertyColumn[],
+		codeMap: Map<string, string>,
+		translate: Translate
+	) {
+		return columns
+			.map((column) => bestValueForColumn(rows, column))
+			.filter((item): item is NonNullable<ReturnType<typeof bestValueForColumn>> => Boolean(item))
+			.map((item) => supportedValue(item.row, item.column, item.value, codeMap, translate))
+			.slice(0, 6);
+	}
+
 	function supportedValue(
 		row: SampleMatrixRow,
 		column: PropertyColumn,
@@ -948,6 +970,61 @@
 		return labels.join(', ') || '--';
 	}
 
+	function openEvidenceCode(code: string) {
+		const row = evidenceRows.find((item) => item.code === code);
+		if (row) openEvidenceRow(row);
+	}
+
+	function joinedList(values: string[], fallback: string) {
+		const cleaned = values.map((value) => value.trim()).filter(Boolean);
+		return cleaned.length ? cleaned.join(', ') : fallback;
+	}
+
+	function narrativeLead(profile: MaterialProfile, translate: Translate) {
+		return translate('research.materialDossier.narrative.lead', {
+			material: profile.canonical_name,
+			processes: joinedList(
+				profile.overview.process_families,
+				translate('research.materialDossier.narrative.unspecifiedProcess')
+			),
+			papers: paperCount,
+			samples: sampleCount,
+			properties: joinedList(
+				propertyColumns.map((column) => column.shortLabel),
+				translate('research.materialDossier.narrative.unspecifiedProperties')
+			),
+			evidence: evidenceCount
+		});
+	}
+
+	function narrativeSampleDesign(translate: Translate) {
+		const controlled = joinedList(
+			processSummary.controlledLabels,
+			translate('research.materialDossier.narrative.noControlledVariables')
+		);
+		const changed = joinedList(
+			processSummary.changedLabels,
+			translate('research.materialDossier.narrative.noChangedVariables')
+		);
+		return translate('research.materialDossier.narrative.sampleDesignBody', {
+			samples: sampleCount,
+			controlled,
+			changed
+		});
+	}
+
+	function narrativeTrendBody(row: ComparisonRow | undefined, translate: Translate) {
+		if (!row) return translate('research.materialDossier.narrative.trendEmpty');
+		return translate('research.materialDossier.narrative.trendBody', {
+			property: row.property,
+			first: row.firstLabel,
+			firstValue: row.firstValue ?? '--',
+			second: row.secondLabel,
+			secondValue: row.secondValue ?? '--',
+			conclusion: row.conclusion
+		});
+	}
+
 	function openValueEvidence(
 		row: SampleMatrixRow,
 		column: PropertyColumn,
@@ -1115,8 +1192,29 @@
 			<p>{$t('research.materialProfile.emptyBody')}</p>
 		</section>
 	{:else}
+		<div class="dossier-tabs" role="tablist" aria-label={$t('research.materialDossier.tabs.label')}>
+			<button
+				type="button"
+				role="tab"
+				aria-selected={activeDossierTab === 'structured'}
+				class:active={activeDossierTab === 'structured'}
+				on:click={() => (activeDossierTab = 'structured')}
+			>
+				{$t('research.materialDossier.tabs.structured')}
+			</button>
+			<button
+				type="button"
+				role="tab"
+				aria-selected={activeDossierTab === 'narrative'}
+				class:active={activeDossierTab === 'narrative'}
+				on:click={() => (activeDossierTab = 'narrative')}
+			>
+				{$t('research.materialDossier.tabs.narrative')}
+			</button>
+		</div>
 		<div class="dossier-layout">
-			<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
+			{#if activeDossierTab === 'structured'}
+				<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
 				<section id="key-findings" class="dossier-card dossier-card--findings">
 					<div class="dossier-section-heading">
 						<span class="section-number">1</span>
@@ -1383,6 +1481,165 @@
 					</a>
 				</section>
 			</main>
+			{:else}
+				<main
+					class="dossier-main dossier-main--narrative"
+					aria-label={$t('research.materialDossier.narrative.mainLabel')}
+				>
+					<section id="narrative-overview" class="dossier-card narrative-card">
+						<p class="narrative-eyebrow">
+							{$t('research.materialDossier.narrative.eyebrow')}
+						</p>
+						<h3>{$t('research.materialDossier.narrative.overviewTitle')}</h3>
+						<p class="narrative-lede">{narrativeLead(materialProfile, $t)}</p>
+						<div class="narrative-metrics">
+							<div>
+								<strong>{paperCount}</strong>
+								<span>{$t('research.materialDossier.aside.sourcePapers')}</span>
+							</div>
+							<div>
+								<strong>{sampleCount}</strong>
+								<span>{$t('research.overview.samples')}</span>
+							</div>
+							<div>
+								<strong>{measuredPropertyCount}</strong>
+								<span>{$t('research.overview.properties')}</span>
+							</div>
+							<div>
+								<strong>{evidenceCount}</strong>
+								<span>{$t('research.overview.evidence')}</span>
+							</div>
+						</div>
+					</section>
+
+					<section id="narrative-samples" class="dossier-card narrative-card">
+						<div class="narrative-section-heading">
+							<span>1</span>
+							<div>
+								<h3>{$t('research.materialDossier.narrative.sampleDesignTitle')}</h3>
+								<p>{narrativeSampleDesign($t)}</p>
+							</div>
+						</div>
+						<div class="dossier-table-wrapper narrative-table-wrapper">
+							<table class="dossier-table dossier-table--compact">
+								<thead>
+									<tr>
+										<th>{$t('research.materialDossier.table.sampleCondition')}</th>
+										<th>{$t('research.materialDossier.table.primaryVariable')}</th>
+										<th>{$t('research.materialDossier.table.processSummary')}</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each sampleRows.slice(0, 5) as row, rowIndex (row.row_id)}
+										<tr>
+											<td>{sampleDisplayLabel(row, $t, rowIndex)}</td>
+											<td>{variableSummary(row, processSummary, $t)}</td>
+											<td>{processBrief(row)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</section>
+
+					<section id="narrative-findings" class="dossier-card narrative-card">
+						<div class="narrative-section-heading">
+							<span>2</span>
+							<div>
+								<h3>{$t('research.materialDossier.narrative.findingsTitle')}</h3>
+								<p>{$t('research.materialDossier.narrative.findingsBody')}</p>
+							</div>
+						</div>
+						<div class="best-value-grid">
+							{#each bestPropertyValues as value (value.key)}
+								<button
+									type="button"
+									class="best-value-card"
+									on:click={() => openSupportedValue(value)}
+								>
+									<span>{value.property}</span>
+									<strong>{value.displayValue}</strong>
+									<small>{value.sample}</small>
+									<em>{value.evidenceCode}</em>
+								</button>
+							{:else}
+								<p class="empty-copy">{$t('research.materialDossier.findings.empty')}</p>
+							{/each}
+						</div>
+						<div class="narrative-finding-list">
+							{#each keyFindings as finding (finding.key)}
+								<article class="narrative-finding">
+									<h4>{finding.title}</h4>
+									<p>{finding.body}</p>
+									<div class="evidence-chip-row">
+										{#each finding.evidenceCodes as code}
+											<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
+												{code}
+											</button>
+										{:else}
+											<span class="evidence-chip evidence-chip--muted">--</span>
+										{/each}
+									</div>
+								</article>
+							{/each}
+						</div>
+					</section>
+
+					<section id="narrative-trends" class="dossier-card narrative-card">
+						<div class="narrative-section-heading">
+							<span>3</span>
+							<div>
+								<h3>{$t('research.materialDossier.narrative.trendQuestion')}</h3>
+								<p>{narrativeTrendBody(trendRows[0], $t)}</p>
+							</div>
+						</div>
+						{#if trendRows.length}
+							{@const trend = trendRows[0]}
+							<div class="narrative-comparison-card">
+								<div>
+									<strong>{trend.firstLabel}</strong>
+									<span>{trend.property}: {trend.firstValue ?? '--'}</span>
+								</div>
+								<div>
+									<strong>{trend.secondLabel}</strong>
+									<span>{trend.property}: {trend.secondValue ?? '--'}</span>
+								</div>
+							</div>
+						{/if}
+						<div class="evidence-chip-row">
+							{#each evidenceRows.slice(0, 4) as row (row.key)}
+								<button type="button" class="evidence-chip" on:click={() => openEvidenceRow(row)}>
+									{row.code}
+								</button>
+							{/each}
+						</div>
+					</section>
+
+					<section id="narrative-evidence" class="dossier-card narrative-card">
+						<div class="narrative-section-heading">
+							<span>4</span>
+							<div>
+								<h3>{$t('research.materialDossier.narrative.evidenceTitle')}</h3>
+								<p>{$t('research.materialDossier.narrative.evidenceBody')}</p>
+							</div>
+						</div>
+						<div class="evidence-chip-row">
+							{#each evidenceRows as row (row.key)}
+								<button type="button" class="evidence-chip" on:click={() => openEvidenceRow(row)}>
+									{row.code}
+								</button>
+							{:else}
+								<span class="evidence-chip evidence-chip--muted">
+									{$t('research.materialDossier.evidence.empty')}
+								</span>
+							{/each}
+						</div>
+						<a class="footer-link" href={resolve('/collections/[id]/evidence', { id: collectionId })}>
+							{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
+						</a>
+					</section>
+				</main>
+			{/if}
 
 			<aside class="dossier-aside" aria-label={$t('research.materialDossier.aside.label')}>
 				<section class="aside-card aside-card--source">
@@ -1402,12 +1659,29 @@
 					aria-label={$t('research.materialDossier.aside.quickNav')}
 				>
 					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
-					<a href="#key-findings">1 {$t('research.materialDossier.sections.findings.title')}</a>
-					<a href="#trend-comparison">2 {$t('research.materialDossier.sections.trends.title')}</a>
-					<a href="#performance-results"
-						>3 {$t('research.materialDossier.sections.performance.title')}</a
-					>
-					<a href="#evidence-locator">4 {$t('research.materialDossier.sections.evidence.title')}</a>
+					{#if activeDossierTab === 'structured'}
+						<a href="#key-findings">1 {$t('research.materialDossier.sections.findings.title')}</a>
+						<a href="#trend-comparison">2 {$t('research.materialDossier.sections.trends.title')}</a>
+						<a href="#performance-results"
+							>3 {$t('research.materialDossier.sections.performance.title')}</a
+						>
+						<a href="#evidence-locator"
+							>4 {$t('research.materialDossier.sections.evidence.title')}</a
+						>
+					{:else}
+						<a href="#narrative-overview"
+							>1 {$t('research.materialDossier.narrative.overviewTitle')}</a
+						>
+						<a href="#narrative-samples"
+							>2 {$t('research.materialDossier.narrative.sampleDesignTitle')}</a
+						>
+						<a href="#narrative-findings"
+							>3 {$t('research.materialDossier.narrative.findingsTitle')}</a
+						>
+						<a href="#narrative-evidence"
+							>4 {$t('research.materialDossier.narrative.evidenceTitle')}</a
+						>
+					{/if}
 				</nav>
 
 				<section class="aside-card">
@@ -1703,6 +1977,35 @@
 		gap: 8px;
 	}
 
+	.dossier-tabs {
+		width: fit-content;
+		display: inline-flex;
+		gap: 4px;
+		padding: 4px;
+		border: 1px solid #dbe4f0;
+		border-radius: 10px;
+		background: #ffffff;
+		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+	}
+
+	.dossier-tabs button {
+		min-height: 32px;
+		padding: 0 12px;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		color: #475569;
+		font-size: 14px;
+		font-weight: 700;
+		line-height: 20px;
+		cursor: pointer;
+	}
+
+	.dossier-tabs button.active {
+		background: #eff6ff;
+		color: #2563eb;
+	}
+
 	.btn--primary-light {
 		border-color: #bfdbfe;
 		background: #eff6ff;
@@ -1747,6 +2050,10 @@
 		display: grid;
 		gap: 16px;
 		min-width: 0;
+	}
+
+	.dossier-main--narrative {
+		max-width: 880px;
 	}
 
 	.dossier-card {
@@ -2128,6 +2435,189 @@
 		text-align: center;
 	}
 
+	.narrative-card {
+		gap: 14px;
+		padding: 18px;
+	}
+
+	.narrative-eyebrow {
+		margin: 0;
+		color: #2563eb;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.narrative-card h3,
+	.narrative-finding h4 {
+		margin: 0;
+		color: #0f172a;
+	}
+
+	.narrative-card h3 {
+		font-size: 20px;
+		font-weight: 800;
+		line-height: 28px;
+	}
+
+	.narrative-lede,
+	.narrative-section-heading p,
+	.narrative-finding p {
+		margin: 0;
+		color: #475569;
+		font-size: 15px;
+		line-height: 25px;
+	}
+
+	.narrative-metrics,
+	.best-value-grid,
+	.narrative-comparison-card {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: 10px;
+	}
+
+	.narrative-metrics div,
+	.best-value-card,
+	.narrative-comparison-card div,
+	.narrative-finding {
+		border: 1px solid #e2e8f0;
+		border-radius: 10px;
+		background: #f8fbff;
+	}
+
+	.narrative-metrics div {
+		display: grid;
+		gap: 2px;
+		padding: 12px;
+	}
+
+	.narrative-metrics strong {
+		color: #0f172a;
+		font-size: 22px;
+		line-height: 28px;
+	}
+
+	.narrative-metrics span,
+	.best-value-card span,
+	.best-value-card small,
+	.best-value-card em,
+	.narrative-comparison-card span {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.narrative-section-heading {
+		display: grid;
+		grid-template-columns: 28px minmax(0, 1fr);
+		gap: 12px;
+		align-items: start;
+	}
+
+	.narrative-section-heading > span {
+		width: 26px;
+		height: 26px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 8px;
+		background: #2563eb;
+		color: #ffffff;
+		font-size: 13px;
+		font-weight: 800;
+		line-height: 18px;
+	}
+
+	.narrative-table-wrapper .dossier-table {
+		min-width: 620px;
+	}
+
+	.best-value-card {
+		display: grid;
+		gap: 3px;
+		padding: 12px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.best-value-card:hover {
+		border-color: #2563eb;
+		background: #eff6ff;
+	}
+
+	.best-value-card strong {
+		color: #0f172a;
+		font-size: 18px;
+		line-height: 26px;
+	}
+
+	.best-value-card em {
+		font-style: normal;
+		font-weight: 800;
+		color: #2563eb;
+	}
+
+	.narrative-finding-list,
+	.evidence-chip-row {
+		display: grid;
+		gap: 10px;
+	}
+
+	.narrative-finding {
+		display: grid;
+		gap: 8px;
+		padding: 14px;
+	}
+
+	.narrative-finding h4 {
+		font-size: 16px;
+		font-weight: 800;
+		line-height: 24px;
+	}
+
+	.evidence-chip-row {
+		display: flex;
+		flex-wrap: wrap;
+	}
+
+	.evidence-chip {
+		min-height: 28px;
+		padding: 0 9px;
+		border: 1px solid #bfdbfe;
+		border-radius: 999px;
+		background: #ffffff;
+		color: #2563eb;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.evidence-chip:hover {
+		border-color: #2563eb;
+		background: #eff6ff;
+	}
+
+	.evidence-chip--muted {
+		border-color: #e2e8f0;
+		color: #64748b;
+		cursor: default;
+	}
+
+	.narrative-comparison-card div {
+		display: grid;
+		gap: 4px;
+		padding: 14px;
+	}
+
+	.narrative-comparison-card strong {
+		color: #0f172a;
+		font-size: 14px;
+		line-height: 22px;
+	}
+
 	.footer-link {
 		width: fit-content;
 		font-size: 13px;
@@ -2343,21 +2833,32 @@
 	:root[data-theme='dark'] .paper-mini-card span,
 	:root[data-theme='dark'] .chart-bar strong,
 	:root[data-theme='dark'] .chart-labels,
+	:root[data-theme='dark'] .narrative-card h3,
+	:root[data-theme='dark'] .narrative-finding h4,
+	:root[data-theme='dark'] .narrative-metrics strong,
+	:root[data-theme='dark'] .best-value-card strong,
+	:root[data-theme='dark'] .narrative-comparison-card strong,
 	:root[data-theme='dark'] .detail-drawer dd,
 	:root[data-theme='dark'] .pdf-data dd {
 		color: var(--text-primary);
 	}
 
+	:root[data-theme='dark'] .dossier-tabs,
 	:root[data-theme='dark'] .dossier-state-card,
 	:root[data-theme='dark'] .dossier-card,
 	:root[data-theme='dark'] .aside-card,
 	:root[data-theme='dark'] .detail-drawer,
 	:root[data-theme='dark'] .paper-mini-card,
+	:root[data-theme='dark'] .narrative-metrics div,
+	:root[data-theme='dark'] .best-value-card,
+	:root[data-theme='dark'] .narrative-comparison-card div,
+	:root[data-theme='dark'] .narrative-finding,
 	:root[data-theme='dark'] .mini-chart {
 		border-color: var(--border-default);
 		background: var(--surface-card);
 	}
 
+	:root[data-theme='dark'] .dossier-tabs button.active,
 	:root[data-theme='dark'] .dossier-table th,
 	:root[data-theme='dark'] .detail-drawer__header button {
 		background: rgba(120, 140, 180, 0.16);
@@ -2374,6 +2875,9 @@
 	:root[data-theme='dark'] .dossier-table-note,
 	:root[data-theme='dark'] .comparison-panel > p,
 	:root[data-theme='dark'] .chart-caption,
+	:root[data-theme='dark'] .narrative-lede,
+	:root[data-theme='dark'] .narrative-section-heading p,
+	:root[data-theme='dark'] .narrative-finding p,
 	:root[data-theme='dark'] .empty-value,
 	:root[data-theme='dark'] .empty-copy,
 	:root[data-theme='dark'] .empty-cell {

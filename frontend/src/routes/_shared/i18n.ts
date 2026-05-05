@@ -247,6 +247,11 @@ const translations: Record<Language, Translations> = {
 				mainLabel: 'Material research dossier content',
 				subtitle:
 					'This page consolidates samples, process parameters, performance results, comparisons, and evidence sources for the selected material.',
+				tabs: {
+					label: 'Material dossier view',
+					structured: 'Structured dossier',
+					narrative: 'Narrative research'
+				},
 				tags: {
 					alloySteel: 'Alloy steel'
 				},
@@ -376,6 +381,31 @@ const translations: Record<Language, Translations> = {
 					caption:
 						'Under comparable process context, the changed variable can shift performance values.',
 					empty: 'No numeric trend is available yet.'
+				},
+				narrative: {
+					mainLabel: 'Narrative material research dossier',
+					eyebrow: 'Interactive review draft',
+					overviewTitle: 'What does this literature set study?',
+					lead:
+						'{material} is studied in the current collection mainly through {processes}. The dossier covers {papers} paper(s), {samples} sample(s), {properties}, and {evidence} evidence anchor(s), so the narrative below stays tied to the structured matrix.',
+					unspecifiedProcess: 'unspecified processes',
+					unspecifiedProperties: 'reported properties',
+					sampleDesignTitle: 'How are the samples designed?',
+					sampleDesignBody:
+						'The current matrix identifies {samples} sample(s). Controlled variables include {controlled}; changed variables include {changed}. This makes the sample set useful for reading process-property differences while keeping the original values available below.',
+					noControlledVariables: 'no clearly controlled variable',
+					noChangedVariables: 'no clearly changed variable',
+					findingsTitle: 'What are the main performance findings?',
+					findingsBody:
+						'The cards summarize the strongest observed values first, then keep the supporting evidence close to each conclusion.',
+					trendQuestion: 'How do variables affect performance?',
+					trendBody:
+						'For {property}, {first} is reported as {firstValue}, while {second} is reported as {secondValue}. Current conclusion: {conclusion}. Treat this as an evidence-backed comparison, not a full mechanism unless more source context supports it.',
+					trendEmpty:
+						'The current matrix does not yet expose enough comparable numeric values to write a trend narrative.',
+					evidenceTitle: 'Where is the evidence?',
+					evidenceBody:
+						'Each evidence chip opens the same source drawer used by the structured tables, so the narrative remains traceable to source locations.'
 				},
 				evidence: {
 					drawerTitle: 'Evidence detail',
@@ -2527,6 +2557,11 @@ const translations: Record<Language, Translations> = {
 				title: '材料研究档案',
 				mainLabel: '材料研究档案内容',
 				subtitle: '本页面整合了该材料在所选文献中的样品、工艺参数、性能结果、比较分析与证据来源。',
+				tabs: {
+					label: '材料档案视图',
+					structured: '结构化档案',
+					narrative: '叙事研究'
+				},
 				tags: {
 					alloySteel: '合金钢'
 				},
@@ -2653,6 +2688,29 @@ const translations: Record<Language, Translations> = {
 					title: '趋势图：关键性能对比',
 					caption: '在可比工艺上下文下，变化变量会影响性能数值。',
 					empty: '暂无可绘制的数值趋势。'
+				},
+				narrative: {
+					mainLabel: '叙事型材料研究档案',
+					eyebrow: '交互式综述草稿',
+					overviewTitle: '这批文献主要研究了什么？',
+					lead:
+						'当前集合围绕 {material} 展开，主要涉及 {processes}。本档案覆盖 {papers} 篇文献、{samples} 个样品、{properties} 和 {evidence} 个证据锚点；下面的叙事内容仍由结构化矩阵支撑。',
+					unspecifiedProcess: '未明确工艺',
+					unspecifiedProperties: '已报告性能',
+					sampleDesignTitle: '样品是如何设计的？',
+					sampleDesignBody:
+						'当前矩阵识别到 {samples} 个样品。控制变量包括 {controlled}；变化变量包括 {changed}。这使得样品集适合阅读工艺差异与性能差异之间的关系，同时保留原始数值以便核查。',
+					noControlledVariables: '暂无明确控制变量',
+					noChangedVariables: '暂无明确变化变量',
+					findingsTitle: '主要性能结果是什么？',
+					findingsBody: '卡片先总结当前最高观测值，再把支撑证据贴近每条结论。',
+					trendQuestion: '变量如何影响性能？',
+					trendBody:
+						'对于 {property}，{first} 的报告值为 {firstValue}，{second} 的报告值为 {secondValue}。当前结论：{conclusion}。除非更多原文上下文支持，否则这里应视为有证据支撑的比较，而不是完整机制解释。',
+					trendEmpty: '当前矩阵还没有足够可比较的数值来写出趋势叙事。',
+					evidenceTitle: '证据在哪里？',
+					evidenceBody:
+						'每个证据 chip 都会打开和结构化表格相同的来源抽屉，因此叙事内容仍然可以追溯到原文位置。'
 				},
 				evidence: {
 					drawerTitle: '证据详情',

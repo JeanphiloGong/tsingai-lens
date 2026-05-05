@@ -21,5 +21,8 @@ This node owns browser-side helpers that are shared across frontend routes.
   Base request helpers
 - `collections.ts`, `files.ts`, `tasks.ts`, `protocol.ts`
   Domain-specific API wrappers
+- `researchView.ts`
+  Research-view aggregation contract helper for paper coverage, sample
+  matrices, comparable groups, condition series, and evidence-backed values
 - `i18n.ts`
   Shared translations and labels

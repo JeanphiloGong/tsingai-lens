@@ -31,22 +31,26 @@ Implemented:
 - Collection overview attempts to load collection research aggregation and
   renders material systems, process families, variable axes, measured
   properties, coverage counts, and warnings when available.
-- Documents tab uses `paper_coverage` as its primary table when research-view
-  data is available, with document profiles retained as fallback context while
-  the backend endpoint is unavailable.
-- Comparison tab uses `comparable_groups` and cross-paper matrix rows as the
-  primary view when research-view data is available, with the previous raw
-  comparison review retained as fallback/debug behavior.
+- Documents tab uses `paper_coverage` from research-view directly. It no
+  longer renders the old document-profile list on this page.
+- Comparison tab uses `comparable_groups` and cross-paper matrix rows from
+  research-view directly. It no longer renders the previous raw comparison
+  review on this page.
 - Paper detail attempts to load paper research aggregation and renders paper
   overview, sample matrix, condition series, and evidence detail before the
-  existing extraction workbench.
+  existing extraction workbench. If paper aggregation is unavailable, the page
+  renders an explicit unavailable state instead of making the old workbench the
+  main page.
 
-Still dependent on backend work:
+Runtime dependency:
 
-- Runtime data appears only after the target research-view endpoints are
-  implemented.
-- Until then, pages explicitly fall back to existing workspace, profile,
-  comparison, evidence, and document-detail data.
+- Collection documents and comparison pages require the collection
+  research-view endpoint.
+- Paper detail requires the paper research-view endpoint for the primary paper
+  result surface.
+- Raw extracted facts and old evidence/debug views remain secondary surfaces
+  under More or inside the document workbench. They do not replace the
+  research-view pages when the aggregation endpoint is unavailable.
 
 ## Current Owning Seams
 
@@ -237,8 +241,8 @@ function issueLabel(row: PaperCoverageRow)
 Target changes:
 
 - use `CollectionAggregation.paper_coverage` as the primary table
-- keep document profiles as fallback context only if the research-view endpoint
-  is not ready
+- render an explicit loading, empty, or error state when the research-view
+  endpoint is not ready
 - link each row to `/collections/{collectionId}/documents/{documentId}`
 - do not render sample matrices or condition series inside this collection tab
 
@@ -278,8 +282,8 @@ Target changes:
 - render the selected group's `CrossPaperMatrix`
 - keep fixed conditions, variable axis, comparability status, and warnings
   close to the group
-- demote old `fetchComparisons()` raw row list to a fallback or debug-only path
-  during the migration
+- keep old `fetchComparisons()` raw-row browsing outside this page; it belongs
+  only to secondary evidence/debug routes
 
 ### Paper Detail Page
 

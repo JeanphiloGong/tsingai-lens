@@ -149,8 +149,10 @@ const translations: Record<Language, Translations> = {
 			moreLabel: 'More',
 			tabs: {
 				overview: 'Overview',
+				comparison: 'Comparison',
 				comparisons: 'Comparisons',
 				results: 'Extracted Results',
+				extractedFacts: 'Extracted Facts',
 				evidence: 'Evidence',
 				documents: 'Documents',
 				protocol: 'Protocol',
@@ -165,6 +167,114 @@ const translations: Record<Language, Translations> = {
 			metaUpdated: 'Updated: {time}',
 			deleteConfirm:
 				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.'
+		},
+		research: {
+			emptyValue: '--',
+			warnings: 'Warnings',
+			state: {
+				empty: 'Empty',
+				processing: 'Processing',
+				partial: 'Partial',
+				ready: 'Ready',
+				failed: 'Failed'
+			},
+			valueStatus: {
+				observed: 'Observed',
+				normalized: 'Normalized',
+				inferred: 'Inferred',
+				missing: 'Missing',
+				conflicted: 'Conflicted'
+			},
+			overview: {
+				title: 'Research overview',
+				body: 'Aggregated view of papers, samples, variables, properties, and evidence readiness.',
+				pendingTitle: 'Research aggregation is not ready',
+				pendingBody:
+					'The collection is processed, but the research aggregation view is not available. Finish processing or retry the research-view build.',
+				documents: 'Documents',
+				samples: 'Samples',
+				measurements: 'Measurements',
+				evidence: 'Evidence',
+				materials: 'Materials',
+				processes: 'Processes',
+				variables: 'Variables',
+				properties: 'Properties'
+			},
+			documents: {
+				title: 'Documents',
+				directBody: 'Read paper coverage directly from the research-view aggregation contract.',
+				loading: 'Loading paper coverage...',
+				errorTitle: 'Paper coverage is unavailable',
+				emptyTitle: 'No paper coverage rows',
+				emptyBody:
+					'The research-view endpoint returned no paper coverage rows for this collection.',
+				refresh: 'Refresh coverage',
+				documentCount: '{count} paper(s)',
+				document: 'Paper',
+				coverageTitle: 'Paper coverage',
+				factCoverageTitle: 'Fact coverage',
+				coverageReady: 'Paper coverage is ready for review.',
+				tableTitle: 'Paper coverage table',
+				state: 'State',
+				processParams: 'Process params',
+				conditions: 'Conditions',
+				evidence: 'Evidence',
+				issues: 'Issues',
+				openPaper: 'Open paper',
+				next: 'Next',
+				issueCount: '{count} issue(s)',
+				noIssues: 'No issues'
+			},
+			comparison: {
+				title: 'Research comparison',
+				directBody:
+					'Inspect comparable groups and cross-paper matrices built by the research-view aggregation layer.',
+				loading: 'Loading research comparison...',
+				errorTitle: 'Research comparison is unavailable',
+				emptyTitle: 'No comparable groups',
+				emptyBody: 'The research-view endpoint returned no comparable groups for this collection.',
+				refresh: 'Refresh comparison',
+				groupCount: '{count} group(s)',
+				groups: 'Comparable groups',
+				variableAxis: 'Variable axis',
+				fixedConditions: 'Fixed conditions',
+				material: 'Material',
+				process: 'Process',
+				properties: 'Properties',
+				documents: 'Documents',
+				samples: 'Samples',
+				variableValue: 'Variable value',
+				testCondition: 'Test condition',
+				result: 'Result',
+				evidence: 'Evidence',
+				emptyMatrix: 'This group does not have matrix rows yet.',
+				status: {
+					comparable: 'Comparable',
+					limited: 'Limited',
+					blocked: 'Blocked'
+				}
+			},
+			sampleMatrix: {
+				title: 'Sample matrix',
+				sample: 'Sample'
+			},
+			conditionSeries: {
+				title: 'Condition series'
+			},
+			paper: {
+				title: 'Paper research view',
+				unavailableTitle: 'Paper research view is unavailable',
+				unavailableBody: 'The paper aggregation endpoint is required for this page.'
+			},
+			evidence: {
+				title: 'Evidence detail',
+				open: 'Evidence',
+				close: 'Close',
+				status: 'Status',
+				confidence: 'Confidence',
+				duplicates: 'Duplicates',
+				missing: 'No evidence reference is attached to this value.'
+			}
 		},
 		overview: {
 			title: 'Collection Overview',
@@ -2087,8 +2197,10 @@ const translations: Record<Language, Translations> = {
 			moreLabel: '更多',
 			tabs: {
 				overview: '概览',
+				comparison: '比较',
 				comparisons: '比较',
 				results: '抽取结果',
+				extractedFacts: '抽取事实',
 				evidence: '证据',
 				documents: '文档',
 				protocol: 'Protocol',
@@ -2102,6 +2214,111 @@ const translations: Record<Language, Translations> = {
 			metaDocuments: '{count} 篇文档',
 			metaUpdated: '最近更新：{time}',
 			deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。'
+		},
+		research: {
+			emptyValue: '--',
+			warnings: '警告',
+			state: {
+				empty: '为空',
+				processing: '处理中',
+				partial: '部分可用',
+				ready: '可用',
+				failed: '失败'
+			},
+			valueStatus: {
+				observed: '有证据值',
+				normalized: '已规范化',
+				inferred: '推断值',
+				missing: '缺失',
+				conflicted: '冲突'
+			},
+			overview: {
+				title: '研究概览',
+				body: '按文献、样品、变量、性能和证据状态聚合后的视图。',
+				pendingTitle: '研究聚合视图尚未就绪',
+				pendingBody: '集合已经处理完成，但研究聚合视图不可用。请完成或重试 research-view 构建。',
+				documents: '文档',
+				samples: '样品',
+				measurements: '性能结果',
+				evidence: '证据',
+				materials: '材料体系',
+				processes: '工艺',
+				variables: '变量',
+				properties: '性能'
+			},
+			documents: {
+				title: '文档',
+				directBody: '直接读取 research-view 聚合后的文献覆盖结果。',
+				loading: '正在加载文献覆盖...',
+				errorTitle: '文献覆盖不可用',
+				emptyTitle: '暂无文献覆盖行',
+				emptyBody: 'research-view 接口没有返回该集合的文献覆盖结果。',
+				refresh: '刷新覆盖',
+				documentCount: '{count} 篇文献',
+				document: '文献',
+				coverageTitle: '文献覆盖',
+				factCoverageTitle: '事实覆盖',
+				coverageReady: '文献覆盖结果可查看。',
+				tableTitle: '文献覆盖表',
+				state: '状态',
+				processParams: '工艺参数',
+				conditions: '条件',
+				evidence: '证据',
+				issues: '问题',
+				openPaper: '打开文献',
+				next: '下一步',
+				issueCount: '{count} 个问题',
+				noIssues: '无明显问题'
+			},
+			comparison: {
+				title: '研究比较',
+				directBody: '查看由 research-view 聚合层生成的可比较组和跨文献矩阵。',
+				loading: '正在加载研究比较...',
+				errorTitle: '研究比较不可用',
+				emptyTitle: '暂无可比较组',
+				emptyBody: 'research-view 接口没有返回该集合的可比较组。',
+				refresh: '刷新比较',
+				groupCount: '{count} 个比较组',
+				groups: '可比较组',
+				variableAxis: '变化变量',
+				fixedConditions: '固定条件',
+				material: '材料',
+				process: '工艺',
+				properties: '性能',
+				documents: '文档',
+				samples: '样品',
+				variableValue: '变量值',
+				testCondition: '测试条件',
+				result: '结果',
+				evidence: '证据',
+				emptyMatrix: '这个比较组还没有矩阵行。',
+				status: {
+					comparable: '可比较',
+					limited: '有限可比',
+					blocked: '暂不应比较'
+				}
+			},
+			sampleMatrix: {
+				title: '样品矩阵',
+				sample: '样品'
+			},
+			conditionSeries: {
+				title: '条件序列'
+			},
+			paper: {
+				title: '文献研究视图',
+				unavailableTitle: '文献研究视图不可用',
+				unavailableBody: '该页面需要单篇文献 research-view 聚合接口。'
+			},
+			evidence: {
+				title: '证据详情',
+				open: '证据',
+				close: '关闭',
+				status: '状态',
+				confidence: '置信度',
+				duplicates: '重复数',
+				missing: '这个值没有关联证据引用。'
+			}
 		},
 		overview: {
 			title: '集合概览',

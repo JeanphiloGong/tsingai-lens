@@ -73,6 +73,61 @@ function tracebackCallPaths() {
 		.filter((path) => path.endsWith('/traceback'));
 }
 
+function buildResearchPayload() {
+	return {
+		collection_id: 'col_123',
+		document_id: 'doc_1',
+		state: 'ready',
+		paper_title: 'Paper A',
+		overview: {
+			material_systems: ['oxide cathode'],
+			sample_variant_count: 1,
+			main_process_variables: ['anneal temperature'],
+			measured_properties: ['conductivity']
+		},
+		sample_matrix: {
+			matrix_id: 'sample_matrix',
+			columns: [{ value_key: 'conductivity', label: 'Conductivity' }],
+			rows: [
+				{
+					row_id: 'row_1',
+					sample_id: 'S1',
+					sample_label: 'Sample A',
+					material: 'oxide cathode',
+					process_context: { anneal: '700 C' },
+					values: {
+						conductivity: {
+							display_value: '12 mS/cm',
+							status: 'observed',
+							evidence_refs: [{ evidence_ref_id: 'ev_1', locator: 'Results' }]
+						}
+					}
+				}
+			]
+		},
+		condition_series: [
+			{
+				series_id: 'series_1',
+				property: 'conductivity',
+				condition_axis: { axis_name: 'temperature' },
+				points: [
+					{
+						point_id: 'point_1',
+						condition_value: 700,
+						condition_unit: 'C',
+						result: {
+							display_value: '12 mS/cm',
+							status: 'observed'
+						}
+					}
+				]
+			}
+		]
+	};
+}
+
+let researchPayload: unknown = null;
+
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -80,6 +135,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/documents/doc_1')
 		});
 		fetchMock.mockReset();
+		researchPayload = buildResearchPayload();
 		getDocumentMock.mockReset();
 		getDocumentMock.mockImplementation(() => ({
 			promise: Promise.resolve({
@@ -154,6 +210,12 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					],
 					warnings: []
 				});
+			}
+			if (
+				url.pathname === '/api/v1/collections/col_123/documents/doc_1/research-view' &&
+				researchPayload
+			) {
+				return jsonResponse(researchPayload);
 			}
 			if (url.pathname === '/api/v1/collections/col_123/results') {
 				return jsonResponse({
@@ -354,7 +416,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await browserPage.getByRole('tab', { name: 'Results' }).click();
 		await expect.element(browserPage.getByText('oxide cathode').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Comparable').first()).toBeInTheDocument();
-		await browserPage.getByText('oxide cathode').first().click();
+		await browserPage.getByRole('button', { name: /oxide cathode.*conductivity/i }).click();
 		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
 		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
@@ -375,6 +437,34 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Jump to source' }).first().click();
 		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
+	});
+
+	it('renders paper research sample matrix when research view is ready', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Paper research view' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Sample matrix' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: '12 mS/cm' }).first())
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('conductivity / temperature')).toBeInTheDocument();
+	});
+
+	it('renders an unavailable state when paper research view is missing', async () => {
+		researchPayload = null;
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Paper research view is unavailable' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
+			.not.toBeInTheDocument();
 	});
 
 	it('loads only the requested traceback for a document source deep link', async () => {

@@ -8,6 +8,12 @@
 		type CollectionFile
 	} from '../../_shared/files';
 	import { t } from '../../_shared/i18n';
+	import {
+		fetchCollectionResearchView,
+		getResearchViewStateTone,
+		type CollectionAggregation,
+		type ResearchViewState
+	} from '../../_shared/researchView';
 	import { createBuildTask, getTask, isTaskActive, type Task } from '../../_shared/tasks';
 	import {
 		buildOverviewPipelineSteps,
@@ -29,6 +35,8 @@
 	};
 
 	let workspace: WorkspaceOverview | null = null;
+	let researchView: CollectionAggregation | null = null;
+	let researchViewError = '';
 	let loading = false;
 	let error = '';
 	let actionStatus = '';
@@ -59,7 +67,7 @@
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		clearPoll();
-		void Promise.all([loadWorkspace(), loadFiles()]);
+		void Promise.all([loadWorkspace(), loadFiles(), loadResearchView()]);
 	}
 
 	onDestroy(() => {
@@ -101,7 +109,7 @@
 			schedulePoll(task.task_id);
 		} else {
 			clearPoll();
-			await Promise.all([loadWorkspace(false), loadFiles(false)]);
+			await Promise.all([loadWorkspace(false), loadFiles(false), loadResearchView()]);
 		}
 	}
 
@@ -124,6 +132,16 @@
 		}
 	}
 
+	async function loadResearchView() {
+		researchViewError = '';
+		try {
+			researchView = await fetchCollectionResearchView(collectionId);
+		} catch (err) {
+			researchView = null;
+			researchViewError = errorMessage(err);
+		}
+	}
+
 	async function loadFiles(showLoading = true) {
 		if (showLoading) filesLoading = true;
 		filesError = '';
@@ -139,7 +157,7 @@
 	}
 
 	async function refreshAll() {
-		await Promise.all([loadWorkspace(), loadFiles()]);
+		await Promise.all([loadWorkspace(), loadFiles(), loadResearchView()]);
 	}
 
 	function browseFiles() {
@@ -205,7 +223,7 @@
 			uploadResult = await uploadCollectionFiles(collectionId, selectedFiles);
 			selectedFiles = [];
 			if (fileInput) fileInput.value = '';
-			await Promise.all([loadFiles(false), loadWorkspace(false)]);
+			await Promise.all([loadFiles(false), loadWorkspace(false), loadResearchView()]);
 			actionStatus = $t('documents.uploadDone');
 		} catch (err) {
 			uploadError = errorMessage(err);
@@ -262,20 +280,42 @@
 	}
 
 	function readyPrimaryHref() {
-		if (!stateWorkspace) return '#';
-		if (stateWorkspace.capabilities.can_view_comparisons) return stateWorkspace.links.comparisons;
-		if (stateWorkspace.capabilities.can_view_documents) return stateWorkspace.links.documents;
-		return stateWorkspace.links.workspace;
+		return stateWorkspace?.links.comparisons ?? `/collections/${collectionId}/comparisons`;
 	}
 
 	function readyPrimaryLabel() {
-		if (stateWorkspace?.capabilities.can_view_comparisons) {
-			return $t('overview.actions.enterComparisons');
-		}
-		if (stateWorkspace?.capabilities.can_view_documents) {
-			return $t('overview.actions.viewDocuments');
-		}
-		return $t('overview.actions.refreshStatus');
+		return $t('overview.actions.enterComparisons');
+	}
+
+	function primaryResearchHref() {
+		return stateWorkspace?.links.comparisons ?? `/collections/${collectionId}/comparisons`;
+	}
+
+	function researchStateLabel(state: ResearchViewState) {
+		return $t(`research.state.${state}`);
+	}
+
+	function overviewWarnings() {
+		return [
+			...(researchView?.warnings ?? []),
+			...(researchView?.paper_coverage ?? []).flatMap((row) => row.primary_warnings)
+		]
+			.map((warning) => warning.message)
+			.filter((message) => message !== '')
+			.slice(0, 5);
+	}
+
+	function coverageSummary() {
+		const rows = researchView?.paper_coverage ?? [];
+		return { total: rows.length };
+	}
+
+	function formatResearchViewState(state: ResearchViewState) {
+		return researchStateLabel(state);
+	}
+
+	function researchListLabel(items: string[]) {
+		return items.length ? items.slice(0, 6).join(', ') : $t('research.emptyValue');
 	}
 
 	function evidenceHref() {
@@ -336,7 +376,11 @@
 		};
 		return [
 			{ key: 'review', label: $t('overview.docTypeReview'), count: counts.review },
-			{ key: 'experimental', label: $t('overview.docTypeExperimental'), count: counts.experimental },
+			{
+				key: 'experimental',
+				label: $t('overview.docTypeExperimental'),
+				count: counts.experimental
+			},
 			{ key: 'mixed', label: $t('overview.docTypeMixed'), count: counts.mixed },
 			{ key: 'uncertain', label: $t('overview.docTypeUncertain'), count: counts.uncertain },
 			{ key: 'benchmark', label: $t('overview.docTypeBenchmark'), count: 0 }
@@ -452,6 +496,96 @@
 
 		{#if actionStatus}
 			<div class={`status ${actionStatusTone(actionStatus)}`} role="status">{actionStatus}</div>
+		{/if}
+
+		{#if researchView}
+			<section
+				class="overview-card research-overview-card"
+				aria-labelledby="research-overview-title"
+			>
+				<div class="overview-card__header">
+					<div>
+						<h2 id="research-overview-title">{$t('research.overview.title')}</h2>
+						<p>{$t('research.overview.body')}</p>
+					</div>
+					<span
+						class={`status-badge status-badge--${getResearchViewStateTone(researchView.state)}`}
+					>
+						{formatResearchViewState(researchView.state)}
+					</span>
+				</div>
+
+				<div class="research-metric-grid">
+					<div>
+						<span>{$t('research.overview.documents')}</span>
+						<strong>{coverageSummary().total || researchView.overview.document_count}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.samples')}</span>
+						<strong>{researchView.overview.sample_count}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.measurements')}</span>
+						<strong>{researchView.overview.measurement_count}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.evidence')}</span>
+						<strong>{researchView.overview.evidence_count}</strong>
+					</div>
+				</div>
+
+				<div class="research-overview-grid">
+					<div>
+						<span>{$t('research.overview.materials')}</span>
+						<strong>{researchListLabel(researchView.overview.material_systems)}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.processes')}</span>
+						<strong>{researchListLabel(researchView.overview.process_families)}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.variables')}</span>
+						<strong>{researchListLabel(researchView.overview.variable_axes)}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.properties')}</span>
+						<strong>{researchListLabel(researchView.overview.measured_properties)}</strong>
+					</div>
+				</div>
+
+				{#if overviewWarnings().length}
+					<div class="research-warning-list">
+						<strong>{$t('research.warnings')}</strong>
+						<ul>
+							{#each overviewWarnings() as warning}
+								<li>{warning}</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+
+				<div class="split-actions">
+					<a class="btn btn--primary btn--small" href={primaryResearchHref()}>
+						{$t('overview.actions.enterComparisons')}
+					</a>
+					<a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/documents`}>
+						{$t('overview.actions.viewDocumentList')}
+					</a>
+				</div>
+			</section>
+		{:else if researchViewError && readinessState === 'ready'}
+			<section class="overview-card research-overview-card research-overview-card--pending">
+				<div class="overview-card__header">
+					<div>
+						<h2>{$t('research.overview.pendingTitle')}</h2>
+						<p>{$t('research.overview.pendingBody')}</p>
+					</div>
+					<span class="status-badge status-badge--processing">
+						{$t('research.state.partial')}
+					</span>
+				</div>
+				<div class="status" role="status">{researchViewError}</div>
+			</section>
 		{/if}
 
 		{#if showUploadPanel}
@@ -640,3 +774,91 @@
 		<div class="overview-footer-note">{$t('overview.footerNote')}</div>
 	</section>
 {/if}
+
+<style>
+	.research-overview-card {
+		display: grid;
+		gap: 18px;
+	}
+
+	.research-metric-grid,
+	.research-overview-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 12px;
+	}
+
+	.research-metric-grid > div,
+	.research-overview-grid > div {
+		display: grid;
+		gap: 6px;
+		min-width: 0;
+		padding: 14px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--bg-subtle);
+	}
+
+	.research-metric-grid span,
+	.research-overview-grid span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.research-metric-grid strong,
+	.research-overview-grid strong {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+		font-size: 15px;
+		line-height: 22px;
+	}
+
+	.research-metric-grid strong {
+		font-size: 24px;
+		line-height: 30px;
+	}
+
+	.research-warning-list {
+		display: grid;
+		gap: 8px;
+		padding: 14px;
+		border: 1px solid var(--warning-border);
+		border-radius: var(--radius-md);
+		background: var(--warning-bg);
+		color: var(--text-primary);
+	}
+
+	.research-warning-list strong {
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.research-warning-list ul {
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-overview-card--pending {
+		border-style: dashed;
+	}
+
+	@media (max-width: 900px) {
+		.research-metric-grid,
+		.research-overview-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 560px) {
+		.research-metric-grid,
+		.research-overview-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>

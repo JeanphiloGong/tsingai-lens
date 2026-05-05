@@ -18,10 +18,15 @@ schemas, API endpoints, evidence binding, tests, and evaluation checks.
 Included:
 
 - derive paper-level sample matrices from paper facts
+- derive paper-scoped material summaries and optional document material
+  profiles from paper facts
 - derive paper-level condition series from paper facts
+- derive collection-level material summaries and material profiles from paper
+  facts and comparison rows
 - derive collection-level paper coverage from document profiles and fact
   availability
-- derive comparable groups and cross-paper matrices from comparison inputs
+- derive comparable groups and cross-paper matrices from comparison inputs and
+  attach them to material context
 - preserve evidence references and warnings in every aggregate value
 - expose same-origin `/api/v1/*` read endpoints for the frontend
 - verify the first PBF-metal slice against expert gold data
@@ -65,8 +70,15 @@ The first backend delivery is acceptable when it can build:
 
 - a paper detail sample matrix for the P001-style 316L paper without duplicate
   visible rows
+- paper-scoped material summaries, and when needed a document material profile
+  that stays inside one source document
+- one material summary per canonical material, with aliases merged rather than
+  split into duplicate material cards
+- one material profile that contains papers, sample matrix, process ranges,
+  property summaries, comparison groups, condition series, evidence, and
+  warnings for that material
 - paper coverage rows for a collection
-- at least one comparable group or a clear partial-state warning
+- at least one material-scoped comparable group or a clear partial-state warning
 - evidence references for observed matrix values
 - explicit warnings for unresolved sample, process, condition, and evidence
   binding

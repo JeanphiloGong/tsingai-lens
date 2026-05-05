@@ -11,7 +11,8 @@ The main decision is:
   paper facts remain the traceable fact layer
 - paper pages should default to aggregated research objects such as sample
   matrices and condition series
-- collection pages should default to comparable groups and cross-paper matrices
+- collection pages should default to material profiles, with comparable groups
+  presented inside material context
 - raw extracted records should stay available as evidence, QA, and debugging
   views rather than acting as the primary product surface
 
@@ -54,6 +55,7 @@ Research views are the default experience for users trying to understand a
 paper or compare a collection. They organize extracted facts into durable
 research objects:
 
+- material profiles
 - sample matrices
 - comparison groups
 - cross-paper matrices
@@ -86,6 +88,7 @@ Recommended paper detail structure:
 ```text
 Paper Detail
 - Overview
+- Materials
 - Sample Matrix
 - Condition Series
 - Evidence Records
@@ -94,6 +97,20 @@ Paper Detail
 
 The current extracted-record list belongs under `Evidence Records` or
 `Extraction Debug`. It should not be the default paper result surface.
+
+Paper detail should also expose material-scoped views, but only within the
+single source document. A document-scoped material view answers:
+
+- which materials does this paper study?
+- how is this material prepared in this paper?
+- which samples or variants belong to this material in this paper?
+- which process conditions, test conditions, and measurement results are bound
+  to those samples?
+- which within-paper comparisons or condition series can be assembled?
+
+It should not answer cross-paper material questions. Cross-paper alias merging,
+collection-wide process ranges, cross-paper trends, and collection-level
+comparability belong to the collection material profile.
 
 ### Paper Overview
 
@@ -109,6 +126,32 @@ The overview should summarize the paper's detected research structure:
 For a PBF-metal paper, this might say that the paper studies 316L stainless
 steel, sixteen sample variants, scanning strategy, scan speed, energy density,
 hatch spacing, and five core performance metrics.
+
+### Paper Materials
+
+The paper `Materials` section should be the main entry when one paper contains
+more than one material system or when users need to inspect one material inside
+the source document before looking at the full collection profile.
+
+Recommended document-scoped material structure:
+
+```text
+Material In This Paper
+- Overview
+- Samples / Variants
+- Sample Matrix
+- Process Conditions
+- Test Conditions
+- Results Matrix
+- Within-Paper Comparisons
+- Condition Series
+- Evidence
+```
+
+This view should reuse the paper's extracted facts and evidence anchors. It may
+perform local material-name normalization inside the document, but it should
+not create a second cross-paper material hierarchy. The same material can link
+out to the collection-scoped material profile when that profile exists.
 
 ### Sample Matrix
 
@@ -161,12 +204,10 @@ Recommended collection structure:
 ```text
 Collection Workspace
 - Overview
-- Paper Coverage
-- Comparable Groups
-- Cross-Paper Matrix
-- Trends / Series
-- Evidence Records
-- Extraction Debug
+- Materials
+- Papers
+- Graph
+- More
 ```
 
 The collection page should not directly list every `measurement_result` from
@@ -184,10 +225,59 @@ The overview should explain the collection's comparison readiness:
 - main variable axes
 - common missing context or warnings
 
-### Paper Coverage
+### Materials
 
-Paper coverage should show whether each paper has enough structured facts to
-support comparison.
+Materials should be the primary collection research entry. Users normally think
+from a material or paper before they think from an internal comparison group
+identifier.
+
+The material list should show one row or card per canonical material:
+
+```text
+Material | Papers | Samples | Processes | Properties | Comparisons | Evidence
+```
+
+Each material entry should link to a material detail page. That page is the
+right home for material-specific samples, process ranges, measured properties,
+comparison groups, condition series, and evidence.
+
+### Material Detail
+
+Material detail should act as the collection-scoped material profile.
+
+Recommended material detail structure:
+
+```text
+Material Profile
+- Overview
+- Papers
+- Sample Matrix
+- Process Parameters
+- Property Summary
+- Comparisons
+- Condition Series
+- Evidence
+```
+
+The material profile should summarize:
+
+- canonical material name and aliases
+- papers where the material appears
+- samples and variants bound to the material
+- process families and process-parameter ranges
+- measured properties and evidence coverage
+- comparison groups for this material
+- unresolved warnings and weak bindings
+
+For a 316L stainless steel collection, this page should answer what papers
+studied 316L, which samples and process parameters were extracted, what
+properties were measured, and which variables appear to affect those
+properties.
+
+### Papers
+
+The paper list should show whether each paper has enough structured facts to
+support material profiling and comparison.
 
 Typical columns:
 
@@ -200,8 +290,8 @@ before entering cross-paper comparison.
 
 ### Comparable Groups
 
-Comparable groups are the main collection-level research objects. A group
-represents one evidence-backed comparison question, such as:
+Comparable groups are evidence-backed comparison questions under a material
+context. A group represents a question such as:
 
 - 316L LPBF: energy density vs density
 - 316L LPBF: scan speed vs hardness
@@ -219,6 +309,10 @@ Each group should preserve:
 - comparability status
 - missing context and warnings
 - evidence-backed rows
+
+Comparable groups should normally appear inside a material profile. A global
+`All Comparisons` surface may remain under `More` for advanced search, QA, or
+debugging, but it should not be the default collection entry.
 
 ### Cross-Paper Matrix
 
@@ -243,20 +337,24 @@ Recommended collection tabs:
 | Tab | Localized label | Primary job |
 | --- | --- | --- |
 | Overview | 概览 | Show collection status, comparison readiness, coverage, material systems, process variables, measured properties, and warnings. |
-| Documents | 文档 | Show the paper list, each paper's processing state, coverage quality, issue count, and entry point into paper detail. |
-| Comparison | 比较 | Show comparable groups, cross-paper matrices, condition series, trends, and evidence drawers for research comparison. |
+| Materials | 材料 | Show canonical materials as the primary research entry and link to material profiles. |
+| Papers | 文献 | Show the paper list, each paper's processing state, coverage quality, issue count, and entry point into paper detail. |
 | Graph | 图谱 | Support relationship exploration across papers, materials, processes, properties, and evidence; this remains secondary to comparison. |
-| More | 更多 | Hold lower-frequency surfaces such as evidence records, extraction debug, exports, evaluation reports, and collection settings. |
+| More | 更多 | Hold lower-frequency surfaces such as all comparisons, evidence records, extraction debug, exports, evaluation reports, and collection settings. |
 
-The `Documents` tab should avoid creating a second literature hierarchy. It
+The `Papers` tab should avoid creating a second literature hierarchy. It
 should own the paper list and link into paper detail pages. Paper-specific
 sample matrices, condition series, evidence, and debug views should belong to
 the paper detail page rather than being duplicated as collection-level
 navigation.
 
-The `Comparison` tab is the primary research tab at collection level. It should
-organize results by comparable group and cross-paper matrix instead of listing
-raw `measurement_results` as cards.
+The `Materials` tab is the primary research tab at collection level. It should
+organize results by canonical material and material profile instead of listing
+raw `measurement_results` or global comparable groups as cards.
+
+The `Comparison` concept remains useful, but it is no longer a primary
+top-level tab in this direction. It should appear as a module inside material
+detail and as `More / All Comparisons` for advanced global browsing.
 
 The `More` tab is the right home for the current extracted-record browser if
 that browser is retained at collection level. Users should still be able to
@@ -272,11 +370,15 @@ Recommended shared object families:
 
 ```text
 PaperAggregation
+PaperMaterialSummary
+DocumentMaterialProfile
 SampleMatrix
 SampleMatrixRow
 EvidenceBackedValue
 ConditionSeries
 CollectionAggregation
+MaterialSummary
+MaterialProfile
 PaperCoverageRow
 ComparableGroup
 CrossPaperMatrix
@@ -334,6 +436,8 @@ sample, process, condition, and result binding.
 
 For the first PBF-metal slice, the paper detail research view should satisfy:
 
+- paper-scoped materials are visible when the source document contains
+  material bindings
 - sample matrix rows match the real experimental sample set
 - core property cells preserve evidence links
 - duplicate raw results do not duplicate visible matrix cells
@@ -343,8 +447,12 @@ For the first PBF-metal slice, the paper detail research view should satisfy:
 
 For the first collection slice, the collection workspace should satisfy:
 
-- paper coverage is visible before comparison
-- comparable groups are the default comparison objects
+- materials are the default collection research objects
+- material summaries and paper coverage are visible before advanced
+  comparison browsing
+- material profiles expose their sample matrices, process ranges, property
+  summaries, comparable groups, condition series, and evidence
+- comparable groups appear under material profiles or advanced global browsing
 - cross-paper matrices are grouped by research question
 - raw extracted records are available only as evidence or debug views
 - missing context and comparability warnings remain visible

@@ -7,9 +7,9 @@ research-facing aggregation views.
 
 It follows the direction in
 [`rfc-research-view-aggregation-layer.md`](../decisions/rfc-research-view-aggregation-layer.md):
-raw paper facts remain traceable, but paper and collection pages should render
-sample matrices, condition series, comparable groups, and cross-paper matrices
-as the primary research surfaces.
+raw paper facts remain traceable, paper pages should render sample matrices and
+condition series, and collection pages should use material profiles as the
+primary research surface.
 
 ## Status
 
@@ -26,8 +26,8 @@ the shared shape while the UI migrates away from raw result-card lists.
   `paper_facts` family, `comparison_rows`, and evidence anchors.
 - Raw `measurement_results` should not be listed directly as the primary
   collection or paper result surface.
-- The backend owns grouping, deduplication, condition-series assembly, and
-  evidence-preserving aggregation.
+- The backend owns material canonicalization, grouping, deduplication,
+  condition-series assembly, and evidence-preserving aggregation.
 - The frontend owns rendering, interaction state, evidence drawers, and tab
   placement.
 - Every visible value that comes from extracted facts must preserve evidence
@@ -38,15 +38,26 @@ the shared shape while the UI migrates away from raw result-card lists.
 
 ## Target API Surfaces
 
-The target contract should expose two read surfaces.
+The target contract should expose four read surfaces.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/v1/collections/{collection_id}/research-view` | Collection-level aggregation for overview, paper coverage, comparable groups, cross-paper matrices, trends, and debug links. |
-| `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view` | Paper-level aggregation for paper overview, sample matrix, condition series, and paper-scoped evidence/debug links. |
+| `GET /api/v1/collections/{collection_id}/research-view` | Collection-level aggregation for overview, material summaries, paper coverage, advanced comparison links, trends, and debug links. |
+| `GET /api/v1/collections/{collection_id}/materials` | Collection-level material summaries for the primary `Materials` tab. |
+| `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view` | Collection-scoped material profile with papers, samples, process ranges, properties, comparisons, condition series, evidence, and warnings. |
+| `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view` | Paper-level aggregation for paper overview, paper-scoped materials, sample matrix, condition series, and paper-scoped evidence/debug links. |
 
 These endpoints should not require the browser to reconstruct sample matrices or
-comparable groups from raw `measurement_results`.
+material profiles from raw `measurement_results`.
+
+Document-scoped material endpoints may be added when the paper detail page
+needs a separate material entry or a deep link into one material inside one
+paper:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials` | Paper-scoped materials detected in one document. |
+| `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view` | Paper-scoped material profile for one document. This is not a collection material profile. |
 
 Optional query parameters may be added only when they are directly needed by
 the UI:
@@ -62,7 +73,7 @@ All aggregation responses should use the same top-level state meanings.
 
 | State | Meaning |
 | --- | --- |
-| `empty` | The collection or document has no source material to aggregate. |
+| `empty` | The collection, material, or document has no source material to aggregate. |
 | `processing` | The required upstream artifacts are still being built. |
 | `partial` | Enough data exists to render the view, but important context is missing or weak. |
 | `ready` | The view has enough structured facts and evidence to support normal use. |
@@ -148,6 +159,7 @@ PaperAggregation
 - paper_title
 - state
 - overview
+- materials
 - sample_matrix
 - condition_series
 - evidence_links
@@ -165,6 +177,60 @@ The paper overview should summarize:
 - measured properties
 - condition families
 - evidence and extraction warnings
+
+### Paper Materials
+
+`PaperMaterialSummary` is the material entry inside one paper. It is scoped by
+`document_id`, not by the whole collection.
+
+Minimum shape:
+
+```text
+PaperMaterialSummary
+- material_id
+- canonical_name
+- aliases
+- sample_count
+- process_families
+- measured_properties
+- comparison_count
+- evidence_coverage
+- links
+- warnings
+```
+
+`DocumentMaterialProfile` is the optional drilldown object for one material
+inside one paper. It should answer how the paper studied that material without
+performing collection-wide material merging or cross-paper comparison.
+
+Minimum shape:
+
+```text
+DocumentMaterialProfile
+- collection_id
+- document_id
+- material_id
+- canonical_name
+- aliases
+- state
+- overview
+- sample_matrix
+- process_conditions
+- test_conditions
+- measured_properties
+- within_paper_comparisons
+- condition_series
+- evidence_refs
+- debug_links
+- warnings
+```
+
+The same canonical material may link from `DocumentMaterialProfile` to the
+collection-scoped `MaterialProfile`, but the two objects have different
+ownership boundaries:
+
+- `DocumentMaterialProfile` is one paper's view of one material.
+- `MaterialProfile` is the collection's cross-paper view of one material.
 
 ### Sample Matrix
 
@@ -244,6 +310,7 @@ CollectionAggregation
 - collection_id
 - state
 - overview
+- materials
 - paper_coverage
 - comparable_groups
 - cross_paper_matrices
@@ -252,6 +319,117 @@ CollectionAggregation
 - debug_links
 - warnings
 ```
+
+### Material Summary
+
+`MaterialSummary` is the row or card object for the collection `Materials` tab.
+
+Minimum shape:
+
+```text
+MaterialSummary
+- material_id
+- canonical_name
+- aliases
+- paper_count
+- sample_count
+- process_families
+- measured_properties
+- comparison_count
+- evidence_coverage
+- state
+- links
+- warnings
+```
+
+`material_id` should be stable within the collection and derived from the
+canonical material key. It should not be the display name when aliases or
+normalization may change.
+
+### Material Profile
+
+`MaterialProfile` is the collection-scoped research object for one material.
+It is the normal parent surface for material-specific sample matrices,
+process summaries, property summaries, comparable groups, condition series, and
+evidence.
+
+Minimum shape:
+
+```text
+MaterialProfile
+- collection_id
+- material_id
+- canonical_name
+- aliases
+- state
+- overview
+- papers
+- sample_matrix
+- process_parameter_ranges
+- measured_properties
+- comparison_groups
+- condition_series
+- evidence_refs
+- debug_links
+- warnings
+```
+
+`MaterialPaperCoverage` minimum shape:
+
+```text
+MaterialPaperCoverage
+- document_id
+- title
+- state
+- sample_count
+- process_families
+- measured_properties
+- evidence_count
+- issue_count
+- links
+- warnings
+```
+
+`ProcessParameterRange` minimum shape:
+
+```text
+ProcessParameterRange
+- parameter
+- display_range
+- min_value
+- max_value
+- unit
+- sample_count
+- document_count
+- evidence_refs
+- warnings
+```
+
+`PropertySummary` minimum shape:
+
+```text
+PropertySummary
+- property
+- display_range
+- min_value
+- max_value
+- unit
+- sample_count
+- document_count
+- evidence_refs
+- warnings
+```
+
+Material canonicalization should prefer, in order:
+
+- normalized material fields from comparison rows when available
+- normalized sample-variant material fields
+- raw sample-variant material names or composition strings
+- explicit missing-material warnings when no reliable material key exists
+
+Aliases should preserve common names found in source facts, such as `316L`,
+`SS316L`, `AISI 316L`, and `316L stainless steel`, without making each alias a
+separate material profile.
 
 ### Paper Coverage
 
@@ -276,7 +454,9 @@ PaperCoverageRow
 
 ### Comparable Group
 
-`ComparableGroup` is the primary collection-level research object.
+`ComparableGroup` is a material-context research object. It answers how one
+variable axis relates to properties under a material, process, test-condition,
+and baseline context.
 
 Minimum shape:
 
@@ -341,14 +521,20 @@ The collection tabs should map to this contract as follows.
 
 | Tab | Localized label | Contract data |
 | --- | --- | --- |
-| Overview | 概览 | `overview`, readiness `state`, summary warnings, paper coverage summary. |
-| Documents | 文档 | `paper_coverage` rows and links to paper detail research views. |
-| Comparison | 比较 | `comparable_groups`, `cross_paper_matrices`, `trend_series`, evidence drawers. |
+| Overview | 概览 | `overview`, readiness `state`, summary warnings, material summary, and paper coverage summary. |
+| Materials | 材料 | `materials` or `/materials` summaries and links to `MaterialProfile` pages. |
+| Papers | 文献 | `paper_coverage` rows and links to paper detail research views. |
 | Graph | 图谱 | Existing graph endpoints; graph remains a secondary exploration surface. |
-| More | 更多 | `evidence_links`, `debug_links`, exports, evaluation reports, and settings. |
+| More | 更多 | all comparisons, `evidence_links`, `debug_links`, exports, evaluation reports, and settings. |
 
 Paper detail pages should use `PaperAggregation` rather than collection
 navigation to show sample matrices and condition series for one document.
+
+Material detail pages should use `MaterialProfile` rather than a global
+comparison list. The comparison module inside material detail should render
+`comparison_groups`, `cross_paper_matrices`, and `trend_series` filtered to
+that material. `More / All Comparisons` may render global comparison search and
+debugging, but it is not the primary collection navigation.
 
 ## Migration Boundary
 
@@ -364,16 +550,31 @@ to this contract once the backend and frontend plans are implemented.
 Backend contract verification should cover:
 
 - paper aggregation builds one row per real sample or variant
+- paper aggregation exposes paper-scoped material summaries when material
+  bindings exist
+- document material profiles stay inside one `document_id` and do not include
+  cross-paper facts
 - duplicate `measurement_results` do not duplicate matrix rows
 - every observed value has evidence references or a warning
-- collection aggregation exposes paper coverage before comparison groups
+- collection aggregation exposes material summaries before advanced comparison
+  links
+- material summaries merge aliases instead of splitting one material into many
+  rows
+- material profiles expose papers, sample matrices, process ranges, property
+  summaries, comparison groups, condition series, evidence refs, and warnings
 - comparable groups preserve fixed conditions, variable axes, and warnings
+  under material context
 
 Frontend verification should cover:
 
-- collection tabs render as `Overview / Documents / Comparison / Graph / More`
-- `Documents` links to paper detail rather than duplicating paper internals
-- `Comparison` renders groups and matrices rather than raw fact cards
+- collection tabs render as `Overview / Materials / Papers / Graph / More`
+- `Materials` links to material profile pages
+- `Papers` links to paper detail rather than duplicating paper internals
+- paper detail can render document-scoped material views without treating them
+  as collection material profiles
+- material detail renders comparison groups and matrices rather than raw fact
+  cards
+- `More / All Comparisons` remains available for global comparison browsing
 - `More` contains evidence/debug surfaces
 - loading, empty, partial, ready, and failed states are explicit
 

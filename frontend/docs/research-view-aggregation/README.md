@@ -20,16 +20,21 @@ Included:
 
 - collapse collection primary navigation to:
   - `Overview`
-  - `Documents`
-  - `Comparison`
+  - `Materials`
+  - `Papers`
   - `Graph`
   - `More`
 - render collection overview from `CollectionAggregation`
-- render document coverage from `PaperCoverageRow`
-- render comparison from `ComparableGroup` and `CrossPaperMatrix`
+- render material summaries and material profile entry points
+- render paper coverage from `PaperCoverageRow`
+- render comparison inside material profile from `ComparableGroup` and
+  `CrossPaperMatrix`
+- render paper-scoped material summaries and "Material In This Paper" drilldown
+  when paper detail needs a local material view
 - render paper detail from `PaperAggregation`, `SampleMatrix`, and
   `ConditionSeries`
 - move raw extraction-card browsing into evidence/debug surfaces
+- keep global all-comparison browsing under `More`
 - preserve loading, empty, partial, ready, and failed states
 
 Excluded:
@@ -66,9 +71,15 @@ contract.
 
 The first frontend delivery is acceptable when:
 
-- collection tabs are `Overview / Documents / Comparison / Graph / More`
-- `Documents` shows paper coverage and links to paper detail
-- `Comparison` shows grouped comparison objects and matrices
+- collection tabs are `Overview / Materials / Papers / Graph / More`
+- `Materials` shows canonical materials and links to material profiles
+- material profiles show papers, sample matrix, process ranges, property
+  summaries, comparisons, condition series, and evidence
+- `Papers` shows paper coverage and links to paper detail
+- paper detail can show materials inside one paper without becoming a
+  collection material profile
+- `More / All Comparisons` shows grouped comparison objects and matrices when
+  users need a global comparison browser
 - raw extracted records are no longer the main collection result list
 - paper detail shows sample matrix and condition series when available
 - every value can open evidence detail or show a missing-evidence warning

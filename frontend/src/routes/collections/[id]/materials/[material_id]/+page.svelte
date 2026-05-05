@@ -2,8 +2,16 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import { errorMessage } from '../../../../_shared/api';
-	import { t } from '../../../../_shared/i18n';
+	import { onDestroy } from 'svelte';
+	import { errorMessage, isHttpStatusError } from '../../../../_shared/api';
+	import { language, t } from '../../../../_shared/i18n';
+	import {
+		buildMaterialReviewMarkdownUrl,
+		buildMaterialReviewPdfUrl,
+		createMaterialReviewReport,
+		fetchMaterialReviewReport,
+		type MaterialReviewReport
+	} from '../../../../_shared/materialReviewReport';
 	import {
 		fetchMaterialResearchView,
 		formatEvidenceBackedValue,
@@ -144,7 +152,10 @@
 	let materialProfile: MaterialProfile | null = null;
 	let selectedEvidence: EvidenceDrawerDetail | null = null;
 	let pdfDrawerOpen = false;
-	let pdfGenerated = false;
+	let pdfReport: MaterialReviewReport | null = null;
+	let pdfReportLoading = false;
+	let pdfReportError = '';
+	let pdfReportPollTimer: number | null = null;
 	let loading = false;
 	let error = '';
 	let loadedKey = '';
@@ -181,7 +192,17 @@
 		materialProfile?.overview.measured_properties.length || propertyColumns.length;
 	$: if (collectionId && materialId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
-		void loadMaterialProfile();
+		resetPdfReportState();
+		void loadMaterialPage();
+	}
+	$: pdfReportReady = pdfReport?.status === 'ready' || pdfReport?.status === 'ready_with_warnings';
+	$: pdfReportGenerating = pdfReport?.status === 'generating';
+	$: pdfReportBusy = pdfReportLoading || pdfReportGenerating;
+
+	onDestroy(clearReportPoll);
+
+	async function loadMaterialPage() {
+		await Promise.all([loadMaterialProfile(), loadPdfReportStatus()]);
 	}
 
 	async function loadMaterialProfile() {
@@ -197,6 +218,63 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function loadPdfReportStatus() {
+		if (!collectionId || !materialId) return;
+		const requestedCollection = collectionId;
+		const requestedMaterial = materialId;
+		pdfReportLoading = true;
+		pdfReportError = '';
+		try {
+			const report = await fetchMaterialReviewReport(requestedCollection, requestedMaterial);
+			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
+			pdfReport = report;
+			updateReportPolling(report);
+		} catch (err) {
+			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
+			clearReportPoll();
+			if (isHttpStatusError(err, 404)) {
+				pdfReport = null;
+			} else {
+				pdfReportError = errorMessage(err);
+			}
+		} finally {
+			if (requestedCollection === collectionId && requestedMaterial === materialId) {
+				pdfReportLoading = false;
+			}
+		}
+	}
+
+	function resetPdfReportState() {
+		clearReportPoll();
+		pdfReport = null;
+		pdfReportLoading = false;
+		pdfReportError = '';
+	}
+
+	function updateReportPolling(report: MaterialReviewReport | null) {
+		if (report?.status === 'generating') {
+			scheduleReportPoll();
+		} else {
+			clearReportPoll();
+		}
+	}
+
+	function scheduleReportPoll() {
+		if (!browser) return;
+		clearReportPoll();
+		pdfReportPollTimer = window.setTimeout(() => {
+			pdfReportPollTimer = null;
+			void loadPdfReportStatus();
+		}, 2500);
+	}
+
+	function clearReportPoll() {
+		if (browser && pdfReportPollTimer !== null) {
+			window.clearTimeout(pdfReportPollTimer);
+		}
+		pdfReportPollTimer = null;
 	}
 
 	function materialPapers(): MaterialPaperCoverage[] {
@@ -852,10 +930,52 @@
 	function openPdfDrawer() {
 		selectedEvidence = null;
 		pdfDrawerOpen = true;
+		if (!pdfReportLoading) {
+			void loadPdfReportStatus();
+		}
 	}
 
-	function generatePdfReport() {
-		pdfGenerated = true;
+	async function generatePdfReport(forceRegenerate = false) {
+		if (!collectionId || !materialId || pdfReportBusy) return;
+		pdfReportLoading = true;
+		pdfReportError = '';
+		try {
+			const report = await createMaterialReviewReport(collectionId, materialId, {
+				language: $language,
+				report_type: 'review_draft',
+				include_appendix: true,
+				force_regenerate: forceRegenerate
+			});
+			pdfReport = report;
+			updateReportPolling(report);
+		} catch (err) {
+			clearReportPoll();
+			pdfReportError = errorMessage(err);
+		} finally {
+			pdfReportLoading = false;
+		}
+	}
+
+	function pdfStatusBody() {
+		if (pdfReportLoading && !pdfReport) {
+			return $t('research.materialDossier.pdf.loadingStatus');
+		}
+		if (pdfReportGenerating) {
+			return $t('research.materialDossier.pdf.generatingStatus');
+		}
+		if (pdfReport?.status === 'failed') {
+			return $t('research.materialDossier.pdf.failedStatus');
+		}
+		return $t('research.materialDossier.pdf.body');
+	}
+
+	function pdfGeneratedStatus(report: MaterialReviewReport) {
+		if (report.status === 'ready_with_warnings') {
+			return $t('research.materialDossier.pdf.generatedWithWarnings', {
+				count: report.warnings.length
+			});
+		}
+		return $t('research.materialDossier.pdf.generatedStatus');
 	}
 
 	function csvEscape(value: string | number | null | undefined) {
@@ -930,7 +1050,7 @@
 			<button class="btn btn--primary-light btn--small" type="button" on:click={openPdfDrawer}>
 				{$t('research.materialDossier.actions.generatePdf')}
 			</button>
-			<button class="btn btn--ghost btn--small" type="button" on:click={loadMaterialProfile}>
+			<button class="btn btn--ghost btn--small" type="button" on:click={loadMaterialPage}>
 				{$t('research.materialDossier.actions.refresh')}
 			</button>
 		</div>
@@ -1339,7 +1459,7 @@
 		<aside class="detail-drawer" aria-label={$t('research.materialDossier.pdf.title')}>
 			<div class="detail-drawer__header">
 				<h3>
-					{pdfGenerated
+					{pdfReportReady
 						? $t('research.materialDossier.pdf.generatedTitle')
 						: $t('research.materialDossier.pdf.title')}
 				</h3>
@@ -1347,25 +1467,68 @@
 					{$t('research.evidence.close')}
 				</button>
 			</div>
-			{#if pdfGenerated}
-				<p class="pdf-status">{$t('research.materialDossier.pdf.generatedStatus')}</p>
+			{#if pdfReportReady && pdfReport}
+				<p
+					class:pdf-status--warning={pdfReport.status === 'ready_with_warnings'}
+					class="pdf-status"
+				>
+					{pdfGeneratedStatus(pdfReport)}
+				</p>
+				<dl class="pdf-data">
+					<div>
+						<dt>{$t('research.materialDossier.pdf.reportTitle')}</dt>
+						<dd>{pdfReport.title ?? materialProfile?.canonical_name ?? materialId}</dd>
+					</div>
+					<div>
+						<dt>{$t('research.materialDossier.pdf.readiness')}</dt>
+						<dd>{pdfReport.readiness} · {pdfReport.readiness_reason}</dd>
+					</div>
+				</dl>
+				{#if pdfReport.warnings.length}
+					<ul class="pdf-warning-list">
+						{#each pdfReport.warnings as warning}
+							<li>{warning}</li>
+						{/each}
+					</ul>
+				{/if}
 				<div class="drawer-actions">
-					<button class="btn btn--ghost btn--small" type="button">
+					<a
+						class="btn btn--ghost btn--small"
+						href={buildMaterialReviewMarkdownUrl(collectionId, materialId)}
+						target="_blank"
+						rel="noreferrer"
+					>
+						{$t('research.materialDossier.pdf.previewMarkdown')}
+					</a>
+					<a
+						class="btn btn--ghost btn--small"
+						href={buildMaterialReviewPdfUrl(collectionId, materialId)}
+						target="_blank"
+						rel="noreferrer"
+					>
 						{$t('research.materialDossier.pdf.view')}
-					</button>
-					<button class="btn btn--ghost btn--small" type="button">
+					</a>
+					<a
+						class="btn btn--ghost btn--small"
+						href={buildMaterialReviewPdfUrl(collectionId, materialId)}
+						download
+					>
 						{$t('research.materialDossier.pdf.download')}
-					</button>
+					</a>
 					<button
 						class="btn btn--primary-light btn--small"
 						type="button"
-						on:click={generatePdfReport}
+						disabled={pdfReportBusy}
+						on:click={() => generatePdfReport(true)}
 					>
 						{$t('research.materialDossier.pdf.regenerate')}
 					</button>
 				</div>
 			{:else}
-				<p>{$t('research.materialDossier.pdf.body')}</p>
+				<p>{pdfStatusBody()}</p>
+				{#if pdfReportError}
+					<p class="pdf-error" role="alert">{pdfReportError}</p>
+				{/if}
 				<ul class="pdf-list">
 					<li>{$t('research.materialDossier.sections.findings.title')}</li>
 					<li>{$t('research.materialDossier.sections.trends.title')}</li>
@@ -1397,9 +1560,14 @@
 					<button
 						class="btn btn--primary-light btn--small"
 						type="button"
-						on:click={generatePdfReport}
+						disabled={pdfReportBusy}
+						on:click={() => generatePdfReport(pdfReport?.status === 'failed')}
 					>
-						{$t('research.materialDossier.pdf.generate')}
+						{pdfReportBusy
+							? $t('research.materialDossier.pdf.generatingStatus')
+							: pdfReport?.status === 'failed'
+								? $t('research.materialDossier.pdf.regenerate')
+								: $t('research.materialDossier.pdf.generate')}
 					</button>
 				</div>
 			{/if}
@@ -2088,11 +2256,35 @@
 		font-weight: 700;
 	}
 
+	.pdf-status--warning {
+		color: #f59e0b;
+	}
+
+	.pdf-error {
+		margin: 0;
+		color: #b91c1c;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.pdf-warning-list {
+		margin: 0;
+		padding-left: 18px;
+		color: #92400e;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
 	.drawer-actions {
 		display: flex;
 		justify-content: flex-end;
 		flex-wrap: wrap;
 		gap: 8px;
+	}
+
+	.drawer-actions .btn:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
 	}
 
 	:root[data-theme='dark'] .dossier-topline span:last-child,

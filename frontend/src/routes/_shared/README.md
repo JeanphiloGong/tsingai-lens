@@ -25,5 +25,8 @@ This node owns browser-side helpers that are shared across frontend routes.
   Research-view aggregation contract helper for material summaries, material
   profiles, paper coverage, sample matrices, comparable groups, condition
   series, and evidence-backed values
+- `materialReviewReport.ts`
+  Material review report status, generation, Markdown preview, and PDF artifact
+  URL helper for collection-scoped material dossiers
 - `i18n.ts`
   Shared translations and labels

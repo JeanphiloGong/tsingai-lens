@@ -57,6 +57,10 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
+function requestMethod(input: string | URL | Request, init?: RequestInit) {
+	return input instanceof Request ? input.method : init?.method ?? 'GET';
+}
+
 function materialProfilePayload() {
 	return {
 		collection_id: 'col_123',
@@ -320,6 +324,30 @@ function materialProfilePayload() {
 	};
 }
 
+function materialReviewReportPayload(overrides: Record<string, unknown> = {}) {
+	return {
+		report_id: 'mrp_mat_316l',
+		collection_id: 'col_123',
+		material_id: 'mat_316l',
+		status: 'ready',
+		message: 'Review draft is ready.',
+		title: '316L stainless steel review draft',
+		language: 'en',
+		report_type: 'review_draft',
+		include_appendix: true,
+		readiness: 'preliminary',
+		readiness_reason: '1 paper and 2 samples are available.',
+		data_version: 'material_profile_v1',
+		warnings: [],
+		created_at: '2026-05-05T15:32:00',
+		updated_at: '2026-05-05T15:33:00',
+		generated_at: '2026-05-05T15:33:00',
+		pdf_url: '/api/v1/collections/col_123/materials/mat_316l/review-report.pdf',
+		markdown_url: '/api/v1/collections/col_123/materials/mat_316l/review-report.md',
+		...overrides
+	};
+}
+
 describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -327,11 +355,19 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/materials/mat_316l')
 		});
 		fetchMock.mockReset();
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(materialProfilePayload());
+			}
+
+			if (
+				path === '/api/v1/collections/col_123/materials/mat_316l/review-report' &&
+				method === 'GET'
+			) {
+				return jsonResponse({ detail: { code: 'material_review_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -370,7 +406,73 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
-		).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
+		).toEqual([
+			'/api/v1/collections/col_123/materials/mat_316l/research-view',
+			'/api/v1/collections/col_123/materials/mat_316l/review-report'
+		]);
+	});
+
+	it('generates a material review report and exposes Markdown and PDF artifacts', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(materialProfilePayload());
+			}
+
+			if (
+				path === '/api/v1/collections/col_123/materials/mat_316l/review-report' &&
+				method === 'GET'
+			) {
+				return jsonResponse({ detail: { code: 'material_review_report_not_found' } }, 404);
+			}
+
+			if (
+				path === '/api/v1/collections/col_123/materials/mat_316l/review-report' &&
+				method === 'POST'
+			) {
+				return jsonResponse(materialReviewReportPayload());
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Generate review PDF' }).click();
+		await browserPage.getByRole('button', { name: 'Generate review', exact: true }).click();
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Material review PDF' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Preview Markdown' }))
+			.toHaveAttribute(
+				'href',
+				'/api/v1/collections/col_123/materials/mat_316l/review-report.md'
+			);
+		await expect
+			.element(browserPage.getByRole('link', { name: 'View PDF' }))
+			.toHaveAttribute(
+				'href',
+				'/api/v1/collections/col_123/materials/mat_316l/review-report.pdf'
+			);
+
+		const postCall = fetchMock.mock.calls.find(
+			([input, init]) =>
+				requestPath(input as string | URL | Request) ===
+					'/api/v1/collections/col_123/materials/mat_316l/review-report' &&
+				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
+		);
+		expect(JSON.parse(String((postCall?.[1] as RequestInit | undefined)?.body))).toMatchObject({
+			report_type: 'review_draft',
+			include_appendix: true,
+			force_regenerate: false
+		});
 	});
 
 	it('opens evidence details from a performance value', async () => {

@@ -82,6 +82,7 @@ class SampleMatrixRowResponse(BaseModel):
     """One paper-level sample or variant row."""
 
     row_id: str = Field(..., description="矩阵行 ID")
+    document_id: str | None = Field(default=None, description="来源文档 ID")
     sample_id: str = Field(..., description="样品或 variant ID")
     sample_label: str | None = Field(default=None, description="样品展示名")
     material: str | None = Field(default=None, description="材料体系")
@@ -106,7 +107,7 @@ class SampleMatrixResponse(BaseModel):
     """Paper-level sample matrix."""
 
     matrix_id: str = Field(..., description="矩阵 ID")
-    document_id: str = Field(..., description="文档 ID")
+    document_id: str | None = Field(default=None, description="文档 ID")
     state: ResearchViewState = Field(..., description="矩阵状态")
     columns: list[SampleMatrixColumnResponse] = Field(default_factory=list, description="列")
     rows: list[SampleMatrixRowResponse] = Field(default_factory=list, description="行")
@@ -161,6 +162,43 @@ class PaperAggregationOverviewResponse(BaseModel):
     warning_count: int = Field(default=0, description="warning 数")
 
 
+class PaperMaterialSummaryResponse(BaseModel):
+    """Material row scoped to one paper."""
+
+    material_id: str = Field(..., description="材料 ID")
+    canonical_name: str = Field(..., description="规范材料名")
+    aliases: list[str] = Field(default_factory=list, description="材料别名")
+    sample_count: int = Field(default=0, description="样品数")
+    process_families: list[str] = Field(default_factory=list, description="工艺族")
+    measured_properties: list[str] = Field(default_factory=list, description="性能指标")
+    comparison_count: int = Field(default=0, description="paper 内比较数量")
+    evidence_coverage: dict[str, Any] = Field(
+        default_factory=dict,
+        description="证据覆盖统计",
+    )
+    links: dict[str, str | None] = Field(default_factory=dict, description="跳转链接")
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="材料 warning",
+    )
+
+
+class PaperMaterialSummariesResponse(BaseModel):
+    """Paper-scoped material summaries."""
+
+    collection_id: str = Field(..., description="集合 ID")
+    document_id: str = Field(..., description="文档 ID")
+    state: ResearchViewState = Field(..., description="聚合状态")
+    materials: list[PaperMaterialSummaryResponse] = Field(
+        default_factory=list,
+        description="paper 内材料列表",
+    )
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="聚合 warning",
+    )
+
+
 class PaperAggregationResponse(BaseModel):
     """Paper-level research aggregation response."""
 
@@ -169,6 +207,10 @@ class PaperAggregationResponse(BaseModel):
     paper_title: str | None = Field(default=None, description="论文标题")
     state: ResearchViewState = Field(..., description="聚合状态")
     overview: PaperAggregationOverviewResponse = Field(..., description="论文概览")
+    materials: list[PaperMaterialSummaryResponse] = Field(
+        default_factory=list,
+        description="paper 内材料列表",
+    )
     sample_matrix: SampleMatrixResponse = Field(..., description="样品矩阵")
     condition_series: list[ConditionSeriesResponse] = Field(
         default_factory=list,
@@ -261,6 +303,185 @@ class ComparableGroupResponse(BaseModel):
     )
 
 
+class MaterialPaperCoverageResponse(BaseModel):
+    """Paper coverage row scoped to one material."""
+
+    document_id: str = Field(..., description="文档 ID")
+    title: str | None = Field(default=None, description="标题")
+    state: ResearchViewState = Field(..., description="文档聚合状态")
+    sample_count: int = Field(default=0, description="材料样品数")
+    process_families: list[str] = Field(default_factory=list, description="工艺族")
+    measured_properties: list[str] = Field(default_factory=list, description="性能指标")
+    evidence_count: int = Field(default=0, description="证据数")
+    issue_count: int = Field(default=0, description="结构化问题数")
+    links: dict[str, str | None] = Field(default_factory=dict, description="跳转链接")
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="文档材料 warning",
+    )
+
+
+class ProcessParameterRangeResponse(BaseModel):
+    """Observed range for one process parameter within a material profile."""
+
+    parameter: str = Field(..., description="工艺参数")
+    display_range: str | None = Field(default=None, description="展示范围")
+    min_value: float | int | str | None = Field(default=None, description="最小值")
+    max_value: float | int | str | None = Field(default=None, description="最大值")
+    unit: str | None = Field(default=None, description="单位")
+    sample_count: int = Field(default=0, description="样品数")
+    document_count: int = Field(default=0, description="文档数")
+    evidence_refs: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="支撑证据",
+    )
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="参数 warning",
+    )
+
+
+class PropertySummaryResponse(BaseModel):
+    """Observed range for one measured property within a material profile."""
+
+    property: str = Field(..., description="性能指标")
+    display_range: str | None = Field(default=None, description="展示范围")
+    min_value: float | int | str | None = Field(default=None, description="最小值")
+    max_value: float | int | str | None = Field(default=None, description="最大值")
+    unit: str | None = Field(default=None, description="单位")
+    sample_count: int = Field(default=0, description="样品数")
+    document_count: int = Field(default=0, description="文档数")
+    evidence_refs: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="支撑证据",
+    )
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="性能 warning",
+    )
+
+
+class DocumentMaterialProfileResponse(BaseModel):
+    """One paper's view of one material."""
+
+    collection_id: str = Field(..., description="集合 ID")
+    document_id: str = Field(..., description="文档 ID")
+    material_id: str = Field(..., description="材料 ID")
+    canonical_name: str = Field(..., description="规范材料名")
+    aliases: list[str] = Field(default_factory=list, description="材料别名")
+    state: ResearchViewState = Field(..., description="聚合状态")
+    overview: dict[str, Any] = Field(default_factory=dict, description="paper 内材料概览")
+    sample_matrix: SampleMatrixResponse = Field(..., description="paper 内材料样品矩阵")
+    process_conditions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="paper 内材料工艺条件",
+    )
+    test_conditions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="paper 内材料测试条件",
+    )
+    measured_properties: list[PropertySummaryResponse] = Field(
+        default_factory=list,
+        description="性能指标摘要",
+    )
+    within_paper_comparisons: list[ComparableGroupResponse] = Field(
+        default_factory=list,
+        description="paper 内比较组",
+    )
+    condition_series: list[ConditionSeriesResponse] = Field(
+        default_factory=list,
+        description="条件序列",
+    )
+    evidence_refs: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="支撑证据",
+    )
+    debug_links: dict[str, str | None] = Field(default_factory=dict, description="调试链接")
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="材料 profile warning",
+    )
+
+
+class MaterialSummaryResponse(BaseModel):
+    """Collection-scoped material summary."""
+
+    material_id: str = Field(..., description="材料 ID")
+    canonical_name: str = Field(..., description="规范材料名")
+    aliases: list[str] = Field(default_factory=list, description="材料别名")
+    paper_count: int = Field(default=0, description="文档数")
+    sample_count: int = Field(default=0, description="样品数")
+    process_families: list[str] = Field(default_factory=list, description="工艺族")
+    measured_properties: list[str] = Field(default_factory=list, description="性能指标")
+    comparison_count: int = Field(default=0, description="比较组数量")
+    evidence_coverage: dict[str, Any] = Field(
+        default_factory=dict,
+        description="证据覆盖统计",
+    )
+    state: ResearchViewState = Field(..., description="材料状态")
+    links: dict[str, str | None] = Field(default_factory=dict, description="跳转链接")
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="材料 warning",
+    )
+
+
+class MaterialSummariesResponse(BaseModel):
+    """Collection-scoped material summaries."""
+
+    collection_id: str = Field(..., description="集合 ID")
+    state: ResearchViewState = Field(..., description="聚合状态")
+    materials: list[MaterialSummaryResponse] = Field(
+        default_factory=list,
+        description="材料列表",
+    )
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="聚合 warning",
+    )
+
+
+class MaterialProfileResponse(BaseModel):
+    """Collection-scoped material research profile."""
+
+    collection_id: str = Field(..., description="集合 ID")
+    material_id: str = Field(..., description="材料 ID")
+    canonical_name: str = Field(..., description="规范材料名")
+    aliases: list[str] = Field(default_factory=list, description="材料别名")
+    state: ResearchViewState = Field(..., description="聚合状态")
+    overview: dict[str, Any] = Field(default_factory=dict, description="材料概览")
+    papers: list[MaterialPaperCoverageResponse] = Field(
+        default_factory=list,
+        description="材料文献覆盖",
+    )
+    sample_matrix: SampleMatrixResponse = Field(..., description="材料样品矩阵")
+    process_parameter_ranges: list[ProcessParameterRangeResponse] = Field(
+        default_factory=list,
+        description="工艺参数范围",
+    )
+    measured_properties: list[PropertySummaryResponse] = Field(
+        default_factory=list,
+        description="性能指标摘要",
+    )
+    comparison_groups: list[ComparableGroupResponse] = Field(
+        default_factory=list,
+        description="材料比较组",
+    )
+    condition_series: list[ConditionSeriesResponse] = Field(
+        default_factory=list,
+        description="条件序列",
+    )
+    evidence_refs: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="支撑证据",
+    )
+    debug_links: dict[str, str | None] = Field(default_factory=dict, description="调试链接")
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="材料 profile warning",
+    )
+
+
 class CollectionAggregationOverviewResponse(BaseModel):
     """Collection-level research overview."""
 
@@ -283,6 +504,10 @@ class CollectionAggregationResponse(BaseModel):
     collection_id: str = Field(..., description="集合 ID")
     state: ResearchViewState = Field(..., description="聚合状态")
     overview: CollectionAggregationOverviewResponse = Field(..., description="集合概览")
+    materials: list[MaterialSummaryResponse] = Field(
+        default_factory=list,
+        description="材料列表",
+    )
     paper_coverage: list[PaperCoverageRowResponse] = Field(
         default_factory=list,
         description="文档覆盖",

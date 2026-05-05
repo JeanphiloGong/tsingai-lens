@@ -486,14 +486,22 @@ def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_cli
     body = response.json()
     assert body["collection_id"] == collection_id
     assert body["state"] == "empty"
+    assert body["materials"] == []
     assert body["paper_coverage"] == []
     assert body["comparable_groups"] == []
+
+    materials = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/materials")
+    assert materials.status_code == 200
+    assert materials.json()["materials"] == []
 
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()
     assert workspace_body["links"]["research_view"] == (
         f"/api/v1/collections/{collection_id}/research-view"
+    )
+    assert workspace_body["links"]["research_materials"] == (
+        f"/api/v1/collections/{collection_id}/materials"
     )
     assert workspace_body["capabilities"]["can_view_research_view"] is False
 

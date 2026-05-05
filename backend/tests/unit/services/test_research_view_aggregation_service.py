@@ -291,6 +291,8 @@ def test_document_research_view_builds_sample_matrix_and_condition_series():
     assert series[0]["property"] == "yield_strength"
     assert series[0]["condition_axis"]["axis_name"] == "test_temperature_c"
     assert [point["condition_value"] for point in series[0]["points"]] == [25.0, 200.0]
+    assert payload["materials"][0]["material_id"] == "mat-ti-6al-4v"
+    assert payload["materials"][0]["canonical_name"] == "Ti-6Al-4V"
 
 
 def test_collection_research_view_builds_coverage_and_comparable_groups():
@@ -310,6 +312,11 @@ def test_collection_research_view_builds_coverage_and_comparable_groups():
     assert group["properties"] == ["yield_strength"]
     assert len(group["matrix"]["rows"]) == 2
 
+    assert payload["materials"][0]["material_id"] == "mat-ti-6al-4v"
+    assert payload["materials"][0]["paper_count"] == 1
+    assert payload["materials"][0]["sample_count"] == 2
+    assert payload["materials"][0]["comparison_count"] == 1
+
 
 def test_collection_research_view_returns_empty_state_for_empty_collection():
     service = _service(has_files=False)
@@ -317,5 +324,64 @@ def test_collection_research_view_returns_empty_state_for_empty_collection():
     payload = service.get_collection_research_view("col-1")
 
     assert payload["state"] == "empty"
+    assert payload["materials"] == []
     assert payload["paper_coverage"] == []
     assert payload["comparable_groups"] == []
+
+
+def test_collection_materials_and_profile_are_material_scoped():
+    service = _service(comparison_rows=_comparison_rows())
+
+    materials = service.list_collection_materials("col-1")
+
+    assert materials["state"] == "ready"
+    assert [item["material_id"] for item in materials["materials"]] == [
+        "mat-ti-6al-4v"
+    ]
+    summary = materials["materials"][0]
+    assert summary["canonical_name"] == "Ti-6Al-4V"
+    assert summary["measured_properties"] == ["density", "yield_strength"]
+    assert summary["links"]["research_view"].endswith(
+        "/materials/mat-ti-6al-4v/research-view"
+    )
+
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-ti-6al-4v",
+    )
+
+    assert profile["canonical_name"] == "Ti-6Al-4V"
+    assert profile["overview"]["sample_count"] == 1
+    assert [row["sample_id"] for row in profile["sample_matrix"]["rows"]] == ["var-s1"]
+    assert [paper["document_id"] for paper in profile["papers"]] == ["paper-1"]
+    assert {item["parameter"] for item in profile["process_parameter_ranges"]} >= {
+        "laser_power_w",
+        "scan_speed_mm_s",
+    }
+    assert {item["property"] for item in profile["measured_properties"]} == {
+        "density",
+        "yield_strength",
+    }
+    assert profile["comparison_groups"][0]["material_system"] == "Ti-6Al-4V"
+
+
+def test_document_material_profile_stays_inside_one_paper():
+    service = _service(comparison_rows=_comparison_rows())
+
+    materials = service.list_document_materials("col-1", "paper-1")
+    profile = service.get_document_material_research_view(
+        "col-1",
+        "paper-1",
+        materials["materials"][0]["material_id"],
+    )
+
+    assert materials["document_id"] == "paper-1"
+    assert materials["materials"][0]["sample_count"] == 1
+    assert profile["document_id"] == "paper-1"
+    assert profile["sample_matrix"]["document_id"] == "paper-1"
+    assert [row["document_id"] for row in profile["sample_matrix"]["rows"]] == ["paper-1"]
+    assert len(profile["process_conditions"]) == 1
+    assert {row["test_condition_id"] for row in profile["test_conditions"]} == {
+        "tc-25",
+        "tc-200",
+    }

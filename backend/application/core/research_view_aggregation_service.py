@@ -84,6 +84,22 @@ class ResearchViewDocumentNotFoundError(FileNotFoundError):
         super().__init__(f"research view document not found: {collection_id}/{document_id}")
 
 
+class ResearchViewMaterialNotFoundError(FileNotFoundError):
+    """Raised when a material profile cannot be found in research-view rows."""
+
+    def __init__(
+        self,
+        collection_id: str,
+        material_id: str,
+        document_id: str | None = None,
+    ) -> None:
+        self.collection_id = collection_id
+        self.document_id = document_id
+        self.material_id = material_id
+        scope = f"{collection_id}/{document_id}" if document_id else collection_id
+        super().__init__(f"research view material not found: {scope}/{material_id}")
+
+
 class ResearchViewAggregationService:
     """Build research-facing aggregate views from Core semantic artifacts."""
 
@@ -139,6 +155,11 @@ class ResearchViewAggregationService:
             projection,
             frames,
         )
+        materials = self._build_material_summaries(
+            collection_id,
+            frames,
+            comparable_groups,
+        )
         cross_paper_matrices = [
             group["matrix"]
             for group in comparable_groups
@@ -167,6 +188,7 @@ class ResearchViewAggregationService:
                 "collection_id": collection_id,
                 "state": state,
                 "overview": overview,
+                "materials": materials,
                 "paper_coverage": paper_coverage,
                 "comparable_groups": comparable_groups,
                 "cross_paper_matrices": cross_paper_matrices,
@@ -185,6 +207,74 @@ class ResearchViewAggregationService:
             }
         )
 
+    def list_collection_materials(self, collection_id: str) -> dict[str, Any]:
+        collection = self.collection_service.get_collection(collection_id)
+        files = self.collection_service.list_files(collection_id)
+        if not files:
+            return {
+                "collection_id": collection_id,
+                "state": "empty",
+                "materials": [],
+                "warnings": [],
+            }
+
+        frames = self._load_fact_frames(collection_id)
+        projection = self._load_comparison_projection(collection_id)
+        comparable_groups = self._build_comparable_groups(
+            collection_id,
+            projection,
+            frames,
+        )
+        materials = self._build_material_summaries(
+            collection_id,
+            frames,
+            comparable_groups,
+        )
+        warnings: list[dict[str, Any]] = []
+        if collection.get("paper_count") and not materials:
+            warnings.append(
+                self._warning(
+                    code="no_material_profiles",
+                    severity="warning",
+                    scope="materials",
+                    message="No reliable material bindings were available for this collection.",
+                )
+            )
+        return self._clean_value(
+            {
+                "collection_id": collection_id,
+                "state": self._derive_material_list_state(materials, warnings),
+                "materials": materials,
+                "warnings": self._dedupe_warnings(warnings),
+            }
+        )
+
+    def get_collection_material_research_view(
+        self,
+        collection_id: str,
+        material_id: str,
+    ) -> dict[str, Any]:
+        self.collection_service.get_collection(collection_id)
+        if not self.collection_service.list_files(collection_id):
+            raise ResearchViewMaterialNotFoundError(collection_id, material_id)
+
+        frames = self._load_fact_frames(collection_id)
+        projection = self._load_comparison_projection(collection_id)
+        comparable_groups = self._build_comparable_groups(
+            collection_id,
+            projection,
+            frames,
+        )
+        profile = self._build_material_profile(
+            collection_id,
+            material_id,
+            frames,
+            comparable_groups,
+        )
+        if profile is None:
+            raise ResearchViewMaterialNotFoundError(collection_id, material_id)
+        return self._clean_value(profile)
+
     def get_document_research_view(
         self,
         collection_id: str,
@@ -197,6 +287,65 @@ class ResearchViewAggregationService:
         return self._clean_value(
             self._build_document_aggregation(collection_id, document_id, frames)
         )
+
+    def list_document_materials(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> dict[str, Any]:
+        self.collection_service.get_collection(collection_id)
+        frames = self._load_fact_frames(collection_id)
+        if document_id not in self._document_ids_from_frames(frames):
+            raise ResearchViewDocumentNotFoundError(collection_id, document_id)
+        materials = self._build_document_material_summaries(
+            collection_id,
+            document_id,
+            frames,
+        )
+        warnings: list[dict[str, Any]] = []
+        if not materials:
+            warnings.append(
+                self._warning(
+                    code="no_document_material_profiles",
+                    severity="warning",
+                    scope="paper_materials",
+                    message="No reliable material bindings were available for this paper.",
+                    related_object_ids=[document_id],
+                )
+            )
+        return self._clean_value(
+            {
+                "collection_id": collection_id,
+                "document_id": document_id,
+                "state": self._derive_material_list_state(materials, warnings),
+                "materials": materials,
+                "warnings": self._dedupe_warnings(warnings),
+            }
+        )
+
+    def get_document_material_research_view(
+        self,
+        collection_id: str,
+        document_id: str,
+        material_id: str,
+    ) -> dict[str, Any]:
+        self.collection_service.get_collection(collection_id)
+        frames = self._load_fact_frames(collection_id)
+        if document_id not in self._document_ids_from_frames(frames):
+            raise ResearchViewDocumentNotFoundError(collection_id, document_id)
+        profile = self._build_document_material_profile(
+            collection_id,
+            document_id,
+            material_id,
+            frames,
+        )
+        if profile is None:
+            raise ResearchViewMaterialNotFoundError(
+                collection_id,
+                material_id,
+                document_id,
+            )
+        return self._clean_value(profile)
 
     def _load_fact_frames(self, collection_id: str) -> dict[str, pd.DataFrame]:
         try:
@@ -371,6 +520,11 @@ class ResearchViewAggregationService:
             document_id,
             document_frames,
         )
+        materials = self._build_document_material_summaries(
+            collection_id,
+            document_id,
+            frames,
+        )
         warnings = [
             *sample_matrix.get("warnings", []),
             *[
@@ -390,6 +544,7 @@ class ResearchViewAggregationService:
             ),
             "state": state,
             "overview": overview,
+            "materials": materials,
             "sample_matrix": sample_matrix,
             "condition_series": condition_series,
             "evidence_links": {
@@ -583,6 +738,7 @@ class ResearchViewAggregationService:
             )
         return {
             "row_id": f"sample-row:{variant_id}",
+            "document_id": self._safe_text(variant.get("document_id")),
             "sample_id": variant_id,
             "sample_label": self._safe_text(variant.get("variant_label")) or variant_id,
             "material": self._material_from_variant(variant),
@@ -1051,6 +1207,1252 @@ class ResearchViewAggregationService:
             "warnings": [],
         }
 
+    def _build_document_material_summaries(
+        self,
+        collection_id: str,
+        document_id: str,
+        frames: dict[str, pd.DataFrame],
+    ) -> list[dict[str, Any]]:
+        document_frames = self._document_frames(frames, document_id)
+        index = self._build_material_index(document_frames, [])
+        summaries: list[dict[str, Any]] = []
+        for material_key, entry in sorted(
+            index.items(),
+            key=lambda item: item[1]["canonical_name"].lower(),
+        ):
+            material_frames = self._filter_frames_for_material_key(
+                material_key,
+                document_frames,
+            )
+            warnings = self._material_binding_warnings(entry)
+            summaries.append(
+                {
+                    "material_id": entry["material_id"],
+                    "canonical_name": entry["canonical_name"],
+                    "aliases": sorted(entry["aliases"]),
+                    "sample_count": len(entry["variant_ids"]),
+                    "process_families": sorted(entry["process_families"]),
+                    "measured_properties": sorted(entry["measured_properties"]),
+                    "comparison_count": len(
+                        self._build_within_paper_comparisons(
+                            collection_id,
+                            document_id,
+                            material_frames,
+                        )
+                    ),
+                    "evidence_coverage": self._material_evidence_coverage(
+                        material_frames,
+                    ),
+                    "links": {
+                        "research_view": (
+                            f"/api/v1/collections/{collection_id}/documents/"
+                            f"{document_id}/materials/{entry['material_id']}/research-view"
+                        ),
+                        "collection_material_research_view": (
+                            f"/api/v1/collections/{collection_id}/materials/"
+                            f"{entry['material_id']}/research-view"
+                        ),
+                    },
+                    "warnings": warnings,
+                }
+            )
+        return summaries
+
+    def _build_document_material_profile(
+        self,
+        collection_id: str,
+        document_id: str,
+        material_id: str,
+        frames: dict[str, pd.DataFrame],
+    ) -> dict[str, Any] | None:
+        document_frames = self._document_frames(frames, document_id)
+        material_key = self._material_key_from_material_id(
+            material_id,
+            document_frames,
+            [],
+        )
+        if material_key is None:
+            return None
+        material_frames = self._filter_frames_for_material_key(
+            material_key,
+            document_frames,
+        )
+        material_index = self._build_material_index(material_frames, [])
+        entry = material_index.get(material_key)
+        if entry is None:
+            return None
+
+        sample_matrix = self._build_sample_matrix(
+            collection_id,
+            document_id,
+            material_frames,
+        )
+        condition_series = self._build_condition_series(
+            collection_id,
+            document_id,
+            material_frames,
+        )
+        measured_properties = self._build_material_property_summaries(
+            material_key,
+            material_frames,
+        )
+        within_paper_comparisons = self._build_within_paper_comparisons(
+            collection_id,
+            document_id,
+            material_frames,
+        )
+        warnings = self._dedupe_warnings(
+            [
+                *self._material_binding_warnings(entry),
+                *sample_matrix.get("warnings", []),
+            ]
+        )
+        return {
+            "collection_id": collection_id,
+            "document_id": document_id,
+            "material_id": entry["material_id"],
+            "canonical_name": entry["canonical_name"],
+            "aliases": sorted(entry["aliases"]),
+            "state": self._derive_material_profile_state(
+                sample_matrix,
+                measured_properties,
+                warnings,
+            ),
+            "overview": {
+                "paper_count": 1,
+                "sample_count": len(sample_matrix.get("rows", [])),
+                "process_families": sorted(entry["process_families"]),
+                "measured_properties": [
+                    item["property"] for item in measured_properties
+                ],
+                "comparison_count": len(within_paper_comparisons),
+                "condition_series_count": len(condition_series),
+                "evidence_coverage": self._material_evidence_coverage(
+                    material_frames,
+                ),
+            },
+            "sample_matrix": sample_matrix,
+            "process_conditions": self._build_document_process_conditions(
+                material_frames,
+            ),
+            "test_conditions": self._build_document_test_conditions(material_frames),
+            "measured_properties": measured_properties,
+            "within_paper_comparisons": within_paper_comparisons,
+            "condition_series": condition_series,
+            "evidence_refs": self._build_evidence_refs(
+                fact_ids=self._fact_ids_from_material_frames(material_frames),
+                anchor_ids=self._anchor_ids_from_material_frames(material_frames),
+                frames=material_frames,
+            ),
+            "debug_links": {
+                "document_research_view": (
+                    f"/api/v1/collections/{collection_id}/documents/"
+                    f"{document_id}/research-view"
+                ),
+                "comparison_semantics": (
+                    f"/api/v1/collections/{collection_id}/documents/"
+                    f"{document_id}/comparison-semantics"
+                ),
+            },
+            "warnings": warnings,
+        }
+
+    def _filter_frames_for_document_material(
+        self,
+        collection_id: str,  # noqa: ARG002
+        document_id: str,
+        material_id: str,
+        frames: dict[str, pd.DataFrame],
+    ) -> dict[str, pd.DataFrame]:
+        document_frames = self._document_frames(frames, document_id)
+        material_key = self._material_key_from_material_id(
+            material_id,
+            document_frames,
+            [],
+        )
+        if material_key is None:
+            return {key: frame.iloc[0:0].copy() for key, frame in document_frames.items()}
+        return self._filter_frames_for_material_key(material_key, document_frames)
+
+    def _build_material_summaries(
+        self,
+        collection_id: str,
+        frames: dict[str, pd.DataFrame],
+        comparable_groups: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        index = self._build_material_index(frames, comparable_groups)
+        summaries: list[dict[str, Any]] = []
+        for material_key, entry in sorted(
+            index.items(),
+            key=lambda item: item[1]["canonical_name"].lower(),
+        ):
+            material_frames = self._filter_frames_for_material_key(material_key, frames)
+            warnings = self._material_binding_warnings(entry)
+            summaries.append(
+                {
+                    "material_id": entry["material_id"],
+                    "canonical_name": entry["canonical_name"],
+                    "aliases": sorted(entry["aliases"]),
+                    "paper_count": len(entry["document_ids"]),
+                    "sample_count": len(entry["variant_ids"]),
+                    "process_families": sorted(entry["process_families"]),
+                    "measured_properties": sorted(entry["measured_properties"]),
+                    "comparison_count": len(entry["comparison_group_ids"]),
+                    "evidence_coverage": self._material_evidence_coverage(
+                        material_frames,
+                    ),
+                    "state": self._derive_material_summary_state(entry, warnings),
+                    "links": {
+                        "research_view": (
+                            f"/api/v1/collections/{collection_id}/materials/"
+                            f"{entry['material_id']}/research-view"
+                        ),
+                        "papers": f"/api/v1/collections/{collection_id}/documents/profiles",
+                    },
+                    "warnings": warnings,
+                }
+            )
+        return summaries
+
+    def _build_material_profile(
+        self,
+        collection_id: str,
+        material_id: str,
+        frames: dict[str, pd.DataFrame],
+        comparable_groups: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        material_key = self._material_key_from_material_id(
+            material_id,
+            frames,
+            comparable_groups,
+        )
+        if material_key is None:
+            return None
+        material_frames = self._filter_frames_for_material_key(material_key, frames)
+        material_index = self._build_material_index(
+            material_frames,
+            self._filter_comparable_groups_for_material(
+                material_key,
+                comparable_groups,
+            ),
+        )
+        entry = material_index.get(material_key)
+        if entry is None:
+            return None
+
+        material_groups = self._filter_comparable_groups_for_material(
+            material_key,
+            comparable_groups,
+        )
+        sample_matrix = self._build_material_sample_matrix(
+            material_key,
+            material_frames,
+        )
+        papers = self._build_material_paper_coverage(
+            collection_id,
+            material_key,
+            material_frames,
+        )
+        process_ranges = self._build_material_process_ranges(
+            material_key,
+            material_frames,
+        )
+        measured_properties = self._build_material_property_summaries(
+            material_key,
+            material_frames,
+        )
+        condition_series = self._build_material_condition_series(
+            collection_id,
+            material_frames,
+        )
+        warnings = self._dedupe_warnings(
+            [
+                *self._material_binding_warnings(entry),
+                *sample_matrix.get("warnings", []),
+                *[warning for paper in papers for warning in paper.get("warnings", [])],
+            ]
+        )
+        return {
+            "collection_id": collection_id,
+            "material_id": entry["material_id"],
+            "canonical_name": entry["canonical_name"],
+            "aliases": sorted(entry["aliases"]),
+            "state": self._derive_material_profile_state(
+                sample_matrix,
+                measured_properties,
+                warnings,
+            ),
+            "overview": {
+                "paper_count": len(papers),
+                "sample_count": len(sample_matrix.get("rows", [])),
+                "process_families": sorted(entry["process_families"]),
+                "measured_properties": [
+                    item["property"] for item in measured_properties
+                ],
+                "comparison_count": len(material_groups),
+                "condition_series_count": len(condition_series),
+                "evidence_coverage": self._material_evidence_coverage(
+                    material_frames,
+                ),
+            },
+            "papers": papers,
+            "sample_matrix": sample_matrix,
+            "process_parameter_ranges": process_ranges,
+            "measured_properties": measured_properties,
+            "comparison_groups": material_groups,
+            "condition_series": condition_series,
+            "evidence_refs": self._build_evidence_refs(
+                fact_ids=self._fact_ids_from_material_frames(material_frames),
+                anchor_ids=self._anchor_ids_from_material_frames(material_frames),
+                frames=material_frames,
+            ),
+            "debug_links": {
+                "all_comparisons": f"/api/v1/collections/{collection_id}/comparisons",
+                "results": f"/api/v1/collections/{collection_id}/results",
+                "evidence_cards": f"/api/v1/collections/{collection_id}/evidence/cards",
+            },
+            "warnings": warnings,
+        }
+
+    def _build_material_paper_coverage(
+        self,
+        collection_id: str,
+        material_key: str,
+        frames: dict[str, pd.DataFrame],
+    ) -> list[dict[str, Any]]:
+        profiles = frames.get("document_profiles", pd.DataFrame())
+        rows: list[dict[str, Any]] = []
+        for document_id in sorted(self._document_ids_from_frames(frames)):
+            document_frames = self._filter_frames_for_material_key(
+                material_key,
+                self._document_frames(frames, document_id),
+            )
+            variants = document_frames.get("sample_variants", pd.DataFrame())
+            measurements = document_frames.get("measurement_results", pd.DataFrame())
+            evidence_anchors = document_frames.get("evidence_anchors", pd.DataFrame())
+            sample_count = sum(
+                1 for _, row in variants.iterrows() if self._is_real_sample_variant(row)
+            )
+            if sample_count == 0 and measurements.empty:
+                continue
+            properties = sorted(
+                {
+                    self._safe_text(row.get("property_normalized")) or ""
+                    for _, row in measurements.iterrows()
+                    if self._safe_text(row.get("property_normalized"))
+                }
+            )
+            warnings = self._coverage_warnings(
+                document_id=document_id,
+                sample_count=sample_count,
+                measurement_count=int(len(measurements)),
+                evidence_count=int(len(evidence_anchors)),
+            )
+            material_id = self._material_id_from_key(material_key)
+            rows.append(
+                {
+                    "document_id": document_id,
+                    "title": self._document_title(profiles, document_id),
+                    "state": self._derive_paper_state(
+                        sample_count=sample_count,
+                        measurement_count=int(len(measurements)),
+                        evidence_count=int(len(evidence_anchors)),
+                    ),
+                    "sample_count": sample_count,
+                    "process_families": sorted(
+                        {
+                            process
+                            for _, row in variants.iterrows()
+                            if (process := self._process_family_from_variant(row))
+                        }
+                    ),
+                    "measured_properties": properties,
+                    "evidence_count": int(len(evidence_anchors)),
+                    "issue_count": len(warnings),
+                    "links": {
+                        "paper_research_view": (
+                            f"/api/v1/collections/{collection_id}/documents/"
+                            f"{document_id}/research-view"
+                        ),
+                        "document_material_research_view": (
+                            f"/api/v1/collections/{collection_id}/documents/"
+                            f"{document_id}/materials/{material_id}/research-view"
+                        ),
+                    },
+                    "warnings": warnings,
+                }
+            )
+        return rows
+
+    def _build_material_sample_matrix(
+        self,
+        material_key: str,
+        frames: dict[str, pd.DataFrame],
+    ) -> dict[str, Any]:
+        variants = frames.get("sample_variants", pd.DataFrame())
+        measurements = frames.get("measurement_results", pd.DataFrame())
+        variant_rows = [
+            self._series_to_dict(row)
+            for _, row in variants.iterrows()
+            if self._material_key_from_variant(row) == material_key
+            and self._is_real_sample_variant(row)
+        ]
+        measurements_by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for _, row in measurements.iterrows():
+            record = self._series_to_dict(row)
+            variant_id = self._safe_text(record.get("variant_id")) or "unassigned"
+            measurements_by_variant[variant_id].append(record)
+
+        rows = [
+            self._build_sample_matrix_row(
+                variant_row,
+                measurements_by_variant.get(
+                    self._safe_text(variant_row.get("variant_id")) or "",
+                    [],
+                ),
+                frames,
+            )
+            for variant_row in variant_rows
+        ]
+        process_keys = [
+            key
+            for key in _PROCESS_COLUMN_ORDER
+            if any(
+                self._has_observed_value(row.get("process_context", {}).get(key))
+                for row in rows
+            )
+        ]
+        columns = [
+            {
+                "column_id": "document_id",
+                "label": "Document",
+                "role": "sample",
+                "value_key": "document_id",
+            },
+            {
+                "column_id": "sample_label",
+                "label": "Sample",
+                "role": "sample",
+                "value_key": "sample_label",
+            },
+            {
+                "column_id": "variable_axis",
+                "label": "Variable axis",
+                "role": "process",
+                "value_key": "variable_axis",
+            },
+            {
+                "column_id": "variable_value",
+                "label": "Variable value",
+                "role": "process",
+                "value_key": "variable_value",
+            },
+            *[
+                {
+                    "column_id": key,
+                    "label": key,
+                    "role": "process",
+                    "value_key": key,
+                }
+                for key in process_keys
+            ],
+            *self._sample_matrix_property_columns(rows),
+        ]
+        warnings: list[dict[str, Any]] = []
+        if not rows:
+            warnings.append(
+                self._warning(
+                    code="no_material_sample_rows",
+                    severity="warning",
+                    scope="material_sample_matrix",
+                    message="No sample rows were available for this material.",
+                    related_object_ids=[material_key],
+                )
+            )
+        return {
+            "matrix_id": f"material-sample-matrix:{self._material_id_from_key(material_key)}",
+            "document_id": None,
+            "state": "ready" if rows else "empty",
+            "columns": columns,
+            "rows": rows,
+            "warnings": warnings,
+        }
+
+    def _build_material_process_ranges(
+        self,
+        material_key: str,  # noqa: ARG002
+        frames: dict[str, pd.DataFrame],
+    ) -> list[dict[str, Any]]:
+        variants = frames.get("sample_variants", pd.DataFrame())
+        grouped: dict[str, list[tuple[dict[str, Any], Any]]] = defaultdict(list)
+        for _, row in variants.iterrows():
+            variant = self._series_to_dict(row)
+            for key, value in self._as_mapping(
+                variant.get("process_context")
+            ).items():
+                if self._has_observed_value(value):
+                    grouped[key].append((variant, value))
+
+        ranges: list[dict[str, Any]] = []
+        for parameter, records in sorted(grouped.items()):
+            values = [value for _, value in records]
+            anchor_ids = [
+                anchor_id
+                for variant, _ in records
+                for anchor_id in self._as_list(variant.get("source_anchor_ids"))
+            ]
+            documents = {
+                self._safe_text(variant.get("document_id")) or ""
+                for variant, _ in records
+                if self._safe_text(variant.get("document_id"))
+            }
+            samples = {
+                self._safe_text(variant.get("variant_id")) or ""
+                for variant, _ in records
+                if self._safe_text(variant.get("variant_id"))
+            }
+            summary = self._range_summary(
+                values,
+                self._process_parameter_unit(parameter),
+            )
+            ranges.append(
+                {
+                    "parameter": parameter,
+                    **summary,
+                    "sample_count": len(samples),
+                    "document_count": len(documents),
+                    "evidence_refs": self._build_evidence_refs(
+                        fact_ids=[],
+                        anchor_ids=anchor_ids,
+                        frames=frames,
+                    ),
+                    "warnings": [],
+                }
+            )
+        return ranges
+
+    def _build_material_property_summaries(
+        self,
+        material_key: str,  # noqa: ARG002
+        frames: dict[str, pd.DataFrame],
+    ) -> list[dict[str, Any]]:
+        measurements = frames.get("measurement_results", pd.DataFrame())
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for _, row in measurements.iterrows():
+            measurement = self._series_to_dict(row)
+            property_name = (
+                self._safe_text(measurement.get("property_normalized"))
+                or "unspecified_property"
+            )
+            grouped[property_name].append(measurement)
+
+        summaries: list[dict[str, Any]] = []
+        for property_name, records in sorted(grouped.items()):
+            units = {
+                self._safe_text(record.get("unit")) or ""
+                for record in records
+                if self._safe_text(record.get("unit"))
+            }
+            values = []
+            for record in records:
+                value_info = self._value_from_measurement(record)
+                value = value_info.get("value")
+                values.append(
+                    value if value is not None else value_info.get("display_value")
+                )
+            unit = next(iter(units)) if len(units) == 1 else None
+            warnings: list[dict[str, Any]] = []
+            if len(units) > 1:
+                warnings.append(
+                    self._warning(
+                        code="mixed_property_units",
+                        severity="warning",
+                        scope="property_summary",
+                        message="This property uses multiple units in the source facts.",
+                        related_object_ids=[property_name],
+                    )
+                )
+            samples = {
+                self._safe_text(record.get("variant_id")) or ""
+                for record in records
+                if self._safe_text(record.get("variant_id"))
+            }
+            documents = {
+                self._safe_text(record.get("document_id")) or ""
+                for record in records
+                if self._safe_text(record.get("document_id"))
+            }
+            summaries.append(
+                {
+                    "property": property_name,
+                    **self._range_summary(values, unit),
+                    "sample_count": len(samples),
+                    "document_count": len(documents),
+                    "evidence_refs": self._build_evidence_refs(
+                        fact_ids=[
+                            self._safe_text(record.get("result_id")) or ""
+                            for record in records
+                        ],
+                        anchor_ids=[
+                            anchor_id
+                            for record in records
+                            for anchor_id in self._as_list(
+                                record.get("evidence_anchor_ids")
+                            )
+                        ],
+                        frames=frames,
+                    ),
+                    "warnings": warnings,
+                }
+            )
+        return summaries
+
+    def _build_material_condition_series(
+        self,
+        collection_id: str,
+        frames: dict[str, pd.DataFrame],
+    ) -> list[dict[str, Any]]:
+        series: list[dict[str, Any]] = []
+        for document_id in sorted(self._document_ids_from_frames(frames)):
+            series.extend(
+                self._build_condition_series(
+                    collection_id,
+                    document_id,
+                    self._document_frames(frames, document_id),
+                )
+            )
+        return series
+
+    def _build_document_process_conditions(
+        self,
+        frames: dict[str, pd.DataFrame],
+    ) -> list[dict[str, Any]]:
+        variants = frames.get("sample_variants", pd.DataFrame())
+        conditions: list[dict[str, Any]] = []
+        for _, row in variants.iterrows():
+            variant = self._series_to_dict(row)
+            process_context = self._as_mapping(variant.get("process_context"))
+            if not process_context:
+                continue
+            conditions.append(
+                {
+                    "sample_id": self._safe_text(variant.get("variant_id")),
+                    "sample_label": self._safe_text(variant.get("variant_label")),
+                    "process_context": process_context,
+                    "evidence_refs": self._build_evidence_refs(
+                        fact_ids=[],
+                        anchor_ids=self._as_list(variant.get("source_anchor_ids")),
+                        frames=frames,
+                    ),
+                }
+            )
+        return conditions
+
+    def _build_document_test_conditions(
+        self,
+        frames: dict[str, pd.DataFrame],
+    ) -> list[dict[str, Any]]:
+        conditions = frames.get("test_conditions", pd.DataFrame())
+        rows: list[dict[str, Any]] = []
+        for _, row in conditions.iterrows():
+            condition = self._series_to_dict(row)
+            rows.append(
+                {
+                    "test_condition_id": self._safe_text(
+                        condition.get("test_condition_id")
+                    ),
+                    "condition_payload": self._as_mapping(
+                        condition.get("condition_payload")
+                    ),
+                    "evidence_refs": self._build_evidence_refs(
+                        fact_ids=[],
+                        anchor_ids=self._as_list(condition.get("evidence_anchor_ids")),
+                        frames=frames,
+                    ),
+                }
+            )
+        return rows
+
+    def _build_within_paper_comparisons(
+        self,
+        collection_id: str,  # noqa: ARG002
+        document_id: str,
+        frames: dict[str, pd.DataFrame],
+    ) -> list[dict[str, Any]]:
+        sample_matrix = self._build_sample_matrix(collection_id, document_id, frames)
+        grouped: dict[str, list[tuple[dict[str, Any], str, dict[str, Any]]]] = defaultdict(list)
+        for row in sample_matrix.get("rows", []):
+            for value_key, value in row.get("values", {}).items():
+                if value.get("status") not in {"observed", "normalized"}:
+                    continue
+                property_name = value_key.split("@", 1)[0]
+                grouped[property_name].append((row, value_key, value))
+
+        comparisons: list[dict[str, Any]] = []
+        for property_name, records in sorted(grouped.items()):
+            sample_ids = {row["sample_id"] for row, _, _ in records}
+            if len(sample_ids) < 2:
+                continue
+            variable_axes = {
+                self._safe_text(row.get("variable_axis")) or "sample"
+                for row, _, _ in records
+            }
+            variable_axis = next(iter(variable_axes)) if len(variable_axes) == 1 else "sample"
+            material = (
+                self._safe_text(records[0][0].get("material")) or "unspecified material"
+            )
+            group_id = (
+                f"within-paper-comparison:{document_id}:"
+                f"{self._slug(material)}:{self._slug(property_name)}"
+            )
+            matrix_rows = [
+                {
+                    "row_id": f"{group_id}:{row['sample_id']}:{self._slug(value_key)}",
+                    "document_id": document_id,
+                    "sample_id": row.get("sample_id"),
+                    "sample_label": row.get("sample_label"),
+                    "material": row.get("material"),
+                    "process_context": row.get("process_context", {}),
+                    "variable_value": row.get("variable_value"),
+                    "test_condition": None,
+                    "property": property_name,
+                    "result": value,
+                    "evidence_refs": value.get("evidence_refs", []),
+                    "warnings": value.get("warnings", []),
+                }
+                for row, value_key, value in records
+            ]
+            comparisons.append(
+                {
+                    "group_id": group_id,
+                    "title": f"{material} {variable_axis} comparison for {property_name}",
+                    "material_system": material,
+                    "process_family": "paper scoped",
+                    "variable_axis": variable_axis,
+                    "fixed_conditions": {"document_id": document_id},
+                    "properties": [property_name],
+                    "documents": [document_id],
+                    "samples": sorted(sample_ids),
+                    "comparability_status": "comparable",
+                    "matrix": {
+                        "matrix_id": f"within-paper-matrix:{self._slug(group_id)}",
+                        "group_id": group_id,
+                        "columns": [
+                            {
+                                "column_id": "sample_id",
+                                "label": "Sample",
+                                "role": "sample",
+                                "value_key": "sample_id",
+                            },
+                            {
+                                "column_id": "variable_value",
+                                "label": "Variable value",
+                                "role": "process",
+                                "value_key": "variable_value",
+                            },
+                            {
+                                "column_id": "result",
+                                "label": "Result",
+                                "role": "property",
+                                "value_key": "result",
+                            },
+                        ],
+                        "rows": matrix_rows,
+                        "warnings": [],
+                    },
+                    "evidence_refs": [
+                        ref
+                        for _, _, value in records
+                        for ref in value.get("evidence_refs", [])
+                    ],
+                    "warnings": [],
+                }
+            )
+        return comparisons
+
+    def _filter_comparable_groups_for_material(
+        self,
+        material_key: str,
+        comparable_groups: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            group
+            for group in comparable_groups
+            if self._material_key_from_label(group.get("material_system")) == material_key
+        ]
+
+    def _build_material_index(
+        self,
+        frames: dict[str, pd.DataFrame],
+        comparable_groups: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        index: dict[str, dict[str, Any]] = {}
+        variant_to_key: dict[str, str] = {}
+        variants = frames.get("sample_variants", pd.DataFrame())
+        for _, row in variants.iterrows():
+            variant = self._series_to_dict(row)
+            if not self._is_real_sample_variant(variant):
+                continue
+            material_key = self._material_key_from_variant(variant)
+            if material_key is None:
+                continue
+            entry = self._ensure_material_entry(
+                index,
+                material_key,
+                self._material_from_variant(variant),
+            )
+            entry["aliases"].update(self._material_aliases_from_variant(variant))
+            if document_id := self._safe_text(variant.get("document_id")):
+                entry["document_ids"].add(document_id)
+            if variant_id := self._safe_text(variant.get("variant_id")):
+                entry["variant_ids"].add(variant_id)
+                variant_to_key[variant_id] = material_key
+            if process := self._process_family_from_variant(variant):
+                entry["process_families"].add(process)
+
+        measurements = frames.get("measurement_results", pd.DataFrame())
+        for _, row in measurements.iterrows():
+            measurement = self._series_to_dict(row)
+            material_key = variant_to_key.get(
+                self._safe_text(measurement.get("variant_id")) or ""
+            )
+            if material_key is None:
+                continue
+            entry = index[material_key]
+            if document_id := self._safe_text(measurement.get("document_id")):
+                entry["document_ids"].add(document_id)
+            if property_name := self._safe_text(
+                measurement.get("property_normalized")
+            ):
+                entry["measured_properties"].add(property_name)
+
+        for group in comparable_groups:
+            material_key = self._material_key_from_label(group.get("material_system"))
+            if material_key is None:
+                continue
+            entry = self._ensure_material_entry(
+                index,
+                material_key,
+                self._safe_text(group.get("material_system")),
+            )
+            if alias := self._safe_text(group.get("material_system")):
+                entry["aliases"].add(alias)
+            entry["document_ids"].update(
+                document_id
+                for document_id in group.get("documents", [])
+                if self._safe_text(document_id)
+            )
+            entry["variant_ids"].update(
+                sample_id
+                for sample_id in group.get("samples", [])
+                if self._safe_text(sample_id)
+            )
+            if process := self._safe_text(group.get("process_family")):
+                entry["process_families"].add(process)
+            entry["measured_properties"].update(
+                property_name
+                for property_name in group.get("properties", [])
+                if self._safe_text(property_name)
+            )
+            if group_id := self._safe_text(group.get("group_id")):
+                entry["comparison_group_ids"].add(group_id)
+        return index
+
+    def _ensure_material_entry(
+        self,
+        index: dict[str, dict[str, Any]],
+        material_key: str,
+        display_name: Any,
+    ) -> dict[str, Any]:
+        canonical_name = self._canonical_material_label(display_name) or material_key
+        entry = index.get(material_key)
+        if entry is None:
+            entry = {
+                "material_key": material_key,
+                "material_id": self._material_id_from_key(material_key),
+                "canonical_name": canonical_name,
+                "aliases": set(),
+                "document_ids": set(),
+                "variant_ids": set(),
+                "process_families": set(),
+                "measured_properties": set(),
+                "comparison_group_ids": set(),
+            }
+            index[material_key] = entry
+        entry["aliases"].add(canonical_name)
+        return entry
+
+    def _material_binding_warnings(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
+        warnings: list[dict[str, Any]] = []
+        if not entry["variant_ids"]:
+            warnings.append(
+                self._warning(
+                    code="material_without_sample_bindings",
+                    severity="warning",
+                    scope="material",
+                    message=(
+                        "This material was detected from comparison rows, but no "
+                        "sample variants are bound to it."
+                    ),
+                    related_object_ids=[entry["material_id"]],
+                )
+            )
+        if not entry["measured_properties"]:
+            warnings.append(
+                self._warning(
+                    code="material_without_measurements",
+                    severity="info",
+                    scope="material",
+                    message="No measured properties are bound to this material yet.",
+                    related_object_ids=[entry["material_id"]],
+                )
+            )
+        return warnings
+
+    def _filter_frames_for_material_key(
+        self,
+        material_key: str,
+        frames: dict[str, pd.DataFrame],
+    ) -> dict[str, pd.DataFrame]:
+        variants = frames.get("sample_variants", pd.DataFrame())
+        if variants is None or variants.empty:
+            selected_variants = pd.DataFrame(
+                columns=list(variants.columns) if variants is not None else []
+            )
+        else:
+            selected_variants = variants[
+                variants.apply(
+                    lambda row: self._material_key_from_variant(row) == material_key
+                    and self._is_real_sample_variant(row),
+                    axis=1,
+                )
+            ].copy()
+        variant_ids = {
+            self._safe_text(row.get("variant_id")) or ""
+            for _, row in selected_variants.iterrows()
+            if self._safe_text(row.get("variant_id"))
+        }
+
+        measurements = frames.get("measurement_results", pd.DataFrame())
+        if (
+            measurements is None
+            or measurements.empty
+            or "variant_id" not in measurements.columns
+        ):
+            selected_measurements = pd.DataFrame(
+                columns=list(measurements.columns) if measurements is not None else []
+            )
+        else:
+            selected_measurements = measurements[
+                measurements["variant_id"].apply(
+                    lambda value: self._safe_text(value) in variant_ids
+                )
+            ].copy()
+
+        condition_ids = {
+            self._safe_text(row.get("test_condition_id")) or ""
+            for _, row in selected_measurements.iterrows()
+            if self._safe_text(row.get("test_condition_id"))
+        }
+        test_conditions = frames.get("test_conditions", pd.DataFrame())
+        if (
+            test_conditions is None
+            or test_conditions.empty
+            or "test_condition_id" not in test_conditions.columns
+        ):
+            selected_conditions = pd.DataFrame(
+                columns=list(test_conditions.columns) if test_conditions is not None else []
+            )
+        else:
+            selected_conditions = test_conditions[
+                test_conditions["test_condition_id"].apply(
+                    lambda value: self._safe_text(value) in condition_ids
+                )
+            ].copy()
+
+        selected = {
+            key: frame.iloc[0:0].copy()
+            for key, frame in frames.items()
+            if key not in {"sample_variants", "measurement_results", "test_conditions"}
+        }
+        selected["sample_variants"] = selected_variants
+        selected["measurement_results"] = selected_measurements
+        selected["test_conditions"] = selected_conditions
+        selected["document_profiles"] = frames.get("document_profiles", pd.DataFrame())
+
+        anchor_ids = self._anchor_ids_from_material_frames(selected)
+        selected["evidence_anchors"] = self._filter_evidence_anchors(
+            frames.get("evidence_anchors", pd.DataFrame()),
+            anchor_ids,
+        )
+        return selected
+
+    def _filter_evidence_anchors(
+        self,
+        anchors: pd.DataFrame,
+        anchor_ids: list[str],
+    ) -> pd.DataFrame:
+        if anchors is None or anchors.empty or "anchor_id" not in anchors.columns:
+            return pd.DataFrame(columns=list(anchors.columns) if anchors is not None else [])
+        wanted = set(self._dedupe_strings(anchor_ids))
+        return anchors[
+            anchors["anchor_id"].apply(lambda value: self._safe_text(value) in wanted)
+        ].copy()
+
+    def _material_key_from_variant(self, variant_row: dict[str, Any] | pd.Series) -> str | None:
+        variant = (
+            self._series_to_dict(variant_row)
+            if isinstance(variant_row, pd.Series)
+            else dict(variant_row)
+        )
+        return self._material_key_from_label(self._material_from_variant(variant))
+
+    def _material_key_from_comparison_row(
+        self,
+        row: dict[str, Any] | pd.Series,
+    ) -> str | None:
+        record = self._series_to_dict(row) if isinstance(row, pd.Series) else dict(row)
+        for key in ("material_system_normalized", "material_system", "material"):
+            if material_key := self._material_key_from_label(record.get(key)):
+                return material_key
+        return None
+
+    def _material_key_from_label(self, label: Any) -> str | None:
+        canonical = self._canonical_material_label(label)
+        if canonical is None:
+            return None
+        return self._slug(canonical)
+
+    def _canonical_material_label(self, label: Any) -> str | None:
+        text = self._safe_text(label)
+        if text is None:
+            return None
+        normalized = re.sub(r"\s+", " ", text.replace("_", " ")).strip()
+        lowered = normalized.lower()
+        if lowered in {
+            "unspecified material",
+            "unknown material",
+            "unknown",
+            "material",
+            "materials",
+        }:
+            return None
+        compact = re.sub(r"[^a-z0-9]", "", lowered)
+        if compact in {"316l", "ss316l", "aisi316l"} or "316l" in compact:
+            return "316L stainless steel"
+        if compact in {"ti6al4v", "ti64"} or "ti6al4v" in compact:
+            return "Ti-6Al-4V"
+        if "inconel718" in compact:
+            return "Inconel 718"
+        if "alsi10mg" in compact:
+            return "AlSi10Mg"
+        return normalized
+
+    def _material_key_from_material_id(
+        self,
+        material_id: str,
+        frames: dict[str, pd.DataFrame],
+        comparable_groups: list[dict[str, Any]],
+    ) -> str | None:
+        requested = self._safe_text(material_id)
+        if requested is None:
+            return None
+        index = self._build_material_index(frames, comparable_groups)
+        for material_key, entry in index.items():
+            if requested in {material_key, entry["material_id"]}:
+                return material_key
+        return None
+
+    def _material_id_from_key(self, material_key: str) -> str:
+        return f"mat-{self._slug(material_key)}"
+
+    def _material_aliases_from_variant(self, variant: dict[str, Any]) -> set[str]:
+        aliases: set[str] = set()
+        host = self._as_mapping(variant.get("host_material_system"))
+        for key in ("composition", "name", "material", "family"):
+            if alias := self._safe_text(host.get(key)):
+                aliases.add(alias)
+        if alias := self._safe_text(variant.get("composition")):
+            aliases.add(alias)
+        return aliases
+
+    def _process_family_from_variant(
+        self,
+        variant_row: dict[str, Any] | pd.Series,
+    ) -> str | None:
+        variant = (
+            self._series_to_dict(variant_row)
+            if isinstance(variant_row, pd.Series)
+            else dict(variant_row)
+        )
+        process_context = self._as_mapping(variant.get("process_context"))
+        for key in (
+            "process_family",
+            "process_normalized",
+            "process",
+            "manufacturing_process",
+            "process_name",
+        ):
+            if process := self._safe_text(process_context.get(key)):
+                return process
+        if any(
+            self._has_observed_value(process_context.get(key))
+            for key in (
+                "laser_power_w",
+                "scan_speed_mm_s",
+                "hatch_spacing_um",
+                "layer_thickness_um",
+                "energy_density_j_mm3",
+            )
+        ):
+            return "PBF/laser processing"
+        return None
+
+    def _process_parameter_unit(self, parameter: str) -> str | None:
+        units = {
+            "laser_power_w": "W",
+            "scan_speed_mm_s": "mm/s",
+            "hatch_spacing_um": "um",
+            "layer_thickness_um": "um",
+            "energy_density_j_mm3": "J/mm3",
+            "preheat_temperature_c": "C",
+            "oxygen_level_ppm": "ppm",
+            "powder_size_distribution_um": "um",
+        }
+        return units.get(parameter)
+
+    def _range_summary(
+        self,
+        values: list[Any],
+        unit: str | None,
+    ) -> dict[str, Any]:
+        cleaned = [value for value in values if self._has_observed_value(value)]
+        numeric_values = [
+            numeric
+            for value in cleaned
+            if (numeric := self._numeric_or_none(value)) is not None
+        ]
+        if numeric_values and len(numeric_values) == len(cleaned):
+            min_value = min(numeric_values)
+            max_value = max(numeric_values)
+            if min_value == max_value:
+                display_range = f"{min_value:g}"
+            else:
+                display_range = f"{min_value:g}-{max_value:g}"
+            if unit:
+                display_range = f"{display_range} {unit}"
+            return {
+                "display_range": display_range,
+                "min_value": min_value,
+                "max_value": max_value,
+                "unit": unit,
+            }
+        labels = self._dedupe_strings(cleaned)
+        display_range = ", ".join(labels[:3])
+        if len(labels) > 3:
+            display_range = f"{display_range}, +{len(labels) - 3} more"
+        return {
+            "display_range": display_range or None,
+            "min_value": None,
+            "max_value": None,
+            "unit": unit,
+        }
+
+    def _material_evidence_coverage(
+        self,
+        frames: dict[str, pd.DataFrame],
+    ) -> dict[str, Any]:
+        measurements = frames.get("measurement_results", pd.DataFrame())
+        if measurements is not None and not measurements.empty:
+            total = int(len(measurements))
+            with_evidence = sum(
+                1
+                for _, row in measurements.iterrows()
+                if self._as_list(row.get("evidence_anchor_ids"))
+            )
+        else:
+            variants = frames.get("sample_variants", pd.DataFrame())
+            total = int(len(variants)) if variants is not None else 0
+            with_evidence = sum(
+                1
+                for _, row in variants.iterrows()
+                if self._as_list(row.get("source_anchor_ids"))
+            ) if variants is not None else 0
+        coverage = round(with_evidence / total, 3) if total else None
+        return {
+            "observed_count": total,
+            "with_evidence_count": with_evidence,
+            "coverage": coverage,
+        }
+
+    def _anchor_ids_from_material_frames(
+        self,
+        frames: dict[str, pd.DataFrame],
+    ) -> list[str]:
+        anchor_ids: list[str] = []
+        for _, row in frames.get("sample_variants", pd.DataFrame()).iterrows():
+            anchor_ids.extend(self._as_list(row.get("source_anchor_ids")))
+        for _, row in frames.get("measurement_results", pd.DataFrame()).iterrows():
+            anchor_ids.extend(self._as_list(row.get("evidence_anchor_ids")))
+        for _, row in frames.get("test_conditions", pd.DataFrame()).iterrows():
+            anchor_ids.extend(self._as_list(row.get("evidence_anchor_ids")))
+        return self._dedupe_strings(anchor_ids)
+
+    def _fact_ids_from_material_frames(
+        self,
+        frames: dict[str, pd.DataFrame],
+    ) -> list[str]:
+        return self._dedupe_strings(
+            [
+                self._safe_text(row.get("variant_id")) or ""
+                for _, row in frames.get("sample_variants", pd.DataFrame()).iterrows()
+            ]
+            + [
+                self._safe_text(row.get("result_id")) or ""
+                for _, row in frames.get("measurement_results", pd.DataFrame()).iterrows()
+            ]
+        )
+
+    def _derive_material_list_state(
+        self,
+        materials: list[dict[str, Any]],
+        warnings: list[dict[str, Any]],
+    ) -> str:
+        if not materials:
+            return "empty"
+        if any(warning.get("severity") == "error" for warning in warnings):
+            return "failed"
+        if warnings or any(material.get("state") == "partial" for material in materials):
+            return "partial"
+        return "ready"
+
+    def _derive_material_summary_state(
+        self,
+        entry: dict[str, Any],
+        warnings: list[dict[str, Any]],
+    ) -> str:
+        if not entry["variant_ids"] and not entry["comparison_group_ids"]:
+            return "empty"
+        if any(warning.get("severity") == "error" for warning in warnings):
+            return "failed"
+        if warnings:
+            return "partial"
+        return "ready"
+
+    def _derive_material_profile_state(
+        self,
+        sample_matrix: dict[str, Any],
+        measured_properties: list[dict[str, Any]],
+        warnings: list[dict[str, Any]],
+    ) -> str:
+        if not sample_matrix.get("rows") and not measured_properties:
+            return "empty"
+        if any(warning.get("severity") == "error" for warning in warnings):
+            return "failed"
+        if warnings or sample_matrix.get("state") == "partial":
+            return "partial"
+        return "ready"
+
     def _warning(
         self,
         code: str,
@@ -1091,6 +2493,7 @@ class ResearchViewAggregationService:
                 "measured_properties": [],
                 "condition_families": [],
             },
+            "materials": [],
             "paper_coverage": [],
             "comparable_groups": [],
             "cross_paper_matrices": [],

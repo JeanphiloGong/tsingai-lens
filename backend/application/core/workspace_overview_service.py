@@ -486,9 +486,22 @@ class WorkspaceService:
             "evidence": f"/api/v1/collections/{collection_id}/evidence/cards",
             "evidence_cards": f"/api/v1/collections/{collection_id}/evidence/cards",
             "research_view": f"/api/v1/collections/{collection_id}/research-view",
+            "research_materials": f"/api/v1/collections/{collection_id}/materials",
+            "research_material": (
+                f"/api/v1/collections/{collection_id}/materials/"
+                "{material_id}/research-view"
+            ),
             "research_documents": (
                 f"/api/v1/collections/{collection_id}/documents/"
                 "{document_id}/research-view"
+            ),
+            "research_document_materials": (
+                f"/api/v1/collections/{collection_id}/documents/"
+                "{document_id}/materials"
+            ),
+            "research_document_material": (
+                f"/api/v1/collections/{collection_id}/documents/"
+                "{document_id}/materials/{material_id}/research-view"
             ),
             "comparisons": f"/api/v1/collections/{collection_id}/comparisons",
             "results": f"/api/v1/collections/{collection_id}/results",

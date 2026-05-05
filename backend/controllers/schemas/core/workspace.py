@@ -146,9 +146,19 @@ class WorkspaceLinksResponse(BaseModel):
     evidence: str | None = Field(default=None, description="evidence 主路径")
     evidence_cards: str | None = Field(default=None, description="evidence/cards 路径")
     research_view: str | None = Field(default=None, description="collection research-view 路径")
+    research_materials: str | None = Field(default=None, description="materials research-view 路径")
+    research_material: str | None = Field(default=None, description="material profile 路径模板")
     research_documents: str | None = Field(
         default=None,
         description="document research-view 路径模板",
+    )
+    research_document_materials: str | None = Field(
+        default=None,
+        description="document material summaries 路径模板",
+    )
+    research_document_material: str | None = Field(
+        default=None,
+        description="document material profile 路径模板",
     )
     comparisons: str | None = Field(default=None, description="comparisons 路径")
     results: str | None = Field(default=None, description="results 路径")

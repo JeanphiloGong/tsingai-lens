@@ -192,6 +192,11 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["links"]["documents"] == f"/api/v1/collections/{collection_id}/documents/profiles"
     assert overview["links"]["results"] == f"/api/v1/collections/{collection_id}/results"
     assert overview["links"]["documents_profiles"] == f"/api/v1/collections/{collection_id}/documents/profiles"
+    assert overview["links"]["research_materials"] == f"/api/v1/collections/{collection_id}/materials"
+    assert overview["links"]["research_material"] == (
+        f"/api/v1/collections/{collection_id}/materials/"
+        "{material_id}/research-view"
+    )
     assert overview["links"]["comparisons"] == f"/api/v1/collections/{collection_id}/comparisons"
     assert overview["links"]["comparable_results"] == (
         f"/api/v1/comparable-results?collection_id={collection_id}"

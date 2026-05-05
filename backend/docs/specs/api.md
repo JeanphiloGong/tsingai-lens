@@ -186,9 +186,21 @@
 - `links.research_view`
   指向 collection research aggregation，即
   `/api/v1/collections/{collection_id}/research-view`
+- `links.research_materials`
+  指向 collection materials 主入口，即
+  `/api/v1/collections/{collection_id}/materials`
+- `links.research_material`
+  是 collection material profile 路径模板，即
+  `/api/v1/collections/{collection_id}/materials/{material_id}/research-view`
 - `links.research_documents`
   是 document research aggregation 路径模板，即
   `/api/v1/collections/{collection_id}/documents/{document_id}/research-view`
+- `links.research_document_materials`
+  是 document-scoped material list 路径模板，即
+  `/api/v1/collections/{collection_id}/documents/{document_id}/materials`
+- `links.research_document_material`
+  是 document-scoped material profile 路径模板，即
+  `/api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
 - `artifacts` 对每类产物应同时提供
   `*_generated` 与 `*_ready` 两类布尔值：
   - `generated` 表示该阶段产物文件已生成（可能为空）
@@ -233,10 +245,14 @@
 ### Research View
 
 - `GET /api/v1/collections/{collection_id}/research-view`
+- `GET /api/v1/collections/{collection_id}/materials`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
 
 这是 research-facing 聚合合同，用来把 raw paper facts 组织成样品矩阵、
-条件序列、文献覆盖和 collection 比较组。
+条件序列、文献覆盖、材料档案和 collection 比较组。
 
 它不是 raw `measurement_results` 或 result-card list 的兼容包装；前端不应在
 主界面重新从一条条 fact 自行拼矩阵。
@@ -246,6 +262,7 @@ Collection research-view 最小返回结构：
 - `collection_id`
 - `state`
 - `overview`
+- `materials`
 - `paper_coverage`
 - `comparable_groups`
 - `cross_paper_matrices`
@@ -261,9 +278,62 @@ Paper research-view 最小返回结构：
 - `paper_title`
 - `state`
 - `overview`
+- `materials`
 - `sample_matrix`
 - `condition_series`
 - `evidence_links`
+- `debug_links`
+- `warnings`
+
+Collection materials 最小返回结构：
+
+- `collection_id`
+- `state`
+- `materials`
+- `warnings`
+
+Collection material profile 最小返回结构：
+
+- `collection_id`
+- `material_id`
+- `canonical_name`
+- `aliases`
+- `state`
+- `overview`
+- `papers`
+- `sample_matrix`
+- `process_parameter_ranges`
+- `measured_properties`
+- `comparison_groups`
+- `condition_series`
+- `evidence_refs`
+- `debug_links`
+- `warnings`
+
+Document materials 最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `state`
+- `materials`
+- `warnings`
+
+Document material profile 最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `material_id`
+- `canonical_name`
+- `aliases`
+- `state`
+- `overview`
+- `sample_matrix`
+- `process_conditions`
+- `test_conditions`
+- `measured_properties`
+- `within_paper_comparisons`
+- `condition_series`
+- `evidence_refs`
 - `debug_links`
 - `warnings`
 
@@ -277,6 +347,11 @@ empty | processing | partial | ready | failed
 
 - `paper_coverage` 每篇文献一行，表达样品数、工艺参数数、measurement 数、
   condition 数、evidence 数和主要 warning
+- `materials` 是 collection 的主材料入口；`comparison_groups` 是材料档案内
+  的分析模块和高级调试入口，不是顶级主导航对象
+- collection material profile 可以跨文献聚合别名、样品、工艺范围、性能摘要
+  和比较组
+- document material profile 只表达单篇文献内一个材料的事实，不做跨文献合并
 - `sample_matrix.rows` 应优先是一行一个真实 sample / variant
 - generic material/process mention 不应成为主矩阵样品行
 - 重复 measurement facts 应折叠到同一 `EvidenceBackedValue.duplicate_count`
@@ -290,6 +365,7 @@ empty | processing | partial | ready | failed
 - collection 不存在：`404`
 - paper facts 尚未生成且 collection 非空：`409 research_view_not_ready`
 - document research-view 指向不存在文档：`404 research_view_document_not_found`
+- material profile 指向不存在材料：`404 research_view_material_not_found`
 
 ### Documents
 

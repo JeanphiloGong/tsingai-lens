@@ -259,17 +259,21 @@ const translations: Record<Language, Translations> = {
 					exportCsv: 'Export data CSV'
 				},
 				sections: {
+					findings: {
+						title: 'Key findings',
+						body: 'Evidence-backed conclusions derived from the sample values and source anchors.'
+					},
 					samples: {
 						title: 'Samples and process parameters',
 						body: 'Review the samples and how their process conditions differ.'
 					},
 					performance: {
-						title: 'Performance results',
-						body: 'Review measured properties and evidence-backed values by sample.'
+						title: 'Supporting data: performance matrix',
+						body: 'Use the matrix to verify which samples, conditions, values, and evidence support the findings.'
 					},
 					trends: {
-						title: 'Trends and comparisons',
-						body: 'Compare samples and inspect how variables affect properties.'
+						title: 'Trend interpretation',
+						body: 'Explain why the findings matter by comparing sample leaders and property trade-offs.'
 					},
 					evidence: {
 						title: 'Evidence locator',
@@ -277,7 +281,11 @@ const translations: Record<Language, Translations> = {
 					}
 				},
 				table: {
-					sampleId: 'Sample ID',
+					sampleId: 'Sample',
+					sampleCondition: 'Sample / condition',
+					primaryVariable: 'Primary variable',
+					processSummary: 'Process summary',
+					sampleFallback: 'Sample {index}',
 					scanStrategy: 'Scan strategy',
 					laserPower: 'Laser power (W)',
 					scanSpeed: 'Scan speed (mm/s)',
@@ -326,6 +334,29 @@ const translations: Record<Language, Translations> = {
 				},
 				performance: {
 					summary: '{samples} sample(s), {properties} measured property column(s).'
+				},
+				findings: {
+					empty: 'No evidence-backed finding can be derived from the current material values yet.',
+					supportedByValues: '{values}. Evidence: {evidence}.',
+					highestStrengthTitle: '{sample} shows the highest strength',
+					splitStrengthTitle: 'Strength maxima are split across samples',
+					highestElongationTitle: '{sample} shows the highest elongation',
+					highestPropertyTitle: '{sample} shows the highest {property}',
+					densityMismatchTitle: 'Highest density does not align with highest strength',
+					densityMismatchBody:
+						'{densitySample} has the highest density ({densityValue}), while {strengthSample} leads strength ({strengthValues}). Evidence: {evidence}.',
+					tradeoffTitle: 'Current data suggests a strength-ductility trade-off',
+					tradeoffBody:
+						'{strengthSample} leads strength while {elongationSample} leads elongation. Evidence: {evidence}.',
+					processOnlyTitle: 'Samples differ by process context',
+					processOnlyBody:
+						'The current matrix varies by {changed}, but comparable performance values are not ready yet.',
+					types: {
+						directObservation: 'direct observation',
+						comparativeInference: 'comparative inference',
+						trendHypothesis: 'trend hypothesis',
+						structuralObservation: 'structural observation'
+					}
 				},
 				comparison: {
 					topic: 'Comparison topic: process variables and performance',
@@ -384,7 +415,7 @@ const translations: Record<Language, Translations> = {
 				},
 				pdf: {
 					title: 'Generate material review PDF',
-					body: 'AI will generate a review from samples and process parameters, performance results, trends, and evidence locations.',
+					body: 'AI will generate a review from key findings, trend interpretation, supporting performance data, and evidence locations.',
 					generate: 'Generate review',
 					cancel: 'Cancel',
 					generatedTitle: 'Material review PDF',
@@ -2501,17 +2532,21 @@ const translations: Record<Language, Translations> = {
 					exportCsv: '导出数据 CSV'
 				},
 				sections: {
+					findings: {
+						title: '关键发现',
+						body: '由样品数值和证据锚点约束生成的可追溯结论。'
+					},
 					samples: {
 						title: '样品与工艺参数',
 						body: '了解有哪些样品及其工艺条件差异。'
 					},
 					performance: {
-						title: '性能结果',
-						body: '查看各样品的测试性能及对应数值。'
+						title: '支撑数据：性能矩阵',
+						body: '用矩阵核对每条发现背后的样品、条件、数值和证据。'
 					},
 					trends: {
-						title: '趋势与比较',
-						body: '分析变量如何影响性能，发现关键趋势。'
+						title: '趋势解释',
+						body: '通过比较样品领先项和性能权衡，解释这些发现说明了什么。'
 					},
 					evidence: {
 						title: '证据定位',
@@ -2519,7 +2554,11 @@ const translations: Record<Language, Translations> = {
 					}
 				},
 				table: {
-					sampleId: '样品ID',
+					sampleId: '样品',
+					sampleCondition: '样品 / 条件',
+					primaryVariable: '主要变量',
+					processSummary: '工艺摘要',
+					sampleFallback: '样品 {index}',
 					scanStrategy: '扫描策略',
 					laserPower: '激光功率 (W)',
 					scanSpeed: '扫描速度 (mm/s)',
@@ -2567,6 +2606,28 @@ const translations: Record<Language, Translations> = {
 				},
 				performance: {
 					summary: '共 {samples} 个样品，{properties} 项性能指标。'
+				},
+				findings: {
+					empty: '当前材料数值还不足以生成可追溯关键发现。',
+					supportedByValues: '{values}。证据：{evidence}。',
+					highestStrengthTitle: '{sample} 表现出最高强度',
+					splitStrengthTitle: '强度最高项分布在不同样品',
+					highestElongationTitle: '{sample} 表现出最高延伸率',
+					highestPropertyTitle: '{sample} 表现出最高{property}',
+					densityMismatchTitle: '最高密度并不对应最高强度',
+					densityMismatchBody:
+						'{densitySample} 的密度最高（{densityValue}），但 {strengthSample} 的强度领先（{strengthValues}）。证据：{evidence}。',
+					tradeoffTitle: '当前数据提示存在强度-塑性权衡',
+					tradeoffBody:
+						'{strengthSample} 强度领先，而 {elongationSample} 延伸率领先。证据：{evidence}。',
+					processOnlyTitle: '样品之间存在工艺上下文差异',
+					processOnlyBody: '当前矩阵的变化变量是 {changed}，但可比较性能值尚未就绪。',
+					types: {
+						directObservation: '直接观察',
+						comparativeInference: '比较推断',
+						trendHypothesis: '趋势假设',
+						structuralObservation: '结构观察'
+					}
 				},
 				comparison: {
 					topic: '比较主题：工艺变量对性能的影响',
@@ -2624,7 +2685,7 @@ const translations: Record<Language, Translations> = {
 				},
 				pdf: {
 					title: '生成材料综述 PDF',
-					body: 'AI 将基于样品与工艺参数、性能结果、趋势与比较、证据定位生成综述。',
+					body: 'AI 将基于关键发现、趋势解释、支撑性能数据和证据定位生成综述。',
 					generate: '生成综述',
 					cancel: '取消',
 					generatedTitle: '材料综述 PDF',

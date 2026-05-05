@@ -70,7 +70,13 @@ function materialProfilePayload() {
 			comparison_count: 1,
 			evidence_count: 18,
 			process_families: ['LPBF/SLM'],
-			measured_properties: ['relative density', 'hardness', 'yield strength'],
+			measured_properties: [
+				'relative density',
+				'hardness',
+				'yield strength',
+				'tensile strength',
+				'elongation'
+			],
 			variable_axes: ['scan strategy']
 		},
 		papers: [
@@ -81,7 +87,7 @@ function materialProfilePayload() {
 				state: 'ready',
 				sample_count: 2,
 				process_families: ['LPBF/SLM'],
-				measured_properties: ['relative density', 'hardness'],
+				measured_properties: ['relative density', 'hardness', 'yield strength'],
 				evidence_count: 18
 			}
 		],
@@ -89,7 +95,9 @@ function materialProfilePayload() {
 			columns: [
 				{ value_key: 'relative_density', label: 'Relative density', unit: '%' },
 				{ value_key: 'hardness', label: 'Hardness', unit: 'HV' },
-				{ value_key: 'yield_strength', label: 'Yield strength', unit: 'MPa' }
+				{ value_key: 'yield_strength', label: 'Yield strength', unit: 'MPa' },
+				{ value_key: 'tensile_strength', label: 'Tensile strength', unit: 'MPa' },
+				{ value_key: 'elongation', label: 'Elongation', unit: '%' }
 			],
 			rows: [
 				{
@@ -136,12 +144,40 @@ function materialProfilePayload() {
 							]
 						},
 						yield_strength: {
-							display_value: '278',
+							display_value: '236.65',
 							status: 'observed',
 							confidence: 0.9,
 							evidence_refs: [
 								{
 									evidence_ref_id: 'ev_yield_s001',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.9
+								}
+							]
+						},
+						tensile_strength: {
+							display_value: '375.13',
+							status: 'observed',
+							confidence: 0.91,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_uts_s001',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.91
+								}
+							]
+						},
+						elongation: {
+							display_value: '7.21%',
+							status: 'observed',
+							confidence: 0.9,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_elongation_s001',
 									document_id: 'doc_1',
 									source_kind: 'table',
 									locator: 'Table 2',
@@ -195,7 +231,7 @@ function materialProfilePayload() {
 							]
 						},
 						yield_strength: {
-							display_value: '262',
+							display_value: '159.97',
 							status: 'observed',
 							confidence: 0.89,
 							evidence_refs: [
@@ -205,6 +241,34 @@ function materialProfilePayload() {
 									source_kind: 'table',
 									locator: 'Table 2',
 									confidence: 0.89
+								}
+							]
+						},
+						tensile_strength: {
+							display_value: '196.78',
+							status: 'observed',
+							confidence: 0.88,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_uts_s002',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.88
+								}
+							]
+						},
+						elongation: {
+							display_value: '1.79%',
+							status: 'observed',
+							confidence: 0.87,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_elongation_s002',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.87
 								}
 							]
 						}
@@ -281,19 +345,26 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Samples and process parameters' }))
+			.element(browserPage.getByRole('heading', { name: 'Key findings' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Performance results' }))
+			.element(browserPage.getByRole('heading', { name: 'Trend interpretation' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Trends and comparisons' }))
+			.element(browserPage.getByRole('heading', { name: 'Supporting data: performance matrix' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Evidence locator' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Alternating strategy A')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Island strategy B')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('S001 · Alternating strategy A').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('S002 · Island strategy B').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Highest density does not align with highest strength'))
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: '95.4%' }).first())
 			.toBeInTheDocument();

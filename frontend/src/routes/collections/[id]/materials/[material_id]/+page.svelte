@@ -26,7 +26,9 @@
 	};
 
 	type ProcessSummary = {
+		controlledKeys: string[];
 		controlledLabels: string[];
+		changedKeys: string[];
 		changedLabels: string[];
 		changedVariable: string;
 	};
@@ -66,13 +68,44 @@
 		maxValue: number;
 	};
 
-	const PRIMARY_PROCESS_KEYS = [
-		'scan_strategy',
-		'laser_power_w',
+	type SupportedValue = {
+		key: string;
+		row: SampleMatrixRow;
+		column: PropertyColumn;
+		value: EvidenceBackedValue;
+		sample: string;
+		property: string;
+		displayValue: string;
+		evidenceCode: string;
+	};
+
+	type KeyFinding = {
+		key: string;
+		title: string;
+		body: string;
+		type: string;
+		confidence: string;
+		supportedValues: SupportedValue[];
+		evidenceCodes: string[];
+	};
+
+	const PROCESS_UNITS: Record<string, string> = {
+		laser_power_w: 'W',
+		scan_speed_mm_s: 'mm/s',
+		energy_density_j_mm3: 'J/mm3',
+		layer_thickness_um: 'um',
+		hatch_spacing_um: 'mm',
+		preheat_temperature_c: 'C',
+		oxygen_level_ppm: 'ppm',
+		powder_size_distribution_um: 'um'
+	};
+
+	const PROCESS_BRIEF_KEYS = [
 		'scan_speed_mm_s',
 		'energy_density_j_mm3',
 		'layer_thickness_um',
-		'hatch_spacing_um'
+		'hatch_spacing_um',
+		'laser_power_w'
 	];
 
 	const PREFERRED_PROPERTY_GROUPS = [
@@ -133,6 +166,13 @@
 	$: processSummary = buildProcessSummary(sampleRows, $t);
 	$: comparisonRows = buildComparisonRows(sampleRows, propertyColumns, processSummary, $t);
 	$: trendRows = trendComparisonRows(comparisonRows);
+	$: keyFindings = buildKeyFindings(
+		sampleRows,
+		propertyColumns,
+		processSummary,
+		evidenceCodeMap,
+		$t
+	);
 	$: materialTags = buildMaterialTags(materialProfile, $t);
 	$: paperCount = materialProfile?.overview.paper_count || materialPapers().length;
 	$: sampleCount = materialProfile?.overview.sample_count || sampleRows.length;
@@ -252,21 +292,72 @@
 		return row.process_context[key] || '--';
 	}
 
-	function sampleLabel(row: SampleMatrixRow) {
-		return row.sample_label || row.sample_id || '--';
+	function processValueWithUnit(row: SampleMatrixRow, key: string) {
+		const value = processValue(row, key);
+		if (value === '--') return value;
+		if (/[a-zA-Z%]/.test(value)) return value;
+		const unit = PROCESS_UNITS[key];
+		return unit ? `${value} ${unit}` : value;
 	}
 
-	function otherProcessParameters(row: SampleMatrixRow, translate: Translate) {
-		return Object.entries(row.process_context)
-			.filter(([key, value]) => value && !PRIMARY_PROCESS_KEYS.includes(key))
-			.map(([key, value]) => `${processLabel(key, translate)}: ${value}`)
-			.join('; ');
+	function sampleConditionLabel(row: SampleMatrixRow, translate: Translate) {
+		const candidates = [
+			row.variable_value ? String(row.variable_value) : '',
+			row.process_context.scan_strategy,
+			row.process_context.post_treatment_summary,
+			row.process_context.build_orientation,
+			row.process_context.energy_density_j_mm3
+				? `${processLabel('energy_density_j_mm3', translate)} ${processValueWithUnit(
+						row,
+						'energy_density_j_mm3'
+					)}`
+				: ''
+		].filter(Boolean);
+		return candidates[0] || '';
+	}
+
+	function sampleDisplayLabel(row: SampleMatrixRow, translate: Translate, index?: number) {
+		const rawLabel = row.sample_label || row.sample_id || '';
+		const condition = sampleConditionLabel(row, translate);
+		if (
+			rawLabel &&
+			condition &&
+			!normalizeForMatch(rawLabel).includes(normalizeForMatch(condition))
+		) {
+			return `${rawLabel} · ${condition}`;
+		}
+		if (condition) return condition;
+		if (rawLabel) return rawLabel;
+		return translate('research.materialDossier.table.sampleFallback', {
+			index: (index ?? 0) + 1
+		});
+	}
+
+	function variableSummary(row: SampleMatrixRow, summary: ProcessSummary, translate: Translate) {
+		if (summary.changedKeys.length) {
+			return summary.changedKeys
+				.map((key) => `${processLabel(key, translate)} = ${processValueWithUnit(row, key)}`)
+				.join('; ');
+		}
+		if (row.variable_axis && row.variable_value !== null) {
+			return `${row.variable_axis} = ${row.variable_value}`;
+		}
+		return sampleConditionLabel(row, translate) || '--';
+	}
+
+	function processBrief(row: SampleMatrixRow) {
+		const parts = PROCESS_BRIEF_KEYS.map((key) => processValueWithUnit(row, key)).filter(
+			(value) => value !== '--'
+		);
+		return parts.join(' · ') || '--';
 	}
 
 	function buildProcessSummary(rows: SampleMatrixRow[], translate: Translate): ProcessSummary {
 		const keys = Array.from(
 			new Set(rows.flatMap((row) => Object.keys(row.process_context)))
 		).filter((key) => rows.some((row) => row.process_context[key]));
+		const controlledKeys: string[] = [];
+		const changedKeys: string[] = [];
 		const controlledLabels: string[] = [];
 		const changedLabels: string[] = [];
 
@@ -274,12 +365,20 @@
 			const values = Array.from(
 				new Set(rows.map((row) => row.process_context[key]).filter(Boolean))
 			);
-			if (values.length === 1) controlledLabels.push(processLabel(key, translate));
-			if (values.length > 1) changedLabels.push(processLabel(key, translate));
+			if (values.length === 1) {
+				controlledKeys.push(key);
+				controlledLabels.push(processLabel(key, translate));
+			}
+			if (values.length > 1) {
+				changedKeys.push(key);
+				changedLabels.push(processLabel(key, translate));
+			}
 		}
 
 		return {
+			controlledKeys,
 			controlledLabels,
+			changedKeys,
 			changedLabels,
 			changedVariable:
 				changedLabels[0] || translate('research.materialDossier.comparison.defaultVariable')
@@ -306,8 +405,8 @@
 	): ComparisonRow[] {
 		if (rows.length < 2) return [];
 		const [first, second] = rows;
-		const firstLabel = sampleLabel(first);
-		const secondLabel = sampleLabel(second);
+		const firstLabel = sampleDisplayLabel(first, translate, 0);
+		const secondLabel = sampleDisplayLabel(second, translate, 1);
 
 		return columns
 			.map((column) => {
@@ -356,6 +455,254 @@
 	function trendComparisonRows(rows: ComparisonRow[]) {
 		const hardness = rows.find((row) => normalizeForMatch(row.property).includes('hardness'));
 		return hardness ? [hardness] : rows.slice(0, 1);
+	}
+
+	function propertyRole(column: PropertyColumn) {
+		const text = normalizeForMatch(`${column.key} ${column.label} ${column.shortLabel}`);
+		if (text.includes('density')) return 'density';
+		if (text.includes('elongation') || text.includes('strain')) return 'elongation';
+		if (text.includes('yield') || text.includes('tensile') || text.includes('uts')) {
+			return 'strength';
+		}
+		if (text.includes('hardness')) return 'hardness';
+		return 'other';
+	}
+
+	function bestValueForColumn(rows: SampleMatrixRow[], column: PropertyColumn) {
+		return rows
+			.map((row) => ({
+				row,
+				column,
+				value: row.values[column.key],
+				numeric: numericValue(row.values[column.key])
+			}))
+			.filter((item) => item.value && item.numeric !== null)
+			.sort((first, second) => (second.numeric ?? 0) - (first.numeric ?? 0))[0];
+	}
+
+	function supportedValue(
+		row: SampleMatrixRow,
+		column: PropertyColumn,
+		value: EvidenceBackedValue,
+		codeMap: Map<string, string>,
+		translate: Translate
+	): SupportedValue {
+		const ref = value.evidence_refs[0];
+		return {
+			key: `${row.row_id}:${column.key}`,
+			row,
+			column,
+			value,
+			sample: sampleDisplayLabel(row, translate),
+			property: column.shortLabel,
+			displayValue: formatEvidenceBackedValue(value),
+			evidenceCode: evidenceCode(ref, codeMap)
+		};
+	}
+
+	function uniqueSupportedValues(values: SupportedValue[]) {
+		const seen = new Set<string>();
+		return values.filter((value) => {
+			if (seen.has(value.key)) return false;
+			seen.add(value.key);
+			return true;
+		});
+	}
+
+	function evidenceCodesForValues(values: SupportedValue[]) {
+		return Array.from(
+			new Set(values.map((value) => value.evidenceCode).filter((value) => value !== '--'))
+		);
+	}
+
+	function supportedValueSummary(values: SupportedValue[]) {
+		return values.map((value) => `${value.property} = ${value.displayValue}`).join(', ');
+	}
+
+	function findingConfidence(values: SupportedValue[], translate: Translate) {
+		const confidences = values
+			.map((item) => item.value.confidence ?? item.value.evidence_refs[0]?.confidence)
+			.filter((item): item is number => item !== null && item !== undefined);
+		if (!confidences.length) return '--';
+		return confidenceLabel(Math.min(...confidences), translate);
+	}
+
+	function finding(
+		key: string,
+		title: string,
+		body: string,
+		typeKey: string,
+		values: SupportedValue[],
+		translate: Translate
+	): KeyFinding {
+		const supportedValues = uniqueSupportedValues(values);
+		return {
+			key,
+			title,
+			body,
+			type: translate(typeKey),
+			confidence: findingConfidence(supportedValues, translate),
+			supportedValues,
+			evidenceCodes: evidenceCodesForValues(supportedValues)
+		};
+	}
+
+	function buildKeyFindings(
+		rows: SampleMatrixRow[],
+		columns: PropertyColumn[],
+		summary: ProcessSummary,
+		codeMap: Map<string, string>,
+		translate: Translate
+	): KeyFinding[] {
+		const bestByColumn = columns
+			.map((column) => bestValueForColumn(rows, column))
+			.filter((item): item is NonNullable<ReturnType<typeof bestValueForColumn>> => Boolean(item));
+		const valuesForBest = (items: typeof bestByColumn) =>
+			items.map((item) => supportedValue(item.row, item.column, item.value, codeMap, translate));
+		const findings: KeyFinding[] = [];
+		const strengthBest = bestByColumn.filter((item) => propertyRole(item.column) === 'strength');
+		const elongationBest = bestByColumn.filter(
+			(item) => propertyRole(item.column) === 'elongation'
+		);
+		const densityBest = bestByColumn.find((item) => propertyRole(item.column) === 'density');
+
+		if (strengthBest.length) {
+			const values = valuesForBest(strengthBest);
+			const firstSample = values[0].sample;
+			const allSameSample = values.every((value) => value.sample === firstSample);
+			findings.push(
+				finding(
+					'highest-strength',
+					allSameSample
+						? translate('research.materialDossier.findings.highestStrengthTitle', {
+								sample: firstSample
+							})
+						: translate('research.materialDossier.findings.splitStrengthTitle'),
+					translate('research.materialDossier.findings.supportedByValues', {
+						values: supportedValueSummary(values),
+						evidence: evidenceCodesForValues(values).join(', ') || '--'
+					}),
+					'research.materialDossier.findings.types.directObservation',
+					values,
+					translate
+				)
+			);
+		}
+
+		if (elongationBest.length) {
+			const values = valuesForBest(elongationBest);
+			findings.push(
+				finding(
+					'highest-elongation',
+					translate('research.materialDossier.findings.highestElongationTitle', {
+						sample: values[0].sample
+					}),
+					translate('research.materialDossier.findings.supportedByValues', {
+						values: supportedValueSummary(values),
+						evidence: evidenceCodesForValues(values).join(', ') || '--'
+					}),
+					'research.materialDossier.findings.types.directObservation',
+					values,
+					translate
+				)
+			);
+		}
+
+		if (densityBest && strengthBest.length) {
+			const densityValue = supportedValue(
+				densityBest.row,
+				densityBest.column,
+				densityBest.value,
+				codeMap,
+				translate
+			);
+			const strengthValues = valuesForBest(strengthBest);
+			const strengthSample = strengthValues[0].sample;
+			if (densityValue.sample !== strengthSample) {
+				const values = [densityValue, ...strengthValues];
+				findings.push(
+					finding(
+						'density-strength-mismatch',
+						translate('research.materialDossier.findings.densityMismatchTitle'),
+						translate('research.materialDossier.findings.densityMismatchBody', {
+							densitySample: densityValue.sample,
+							densityValue: densityValue.displayValue,
+							strengthSample,
+							strengthValues: supportedValueSummary(strengthValues),
+							evidence: evidenceCodesForValues(values).join(', ') || '--'
+						}),
+						'research.materialDossier.findings.types.comparativeInference',
+						values,
+						translate
+					)
+				);
+			}
+		}
+
+		if (strengthBest.length && elongationBest.length) {
+			const strengthValues = valuesForBest(strengthBest);
+			const elongationValues = valuesForBest(elongationBest);
+			if (strengthValues[0].sample !== elongationValues[0].sample) {
+				const values = [...strengthValues, ...elongationValues];
+				findings.push(
+					finding(
+						'strength-ductility-tradeoff',
+						translate('research.materialDossier.findings.tradeoffTitle'),
+						translate('research.materialDossier.findings.tradeoffBody', {
+							strengthSample: strengthValues[0].sample,
+							elongationSample: elongationValues[0].sample,
+							evidence: evidenceCodesForValues(values).join(', ') || '--'
+						}),
+						'research.materialDossier.findings.types.trendHypothesis',
+						values,
+						translate
+					)
+				);
+			}
+		}
+
+		for (const item of bestByColumn) {
+			if (findings.length >= 4) break;
+			const value = supportedValue(item.row, item.column, item.value, codeMap, translate);
+			const exists = findings.some((existing) =>
+				existing.supportedValues.some((supported) => supported.key === value.key)
+			);
+			if (exists) continue;
+			findings.push(
+				finding(
+					`highest-${item.column.key}`,
+					translate('research.materialDossier.findings.highestPropertyTitle', {
+						sample: value.sample,
+						property: value.property
+					}),
+					translate('research.materialDossier.findings.supportedByValues', {
+						values: `${value.property} = ${value.displayValue}`,
+						evidence: value.evidenceCode
+					}),
+					'research.materialDossier.findings.types.directObservation',
+					[value],
+					translate
+				)
+			);
+		}
+
+		if (findings.length === 0 && summary.changedLabels.length) {
+			return [
+				{
+					key: 'process-structure',
+					title: translate('research.materialDossier.findings.processOnlyTitle'),
+					body: translate('research.materialDossier.findings.processOnlyBody', {
+						changed: summary.changedLabels.join(', ')
+					}),
+					type: translate('research.materialDossier.findings.types.structuralObservation'),
+					confidence: '--',
+					supportedValues: [],
+					evidenceCodes: []
+				}
+			];
+		}
+
+		return findings.slice(0, 4);
 	}
 
 	function buildEvidenceCodeMap(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
@@ -425,7 +772,7 @@
 		const ref = value.evidence_refs[0];
 		return {
 			title: `${column.shortLabel} = ${formatEvidenceBackedValue(value)}`,
-			sample: sampleLabel(row),
+			sample: sampleDisplayLabel(row, translate),
 			source: paperTitle(ref),
 			location: ref?.locator || '--',
 			anchor: evidenceCode(ref, codeMap),
@@ -452,7 +799,7 @@
 				items.push({
 					key: `${row.row_id}:${column.key}:${ref.evidence_ref_id}`,
 					code: evidenceCode(ref, codeMap),
-					claim: `${sampleLabel(row)} ${column.shortLabel} ${formatEvidenceBackedValue(value)}`,
+					claim: `${sampleDisplayLabel(row, translate)} ${column.shortLabel} ${formatEvidenceBackedValue(value)}`,
 					type: sourceTypeLabel(ref, translate),
 					location: ref.locator || '--',
 					confidence: confidenceScore(value.confidence ?? ref.confidence),
@@ -488,6 +835,10 @@
 		selectedEvidence = drawerDetailForValue(row, column, value, evidenceCodeMap, collectionId, $t);
 	}
 
+	function openSupportedValue(value: SupportedValue) {
+		openValueEvidence(value.row, value.column, value.value);
+	}
+
 	function openEvidenceRow(row: EvidenceLocatorRow) {
 		pdfDrawerOpen = false;
 		selectedEvidence = row.detail;
@@ -521,7 +872,7 @@
 				const ref = value?.evidence_refs[0];
 				return [
 					'performance',
-					sampleLabel(row),
+					sampleDisplayLabel(row, $t),
 					column.shortLabel,
 					value ? formatEvidenceBackedValue(value) : '',
 					evidenceCode(ref, evidenceCodeMap),
@@ -602,121 +953,54 @@
 	{:else}
 		<div class="dossier-layout">
 			<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
-				<section id="samples-process" class="dossier-card">
+				<section id="key-findings" class="dossier-card dossier-card--findings">
 					<div class="dossier-section-heading">
 						<span class="section-number">1</span>
-						<h3>{$t('research.materialDossier.sections.samples.title')}</h3>
-						<p>{$t('research.materialDossier.sections.samples.body')}</p>
+						<h3>{$t('research.materialDossier.sections.findings.title')}</h3>
+						<p>{$t('research.materialDossier.sections.findings.body')}</p>
 					</div>
 
-					<div class="dossier-table-wrapper">
-						<table class="dossier-table">
-							<thead>
-								<tr>
-									<th>{$t('research.materialDossier.table.sampleId')}</th>
-									<th>{$t('research.materialDossier.table.scanStrategy')}</th>
-									<th>{$t('research.materialDossier.table.laserPower')}</th>
-									<th>{$t('research.materialDossier.table.scanSpeed')}</th>
-									<th>{$t('research.materialDossier.table.energyDensity')}</th>
-									<th>{$t('research.materialDossier.table.layerThickness')}</th>
-									<th>{$t('research.materialDossier.table.hatchSpacing')}</th>
-									<th>{$t('research.materialDossier.table.otherParameters')}</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each sampleRows as row (row.row_id)}
-									<tr>
-										<td>
-											<a
-												class="dossier-link"
-												href={resolve('/collections/[id]/materials/[material_id]', {
-													id: collectionId,
-													material_id: materialId
-												})}
-											>
-												{sampleLabel(row)}
-											</a>
-										</td>
-										<td>{processValue(row, 'scan_strategy')}</td>
-										<td>{processValue(row, 'laser_power_w')}</td>
-										<td>{processValue(row, 'scan_speed_mm_s')}</td>
-										<td>{processValue(row, 'energy_density_j_mm3')}</td>
-										<td>{processValue(row, 'layer_thickness_um')}</td>
-										<td>{processValue(row, 'hatch_spacing_um')}</td>
-										<td>{otherProcessParameters(row, $t) || '--'}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-					<p class="dossier-table-note">
-						{$t('research.materialDossier.samples.summary', {
-							count: sampleRows.length,
-							controlled: processSummary.controlledLabels.join(', ') || '--',
-							changed: processSummary.changedLabels.join(', ') || '--'
-						})}
-					</p>
-				</section>
-
-				<section id="performance-results" class="dossier-card">
-					<div class="dossier-section-heading">
-						<span class="section-number">2</span>
-						<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
-						<p>{$t('research.materialDossier.sections.performance.body')}</p>
-					</div>
-
-					<div class="dossier-table-wrapper">
-						<table class="dossier-table">
-							<thead>
-								<tr>
-									<th>{$t('research.materialDossier.table.sampleId')}</th>
-									{#each propertyColumns as column (column.key)}
-										<th>{column.label}</th>
-									{/each}
-									<th>{$t('research.materialDossier.table.testCondition')}</th>
-									<th>{$t('research.materialDossier.table.evidenceAnchors')}</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each sampleRows as row (row.row_id)}
-									<tr>
-										<td>
-											<span class="sample-id">{sampleLabel(row)}</span>
-										</td>
-										{#each propertyColumns as column (column.key)}
-											{@const value = row.values[column.key]}
-											<td>
-												{#if value}
-													<button
-														type="button"
-														class="value-button"
-														on:click={() => openValueEvidence(row, column, value)}
-													>
-														{formatEvidenceBackedValue(value)}
-													</button>
-												{:else}
-													<span class="empty-value">--</span>
-												{/if}
-											</td>
+					<div class="finding-grid">
+						{#each keyFindings as finding, index (finding.key)}
+							<article class="finding-card">
+								<div class="finding-card__header">
+									<span>{index + 1}</span>
+									<div>
+										<h4>{finding.title}</h4>
+										<p>{finding.body}</p>
+									</div>
+								</div>
+								<div class="finding-meta">
+									<span>{finding.type}</span>
+									<span
+										>{$t('research.materialDossier.evidence.confidence')}: {finding.confidence}</span
+									>
+									<span
+										>{$t('research.materialDossier.evidence.anchor')}:
+										{finding.evidenceCodes.join(', ') || '--'}</span
+									>
+								</div>
+								{#if finding.supportedValues.length}
+									<div class="finding-values">
+										{#each finding.supportedValues as value (value.key)}
+											<button type="button" on:click={() => openSupportedValue(value)}>
+												<strong>{value.sample}</strong>
+												<span>{value.property} = {value.displayValue}</span>
+												<small>{value.evidenceCode}</small>
+											</button>
 										{/each}
-										<td>{row.variable_axis ?? '--'}</td>
-										<td>{rowEvidenceLabels(row, propertyColumns, evidenceCodeMap)}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
+									</div>
+								{/if}
+							</article>
+						{:else}
+							<p class="empty-copy">{$t('research.materialDossier.findings.empty')}</p>
+						{/each}
 					</div>
-					<p class="dossier-table-note">
-						{$t('research.materialDossier.performance.summary', {
-							samples: sampleRows.length,
-							properties: propertyColumns.length
-						})}
-					</p>
 				</section>
 
 				<section id="trend-comparison" class="dossier-card">
 					<div class="dossier-section-heading">
-						<span class="section-number">3</span>
+						<span class="section-number">2</span>
 						<h3>{$t('research.materialDossier.sections.trends.title')}</h3>
 						<p>{$t('research.materialDossier.sections.trends.body')}</p>
 					</div>
@@ -816,6 +1100,67 @@
 					</div>
 				</section>
 
+				<section id="performance-results" class="dossier-card">
+					<div class="dossier-section-heading">
+						<span class="section-number">3</span>
+						<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
+						<p>{$t('research.materialDossier.sections.performance.body')}</p>
+					</div>
+
+					<div class="dossier-table-wrapper">
+						<table class="dossier-table dossier-table--wide">
+							<thead>
+								<tr>
+									<th>{$t('research.materialDossier.table.sampleCondition')}</th>
+									<th>{$t('research.materialDossier.table.primaryVariable')}</th>
+									<th>{$t('research.materialDossier.table.processSummary')}</th>
+									{#each propertyColumns as column (column.key)}
+										<th>{column.label}</th>
+									{/each}
+									<th>{$t('research.materialDossier.table.evidenceAnchors')}</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each sampleRows as row, rowIndex (row.row_id)}
+									<tr>
+										<td>
+											<div class="sample-condition">
+												<strong>{sampleDisplayLabel(row, $t, rowIndex)}</strong>
+												<small>{materialProfile.canonical_name}</small>
+											</div>
+										</td>
+										<td>{variableSummary(row, processSummary, $t)}</td>
+										<td>{processBrief(row)}</td>
+										{#each propertyColumns as column (column.key)}
+											{@const value = row.values[column.key]}
+											<td>
+												{#if value}
+													<button
+														type="button"
+														class="value-button"
+														on:click={() => openValueEvidence(row, column, value)}
+													>
+														{formatEvidenceBackedValue(value)}
+													</button>
+												{:else}
+													<span class="empty-value">--</span>
+												{/if}
+											</td>
+										{/each}
+										<td>{rowEvidenceLabels(row, propertyColumns, evidenceCodeMap)}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+					<p class="dossier-table-note">
+						{$t('research.materialDossier.performance.summary', {
+							samples: sampleRows.length,
+							properties: propertyColumns.length
+						})}
+					</p>
+				</section>
+
 				<section id="evidence-locator" class="dossier-card">
 					<div class="dossier-section-heading">
 						<span class="section-number">4</span>
@@ -893,11 +1238,11 @@
 					aria-label={$t('research.materialDossier.aside.quickNav')}
 				>
 					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
-					<a href="#samples-process">1 {$t('research.materialDossier.sections.samples.title')}</a>
+					<a href="#key-findings">1 {$t('research.materialDossier.sections.findings.title')}</a>
+					<a href="#trend-comparison">2 {$t('research.materialDossier.sections.trends.title')}</a>
 					<a href="#performance-results"
-						>2 {$t('research.materialDossier.sections.performance.title')}</a
+						>3 {$t('research.materialDossier.sections.performance.title')}</a
 					>
-					<a href="#trend-comparison">3 {$t('research.materialDossier.sections.trends.title')}</a>
 					<a href="#evidence-locator">4 {$t('research.materialDossier.sections.evidence.title')}</a>
 				</nav>
 
@@ -1022,9 +1367,9 @@
 			{:else}
 				<p>{$t('research.materialDossier.pdf.body')}</p>
 				<ul class="pdf-list">
-					<li>{$t('research.materialDossier.sections.samples.title')}</li>
-					<li>{$t('research.materialDossier.sections.performance.title')}</li>
+					<li>{$t('research.materialDossier.sections.findings.title')}</li>
 					<li>{$t('research.materialDossier.sections.trends.title')}</li>
+					<li>{$t('research.materialDossier.sections.performance.title')}</li>
 					<li>{$t('research.materialDossier.sections.evidence.title')}</li>
 				</ul>
 				<dl class="pdf-data">
@@ -1242,6 +1587,119 @@
 		line-height: 20px;
 	}
 
+	.finding-grid {
+		display: grid;
+		gap: 12px;
+	}
+
+	.finding-card {
+		display: grid;
+		gap: 12px;
+		padding: 14px;
+		border: 1px solid #dbeafe;
+		border-radius: 10px;
+		background: #f8fbff;
+	}
+
+	.finding-card__header {
+		display: grid;
+		grid-template-columns: 26px minmax(0, 1fr);
+		gap: 10px;
+		align-items: start;
+	}
+
+	.finding-card__header > span {
+		width: 24px;
+		height: 24px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 8px;
+		background: #2563eb;
+		color: #ffffff;
+		font-size: 13px;
+		font-weight: 800;
+		line-height: 18px;
+	}
+
+	.finding-card h4 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 16px;
+		font-weight: 700;
+		line-height: 24px;
+	}
+
+	.finding-card p {
+		margin: 4px 0 0;
+		color: #475569;
+		font-size: 14px;
+		line-height: 22px;
+	}
+
+	.finding-meta,
+	.finding-values {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.finding-meta span {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		padding: 3px 8px;
+		border: 1px solid #e2e8f0;
+		border-radius: 6px;
+		background: #ffffff;
+		color: #475569;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.finding-values button {
+		display: grid;
+		gap: 2px;
+		min-width: 180px;
+		padding: 9px 10px;
+		border: 1px solid #bfdbfe;
+		border-radius: 8px;
+		background: #ffffff;
+		color: #0f172a;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.finding-values button:hover {
+		border-color: #2563eb;
+		background: #eff6ff;
+	}
+
+	.finding-values strong,
+	.finding-values span,
+	.finding-values small {
+		overflow-wrap: anywhere;
+	}
+
+	.finding-values strong {
+		color: #2563eb;
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.finding-values span {
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 19px;
+	}
+
+	.finding-values small {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
 	.dossier-table-wrapper {
 		overflow-x: auto;
 		border: 1px solid #e2e8f0;
@@ -1256,6 +1714,10 @@
 
 	.dossier-table--compact {
 		min-width: 620px;
+	}
+
+	.dossier-table--wide {
+		min-width: 1080px;
 	}
 
 	.dossier-table th,
@@ -1285,9 +1747,21 @@
 		font-weight: 700;
 	}
 
-	.sample-id {
+	.sample-condition {
+		display: grid;
+		gap: 3px;
+		min-width: 180px;
+	}
+
+	.sample-condition strong {
 		color: #2563eb;
 		font-weight: 700;
+	}
+
+	.sample-condition small {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.value-button,

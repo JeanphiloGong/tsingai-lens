@@ -76,6 +76,12 @@
 		maxValue: number;
 	};
 
+	type ComparisonPair = {
+		first: SampleMatrixRow;
+		second: SampleMatrixRow;
+		variableLabel: string;
+	};
+
 	type SupportedValue = {
 		key: string;
 		row: SampleMatrixRow;
@@ -367,7 +373,9 @@
 	}
 
 	function processValue(row: SampleMatrixRow, key: string) {
-		return row.process_context[key] || '--';
+		const value = row.process_context[key];
+		if (value === null || value === undefined || value === '') return '--';
+		return String(value);
 	}
 
 	function processValueWithUnit(row: SampleMatrixRow, key: string) {
@@ -433,7 +441,7 @@
 	function buildProcessSummary(rows: SampleMatrixRow[], translate: Translate): ProcessSummary {
 		const keys = Array.from(
 			new Set(rows.flatMap((row) => Object.keys(row.process_context)))
-		).filter((key) => rows.some((row) => row.process_context[key]));
+		).filter((key) => rows.some((row) => processValue(row, key) !== '--'));
 		const controlledKeys: string[] = [];
 		const changedKeys: string[] = [];
 		const controlledLabels: string[] = [];
@@ -441,7 +449,7 @@
 
 		for (const key of keys) {
 			const values = Array.from(
-				new Set(rows.map((row) => row.process_context[key]).filter(Boolean))
+				new Set(rows.map((row) => processValue(row, key)).filter((value) => value !== '--'))
 			);
 			if (values.length === 1) {
 				controlledKeys.push(key);
@@ -475,14 +483,50 @@
 		return match ? Number(match[0]) : null;
 	}
 
+	function comparisonPair(
+		rows: SampleMatrixRow[],
+		summary: ProcessSummary,
+		translate: Translate
+	): ComparisonPair | null {
+		if (rows.length < 2) return null;
+
+		for (const key of summary.changedKeys) {
+			for (let firstIndex = 0; firstIndex < rows.length - 1; firstIndex += 1) {
+				for (let secondIndex = firstIndex + 1; secondIndex < rows.length; secondIndex += 1) {
+					const firstValue = processValueWithUnit(rows[firstIndex], key);
+					const secondValue = processValueWithUnit(rows[secondIndex], key);
+					if (firstValue === '--' || secondValue === '--' || firstValue === secondValue) {
+						continue;
+					}
+					return {
+						first: rows[firstIndex],
+						second: rows[secondIndex],
+						variableLabel: processLabel(key, translate)
+					};
+				}
+			}
+		}
+
+		if (!summary.changedKeys.length) {
+			return {
+				first: rows[0],
+				second: rows[1],
+				variableLabel: summary.changedVariable
+			};
+		}
+
+		return null;
+	}
+
 	function buildComparisonRows(
 		rows: SampleMatrixRow[],
 		columns: PropertyColumn[],
 		summary: ProcessSummary,
 		translate: Translate
 	): ComparisonRow[] {
-		if (rows.length < 2) return [];
-		const [first, second] = rows;
+		const pair = comparisonPair(rows, summary, translate);
+		if (!pair) return [];
+		const { first, second, variableLabel } = pair;
 		const firstLabel = sampleDisplayLabel(first, translate, 0);
 		const secondLabel = sampleDisplayLabel(second, translate, 1);
 
@@ -516,7 +560,7 @@
 
 				return {
 					key: column.key,
-					variable: `${summary.changedVariable}: ${firstLabel} vs ${secondLabel}`,
+					variable: `${variableLabel}: ${firstLabel} vs ${secondLabel}`,
 					property: column.label,
 					observation: `${firstDisplay} -> ${secondDisplay}`,
 					conclusion,

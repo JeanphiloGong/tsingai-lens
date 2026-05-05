@@ -347,6 +347,26 @@ def test_table_row_process_context_uses_cell_header_bindings():
     assert context.energy_density_j_mm3 == 150.0
 
 
+def test_table_row_process_context_keeps_p001_process_columns_separate():
+    service = PaperFactsService()
+
+    context = service._build_table_row_process_context(
+        [],
+        row_cells=[
+            {"col_index": 1, "header_path": "Sample number", "cell_text": "9"},
+            {"col_index": 2, "header_path": "Hatch space (mm)", "cell_text": "0.12"},
+            {"col_index": 3, "header_path": "Scan strategy", "cell_text": "B"},
+            {"col_index": 4, "header_path": "Scanning speed (mm/s)", "cell_text": "0.239"},
+            {"col_index": 5, "header_path": "Energy density (J/mm 3 )", "cell_text": "70"},
+        ],
+    )
+
+    assert context.hatch_spacing_um == 120.0
+    assert context.scan_strategy == "B"
+    assert context.scan_speed_mm_s == 0.239
+    assert context.energy_density_j_mm3 == 70.0
+
+
 def test_text_window_test_conditions_skip_empty_payload():
     service = PaperFactsService()
     text_window = {

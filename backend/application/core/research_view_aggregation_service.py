@@ -819,15 +819,49 @@ class ResearchViewAggregationService:
         unique: dict[tuple[Any, ...], dict[str, Any]] = {}
         for measurement in measurements:
             value_payload = self._as_mapping(measurement.get("value_payload"))
-            key = (
-                self._safe_text(measurement.get("property_normalized")),
-                self._numeric_value(value_payload),
-                self._safe_text(value_payload.get("source_value_text")),
-                self._safe_text(measurement.get("unit")),
-                self._safe_text(measurement.get("result_type")),
-            )
-            unique.setdefault(key, measurement)
+            numeric_value = self._numeric_value(value_payload)
+            if numeric_value is None:
+                key = (
+                    self._safe_text(measurement.get("property_normalized")),
+                    self._safe_text(value_payload.get("source_value_text")),
+                    self._measurement_display_unit(measurement, value_payload),
+                    self._safe_text(measurement.get("result_type")),
+                )
+            else:
+                key = (
+                    self._safe_text(measurement.get("property_normalized")),
+                    numeric_value,
+                    self._safe_text(measurement.get("result_type")),
+                )
+            existing = unique.get(key)
+            measurement_score = self._measurement_display_score(measurement)
+            existing_score = -1
+            if existing is not None:
+                existing_score = self._measurement_display_score(existing)
+            if measurement_score > existing_score:
+                unique[key] = measurement
         return list(unique.values())
+
+    def _measurement_display_unit(
+        self,
+        measurement: dict[str, Any],
+        value_payload: dict[str, Any],
+    ) -> str:
+        unit = self._safe_text(measurement.get("unit")) or self._safe_text(
+            value_payload.get("source_unit_text")
+        )
+        return (unit or "").replace("％", "%").strip().lower()
+
+    def _measurement_display_score(self, measurement: dict[str, Any]) -> int:
+        value_payload = self._as_mapping(measurement.get("value_payload"))
+        score = 0
+        if self._safe_text(measurement.get("unit")):
+            score += 2
+        if self._safe_text(value_payload.get("source_unit_text")):
+            score += 1
+        if self._safe_text(value_payload.get("source_value_text")):
+            score += 1
+        return score
 
     def _build_evidence_backed_value(
         self,

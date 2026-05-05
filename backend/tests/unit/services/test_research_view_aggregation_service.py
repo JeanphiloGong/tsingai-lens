@@ -310,6 +310,39 @@ def test_document_research_view_builds_sample_matrix_and_condition_series():
     assert payload["materials"][0]["canonical_name"] == "Ti-6Al-4V"
 
 
+def test_research_view_collapses_equivalent_numeric_values_with_missing_units():
+    service = _service()
+
+    value = service._build_evidence_backed_value(
+        [
+            {
+                "result_id": "res-density-unitless",
+                "property_normalized": "density",
+                "value_payload": {"value": 97.7, "source_value_text": "97.7"},
+                "unit": "",
+                "result_type": "scalar",
+                "evidence_anchor_ids": [],
+            },
+            {
+                "result_id": "res-density-percent",
+                "property_normalized": "density",
+                "value_payload": {"value": 97.7, "source_value_text": "97.7"},
+                "unit": "%",
+                "result_type": "scalar",
+                "evidence_anchor_ids": [],
+            },
+        ],
+        {"evidence_anchors": pd.DataFrame()},
+    )
+
+    assert value["status"] == "observed"
+    assert value["display_value"] == "97.7 %"
+    assert value["value"] == 97.7
+    assert value["unit"] == "%"
+    assert value["duplicate_count"] == 1
+    assert value["conflict_status"] == "duplicate_only"
+
+
 def test_collection_research_view_builds_coverage_and_comparable_groups():
     service = _service(comparison_rows=_comparison_rows())
 

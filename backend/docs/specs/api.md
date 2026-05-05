@@ -18,6 +18,8 @@
 - `evidence/cards` 是支撑型资源，主要服务于 result/document/comparison drilldown
 - `protocol/*` 是条件分支，不是所有 collection 的默认主产物
 - `graph/*`、`reports/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
+- `materials/{material_id}/review-report*` 是基于 material research-view 的
+  AI-assisted review draft 生成能力，不是 raw 数据导出
 - 当前没有单独公开的 `query/search` 产品接口
 - `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
 - 所有业务响应都会回传 `X-Request-ID`
@@ -366,6 +368,107 @@ empty | processing | partial | ready | failed
 - paper facts 尚未生成且 collection 非空：`409 research_view_not_ready`
 - document research-view 指向不存在文档：`404 research_view_document_not_found`
 - material profile 指向不存在材料：`404 research_view_material_not_found`
+
+### Material Review Reports
+
+- `POST /api/v1/collections/{collection_id}/materials/{material_id}/review-report`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report.md`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report.pdf`
+
+这是材料档案的高价值输出能力：后端先读取 collection material profile
+research-view，整理为 `MaterialReviewContextPack`，再调用 AI 生成综述论文级
+Markdown 草稿，校验证据引用，并渲染 PDF。
+
+产品定位是 AI-assisted review draft，不是正式发表论文，也不是普通导出。
+PDF/Markdown 内必须保留说明：
+
+```text
+本文件为基于当前文献集合生成的 AI 辅助综述论文草稿，正式学术使用前需人工审阅。
+```
+
+生成请求体：
+
+```json
+{
+  "language": "zh",
+  "report_type": "review_draft",
+  "include_appendix": true,
+  "force_regenerate": false
+}
+```
+
+字段语义：
+
+- `language`
+  当前支持 `zh | en`，默认 `zh`
+- `report_type`
+  当前仅支持 `review_draft`
+- `include_appendix`
+  是否把 evidence table 放入 AI 上下文和报告附录
+- `force_regenerate`
+  是否忽略已有报告并重新生成
+
+`POST` 返回最小结构：
+
+- `report_id`
+- `collection_id`
+- `material_id`
+- `status`
+- `message`
+- `title`
+- `language`
+- `report_type`
+- `include_appendix`
+- `readiness`
+- `readiness_reason`
+- `data_version`
+- `warnings`
+- `created_at`
+- `updated_at`
+- `generated_at`
+- `pdf_url`
+- `markdown_url`
+
+`status` 使用：
+
+```text
+generating | ready | ready_with_warnings | failed
+```
+
+`readiness` 使用：
+
+```text
+strong | usable | preliminary | insufficient
+```
+
+生成流程：
+
+1. 读取 material research-view。
+2. 构造 `MaterialReviewContextPack`，只包含综述写作需要的材料、文献范围、
+   样品-工艺矩阵、性能矩阵、comparison clusters、trend findings、
+   conflicts、research gaps、evidence table 和 limitations。
+3. 调用 AI 生成 Markdown。
+4. 校验 Markdown 中的 evidence id。
+5. 写出 Markdown 和 PDF。
+
+证据约束：
+
+- AI 输入不应直接暴露 raw JSON、长 result id、hash id、抽取日志或 debug 信息
+- 后端会把 evidence refs 映射为 `E01`、`E02` 这类报告内证据 ID
+- Markdown 中出现不存在的 evidence id 时，报告状态应为
+  `ready_with_warnings`
+- 结论章节缺少 evidence citation 时，报告状态应为
+  `ready_with_warnings`
+- 机制解释必须区分数据直接支持、趋势观察、机制性假设和研究空白
+
+错误语义：
+
+- collection 不存在：`404`
+- material profile 指向不存在材料：`404 research_view_material_not_found`
+- paper facts 尚未生成且 collection 非空：`409 research_view_not_ready`
+- 报告尚未生成：`404 material_review_report_not_found`
+- Markdown/PDF 尚未就绪：`409 material_review_report_not_ready`
 
 ### Documents
 

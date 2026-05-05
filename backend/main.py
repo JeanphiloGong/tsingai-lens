@@ -11,7 +11,7 @@ from controllers.core import (
     results,
     workspace,
 )
-from controllers.derived import graph, protocol, reports
+from controllers.derived import graph, material_review_reports, protocol, reports
 from controllers.goal import intake as goals
 from controllers.source import collections, tasks
 from fastapi import FastAPI, Request
@@ -104,6 +104,7 @@ def create_app() -> FastAPI:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.mount(f"{PUBLIC_API_PREFIX}/static", StaticFiles(directory=DATA_DIR), name="static")
     app.include_router(reports.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(material_review_reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(graph.router, prefix=PUBLIC_API_V1_PREFIX)

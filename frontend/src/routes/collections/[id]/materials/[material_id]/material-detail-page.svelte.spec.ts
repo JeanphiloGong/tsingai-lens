@@ -68,36 +68,145 @@ function materialProfilePayload() {
 			paper_count: 1,
 			sample_count: 2,
 			comparison_count: 1,
-			evidence_count: 4,
-			process_families: ['LPBF'],
-			measured_properties: ['density'],
-			variable_axes: ['scan speed']
+			evidence_count: 18,
+			process_families: ['LPBF/SLM'],
+			measured_properties: ['relative density', 'hardness', 'yield strength'],
+			variable_axes: ['scan strategy']
 		},
 		papers: [
 			{
 				document_id: 'doc_1',
 				title: 'Paper A',
+				source_filename: '316L Stainless Steel Process Study.pdf',
 				state: 'ready',
 				sample_count: 2,
-				process_families: ['LPBF'],
-				measured_properties: ['density'],
-				evidence_count: 4
+				process_families: ['LPBF/SLM'],
+				measured_properties: ['relative density', 'hardness'],
+				evidence_count: 18
 			}
 		],
 		sample_matrix: {
-			columns: [{ value_key: 'density', label: 'Density' }],
+			columns: [
+				{ value_key: 'relative_density', label: 'Relative density', unit: '%' },
+				{ value_key: 'hardness', label: 'Hardness', unit: 'HV' },
+				{ value_key: 'yield_strength', label: 'Yield strength', unit: 'MPa' }
+			],
 			rows: [
 				{
 					row_id: 'row_1',
-					sample_id: 'S1',
-					sample_label: 'Sample A',
+					sample_id: 'S001',
+					sample_label: 'S001',
 					material: '316L stainless steel',
-					process_context: { scan_speed: '800 mm/s' },
+					process_context: {
+						scan_strategy: 'Alternating strategy A',
+						laser_power_w: '200',
+						scan_speed_mm_s: '800',
+						energy_density_j_mm3: '70',
+						layer_thickness_um: '30',
+						hatch_spacing_um: '0.12',
+						oxygen_level_ppm: '100 ppm'
+					},
 					values: {
-						density: {
-							display_value: '99.1%',
+						relative_density: {
+							display_value: '95.4%',
 							status: 'observed',
-							evidence_refs: [{ evidence_ref_id: 'ev_1', document_id: 'doc_1' }]
+							confidence: 0.96,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_density_s001',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.96
+								}
+							]
+						},
+						hardness: {
+							display_value: '215.6',
+							status: 'observed',
+							confidence: 0.95,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_hardness_s001',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.95
+								}
+							]
+						},
+						yield_strength: {
+							display_value: '278',
+							status: 'observed',
+							confidence: 0.9,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_yield_s001',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.9
+								}
+							]
+						}
+					}
+				},
+				{
+					row_id: 'row_2',
+					sample_id: 'S002',
+					sample_label: 'S002',
+					material: '316L stainless steel',
+					process_context: {
+						scan_strategy: 'Island strategy B',
+						laser_power_w: '200',
+						scan_speed_mm_s: '800',
+						energy_density_j_mm3: '70',
+						layer_thickness_um: '30',
+						hatch_spacing_um: '0.12',
+						oxygen_level_ppm: '100 ppm'
+					},
+					values: {
+						relative_density: {
+							display_value: '97.7%',
+							status: 'observed',
+							confidence: 0.94,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_density_s002',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.94
+								}
+							]
+						},
+						hardness: {
+							display_value: '192.3',
+							status: 'observed',
+							confidence: 0.92,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_hardness_s002',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.92
+								}
+							]
+						},
+						yield_strength: {
+							display_value: '262',
+							status: 'observed',
+							confidence: 0.89,
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_yield_s002',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.89
+								}
+							]
 						}
 					}
 				}
@@ -106,7 +215,7 @@ function materialProfilePayload() {
 		process_parameter_ranges: [
 			{
 				parameter: 'scan speed',
-				display_range: '800-1200 mm/s',
+				display_range: '800 mm/s',
 				sample_count: 2,
 				document_count: 1
 			}
@@ -125,7 +234,7 @@ function materialProfilePayload() {
 				title: 'Scan speed vs density',
 				material_system: '316L stainless steel',
 				process_family: 'LPBF',
-				variable_axis: 'scan speed',
+				variable_axis: 'scan strategy',
 				properties: ['density'],
 				comparability_status: 'comparable',
 				matrix: {
@@ -135,10 +244,10 @@ function materialProfilePayload() {
 						{
 							row_id: 'mx_row_1',
 							document_id: 'doc_1',
-							sample_id: 'S1',
-							variable_value: '800 mm/s',
+							sample_id: 'S001',
+							variable_value: 'Alternating strategy A',
 							property: 'density',
-							result: { display_value: '99.1%', status: 'observed' }
+							result: { display_value: '95.4%', status: 'observed' }
 						}
 					]
 				}
@@ -172,19 +281,40 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Papers using this material' }))
+			.element(browserPage.getByRole('heading', { name: 'Samples and process parameters' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Sample matrix' }))
+			.element(browserPage.getByRole('heading', { name: 'Performance results' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Comparisons for this material' }))
+			.element(browserPage.getByRole('heading', { name: 'Trends and comparisons' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: '99.1%' }).first())
+			.element(browserPage.getByRole('heading', { name: 'Evidence locator' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Alternating strategy A')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Island strategy B')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: '95.4%' }).first())
 			.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
 		).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
+	});
+
+	it('opens evidence details from a performance value', async () => {
+		render(Page);
+
+		const densityValue = browserPage.getByRole('button', { name: '95.4%' }).first();
+		await expect.element(densityValue).toBeInTheDocument();
+		await densityValue.click({ force: true });
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence detail' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Relative density = 95.4%')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Table 2' }).last())
+			.toBeInTheDocument();
 	});
 });

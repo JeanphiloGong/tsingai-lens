@@ -209,7 +209,8 @@ const translations: Record<Language, Translations> = {
 				loading: 'Loading materials...',
 				errorTitle: 'Materials are unavailable',
 				emptyTitle: 'No material profiles yet',
-				emptyBody: 'The material aggregation endpoint returned no material summaries for this collection.',
+				emptyBody:
+					'The material aggregation endpoint returned no material summaries for this collection.',
 				refresh: 'Refresh materials',
 				summaryTitle: 'Material summary',
 				materialCount: '{count} material(s)',
@@ -240,6 +241,158 @@ const translations: Record<Language, Translations> = {
 				noProcessRanges: 'No process ranges were returned for this material.',
 				noPropertySummaries: 'No property summaries were returned for this material.',
 				seriesCount: '{count} series'
+			},
+			materialDossier: {
+				title: 'Material research dossier',
+				mainLabel: 'Material research dossier content',
+				subtitle:
+					'This page consolidates samples, process parameters, performance results, comparisons, and evidence sources for the selected material.',
+				tags: {
+					alloySteel: 'Alloy steel'
+				},
+				actions: {
+					label: 'Material dossier actions',
+					viewPapers: 'View papers',
+					viewEvidence: 'View evidence',
+					generatePdf: 'Generate review PDF',
+					refresh: 'Refresh',
+					exportCsv: 'Export data CSV'
+				},
+				sections: {
+					samples: {
+						title: 'Samples and process parameters',
+						body: 'Review the samples and how their process conditions differ.'
+					},
+					performance: {
+						title: 'Performance results',
+						body: 'Review measured properties and evidence-backed values by sample.'
+					},
+					trends: {
+						title: 'Trends and comparisons',
+						body: 'Compare samples and inspect how variables affect properties.'
+					},
+					evidence: {
+						title: 'Evidence locator',
+						body: 'Locate the source evidence for each value and conclusion.'
+					}
+				},
+				table: {
+					sampleId: 'Sample ID',
+					scanStrategy: 'Scan strategy',
+					laserPower: 'Laser power (W)',
+					scanSpeed: 'Scan speed (mm/s)',
+					energyDensity: 'Energy density (J/mm3)',
+					layerThickness: 'Layer thickness (um)',
+					hatchSpacing: 'Hatch spacing',
+					otherParameters: 'Other parameters',
+					testCondition: 'Test condition',
+					evidenceAnchors: 'Evidence anchors'
+				},
+				process: {
+					scan_strategy: 'Scan strategy',
+					laser_power_w: 'Laser power',
+					scan_speed_mm_s: 'Scan speed',
+					hatch_spacing_um: 'Hatch spacing',
+					layer_thickness_um: 'Layer thickness',
+					energy_density_j_mm3: 'Energy density',
+					energy_density_origin: 'Energy density origin',
+					build_orientation: 'Build orientation',
+					post_treatment_summary: 'Post treatment',
+					preheat_temperature_c: 'Preheat temperature',
+					shielding_gas: 'Shielding gas',
+					oxygen_level_ppm: 'Oxygen level',
+					powder_size_distribution_um: 'Powder size distribution',
+					process_normalized: 'Process'
+				},
+				properties: {
+					relativeDensity: 'Relative density (%)',
+					relativeDensityShort: 'Relative density',
+					hardness: 'Hardness (HV)',
+					hardnessShort: 'Hardness',
+					yieldStrength: 'Yield strength (MPa)',
+					yieldStrengthShort: 'Yield strength',
+					tensileStrength: 'Tensile strength (MPa)',
+					tensileStrengthShort: 'Tensile strength',
+					elongation: 'Elongation (%)',
+					elongationShort: 'Elongation',
+					density: 'Density',
+					hardnesshv: 'Hardness (HV)',
+					yieldstrength: 'Yield strength',
+					tensilestrength: 'Tensile strength'
+				},
+				samples: {
+					summary:
+						'{count} sample(s). Controlled variables: {controlled}; changed variables: {changed}.'
+				},
+				performance: {
+					summary: '{samples} sample(s), {properties} measured property column(s).'
+				},
+				comparison: {
+					topic: 'Comparison topic: process variables and performance',
+					controls: 'Controlled variables: {controlled}',
+					defaultVariable: 'Process variable',
+					variable: 'Changed variable',
+					property: 'Affected property',
+					observation: 'Observed trend',
+					conclusion: 'Conclusion',
+					noClearWinner: 'No clear difference',
+					needsEvidence: 'Needs more evidence',
+					higherConclusion: '{sample} is higher for {property}',
+					empty: 'No comparable numeric values were returned for this material yet.'
+				},
+				chart: {
+					title: 'Trend chart: key property comparison',
+					caption:
+						'Under comparable process context, the changed variable can shift performance values.',
+					empty: 'No numeric trend is available yet.'
+				},
+				evidence: {
+					drawerTitle: 'Evidence detail',
+					code: 'No.',
+					claim: 'Data / conclusion',
+					type: 'Evidence type',
+					location: 'Source location',
+					anchor: 'Evidence anchor',
+					confidence: 'Confidence',
+					value: 'Value',
+					source: 'Source',
+					excerpt: 'Original excerpt',
+					tableData: 'Table data',
+					textConclusion: 'Conclusion text',
+					sourceEvidence: 'Source evidence',
+					contextUnavailable: 'Open the source paper to review the original context.',
+					empty: 'No evidence-backed values were returned for this material yet.',
+					viewAll: 'View all {count} evidence items ->'
+				},
+				confidence: {
+					high: 'High',
+					medium: 'Medium',
+					low: 'Low'
+				},
+				aside: {
+					label: 'Material dossier sidebar',
+					sourceInfo: 'Source info',
+					sourcePapers: 'Source papers',
+					lastUpdated: 'Last updated',
+					lastUpdatedUnknown: 'Not returned',
+					quickNav: 'Quick navigation',
+					literatureInfo: 'Literature info',
+					noLiterature: 'No source paper metadata was returned.',
+					actions: 'Actions',
+					tip: 'Tip',
+					tipBody: 'Click a performance value or evidence anchor to inspect the source context.'
+				},
+				pdf: {
+					title: 'Generate material review PDF',
+					body: 'AI will generate a review from samples and process parameters, performance results, trends, and evidence locations.',
+					generate: 'Generate review',
+					cancel: 'Cancel',
+					generatedTitle: 'Material review PDF',
+					generatedStatus: 'Generated',
+					view: 'View PDF',
+					download: 'Download',
+					regenerate: 'Regenerate'
+				}
 			},
 			paperMaterials: {
 				title: 'Materials in this paper'
@@ -2331,6 +2484,155 @@ const translations: Record<Language, Translations> = {
 				noProcessRanges: '这个材料还没有返回工艺参数范围。',
 				noPropertySummaries: '这个材料还没有返回性能摘要。',
 				seriesCount: '{count} 个序列'
+			},
+			materialDossier: {
+				title: '材料研究档案',
+				mainLabel: '材料研究档案内容',
+				subtitle: '本页面整合了该材料在所选文献中的样品、工艺参数、性能结果、比较分析与证据来源。',
+				tags: {
+					alloySteel: '合金钢'
+				},
+				actions: {
+					label: '材料档案操作',
+					viewPapers: '查看文献',
+					viewEvidence: '查看证据',
+					generatePdf: '生成综述 PDF',
+					refresh: '刷新',
+					exportCsv: '导出数据 CSV'
+				},
+				sections: {
+					samples: {
+						title: '样品与工艺参数',
+						body: '了解有哪些样品及其工艺条件差异。'
+					},
+					performance: {
+						title: '性能结果',
+						body: '查看各样品的测试性能及对应数值。'
+					},
+					trends: {
+						title: '趋势与比较',
+						body: '分析变量如何影响性能，发现关键趋势。'
+					},
+					evidence: {
+						title: '证据定位',
+						body: '查看每个数据与结论的原文证据。'
+					}
+				},
+				table: {
+					sampleId: '样品ID',
+					scanStrategy: '扫描策略',
+					laserPower: '激光功率 (W)',
+					scanSpeed: '扫描速度 (mm/s)',
+					energyDensity: '能量密度 (J/mm3)',
+					layerThickness: '层厚 (um)',
+					hatchSpacing: '道间距',
+					otherParameters: '其他参数',
+					testCondition: '测试条件',
+					evidenceAnchors: '证据锚点'
+				},
+				process: {
+					scan_strategy: '扫描策略',
+					laser_power_w: '激光功率',
+					scan_speed_mm_s: '扫描速度',
+					hatch_spacing_um: '道间距',
+					layer_thickness_um: '层厚',
+					energy_density_j_mm3: '能量密度',
+					energy_density_origin: '能量密度来源',
+					build_orientation: '成形方向',
+					post_treatment_summary: '后处理',
+					preheat_temperature_c: '预热温度',
+					shielding_gas: '保护气氛',
+					oxygen_level_ppm: '氧含量',
+					powder_size_distribution_um: '粉末粒径分布',
+					process_normalized: '工艺'
+				},
+				properties: {
+					relativeDensity: '相对密度 (%)',
+					relativeDensityShort: '相对密度',
+					hardness: '硬度 (HV)',
+					hardnessShort: '硬度',
+					yieldStrength: '屈服强度 (MPa)',
+					yieldStrengthShort: '屈服强度',
+					tensileStrength: '抗拉强度 (MPa)',
+					tensileStrengthShort: '抗拉强度',
+					elongation: '延伸率 (%)',
+					elongationShort: '延伸率',
+					density: '密度',
+					hardnesshv: '硬度 (HV)',
+					yieldstrength: '屈服强度',
+					tensilestrength: '抗拉强度'
+				},
+				samples: {
+					summary: '共 {count} 个样品。控制变量：{controlled}；变化变量：{changed}。'
+				},
+				performance: {
+					summary: '共 {samples} 个样品，{properties} 项性能指标。'
+				},
+				comparison: {
+					topic: '比较主题：工艺变量对性能的影响',
+					controls: '控制变量：{controlled}',
+					defaultVariable: '工艺变量',
+					variable: '变化变量',
+					property: '影响性能',
+					observation: '观察趋势',
+					conclusion: '结论',
+					noClearWinner: '差异不明显',
+					needsEvidence: '需要更多证据',
+					higherConclusion: '{sample} 的{property}更高',
+					empty: '该材料暂未返回可比较的数值结果。'
+				},
+				chart: {
+					title: '趋势图：关键性能对比',
+					caption: '在可比工艺上下文下，变化变量会影响性能数值。',
+					empty: '暂无可绘制的数值趋势。'
+				},
+				evidence: {
+					drawerTitle: '证据详情',
+					code: '编号',
+					claim: '数据 / 结论',
+					type: '证据类型',
+					location: '原文位置',
+					anchor: '证据锚点',
+					confidence: '可信度',
+					value: '数值',
+					source: '来源',
+					excerpt: '原文片段',
+					tableData: '表格数据',
+					textConclusion: '结论性描述',
+					sourceEvidence: '来源证据',
+					contextUnavailable: '请打开来源文献查看原文上下文。',
+					empty: '该材料暂未返回带证据的性能值。',
+					viewAll: '查看全部 {count} 条证据 ->'
+				},
+				confidence: {
+					high: '高',
+					medium: '中',
+					low: '低'
+				},
+				aside: {
+					label: '材料档案侧栏',
+					sourceInfo: '来源信息',
+					sourcePapers: '来源文献',
+					lastUpdated: '最后更新',
+					lastUpdatedUnknown: '接口未返回',
+					quickNav: '快速导航',
+					literatureInfo: '文献信息',
+					noLiterature: '接口未返回来源文献信息。',
+					actions: '操作',
+					tip: '提示',
+					tipBody: '点击表格中的性能值或证据锚点，可查看来源上下文。'
+				},
+				pdf: {
+					title: '生成材料综述 PDF',
+					body: 'AI 将基于样品与工艺参数、性能结果、趋势与比较、证据定位生成综述。',
+					generate: '生成综述',
+					cancel: '取消',
+					generatedTitle: '材料综述 PDF',
+					generatedStatus: '已生成',
+					view: '查看 PDF',
+					download: '下载',
+					regenerate: '重新生成'
+				}
 			},
 			paperMaterials: {
 				title: '本文献中的材料'

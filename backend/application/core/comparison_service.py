@@ -652,11 +652,9 @@ class ComparisonService:
             not comparable_results_path.is_file() or not scoped_results_path.is_file()
         )
         if core_semantic_rebuild_required(output_dir) and documents_path.is_file():
-            self.build_comparison_rows(collection_id, output_dir)
-            return
+            raise ComparisonRowsNotReadyError(collection_id, output_dir)
         if semantic_artifacts_missing and documents_path.is_file():
-            self.build_comparison_rows(collection_id, output_dir)
-            return
+            raise ComparisonRowsNotReadyError(collection_id, output_dir)
         if semantic_artifacts_missing:
             raise ComparisonRowsNotReadyError(collection_id, output_dir)
 

@@ -334,6 +334,42 @@ def test_collection_material_routes_return_contract_payload(monkeypatch):
     assert profile.material_id == "mat-316l-stainless-steel"
 
 
+def test_collection_material_routes_run_service_in_threadpool(monkeypatch):
+    calls = []
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        calls.append((func.__name__, args, kwargs))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        research_view_controller,
+        "research_view_service",
+        FakeResearchViewService(),
+    )
+    monkeypatch.setattr(
+        research_view_controller,
+        "run_in_threadpool",
+        fake_run_in_threadpool,
+    )
+
+    asyncio.run(research_view_controller.list_collection_materials("col-1"))
+    asyncio.run(
+        research_view_controller.get_collection_material_research_view(
+            "col-1",
+            "mat-316l-stainless-steel",
+        )
+    )
+
+    assert calls == [
+        ("list_collection_materials", ("col-1",), {}),
+        (
+            "get_collection_material_research_view",
+            ("col-1", "mat-316l-stainless-steel"),
+            {},
+        ),
+    ]
+
+
 def test_document_research_view_route_returns_contract_payload(monkeypatch):
     monkeypatch.setattr(
         research_view_controller,

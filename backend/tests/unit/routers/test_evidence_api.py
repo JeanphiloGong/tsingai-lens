@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.core_semantic_version import write_core_semantic_manifest
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import evidence as evidence_controller
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
@@ -120,6 +121,22 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
         ),
         None,
     )
+    pd.DataFrame(
+        columns=[
+            "evidence_id",
+            "document_id",
+            "collection_id",
+            "claim_text",
+            "claim_type",
+            "evidence_source_type",
+            "evidence_anchors",
+            "material_system",
+            "condition_context",
+            "confidence",
+            "traceability_status",
+        ]
+    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    write_core_semantic_manifest(output_dir)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(

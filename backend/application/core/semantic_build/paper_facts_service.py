@@ -123,6 +123,16 @@ _MEASUREMENT_RESULTS_JSON_COLUMNS = (
     "characterization_observation_ids",
     "evidence_anchor_ids",
 )
+_PAPER_FACT_FRAME_FILES = (
+    _EVIDENCE_ANCHORS_FILE,
+    _METHOD_FACTS_FILE,
+    _TEST_CONDITIONS_FILE,
+    _BASELINE_REFERENCES_FILE,
+    _SAMPLE_VARIANTS_FILE,
+    _MEASUREMENT_RESULTS_FILE,
+    _CHARACTERIZATION_OBSERVATIONS_FILE,
+    _STRUCTURE_FEATURES_FILE,
+)
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _MAX_SUPPORTING_TEXT_WINDOWS = 3
 _MAX_TABLE_ROW_SUPPORTING_TEXT_CHARS = 1200
@@ -571,13 +581,12 @@ class PaperFactsService:
     def read_evidence_cards(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
         path = output_dir / _EVIDENCE_CARDS_FILE
-        if path.is_file() and not core_semantic_rebuild_required(output_dir):
-            cards = restore_frame_from_storage(
-                pd.read_parquet(path),
-                _EVIDENCE_JSON_COLUMNS,
-            )
-        else:
-            cards = self.build_evidence_cards(collection_id, output_dir)
+        if not path.is_file() or core_semantic_rebuild_required(output_dir):
+            raise PaperFactsNotReadyError(collection_id, output_dir)
+        cards = restore_frame_from_storage(
+            pd.read_parquet(path),
+            _EVIDENCE_JSON_COLUMNS,
+        )
         return self._normalize_cards_table(cards, collection_id)
 
     def read_paper_fact_frames(self, collection_id: str) -> dict[str, pd.DataFrame]:
@@ -1169,6 +1178,10 @@ class PaperFactsService:
             if output_dir is not None
             else self._resolve_output_dir(collection_id)
         )
+        if core_semantic_rebuild_required(base_dir) or any(
+            not (base_dir / name).is_file() for name in _PAPER_FACT_FRAME_FILES
+        ):
+            self.build_paper_facts(collection_id, base_dir)
         frames = self._load_paper_fact_frames(collection_id, base_dir)
         cards_table = self._derive_evidence_cards_table(
             collection_id=collection_id,
@@ -1198,23 +1211,10 @@ class PaperFactsService:
         collection_id: str,
         base_dir: Path,
     ) -> dict[str, pd.DataFrame]:
-        required = (
-            _EVIDENCE_ANCHORS_FILE,
-            _METHOD_FACTS_FILE,
-            _TEST_CONDITIONS_FILE,
-            _BASELINE_REFERENCES_FILE,
-            _SAMPLE_VARIANTS_FILE,
-            _MEASUREMENT_RESULTS_FILE,
-            _CHARACTERIZATION_OBSERVATIONS_FILE,
-            _STRUCTURE_FEATURES_FILE,
-        )
-        if core_semantic_rebuild_required(base_dir) or any(
-            not (base_dir / name).is_file() for name in required
-        ):
-            self.build_paper_facts(collection_id, base_dir)
-
-        missing = [name for name in required if not (base_dir / name).is_file()]
-        if missing:
+        missing = [
+            name for name in _PAPER_FACT_FRAME_FILES if not (base_dir / name).is_file()
+        ]
+        if core_semantic_rebuild_required(base_dir) or missing:
             raise PaperFactsNotReadyError(collection_id, base_dir)
 
         return {

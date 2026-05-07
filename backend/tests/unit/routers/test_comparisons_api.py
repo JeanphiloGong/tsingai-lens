@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.comparison_service import ComparisonService
+from application.core.semantic_build.core_semantic_version import write_core_semantic_manifest
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import comparisons as comparisons_controller
@@ -230,6 +231,8 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
     )
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     _write_source_artifacts(output_dir, documents, None)
+    _write_semantic_comparison_artifacts(output_dir, [], [])
+    write_core_semantic_manifest(output_dir)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(

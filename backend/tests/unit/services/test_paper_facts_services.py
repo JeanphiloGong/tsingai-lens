@@ -10,13 +10,19 @@ import pytest
 
 from application.core.comparison_assembly import ComparableResultAssembler
 from application.core.comparison_projection import ComparisonRowProjector
-from application.core.comparison_service import ComparisonService
+from application.core.comparison_service import (
+    ComparisonRowsNotReadyError,
+    ComparisonService,
+)
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.llm.prompts import (
     build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
-from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.semantic_build.paper_facts_service import (
+    PaperFactsNotReadyError,
+    PaperFactsService,
+)
 from application.core.semantic_build.llm.schemas import (
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
@@ -194,6 +200,70 @@ class EvidenceOnlyExtractor:
 
     def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
         return StructuredTableBatchMentions()
+
+
+def test_read_paper_fact_frames_does_not_build_missing_artifacts(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Pending Paper",
+                "text": "The sample was annealed before testing.",
+            }
+        ]
+    )
+    text_units = pd.DataFrame(
+        [
+            {
+                "id": "tu-1",
+                "text": "The sample was annealed before testing.",
+                "document_ids": ["paper-1"],
+            }
+        ]
+    )
+    documents.to_parquet(output_dir / "documents.parquet", index=False)
+    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
+    _write_source_artifacts(output_dir, documents, text_units)
+
+    service = PaperFactsService()
+    monkeypatch.setattr(service, "_resolve_output_dir", lambda collection_id: output_dir)
+
+    def fail_build(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("read_paper_fact_frames must not build paper facts")
+
+    monkeypatch.setattr(service, "build_paper_facts", fail_build)
+
+    with pytest.raises(PaperFactsNotReadyError):
+        service.read_paper_fact_frames("col-1")
+
+
+def test_read_comparison_projection_does_not_build_missing_artifacts(monkeypatch, tmp_path):
+    _patch_parquet(monkeypatch)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "id": "paper-1",
+                "title": "Pending Paper",
+                "text": "The sample was annealed before testing.",
+            }
+        ]
+    ).to_parquet(output_dir / "documents.parquet", index=False)
+
+    service = ComparisonService()
+    monkeypatch.setattr(service, "_resolve_output_dir", lambda collection_id: output_dir)
+
+    def fail_build(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("read_comparison_projection must not build comparison rows")
+
+    monkeypatch.setattr(service, "build_comparison_rows", fail_build)
+
+    with pytest.raises(ComparisonRowsNotReadyError):
+        service.read_comparison_projection("col-1")
 
 
 def test_paper_facts_prompt_payloads_exclude_internal_ids():

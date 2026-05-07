@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
@@ -50,7 +51,10 @@ async def get_collection_research_view(
     collection_id: str,
 ) -> CollectionAggregationResponse:
     try:
-        payload = research_view_service.get_collection_research_view(collection_id)
+        payload = await run_in_threadpool(
+            research_view_service.get_collection_research_view,
+            collection_id,
+        )
     except ResearchViewNotReadyError as exc:
         raise HTTPException(
             status_code=409,
@@ -70,7 +74,10 @@ async def list_collection_materials(
     collection_id: str,
 ) -> MaterialSummariesResponse:
     try:
-        payload = research_view_service.list_collection_materials(collection_id)
+        payload = await run_in_threadpool(
+            research_view_service.list_collection_materials,
+            collection_id,
+        )
     except ResearchViewNotReadyError as exc:
         raise HTTPException(
             status_code=409,
@@ -91,7 +98,8 @@ async def get_collection_material_research_view(
     material_id: str,
 ) -> MaterialProfileResponse:
     try:
-        payload = research_view_service.get_collection_material_research_view(
+        payload = await run_in_threadpool(
+            research_view_service.get_collection_material_research_view,
             collection_id,
             material_id,
         )
@@ -120,7 +128,8 @@ async def get_collection_document_research_view(
     document_id: str,
 ) -> PaperAggregationResponse:
     try:
-        payload = research_view_service.get_document_research_view(
+        payload = await run_in_threadpool(
+            research_view_service.get_document_research_view,
             collection_id,
             document_id,
         )
@@ -154,7 +163,8 @@ async def list_collection_document_materials(
     document_id: str,
 ) -> PaperMaterialSummariesResponse:
     try:
-        payload = research_view_service.list_document_materials(
+        payload = await run_in_threadpool(
+            research_view_service.list_document_materials,
             collection_id,
             document_id,
         )
@@ -189,7 +199,8 @@ async def get_collection_document_material_research_view(
     material_id: str,
 ) -> DocumentMaterialProfileResponse:
     try:
-        payload = research_view_service.get_document_material_research_view(
+        payload = await run_in_threadpool(
+            research_view_service.get_document_material_research_view,
             collection_id,
             document_id,
             material_id,

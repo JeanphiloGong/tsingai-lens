@@ -224,6 +224,7 @@ class ResearchViewAggregationService:
             collection_id,
             projection,
             frames,
+            include_matrix=False,
         )
         materials = self._build_material_summaries(
             collection_id,
@@ -260,10 +261,24 @@ class ResearchViewAggregationService:
 
         frames = self._load_fact_frames(collection_id)
         projection = self._load_comparison_projection(collection_id)
+        material_index_groups = self._build_comparable_groups(
+            collection_id,
+            projection,
+            frames,
+            include_matrix=False,
+        )
+        material_key = self._material_key_from_material_id(
+            material_id,
+            frames,
+            material_index_groups,
+        )
+        if material_key is None:
+            raise ResearchViewMaterialNotFoundError(collection_id, material_id)
         comparable_groups = self._build_comparable_groups(
             collection_id,
             projection,
             frames,
+            material_key=material_key,
         )
         profile = self._build_material_profile(
             collection_id,
@@ -1110,6 +1125,9 @@ class ResearchViewAggregationService:
         collection_id: str,
         projection,  # noqa: ANN001
         frames: dict[str, pd.DataFrame],
+        *,
+        include_matrix: bool = True,
+        material_key: str | None = None,
     ) -> list[dict[str, Any]]:
         if projection is None:
             return []
@@ -1119,7 +1137,15 @@ class ResearchViewAggregationService:
         ).items():
             rows = [self._series_to_dict(row) for _, row in group_rows.iterrows()]
             material, process, test_condition, baseline, variable_axis = group_key
-            matrix = self._build_cross_paper_matrix(group_rows, frames)
+            if material_key is not None and (
+                self._material_key_from_label(material) != material_key
+            ):
+                continue
+            matrix = (
+                self._build_cross_paper_matrix(group_rows, frames)
+                if include_matrix
+                else None
+            )
             warnings = self._comparison_group_warnings(rows)
             groups.append(
                 {
@@ -1161,17 +1187,23 @@ class ResearchViewAggregationService:
                     ),
                     "comparability_status": self._aggregate_comparability_status(rows),
                     "matrix": matrix,
-                    "evidence_refs": self._build_evidence_refs(
-                        fact_ids=[
-                            self._safe_text(row.get("comparable_result_id")) or ""
-                            for row in rows
-                        ],
-                        anchor_ids=[
-                            anchor_id
-                            for row in rows
-                            for anchor_id in self._as_list(row.get("supporting_anchor_ids"))
-                        ],
-                        frames=frames,
+                    "evidence_refs": (
+                        self._build_evidence_refs(
+                            fact_ids=[
+                                self._safe_text(row.get("comparable_result_id")) or ""
+                                for row in rows
+                            ],
+                            anchor_ids=[
+                                anchor_id
+                                for row in rows
+                                for anchor_id in self._as_list(
+                                    row.get("supporting_anchor_ids")
+                                )
+                            ],
+                            frames=frames,
+                        )
+                        if include_matrix
+                        else []
                     ),
                     "warnings": warnings,
                 }

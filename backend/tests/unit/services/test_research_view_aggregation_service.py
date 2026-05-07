@@ -413,6 +413,21 @@ def test_collection_materials_and_profile_are_material_scoped():
     assert profile["comparison_groups"][0]["material_system"] == "Ti-6Al-4V"
 
 
+def test_collection_materials_does_not_build_comparison_matrices(monkeypatch):
+    service = _service(comparison_rows=_comparison_rows())
+
+    def fail_matrix_build(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("material list should not build cross-paper matrices")
+
+    monkeypatch.setattr(service, "_build_cross_paper_matrix", fail_matrix_build)
+
+    materials = service.list_collection_materials("col-1")
+
+    assert materials["state"] == "ready"
+    assert materials["materials"][0]["material_id"] == "mat-ti-6al-4v"
+    assert materials["materials"][0]["comparison_count"] == 1
+
+
 def test_document_material_profile_stays_inside_one_paper():
     service = _service(comparison_rows=_comparison_rows())
 

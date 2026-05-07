@@ -72,6 +72,13 @@ Supporting research binaries live under `docs/research/assets/`.
   [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md),
   then
   [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
+- Collection-bound goal copilot:
+  read
+  [`decisions/rfc-collection-bound-goal-copilot.md`](decisions/rfc-collection-bound-goal-copilot.md)
+  after
+  [`decisions/rfc-lens-agent-era-positioning.md`](decisions/rfc-lens-agent-era-positioning.md)
+  when working on goal sessions, collection-bound chat, answer source modes,
+  or copilot memory.
 - Shared system understanding:
   start with [`overview/system-overview.md`](overview/system-overview.md), then
   move to the relevant module entry page
@@ -144,6 +151,7 @@ Decisions:
 - [`decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md`](decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md)
 - [`decisions/rfc-document-result-evidence-chain-contract-freeze.md`](decisions/rfc-document-result-evidence-chain-contract-freeze.md)
 - [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md)
+- [`decisions/rfc-collection-bound-goal-copilot.md`](decisions/rfc-collection-bound-goal-copilot.md)
 
 Research:
 

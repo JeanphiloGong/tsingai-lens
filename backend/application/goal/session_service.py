@@ -1,0 +1,755 @@
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Literal
+from uuid import uuid4
+
+from openai import OpenAI
+
+from application.core.comparison_service import (
+    ComparisonRowsNotReadyError,
+    ComparisonService,
+)
+from application.core.research_view_aggregation_service import (
+    ResearchViewAggregationService,
+    ResearchViewMaterialNotFoundError,
+    ResearchViewNotReadyError,
+)
+from application.core.semantic_build.paper_facts_service import (
+    PaperFactsNotReadyError,
+    PaperFactsService,
+)
+from application.core.workspace_overview_service import WorkspaceService
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.source.task_service import TaskService
+from infra.persistence.file._json import read_json, write_json
+
+AnswerMode = Literal["grounded", "hybrid", "general"]
+SourceMode = Literal[
+    "collection_grounded",
+    "collection_limited",
+    "general_fallback",
+    "general_only",
+]
+
+_ANSWER_MODES = {"grounded", "hybrid", "general"}
+_GENERAL_FALLBACK_PREFIX = (
+    "The current collection does not contain structured evidence for this "
+    "question. The following answer is general background and should not be "
+    "treated as a collection-supported conclusion.\n\n"
+)
+_MAX_CONTEXT_CHARS = 18000
+_MAX_ROLLING_SUMMARY_CHARS = 1600
+_UNSET = object()
+
+
+class GoalSessionNotFoundError(FileNotFoundError):
+    """Raised when a goal session cannot be found."""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        super().__init__(f"goal session not found: {session_id}")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _clean_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _clean_mode(value: str | None) -> AnswerMode:
+    mode = str(value or "hybrid").strip().lower()
+    if mode not in _ANSWER_MODES:
+        raise ValueError("answer_mode must be one of: grounded, hybrid, general")
+    return mode  # type: ignore[return-value]
+
+
+class GoalSessionService:
+    """Collection-bound goal conversation sessions over Core artifacts."""
+
+    def __init__(
+        self,
+        *,
+        collection_service: CollectionService | None = None,
+        task_service: TaskService | None = None,
+        artifact_registry_service: ArtifactRegistryService | None = None,
+        research_view_service: ResearchViewAggregationService | None = None,
+        workspace_service: WorkspaceService | None = None,
+        comparison_service: ComparisonService | None = None,
+        paper_facts_service: PaperFactsService | None = None,
+        llm_client: Any | None = None,
+        model: str | None = None,
+    ) -> None:
+        self.collection_service = collection_service or CollectionService()
+        self.task_service = task_service or TaskService(
+            self.collection_service.root_dir.parent / "tasks"
+        )
+        self.artifact_registry_service = (
+            artifact_registry_service
+            or ArtifactRegistryService(self.collection_service.root_dir)
+        )
+        self.research_view_service = research_view_service or ResearchViewAggregationService(
+            collection_service=self.collection_service,
+            task_service=self.task_service,
+            artifact_registry_service=self.artifact_registry_service,
+        )
+        self.workspace_service = workspace_service or WorkspaceService(
+            collection_service=self.collection_service,
+            task_service=self.task_service,
+            artifact_registry_service=self.artifact_registry_service,
+        )
+        self.comparison_service = comparison_service or ComparisonService(
+            collection_service=self.collection_service,
+            artifact_registry_service=self.artifact_registry_service,
+        )
+        self.paper_facts_service = paper_facts_service or PaperFactsService(
+            collection_service=self.collection_service,
+            artifact_registry_service=self.artifact_registry_service,
+        )
+        self.model = (
+            model
+            or os.getenv("GOAL_COPILOT_LLM_MODEL")
+            or os.getenv("LLM_MODEL")
+            or "gpt-4o-mini"
+        ).strip()
+        self.llm_client = llm_client or OpenAI(
+            api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
+            base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
+        )
+
+    def create_session(
+        self,
+        *,
+        collection_id: str,
+        focused_material_id: str | None = None,
+        focused_paper_id: str | None = None,
+        goal_text: str | None = None,
+        goal_brief_json: dict[str, Any] | None = None,
+        answer_mode: str | None = "hybrid",
+    ) -> dict[str, Any]:
+        collection = self.collection_service.get_collection(collection_id)
+        now = _now_iso()
+        session = {
+            "session_id": f"gs_{uuid4().hex[:12]}",
+            "user_id": "local-user",
+            "collection_id": collection["collection_id"],
+            "focused_material_id": _clean_text(focused_material_id),
+            "focused_paper_id": _clean_text(focused_paper_id),
+            "goal_text": _clean_text(goal_text),
+            "goal_brief_json": dict(goal_brief_json or {}),
+            "answer_mode": _clean_mode(answer_mode),
+            "rolling_summary": "",
+            "last_evidence_ids": [],
+            "last_material_ids": [],
+            "last_paper_ids": [],
+            "collection_data_version": self._collection_data_version(collection),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._write_session(session)
+        self._write_messages(session, [])
+        return session
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        session = self._read_session(session_id)
+        session["collection_data_version"] = self._collection_data_version(
+            self.collection_service.get_collection(session["collection_id"])
+        )
+        return session
+
+    def update_session(
+        self,
+        session_id: str,
+        *,
+        collection_id: Any = _UNSET,
+        focused_material_id: Any = _UNSET,
+        focused_paper_id: Any = _UNSET,
+        goal_text: Any = _UNSET,
+        goal_brief_json: Any = _UNSET,
+        answer_mode: Any = _UNSET,
+    ) -> dict[str, Any]:
+        session = self._read_session(session_id)
+        if collection_id is not _UNSET:
+            next_collection_id = _clean_text(collection_id)
+            if not next_collection_id:
+                raise ValueError("collection_id cannot be cleared")
+            if next_collection_id != session["collection_id"]:
+                self.collection_service.get_collection(next_collection_id)
+                session["collection_id"] = next_collection_id
+        if focused_material_id is not _UNSET:
+            session["focused_material_id"] = _clean_text(focused_material_id)
+        if focused_paper_id is not _UNSET:
+            session["focused_paper_id"] = _clean_text(focused_paper_id)
+        if goal_text is not _UNSET:
+            session["goal_text"] = _clean_text(goal_text)
+        if goal_brief_json is not _UNSET:
+            session["goal_brief_json"] = dict(goal_brief_json or {})
+        if answer_mode is not _UNSET:
+            session["answer_mode"] = _clean_mode(answer_mode)
+        session["collection_data_version"] = self._collection_data_version(
+            self.collection_service.get_collection(session["collection_id"])
+        )
+        session["updated_at"] = _now_iso()
+        self._write_session(session)
+        return session
+
+    def list_messages(self, session_id: str) -> dict[str, Any]:
+        session = self._read_session(session_id)
+        return {
+            "session_id": session["session_id"],
+            "items": self._read_messages(session),
+        }
+
+    def post_message(
+        self,
+        session_id: str,
+        *,
+        message: str,
+        page_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        user_message = _clean_text(message)
+        if not user_message:
+            raise ValueError("message is required")
+
+        session = self._read_session(session_id)
+        self._apply_page_context(session, page_context or {})
+        command_response = self._apply_inline_command(session, user_message)
+        messages = self._read_messages(session)
+        now = _now_iso()
+        user_record = {
+            "message_id": f"msg_{uuid4().hex[:12]}",
+            "role": "user",
+            "content": user_message,
+            "created_at": now,
+        }
+        messages.append(user_record)
+
+        if command_response is not None:
+            response = self._build_command_message(session, command_response)
+        else:
+            response = self._answer_message(session, user_message)
+
+        messages.append(response)
+        session["updated_at"] = response["created_at"]
+        self._write_session(session)
+        self._write_messages(session, messages)
+        return response
+
+    def _answer_message(self, session: dict[str, Any], message: str) -> dict[str, Any]:
+        mode: AnswerMode = _clean_mode(session.get("answer_mode"))
+        context = self._build_collection_context(session) if mode != "general" else {}
+        has_collection_context = bool(context.get("has_collection_context"))
+        warnings = list(context.get("warnings", []))
+        used_evidence_ids = (
+            self._stable_strings(context.get("evidence_ids")) if has_collection_context else []
+        )
+        links = dict(context.get("links") or {})
+
+        if mode == "grounded" and not has_collection_context:
+            source_mode: SourceMode = "collection_limited"
+            answer = (
+                "The bound collection does not currently contain structured Core "
+                "evidence that can answer this question. Finish indexing, add more "
+                "source material, or switch to hybrid/general mode for background."
+            )
+            warnings.append("no_collection_evidence_found")
+        elif mode == "general":
+            source_mode = "general_only"
+            answer = self._generate_llm_answer(
+                session=session,
+                user_message=message,
+                source_mode=source_mode,
+                context={},
+            )
+            used_evidence_ids = []
+        elif has_collection_context:
+            source_mode = "collection_grounded"
+            answer = self._generate_llm_answer(
+                session=session,
+                user_message=message,
+                source_mode=source_mode,
+                context=context,
+            )
+        else:
+            source_mode = "general_fallback"
+            warnings.append("no_collection_evidence_found")
+            generated = self._generate_llm_answer(
+                session=session,
+                user_message=message,
+                source_mode=source_mode,
+                context={},
+            )
+            answer = self._ensure_general_fallback_boundary(generated)
+            used_evidence_ids = []
+
+        response = {
+            "message_id": f"msg_{uuid4().hex[:12]}",
+            "session_id": session["session_id"],
+            "role": "assistant",
+            "answer": answer,
+            "content": answer,
+            "source_mode": source_mode,
+            "used_evidence_ids": used_evidence_ids,
+            "warnings": self._stable_strings(warnings),
+            "links": links,
+            "created_at": _now_iso(),
+        }
+        self._update_session_after_answer(
+            session,
+            user_message=message,
+            response=response,
+            context=context,
+        )
+        return response
+
+    def _build_command_message(
+        self,
+        session: dict[str, Any],
+        command_response: str,
+    ) -> dict[str, Any]:
+        response = {
+            "message_id": f"msg_{uuid4().hex[:12]}",
+            "session_id": session["session_id"],
+            "role": "assistant",
+            "answer": command_response,
+            "content": command_response,
+            "source_mode": "collection_limited",
+            "used_evidence_ids": [],
+            "warnings": [],
+            "links": self._session_links(session),
+            "created_at": _now_iso(),
+        }
+        self._update_session_after_answer(
+            session,
+            user_message=command_response,
+            response=response,
+            context={},
+        )
+        return response
+
+    def _apply_page_context(
+        self,
+        session: dict[str, Any],
+        page_context: dict[str, Any],
+    ) -> None:
+        material_id = _clean_text(page_context.get("material_id"))
+        if material_id:
+            session["focused_material_id"] = material_id
+        paper_id = _clean_text(page_context.get("paper_id") or page_context.get("document_id"))
+        if paper_id:
+            session["focused_paper_id"] = paper_id
+
+    def _apply_inline_command(
+        self,
+        session: dict[str, Any],
+        message: str,
+    ) -> str | None:
+        text = message.strip()
+        if not text.startswith("$"):
+            return None
+        command, _, argument = text[1:].partition(" ")
+        command = command.strip().lower()
+        argument = argument.strip()
+        if command == "mode":
+            session["answer_mode"] = _clean_mode(argument)
+            return f"Answer mode updated to {session['answer_mode']}."
+        if command == "material":
+            session["focused_material_id"] = _clean_text(argument)
+            return f"Focused material updated to {session['focused_material_id'] or 'none'}."
+        if command in {"paper", "document"}:
+            session["focused_paper_id"] = _clean_text(argument)
+            return f"Focused paper updated to {session['focused_paper_id'] or 'none'}."
+        if command == "goal":
+            session["goal_text"] = _clean_text(argument)
+            return "Goal updated."
+        if command == "clear" and argument == "focus":
+            session["focused_material_id"] = None
+            session["focused_paper_id"] = None
+            return "Focus cleared."
+        if command == "collection":
+            self.collection_service.get_collection(argument)
+            session["collection_id"] = argument
+            session["focused_material_id"] = None
+            session["focused_paper_id"] = None
+            return f"Bound collection updated to {argument}."
+        raise ValueError(f"unsupported goal session command: ${command}")
+
+    def _build_collection_context(self, session: dict[str, Any]) -> dict[str, Any]:
+        collection_id = session["collection_id"]
+        warnings: list[str] = []
+        collection = self.collection_service.get_collection(collection_id)
+        workspace = self._safe_workspace(collection_id, warnings)
+        focused_material_id = session.get("focused_material_id")
+        material_profile = None
+        collection_research_view = None
+        if focused_material_id:
+            material_profile = self._safe_material_profile(
+                collection_id,
+                focused_material_id,
+                warnings,
+            )
+        else:
+            collection_research_view = self._safe_collection_research_view(
+                collection_id,
+                warnings,
+            )
+        comparisons = self._safe_comparisons(collection_id, warnings)
+        evidence_cards = self._safe_evidence_cards(collection_id, warnings)
+
+        context_payload = {
+            "collection": collection,
+            "workspace": workspace,
+            "focused_material_id": focused_material_id,
+            "focused_paper_id": session.get("focused_paper_id"),
+            "material_profile": material_profile,
+            "collection_research_view": collection_research_view,
+            "comparisons": comparisons,
+            "evidence_cards": evidence_cards,
+        }
+        evidence_ids = self._collect_evidence_ids(context_payload)
+        material_ids = self._collect_material_ids(context_payload)
+        paper_ids = self._collect_paper_ids(context_payload)
+        has_collection_context = bool(
+            evidence_ids
+            or self._has_non_empty_path(material_profile, ("sample_matrix", "rows"))
+            or self._has_non_empty_path(collection_research_view, ("materials",))
+            or self._has_non_empty_path(collection_research_view, ("comparable_groups",))
+            or self._has_non_empty_path(comparisons, ("items",))
+            or self._has_non_empty_path(evidence_cards, ("items",))
+        )
+        return {
+            "has_collection_context": has_collection_context,
+            "warnings": warnings,
+            "evidence_ids": evidence_ids,
+            "material_ids": material_ids,
+            "paper_ids": paper_ids,
+            "links": self._session_links(session),
+            "payload": self._compact_value(context_payload),
+        }
+
+    def _safe_workspace(
+        self,
+        collection_id: str,
+        warnings: list[str],
+    ) -> dict[str, Any] | None:
+        _ = warnings
+        return self.workspace_service.get_workspace_overview(collection_id)
+
+    def _safe_collection_research_view(
+        self,
+        collection_id: str,
+        warnings: list[str],
+    ) -> dict[str, Any] | None:
+        try:
+            return self.research_view_service.get_collection_research_view(collection_id)
+        except ResearchViewNotReadyError:
+            warnings.append("research_view_not_ready")
+            return None
+
+    def _safe_material_profile(
+        self,
+        collection_id: str,
+        material_id: str,
+        warnings: list[str],
+    ) -> dict[str, Any] | None:
+        try:
+            return self.research_view_service.get_collection_material_research_view(
+                collection_id,
+                material_id,
+            )
+        except ResearchViewMaterialNotFoundError:
+            warnings.append("focused_material_not_found")
+            return None
+        except ResearchViewNotReadyError:
+            warnings.append("research_view_not_ready")
+            return None
+
+    def _safe_comparisons(
+        self,
+        collection_id: str,
+        warnings: list[str],
+    ) -> dict[str, Any] | None:
+        try:
+            return self.comparison_service.list_comparison_rows(collection_id, limit=10)
+        except ComparisonRowsNotReadyError:
+            warnings.append("comparison_rows_not_ready")
+            return None
+
+    def _safe_evidence_cards(
+        self,
+        collection_id: str,
+        warnings: list[str],
+    ) -> dict[str, Any] | None:
+        try:
+            return self.paper_facts_service.list_evidence_cards(collection_id, limit=10)
+        except PaperFactsNotReadyError:
+            warnings.append("evidence_cards_not_ready")
+            return None
+
+    def _generate_llm_answer(
+        self,
+        *,
+        session: dict[str, Any],
+        user_message: str,
+        source_mode: SourceMode,
+        context: dict[str, Any],
+    ) -> str:
+        system_prompt, prompt = self._build_prompt(
+            session=session,
+            user_message=user_message,
+            source_mode=source_mode,
+            context=context,
+        )
+        completion = self.llm_client.chat.completions.create(
+            model=self.model,
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        content = completion.choices[0].message.content if completion.choices else None
+        answer = self._coerce_message_content(content)
+        if not answer:
+            raise RuntimeError("goal copilot returned empty answer")
+        return answer
+
+    def _build_prompt(
+        self,
+        *,
+        session: dict[str, Any],
+        user_message: str,
+        source_mode: SourceMode,
+        context: dict[str, Any],
+    ) -> tuple[str, str]:
+        if source_mode == "collection_grounded":
+            source_rule = (
+                "Answer only from the provided collection context. Cite evidence ids "
+                "when making collection-supported claims. Do not invent sample ids, "
+                "paper names, values, or evidence ids."
+            )
+        elif source_mode == "general_fallback":
+            source_rule = (
+                "The collection context is empty or insufficient. Answer from general "
+                "background knowledge only, and clearly state that it is not a "
+                "collection-supported conclusion. Do not cite evidence ids."
+            )
+        else:
+            source_rule = (
+                "Answer from general background knowledge only. Do not present the "
+                "answer as a finding from the bound collection and do not cite evidence ids."
+            )
+        system_prompt = (
+            "You are Lens, a collection-bound research copilot. Preserve the "
+            "boundary between collection evidence and general background. "
+            f"{source_rule} Keep the answer concise and useful."
+        )
+        context_text = ""
+        if context:
+            context_text = json.dumps(
+                context.get("payload", context),
+                ensure_ascii=False,
+                indent=2,
+            )[:_MAX_CONTEXT_CHARS]
+        prompt = (
+            f"Goal session:\n"
+            f"- collection_id: {session.get('collection_id')}\n"
+            f"- focused_material_id: {session.get('focused_material_id')}\n"
+            f"- focused_paper_id: {session.get('focused_paper_id')}\n"
+            f"- goal_text: {session.get('goal_text')}\n"
+            f"- answer_mode: {session.get('answer_mode')}\n"
+            f"- rolling_summary: {session.get('rolling_summary')}\n\n"
+            f"User message:\n{user_message}\n\n"
+            f"Collection context:\n{context_text or '{}'}"
+        )
+        return system_prompt, prompt
+
+    def _update_session_after_answer(
+        self,
+        session: dict[str, Any],
+        *,
+        user_message: str,
+        response: dict[str, Any],
+        context: dict[str, Any],
+    ) -> None:
+        session["last_evidence_ids"] = list(response.get("used_evidence_ids") or [])
+        session["last_material_ids"] = self._stable_strings(context.get("material_ids"))
+        session["last_paper_ids"] = self._stable_strings(context.get("paper_ids"))
+        summary_bits = [
+            session.get("rolling_summary") or "",
+            (
+                f"Last turn source={response.get('source_mode')}; "
+                f"user asked: {user_message[:240]}"
+            ),
+        ]
+        if response.get("source_mode") == "general_fallback":
+            summary_bits.append(
+                "The previous answer used general background and is not collection evidence."
+            )
+        summary = "\n".join(bit for bit in summary_bits if bit).strip()
+        session["rolling_summary"] = summary[-_MAX_ROLLING_SUMMARY_CHARS:]
+        session["collection_data_version"] = self._collection_data_version(
+            self.collection_service.get_collection(session["collection_id"])
+        )
+
+    def _collection_data_version(self, collection: dict[str, Any]) -> str:
+        collection_id = collection["collection_id"]
+        artifacts = self.collection_service.artifact_repository.read(collection_id) or {}
+        return str(
+            artifacts.get("updated_at")
+            or collection.get("updated_at")
+            or collection.get("created_at")
+            or ""
+        )
+
+    def _session_links(self, session: dict[str, Any]) -> dict[str, str]:
+        collection_id = session["collection_id"]
+        links = {
+            "workspace": f"/collections/{collection_id}",
+            "materials": f"/collections/{collection_id}/materials",
+            "comparisons": f"/collections/{collection_id}/comparisons",
+            "evidence": f"/collections/{collection_id}/evidence",
+        }
+        material_id = session.get("focused_material_id")
+        if material_id:
+            links["focused_material"] = (
+                f"/collections/{collection_id}/materials/{material_id}"
+            )
+        return links
+
+    def _session_dir(self, collection_id: str) -> Path:
+        _ = collection_id
+        return self.collection_service.root_dir / "_goal_sessions"
+
+    def _session_path(self, session: dict[str, Any]) -> Path:
+        return self._session_dir(session["collection_id"]) / f"{session['session_id']}.json"
+
+    def _messages_path(self, session: dict[str, Any]) -> Path:
+        return self._session_dir(session["collection_id"]) / f"{session['session_id']}.messages.json"
+
+    def _find_session_path(self, session_id: str) -> Path:
+        path = self.collection_service.root_dir / "_goal_sessions" / f"{session_id}.json"
+        if path.exists():
+            return path
+        raise GoalSessionNotFoundError(session_id)
+
+    def _read_session(self, session_id: str) -> dict[str, Any]:
+        path = self._find_session_path(session_id)
+        session = read_json(path, None)
+        if not isinstance(session, dict):
+            raise GoalSessionNotFoundError(session_id)
+        return session
+
+    def _write_session(self, session: dict[str, Any]) -> None:
+        write_json(self._session_path(session), session)
+
+    def _read_messages(self, session: dict[str, Any]) -> list[dict[str, Any]]:
+        messages = read_json(self._messages_path(session), [])
+        return messages if isinstance(messages, list) else []
+
+    def _write_messages(
+        self,
+        session: dict[str, Any],
+        messages: list[dict[str, Any]],
+    ) -> None:
+        write_json(self._messages_path(session), messages)
+
+    def _collect_evidence_ids(self, value: Any) -> list[str]:
+        found: list[str] = []
+        for key, item in self._walk(value):
+            if key in {"evidence_id", "evidence_ref_id"}:
+                text = _clean_text(item)
+                if text:
+                    found.append(text)
+            elif key in {"used_evidence_ids", "evidence_ids", "anchor_ids"} and isinstance(item, list):
+                found.extend(text for text in (_clean_text(v) for v in item) if text)
+        return self._stable_strings(found)
+
+    def _collect_material_ids(self, value: Any) -> list[str]:
+        return self._collect_ids(value, {"material_id"})
+
+    def _collect_paper_ids(self, value: Any) -> list[str]:
+        return self._collect_ids(value, {"paper_id", "document_id"})
+
+    def _collect_ids(self, value: Any, keys: set[str]) -> list[str]:
+        found: list[str] = []
+        for key, item in self._walk(value):
+            if key in keys:
+                text = _clean_text(item)
+                if text:
+                    found.append(text)
+        return self._stable_strings(found)
+
+    def _walk(self, value: Any) -> list[tuple[str, Any]]:
+        items: list[tuple[str, Any]] = []
+        if isinstance(value, dict):
+            for key, item in value.items():
+                items.append((str(key), item))
+                items.extend(self._walk(item))
+        elif isinstance(value, list):
+            for item in value:
+                items.extend(self._walk(item))
+        return items
+
+    def _has_non_empty_path(self, value: Any, path: tuple[str, ...]) -> bool:
+        current = value
+        for key in path:
+            if not isinstance(current, dict):
+                return False
+            current = current.get(key)
+        return bool(current)
+
+    def _compact_value(self, value: Any, *, depth: int = 0) -> Any:
+        if depth > 5:
+            return None
+        if isinstance(value, dict):
+            compact: dict[str, Any] = {}
+            for index, (key, item) in enumerate(value.items()):
+                if index >= 30:
+                    compact["_truncated"] = True
+                    break
+                compact[str(key)] = self._compact_value(item, depth=depth + 1)
+            return compact
+        if isinstance(value, list):
+            return [self._compact_value(item, depth=depth + 1) for item in value[:12]]
+        if isinstance(value, str):
+            return value[:900]
+        return value
+
+    def _stable_strings(self, values: Any) -> list[str]:
+        result: list[str] = []
+        if not isinstance(values, list):
+            return result
+        for value in values:
+            text = _clean_text(value)
+            if text and text not in result:
+                result.append(text)
+        return result
+
+    def _coerce_message_content(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if not isinstance(content, list):
+            return str(content or "").strip()
+        parts: list[str] = []
+        for item in content:
+            text = item if isinstance(item, str) else getattr(item, "text", None)
+            if text is None and isinstance(item, dict):
+                text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        return "\n".join(parts).strip()
+
+    def _ensure_general_fallback_boundary(self, answer: str) -> str:
+        if "not a collection-supported conclusion" in answer.lower():
+            return answer
+        if "current collection" in answer.lower() and "general background" in answer.lower():
+            return answer
+        return f"{_GENERAL_FALLBACK_PREFIX}{answer.strip()}"

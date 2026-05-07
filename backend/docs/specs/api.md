@@ -22,6 +22,8 @@
   AI-assisted review draft 生成能力，不是 raw 数据导出
 - 当前没有单独公开的 `query/search` 产品接口
 - `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
+- `goal-sessions/*` 是绑定 collection 的 AI research copilot 会话层，必须区分
+  collection evidence 与 general fallback
 - 所有业务响应都会回传 `X-Request-ID`
   - 客户端可主动传入 `X-Request-ID` 参与链路关联
   - 如果未传入或值非法，后端会生成新的 request id 并回写到响应头
@@ -52,6 +54,14 @@
 2. 从响应读取 `seed_collection.collection_id`
 3. 打开 `GET /api/v1/collections/{collection_id}/workspace`
 4. 后续统一进入 `comparisons`、`results`、`documents`
+
+可选 collection-bound copilot 流程：
+
+1. `POST /api/v1/goal-sessions` 绑定一个 collection
+2. `PATCH /api/v1/goal-sessions/{session_id}` 设置 goal、focus material/paper 或回答模式
+3. `POST /api/v1/goal-sessions/{session_id}/messages`
+4. 根据返回的 `source_mode` 区分知识库证据、证据不足、通用背景回退或纯通用回答
+5. 从返回的 `used_evidence_ids` 和 `links` 回到 evidence、materials、comparisons 或 workspace
 
 ## 资源与接口
 
@@ -95,6 +105,59 @@
   build，不应被当成 Goal Consumer 的最终 coverage 判断
 - 返回中不得直接内嵌 `document_profiles`、`evidence_cards`、`comparison_rows`
 - 返回必须提供 `seed_collection.collection_id`，并收敛到统一 collection 路由
+
+### Goal Sessions / Collection-bound Copilot
+
+- `POST /api/v1/goal-sessions`
+- `GET /api/v1/goal-sessions/{session_id}`
+- `PATCH /api/v1/goal-sessions/{session_id}`
+- `POST /api/v1/goal-sessions/{session_id}/messages`
+- `GET /api/v1/goal-sessions/{session_id}/messages`
+
+最小 session 字段：
+
+- `session_id`
+- `user_id`
+- `collection_id`
+- `focused_material_id`
+- `focused_paper_id`
+- `goal_text`
+- `goal_brief_json`
+- `answer_mode`
+- `rolling_summary`
+- `last_evidence_ids`
+- `last_material_ids`
+- `last_paper_ids`
+- `collection_data_version`
+
+`answer_mode` 可选值：
+
+- `grounded`：只允许基于当前 collection 的 Core 证据回答；无证据时返回受限说明
+- `hybrid`：默认模式；优先查 collection，缺少证据时允许通用背景回退
+- `general`：不以当前 collection 作为证据来源，只做通用背景回答
+
+message 返回必须包含：
+
+- `answer`
+- `source_mode`
+- `used_evidence_ids`
+- `warnings`
+- `links`
+
+`source_mode` 可选值：
+
+- `collection_grounded`
+- `collection_limited`
+- `general_fallback`
+- `general_only`
+
+语义约束：
+
+- session 必须绑定一个 collection
+- grounded/hybrid 模式必须先检索当前 collection 的 Core 或 derived Core artifact
+- collection-grounded 结论不得编造 evidence id、sample id、paper name 或 property value
+- general fallback 必须明确标注不是当前 collection 证据结论
+- rolling summary 可以记录对话连续性，但不得把 general fallback 提升为 collection evidence
 
 ### Collection 与任务入口
 

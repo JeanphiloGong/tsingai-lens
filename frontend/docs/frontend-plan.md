@@ -25,6 +25,9 @@
 - 图谱与 GraphML：`GET /api/v1/collections/{collection_id}/graph`、`GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`、`GET /api/v1/collections/{collection_id}/graphml`
 - 图谱 drilldown 详情：`GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、`GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`、`GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
 - 图谱聚合节点 drilldown：回到 `GET /api/v1/collections/{collection_id}/comparisons`，并使用 `material_system_normalized`、`property_normalized`、`test_condition_normalized`、`baseline_normalized` 过滤参数
+- Collection-bound AI 研究助手：`POST /api/v1/goal-sessions`、
+  `GET|PATCH /api/v1/goal-sessions/{session_id}`、
+  `POST|GET /api/v1/goal-sessions/{session_id}/messages`
 - Protocol 结果：`GET /api/v1/collections/{collection_id}/protocol/steps`、`GET /api/v1/collections/{collection_id}/protocol/search`、`POST /api/v1/collections/{collection_id}/protocol/sop`
 
 ## 前端实现约束
@@ -40,6 +43,10 @@
   `test_condition`、`baseline`、`unknown` 结构节点，并用聚合边表达文献、材料、性能和上下文之间的 collection-level 导航关系
 - 单个材料的细粒度样品、工艺变量、性能、发现和证据关系由
   `/collections/{collection_id}/materials/{material_id}` 材料档案内的 material-scoped graph 承载；集合图谱只提供进入材料档案的导航入口
+- `/collections/{collection_id}/assistant` 使用同源 `goal-sessions` API，是绑定当前
+  collection 的研究助手入口；它必须显示 `collection_grounded`、
+  `collection_limited`、`general_fallback`、`general_only` 来源边界，并把材料详情页传入的
+  `material_id` 作为显式 focus context
 - 报告结果不再是当前浏览器主流程；workspace 只保留降级说明，不再维护前端 reports API 客户端
 - 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已退役为说明页，不再发旧浏览器请求
 

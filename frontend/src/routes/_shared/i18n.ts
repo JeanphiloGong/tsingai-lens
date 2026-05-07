@@ -158,6 +158,7 @@ const translations: Record<Language, Translations> = {
 				materials: 'Materials',
 				papers: 'Papers',
 				allComparisons: 'All Comparisons',
+				assistant: 'AI Copilot',
 				protocol: 'Protocol',
 				graph: 'Graph'
 			},
@@ -170,6 +171,53 @@ const translations: Record<Language, Translations> = {
 			metaUpdated: 'Updated: {time}',
 			deleteConfirm:
 				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.'
+		},
+		goalCopilot: {
+			eyebrow: 'Collection Copilot',
+			title: 'AI Research Copilot',
+			subtitle:
+				'Ask questions against the bound collection first. Hybrid mode falls back to general background only when collection evidence is missing.',
+			contextLabel: 'Goal session context',
+			chatLabel: 'Goal copilot conversation',
+			chatTitle: 'Collection-bound conversation',
+			collection: 'Knowledge base',
+			goal: 'Goal',
+			goalPlaceholder: 'Compare LPBF process effects on strength and elongation...',
+			focusedMaterial: 'Focused material',
+			focusedMaterialPlaceholder: 'Optional material id or name',
+			focusedPaper: 'Focused paper',
+			focusedPaperPlaceholder: 'Optional paper or document id',
+			mode: 'Answer mode',
+			modes: {
+				grounded: 'Grounded',
+				hybrid: 'Hybrid',
+				general: 'General'
+			},
+			saveContext: 'Save context',
+			saving: 'Saving...',
+			contextSaved: 'Context saved',
+			newSession: 'New session',
+			newSessionReady: 'New session ready',
+			commandsTitle: 'Commands',
+			sessionMeta: '{mode} · {id}',
+			openWorkspace: 'Open workspace',
+			loading: 'Loading copilot...',
+			emptyTitle: 'Ask a collection-scoped question',
+			emptyBody:
+				'The assistant will check Core results first and mark any general fallback clearly.',
+			userRole: 'You',
+			assistantRole: 'Lens',
+			evidenceLabel: 'Evidence used',
+			messageLabel: 'Message',
+			messagePlaceholder: 'Ask about trends, evidence gaps, comparable samples, or background...',
+			send: 'Send',
+			sending: 'Sending...',
+			sourceMode: {
+				collection_grounded: 'Collection evidence',
+				collection_limited: 'Limited collection evidence',
+				general_fallback: 'General fallback',
+				general_only: 'General background'
+			}
 		},
 		research: {
 			emptyValue: '--',
@@ -259,6 +307,7 @@ const translations: Record<Language, Translations> = {
 					label: 'Material dossier actions',
 					viewPapers: 'View papers',
 					viewEvidence: 'View evidence',
+					askCopilot: 'Ask Copilot',
 					generatePdf: 'Generate review PDF',
 					refresh: 'Refresh',
 					exportCsv: 'Export data CSV'
@@ -2524,6 +2573,7 @@ const translations: Record<Language, Translations> = {
 				materials: '材料',
 				papers: '文献',
 				allComparisons: '全部比较',
+				assistant: 'AI 助手',
 				protocol: 'Protocol',
 				graph: '图谱'
 			},
@@ -2535,6 +2585,52 @@ const translations: Record<Language, Translations> = {
 			metaDocuments: '{count} 篇文档',
 			metaUpdated: '最近更新：{time}',
 			deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。'
+		},
+		goalCopilot: {
+			eyebrow: '集合助手',
+			title: 'AI 研究助手',
+			subtitle:
+				'优先基于当前绑定的 collection 回答；Hybrid 模式只有在知识库缺少证据时才回退到通用背景。',
+			contextLabel: 'Goal session 上下文',
+			chatLabel: 'Goal copilot 对话',
+			chatTitle: '绑定知识库的对话',
+			collection: '知识库',
+			goal: '目标',
+			goalPlaceholder: '比较 LPBF 工艺对强度和延伸率的影响...',
+			focusedMaterial: '关注材料',
+			focusedMaterialPlaceholder: '可选材料 ID 或名称',
+			focusedPaper: '关注文献',
+			focusedPaperPlaceholder: '可选 paper 或 document ID',
+			mode: '回答模式',
+			modes: {
+				grounded: '仅知识库',
+				hybrid: '知识库优先',
+				general: '通用背景'
+			},
+			saveContext: '保存上下文',
+			saving: '保存中...',
+			contextSaved: '上下文已保存',
+			newSession: '新建会话',
+			newSessionReady: '新会话已就绪',
+			commandsTitle: '命令',
+			sessionMeta: '{mode} · {id}',
+			openWorkspace: '打开工作区',
+			loading: '正在加载助手...',
+			emptyTitle: '询问一个 collection 范围内的问题',
+			emptyBody: '助手会先检查 Core 结果，并清楚标注任何通用背景回退。',
+			userRole: '你',
+			assistantRole: 'Lens',
+			evidenceLabel: '使用的证据',
+			messageLabel: '消息',
+			messagePlaceholder: '询问趋势、证据缺口、可比样品或背景知识...',
+			send: '发送',
+			sending: '发送中...',
+			sourceMode: {
+				collection_grounded: '基于知识库证据',
+				collection_limited: '知识库证据不足',
+				general_fallback: '通用背景回退',
+				general_only: '通用背景'
+			}
 		},
 		research: {
 			emptyValue: '--',
@@ -2621,6 +2717,7 @@ const translations: Record<Language, Translations> = {
 					label: '材料档案操作',
 					viewPapers: '查看文献',
 					viewEvidence: '查看证据',
+					askCopilot: '询问助手',
 					generatePdf: '生成综述 PDF',
 					refresh: '刷新',
 					exportCsv: '导出数据 CSV'

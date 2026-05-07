@@ -1380,6 +1380,14 @@
 			>
 				{$t('research.materialDossier.actions.viewEvidence')}
 			</a>
+			<a
+				class="btn btn--ghost btn--small"
+				href={`${resolve('/collections/[id]/assistant', { id: collectionId })}?material_id=${encodeURIComponent(
+					materialId
+				)}`}
+			>
+				{$t('research.materialDossier.actions.askCopilot')}
+			</a>
 			<button class="btn btn--primary-light btn--small" type="button" on:click={openPdfDrawer}>
 				{$t('research.materialDossier.actions.generatePdf')}
 			</button>
@@ -1989,6 +1997,13 @@
 					</a>
 					<a href={resolve('/collections/[id]/evidence', { id: collectionId })}>
 						{$t('research.materialDossier.actions.viewEvidence')}
+					</a>
+					<a
+						href={`${resolve('/collections/[id]/assistant', {
+							id: collectionId
+						})}?material_id=${encodeURIComponent(materialId)}`}
+					>
+						{$t('research.materialDossier.actions.askCopilot')}
 					</a>
 					<button type="button" on:click={exportCsv}>
 						{$t('research.materialDossier.actions.exportCsv')}

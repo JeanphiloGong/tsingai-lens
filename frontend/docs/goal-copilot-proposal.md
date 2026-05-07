@@ -44,6 +44,9 @@ Out of scope:
   Current frontend same-origin API and product flow guide
 - [`../src/routes/collections/lens-v1-interface-spec.md`](../src/routes/collections/lens-v1-interface-spec.md)
   Current collection route-family spec
+- [`../../docs/decisions/rfc-collection-bound-goal-copilot.md`](../../docs/decisions/rfc-collection-bound-goal-copilot.md)
+  Shared product contract for collection-bound goal sessions, answer source
+  modes, explicit context memory, and general-knowledge fallback boundaries
 - [`../../backend/docs/architecture/goal-core-source-layering.md`](../../backend/docs/architecture/goal-core-source-layering.md)
   Backend layer authority for Goal Brief, Core, and Goal Consumer boundaries
 - [`../../backend/docs/specs/api.md`](../../backend/docs/specs/api.md)
@@ -213,7 +216,7 @@ Primary action:
 
 - finish collection preparation and wait for Core readiness
 
-### State C: Answer From Core
+### State C: Answer From Bound Collection
 
 Once Core artifacts are ready, the same conversational surface can shift into
 analysis mode.
@@ -224,6 +227,8 @@ Frontend behavior:
 - ground responses in comparisons, evidence, and document facts
 - expose links back to workspace, comparisons, evidence, and source context
 - make missingness, uncertainty, and expert-review conditions explicit
+- when the shared session is in hybrid mode, allow general background only
+  after the UI marks it as outside the current collection
 
 Primary actions:
 
@@ -240,6 +245,8 @@ Primary actions:
   collection, processing, or answering from Core
 - the system should never imply evidence-backed conclusions before Core is
   ready
+- general-knowledge fallback must be visibly labeled and must not display as a
+  collection-supported finding
 - each answer in analysis mode should link naturally back to collection
   surfaces instead of trapping the user inside chat
 - warnings, uncertainty, and review flags must remain explicit
@@ -257,7 +264,8 @@ Recommended model:
 - keep workspace as the collection entry surface after handoff
 - add a narrow collection-scoped analysis endpoint only when the Core-grounded
   chat phase is ready
-- keep that future analysis surface restricted to Core-backed answers
+- keep collection-grounded answers restricted to Core-backed evidence, while
+  following the shared source-mode contract when hybrid fallback is enabled
 
 Avoid in the first wave:
 

@@ -11,6 +11,7 @@ This node owns the collection workspace route family in the frontend.
 - `collections/[id]/documents/+page.svelte`
 - `collections/[id]/evidence/+page.svelte`
 - `collections/[id]/comparisons/+page.svelte`
+- `collections/[id]/assistant/+page.svelte`
 - `collections/[id]/documents/[document_id]/+page.svelte`
 
 ## Responsibilities
@@ -21,6 +22,8 @@ This node owns the collection workspace route family in the frontend.
 - render canonical collection materials and collection-scoped material profiles
 - render collection-level evidence cards and source-anchor entry points
 - render global comparison review as a More / All Comparisons surface
+- render the collection-bound AI research copilot with explicit answer source
+  modes and links back to Core-owned surfaces
 - render document detail as a paper reader plus structured understanding workbench
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness

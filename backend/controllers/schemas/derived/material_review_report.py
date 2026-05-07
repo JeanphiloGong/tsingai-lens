@@ -38,6 +38,7 @@ class MaterialReviewReportResponse(BaseModel):
     collection_id: str = Field(..., description="集合 ID")
     material_id: str = Field(..., description="材料 ID")
     status: MaterialReviewReportStatus = Field(..., description="报告生成状态")
+    stage: str | None = Field(default=None, description="报告生成流水线阶段")
     message: str = Field(..., description="状态说明")
     title: str | None = Field(default=None, description="报告标题")
     language: str = Field(default="zh", description="报告语言")

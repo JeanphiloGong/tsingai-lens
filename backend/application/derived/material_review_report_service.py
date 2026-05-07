@@ -17,6 +17,7 @@ from openai import OpenAI
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
+from application.derived.material_review_pipeline import MaterialReviewReportPipeline
 from application.source.collection_service import CollectionService
 from infra.persistence.file._json import read_json, write_json
 
@@ -106,6 +107,10 @@ class MaterialReviewReportService:
             api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
             base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
         )
+        self.pipeline = MaterialReviewReportPipeline(
+            llm_client=self.llm_client,
+            model=self.model,
+        )
 
     def request_review_report(
         self,
@@ -141,6 +146,7 @@ class MaterialReviewReportService:
             "collection_id": collection_id,
             "material_id": material_id,
             "status": "generating",
+            "stage": "requested",
             "message": "Review draft generation started.",
             "title": self._default_title(profile),
             "language": language,
@@ -186,14 +192,51 @@ class MaterialReviewReportService:
             context_pack = read_json(paths["context"], None)
             if context_pack is None:
                 raise MaterialReviewReportNotFoundError(collection_id, material_id)
-            markdown = self._generate_markdown(context_pack, language=language)
+            def update_stage(stage: str, message: str) -> None:
+                nonlocal metadata
+                metadata = self._update_metadata_stage(
+                    collection_id,
+                    material_id,
+                    metadata,
+                    stage,
+                    message,
+                )
+
+            pipeline_result = self.pipeline.run(
+                context_pack,
+                paths=paths,
+                language=language,
+                include_appendix=include_appendix,
+                stage_callback=update_stage,
+            )
+            markdown = _safe_text(pipeline_result.get("markdown"))
+            if not markdown:
+                raise RuntimeError("material review generation returned empty markdown")
             validation = self.validate_markdown(markdown, context_pack)
-            warnings = validation["warnings"]
+            warnings = list(
+                dict.fromkeys(
+                    [
+                        *[
+                            _safe_text(item)
+                            for item in _safe_list(pipeline_result.get("warnings"))
+                            if _safe_text(item)
+                        ],
+                        *validation["warnings"],
+                    ]
+                )
+            )
             status = "ready_with_warnings" if warnings else "ready"
             title = self._extract_title(markdown) or metadata.get("title") or self._default_title(
                 context_pack.get("material", {})
             )
             self._write_text(paths["markdown"], markdown)
+            metadata = self._update_metadata_stage(
+                collection_id,
+                material_id,
+                metadata,
+                "rendering_pdf",
+                "Rendering PDF.",
+            )
             self._render_pdf(
                 markdown,
                 paths["pdf"],
@@ -203,6 +246,7 @@ class MaterialReviewReportService:
             updated = {
                 **metadata,
                 "status": status,
+                "stage": status,
                 "message": (
                     "Review draft generated with evidence warnings."
                     if warnings
@@ -219,6 +263,7 @@ class MaterialReviewReportService:
             failed = {
                 **self._without_urls(metadata),
                 "status": "failed",
+                "stage": "failed",
                 "message": str(exc),
                 "updated_at": _now_iso(),
             }
@@ -492,91 +537,6 @@ class MaterialReviewReportService:
             "warnings": warnings,
         }
 
-    def _generate_markdown(self, context_pack: dict[str, Any], *, language: str) -> str:
-        system_prompt, user_prompt = self._build_generation_prompt(context_pack, language=language)
-        completion = self.llm_client.chat.completions.create(
-            model=self.model,
-            temperature=0.2,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        content = completion.choices[0].message.content if completion.choices else None
-        markdown = self._coerce_message_content(content)
-        if not markdown:
-            raise RuntimeError("material review generation returned empty markdown")
-        return markdown
-
-    def _build_generation_prompt(
-        self,
-        context_pack: dict[str, Any],
-        *,
-        language: str,
-    ) -> tuple[str, str]:
-        language_label = "正式学术中文" if language == "zh" else "formal academic English"
-        system_prompt = (
-            "You are a materials science review-writing assistant.\n"
-            "Generate an AI-assisted review draft from the structured material research context.\n"
-            "Rules:\n"
-            "1. Do not use concrete values, samples, papers, or experimental results outside the context.\n"
-            "2. You may compare, synthesize trends, and discuss mechanisms grounded in the data.\n"
-            "3. Do not turn correlation into causation unless the evidence explicitly supports it.\n"
-            "4. Every key conclusion must cite evidence ids such as [E01, E04].\n"
-            "5. Mechanistic explanations with limited evidence must be written as possible or requiring validation.\n"
-            "6. Distinguish direct findings, trend observations, mechanistic hypotheses, and research gaps.\n"
-            "7. General non-quantitative domain framing is allowed only when clearly separated from collection-derived findings.\n"
-            "8. Output Markdown only.\n"
-            f"9. Use {language_label}."
-        )
-        if language == "en":
-            user_prompt = (
-                "Generate a review-paper-level draft for this material from the following "
-                "MaterialReviewContextPack.\n\n"
-                "Report structure:\n"
-                "1. Abstract\n"
-                "2. Introduction\n"
-                "3. Literature Scope and Data Sources\n"
-                "4. Material System and Sample Design\n"
-                "5. Process Parameter Space\n"
-                "6. Property Results Summary\n"
-                "7. Processing-Structure-Property Relationships\n"
-                "8. Cross-Paper Consistency and Differences\n"
-                "9. Mechanistic Discussion\n"
-                "10. Limitations\n"
-                "11. Research Gaps and Future Directions\n"
-                "12. Conclusions\n"
-                "13. Appendix: Evidence Table\n\n"
-                "Requirements: do not fabricate facts outside the context; every key "
-                "conclusion must cite evidence ids; explicitly state data insufficiency; "
-                "synthesize, compare, and analyze rather than only restating values.\n\n"
-                "MaterialReviewContextPack:\n"
-                f"{json.dumps(context_pack, ensure_ascii=False, indent=2)}"
-            )
-        else:
-            user_prompt = (
-                "请基于以下 MaterialReviewContextPack，为该材料生成一篇综述论文级别的草稿。\n\n"
-                "报告结构：\n"
-                "1. 摘要\n"
-                "2. 引言\n"
-                "3. 文献范围与数据来源\n"
-                "4. 材料体系与样品设计\n"
-                "5. 工艺参数空间\n"
-                "6. 性能结果汇总\n"
-                "7. 工艺-组织-性能关系\n"
-                "8. 跨文献一致性与差异\n"
-                "9. 机制讨论\n"
-                "10. 局限性\n"
-                "11. 研究空白与未来方向\n"
-                "12. 结论\n"
-                "13. 附录：证据表\n\n"
-                "要求：不要编造上下文之外的事实；所有关键结论必须引用 evidence id；"
-                "如果数据不足，请明确指出不足；不要只复述数据，要进行归纳、比较和综述级分析。\n\n"
-                "MaterialReviewContextPack:\n"
-                f"{json.dumps(context_pack, ensure_ascii=False, indent=2)}"
-            )
-        return system_prompt, user_prompt
-
     def _render_pdf(
         self,
         markdown: str,
@@ -686,12 +646,37 @@ class MaterialReviewReportService:
             "base_dir": base_dir,
             "metadata": base_dir / "report.json",
             "context": base_dir / "context_pack.json",
+            "data_pack": base_dir / "data_pack.json",
+            "outline": base_dir / "outline.json",
+            "section_contexts": base_dir / "section_contexts.json",
+            "sections": base_dir / "sections.json",
+            "bound_claims": base_dir / "bound_claims.json",
+            "review_notes": base_dir / "review_notes.json",
+            "revisions": base_dir / "revisions.json",
             "markdown": base_dir / "review.md",
             "pdf": base_dir / "review.pdf",
         }
 
     def _read_metadata(self, collection_id: str, material_id: str) -> dict[str, Any] | None:
         return read_json(self._report_paths(collection_id, material_id)["metadata"], None)
+
+    def _update_metadata_stage(
+        self,
+        collection_id: str,
+        material_id: str,
+        metadata: dict[str, Any],
+        stage: str,
+        message: str,
+    ) -> dict[str, Any]:
+        updated = {
+            **self._without_urls(metadata),
+            "status": "generating",
+            "stage": stage,
+            "message": message,
+            "updated_at": _now_iso(),
+        }
+        write_json(self._report_paths(collection_id, material_id)["metadata"], updated)
+        return updated
 
     def _write_text(self, path: Path, payload: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -964,17 +949,3 @@ class MaterialReviewReportService:
         )
         match = pattern.search(markdown)
         return match.group("body").strip() if match else ""
-
-    def _coerce_message_content(self, content: Any) -> str:
-        if isinstance(content, str):
-            return content.strip()
-        if not isinstance(content, list):
-            return str(content or "").strip()
-        parts: list[str] = []
-        for item in content:
-            text = item if isinstance(item, str) else getattr(item, "text", None)
-            if text is None and isinstance(item, dict):
-                text = item.get("text")
-            if isinstance(text, str) and text.strip():
-                parts.append(text.strip())
-        return "\n".join(parts).strip()

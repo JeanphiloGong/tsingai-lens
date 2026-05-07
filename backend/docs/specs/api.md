@@ -440,8 +440,9 @@ empty | processing | partial | ready | failed
 - `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report.pdf`
 
 这是材料档案的高价值输出能力：后端先读取 collection material profile
-research-view，整理为 `MaterialReviewContextPack`，再调用 AI 生成综述论文级
-Markdown 草稿，校验证据引用，并渲染 PDF。
+research-view，整理为 `MaterialReviewContextPack`，再进入分阶段综述生成流水线。
+流水线会生成写作数据包、提纲、分节上下文、分节草稿、证据绑定结果、审核记录、
+修订记录和最终 Markdown，然后校验证据引用并渲染 PDF。
 
 产品定位是 AI-assisted review draft，不是正式发表论文，也不是普通导出。
 PDF/Markdown 内必须保留说明：
@@ -478,6 +479,7 @@ PDF/Markdown 内必须保留说明：
 - `collection_id`
 - `material_id`
 - `status`
+- `stage`
 - `message`
 - `title`
 - `language`
@@ -505,15 +507,44 @@ generating | ready | ready_with_warnings | failed
 strong | usable | preliminary | insufficient
 ```
 
+`stage` 使用更细的生成阶段。`status` 仍保持稳定的对外任务状态：
+
+```text
+requested
+building_data_pack
+planning_outline
+selecting_section_contexts
+writing_sections
+binding_evidence
+reviewing
+revising
+integrating
+rendering_pdf
+ready
+ready_with_warnings
+failed
+```
+
 生成流程：
 
 1. 读取 material research-view。
 2. 构造 `MaterialReviewContextPack`，只包含综述写作需要的材料、文献范围、
    样品-工艺矩阵、性能矩阵、comparison clusters、trend findings、
    conflicts、research gaps、evidence table 和 limitations。
-3. 调用 AI 生成 Markdown。
-4. 校验 Markdown 中的 evidence id。
-5. 写出 Markdown 和 PDF。
+3. 构造确定性的 `data_pack.json`，计算样品数、工艺参数空间、性能范围、
+   极值样品、样品级对比、趋势候选和质量 flags。
+4. 生成 `outline.json`，单篇或少量文献时使用证据边界章节，不生成实质性的
+   跨文献一致性结论章节。
+5. 生成 `section_contexts.json`，每个章节只接收该章节需要的数据子集。
+6. 分章节调用 AI 写作，写出 `sections.json`；结果章节必须包含样品、数值和
+   evidence id。
+7. 写出 `bound_claims.json` 和 `review_notes.json`，检查证据 ID、样品 ID、
+   数值、泛泛表述、单篇文献过度外推和缺失核心数据。
+8. 对失败章节最多执行两轮自动修订，写出 `revisions.json`；无法修复时使用
+   确定性的证据绑定段落兜底，并把问题保留为 warning。
+9. 整合最终 Markdown，追加确定性附录，包括样品-工艺矩阵、样品-性能矩阵、
+   evidence table 和必要的 reviewer warnings。
+10. 校验 Markdown 中的 evidence id，写出 Markdown 和 PDF。
 
 证据约束：
 

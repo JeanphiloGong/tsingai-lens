@@ -22,6 +22,7 @@ def _report_payload(status: str = "ready") -> dict[str, Any]:
         "collection_id": "col-1",
         "material_id": "mat-316l",
         "status": status,
+        "stage": status,
         "message": "Review draft generated.",
         "title": "316L review",
         "language": "zh",

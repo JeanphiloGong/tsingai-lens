@@ -86,7 +86,7 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
-                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                        "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
             }
@@ -106,7 +106,7 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
             },
             {
                 "id": "tu-3",
-                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                "text": "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
                 "document_ids": ["paper-1"],
             },
         ]

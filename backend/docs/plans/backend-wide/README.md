@@ -34,6 +34,9 @@ order in root `docs/`.
   Backend-local materials comparison direction and closure family
 - [`request-id-and-extraction-observability/README.md`](request-id-and-extraction-observability/README.md)
   Backend-wide request correlation and extraction diagnostics family
+- [`user-ownership-modeling/README.md`](user-ownership-modeling/README.md)
+  Backend ownership modeling plan for collection-scoped users, goal sessions,
+  and generated review reports
 
 ## Reading Paths
 
@@ -47,6 +50,8 @@ order in root `docs/`.
   start at [`research-view-aggregation/README.md`](research-view-aggregation/README.md)
 - Backend-local materials comparison direction:
   start at [`materials-comparison-v2/README.md`](materials-comparison-v2/README.md)
+- Backend user ownership modeling:
+  start at [`user-ownership-modeling/implementation-plan.md`](user-ownership-modeling/implementation-plan.md)
 
 ## Boundary Rule
 

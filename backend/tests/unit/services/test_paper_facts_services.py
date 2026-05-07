@@ -31,6 +31,10 @@ from application.core.semantic_build.llm.schemas import (
     StructuredDocumentProfile,
     StructuredExtractionBundle,
     StructuredTableBatchMentions,
+    StructuredTableBatchRowMentions,
+    TableRowFactMentionPayload,
+    TableRowResultClaimPayload,
+    TableRowSubjectMentionPayload,
     StructuredTextWindowMentions,
     TextWindowBaselineMentionPayload,
     TextWindowMethodMentionPayload,
@@ -799,6 +803,81 @@ def test_table_batch_payload_includes_source_table_context():
     }
     assert payload["target_rows"][0]["row_summary"] == "A | 560 | as-built"
     assert payload["target_rows"][0]["row_index"] == 1
+
+
+def test_table_row_binding_repairs_split_lpbf_variant_labels():
+    service = PaperFactsService()
+    row_cells = [
+        {
+            "header_path": None,
+            "cell_text": "100) HT-SLM (100/",
+            "unit_hint": None,
+            "col_index": 0,
+        },
+        {
+            "header_path": "Type of heat treatment",
+            "cell_text": "Furnace HT",
+            "unit_hint": None,
+            "col_index": 1,
+        },
+        {
+            "header_path": "Laser power (W)",
+            "cell_text": "100",
+            "unit_hint": None,
+            "col_index": 2,
+        },
+        {
+            "header_path": "Scan speed (mm/s)",
+            "cell_text": "100",
+            "unit_hint": None,
+            "col_index": 3,
+        },
+        {
+            "header_path": "Density (%)",
+            "cell_text": "98.70",
+            "unit_hint": "%",
+            "col_index": 4,
+        },
+    ]
+
+    bundle = service._bind_table_row_mentions_to_bundle(
+        mentions=StructuredTableBatchRowMentions(
+            row_index=2,
+            row_subjects=[
+                TableRowSubjectMentionPayload(
+                    variant_label="100) HT-SLM (100/",
+                    family="316L stainless steel",
+                )
+            ],
+            process_mentions=[
+                TableRowFactMentionPayload(
+                    name="post_treatment_summary",
+                    value_text="Furnace HT",
+                )
+            ],
+            result_claims=[
+                TableRowResultClaimPayload(
+                    property_normalized="density",
+                    value_text="98.70",
+                    unit="%",
+                    variant_label="100) HT-SLM (100/",
+                    quote="100) HT-SLM (100/ | Furnace HT | 100 | 100 | 98.70",
+                )
+            ],
+        ),
+        table_row={
+            "table_id": "tbl-1",
+            "row_index": 2,
+            "row_text": "100) HT-SLM (100/ | Furnace HT | 100 | 100 | 98.70",
+            "page": 3,
+        },
+        row_cells=row_cells,
+        table_context=None,
+    )
+
+    assert bundle.sample_variants[0].variant_label == "HT-SLM (100/100)"
+    assert bundle.measurement_results[0].variant_label == "HT-SLM (100/100)"
+    assert "HT-SLM (100/100)" in bundle.measurement_results[0].claim_text
 
 
 def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):

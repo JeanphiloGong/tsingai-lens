@@ -1527,6 +1527,8 @@ class PaperFactsService:
             result_claims=current_work_claims,
             table_row=table_row,
             table_context=table_context,
+            process_context=process_context,
+            row_cells=row_cells,
         )
         return StructuredExtractionBundle(
             sample_variants=sample_variants,
@@ -1669,6 +1671,113 @@ class PaperFactsService:
             return round(value * 1000.0, 6)
         return value
 
+    def _repair_table_row_variant_label(
+        self,
+        variant_label: Any,
+        *,
+        process_context: ProcessContextPayload,
+        row_cells: list[dict[str, Any]],
+    ) -> str | None:
+        label = self._normalize_scalar_text(variant_label)
+        if not label:
+            return None
+
+        label_lower = label.lower()
+        if not any(
+            token in label_lower for token in ("as-slm", "ht-slm", "hip-slm")
+        ):
+            return label
+
+        power = self._process_context_number(
+            process_context,
+            "laser_power_w",
+        )
+        if power is None:
+            power = self._numeric_value_from_table_cells(row_cells, ("laser", "power"))
+        speed = self._process_context_number(
+            process_context,
+            "scan_speed_mm_s",
+        )
+        if speed is None:
+            speed = self._numeric_value_from_table_cells(row_cells, ("scan", "speed"))
+        if power is None or speed is None:
+            return label
+
+        treatment_text = " ".join(
+            part
+            for part in (
+                self._normalize_scalar_text(
+                    getattr(process_context, "post_treatment_summary", None)
+                ),
+                self._text_value_from_table_cells(row_cells, ("heat", "treatment")),
+                label,
+            )
+            if part
+        ).lower()
+        if "hip-slm" in label_lower or "hip" in treatment_text:
+            process_label = "HIP-SLM"
+        elif (
+            "ht-slm" in label_lower
+            or "furnace" in treatment_text
+            or "heat treatment" in treatment_text
+        ):
+            process_label = "HT-SLM"
+        elif "as-slm" in label_lower:
+            process_label = "as-SLM"
+        else:
+            return label
+
+        return (
+            f"{process_label} "
+            f"({self._format_table_process_number(power)}/"
+            f"{self._format_table_process_number(speed)})"
+        )
+
+    def _process_context_number(
+        self,
+        process_context: ProcessContextPayload,
+        field_name: str,
+    ) -> float | None:
+        value = getattr(process_context, field_name, None)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _numeric_value_from_table_cells(
+        self,
+        row_cells: list[dict[str, Any]],
+        header_tokens: tuple[str, ...],
+    ) -> float | None:
+        value_text = self._text_value_from_table_cells(row_cells, header_tokens)
+        if value_text is None:
+            return None
+        numeric = self._coerce_numeric_text_window_value(value_text, value_text)
+        return float(numeric) if numeric is not None else None
+
+    def _text_value_from_table_cells(
+        self,
+        row_cells: list[dict[str, Any]],
+        header_tokens: tuple[str, ...],
+    ) -> str | None:
+        for cell in row_cells:
+            header = self._normalize_scalar_text(cell.get("header_path"))
+            value = self._normalize_scalar_text(cell.get("cell_text"))
+            if not header or not value:
+                continue
+            normalized_header = re.sub(r"[^a-z0-9]+", " ", header.lower())
+            if all(token in normalized_header for token in header_tokens):
+                return value
+        return None
+
+    def _format_table_process_number(self, value: float) -> str:
+        number = float(value)
+        if number.is_integer():
+            return str(int(number))
+        return f"{number:g}"
+
     def _build_table_row_sample_variants(
         self,
         *,
@@ -1681,7 +1790,11 @@ class PaperFactsService:
         rows: list[SampleVariantPayload] = []
         seen: set[str] = set()
         for subject in mentions.row_subjects:
-            variant_label = self._normalize_scalar_text(subject.variant_label)
+            variant_label = self._repair_table_row_variant_label(
+                subject.variant_label,
+                process_context=process_context,
+                row_cells=row_cells,
+            )
             if not variant_label or variant_label.lower() in seen:
                 continue
             seen.add(variant_label.lower())
@@ -1707,7 +1820,11 @@ class PaperFactsService:
             return rows
 
         for claim in result_claims:
-            variant_label = self._normalize_scalar_text(claim.variant_label)
+            variant_label = self._repair_table_row_variant_label(
+                claim.variant_label,
+                process_context=process_context,
+                row_cells=row_cells,
+            )
             if not variant_label or variant_label.lower() in seen:
                 continue
             seen.add(variant_label.lower())
@@ -1724,6 +1841,14 @@ class PaperFactsService:
 
         sample_label = self._infer_table_row_sample_label(row_cells)
         if sample_label:
+            sample_label = (
+                self._repair_table_row_variant_label(
+                    sample_label,
+                    process_context=process_context,
+                    row_cells=row_cells,
+                )
+                or sample_label
+            )
             return [
                 SampleVariantPayload(
                     variant_label=sample_label,
@@ -1850,6 +1975,8 @@ class PaperFactsService:
         result_claims: list[Any],
         table_row: dict[str, Any],
         table_context: dict[str, Any] | None,
+        process_context: ProcessContextPayload,
+        row_cells: list[dict[str, Any]],
     ) -> list[MeasurementResultPayload]:
         rows: list[MeasurementResultPayload] = []
         seen_keys: set[tuple[Any, ...]] = set()
@@ -1876,8 +2003,21 @@ class PaperFactsService:
                 explicit_unit=unit,
                 text=claim_text,
             )
+            variant_label = self._repair_table_row_variant_label(
+                claim.variant_label,
+                process_context=process_context,
+                row_cells=row_cells,
+            )
+            raw_variant_label = self._normalize_scalar_text(claim.variant_label)
+            if (
+                claim_text
+                and variant_label
+                and raw_variant_label
+                and raw_variant_label in claim_text
+            ):
+                claim_text = claim_text.replace(raw_variant_label, variant_label)
             dedupe_key = (
-                self._normalize_scalar_text(claim.variant_label),
+                variant_label,
                 property_name,
                 str(claim.result_type or "").strip() or "scalar",
                 self._measurement_value_signature(
@@ -1895,7 +2035,7 @@ class PaperFactsService:
                     result_type=str(claim.result_type or "").strip() or "scalar",
                     value_payload=value_payload,
                     unit=unit,
-                    variant_label=claim.variant_label,
+                    variant_label=variant_label,
                     baseline_label=claim.baseline_label,
                     anchors=[
                         EvidenceAnchorPayload(

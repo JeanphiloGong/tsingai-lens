@@ -590,7 +590,11 @@ def _build_pdf_table_rows(
     rows: list[dict[str, Any]] = []
     for table_id, table_frame in table_cells.groupby("table_id", sort=False):
         first_data_row = None
-        for row_index in sorted(int(value) for value in table_frame["row_index"].dropna().tolist()):
+        row_indices = {
+            int(value)
+            for value in table_frame["row_index"].dropna().tolist()
+        }
+        for row_index in sorted(row_indices):
             row_frame = table_frame[table_frame["row_index"].astype(int) == row_index]
             if row_frame["header_path"].isna().all():
                 continue

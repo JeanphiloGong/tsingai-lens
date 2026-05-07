@@ -299,6 +299,8 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
     assert "| Sample | Strength (MPa) |" in table["table_markdown"]
     assert "A | 123" in table["table_text"]
     assert not bundle.table_rows.empty
+    assert len(bundle.table_rows) == 1
+    assert bundle.table_rows["row_id"].is_unique
     assert not bundle.table_cells.empty
     assert set(bundle.tables["table_id"]) == set(bundle.table_rows["table_id"])
     assert "Strength (MPa)" in set(bundle.table_cells["header_path"].dropna())

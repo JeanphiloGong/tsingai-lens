@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { errorMessage } from './_shared/api';
   import {
     createCollection,
@@ -49,6 +49,7 @@
   let searchTerm = '';
   let statusFilter: StatusFilter = 'all';
   let openRowMenuId = '';
+  let collectionPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   $: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
   $: sortedCollections = [...$collections].sort(compareCollectionsByUpdated);
@@ -74,15 +75,42 @@
     await loadCollections();
   });
 
-  async function loadCollections() {
+  onDestroy(() => {
+    clearCollectionPoll();
+  });
+
+  function clearCollectionPoll() {
+    if (collectionPollTimer) {
+      clearTimeout(collectionPollTimer);
+      collectionPollTimer = null;
+    }
+  }
+
+  function hasProcessingCollections(items: Collection[]) {
+    return items.some((collection) => getStatusGroup(collection.status) === 'processing');
+  }
+
+  function scheduleCollectionPoll() {
+    clearCollectionPoll();
+    collectionPollTimer = setTimeout(() => {
+      void loadCollections(false);
+    }, 2500);
+  }
+
+  async function loadCollections(showLoading = true) {
     error = '';
-    loading = true;
+    if (showLoading) loading = true;
     try {
-      await fetchCollections();
+      const items = await fetchCollections();
+      if (hasProcessingCollections(items)) {
+        scheduleCollectionPoll();
+      } else {
+        clearCollectionPoll();
+      }
     } catch (err) {
       error = errorMessage(err);
     } finally {
-      loading = false;
+      if (showLoading) loading = false;
     }
   }
 
@@ -178,10 +206,17 @@
 
   function getStatusGroup(status?: string | null) {
     const normalized = status?.toLowerCase() ?? '';
-    if (normalized === 'processing') return 'processing';
-    if (normalized === 'attention_required' || normalized === 'failed') return 'attention';
+    if (['processing', 'running', 'queued', 'started', 'in_progress'].includes(normalized)) {
+      return 'processing';
+    }
+    if (['attention_required', 'failed', 'partial_success'].includes(normalized)) {
+      return 'attention';
+    }
     if (
       normalized === 'ready' ||
+      normalized === 'completed' ||
+      normalized === 'complete' ||
+      normalized === 'success' ||
       normalized === 'graph_ready' ||
       normalized === 'document_profiled' ||
       normalized === 'comparison_pending' ||
@@ -275,7 +310,15 @@
 
     try {
       setRowMessage(collection.id, $t('home.indexing'));
-      await createBuildTask(collection.id);
+      const task = await createBuildTask(collection.id);
+      collections.update((items) =>
+        items.map((item) =>
+          item.id === collection.id
+            ? { ...item, status: 'running', updated_at: task.updated_at || item.updated_at }
+            : item
+        )
+      );
+      scheduleCollectionPoll();
       setRowMessage(collection.id, $t('home.indexStarted'));
     } catch (err) {
       setRowMessage(collection.id, errorMessage(err), 'error');

@@ -63,7 +63,7 @@ def goal_session_services(monkeypatch, tmp_path):
     return collection_service, service
 
 
-def test_goal_sessions_route_creates_and_messages_session(goal_session_services):
+def test_goal_sessions_route_creates_minimal_session_and_messages(goal_session_services):
     collection_service, _service = goal_session_services
     collection = collection_service.create_collection("Copilot Collection")
 
@@ -71,8 +71,6 @@ def test_goal_sessions_route_creates_and_messages_session(goal_session_services)
         sessions_controller.create_goal_session(
             GoalSessionCreateRequest(
                 collection_id=collection["collection_id"],
-                goal_text="Compare LPBF strength and ductility.",
-                answer_mode="hybrid",
             )
         )
     )
@@ -90,6 +88,9 @@ def test_goal_sessions_route_creates_and_messages_session(goal_session_services)
     )
 
     assert session.collection_id == collection["collection_id"]
+    assert session.goal_text is None
+    assert session.goal_brief_json == {}
+    assert session.answer_mode == "hybrid"
     assert response.source_mode == "general_fallback"
     assert response.used_evidence_ids == []
     assert len(messages.items) == 2

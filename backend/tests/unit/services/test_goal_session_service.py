@@ -130,6 +130,25 @@ def test_goal_session_persists_explicit_context(tmp_path):
     assert loaded["answer_mode"] == "hybrid"
 
 
+def test_goal_session_can_start_with_collection_only(tmp_path):
+    service, collection_service = _service(tmp_path, content="General background.")
+    collection = collection_service.create_collection("Minimal Session Collection")
+
+    session = service.create_session(collection_id=collection["collection_id"])
+    response = service.post_message(
+        session["session_id"],
+        message="What can I ask about this collection?",
+    )
+    loaded = service.get_session(session["session_id"])
+
+    assert loaded["collection_id"] == collection["collection_id"]
+    assert loaded["goal_text"] is None
+    assert loaded["goal_brief_json"] == {}
+    assert loaded["answer_mode"] == "hybrid"
+    assert response["source_mode"] == "general_fallback"
+    assert response["used_evidence_ids"] == []
+
+
 def test_goal_session_update_can_clear_focus(tmp_path):
     service, collection_service = _service(tmp_path)
     collection = collection_service.create_collection("Session Collection")

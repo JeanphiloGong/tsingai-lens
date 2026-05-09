@@ -48,14 +48,7 @@
 9. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
 10. 在 comparison/result/document 中需要核验证据时，调用 traceback 接口并跳转文档查看器
 
-可选 goal-first 流程（当前只覆盖 Goal Brief / Intake）：
-
-1. `POST /api/v1/goals/intake`
-2. 从响应读取 `seed_collection.collection_id`
-3. 打开 `GET /api/v1/collections/{collection_id}/workspace`
-4. 后续统一进入 `comparisons`、`results`、`documents`
-
-可选 collection-bound copilot 流程：
+可选 collection-bound 短对话流程：
 
 1. `POST /api/v1/goal-sessions` 绑定一个 collection
 2. `PATCH /api/v1/goal-sessions/{session_id}` 设置 goal、focus material/paper 或回答模式
@@ -63,9 +56,16 @@
 4. 根据返回的 `source_mode` 区分知识库证据、证据不足、通用背景回退或纯通用回答
 5. 从返回的 `used_evidence_ids` 和 `links` 回到 evidence、materials、comparisons 或 workspace
 
+可选 goal-first collection seeding 流程（当前只覆盖 Goal Brief / Intake）：
+
+1. `POST /api/v1/goals/intake`
+2. 从响应读取 `seed_collection.collection_id`
+3. 打开 `GET /api/v1/collections/{collection_id}/workspace`
+4. 后续统一进入 `goal-sessions`、`comparisons`、`results`、`documents`
+
 ## 资源与接口
 
-### Goal Brief / Intake（当前公开入口）
+### Goal Brief / Intake（可选 collection seeding 入口）
 
 - `POST /api/v1/goals/intake`
 
@@ -106,7 +106,7 @@
 - 返回中不得直接内嵌 `document_profiles`、`evidence_cards`、`comparison_rows`
 - 返回必须提供 `seed_collection.collection_id`，并收敛到统一 collection 路由
 
-### Goal Sessions / Collection-bound Copilot
+### Goal Sessions / Collection-bound Short Conversation
 
 - `POST /api/v1/goal-sessions`
 - `GET /api/v1/goal-sessions/{session_id}`
@@ -129,6 +129,18 @@
 - `last_material_ids`
 - `last_paper_ids`
 - `collection_data_version`
+
+最小创建请求只需要绑定 collection：
+
+```json
+{
+  "collection_id": "col_xxx"
+}
+```
+
+`goal_text`、`focused_material_id`、`focused_paper_id`、`answer_mode` 和
+`goal_brief_json` 都是可选会话上下文。`goal_brief_json` 是可选 metadata，不是开始
+对话的前置条件。
 
 `answer_mode` 可选值：
 
@@ -154,10 +166,13 @@ message 返回必须包含：
 语义约束：
 
 - session 必须绑定一个 collection
+- session 可以在没有结构化 Goal Brief 的情况下开始
 - grounded/hybrid 模式必须先检索当前 collection 的 Core 或 derived Core artifact
 - collection-grounded 结论不得编造 evidence id、sample id、paper name 或 property value
 - general fallback 必须明确标注不是当前 collection 证据结论
 - rolling summary 可以记录对话连续性，但不得把 general fallback 提升为 collection evidence
+- 当前短对话层不产出 final coverage assessment、gap detection、clue ranking 或
+  next-step decision support
 
 ### Collection 与任务入口
 

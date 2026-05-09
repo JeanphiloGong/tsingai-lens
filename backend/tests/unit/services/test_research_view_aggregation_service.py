@@ -484,6 +484,122 @@ def test_material_profile_inherits_single_document_material_and_keeps_filename()
     assert profile["sample_matrix"]["rows"][0]["material"] == "316L stainless steel"
 
 
+def test_material_profile_uses_document_material_when_variant_mentions_argon():
+    profiles, frames = _frames()
+    profiles.loc[0, "title"] = None
+    profiles.loc[
+        0,
+        "source_filename",
+    ] = "P002-Effect of Preheating Build Platform on 316L Stainless Steel.pdf"
+    variants = frames["sample_variants"].copy()
+    variants.at[0, "variant_label"] = "P150"
+    variants.at[0, "host_material_system"] = {
+        "family": "argon",
+        "composition": None,
+    }
+    variants.at[0, "composition"] = None
+    frames["sample_variants"] = variants
+
+    service = _service_from_frames(profiles, frames)
+
+    materials = service.list_collection_materials("col-1")
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    assert [item["material_id"] for item in materials["materials"]] == [
+        "mat-316l-stainless-steel"
+    ]
+    assert materials["materials"][0]["canonical_name"] == "316L stainless steel"
+    assert profile["sample_matrix"]["rows"][0]["sample_label"] == "P150"
+    assert profile["sample_matrix"]["rows"][0]["material"] == "316L stainless steel"
+
+
+def test_material_profile_keeps_unspecified_material_process_and_angle_samples():
+    profiles, frames = _frames()
+    profiles.loc[
+        0,
+        "source_filename",
+    ] = "P005-Influence of porosity on mechanical properties of SLM 316L stainless steel.pdf"
+    frames["sample_variants"] = pd.DataFrame(
+        [
+            {
+                "variant_id": "var-power",
+                "document_id": "paper-1",
+                "collection_id": "col-1",
+                "variant_label": "375 W-2100 mm/s",
+                "host_material_system": {"family": "unspecified material system"},
+                "composition": "unspecified material system",
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": {},
+                "source_anchor_ids": ["anc-density"],
+            },
+            {
+                "variant_id": "var-angle-0",
+                "document_id": "paper-1",
+                "collection_id": "col-1",
+                "variant_label": "0",
+                "host_material_system": {"family": "unspecified material system"},
+                "composition": "unspecified material system",
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": {},
+                "source_anchor_ids": [],
+            },
+            {
+                "variant_id": "var-angle-45",
+                "document_id": "paper-1",
+                "collection_id": "col-1",
+                "variant_label": "45",
+                "host_material_system": {"family": "unspecified material system"},
+                "composition": "unspecified material system",
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": {},
+                "source_anchor_ids": [],
+            },
+        ]
+    )
+    frames["measurement_results"] = pd.DataFrame(
+        [
+            {
+                "result_id": "res-density",
+                "document_id": "paper-1",
+                "collection_id": "col-1",
+                "variant_id": "var-power",
+                "property_normalized": "density",
+                "value_payload": {"value": 99.1, "source_value_text": "99.1"},
+                "unit": "%",
+                "test_condition_id": None,
+                "evidence_anchor_ids": ["anc-density"],
+            }
+        ]
+    )
+    frames["test_conditions"] = pd.DataFrame()
+
+    service = _service_from_frames(profiles, frames)
+
+    materials = service.list_collection_materials("col-1")
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    assert materials["materials"][0]["sample_count"] == 3
+    assert profile["overview"]["sample_count"] == 3
+    assert [row["sample_label"] for row in profile["sample_matrix"]["rows"]] == [
+        "375 W-2100 mm/s",
+        "0",
+        "45",
+    ]
+    assert {
+        row["material"] for row in profile["sample_matrix"]["rows"]
+    } == {"316L stainless steel"}
+    assert profile["measured_properties"][0]["property"] == "density"
+
+
 def test_material_profile_inherits_single_document_comparison_material():
     profiles, frames = _frames()
     profiles.loc[0, "title"] = "PBF Sample Study"

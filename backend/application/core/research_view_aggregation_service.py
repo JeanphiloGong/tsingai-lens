@@ -64,6 +64,10 @@ _GENERIC_VARIANT_TERMS = (
     "material",
     "materials",
 )
+_NON_MATERIAL_SYSTEM_COMPACT_LABELS = {
+    "argon",
+    "ar",
+}
 
 
 class ResearchViewNotReadyError(RuntimeError):
@@ -805,10 +809,15 @@ class ResearchViewAggregationService:
 
         label = (self._safe_text(variant.get("variant_label")) or "").lower()
         composition = (self._safe_text(variant.get("composition")) or "").lower()
-        material = (self._material_from_variant(variant) or "").lower()
+        material = self._material_from_variant(variant)
+        material_text = (material or "").lower()
         if not label and not composition and not material:
             return False
-        generic_candidates = {label, composition, material} - {""}
+        generic_candidates = {label} - {""}
+        if self._canonical_material_label(composition):
+            generic_candidates.add(composition)
+        if self._canonical_material_label(material):
+            generic_candidates.add(material_text)
         return not any(
             term in candidate
             for candidate in generic_candidates
@@ -2458,6 +2467,9 @@ class ResearchViewAggregationService:
             return None
         normalized = re.sub(r"\s+", " ", text.replace("_", " ")).strip()
         lowered = normalized.lower()
+        compact = re.sub(r"[^a-z0-9]", "", lowered)
+        if compact in _NON_MATERIAL_SYSTEM_COMPACT_LABELS:
+            return None
         if lowered in {
             "unspecified material",
             "unspecified material system",
@@ -2469,7 +2481,6 @@ class ResearchViewAggregationService:
             "materials",
         }:
             return None
-        compact = re.sub(r"[^a-z0-9]", "", lowered)
         if compact in {
             "unspecifiedmaterial",
             "unspecifiedmaterialsystem",

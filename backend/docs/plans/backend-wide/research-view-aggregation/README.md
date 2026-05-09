@@ -47,6 +47,8 @@ Excluded:
    [`research-view-aggregation-contract.md`](../../../../../docs/contracts/research-view-aggregation-contract.md)
 3. Use the backend implementation plan:
    [`implementation-plan.md`](implementation-plan.md)
+4. For the current six-paper 316L repair wave, use
+   [`material-profile-aggregation-repair-plan.md`](material-profile-aggregation-repair-plan.md)
 
 ## Ownership
 
@@ -77,6 +79,9 @@ The first backend delivery is acceptable when it can build:
 - one material profile that contains papers, sample matrix, process ranges,
   property summaries, comparison groups, condition series, evidence, and
   warnings for that material
+- the current six-paper 316L validation collection keeps all six papers under
+  `mat-316l-stainless-steel` and does not expose process media such as argon
+  as material profiles
 - paper coverage rows for a collection
 - at least one material-scoped comparable group or a clear partial-state warning
 - evidence references for observed matrix values

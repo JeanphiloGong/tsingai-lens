@@ -304,9 +304,20 @@ Message responses should expose source mode and evidence use:
   "answer": "...",
   "source_mode": "collection_grounded",
   "used_evidence_ids": ["E01", "E02"],
+  "source_links": [
+    {
+      "kind": "evidence",
+      "label": "Source 1",
+      "href": "/collections/col_xxx/documents/doc_xxx?evidence_id=E01"
+    }
+  ],
   "warnings": []
 }
 ```
+
+`source_links` are the user-facing source surface. `used_evidence_ids` remain
+trace metadata for diagnostics and persistence; normal chat UI should link back
+to document/evidence routes instead of showing raw paper or evidence ids.
 
 When collection evidence is absent:
 

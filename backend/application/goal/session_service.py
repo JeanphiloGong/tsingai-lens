@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 from uuid import uuid4
 
 from openai import OpenAI
@@ -44,6 +45,7 @@ _GENERAL_FALLBACK_PREFIX = (
 )
 _MAX_CONTEXT_CHARS = 18000
 _MAX_ROLLING_SUMMARY_CHARS = 1600
+_MAX_SOURCE_LINKS = 12
 _UNSET = object()
 
 
@@ -251,6 +253,9 @@ class GoalSessionService:
             self._stable_strings(context.get("evidence_ids")) if has_collection_context else []
         )
         links = dict(context.get("links") or {})
+        source_links = (
+            list(context.get("source_links") or []) if has_collection_context else []
+        )
 
         if mode == "grounded" and not has_collection_context:
             source_mode: SourceMode = "collection_limited"
@@ -299,6 +304,7 @@ class GoalSessionService:
             "used_evidence_ids": used_evidence_ids,
             "warnings": self._stable_strings(warnings),
             "links": links,
+            "source_links": source_links,
             "created_at": _now_iso(),
         }
         self._update_session_after_answer(
@@ -324,6 +330,7 @@ class GoalSessionService:
             "used_evidence_ids": [],
             "warnings": [],
             "links": self._session_links(session),
+            "source_links": [],
             "created_at": _now_iso(),
         }
         self._update_session_after_answer(
@@ -416,6 +423,11 @@ class GoalSessionService:
         evidence_ids = self._collect_evidence_ids(context_payload)
         material_ids = self._collect_material_ids(context_payload)
         paper_ids = self._collect_paper_ids(context_payload)
+        source_refs = self._build_source_refs(
+            collection_id,
+            evidence_sources=self._collect_evidence_sources(context_payload),
+            paper_ids=paper_ids,
+        )
         has_collection_context = bool(
             evidence_ids
             or self._has_non_empty_path(material_profile, ("sample_matrix", "rows"))
@@ -431,7 +443,10 @@ class GoalSessionService:
             "material_ids": material_ids,
             "paper_ids": paper_ids,
             "links": self._session_links(session),
+            "source_links": self._public_source_links(source_refs),
+            "source_refs": source_refs,
             "payload": self._compact_value(context_payload),
+            "prompt_payload": self._prompt_payload(context_payload, source_refs),
         }
 
     def _safe_workspace(
@@ -531,20 +546,23 @@ class GoalSessionService:
     ) -> tuple[str, str]:
         if source_mode == "collection_grounded":
             source_rule = (
-                "Answer only from the provided collection context. Cite evidence ids "
-                "when making collection-supported claims. Do not invent sample ids, "
-                "paper names, values, or evidence ids."
+                "Answer only from the provided collection context. Cite source link "
+                "labels such as [Source 1] when making collection-supported claims. "
+                "Do not paste raw document_id, paper_id, evidence_id, or other long "
+                "internal ids into the answer. Do not invent sample ids, paper names, "
+                "values, or source links."
             )
         elif source_mode == "general_fallback":
             source_rule = (
                 "The collection context is empty or insufficient. Answer from general "
                 "background knowledge only, and clearly state that it is not a "
-                "collection-supported conclusion. Do not cite evidence ids."
+                "collection-supported conclusion. Do not cite source links or evidence ids."
             )
         else:
             source_rule = (
                 "Answer from general background knowledge only. Do not present the "
-                "answer as a finding from the bound collection and do not cite evidence ids."
+                "answer as a finding from the bound collection and do not cite source links "
+                "or evidence ids."
             )
         system_prompt = (
             "You are Lens, a collection-bound research copilot. Preserve the "
@@ -552,12 +570,18 @@ class GoalSessionService:
             f"{source_rule} Keep the answer concise and useful."
         )
         context_text = ""
+        source_links_text = ""
         if context:
             context_text = json.dumps(
-                context.get("payload", context),
+                context.get("prompt_payload", context.get("payload", context)),
                 ensure_ascii=False,
                 indent=2,
             )[:_MAX_CONTEXT_CHARS]
+            source_links_text = json.dumps(
+                context.get("source_links") or [],
+                ensure_ascii=False,
+                indent=2,
+            )
         prompt = (
             f"Goal session:\n"
             f"- collection_id: {session.get('collection_id')}\n"
@@ -567,6 +591,7 @@ class GoalSessionService:
             f"- answer_mode: {session.get('answer_mode')}\n"
             f"- rolling_summary: {session.get('rolling_summary')}\n\n"
             f"User message:\n{user_message}\n\n"
+            f"Source links:\n{source_links_text or '[]'}\n\n"
             f"Collection context:\n{context_text or '{}'}"
         )
         return system_prompt, prompt
@@ -624,6 +649,99 @@ class GoalSessionService:
             )
         return links
 
+    def _document_href(self, collection_id: str, document_id: str) -> str:
+        return (
+            f"/collections/{quote(collection_id, safe='')}/documents/"
+            f"{quote(document_id, safe='')}"
+        )
+
+    def _evidence_href(
+        self,
+        collection_id: str,
+        *,
+        evidence_id: str,
+        document_id: str | None,
+    ) -> str:
+        if document_id:
+            return (
+                f"{self._document_href(collection_id, document_id)}"
+                f"?evidence_id={quote(evidence_id, safe='')}"
+            )
+        return (
+            f"/collections/{quote(collection_id, safe='')}/evidence"
+            f"?evidence_id={quote(evidence_id, safe='')}"
+        )
+
+    def _build_source_refs(
+        self,
+        collection_id: str,
+        *,
+        evidence_sources: list[dict[str, str | None]],
+        paper_ids: list[str],
+    ) -> list[dict[str, str]]:
+        refs: list[dict[str, str]] = []
+        seen_hrefs: set[str] = set()
+        covered_documents: set[str] = set()
+
+        for source in evidence_sources:
+            evidence_id = _clean_text(source.get("evidence_id"))
+            if not evidence_id:
+                continue
+            document_id = _clean_text(source.get("document_id"))
+            href = self._evidence_href(
+                collection_id,
+                evidence_id=evidence_id,
+                document_id=document_id,
+            )
+            if href in seen_hrefs:
+                continue
+            seen_hrefs.add(href)
+            if document_id:
+                covered_documents.add(document_id)
+            refs.append(
+                {
+                    "kind": "evidence",
+                    "label": f"Source {len(refs) + 1}",
+                    "href": href,
+                    "evidence_id": evidence_id,
+                    "document_id": document_id or "",
+                }
+            )
+            if len(refs) >= _MAX_SOURCE_LINKS:
+                return refs
+
+        for paper_id in paper_ids:
+            if paper_id in covered_documents:
+                continue
+            href = self._document_href(collection_id, paper_id)
+            if href in seen_hrefs:
+                continue
+            seen_hrefs.add(href)
+            refs.append(
+                {
+                    "kind": "document",
+                    "label": f"Source {len(refs) + 1}",
+                    "href": href,
+                    "document_id": paper_id,
+                    "evidence_id": "",
+                }
+            )
+            if len(refs) >= _MAX_SOURCE_LINKS:
+                return refs
+        return refs
+
+    def _public_source_links(
+        self, source_refs: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "kind": ref["kind"],
+                "label": ref["label"],
+                "href": ref["href"],
+            }
+            for ref in source_refs
+        ]
+
     def _session_dir(self, collection_id: str) -> Path:
         _ = collection_id
         return self.collection_service.root_dir / "_goal_sessions"
@@ -671,6 +789,61 @@ class GoalSessionService:
             elif key in {"used_evidence_ids", "evidence_ids", "anchor_ids"} and isinstance(item, list):
                 found.extend(text for text in (_clean_text(v) for v in item) if text)
         return self._stable_strings(found)
+
+    def _collect_evidence_sources(self, value: Any) -> list[dict[str, str | None]]:
+        found: list[dict[str, str | None]] = []
+
+        def visit(item: Any, inherited_document_id: str | None = None) -> None:
+            if isinstance(item, dict):
+                document_id = (
+                    _clean_text(item.get("document_id") or item.get("paper_id"))
+                    or inherited_document_id
+                )
+                evidence_id = _clean_text(
+                    item.get("evidence_id") or item.get("evidence_ref_id")
+                )
+                if evidence_id:
+                    found.append(
+                        {
+                            "evidence_id": evidence_id,
+                            "document_id": document_id,
+                        }
+                    )
+                evidence_ids = (
+                    item.get("used_evidence_ids")
+                    or item.get("evidence_ids")
+                    or item.get("anchor_ids")
+                )
+                if isinstance(evidence_ids, list):
+                    for evidence_value in evidence_ids:
+                        nested_evidence_id = _clean_text(evidence_value)
+                        if nested_evidence_id:
+                            found.append(
+                                {
+                                    "evidence_id": nested_evidence_id,
+                                    "document_id": document_id,
+                                }
+                            )
+                for nested in item.values():
+                    visit(nested, document_id)
+            elif isinstance(item, list):
+                for nested in item:
+                    visit(nested, inherited_document_id)
+
+        visit(value)
+        unique: list[dict[str, str | None]] = []
+        seen: set[tuple[str, str | None]] = set()
+        for source in found:
+            evidence_id = _clean_text(source.get("evidence_id"))
+            if not evidence_id:
+                continue
+            document_id = _clean_text(source.get("document_id"))
+            key = (evidence_id, document_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append({"evidence_id": evidence_id, "document_id": document_id})
+        return unique
 
     def _collect_material_ids(self, value: Any) -> list[str]:
         return self._collect_ids(value, {"material_id"})
@@ -721,6 +894,72 @@ class GoalSessionService:
             return [self._compact_value(item, depth=depth + 1) for item in value[:12]]
         if isinstance(value, str):
             return value[:900]
+        return value
+
+    def _prompt_payload(self, value: Any, source_refs: list[dict[str, str]]) -> Any:
+        compact = self._compact_value(value)
+        evidence_labels = {
+            ref["evidence_id"]: ref["label"]
+            for ref in source_refs
+            if ref.get("evidence_id")
+        }
+        document_labels = {
+            ref["document_id"]: ref["label"]
+            for ref in source_refs
+            if ref.get("document_id")
+        }
+        return self._replace_internal_source_ids(
+            compact,
+            evidence_labels=evidence_labels,
+            document_labels=document_labels,
+        )
+
+    def _replace_internal_source_ids(
+        self,
+        value: Any,
+        *,
+        evidence_labels: dict[str, str],
+        document_labels: dict[str, str],
+    ) -> Any:
+        if isinstance(value, dict):
+            cleaned: dict[str, Any] = {}
+            for key, item in value.items():
+                key_text = str(key)
+                if key_text in {"document_id", "paper_id"}:
+                    label = document_labels.get(str(item or ""))
+                    if label:
+                        cleaned["document_source"] = label
+                    continue
+                if key_text in {"evidence_id", "evidence_ref_id"}:
+                    label = evidence_labels.get(str(item or ""))
+                    if label:
+                        cleaned["evidence_source"] = label
+                    continue
+                if key_text in {"used_evidence_ids", "evidence_ids", "anchor_ids"}:
+                    if isinstance(item, list):
+                        labels = [
+                            evidence_labels.get(str(entry or ""))
+                            for entry in item
+                            if evidence_labels.get(str(entry or ""))
+                        ]
+                        if labels:
+                            cleaned["evidence_sources"] = self._stable_strings(labels)
+                    continue
+                cleaned[key_text] = self._replace_internal_source_ids(
+                    item,
+                    evidence_labels=evidence_labels,
+                    document_labels=document_labels,
+                )
+            return cleaned
+        if isinstance(value, list):
+            return [
+                self._replace_internal_source_ids(
+                    item,
+                    evidence_labels=evidence_labels,
+                    document_labels=document_labels,
+                )
+                for item in value
+            ]
         return value
 
     def _stable_strings(self, values: Any) -> list[str]:

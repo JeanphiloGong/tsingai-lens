@@ -216,6 +216,11 @@ const translations: Record<Language, Translations> = {
 			userRole: 'You',
 			assistantRole: 'Lens',
 			evidenceLabel: 'Evidence used',
+			sourceLinks: {
+				label: 'Answer sources',
+				document: 'Paper {number}',
+				evidence: 'Source {number}'
+			},
 			messageLabel: 'Message',
 			messagePlaceholder:
 				'Ask the current collection, for example: compare LPBF process effects on strength and elongation',
@@ -2651,6 +2656,11 @@ const translations: Record<Language, Translations> = {
 			userRole: '你',
 			assistantRole: 'Lens',
 			evidenceLabel: '使用的证据',
+			sourceLinks: {
+				label: '回答来源',
+				document: '文献 {number}',
+				evidence: '来源 {number}'
+			},
 			messageLabel: '消息',
 			messagePlaceholder: '向当前 collection 提问，例如：比较 LPBF 工艺对强度和延伸率的影响',
 			inputHint: 'AI 可能会生成不准确的信息，请核查重要内容。',

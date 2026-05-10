@@ -8,7 +8,8 @@
 		fetchGoalSessionMessages,
 		postGoalSessionMessage,
 		type GoalSession,
-		type GoalSessionMessage
+		type GoalSessionMessage,
+		type GoalSourceLink
 	} from '../../../_shared/goalSessions';
 	import { t } from '../../../_shared/i18n';
 
@@ -18,6 +19,23 @@
 		created_at: string;
 		updated_at: string;
 	};
+
+	type InlineSegment = {
+		text: string;
+		strong: boolean;
+	};
+
+	type ParagraphBlock = {
+		kind: 'paragraph';
+		segments: InlineSegment[];
+	};
+
+	type ListBlock = {
+		kind: 'list';
+		items: InlineSegment[][];
+	};
+
+	type RenderBlock = ParagraphBlock | ListBlock;
 
 	const suggestionKeys = [
 		'goalCopilot.suggestions.summary',
@@ -226,6 +244,66 @@
 		return message.answer ?? message.content ?? '';
 	}
 
+	function renderInlineMarkdown(text: string): InlineSegment[] {
+		const segments: InlineSegment[] = [];
+		const pattern = /\*\*([^*]+)\*\*/g;
+		let lastIndex = 0;
+		let match: RegExpExecArray | null;
+		while ((match = pattern.exec(text)) !== null) {
+			if (match.index > lastIndex) {
+				segments.push({ text: text.slice(lastIndex, match.index), strong: false });
+			}
+			segments.push({ text: match[1], strong: true });
+			lastIndex = match.index + match[0].length;
+		}
+		if (lastIndex < text.length) {
+			segments.push({ text: text.slice(lastIndex), strong: false });
+		}
+		return segments.length ? segments : [{ text, strong: false }];
+	}
+
+	function renderMessageBlocks(text: string): RenderBlock[] {
+		return text
+			.split(/\n{2,}/)
+			.map((block) => block.trim())
+			.filter(Boolean)
+			.map((block) => {
+				const lines = block
+					.split('\n')
+					.map((line) => line.trim())
+					.filter(Boolean);
+				const listItems = lines
+					.map((line) => line.match(/^(?:[-*]\s+|\d+\.\s+)(.+)$/))
+					.filter((match): match is RegExpMatchArray => Boolean(match));
+				if (lines.length > 0 && listItems.length === lines.length) {
+					const listBlock: ListBlock = {
+						kind: 'list',
+						items: listItems.map((match) => renderInlineMarkdown(match[1].trim()))
+					};
+					return listBlock;
+				}
+				const paragraphBlock: ParagraphBlock = {
+					kind: 'paragraph',
+					segments: renderInlineMarkdown(lines.join(' '))
+				};
+				return paragraphBlock;
+			});
+	}
+
+	function visibleSourceLinks(message: GoalSessionMessage) {
+		return (message.source_links ?? [])
+			.filter((link) => link.href.startsWith('/collections/'))
+			.slice(0, 12);
+	}
+
+	function sourceLinkLabel(link: GoalSourceLink, index: number) {
+		const key =
+			link.kind === 'document'
+				? 'goalCopilot.sourceLinks.document'
+				: 'goalCopilot.sourceLinks.evidence';
+		return $t(key, { number: index + 1 });
+	}
+
 	function formatTime(value?: string) {
 		if (!value) return '';
 		const date = new Date(value);
@@ -360,7 +438,44 @@
 								</div>
 								<div class="assistant-content">
 									<time>{formatTime(message.created_at)}</time>
-									<div class="assistant-bubble">{messageText(message)}</div>
+									<div class="assistant-bubble">
+										{#each renderMessageBlocks(messageText(message)) as block}
+											{#if block.kind === 'list'}
+												<ul>
+													{#each block.items as item}
+														<li>
+															{#each item as segment}
+																{#if segment.strong}
+																	<strong>{segment.text}</strong>
+																{:else}
+																	{segment.text}
+																{/if}
+															{/each}
+														</li>
+													{/each}
+												</ul>
+											{:else}
+												<p>
+													{#each block.segments as segment}
+														{#if segment.strong}
+															<strong>{segment.text}</strong>
+														{:else}
+															{segment.text}
+														{/if}
+													{/each}
+												</p>
+											{/if}
+										{/each}
+									</div>
+									{#if visibleSourceLinks(message).length}
+										<nav class="source-links" aria-label={$t('goalCopilot.sourceLinks.label')}>
+											{#each visibleSourceLinks(message) as link, index}
+												<a class="source-link" href={link.href}>
+													{sourceLinkLabel(link, index)}
+												</a>
+											{/each}
+										</nav>
+									{/if}
 									<div class="message-actions">
 										<button
 											class="action-button"
@@ -856,6 +971,8 @@
 		font-size: 15px;
 		line-height: 26px;
 		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		word-break: break-word;
 	}
 
 	.assistant-message {
@@ -903,7 +1020,53 @@
 		font-size: 15px;
 		line-height: 26px;
 		color: #111827;
-		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+
+	.assistant-bubble p {
+		margin: 0 0 10px;
+	}
+
+	.assistant-bubble p:last-child,
+	.assistant-bubble ul:last-child {
+		margin-bottom: 0;
+	}
+
+	.assistant-bubble ul {
+		margin: 8px 0;
+		padding-left: 20px;
+	}
+
+	.assistant-bubble li {
+		margin-bottom: 6px;
+	}
+
+	.source-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 10px;
+	}
+
+	.source-link {
+		display: inline-flex;
+		align-items: center;
+		min-height: 30px;
+		padding: 5px 10px;
+		border-radius: 8px;
+		border: 1px solid #d8e0ec;
+		background: #fff;
+		color: #2563eb;
+		font-size: 13px;
+		line-height: 18px;
+		font-weight: 500;
+		text-decoration: none;
+	}
+
+	.source-link:hover {
+		border-color: #2563eb;
+		background: #f8fbff;
 	}
 
 	.message-actions {
@@ -912,6 +1075,10 @@
 		justify-content: flex-end;
 		margin-top: -12px;
 		padding-right: 8px;
+	}
+
+	.source-links + .message-actions {
+		margin-top: 8px;
 	}
 
 	.action-button {

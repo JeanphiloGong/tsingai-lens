@@ -147,6 +147,7 @@ def test_goal_session_can_start_with_collection_only(tmp_path):
     assert loaded["answer_mode"] == "hybrid"
     assert response["source_mode"] == "general_fallback"
     assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
 
 
 def test_goal_session_update_can_clear_focus(tmp_path):
@@ -184,6 +185,7 @@ def test_grounded_message_returns_limited_when_collection_has_no_context(tmp_pat
 
     assert response["source_mode"] == "collection_limited"
     assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
     assert "no_collection_evidence_found" in response["warnings"]
     assert service.llm_client.chat.completions.calls == []
 
@@ -226,5 +228,14 @@ def test_material_page_context_scopes_grounded_answer(tmp_path):
 
     assert response["source_mode"] == "collection_grounded"
     assert set(response["used_evidence_ids"]) == {"E01", "E02"}
+    assert {link["href"] for link in response["source_links"]} == {
+        f"/collections/{collection['collection_id']}/documents/paper-a?evidence_id=E02",
+        f"/collections/{collection['collection_id']}/documents/paper-a?evidence_id=E01",
+    }
+    assert all(link["label"].startswith("Source ") for link in response["source_links"])
+    assert all("document_id" not in link for link in response["source_links"])
     assert loaded["focused_material_id"] == "mat-316l"
     assert set(loaded["last_evidence_ids"]) == {"E01", "E02"}
+    prompt_messages = service.llm_client.chat.completions.calls[0]["messages"]
+    assert "Cite source link labels" in prompt_messages[0]["content"]
+    assert "Source links:" in prompt_messages[1]["content"]

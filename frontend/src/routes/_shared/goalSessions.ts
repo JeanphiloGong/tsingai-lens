@@ -8,6 +8,12 @@ export type GoalSourceMode =
 	| 'general_fallback'
 	| 'general_only';
 
+export type GoalSourceLink = {
+	kind: 'document' | 'evidence';
+	label: string;
+	href: string;
+};
+
 export type GoalSession = {
 	session_id: string;
 	user_id: string;
@@ -36,6 +42,7 @@ export type GoalSessionMessage = {
 	used_evidence_ids?: string[];
 	warnings?: string[];
 	links?: Record<string, string>;
+	source_links?: GoalSourceLink[];
 	created_at: string;
 };
 
@@ -49,6 +56,7 @@ export type GoalSessionMessageResponse = {
 	used_evidence_ids: string[];
 	warnings: string[];
 	links: Record<string, string>;
+	source_links: GoalSourceLink[];
 	created_at: string;
 };
 

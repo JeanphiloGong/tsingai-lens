@@ -11,6 +11,7 @@ SourceMode = Literal[
     "general_fallback",
     "general_only",
 ]
+SourceLinkKind = Literal["document", "evidence"]
 
 
 class GoalSessionCreateRequest(BaseModel):
@@ -77,6 +78,14 @@ class GoalSessionMessageRequest(BaseModel):
     )
 
 
+class GoalSourceLinkResponse(BaseModel):
+    """User-navigable source link for an assistant answer."""
+
+    kind: SourceLinkKind = Field(..., description="Source link kind")
+    label: str = Field(..., description="Short user-facing source label")
+    href: str = Field(..., description="Frontend route for source verification")
+
+
 class GoalSessionMessageResponse(BaseModel):
     """Assistant response for one goal session message."""
 
@@ -92,6 +101,10 @@ class GoalSessionMessageResponse(BaseModel):
     )
     warnings: list[str] = Field(default_factory=list, description="Source or readiness warnings")
     links: dict[str, str] = Field(default_factory=dict, description="Workspace links")
+    source_links: list[GoalSourceLinkResponse] = Field(
+        default_factory=list,
+        description="User-navigable document or evidence links used by the answer",
+    )
     created_at: str = Field(..., description="Creation timestamp")
 
 

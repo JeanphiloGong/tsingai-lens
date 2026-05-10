@@ -54,7 +54,7 @@
 2. `PATCH /api/v1/goal-sessions/{session_id}` 设置 goal、focus material/paper 或回答模式
 3. `POST /api/v1/goal-sessions/{session_id}/messages`
 4. 根据返回的 `source_mode` 区分知识库证据、证据不足、通用背景回退或纯通用回答
-5. 从返回的 `used_evidence_ids` 和 `links` 回到 evidence、materials、comparisons 或 workspace
+5. 从返回的 `source_links` 进入可访问的文献或证据位置；`used_evidence_ids` 只作诊断追踪
 
 可选 goal-first collection seeding 流程（当前只覆盖 Goal Brief / Intake）：
 
@@ -155,6 +155,7 @@ message 返回必须包含：
 - `used_evidence_ids`
 - `warnings`
 - `links`
+- `source_links`
 
 `source_mode` 可选值：
 
@@ -169,6 +170,8 @@ message 返回必须包含：
 - session 可以在没有结构化 Goal Brief 的情况下开始
 - grounded/hybrid 模式必须先检索当前 collection 的 Core 或 derived Core artifact
 - collection-grounded 结论不得编造 evidence id、sample id、paper name 或 property value
+- `source_links` 必须是前端可访问的 document/evidence 路由；普通回答 UI 不应把文献
+  内部 ID 当作主要来源展示
 - general fallback 必须明确标注不是当前 collection 证据结论
 - rolling summary 可以记录对话连续性，但不得把 general fallback 提升为 collection evidence
 - 当前短对话层不产出 final coverage assessment、gap detection、clue ranking 或

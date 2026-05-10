@@ -117,6 +117,11 @@ Responses must continue to expose:
 - `used_evidence_ids`
 - `warnings`
 - `links`
+- `source_links`
+
+`source_links` carries user-navigable document/evidence routes for answer
+verification. `used_evidence_ids` remains diagnostic trace metadata and should
+not be the primary UI source label.
 
 The source modes stay intentionally small:
 

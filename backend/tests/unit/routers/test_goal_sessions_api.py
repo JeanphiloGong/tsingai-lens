@@ -93,6 +93,7 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(goal_session_s
     assert session.answer_mode == "hybrid"
     assert response.source_mode == "general_fallback"
     assert response.used_evidence_ids == []
+    assert response.source_links == []
     assert len(messages.items) == 2
 
 

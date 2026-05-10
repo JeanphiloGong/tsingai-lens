@@ -27,8 +27,8 @@ GraphRAG-era Source seams.
   Add Source-owned figure rows and cropped figure assets without moving image
   semantics into Source
 - [`source-table-artifact-plan.md`](source-table-artifact-plan.md)
-  Add Source-owned whole-table artifacts so Core can use table context without
-  reconstructing tables from row and cell outputs
+  Harden Source-owned whole-table artifacts so Core consumes complete table
+  structure while rows and cells remain evidence anchors
 - [`rag-anything-source-reference-plan.md`](rag-anything-source-reference-plan.md)
   Borrow MinerU parser benchmarking, cache, pre-parsed input, and
   local-context ideas from RAG-Anything while keeping Source evidence-first

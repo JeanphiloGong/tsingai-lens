@@ -138,6 +138,10 @@ _MAX_SUPPORTING_TEXT_WINDOWS = 3
 _MAX_TABLE_ROW_SUPPORTING_TEXT_CHARS = 1200
 _MAX_TABLE_CONTEXT_CHARS = 6000
 _TABLE_ROWS_PER_EXTRACTION_BATCH = 5
+_MAX_WHOLE_TABLE_EXTRACTION_ROWS = 40
+_MAX_FULL_TABLE_CONTEXT_ROWS = 40
+_TABLE_CONTEXT_LEADING_ROWS = 5
+_TABLE_CONTEXT_TRAILING_ROWS = 3
 _MAX_TEXT_WINDOWS_PER_DOCUMENT = 24
 _INTRODUCTION_WINDOW_LIMIT = 1
 _CHARACTERIZATION_COLUMNS = [
@@ -1400,7 +1404,7 @@ class PaperFactsService:
             },
             "table_context": self._build_table_context_payload(
                 table_context=table_context,
-                table_row=first_row,
+                table_rows=table_rows,
             ),
             "target_rows": [
                 self._build_table_batch_target_row_payload(
@@ -3677,23 +3681,28 @@ class PaperFactsService:
         table_rows: list[dict[str, Any]],
     ) -> list[list[dict[str, Any]]]:
         batches: list[list[dict[str, Any]]] = []
+        current_table_rows: list[dict[str, Any]] = []
+
+        def flush_table_rows() -> None:
+            if not current_table_rows:
+                return
+            if len(current_table_rows) <= _MAX_WHOLE_TABLE_EXTRACTION_ROWS:
+                batches.append(list(current_table_rows))
+                return
+            for index in range(0, len(current_table_rows), _TABLE_ROWS_PER_EXTRACTION_BATCH):
+                batches.append(
+                    current_table_rows[index:index + _TABLE_ROWS_PER_EXTRACTION_BATCH]
+                )
+
         current_table_id: str | None = None
-        current_batch: list[dict[str, Any]] = []
         for row in table_rows:
             table_id = str(row.get("table_id") or "")
-            if (
-                current_batch
-                and (
-                    table_id != current_table_id
-                    or len(current_batch) >= _TABLE_ROWS_PER_EXTRACTION_BATCH
-                )
-            ):
-                batches.append(current_batch)
-                current_batch = []
+            if current_table_rows and table_id != current_table_id:
+                flush_table_rows()
+                current_table_rows = []
             current_table_id = table_id
-            current_batch.append(row)
-        if current_batch:
-            batches.append(current_batch)
+            current_table_rows.append(row)
+        flush_table_rows()
         return batches
 
     def _score_text_window_for_extraction(
@@ -4061,25 +4070,32 @@ class PaperFactsService:
         self,
         *,
         table_context: dict[str, Any] | None,
-        table_row: dict[str, Any],
+        table_rows: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        first_row = table_rows[0] if table_rows else {}
         if not table_context:
             return {
                 "caption_text": None,
-                "heading_path": self._normalize_scalar_text(table_row.get("heading_path")),
+                "heading_path": self._normalize_scalar_text(first_row.get("heading_path")),
                 "column_headers": [],
+                "table_matrix": [],
                 "table_markdown": None,
                 "table_text": None,
-                "page": self._safe_int(table_row.get("page")),
+                "page": self._safe_int(first_row.get("page")),
             }
+        table_matrix = self._normalize_table_matrix(table_context.get("table_matrix"))
 
         return {
             "caption_text": self._normalize_scalar_text(table_context.get("caption_text")),
             "heading_path": self._normalize_scalar_text(
                 table_context.get("heading_path")
             )
-            or self._normalize_scalar_text(table_row.get("heading_path")),
+            or self._normalize_scalar_text(first_row.get("heading_path")),
             "column_headers": self._normalize_list(table_context.get("column_headers")),
+            "table_matrix": self._bound_table_matrix_for_rows(
+                table_matrix=table_matrix,
+                table_rows=table_rows,
+            ),
             "table_markdown": self._truncate_context_text(
                 table_context.get("table_markdown"),
                 _MAX_TABLE_CONTEXT_CHARS,
@@ -4089,7 +4105,7 @@ class PaperFactsService:
                 _MAX_TABLE_CONTEXT_CHARS,
             ),
             "page": self._safe_int(table_context.get("page"))
-            or self._safe_int(table_row.get("page")),
+            or self._safe_int(first_row.get("page")),
         }
 
     def _build_text_windows_by_document(
@@ -5090,6 +5106,39 @@ class PaperFactsService:
         if isinstance(normalized, list):
             return [str(item) for item in normalized if str(item).strip()]
         return [str(normalized)]
+
+    def _normalize_table_matrix(self, value: Any) -> list[list[str]]:
+        normalized = self._normalize_object(value)
+        if not isinstance(normalized, list):
+            return []
+        matrix: list[list[str]] = []
+        for row in normalized:
+            if isinstance(row, list):
+                matrix.append([str(cell) for cell in row])
+            elif row not in (None, ""):
+                matrix.append([str(row)])
+        return matrix
+
+    def _bound_table_matrix_for_rows(
+        self,
+        *,
+        table_matrix: list[list[str]],
+        table_rows: list[dict[str, Any]],
+    ) -> list[list[str]]:
+        if len(table_matrix) <= _MAX_FULL_TABLE_CONTEXT_ROWS:
+            return table_matrix
+
+        indices = set(range(min(_TABLE_CONTEXT_LEADING_ROWS, len(table_matrix))))
+        trailing_start = max(len(table_matrix) - _TABLE_CONTEXT_TRAILING_ROWS, 0)
+        indices.update(range(trailing_start, len(table_matrix)))
+        for row in table_rows:
+            row_index = self._safe_int(row.get("row_index"))
+            if row_index is None:
+                continue
+            for index in (row_index - 1, row_index, row_index + 1):
+                if 0 <= index < len(table_matrix):
+                    indices.add(index)
+        return [table_matrix[index] for index in sorted(indices)]
 
     def _normalize_method_role(self, value: Any) -> str:
         lowered = str(value or "").strip().lower()

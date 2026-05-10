@@ -2,7 +2,7 @@
 
 ## Summary
 
-This plan records the next Source-layer contract change for table evidence.
+This plan records the Source-to-Core structure handoff for table evidence.
 
 The Source layer should preserve the observable evidence substrate of a paper
 in three families:
@@ -13,26 +13,28 @@ in three families:
   `table_cells.parquet`
 - figures through `figures.parquet` and `image_assets/`
 
-The current Source artifacts preserve table evidence only as row and cell
-outputs:
+The active Source runtime now emits table evidence in three related artifacts:
 
+- `tables.parquet`
 - `table_rows.parquet`
 - `table_cells.parquet`
 
-That shape is useful for evidence anchors and fine-grained locators, but it is
-not enough for table-grounded extraction. Core currently receives one selected
-table row plus row cells and nearby text windows. When a table needs whole-table
-context, Core must reconstruct that context from cells.
+That shape is the right ownership direction, but the contract still needs one
+hardening step: the complete table artifact must be the primary structural
+input to Core, while row and cell artifacts remain locators and evidence
+anchors. Core should not have to reconstruct a full table from row text or
+cells before it can decide how to route, split, or prompt extraction.
 
 That reconstruction belongs in Source. A complete table is observable document
 structure, not a Core semantic fact.
 
-The proposed change is to add a Source-owned table artifact:
+The proposed change is to harden the Source-owned complete table artifact:
 
-- `tables.parquet`
-
-Core should then use `tables.parquet` as table context while still anchoring
-extraction to selected rows from `table_rows.parquet`.
+- add an explicit `table_matrix` field to `tables.parquet`
+- bind captions and headings with same-page bbox-aware nearest-neighbor logic
+- keep `table_rows.parquet` and `table_cells.parquet` as row and cell anchors
+- let Core decide routing, whole-table prompting, chunking, and semantic
+  extraction strategy from the complete Source structure
 
 Read this plan with:
 
@@ -40,23 +42,26 @@ Read this plan with:
 - [`source-parser-evaluation-plan.md`](source-parser-evaluation-plan.md)
 - [`rag-anything-source-reference-plan.md`](rag-anything-source-reference-plan.md)
 - [`source-figure-asset-extraction-plan.md`](source-figure-asset-extraction-plan.md)
+- [`../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md)
 - [`../../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 
 ## Current Table Flow
 
 The active Source runtime already emits structured table evidence:
 
+- `tables.parquet` carries table-level caption, heading, page, bbox, row and
+  column counts, headers, Markdown, and plain text.
 - `table_cells.parquet` carries cell text, header paths, unit hints, row and
   column indexes, page, and bounding boxes.
 - `table_rows.parquet` carries row-level evidence with `row_text`,
   `heading_path`, page, and row bounding boxes.
 
 Core currently builds table extraction payloads from selected row batches, row
-cells, and the matching complete table context. The prompt asks the model to
-extract facts for target rows while using supporting text windows only when
-needed.
+cells, and the matching table context. The remaining problem is that the
+consumer path is still row-first: Core can select rows before it has treated
+the complete table as the primary structural unit.
 
-This keeps extraction anchored, but it loses important table context:
+That can lose or underuse important table context:
 
 - multi-row headers
 - caption and footnotes
@@ -66,12 +71,13 @@ This keeps extraction anchored, but it loses important table context:
 - parser-native table HTML or Markdown that may preserve layout better than
   row text alone
 
-Core should not own this reconstruction. Core should decide facts. Source
-should preserve the table structure that Core needs to interpret evidence.
+Core should not own table reconstruction. Core should decide facts and
+extraction grain. Source should preserve the table structure that Core needs to
+interpret evidence.
 
 ## Proposed Table Artifact
 
-Add `tables.parquet` as a first-class Source artifact.
+Harden `tables.parquet` as the first-class complete-table Source artifact.
 
 Recommended columns:
 
@@ -86,12 +92,17 @@ Recommended columns:
 - `row_count`
 - `col_count`
 - `column_headers`
+- `table_matrix`
 - `table_markdown`
 - `table_text`
 - `metadata`
 
 The first implementation should prioritize:
 
+- `table_matrix`
+  Complete row-major cell text as parsed from the table. This is the stable
+  structure Core can use to build whole-table prompts or bounded large-table
+  views without reconstructing the matrix from row text.
 - `table_markdown`
   Human-readable table context for LLM extraction.
 - `table_text`
@@ -113,8 +124,10 @@ Source should:
 - generate one `tables.parquet` row per observed table
 - keep `table_id` stable and shared with `table_rows.parquet` and
   `table_cells.parquet`
-- preserve caption, heading path, page, bbox, row count, column count, and
-  parser details
+- preserve caption, heading path, page, bbox, row count, column count,
+  `table_matrix`, and parser details
+- bind headings and captions using same-page bbox proximity when coordinates
+  are available, with page-order behavior only as fallback
 - render a conservative Markdown table from parser cells when parser-native
   Markdown is not available
 - keep table rows and cells as separate artifacts for row anchoring, unit
@@ -124,18 +137,46 @@ Source must not:
 
 - extract sample, method, result, baseline, or comparison facts
 - decide which row is scientifically important
+- decide whether Core should use whole-table prompting or chunked prompting
 - use generated table descriptions as research facts
 - introduce a production multi-parser branch just to support table HTML
 
 This keeps Source as the owner of observable document structure and keeps Core
 as the owner of semantic extraction.
 
-## Core Use
+## Core Consumption
 
-Core should continue to select table rows as extraction units, but each
-table-row payload should include a table context object.
+Core should consume `tables.parquet` as the primary table structure and use
+`table_rows.parquet` plus `table_cells.parquet` as anchoring details.
 
-Target payload shape:
+The consuming flow should be:
+
+```text
+tables.parquet
+      |
+      v
+Core table routing
+      |
+      +-- skip non-extractable tables
+      |
+      +-- whole-table extraction for small tables
+      |
+      +-- bounded chunk extraction for large tables
+      |
+      v
+row and cell evidence binding
+```
+
+This means the split decision belongs to Core:
+
+- Source returns the full table structure.
+- Core decides whether to pass the whole table to the model.
+- Core decides whether a large table needs caption, headers, neighbor rows, and
+  chunk rows.
+- Core binds extracted mentions back to `table_id`, `row_index`, `cell_id`,
+  page, and bbox.
+
+Target table context shape:
 
 ```json
 {
@@ -143,6 +184,7 @@ Target payload shape:
     "caption_text": "...",
     "heading_path": "...",
     "column_headers": ["..."],
+    "table_matrix": [["Sample", "Hardness"], ["A", "220 HV"]],
     "table_markdown": "...",
     "table_text": "...",
     "page": 3
@@ -155,8 +197,9 @@ Target payload shape:
 }
 ```
 
-The extraction prompt should keep the target-row boundary, but pass several
-target rows in one batch using shared table context.
+For small tables, the extraction prompt can use the complete table context and
+all target rows. For large tables, Core should derive a bounded view from the
+same complete Source artifact.
 
 The model should be told:
 
@@ -167,8 +210,8 @@ The model should be told:
 - do not copy values from other rows into facts for the target row
 - keep evidence anchors tied to the target row, page, and source text
 
-For small tables, Core can include the full `table_markdown`. For large tables,
-Core should include a bounded view assembled from the Source table artifact:
+For large tables, Core should include a bounded view assembled from the Source
+table artifact:
 
 - caption and heading path
 - column headers
@@ -180,15 +223,21 @@ Core should include a bounded view assembled from the Source table artifact:
 The bounded large-table view should be Core prompt shaping over Source data,
 not a new Source semantic artifact.
 
+Core should apply the same principle to prose blocks: Source returns complete
+ordered blocks, while Core decides whether a block or section is methods,
+results, background, references, or noise before targeted extraction.
+
 ## First Implementation Slice
 
 The first implementation should be deliberately narrow:
 
-- add `tables.parquet` for the active Docling PDF path
+- add `table_matrix` to `tables.parquet` for the active Docling PDF path
+- update heading and caption binding to prefer same-page bbox-nearest matches
 - keep `table_rows.parquet` and `table_cells.parquet` unchanged
-- expose `tables.parquet` through the Source artifact loader
-- pass table context into Core table-batch extraction
-- keep the extraction unit as the selected target row
+- keep `tables.parquet` as the primary table context exposed through the Source
+  artifact loader
+- change Core consumption so table context drives routing and split decisions
+- keep row and cell artifacts as binding anchors
 
 The first implementation should not:
 
@@ -198,45 +247,50 @@ The first implementation should not:
 - change public API response shapes unless a consumer requires table readiness
   flags
 - remove row or cell artifacts
+- move scientific table classification into Source
 
-This gives Core whole-table context without changing the active parser choice
-or broadening Source into semantic extraction.
+This gives Core complete table structure without changing the active parser
+choice or broadening Source into semantic extraction.
 
 ## Implementation Map
 
 Update `backend/infra/source/contracts/artifact_schemas.py`:
 
-- add `TABLES_FINAL_COLUMNS`
+- add `table_matrix` to `TABLES_FINAL_COLUMNS`
 - keep existing `TABLE_ROWS_FINAL_COLUMNS` and `TABLE_CELLS_FINAL_COLUMNS`
   stable
 
 Update `backend/infra/source/runtime/workflows/create_source_artifacts.py`:
 
-- add `tables` to `SourceArtifactBundle`
-- write `tables` in `run_workflow(...)`
-- concatenate `tables` across bundles in `create_source_artifacts(...)`
-- return an empty `tables` frame in `_build_text_bundle(...)`
-- add `_build_pdf_tables(...)` and call it from `_build_pdf_bundle(...)`
 - keep `table_id` generation aligned with `_build_pdf_table_cells(...)` and
   `_build_pdf_table_rows(...)`
+- persist the Docling table matrix into `tables.parquet`
+- replace page-only heading resolution for tables and rows with bbox-aware
+  same-page heading resolution when table or row bbox exists
+- keep caption fallback based on same-page bbox proximity and record linkage
+  details in `metadata`
 
 Update `backend/application/source/artifact_input_service.py`:
 
-- add a `tables` path to `CollectionArtifactPaths`
-- add `load_tables_artifact(...)`
+- preserve `table_matrix` when loading `tables.parquet`
+- keep missing-artifact failures explicit for consumers that require complete
+  table structure
 
 Update `backend/application/core/semantic_build/paper_facts_service.py`:
 
 - load `tables.parquet`
 - group table records by `table_id`
-- pass the matching table record into table-batch extraction payload building
-- keep target row selection and evidence binding unchanged
+- drive table extraction planning from table records rather than from selected
+  rows alone
+- decide in Core whether a table is skipped, sent whole, or split into bounded
+  chunks
+- bind extracted mentions back to rows and cells after extraction
 
 Update `backend/application/core/semantic_build/llm/prompts.py`:
 
-- change the table prompt from one-row-only wording to target-row-with-context
-  wording
-- state that non-target rows are context only
+- allow complete small-table context in table prompts
+- state that non-target rows remain context unless the prompt declares them as
+  target rows
 
 Update tests:
 
@@ -250,18 +304,16 @@ Update tests:
 
 ## Delivery Sequence
 
-### 1. Add The Table Artifact Schema
+### 1. Harden The Complete Table Artifact Schema
 
-Add `TABLES_FINAL_COLUMNS` to
+Add `table_matrix` to `TABLES_FINAL_COLUMNS` in
 `backend/infra/source/contracts/artifact_schemas.py`.
 
-Update `SourceArtifactBundle` and `create_source_artifacts` so the active
-workflow writes `tables.parquet` next to `table_rows.parquet` and
-`table_cells.parquet`.
+Keep `tables.parquet` next to `table_rows.parquet` and `table_cells.parquet`.
 
 Verification:
 
-- Source workflow writes `tables.parquet`
+- Source workflow writes `tables.parquet` with `table_matrix`
 - empty or no-table documents still produce an empty `tables.parquet` with the
   fixed columns
 - existing `table_rows.parquet` and `table_cells.parquet` schemas remain stable
@@ -281,6 +333,7 @@ produce:
 - heading path
 - row and column counts
 - column headers
+- row-major `table_matrix`
 - Markdown and plain-text renderings
 - parser details in `metadata`
 
@@ -293,9 +346,28 @@ Verification:
 
 - existing Docling fixture tests cover `tables`
 - `table_id` matches rows and cells for the same table
+- `table_matrix` preserves row order and visible cell text
 - table Markdown contains headers and data cells in row order
 
-### 3. Expose Tables To Application Services
+### 3. Fix Heading And Caption Binding
+
+Update table, row, and figure context binding so Source prefers same-page
+bbox-nearest structure:
+
+- for headings, choose the nearest same-page heading above the target bbox when
+  possible
+- for captions, choose the nearest same-page table or figure caption around the
+  target bbox and avoid reusing the same caption block for multiple targets
+- fall back to the existing page-order behavior only when bbox data is missing
+
+Verification:
+
+- table fixtures with two same-page sections bind to the nearer heading above
+  the table
+- table fixtures with nearby captions bind the expected caption block
+- missing bbox still produces a deterministic fallback heading path
+
+### 4. Expose Tables To Application Services
 
 Update `backend/application/source/artifact_input_service.py` with:
 
@@ -311,22 +383,26 @@ Verification:
 - path contract tests include `tables.parquet`
 - missing `tables.parquet` fails clearly when a consumer requires table context
 
-### 4. Add Table Context To Core Extraction
+### 5. Change Core To Consume Complete Table Structure
 
 Update `PaperFactsService` so it loads `tables.parquet`, groups tables by
-`table_id`, and passes table context into table-batch extraction payloads.
+`table_id`, and plans table extraction from complete table records.
 
-The row remains the extraction unit. The table is context.
+Rows and cells remain anchors. The table is the structural unit Core routes
+and splits.
 
 Verification:
 
-- payload tests assert `table_context.table_markdown` is present
-- prompt tests assert extraction remains target-row anchored
+- payload tests assert `table_context.table_matrix` and `table_markdown` are
+  present for small-table extraction
+- prompt tests assert extraction remains row and cell anchored after Core
+  decides the target rows
 - paper-facts service tests cover missing table context explicitly
-- empty table context degrades to the existing row-and-cell payload behavior
-  only if the first implementation deliberately preserves that fallback
+- small-table tests assert Core can pass the whole table context
+- large-table tests assert Core builds a bounded view from the complete Source
+  table artifact
 
-### 5. Re-score Parser Candidates Against The New Shape
+### 6. Re-score Parser Candidates Against The New Shape
 
 Update `source_parser_benchmark.py` so parser scoring includes table-level
 dimensions:
@@ -389,10 +465,12 @@ that best fills the Lens Source evidence contract.
 
 This plan is successful when:
 
-- Source emits `tables.parquet` as a stable artifact
-- Core can include whole-table context without reconstructing tables from
-  cells
-- table-batch extraction remains anchored to selected target rows
+- Source emits `tables.parquet` with complete `table_matrix`, Markdown, text,
+  caption, heading, page, and bbox context
+- Core can plan table routing, whole-table prompting, or bounded chunking
+  without reconstructing tables from cells
+- table extraction remains anchored to rows and cells after Core chooses the
+  target extraction grain
 - Docling and MinerU can be compared on table-level context quality
 - no Source-generated table description becomes a research fact
 
@@ -400,7 +478,9 @@ It is not successful if:
 
 - Core owns parser-specific table reconstruction
 - `tables.parquet` replaces rows or cells instead of complementing them
-- table context causes the model to extract facts from non-target rows
+- Source starts deciding whether a table is composition, current-work results,
+  prior work, or otherwise scientifically extractable
+- table context causes the model to extract facts without row or cell anchors
 - the implementation introduces a production parser compatibility layer
 
 ## Risks
@@ -411,9 +491,10 @@ large tables while Source keeps the complete table artifact.
 Markdown rendering can hide spans and merged cells. Source should keep cells
 and metadata so table context can be debugged against `table_cells.parquet`.
 
-Caption linkage may be incomplete for some parser outputs. Missing captions
-should be explicit in `metadata` rather than filled with generated summaries.
+Caption or heading linkage may be incomplete for some parser outputs. Missing
+captions or headings should be explicit in `metadata` rather than filled with
+generated summaries.
 
-Adding `tables.parquet` changes the Source artifact surface. It should be
+Adding `table_matrix` changes the Source artifact surface. It should be
 treated as a forward contract addition and verified with targeted Source and
 Core tests before any parser adoption decision.

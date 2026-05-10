@@ -324,6 +324,7 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
             "caption_text": "Table 1 Mechanical results.",
             "heading_path": "Results > Table 1",
             "column_headers": ["Sample", "Strength"],
+            "table_matrix": [["Sample", "Strength"], ["A", "12 MPa"]],
             "table_markdown": "| Sample | Strength |\n| --- | --- |\n| A | 12 MPa |",
             "table_text": "Sample | Strength\nA | 12 MPa",
             "page": 5,
@@ -763,6 +764,10 @@ def test_table_batch_payload_includes_source_table_context():
             "caption_text": "Table 1 Mechanical properties.",
             "heading_path": "Results > Mechanical Properties",
             "column_headers": ["Sample", "Yield strength (MPa)", "Baseline"],
+            "table_matrix": [
+                ["Sample", "Yield strength (MPa)", "Baseline"],
+                ["A", "560", "as-built"],
+            ],
             "table_markdown": "| Sample | Yield strength (MPa) | Baseline |\n| --- | --- | --- |\n| A | 560 | as-built |",
             "table_text": "Sample | Yield strength (MPa) | Baseline\nA | 560 | as-built",
             "page": 5,
@@ -797,12 +802,86 @@ def test_table_batch_payload_includes_source_table_context():
         "caption_text": "Table 1 Mechanical properties.",
         "heading_path": "Results > Mechanical Properties",
         "column_headers": ["Sample", "Yield strength (MPa)", "Baseline"],
+        "table_matrix": [
+            ["Sample", "Yield strength (MPa)", "Baseline"],
+            ["A", "560", "as-built"],
+        ],
         "table_markdown": "| Sample | Yield strength (MPa) | Baseline |\n| --- | --- | --- |\n| A | 560 | as-built |",
         "table_text": "Sample | Yield strength (MPa) | Baseline\nA | 560 | as-built",
         "page": 5,
     }
     assert payload["target_rows"][0]["row_summary"] == "A | 560 | as-built"
     assert payload["target_rows"][0]["row_index"] == 1
+
+
+def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables():
+    service = PaperFactsService()
+
+    small_rows = [
+        {"table_id": "tbl-small", "row_index": index, "row_text": f"A{index} | {index}"}
+        for index in range(1, 7)
+    ]
+    large_rows = [
+        {"table_id": "tbl-large", "row_index": index, "row_text": f"B{index} | {index}"}
+        for index in range(1, 42)
+    ]
+
+    batches = service._batch_table_rows_for_extraction([*small_rows, *large_rows])
+
+    assert [len(batch) for batch in batches] == [
+        6,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        1,
+    ]
+
+
+def test_table_batch_payload_bounds_large_table_matrix_to_target_rows():
+    service = PaperFactsService()
+    matrix = [["Sample", "Strength"]]
+    matrix.extend([[f"A{index}", str(index)] for index in range(1, 50)])
+
+    payload = service._build_table_batch_extraction_payload(
+        title="Large Table Paper",
+        source_filename="large-table.pdf",
+        profile={
+            "doc_type": "experimental",
+            "protocol_extractable": "yes",
+        },
+        table_context={
+            "caption_text": "Table 1 Large result table.",
+            "heading_path": "Results",
+            "column_headers": ["Sample", "Strength"],
+            "table_matrix": matrix,
+            "table_markdown": "| Sample | Strength |",
+            "table_text": "Sample | Strength",
+            "page": 3,
+        },
+        table_rows=[
+            {
+                "table_id": "tbl-large",
+                "row_index": 24,
+                "row_text": "A24 | 24",
+                "heading_path": "Results",
+                "page": 3,
+            }
+        ],
+        row_cells_by_index={},
+        text_windows=[],
+    )
+
+    bounded_matrix = payload["table_context"]["table_matrix"]
+    assert ["A24", "24"] in bounded_matrix
+    assert ["A23", "23"] in bounded_matrix
+    assert ["A25", "25"] in bounded_matrix
+    assert ["A49", "49"] in bounded_matrix
+    assert ["A10", "10"] not in bounded_matrix
 
 
 def test_table_row_binding_repairs_split_lpbf_variant_labels():
@@ -1501,7 +1580,7 @@ def test_paper_facts_service_batches_table_rows_before_model_calls(
     document_profile_service.build_document_profiles(collection_id, output_dir)
     paper_facts_service.build_paper_facts(collection_id, output_dir)
 
-    assert [len(payload["target_rows"]) for payload in extractor.table_payloads] == [5, 1]
+    assert [len(payload["target_rows"]) for payload in extractor.table_payloads] == [6]
 
 
 def test_paper_facts_service_passes_table_artifact_context_to_batch_extraction(
@@ -1583,6 +1662,10 @@ def test_paper_facts_service_passes_table_artifact_context_to_batch_extraction(
                 "row_count": 2,
                 "col_count": 3,
                 "column_headers": ["Sample", "Tensile Strength (MPa)", "Baseline"],
+                "table_matrix": [
+                    ["Sample", "Tensile Strength (MPa)", "Baseline"],
+                    ["A1", "950", "as-built"],
+                ],
                 "table_markdown": "| Sample | Tensile Strength (MPa) | Baseline |\n| --- | --- | --- |\n| A1 | 950 | as-built |",
                 "table_text": "Sample | Tensile Strength (MPa) | Baseline\nA1 | 950 | as-built",
                 "metadata": {"source": "test"},
@@ -1605,6 +1688,10 @@ def test_paper_facts_service_passes_table_artifact_context_to_batch_extraction(
         "Sample",
         "Tensile Strength (MPa)",
         "Baseline",
+    ]
+    assert table_context["table_matrix"] == [
+        ["Sample", "Tensile Strength (MPa)", "Baseline"],
+        ["A1", "950", "as-built"],
     ]
     assert "A1 | 950 | as-built" in table_context["table_markdown"]
     assert extractor.table_payloads[0]["target_rows"][0]["row_summary"] == "A1 | 950 | as-built"

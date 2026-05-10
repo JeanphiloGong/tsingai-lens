@@ -13,7 +13,10 @@ from infra.source.runtime.source_evidence import (
     build_table_cells,
     build_table_rows,
 )
-from infra.source.runtime.workflows.create_source_artifacts import _build_pdf_bundle
+from infra.source.runtime.workflows.create_source_artifacts import (
+    _build_pdf_bundle,
+    _resolve_heading_path_for_target,
+)
 
 
 def test_default_source_pipeline_uses_structure_first_handoff_workflow():
@@ -296,6 +299,7 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
     assert table["row_count"] == 2
     assert table["col_count"] == 2
     assert table["column_headers"] == ["Sample", "Strength (MPa)"]
+    assert table["table_matrix"] == [["Sample", "Strength (MPa)"], ["A", "123"]]
     assert "| Sample | Strength (MPa) |" in table["table_markdown"]
     assert "A | 123" in table["table_text"]
     assert not bundle.table_rows.empty
@@ -305,3 +309,39 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
     assert set(bundle.tables["table_id"]) == set(bundle.table_rows["table_id"])
     assert "Strength (MPa)" in set(bundle.table_cells["header_path"].dropna())
     assert "MPa" in set(bundle.table_cells["unit_hint"].dropna())
+
+
+def test_heading_path_binding_prefers_same_page_bbox_heading_above_target():
+    target_bbox = '{"b": 360.0, "coord_origin": "TOPLEFT", "l": 0.0, "r": 100.0, "t": 300.0}'
+    heading_blocks = [
+        {
+            "page": 1,
+            "heading_path": "Introduction",
+            "block_order": 1,
+            "block_type": "heading",
+            "bbox": '{"b": 120.0, "coord_origin": "TOPLEFT", "l": 0.0, "r": 100.0, "t": 100.0}',
+        },
+        {
+            "page": 1,
+            "heading_path": "Results > Mechanical Properties",
+            "block_order": 2,
+            "block_type": "heading",
+            "bbox": '{"b": 290.0, "coord_origin": "TOPLEFT", "l": 0.0, "r": 100.0, "t": 270.0}',
+        },
+        {
+            "page": 1,
+            "heading_path": "Appendix",
+            "block_order": 3,
+            "block_type": "heading",
+            "bbox": '{"b": 430.0, "coord_origin": "TOPLEFT", "l": 0.0, "r": 100.0, "t": 400.0}',
+        },
+    ]
+
+    assert (
+        _resolve_heading_path_for_target(
+            page=1,
+            target_bbox=target_bbox,
+            heading_blocks=heading_blocks,
+        )
+        == "Results > Mechanical Properties"
+    )

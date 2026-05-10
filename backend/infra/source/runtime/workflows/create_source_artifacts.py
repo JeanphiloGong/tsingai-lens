@@ -516,10 +516,15 @@ def _build_pdf_tables(
                 "caption_block_id": caption_block_id,
                 "page": page,
                 "bbox": bbox,
-                "heading_path": _resolve_heading_path_for_page(page, heading_blocks),
+                "heading_path": _resolve_heading_path_for_target(
+                    page=page,
+                    target_bbox=bbox,
+                    heading_blocks=heading_blocks,
+                ),
                 "row_count": row_count,
                 "col_count": col_count,
                 "column_headers": column_headers,
+                "table_matrix": matrix,
                 "table_markdown": _render_markdown_table(matrix, column_headers),
                 "table_text": _render_plain_table_text(matrix),
                 "metadata": {
@@ -609,6 +614,7 @@ def _build_pdf_table_rows(
             if not row_text:
                 continue
             page = _first_non_null(ordered_cells["page"].tolist())
+            row_bbox = _merge_bbox_payloads(ordered_cells["bbox"].tolist())
             rows.append(
                 {
                     "row_id": f"row_{document_id}_{table_id}_{row_index}",
@@ -617,8 +623,12 @@ def _build_pdf_table_rows(
                     "row_index": row_index,
                     "row_text": row_text,
                     "page": page,
-                    "bbox": _merge_bbox_payloads(ordered_cells["bbox"].tolist()),
-                    "heading_path": _resolve_heading_path_for_page(page, heading_blocks),
+                    "bbox": row_bbox,
+                    "heading_path": _resolve_heading_path_for_target(
+                        page=page,
+                        target_bbox=row_bbox,
+                        heading_blocks=heading_blocks,
+                    ),
                 }
             )
 
@@ -719,7 +729,11 @@ def _build_pdf_figures(
                     "caption_block_id": caption_block_id,
                     "page": page,
                     "bbox": bbox,
-                    "heading_path": _resolve_heading_path_for_page(page, heading_blocks),
+                    "heading_path": _resolve_heading_path_for_target(
+                        page=page,
+                        target_bbox=bbox,
+                        heading_blocks=heading_blocks,
+                    ),
                     "image_path": image_path,
                     "image_mime_type": image_mime_type,
                     "image_width": image_width,
@@ -765,6 +779,8 @@ def _build_heading_blocks(blocks: pd.DataFrame | None) -> list[dict[str, Any]]:
                 "page": item.get("page"),
                 "heading_path": str(item.get("heading_path") or "").strip() or None,
                 "block_order": int(item.get("block_order") or 0),
+                "block_type": str(item.get("block_type") or "").strip(),
+                "bbox": item.get("bbox"),
             }
             for item in blocks.to_dict(orient="records")
             if str(item.get("heading_path") or "").strip()
@@ -880,9 +896,7 @@ def _caption_distance_score(figure_bbox: Any, caption_bbox: Any) -> float:
     caption = _load_bbox_payload(caption_bbox)
     if figure is None or caption is None:
         return float("inf")
-    figure_bottom = float(figure.get("b", 0.0))
-    caption_top = float(caption.get("t", 0.0))
-    return abs(caption_top - figure_bottom)
+    return _bbox_vertical_gap(figure, caption)
 
 
 def _extract_picture_asset(
@@ -1281,6 +1295,78 @@ def _resolve_heading_path_for_page(
     if not eligible:
         return heading_blocks[-1].get("heading_path")
     return eligible[-1].get("heading_path")
+
+
+def _resolve_heading_path_for_target(
+    *,
+    page: int | None,
+    target_bbox: Any,
+    heading_blocks: list[dict[str, Any]],
+) -> str | None:
+    target = _load_bbox_payload(target_bbox)
+    normalized_page = _safe_int(page)
+    if target is None or normalized_page is None:
+        return _resolve_heading_path_for_page(page, heading_blocks)
+
+    candidates = []
+    for item in heading_blocks:
+        if item.get("block_type") != "heading":
+            continue
+        if _safe_int(item.get("page")) != normalized_page:
+            continue
+        if not item.get("heading_path"):
+            continue
+        heading = _load_bbox_payload(item.get("bbox"))
+        if heading is None:
+            continue
+        distance = _heading_above_distance(target, heading)
+        if distance is None:
+            continue
+        candidates.append((distance, -(int(item.get("block_order") or 0)), item))
+
+    if not candidates:
+        return _resolve_heading_path_for_page(page, heading_blocks)
+    return min(candidates, key=lambda item: (item[0], item[1]))[2].get("heading_path")
+
+
+def _heading_above_distance(
+    target: dict[str, Any],
+    heading: dict[str, Any],
+) -> float | None:
+    if _uses_top_left_origin(target, heading):
+        distance = float(target.get("t", 0.0)) - float(heading.get("b", 0.0))
+    else:
+        distance = float(heading.get("b", 0.0)) - float(target.get("t", 0.0))
+    return distance if distance >= 0 else None
+
+
+def _bbox_vertical_gap(first: dict[str, Any], second: dict[str, Any]) -> float:
+    if _uses_top_left_origin(first, second):
+        first_top = min(float(first.get("t", 0.0)), float(first.get("b", 0.0)))
+        first_bottom = max(float(first.get("t", 0.0)), float(first.get("b", 0.0)))
+        second_top = min(float(second.get("t", 0.0)), float(second.get("b", 0.0)))
+        second_bottom = max(float(second.get("t", 0.0)), float(second.get("b", 0.0)))
+    else:
+        first_top = max(float(first.get("t", 0.0)), float(first.get("b", 0.0)))
+        first_bottom = min(float(first.get("t", 0.0)), float(first.get("b", 0.0)))
+        second_top = max(float(second.get("t", 0.0)), float(second.get("b", 0.0)))
+        second_bottom = min(float(second.get("t", 0.0)), float(second.get("b", 0.0)))
+
+    if _uses_top_left_origin(first, second):
+        if first_bottom < second_top:
+            return second_top - first_bottom
+        if second_bottom < first_top:
+            return first_top - second_bottom
+    else:
+        if first_bottom > second_top:
+            return first_bottom - second_top
+        if second_bottom > first_top:
+            return second_bottom - first_top
+    return 0.0
+
+
+def _uses_top_left_origin(*payloads: dict[str, Any]) -> bool:
+    return any("top" in str(payload.get("coord_origin") or "").lower() for payload in payloads)
 
 
 def _safe_int(value: Any) -> int | None:

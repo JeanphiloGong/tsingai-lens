@@ -185,6 +185,7 @@ TABLES_FINAL_COLUMNS = [
     "row_count",
     "col_count",
     "column_headers",
+    "table_matrix",
     "table_markdown",
     "table_text",
     METADATA,

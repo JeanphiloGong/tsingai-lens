@@ -124,3 +124,17 @@ No `tables.parquet` rows found.
 
 Rebuild the collection first when you need to inspect newly added artifact
 families.
+
+## Source Table Split Preview
+
+Use `export_source_tables.py` when you want to inspect only the Source table
+split output. It can read existing artifacts or reparse collection input PDFs
+with the current Source code without writing back to the collection.
+
+```bash
+cd backend
+./.venv/bin/python scripts/export_source_tables.py \
+  --collection-id col_ed3ea76e79c3 \
+  --destination /tmp/source-table-preview \
+  --reparse-inputs
+```

@@ -144,7 +144,7 @@ JSON compliance rules for this extraction:
 - Put result values in `result_claims[*].value_text` and `result_claims[*].unit`.
 - Omit weakly grounded PBF fields. Do not infer missing laser power, scan speed, orientations, strain rate, or energy density from general domain knowledge.
 - Extract target-row-grounded facts only. Use `table_context` to interpret captions, headers, units, groups, baselines, and row meaning.
-- Treat non-target rows inside `table_context.table_markdown` or `table_context.table_text` as context only. Do not copy their values into facts for a target row.
+- Treat non-target rows inside `table_context.table_matrix`, `table_context.table_markdown`, or `table_context.table_text` as context only. Do not copy their values into facts for a target row.
 - Do not mix values across target rows. Put each extracted value under the matching `row_index`.
 - Use `supporting_text_windows` only to disambiguate row labels, abbreviations, or column meaning.
 - Do not mine `supporting_text_windows` for extra standalone facts that are not needed to interpret this row.
@@ -333,7 +333,7 @@ def build_table_batch_mentions_prompt(payload: dict[str, Any]) -> tuple[str, str
         "Extract target-row-grounded lightweight mentions for this batch using the provided table context.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "Use `table_context` to interpret the target rows' caption, headers, units, "
-        "row groups, and table-wide labels. Non-target rows are context only; do not "
+        "matrix, row groups, and table-wide labels. Non-target rows are context only; do not "
         "extract their values as target-row facts. Skip outputs when a target row is a literature "
         "summary rather than a directly attributable study row. Do not mix values across "
         "target rows. Do not emit backend "

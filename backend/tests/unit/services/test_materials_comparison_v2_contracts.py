@@ -85,6 +85,7 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "row_count",
         "col_count",
         "column_headers",
+        "table_matrix",
         "table_markdown",
         "table_text",
         "metadata",

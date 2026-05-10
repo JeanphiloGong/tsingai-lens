@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import json
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -10,19 +9,16 @@ import pandas as pd
 from fastapi import HTTPException
 
 from application.derived.protocol.document_meta_service import load_document_title_map
+from infra.persistence.factory import build_protocol_artifact_repository
 
 
-_BLOCK_FILE = "procedure_blocks.parquet"
-_STEP_FILE = "protocol_steps.parquet"
+protocol_artifact_repository = build_protocol_artifact_repository()
 
 
-def _read_parquet_optional(path: Path) -> pd.DataFrame | None:
-    if not path.is_file():
+def _frame(records: tuple[Any, ...]) -> pd.DataFrame | None:
+    if not records:
         return None
-    try:
-        return pd.read_parquet(path)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"无法读取协议产物: {path.name}: {exc}") from exc
+    return pd.DataFrame([dict(record) for record in records])
 
 
 def _to_python(value: Any) -> Any:
@@ -104,11 +100,13 @@ def _contains_paper(row: pd.Series, paper_ids: set[str]) -> bool:
 
 
 def _normalize_step(row: pd.Series, title_map: dict[str, str] | None = None) -> dict[str, Any]:
-    conditions = _to_dict(row.get("conditions"))
-    characterization = _to_list(row.get("characterization"))
-    controls = _to_list(row.get("controls"))
-    evidence_refs = _to_list(row.get("evidence_refs"))
-    materials = _to_list(row.get("materials"))
+    conditions = _to_dict(row.get("conditions") or row.get("conditions_json"))
+    characterization = _to_list(
+        row.get("characterization") or row.get("characterization_json")
+    )
+    controls = _to_list(row.get("controls") or row.get("controls_json"))
+    evidence_refs = _to_list(row.get("evidence_refs") or row.get("evidence_refs_json"))
+    materials = _to_list(row.get("materials") or row.get("materials_json"))
     paper_id = _resolve_paper_id(row)
     return {
         "step_id": str(row.get("step_id") or row.get("id") or ""),
@@ -118,7 +116,7 @@ def _normalize_step(row: pd.Series, title_map: dict[str, str] | None = None) -> 
         "block_id": _to_python(row.get("block_id")),
         "block_type": _to_python(row.get("block_type")),
         "order": _safe_int(row.get("order")),
-        "action": str(_to_python(row.get("action")) or row.get("text") or ""),
+        "action": str(_to_python(row.get("action")) or row.get("raw_text") or row.get("text") or ""),
         "purpose": _to_python(row.get("purpose")),
         "expected_output": _to_python(row.get("expected_output")),
         "materials": materials,
@@ -127,6 +125,8 @@ def _normalize_step(row: pd.Series, title_map: dict[str, str] | None = None) -> 
         "controls": controls,
         "evidence_refs": evidence_refs,
         "confidence_score": _safe_float(row.get("confidence_score")),
+        "validation_status": _to_python(row.get("validation_status")),
+        "validation_errors": _to_list(row.get("validation_errors_json")),
     }
 
 
@@ -225,14 +225,20 @@ def _default_controls(steps: list[Any]) -> list[Any]:
     return ["baseline_control"]
 
 
-def load_protocol_artifacts(base_dir: Path, paper_ids: list[str] | None = None, limit: int = 50) -> dict[str, Any]:
+def load_protocol_artifacts(
+    collection_id: str,
+    output_path: str | None = None,
+    paper_ids: list[str] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
     paper_filter = set(paper_ids or [])
-    blocks_df = _read_parquet_optional(base_dir / _BLOCK_FILE)
-    steps_df = _read_parquet_optional(base_dir / _STEP_FILE)
-    title_map = load_document_title_map(base_dir)
+    artifacts = protocol_artifact_repository.read_collection_artifacts(collection_id)
+    blocks_df = _frame(artifacts.procedure_blocks)
+    steps_df = _frame(artifacts.protocol_steps)
+    title_map = load_document_title_map(collection_id)
 
     if blocks_df is None and steps_df is None:
-        raise HTTPException(status_code=404, detail="未找到 protocol 产物，请先生成 procedure_blocks/protocol_steps parquet")
+        raise HTTPException(status_code=404, detail="未找到 protocol 产物，请先生成 procedure blocks 和 protocol steps")
 
     if paper_filter:
         if blocks_df is not None:
@@ -244,7 +250,7 @@ def load_protocol_artifacts(base_dir: Path, paper_ids: list[str] | None = None, 
     steps = [] if steps_df is None else [_normalize_step(row, title_map) for _, row in steps_df.head(limit).iterrows()]
 
     return {
-        "output_path": str(base_dir),
+        "output_path": output_path,
         "paper_ids": sorted(paper_filter) if paper_filter else None,
         "summary": {
             "procedure_blocks": 0 if blocks_df is None else int(len(blocks_df)),
@@ -256,16 +262,18 @@ def load_protocol_artifacts(base_dir: Path, paper_ids: list[str] | None = None, 
 
 
 def list_protocol_steps(
-    base_dir: Path,
+    collection_id: str,
+    output_path: str | None = None,
     paper_id: str | None = None,
     block_type: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    steps_df = _read_parquet_optional(base_dir / _STEP_FILE)
+    artifacts = protocol_artifact_repository.read_collection_artifacts(collection_id)
+    steps_df = _frame(artifacts.protocol_steps)
     if steps_df is None:
-        raise HTTPException(status_code=404, detail="protocol_steps.parquet 不存在")
-    title_map = load_document_title_map(base_dir)
+        raise HTTPException(status_code=404, detail="protocol steps 不存在")
+    title_map = load_document_title_map(collection_id)
 
     if paper_id:
         steps_df = steps_df[steps_df.apply(lambda row: _resolve_paper_id(row) == paper_id, axis=1)]
@@ -276,7 +284,7 @@ def list_protocol_steps(
     normalized.sort(key=lambda item: ((item.get("paper_id") or ""), item.get("order") or 0, item.get("step_id") or ""))
     items = normalized[offset : offset + limit]
     return {
-        "output_path": str(base_dir),
+        "output_path": output_path,
         "paper_id": paper_id,
         "block_type": block_type,
         "total": len(normalized),
@@ -286,7 +294,8 @@ def list_protocol_steps(
 
 
 def build_sop_draft(
-    base_dir: Path,
+    collection_id: str,
+    output_path: str | None,
     goal: str,
     target_properties: list[str] | None = None,
     paper_ids: list[str] | None = None,
@@ -295,7 +304,11 @@ def build_sop_draft(
     if not goal.strip():
         raise HTTPException(status_code=400, detail="goal 不能为空")
 
-    payload = list_protocol_steps(base_dir=base_dir, limit=1000)
+    payload = list_protocol_steps(
+        collection_id=collection_id,
+        output_path=output_path,
+        limit=1000,
+    )
     steps = payload["items"]
     if paper_ids:
         allowed = set(paper_ids)
@@ -317,7 +330,7 @@ def build_sop_draft(
         "artifact_summary": payload["total"],
     }
     return {
-        "output_path": str(base_dir),
+        "output_path": output_path,
         "goal": goal,
         "count": len(steps),
         "sop_draft": draft,

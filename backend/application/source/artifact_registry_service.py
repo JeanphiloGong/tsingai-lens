@@ -10,9 +10,12 @@ from domain.core.comparison import (
     ComparableResult,
     evaluate_collection_reassessment_reasons,
 )
-from domain.ports import ArtifactRepository
+from domain.ports import ArtifactRepository, ProtocolArtifactRepository
 from domain.source import ArtifactStatusRecord
-from infra.persistence.factory import build_artifact_repository
+from infra.persistence.factory import (
+    build_artifact_repository,
+    build_protocol_artifact_repository,
+)
 from infra.persistence.backbone_codec import restore_frame_from_storage
 
 
@@ -37,9 +40,13 @@ class ArtifactRegistryService:
         self,
         root_dir: Path | None = None,
         repository: ArtifactRepository | None = None,
+        protocol_artifact_repository: ProtocolArtifactRepository | None = None,
     ) -> None:
         self.repository = repository or build_artifact_repository(root_dir)
         self.root_dir = self.repository.root_dir
+        self.protocol_artifact_repository = (
+            protocol_artifact_repository or build_protocol_artifact_repository()
+        )
 
     def build_registry(
         self,
@@ -69,8 +76,9 @@ class ArtifactRegistryService:
         figures_path = base_dir / "figures.parquet"
         table_rows_path = base_dir / "table_rows.parquet"
         table_cells_path = base_dir / "table_cells.parquet"
-        procedure_blocks_path = base_dir / "procedure_blocks.parquet"
-        protocol_steps_path = base_dir / "protocol_steps.parquet"
+        protocol_status = self.protocol_artifact_repository.get_collection_status(
+            collection_id
+        )
         collection_scope_stale = self._collection_scope_artifacts_stale(
             collection_id=collection_id,
             comparable_results_path=comparable_results_path,
@@ -122,10 +130,10 @@ class ArtifactRegistryService:
             table_rows_ready=self._parquet_has_rows(table_rows_path),
             table_cells_generated=table_cells_path.exists(),
             table_cells_ready=self._parquet_has_rows(table_cells_path),
-            procedure_blocks_generated=procedure_blocks_path.exists(),
-            procedure_blocks_ready=self._parquet_has_rows(procedure_blocks_path),
-            protocol_steps_generated=protocol_steps_path.exists(),
-            protocol_steps_ready=self._parquet_has_rows(protocol_steps_path),
+            procedure_blocks_generated=protocol_status.procedure_blocks_generated,
+            procedure_blocks_ready=protocol_status.procedure_blocks_ready,
+            protocol_steps_generated=protocol_status.protocol_steps_generated,
+            protocol_steps_ready=protocol_status.protocol_steps_ready,
             updated_at=_now_iso(),
         ).to_record()
         if previous_payload is None:

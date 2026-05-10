@@ -1,32 +1,17 @@
 from __future__ import annotations
 
-import json
 import sys
 from hashlib import sha1
-from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 
 from application.derived.graph_projection_service import load_core_graph_payload
-from domain.core.comparison import (
-    ComparableResult,
-    build_collection_assessment_input_fingerprint,
-    build_comparison_row_id,
-)
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+from domain.core.comparison import ComparisonRowRecord
+from domain.core.document_profile import DocumentProfile
+from domain.core.evidence_backbone import EvidenceAnchor
+from domain.core.fact_store import CoreFactSet
+from infra.persistence.sqlite import SqliteCoreFactRepository
 
 
 def _semantic_node_id(prefix: str, label: str) -> str:
@@ -37,113 +22,72 @@ def _comparison_rows_frame(*records: dict) -> pd.DataFrame:
     return pd.DataFrame(list(records))
 
 
-def _current_scope_metadata(comparable_result: dict) -> dict[str, object]:
-    comparable_record = ComparableResult.from_mapping(comparable_result)
-    return {
-        "policy_family": "default_collection_comparison_policy",
-        "policy_version": "comparison_policy_v1",
-        "comparable_result_normalization_version": comparable_record.normalization_version,
-        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
-            comparable_record
-        ),
-        "reassessment_triggers": [
-            "policy_family_changed",
-            "policy_version_changed",
-            "comparable_result_normalization_version_changed",
-            "assessment_input_fingerprint_changed",
-        ],
-    }
-
-
-def _write_semantic_comparison_artifacts(
-    output_dir: Path,
+def _core_graph_fact_set(
     collection_id: str,
     *,
-    comparable_result_id: str = "cres-1",
+    row_id: str = "cmp-1",
     source_document_id: str = "paper-1",
     supporting_evidence_ids: list[str] | None = None,
-) -> str:
+) -> CoreFactSet:
     evidence_ids = supporting_evidence_ids or ["ev-1"]
-    comparable_result = {
-        "comparable_result_id": comparable_result_id,
-        "source_result_id": f"res-{comparable_result_id}",
-        "source_document_id": source_document_id,
-        "binding": {
-            "variant_id": None,
-            "baseline_id": f"base-{comparable_result_id}",
-            "test_condition_id": f"tc-{comparable_result_id}",
-        },
-        "normalized_context": {
-            "material_system_normalized": "oxide cathode",
-            "process_normalized": "700 C",
-            "baseline_normalized": "as-prepared",
-            "test_condition_normalized": "EIS",
-        },
-        "axis": {
-            "axis_name": None,
-            "axis_value": None,
-            "axis_unit": None,
-        },
-        "value": {
-            "property_normalized": "conductivity",
-            "result_type": "scalar",
-            "numeric_value": 12.0,
-            "unit": "mS/cm",
-            "summary": "12 mS/cm",
-            "statistic_type": None,
-            "uncertainty": None,
-        },
-        "evidence": {
-            "direct_anchor_ids": ["anchor-1"],
-            "contextual_anchor_ids": [],
-            "evidence_ids": evidence_ids,
-            "structure_feature_ids": [],
-            "characterization_observation_ids": [],
-            "traceability_status": "direct",
-        },
-        "variant_label": None,
-        "baseline_reference": "as-prepared",
-        "result_source_type": "text",
-        "epistemic_status": "normalized_from_evidence",
-        "normalization_version": "comparable_result_v1",
-    }
-    pd.DataFrame([comparable_result]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(
-        [
-            {
-                "collection_id": collection_id,
-                "comparable_result_id": comparable_result_id,
-                "assessment": {
-                    "missing_critical_context": [],
-                    "comparability_basis": ["baseline_resolved"],
-                    "comparability_warnings": [],
+    return CoreFactSet(
+        paper_facts_ready=True,
+        comparison_artifacts_ready=True,
+        document_profiles=(
+            DocumentProfile.from_mapping(
+                {
+                    "document_id": source_document_id,
+                    "collection_id": collection_id,
+                    "title": "Core Route Paper",
+                    "source_filename": "paper.txt",
+                    "doc_type": "experimental",
+                    "protocol_extractable": "yes",
+                    "protocol_extractability_signals": ["methods_section_detected"],
+                    "parsing_warnings": [],
+                    "confidence": 0.91,
+                }
+            ),
+        ),
+        evidence_anchors=(
+            EvidenceAnchor.from_mapping(
+                {
+                    "anchor_id": "anchor-1",
+                    "document_id": source_document_id,
+                    "source_type": "text",
+                    "snippet_id": "tu-1",
+                    "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
+                }
+            ),
+        ),
+        comparison_rows=(
+            ComparisonRowRecord.from_mapping(
+                {
+                    "row_id": row_id,
+                    "collection_id": collection_id,
+                    "comparable_result_id": "cres-1",
+                    "source_document_id": source_document_id,
+                    "supporting_evidence_ids": evidence_ids,
+                    "supporting_anchor_ids": ["anchor-1"],
+                    "material_system_normalized": "oxide cathode",
+                    "process_normalized": "700 C",
+                    "property_normalized": "conductivity",
+                    "baseline_normalized": "as-prepared",
+                    "test_condition_normalized": "EIS",
                     "comparability_status": "comparable",
-                    "requires_expert_review": False,
-                    "assessment_epistemic_status": "normalized_from_evidence",
-                },
-                "epistemic_status": "normalized_from_evidence",
-                "included": True,
-                "sort_order": 0,
-                **_current_scope_metadata(comparable_result),
-            }
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    return build_comparison_row_id(
-        collection_id=collection_id,
-        comparable_result_id=comparable_result_id,
+                    "comparability_warnings": [],
+                    "comparability_basis": ["baseline_resolved"],
+                    "result_summary": "12 mS/cm",
+                    "result_source_type": "text",
+                    "value": 12.0,
+                    "unit": "mS/cm",
+                }
+            ),
+        ),
     )
 
 
-def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    output_dir = tmp_path / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    pd.DataFrame(
+def test_core_projection_builds_route_compatible_graph_payload():
+    profiles = pd.DataFrame(
         [
             {
                 "document_id": "paper-1",
@@ -157,8 +101,8 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
                 "confidence": 0.91,
             }
         ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
+    )
+    evidence_cards = pd.DataFrame(
         [
             {
                 "evidence_id": "ev-1",
@@ -188,7 +132,7 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
                 "traceability_status": "direct",
             }
         ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    )
     comparison_rows = _comparison_rows_frame(
         {
             "row_id": "cmp-1",
@@ -208,7 +152,8 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
     )
 
     nodes, edges, truncated = load_core_graph_payload(
-        base_dir=output_dir,
+        profiles=profiles,
+        evidence_cards=evidence_cards,
         comparison_rows=comparison_rows,
         max_nodes=20,
         min_weight=0.0,
@@ -262,13 +207,8 @@ def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_
     )
 
 
-def test_core_projection_skips_placeholder_semantic_nodes(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    output_dir = tmp_path / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    pd.DataFrame(
+def test_core_projection_skips_placeholder_semantic_nodes():
+    profiles = pd.DataFrame(
         [
             {
                 "document_id": "paper-1",
@@ -282,8 +222,8 @@ def test_core_projection_skips_placeholder_semantic_nodes(monkeypatch, tmp_path)
                 "confidence": 0.91,
             }
         ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
+    )
+    evidence_cards = pd.DataFrame(
         [
             {
                 "evidence_id": "ev-1",
@@ -299,7 +239,7 @@ def test_core_projection_skips_placeholder_semantic_nodes(monkeypatch, tmp_path)
                 "traceability_status": "direct",
             }
         ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    )
     comparison_rows = _comparison_rows_frame(
         {
             "row_id": "cmp-1",
@@ -319,7 +259,8 @@ def test_core_projection_skips_placeholder_semantic_nodes(monkeypatch, tmp_path)
     )
 
     nodes, edges, truncated = load_core_graph_payload(
-        base_dir=output_dir,
+        profiles=profiles,
+        evidence_cards=evidence_cards,
         comparison_rows=comparison_rows,
         max_nodes=20,
         min_weight=0.0,
@@ -339,13 +280,8 @@ def test_core_projection_skips_placeholder_semantic_nodes(monkeypatch, tmp_path)
     } == {"comparison_to_property"}
 
 
-def test_core_projection_truncation_reserves_backbone_capacity(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    output_dir = tmp_path / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    pd.DataFrame(
+def test_core_projection_truncation_reserves_backbone_capacity():
+    profiles = pd.DataFrame(
         [
             {
                 "document_id": f"paper-{index}",
@@ -360,8 +296,8 @@ def test_core_projection_truncation_reserves_backbone_capacity(monkeypatch, tmp_
             }
             for index in range(1, 5)
         ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
+    )
+    evidence_cards = pd.DataFrame(
         [
             {
                 "evidence_id": f"ev-{index}",
@@ -378,7 +314,7 @@ def test_core_projection_truncation_reserves_backbone_capacity(monkeypatch, tmp_
             }
             for index in range(1, 5)
         ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    )
     comparison_rows = _comparison_rows_frame(
         *[
             {
@@ -401,7 +337,8 @@ def test_core_projection_truncation_reserves_backbone_capacity(monkeypatch, tmp_
     )
 
     nodes, _edges, truncated = load_core_graph_payload(
-        base_dir=output_dir,
+        profiles=profiles,
+        evidence_cards=evidence_cards,
         comparison_rows=comparison_rows,
         max_nodes=10,
         min_weight=0.0,
@@ -436,69 +373,23 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
         )
 
     import application.derived.graph_service as graph_service
-    _patch_parquet(monkeypatch)
 
     from application.source.collection_service import CollectionService
-    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     monkeypatch.setattr(graph_service, "collection_service", collection_service)
-    monkeypatch.setattr(graph_service, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
 
     collection = collection_service.create_collection("Core Projection Collection")
     collection_id = collection["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Core Route Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": ["methods_section_detected"],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-1",
-                        "source_type": "text",
-                        "section_id": None,
-                        "block_id": None,
-                        "snippet_id": "tu-1",
-                        "figure_or_table": None,
-                        "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
-                    }
-                ],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {
-                    "process": {"temperatures_c": [700.0]},
-                    "baseline": {"control": "as-prepared"},
-                    "test": {"method": "EIS"},
-                },
-                "confidence": 0.83,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    _write_semantic_comparison_artifacts(output_dir, collection_id)
-    artifact_registry.upsert(collection_id, output_dir)
+    core_fact_repository.replace_collection_facts(
+        collection_id,
+        _core_graph_fact_set(collection_id),
+    )
     assert not (output_dir / "comparison_rows.parquet").exists()
 
     payload = graph_service.get_collection_graph(
@@ -541,54 +432,22 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
 
     import application.derived.graph_service as graph_service
 
-    _patch_parquet(monkeypatch)
-
     from application.source.collection_service import CollectionService
-    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     monkeypatch.setattr(graph_service, "collection_service", collection_service)
-    monkeypatch.setattr(graph_service, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
 
     collection = collection_service.create_collection("Graph Neighborhood Collection")
     collection_id = collection["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Core Route Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.83,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    row_id = _write_semantic_comparison_artifacts(output_dir, collection_id)
-    artifact_registry.upsert(collection_id, output_dir)
+    row_id = "cmp-1"
+    core_fact_repository.replace_collection_facts(
+        collection_id,
+        _core_graph_fact_set(collection_id, row_id=row_id),
+    )
 
     payload = graph_service.get_collection_graph_neighbors(
         collection_id=collection_id,

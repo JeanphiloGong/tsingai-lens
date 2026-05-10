@@ -7,7 +7,7 @@ from uuid import uuid4
 import pandas as pd
 
 
-PROTOCOL_STEP_PARQUET_COLUMNS = [
+PROTOCOL_STEP_STORAGE_COLUMNS = [
     "step_id",
     "paper_id",
     "section_id",
@@ -30,7 +30,7 @@ PROTOCOL_STEP_PARQUET_COLUMNS = [
 
 
 class ProtocolValidateService:
-    """Validate extracted steps and prepare a stable parquet payload."""
+    """Validate extracted steps and prepare a stable storage payload."""
 
     def validate_step(self, step: dict[str, Any]) -> dict[str, Any]:
         payload = dict(step)
@@ -66,7 +66,7 @@ class ProtocolValidateService:
     def validate_steps(self, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [self.validate_step(step) for step in steps]
 
-    def to_parquet_frame(self, steps: list[dict[str, Any]]) -> pd.DataFrame:
+    def to_storage_frame(self, steps: list[dict[str, Any]]) -> pd.DataFrame:
         rows = []
         for step in self.validate_steps(steps):
             rows.append(
@@ -91,7 +91,7 @@ class ProtocolValidateService:
                     "validation_errors_json": self._to_json(step["validation_errors"]),
                 }
             )
-        return pd.DataFrame(rows, columns=PROTOCOL_STEP_PARQUET_COLUMNS)
+        return pd.DataFrame(rows, columns=PROTOCOL_STEP_STORAGE_COLUMNS)
 
     def _validate_conditions(self, conditions: Any) -> dict[str, Any]:
         payload = dict(conditions or {})

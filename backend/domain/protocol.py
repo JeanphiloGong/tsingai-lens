@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 ValueStatus = Literal["reported", "inferred", "not_reported", "ambiguous"]
 MaterialRole = Literal[
@@ -140,3 +140,17 @@ class SOPDraft:
     risks: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
     review_status: ReviewStatus = "draft"
+
+
+@dataclass(frozen=True)
+class ProtocolArtifactSet:
+    procedure_blocks: tuple[Mapping[str, Any], ...] = ()
+    protocol_steps: tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class ProtocolArtifactStatus:
+    procedure_blocks_generated: bool = False
+    procedure_blocks_ready: bool = False
+    protocol_steps_generated: bool = False
+    protocol_steps_ready: bool = False

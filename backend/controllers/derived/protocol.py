@@ -83,7 +83,8 @@ async def list_collection_protocol_steps(
 ) -> dict[str, Any]:
     base_dir = _ensure_collection_protocol_ready(collection_id)
     payload = protocol_sop_service.list_protocol_steps(
-        base_dir=base_dir,
+        collection_id=collection_id,
+        output_path=str(base_dir),
         paper_id=paper_id,
         block_type=block_type,
         limit=limit,
@@ -102,10 +103,11 @@ async def search_collection_protocol_steps(
 ) -> dict[str, Any]:
     base_dir = _ensure_collection_protocol_ready(collection_id)
     payload = protocol_search_service.search_protocol_steps(
-        base_dir=base_dir,
+        collection_id=collection_id,
         query=q,
         limit=limit,
         paper_id=paper_id,
+        output_path=str(base_dir),
     )
     payload["collection_id"] = collection_id
     return payload
@@ -126,7 +128,8 @@ async def build_collection_protocol_sop(
         raise HTTPException(status_code=400, detail="max_steps 必须在 1-50 之间")
     base_dir = _ensure_collection_protocol_ready(collection_id)
     response = protocol_sop_service.build_sop_draft(
-        base_dir=base_dir,
+        collection_id=collection_id,
+        output_path=str(base_dir),
         goal=goal,
         target_properties=target_properties,
         paper_ids=paper_ids,

@@ -1,32 +1,21 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import pandas as pd
-from fastapi import HTTPException
+from domain.ports import SourceArtifactRepository
+from infra.persistence.factory import build_source_artifact_repository
 
 
-_DOCUMENT_FILE = "documents.parquet"
+source_artifact_repository = build_source_artifact_repository()
 
 
-def load_document_title_map(base_dir: Path) -> dict[str, str]:
-    path = base_dir / _DOCUMENT_FILE
-    if not path.is_file():
-        return {}
-
-    try:
-        documents = pd.read_parquet(path)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"无法读取 documents.parquet: {exc}") from exc
-
-    if "id" not in documents.columns:
-        return {}
+def load_document_title_map(
+    collection_id: str,
+    repository: SourceArtifactRepository | None = None,
+) -> dict[str, str]:
+    documents = (repository or source_artifact_repository).list_documents(collection_id)
 
     title_map: dict[str, str] = {}
-    for _, row in documents.iterrows():
-        paper_id = str(row.get("id") or "").strip()
-        title = str(row.get("title") or "").strip()
-        if paper_id and title:
-            title_map[paper_id] = title
+    for document in documents:
+        if document.document_id and document.title:
+            title_map[document.document_id] = document.title
 
     return title_map

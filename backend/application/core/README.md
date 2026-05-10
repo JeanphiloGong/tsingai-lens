@@ -9,8 +9,8 @@ artifacts.
 - `comparison_service.py`
   deterministic comparable-result assembly, collection-scoped comparability
   evaluation, collection-first comparison-row projection from
-  `collection_comparable_results` plus `comparable_results`, and optional
-  corpus comparable-result cache materialization for accelerated corpus reads
+  `collection_comparable_results` plus `comparable_results`, and repository-backed
+  online comparison/result reads
 - `research_view_aggregation_service.py`
   research-facing aggregation over paper facts and comparison projections for
   paper sample matrices, condition series, paper coverage, comparable groups,

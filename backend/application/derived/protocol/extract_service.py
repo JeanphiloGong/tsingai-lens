@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -126,17 +125,7 @@ class ProtocolExtractService:
         return steps
 
     def build_protocol_steps_table(self, procedure_blocks: pd.DataFrame) -> pd.DataFrame:
-        return self.validator.to_parquet_frame(self.extract_steps(procedure_blocks))
-
-    def write_protocol_steps_parquet(
-        self,
-        procedure_blocks: pd.DataFrame,
-        output_path: str | Path,
-    ) -> Path:
-        output = Path(output_path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        self.build_protocol_steps_table(procedure_blocks).to_parquet(output, index=False)
-        return output
+        return self.validator.to_storage_frame(self.extract_steps(procedure_blocks))
 
     def _validate_input_frame(self, procedure_blocks: pd.DataFrame) -> None:
         required = {"block_id", "text"}

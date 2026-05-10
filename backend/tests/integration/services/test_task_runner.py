@@ -15,6 +15,11 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.collection_build_task_runner import CollectionBuildTaskRunner
 from application.source.task_service import TaskService
+from domain.source import SourceArtifactSet
+from infra.persistence.sqlite import (
+    SqliteProtocolArtifactRepository,
+    SqliteSourceArtifactRepository,
+)
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
@@ -45,7 +50,12 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
-def _write_source_artifact_outputs(output_dir: Path) -> None:
+def _write_source_artifact_outputs(
+    output_dir: Path,
+    *,
+    collection_id: str | None = None,
+    source_repository=None,  # noqa: ANN001
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     documents = pd.DataFrame(
         [
@@ -59,7 +69,7 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
-                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                        "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
             }
@@ -79,16 +89,17 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
             },
             {
                 "id": "tu-3",
-                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                "text": "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
                 "document_ids": ["paper-1"],
             },
         ]
     )
+    blocks = build_blocks(documents, text_units)
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
+    blocks.to_parquet(output_dir / "blocks.parquet", index=False)
     pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
-    pd.DataFrame(
+    tables = pd.DataFrame(
         [
             {
                 "table_id": "tbl-1",
@@ -107,9 +118,24 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
                 "metadata": {},
             }
         ]
-    ).to_parquet(output_dir / "tables.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
+    )
+    table_rows = build_table_rows(documents, text_units)
+    table_cells = build_table_cells(documents, text_units)
+    tables.to_parquet(output_dir / "tables.parquet", index=False)
+    table_rows.to_parquet(output_dir / "table_rows.parquet", index=False)
+    table_cells.to_parquet(output_dir / "table_cells.parquet", index=False)
+    if collection_id and source_repository:
+        source_repository.replace_collection_artifacts(
+            collection_id,
+            SourceArtifactSet.from_records(
+                documents=documents.to_dict(orient="records"),
+                text_units=text_units.to_dict(orient="records"),
+                blocks=blocks.to_dict(orient="records"),
+                tables=tables.to_dict(orient="records"),
+                table_rows=table_rows.to_dict(orient="records"),
+                table_cells=table_cells.to_dict(orient="records"),
+            ),
+        )
 
 
 def _write_review_only_outputs(output_dir: Path) -> None:
@@ -162,10 +188,16 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     _patch_parquet(monkeypatch)
 
     import application.source.collection_build_task_runner as task_runner_module
+    import application.derived.protocol.pipeline_service as protocol_pipeline_service
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    protocol_artifact_repository = SqliteProtocolArtifactRepository(tmp_path / "lens.sqlite")
+    artifact_registry = ArtifactRegistryService(
+        tmp_path / "collections",
+        protocol_artifact_repository=protocol_artifact_repository,
+    )
     runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Composite Papers")
@@ -180,9 +212,24 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
-        _write_source_artifact_outputs(paths.output_dir)
+        collection_id = kwargs.get("additional_context", {}).get("collection_id")
+        _write_source_artifact_outputs(
+            paths.output_dir,
+            collection_id=collection_id,
+            source_repository=source_artifact_repository,
+        )
         return [DummyWorkflowOutput()]
 
+    monkeypatch.setattr(
+        protocol_pipeline_service,
+        "source_artifact_repository",
+        source_artifact_repository,
+    )
+    monkeypatch.setattr(
+        protocol_pipeline_service,
+        "protocol_artifact_repository",
+        protocol_artifact_repository,
+    )
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)

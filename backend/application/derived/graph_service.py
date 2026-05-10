@@ -3,23 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from application.core.comparison_service import ComparisonRowsNotReadyError, ComparisonService
+from application.derived.core_fact_projection import build_core_fact_projection_frames
 from application.source.collection_service import CollectionService
 from application.derived.graph_projection_service import (
     load_core_graph_payload,
-    missing_core_graph_artifacts,
 )
 from application.source.artifact_registry_service import ArtifactRegistryService
+from infra.persistence.factory import build_core_fact_repository
 from infra.derived.graph.graphml import to_graphml as render_graphml
 
 
 artifact_registry_service = ArtifactRegistryService()
 collection_service = CollectionService()
+core_fact_repository = build_core_fact_repository()
 _NEIGHBORHOOD_MAX_NODES = 2_147_483_647
-_GRAPH_SEMANTIC_ARTIFACTS = (
-    "comparable_results.parquet",
-    "collection_comparable_results.parquet",
-)
 
 
 class GraphNotReadyError(RuntimeError):
@@ -46,23 +43,6 @@ class GraphNodeNotFoundError(RuntimeError):
         super().__init__(f"graph node not found: {collection_id}/{node_id}")
 
 
-def _missing_graph_semantic_artifacts(base_dir: Path) -> list[str]:
-    return [
-        filename for filename in _GRAPH_SEMANTIC_ARTIFACTS if not (base_dir / filename).is_file()
-    ]
-
-
-def _missing_graph_artifacts(base_dir: Path) -> list[str]:
-    missing: list[str] = []
-    for filename in (
-        *missing_core_graph_artifacts(base_dir),
-        *_missing_graph_semantic_artifacts(base_dir),
-    ):
-        if filename not in missing:
-            missing.append(filename)
-    return missing
-
-
 def resolve_collection_output_dir(collection_id: str) -> Path:
     collection_service.get_collection(collection_id)
 
@@ -81,43 +61,37 @@ def resolve_collection_output_dir(collection_id: str) -> Path:
         raise GraphNotReadyError(
             collection_id=collection_id,
             output_dir=paths.output_dir.resolve(),
-            missing_artifacts=_missing_graph_artifacts(paths.output_dir.resolve()),
+            missing_artifacts=["core_fact_repository.comparison_artifacts"],
         )
     return paths.output_dir.resolve()
 
 
+def _graph_error_output_dir(collection_id: str) -> Path:
+    try:
+        return resolve_collection_output_dir(collection_id)
+    except GraphNotReadyError as exc:
+        return exc.output_dir
+
+
 def load_graph_payload(
     collection_id: str,
-    base_dir: Path,
     max_nodes: int,
     min_weight: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
-    missing_artifacts = missing_core_graph_artifacts(base_dir)
-    if missing_artifacts:
+    collection_service.get_collection(collection_id)
+    facts = core_fact_repository.read_collection_facts(collection_id)
+    if not facts.comparison_artifacts_ready:
         raise GraphNotReadyError(
             collection_id=collection_id,
-            output_dir=base_dir,
-            missing_artifacts=_missing_graph_artifacts(base_dir),
+            output_dir=_graph_error_output_dir(collection_id),
+            missing_artifacts=["core_fact_repository.comparison_artifacts"],
         )
-
-    try:
-        comparison_projection = ComparisonService(
-            collection_service=collection_service,
-            artifact_registry_service=artifact_registry_service,
-        ).read_comparison_projection(
-            collection_id,
-            materialize_row_cache=False,
-        )
-    except ComparisonRowsNotReadyError as exc:
-        raise GraphNotReadyError(
-            collection_id=collection_id,
-            output_dir=exc.output_dir,
-            missing_artifacts=_missing_graph_artifacts(base_dir),
-        ) from exc
+    frames = build_core_fact_projection_frames(facts)
 
     return load_core_graph_payload(
-        base_dir=base_dir,
-        comparison_rows=comparison_projection.comparison_rows,
+        profiles=frames.document_profiles,
+        evidence_cards=frames.evidence_cards,
+        comparison_rows=frames.comparison_rows,
         max_nodes=max_nodes,
         min_weight=min_weight,
     )
@@ -128,10 +102,8 @@ def get_collection_graph(
     max_nodes: int,
     min_weight: float,
 ) -> dict[str, Any]:
-    base_dir = resolve_collection_output_dir(collection_id)
     nodes_payload, edges_payload, truncated = load_graph_payload(
         collection_id=collection_id,
-        base_dir=base_dir,
         max_nodes=max_nodes,
         min_weight=min_weight,
     )
@@ -148,10 +120,8 @@ def build_graphml(
     max_nodes: int,
     min_weight: float,
 ) -> tuple[bytes, str]:
-    base_dir = resolve_collection_output_dir(collection_id)
     nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
-        base_dir=base_dir,
         max_nodes=max_nodes,
         min_weight=min_weight,
     )
@@ -162,10 +132,8 @@ def get_collection_graph_neighbors(
     collection_id: str,
     node_id: str,
 ) -> dict[str, Any]:
-    base_dir = resolve_collection_output_dir(collection_id)
     nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
-        base_dir=base_dir,
         max_nodes=_NEIGHBORHOOD_MAX_NODES,
         min_weight=0.0,
     )
@@ -206,6 +174,7 @@ __all__ = [
     "artifact_registry_service",
     "build_graphml",
     "collection_service",
+    "core_fact_repository",
     "get_collection_graph_neighbors",
     "get_collection_graph",
     "GraphNodeNotFoundError",

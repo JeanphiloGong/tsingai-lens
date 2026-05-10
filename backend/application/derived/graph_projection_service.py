@@ -2,27 +2,11 @@ from __future__ import annotations
 
 import math
 from hashlib import sha1
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from infra.persistence.backbone_codec import restore_frame_from_storage
 
-
-_CORE_GRAPH_BACKBONE_ARTIFACTS = (
-    "document_profiles.parquet",
-    "evidence_cards.parquet",
-)
-_DOCUMENT_PROFILE_JSON_COLUMNS = (
-    "protocol_extractability_signals",
-    "parsing_warnings",
-)
-_EVIDENCE_CARD_JSON_COLUMNS = (
-    "evidence_anchors",
-    "material_system",
-    "condition_context",
-)
 _NODE_TYPE_PRIORITY = {
     "comparison": 0,
     "evidence": 1,
@@ -85,23 +69,13 @@ _SEMANTIC_NODE_SPECS = (
 _BACKBONE_TRUNCATION_SHARE = 0.6
 
 
-def missing_core_graph_artifacts(base_dir: Path) -> list[str]:
-    return [
-        filename
-        for filename in _CORE_GRAPH_BACKBONE_ARTIFACTS
-        if not (base_dir / filename).is_file()
-    ]
-
-
 def load_core_graph_payload(
-    base_dir: Path,
+    profiles: pd.DataFrame,
+    evidence_cards: pd.DataFrame,
     comparison_rows: pd.DataFrame,
     max_nodes: int,
     min_weight: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
-    profiles = _read_profiles(base_dir)
-    evidence_cards = _read_evidence_cards(base_dir)
-
     doc_records: dict[str, dict[str, Any]] = {}
     evidence_records: dict[str, dict[str, Any]] = {}
 
@@ -152,20 +126,6 @@ def load_core_graph_payload(
 
     nodes, edges, truncated = _truncate_graph(nodes, edges, max_nodes)
     return nodes, edges, truncated
-
-
-def _read_profiles(base_dir: Path) -> pd.DataFrame:
-    return restore_frame_from_storage(
-        pd.read_parquet(base_dir / "document_profiles.parquet"),
-        _DOCUMENT_PROFILE_JSON_COLUMNS,
-    )
-
-
-def _read_evidence_cards(base_dir: Path) -> pd.DataFrame:
-    return restore_frame_from_storage(
-        pd.read_parquet(base_dir / "evidence_cards.parquet"),
-        _EVIDENCE_CARD_JSON_COLUMNS,
-    )
 
 
 def _build_document_record(row: pd.Series) -> dict[str, Any]:
@@ -498,5 +458,4 @@ def _as_text(value: Any) -> str | None:
 
 __all__ = [
     "load_core_graph_payload",
-    "missing_core_graph_artifacts",
 ]

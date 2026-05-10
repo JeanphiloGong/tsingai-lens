@@ -15,8 +15,21 @@ except ImportError:  # pragma: no cover
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.comparison_service import ComparisonService
+from application.core.comparison_projection import ComparisonRowProjector
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from controllers.core import documents as documents_controller
+from domain.core import (
+    BaselineReference,
+    CharacterizationObservation,
+    CollectionComparableResult,
+    ComparableResult,
+    ComparisonRowRecord,
+    CoreFactSet,
+    MeasurementResult,
+    SampleVariant,
+    StructureFeature,
+    TestCondition as CoreTestCondition,
+)
 from infra.source.runtime.source_evidence import build_blocks
 from tests.support.pbf_acceptance_fixture import (
     PBF_BASELINE_LABEL,
@@ -26,7 +39,13 @@ from tests.support.pbf_acceptance_fixture import (
     PBF_YIELD_25_COMPARABLE_ID,
     PBF_YIELD_200_COMPARABLE_ID,
     PBF_YIELD_SERIES_KEY,
-    write_pbf_acceptance_artifacts,
+    pbf_acceptance_baseline_references,
+    pbf_acceptance_characterization_observations,
+    pbf_acceptance_comparison_records,
+    pbf_acceptance_measurement_results,
+    pbf_acceptance_sample_variants,
+    pbf_acceptance_structure_features,
+    pbf_acceptance_test_conditions,
 )
 
 
@@ -49,21 +68,6 @@ def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
 
 def _write_blocks(output_dir: Path, documents: pd.DataFrame) -> None:
     build_blocks(documents, None).to_parquet(output_dir / "blocks.parquet", index=False)
-
-
-def _write_semantic_comparison_artifacts(
-    output_dir: Path,
-    comparable_results: list[dict],
-    scoped_results: list[dict],
-) -> None:
-    pd.DataFrame(comparable_results).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(scoped_results).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
 
 
 def _build_semantic_comparison_record(
@@ -149,6 +153,72 @@ def _build_semantic_comparison_record(
         ],
     }
     return comparable_result, scoped_result
+
+
+def _store_core_document_semantics(
+    comparison_service: ComparisonService,
+    collection_id: str,
+    *,
+    comparable_results: list[dict] | None = None,
+    scoped_results: list[dict] | None = None,
+    sample_variants: list[dict] | None = None,
+    test_conditions: list[dict] | None = None,
+    baseline_references: list[dict] | None = None,
+    measurement_results: list[dict] | None = None,
+    characterization_observations: list[dict] | None = None,
+    structure_features: list[dict] | None = None,
+) -> None:
+    comparable_results = comparable_results or []
+    scoped_results = scoped_results or []
+    comparison_rows: tuple[ComparisonRowRecord, ...] = ()
+    if comparable_results and scoped_results:
+        row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+            collection_id=collection_id,
+            comparable_results=pd.DataFrame(comparable_results),
+            scoped_results=pd.DataFrame(scoped_results),
+        )
+        comparison_rows = tuple(
+            ComparisonRowRecord.from_mapping(dict(row))
+            for _, row in row_table.iterrows()
+        )
+    comparison_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            comparison_artifacts_ready=True,
+            sample_variants=tuple(
+                SampleVariant.from_mapping(row) for row in (sample_variants or [])
+            ),
+            test_conditions=tuple(
+                CoreTestCondition.from_mapping(row)
+                for row in (test_conditions or [])
+            ),
+            baseline_references=tuple(
+                BaselineReference.from_mapping(row)
+                for row in (baseline_references or [])
+            ),
+            measurement_results=tuple(
+                MeasurementResult.from_mapping(row)
+                for row in (measurement_results or [])
+            ),
+            characterization_observations=tuple(
+                CharacterizationObservation.from_mapping(row)
+                for row in (characterization_observations or [])
+            ),
+            structure_features=tuple(
+                StructureFeature.from_mapping(row)
+                for row in (structure_features or [])
+            ),
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row) for row in comparable_results
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row)
+                for row in scoped_results
+            ),
+            comparison_rows=comparison_rows,
+        ),
+    )
 
 
 @pytest.fixture()
@@ -564,12 +634,12 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
 ):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, artifact_registry, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Missing Document Semantics")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
 
-    _write_semantic_comparison_artifacts(output_dir, [], [])
+    _store_core_document_semantics(comparison_service, collection_id)
     pd.DataFrame(
         [
             {
@@ -603,26 +673,22 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
 
 def test_document_comparison_semantics_route_returns_semantic_items_for_document(
     document_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, _artifact_registry, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Document Semantic Drilldown")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
 
     comparable_result, scoped_result = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-1",
         source_document_id="paper-1",
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
+    _store_core_document_semantics(
+        comparison_service,
+        collection_id,
+        comparable_results=[comparable_result],
+        scoped_results=[scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         documents_controller.get_collection_document_comparison_semantics(
@@ -650,26 +716,22 @@ def test_document_comparison_semantics_route_returns_semantic_items_for_document
 
 def test_document_comparison_semantics_route_can_include_projected_rows(
     document_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, _artifact_registry, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Document Semantic Projection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
 
     comparable_result, scoped_result = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-1",
         source_document_id="paper-1",
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
+    _store_core_document_semantics(
+        comparison_service,
+        collection_id,
+        comparable_results=[comparable_result],
+        scoped_results=[scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         documents_controller.get_collection_document_comparison_semantics(
@@ -688,17 +750,37 @@ def test_document_comparison_semantics_route_can_include_projected_rows(
 
 def test_document_comparison_semantics_route_returns_pbf_acceptance_chain(
     document_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, _artifact_registry, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Document Evidence Chain")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    write_pbf_acceptance_artifacts(output_dir, collection_id=collection_id)
-    artifact_registry.upsert(collection_id, output_dir)
+    sample_variants = pbf_acceptance_sample_variants(collection_id)
+    test_conditions = pbf_acceptance_test_conditions(collection_id)
+    baseline_references = pbf_acceptance_baseline_references(collection_id)
+    measurement_results = pbf_acceptance_measurement_results(collection_id)
+    characterization_observations = pbf_acceptance_characterization_observations(
+        collection_id
+    )
+    structure_features = pbf_acceptance_structure_features(collection_id)
+    comparable_results, scoped_results = pbf_acceptance_comparison_records(
+        collection_id,
+        sample_variants=sample_variants,
+        test_conditions=test_conditions,
+        baseline_references=baseline_references,
+        measurement_results=measurement_results,
+    )
+    _store_core_document_semantics(
+        comparison_service,
+        collection_id,
+        sample_variants=sample_variants,
+        test_conditions=test_conditions,
+        baseline_references=baseline_references,
+        measurement_results=measurement_results,
+        characterization_observations=characterization_observations,
+        structure_features=structure_features,
+        comparable_results=comparable_results,
+        scoped_results=scoped_results,
+    )
 
     payload = asyncio.run(
         documents_controller.get_collection_document_comparison_semantics(

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 from application.derived.protocol import artifact_service as source_service
@@ -28,22 +26,6 @@ def test_build_document_records_uses_documents_and_text_units():
     assert records["paper_id"].tolist() == ["doc-1", "doc-2"]
     assert records.loc[0, "text_unit_ids"] == ["tu-1"]
     assert "stirred for 2 h" in records.loc[1, "text"]
-
-
-def test_persist_protocol_artifacts_uses_parquet_writer(monkeypatch, tmp_path):
-    writes: list[tuple[str, list[dict[str, object]]]] = []
-
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        writes.append((Path(path).name, self.to_dict(orient="records")))
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-
-    blocks = pd.DataFrame([{"block_id": "b-1", "paper_id": "doc-1"}])
-
-    block_path = source_service.persist_procedure_blocks(tmp_path, blocks)
-
-    assert block_path.name == "procedure_blocks.parquet"
-    assert [item[0] for item in writes] == ["procedure_blocks.parquet"]
 
 
 def test_build_procedure_blocks_derives_scope_from_source_headings():

@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 
-import pandas as pd
 import pytest
 
 try:
@@ -16,42 +13,14 @@ from application.core.comparison_service import ComparisonService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from controllers.core import comparable_results as comparable_results_controller
-from domain.core.comparison import (
+from domain.core import (
+    CollectionComparableResult,
     ComparableResult,
+    CoreFactSet,
+)
+from domain.core.comparison import (
     build_collection_assessment_input_fingerprint,
 )
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        payload = {
-            "columns": list(frame.columns),
-            "records": frame.to_dict(orient="records"),
-        }
-        Path(path).write_text(json.dumps(payload), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload["records"], columns=payload["columns"])
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _write_semantic_comparison_artifacts(
-    output_dir: Path,
-    comparable_results: list[dict],
-    scoped_results: list[dict],
-) -> None:
-    pd.DataFrame(comparable_results).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(scoped_results).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
 
 
 def _build_semantic_comparison_record(
@@ -143,6 +112,29 @@ def _build_semantic_comparison_record(
     return comparable_result, scoped_result
 
 
+def _store_core_comparable_result_facts(
+    comparison_service: ComparisonService,
+    collection_id: str,
+    *,
+    comparable_results: list[dict],
+    scoped_results: list[dict],
+) -> None:
+    comparison_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            comparison_artifacts_ready=True,
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row) for row in comparable_results
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row)
+                for row in scoped_results
+            ),
+        ),
+    )
+
+
 @pytest.fixture()
 def comparable_result_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
@@ -160,11 +152,8 @@ def comparable_result_services(monkeypatch, tmp_path):
 
 def test_comparable_results_route_returns_200_without_row_cache(
     comparable_result_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _comparison_service = comparable_result_services
+    collection_service, _artifact_registry, comparison_service = comparable_result_services
     collection = collection_service.create_collection(name="Comparable Results Collection")
     collection_id = collection["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
@@ -175,12 +164,12 @@ def test_comparable_results_route_returns_200_without_row_cache(
         comparable_result_id="cres-route-1",
         source_document_id="paper-1",
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
+    _store_core_comparable_result_facts(
+        comparison_service,
+        collection_id,
+        comparable_results=[comparable_result],
+        scoped_results=[scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         comparable_results_controller.list_comparable_results(collection_id=collection_id)

@@ -260,7 +260,7 @@ class CollectionBuildTaskRunner:
                     progress_percent=88,
                 )
                 if protocol_candidate_count > 0:
-                    build_protocol_artifacts(output_dir)
+                    build_protocol_artifacts(collection_id, output_dir)
                 else:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))

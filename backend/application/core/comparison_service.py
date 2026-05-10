@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,7 +18,6 @@ from application.core.comparison_projection import (
     ComparisonRowProjector,
 )
 from application.core.semantic_build.core_semantic_version import (
-    CURRENT_CORE_SEMANTIC_VERSION,
     core_semantic_rebuild_required,
     write_core_semantic_manifest,
 )
@@ -39,6 +37,7 @@ from domain.core.comparison import (
     ComparisonRowRecord,
     evaluate_collection_reassessment_reasons,
 )
+from domain.core.fact_store import CoreFactSet
 from domain.ports import CoreFactRepository
 from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
@@ -99,19 +98,6 @@ _COMPARISON_JSON_COLUMNS = (
     "comparability_warnings",
     "comparability_basis",
     "missing_critical_context",
-)
-_CORPUS_COMPARABLE_RESULTS_CACHE_DIR = "_core_cache"
-_CORPUS_COMPARABLE_RESULTS_CACHE_FILE = "corpus_comparable_results_cache.parquet"
-_CORPUS_COMPARABLE_RESULTS_CACHE_META_FILE = "corpus_comparable_results_cache_meta.json"
-_CORPUS_COMPARABLE_RESULTS_CACHE_SCHEMA_VERSION = 1
-_CORPUS_COMPARABLE_RESULTS_CACHE_JSON_COLUMNS = (
-    "binding",
-    "normalized_context",
-    "axis",
-    "value",
-    "evidence",
-    "observed_collection_ids",
-    "collection_overlays",
 )
 _PROCESS_STATE_KEYS = (
     "laser_power_w",
@@ -341,7 +327,11 @@ class ComparisonService:
         result_id: str,
     ) -> dict[str, Any]:
         result_key = self._safe_text(result_id) or ""
-        all_records = self._collect_collection_result_records(collection_id)
+        facts = self._read_comparison_facts(collection_id)
+        all_records = self._collect_collection_result_records_from_facts(
+            collection_id,
+            facts,
+        )
         matching_records = [
             item
             for item in all_records
@@ -350,8 +340,7 @@ class ComparisonService:
         if not matching_records:
             raise ResultNotFoundError(collection_id, result_key)
         scoped_record, comparable_record, document_payload = matching_records[0]
-        output_dir = self._resolve_output_dir(collection_id)
-        projection_context = self._load_optional_projection_context(output_dir)
+        projection_context = self._projection_context_from_facts(facts)
         return self._serialize_collection_result_detail(
             collection_id,
             comparable_record,
@@ -415,19 +404,14 @@ class ComparisonService:
         include_row_projections: bool = False,
         include_grouped_projections: bool = False,
     ) -> dict[str, Any]:
-        output_dir = self._resolve_output_dir(collection_id)
-        semantic_tables = self._read_semantic_comparison_artifacts(
-            collection_id,
-            output_dir,
-        )
+        facts = self._read_comparison_facts(collection_id)
         document_id = self._safe_text(source_document_id) or ""
-        comparable_results = semantic_tables.comparable_results
-        document_results = comparable_results[
-            comparable_results["source_document_id"].apply(
-                lambda value: self._safe_text(value) == document_id
-            )
-        ].copy()
-        if document_results.empty:
+        comparable_records = [
+            record
+            for record in facts.comparable_results
+            if self._safe_text(record.source_document_id) == document_id
+        ]
+        if not comparable_records:
             payload = {
                 "collection_id": collection_id,
                 "source_document_id": document_id,
@@ -439,52 +423,40 @@ class ComparisonService:
                 payload["variant_dossiers"] = []
             return payload
 
-        comparable_records = [
-            ComparableResult.from_mapping(dict(row))
-            for _, row in document_results.iterrows()
-        ]
         comparable_result_ids = {
             record.comparable_result_id
             for record in comparable_records
             if record.comparable_result_id
         }
-        scoped_results = semantic_tables.collection_comparable_results.iloc[0:0].copy()
         scoped_records_by_result_id: dict[str, list[CollectionComparableResult]] = {}
         sort_order_by_result_id: dict[str, int] = {}
-        if comparable_result_ids:
-            scoped_results = semantic_tables.collection_comparable_results[
-                semantic_tables.collection_comparable_results["comparable_result_id"].apply(
-                    lambda value: self._safe_text(value) in comparable_result_ids
-                )
-            ].copy()
-            for _, row in scoped_results.iterrows():
-                scoped_record = CollectionComparableResult.from_mapping(dict(row))
-                if self._safe_text(scoped_record.collection_id) != collection_id:
-                    continue
-                scoped_records_by_result_id.setdefault(
-                    scoped_record.comparable_result_id,
-                    [],
-                ).append(scoped_record)
-                if scoped_record.sort_order is None:
-                    continue
-                existing_sort_order = sort_order_by_result_id.get(
-                    scoped_record.comparable_result_id
-                )
-                sort_order_by_result_id[scoped_record.comparable_result_id] = (
-                    scoped_record.sort_order
-                    if existing_sort_order is None
-                    else min(existing_sort_order, scoped_record.sort_order)
-                )
+        for scoped_record in facts.collection_comparable_results:
+            if self._safe_text(scoped_record.collection_id) != collection_id:
+                continue
+            if scoped_record.comparable_result_id not in comparable_result_ids:
+                continue
+            scoped_records_by_result_id.setdefault(
+                scoped_record.comparable_result_id,
+                [],
+            ).append(scoped_record)
+            if scoped_record.sort_order is None:
+                continue
+            existing_sort_order = sort_order_by_result_id.get(
+                scoped_record.comparable_result_id
+            )
+            sort_order_by_result_id[scoped_record.comparable_result_id] = (
+                scoped_record.sort_order
+                if existing_sort_order is None
+                else min(existing_sort_order, scoped_record.sort_order)
+            )
 
         projected_rows_by_result_id: dict[str, list[dict[str, Any]]] = {}
         if include_row_projections:
-            projected_rows = self.comparison_row_projector.project_rows_from_semantic_artifacts(
-                collection_id=collection_id,
-                comparable_results=document_results,
-                scoped_results=scoped_results,
-            )
-            for _, row in projected_rows.iterrows():
-                row_record = ComparisonRowRecord.from_mapping(dict(row))
+            for row_record in facts.comparison_rows:
+                if self._safe_text(row_record.collection_id) != collection_id:
+                    continue
+                if row_record.comparable_result_id not in comparable_result_ids:
+                    continue
                 projected_rows_by_result_id.setdefault(
                     row_record.comparable_result_id,
                     [],
@@ -526,7 +498,7 @@ class ComparisonService:
             "items": items,
         }
         if include_grouped_projections:
-            projection_context = self._load_optional_projection_context(output_dir)
+            projection_context = self._projection_context_from_facts(facts)
             payload["variant_dossiers"] = self._build_variant_dossiers(
                 collection_id=collection_id,
                 comparable_records=comparable_records,
@@ -579,20 +551,39 @@ class ComparisonService:
         source_document_id: str | None = None,
         result_id: str | None = None,
     ) -> list[tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]]:
-        output_dir = self._resolve_output_dir(collection_id)
-        semantic_tables = self._read_semantic_comparison_artifacts(collection_id, output_dir)
+        return self._collect_collection_result_records_from_facts(
+            collection_id,
+            self._read_comparison_facts(collection_id),
+            material_system_normalized=material_system_normalized,
+            property_normalized=property_normalized,
+            test_condition_normalized=test_condition_normalized,
+            baseline_normalized=baseline_normalized,
+            comparability_status=comparability_status,
+            source_document_id=source_document_id,
+            result_id=result_id,
+        )
+
+    def _collect_collection_result_records_from_facts(
+        self,
+        collection_id: str,
+        facts: CoreFactSet,
+        *,
+        material_system_normalized: str | None = None,
+        property_normalized: str | None = None,
+        test_condition_normalized: str | None = None,
+        baseline_normalized: str | None = None,
+        comparability_status: str | None = None,
+        source_document_id: str | None = None,
+        result_id: str | None = None,
+    ) -> list[tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]]:
         comparable_lookup = {
             record.comparable_result_id: record
-            for record in (
-                ComparableResult.from_mapping(dict(row))
-                for _, row in semantic_tables.comparable_results.iterrows()
-            )
+            for record in facts.comparable_results
             if self._safe_text(record.comparable_result_id)
         }
-        document_lookup = self._load_document_profile_lookup(collection_id)
+        document_lookup = self._document_profile_lookup_from_facts(facts)
         records: list[tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]] = []
-        for _, row in semantic_tables.collection_comparable_results.iterrows():
-            scoped_record = CollectionComparableResult.from_mapping(dict(row))
+        for scoped_record in facts.collection_comparable_results:
             if self._safe_text(scoped_record.collection_id) != collection_id or not scoped_record.included:
                 continue
             comparable_record = comparable_lookup.get(scoped_record.comparable_result_id)
@@ -854,7 +845,6 @@ class ComparisonService:
             row_table=row_table,
         )
         write_core_semantic_manifest(output_dir)
-        self._invalidate_corpus_comparable_results_cache()
         self.artifact_registry_service.upsert(collection_id, output_dir)
         return ComparisonSemanticTables(
             comparable_results=comparable_results,
@@ -1015,7 +1005,6 @@ class ComparisonService:
             row_table=row_table,
         )
         write_core_semantic_manifest(base_dir)
-        self._invalidate_corpus_comparable_results_cache()
         self.artifact_registry_service.upsert(collection_id, base_dir)
 
     def _store_comparison_artifacts(
@@ -1075,7 +1064,7 @@ class ComparisonService:
         if scoped_collection_id:
             items = self._scan_corpus_comparable_result_items(collection_id=scoped_collection_id)
         else:
-            items = self._load_or_rebuild_corpus_comparable_results_cache()
+            items = self._scan_corpus_comparable_result_items()
         return self._filter_corpus_comparable_result_items(
             items,
             material_system_normalized=material_system_normalized,
@@ -1098,18 +1087,12 @@ class ComparisonService:
 
         for current_collection_id in collection_ids:
             try:
-                semantic_tables = self._read_semantic_comparison_artifacts(
-                    current_collection_id,
-                    self._resolve_output_dir(current_collection_id),
-                )
+                facts = self._read_comparison_facts(current_collection_id)
             except ComparisonRowsNotReadyError:
                 if collection_id:
                     raise
                 continue
-            comparable_records = [
-                ComparableResult.from_mapping(dict(row))
-                for _, row in semantic_tables.comparable_results.iterrows()
-            ]
+            comparable_records = list(facts.comparable_results)
             matching_result_ids = {
                 record.comparable_result_id
                 for record in comparable_records
@@ -1125,8 +1108,7 @@ class ComparisonService:
                     record.comparable_result_id,
                     set(),
                 ).add(current_collection_id)
-            for _, row in semantic_tables.collection_comparable_results.iterrows():
-                scoped_record = CollectionComparableResult.from_mapping(dict(row))
+            for scoped_record in facts.collection_comparable_results:
                 if scoped_record.collection_id != current_collection_id:
                     continue
                 if scoped_record.comparable_result_id not in matching_result_ids:
@@ -1159,36 +1141,6 @@ class ComparisonService:
                     collection_overlays=collection_overlays,
                 )
             )
-        return items
-
-    def _load_or_rebuild_corpus_comparable_results_cache(self) -> list[dict[str, Any]]:
-        cache_table_path, cache_meta_path = self._resolve_corpus_comparable_results_cache_paths()
-        current_snapshot = self._build_corpus_comparable_results_cache_snapshot()
-        if cache_table_path.is_file() and cache_meta_path.is_file():
-            try:
-                cache_meta = json.loads(cache_meta_path.read_text(encoding="utf-8"))
-                if self._corpus_comparable_results_cache_is_current(
-                    cache_meta,
-                    current_snapshot,
-                ):
-                    cached_frame = restore_frame_from_storage(
-                        pd.read_parquet(cache_table_path),
-                        _CORPUS_COMPARABLE_RESULTS_CACHE_JSON_COLUMNS,
-                    )
-                    return [
-                        dict(row)
-                        for _, row in cached_frame.iterrows()
-                    ]
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Corpus comparable-result cache read failed; rebuilding cache path=%s",
-                    cache_table_path,
-                )
-        items = self._scan_corpus_comparable_result_items()
-        self._write_corpus_comparable_results_cache(
-            items=items,
-            collection_snapshot=current_snapshot,
-        )
         return items
 
     def _filter_corpus_comparable_result_items(
@@ -1306,83 +1258,6 @@ class ComparisonService:
                 collection_ids.append(current_collection_id)
         return collection_ids
 
-    def _resolve_corpus_comparable_results_cache_paths(self) -> tuple[Path, Path]:
-        cache_dir = self.collection_service.root_dir / _CORPUS_COMPARABLE_RESULTS_CACHE_DIR
-        return (
-            cache_dir / _CORPUS_COMPARABLE_RESULTS_CACHE_FILE,
-            cache_dir / _CORPUS_COMPARABLE_RESULTS_CACHE_META_FILE,
-        )
-
-    def _build_corpus_comparable_results_cache_snapshot(self) -> dict[str, dict[str, int | None]]:
-        snapshot: dict[str, dict[str, int | None]] = {}
-        for collection_id in self._list_corpus_collection_ids(None):
-            output_dir = self.collection_service.get_paths(collection_id).output_dir.resolve()
-            documents_path = output_dir / "documents.parquet"
-            comparable_results_path = output_dir / _COMPARABLE_RESULTS_FILE
-            scoped_results_path = output_dir / _COLLECTION_COMPARABLE_RESULTS_FILE
-            if not (
-                documents_path.is_file()
-                or comparable_results_path.is_file()
-                or scoped_results_path.is_file()
-            ):
-                continue
-            snapshot[collection_id] = {
-                "documents_mtime_ns": self._path_mtime_ns(documents_path),
-                "comparable_results_mtime_ns": self._path_mtime_ns(comparable_results_path),
-                "collection_comparable_results_mtime_ns": self._path_mtime_ns(
-                    scoped_results_path
-                ),
-            }
-        return snapshot
-
-    def _corpus_comparable_results_cache_is_current(
-        self,
-        cache_meta: dict[str, Any],
-        current_snapshot: dict[str, dict[str, int | None]],
-    ) -> bool:
-        if cache_meta.get("schema_version") != _CORPUS_COMPARABLE_RESULTS_CACHE_SCHEMA_VERSION:
-            return False
-        if cache_meta.get("core_semantic_version") != CURRENT_CORE_SEMANTIC_VERSION:
-            return False
-        return cache_meta.get("collection_snapshot") == current_snapshot
-
-    def _write_corpus_comparable_results_cache(
-        self,
-        *,
-        items: list[dict[str, Any]],
-        collection_snapshot: dict[str, dict[str, int | None]],
-    ) -> None:
-        cache_table_path, cache_meta_path = self._resolve_corpus_comparable_results_cache_paths()
-        cache_table_path.parent.mkdir(parents=True, exist_ok=True)
-        prepare_frame_for_storage(
-            pd.DataFrame(items),
-            _CORPUS_COMPARABLE_RESULTS_CACHE_JSON_COLUMNS,
-        ).to_parquet(cache_table_path, index=False)
-        cache_meta_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": _CORPUS_COMPARABLE_RESULTS_CACHE_SCHEMA_VERSION,
-                    "core_semantic_version": CURRENT_CORE_SEMANTIC_VERSION,
-                    "collection_snapshot": collection_snapshot,
-                },
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            ),
-            encoding="utf-8",
-        )
-
-    def _invalidate_corpus_comparable_results_cache(self) -> None:
-        cache_table_path, cache_meta_path = self._resolve_corpus_comparable_results_cache_paths()
-        for path in (cache_table_path, cache_meta_path):
-            if path.is_file():
-                path.unlink()
-
-    def _path_mtime_ns(self, path: Path) -> int | None:
-        if not path.is_file():
-            return None
-        return path.stat().st_mtime_ns
-
     def _filter_rows(
         self,
         rows: pd.DataFrame,
@@ -1411,11 +1286,43 @@ class ComparisonService:
         self,
         collection_id: str,
     ) -> list[ComparisonRowRecord]:
+        facts = self._read_comparison_facts(collection_id)
+        sort_order_by_result_id: dict[str, int] = {}
+        for scoped_record in facts.collection_comparable_results:
+            if self._safe_text(scoped_record.collection_id) != collection_id:
+                continue
+            if scoped_record.sort_order is None:
+                continue
+            result_id = self._safe_text(scoped_record.comparable_result_id)
+            if not result_id:
+                continue
+            existing_sort_order = sort_order_by_result_id.get(result_id)
+            sort_order_by_result_id[result_id] = (
+                scoped_record.sort_order
+                if existing_sort_order is None
+                else min(existing_sort_order, scoped_record.sort_order)
+            )
+        return sorted(
+            facts.comparison_rows,
+            key=lambda record: (
+                sort_order_by_result_id.get(
+                    record.comparable_result_id,
+                    1_000_000_000,
+                ),
+                record.comparable_result_id,
+                record.row_id,
+            ),
+        )
+
+    def _read_comparison_facts(
+        self,
+        collection_id: str,
+    ) -> CoreFactSet:
         self.collection_service.get_collection(collection_id)
         facts = self.core_fact_repository.read_collection_facts(collection_id)
         if not facts.comparison_artifacts_ready:
             raise ComparisonRowsNotReadyError(collection_id)
-        return list(facts.comparison_rows)
+        return facts
 
     def _filter_row_records(
         self,
@@ -1561,6 +1468,46 @@ class ComparisonService:
             ),
         }
 
+    def _projection_context_from_facts(self, facts: CoreFactSet) -> dict[str, Any]:
+        return {
+            "sample_variants_by_id": self._index_records_by_text(
+                [record.to_record() for record in facts.sample_variants],
+                "variant_id",
+            ),
+            "measurement_results_by_id": self._index_records_by_text(
+                [record.to_record() for record in facts.measurement_results],
+                "result_id",
+            ),
+            "test_conditions_by_id": self._index_records_by_text(
+                [record.to_record() for record in facts.test_conditions],
+                "test_condition_id",
+            ),
+            "baseline_references_by_id": self._index_records_by_text(
+                [record.to_record() for record in facts.baseline_references],
+                "baseline_id",
+            ),
+            "characterization_observations_by_id": self._index_records_by_text(
+                [
+                    record.to_record()
+                    for record in facts.characterization_observations
+                ],
+                "observation_id",
+            ),
+            "structure_features_by_id": self._index_records_by_text(
+                [record.to_record() for record in facts.structure_features],
+                "feature_id",
+            ),
+        }
+
+    def _document_profile_lookup_from_facts(
+        self,
+        facts: CoreFactSet,
+    ) -> dict[str, dict[str, Any]]:
+        return self._index_records_by_text(
+            [record.to_record() for record in facts.document_profiles],
+            "document_id",
+        )
+
     def _read_optional_semantic_frame(
         self,
         path: Path,
@@ -1583,6 +1530,18 @@ class ComparisonService:
             record_key = self._safe_text(row_payload.get(key))
             if record_key:
                 lookup[record_key] = row_payload
+        return lookup
+
+    def _index_records_by_text(
+        self,
+        records: list[dict[str, Any]],
+        key: str,
+    ) -> dict[str, dict[str, Any]]:
+        lookup: dict[str, dict[str, Any]] = {}
+        for record in records:
+            record_key = self._safe_text(record.get(key))
+            if record_key:
+                lookup[record_key] = record
         return lookup
 
     def _build_variant_dossiers(

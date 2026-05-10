@@ -1,22 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from fastapi import HTTPException
 
-from application.core.comparison_service import ComparisonRowsNotReadyError, ComparisonService
+from application.derived.core_fact_projection import build_core_fact_projection_frames
 from domain.shared.enums import (
     COMPARABILITY_STATUS_COMPARABLE,
     COMPARABILITY_STATUS_INSUFFICIENT,
     COMPARABILITY_STATUS_LIMITED,
     COMPARABILITY_STATUS_NOT_COMPARABLE,
 )
-from infra.persistence.backbone_codec import restore_frame_from_storage
 from application.source.collection_service import CollectionService
-from application.source.artifact_registry_service import ArtifactRegistryService
+from infra.persistence.factory import build_core_fact_repository
 from controllers.schemas.derived.report import (
     ReportCommunityDetailResponse,
     ReportCommunityListResponse,
@@ -29,18 +27,8 @@ from controllers.schemas.derived.report import (
 )
 
 
-_DOCUMENT_PROFILE_JSON_COLUMNS = (
-    "protocol_extractability_signals",
-    "parsing_warnings",
-)
-_EVIDENCE_CARD_JSON_COLUMNS = (
-    "evidence_anchors",
-    "material_system",
-    "condition_context",
-)
-
 collection_service = CollectionService()
-artifact_registry_service = ArtifactRegistryService()
+core_fact_repository = build_core_fact_repository()
 
 
 @dataclass(frozen=True)
@@ -67,59 +55,22 @@ class _CoreReportProjection:
     comparison_rows: dict[str, dict[str, Any]]
 
 
-def _resolve_output_dir(collection_id: str | None) -> tuple[Path, str]:
+def _read_projection_frames(
+    collection_id: str | None,
+) -> tuple[str, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if not collection_id:
         raise HTTPException(status_code=400, detail="collection_id 不能为空")
 
     collection_service.get_collection(collection_id)
-    try:
-        artifacts = artifact_registry_service.get(collection_id)
-        output_path = artifacts.get("output_path")
-        if output_path:
-            base_dir = Path(str(output_path)).expanduser().resolve()
-            if base_dir.exists():
-                return base_dir, collection_id
-    except FileNotFoundError:
-        pass
-
-    paths = collection_service.get_paths(collection_id)
-    base_dir = paths.output_dir.expanduser().resolve()
-    if not base_dir.exists():
-        raise HTTPException(status_code=404, detail="collection 输出目录不存在")
-    return base_dir, collection_id
-
-
-def _read_profiles(base_dir: Path) -> pd.DataFrame:
-    path = base_dir / "document_profiles.parquet"
-    if not path.is_file():
-        return pd.DataFrame()
-    return restore_frame_from_storage(
-        pd.read_parquet(path),
-        _DOCUMENT_PROFILE_JSON_COLUMNS,
+    frames = build_core_fact_projection_frames(
+        core_fact_repository.read_collection_facts(collection_id)
     )
-
-
-def _read_evidence_cards(base_dir: Path) -> pd.DataFrame:
-    path = base_dir / "evidence_cards.parquet"
-    if not path.is_file():
-        return pd.DataFrame()
-    return restore_frame_from_storage(
-        pd.read_parquet(path),
-        _EVIDENCE_CARD_JSON_COLUMNS,
+    return (
+        collection_id,
+        frames.document_profiles,
+        frames.evidence_cards,
+        frames.comparison_rows,
     )
-
-
-def _read_comparison_rows(collection_id: str) -> pd.DataFrame:
-    try:
-        return ComparisonService(
-            collection_service=collection_service,
-            artifact_registry_service=artifact_registry_service,
-        ).read_comparison_projection(
-            collection_id,
-            materialize_row_cache=False,
-        ).comparison_rows
-    except ComparisonRowsNotReadyError:
-        return pd.DataFrame()
 
 
 def _safe_text(value: Any) -> str | None:
@@ -221,10 +172,12 @@ def _build_group_findings(
 
 
 def _build_projection(collection_id: str) -> _CoreReportProjection:
-    base_dir, resolved_collection_id = _resolve_output_dir(collection_id)
-    profiles = _read_profiles(base_dir)
-    evidence_cards = _read_evidence_cards(base_dir)
-    comparison_rows = _read_comparison_rows(resolved_collection_id)
+    (
+        resolved_collection_id,
+        profiles,
+        evidence_cards,
+        comparison_rows,
+    ) = _read_projection_frames(collection_id)
 
     document_lookup: dict[str, dict[str, Any]] = {}
     for _, row in profiles.iterrows():

@@ -6,7 +6,7 @@ import pytest
 from application.derived.protocol.extract_service import ProtocolExtractService
 from application.derived.protocol.normalize_service import ProtocolNormalizeService
 from application.derived.protocol.validate_service import (
-    PROTOCOL_STEP_PARQUET_COLUMNS,
+    PROTOCOL_STEP_STORAGE_COLUMNS,
     ProtocolValidateService,
 )
 
@@ -111,33 +111,7 @@ def test_build_protocol_steps_table_serializes_json_columns():
     service = ProtocolExtractService()
     frame = service.build_protocol_steps_table(blocks)
 
-    assert list(frame.columns) == PROTOCOL_STEP_PARQUET_COLUMNS
+    assert list(frame.columns) == PROTOCOL_STEP_STORAGE_COLUMNS
     conditions = json.loads(frame.iloc[0]["conditions_json"])
     assert conditions["temperature"]["status"] == "reported"
     assert frame.iloc[0]["validation_status"] == "valid"
-
-
-def test_write_protocol_steps_parquet(tmp_path):
-    blocks = pd.DataFrame(
-        [
-            {
-                "paper_id": "paper-1",
-                "section_id": "sec-1",
-                "block_id": "blk-1",
-                "block_type": "synthesis",
-                "order": 1,
-                "text": "The mixture was annealed at 600 °C for 2 h under Ar.",
-            }
-        ]
-    )
-
-    service = ProtocolExtractService()
-    output_path = tmp_path / "protocol_steps.parquet"
-    try:
-        service.write_protocol_steps_parquet(blocks, output_path)
-        loaded = pd.read_parquet(output_path)
-    except ImportError:
-        pytest.skip("parquet engine not installed")
-
-    assert output_path.exists()
-    assert loaded.iloc[0]["action"] == "anneal"

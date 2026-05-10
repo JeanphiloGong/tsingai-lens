@@ -55,6 +55,7 @@ from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
     ComparisonAxis,
+    ComparisonRowRecord,
     ContextBinding,
     EvidenceTrace,
     NormalizedComparisonContext,
@@ -183,6 +184,32 @@ def _build_collection_overlay(
             COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
             COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
             COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
+        ),
+    )
+
+
+def _store_core_comparison_artifacts(
+    comparison_service: ComparisonService,
+    collection_id: str,
+    comparable_results: list[ComparableResult],
+    scoped_results: list[CollectionComparableResult],
+) -> None:
+    row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=pd.DataFrame(
+            [record.to_record() for record in comparable_results]
+        ),
+        scoped_results=pd.DataFrame(
+            [record.to_record() for record in scoped_results]
+        ),
+    )
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        tuple(comparable_results),
+        tuple(scoped_results),
+        tuple(
+            ComparisonRowRecord.from_mapping(dict(row))
+            for _, row in row_table.iterrows()
         ),
     )
 
@@ -3208,12 +3235,9 @@ def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_pa
     )
 
 
-def test_comparison_service_inspects_document_semantics_from_semantic_artifacts(
-    monkeypatch,
+def test_comparison_service_inspects_document_semantics_from_repository(
     tmp_path,
 ):
-    _patch_parquet(monkeypatch)
-
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
 
@@ -3244,28 +3268,27 @@ def test_comparison_service_inspects_document_semantics_from_semantic_artifacts(
         source_document_id="paper-2",
         source_result_id="res-3",
     )
-    pd.DataFrame(
-        [
-            first.to_record(),
-            second.to_record(),
-            other_document.to_record(),
-        ]
-    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=first,
-                sort_order=2,
-            ).to_record(),
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=other_document,
-                sort_order=0,
-            ).to_record(),
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
+    first_overlay = _build_collection_overlay(
+        collection_id=collection_id,
+        comparable_result=first,
+        sort_order=2,
+    )
+    second_overlay = _build_collection_overlay(
+        collection_id=collection_id,
+        comparable_result=second,
+        sort_order=3,
+    )
+    other_overlay = _build_collection_overlay(
+        collection_id=collection_id,
+        comparable_result=other_document,
+        sort_order=0,
+    )
+    _store_core_comparison_artifacts(
+        comparison_service,
+        collection_id,
+        [first, second, other_document],
+        [first_overlay, second_overlay, other_overlay],
+    )
 
     payload = comparison_service.inspect_document_comparison_semantics(
         collection_id,
@@ -3280,36 +3303,21 @@ def test_comparison_service_inspects_document_semantics_from_semantic_artifacts(
         "cres-doc-1-a",
         "cres-doc-1-b",
     ]
-    assert payload["items"][0]["collection_overlays"] == [
-        _build_collection_overlay(
-            collection_id=collection_id,
-            comparable_result=first,
-            sort_order=2,
-        ).to_record()
-    ]
+    assert payload["items"][0]["collection_overlays"] == [first_overlay.to_record()]
     assert payload["items"][0]["collection_overlays"][0]["policy_family"] == (
         COLLECTION_COMPARISON_POLICY_FAMILY
     )
     assert payload["items"][0]["collection_overlays"][0]["policy_version"] == (
         COLLECTION_COMPARISON_POLICY_VERSION
     )
-    assert payload["items"][1]["collection_overlays"] == [
-        _build_collection_overlay(
-            collection_id=collection_id,
-            comparable_result=second,
-            sort_order=3,
-        ).to_record()
-    ]
+    assert payload["items"][1]["collection_overlays"] == [second_overlay.to_record()]
     assert "projected_rows" not in payload["items"][0]
-    assert (output_dir / "comparison_rows.parquet").exists()
+    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
-def test_comparison_service_document_semantic_inspection_can_project_rows_without_row_cache(
-    monkeypatch,
+def test_comparison_service_document_semantic_inspection_returns_repository_rows_without_row_cache(
     tmp_path,
 ):
-    _patch_parquet(monkeypatch)
-
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
 
@@ -3327,20 +3335,17 @@ def test_comparison_service_document_semantic_inspection_can_project_rows_withou
         source_document_id="paper-1",
         source_result_id="res-1",
     )
-    pd.DataFrame([comparable_result.to_record()]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
+    scoped_result = _build_collection_overlay(
+        collection_id=collection_id,
+        comparable_result=comparable_result,
+        sort_order=0,
     )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=comparable_result,
-                sort_order=0,
-            ).to_record()
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
+    _store_core_comparison_artifacts(
+        comparison_service,
+        collection_id,
+        [comparable_result],
+        [scoped_result],
+    )
 
     payload = comparison_service.inspect_document_comparison_semantics(
         collection_id,
@@ -3515,6 +3520,25 @@ def test_comparison_service_lists_corpus_comparable_results_across_collections_w
         summary="Impact strength increased to 61 MPa.",
         numeric_value=61.0,
     )
+    first_scoped_results = [
+        _build_collection_overlay(
+            collection_id=first_collection_id,
+            comparable_result=shared_result,
+            sort_order=0,
+        ),
+        _build_collection_overlay(
+            collection_id=first_collection_id,
+            comparable_result=unique_result,
+            sort_order=1,
+        ),
+    ]
+    second_scoped_results = [
+        _build_collection_overlay(
+            collection_id=second_collection_id,
+            comparable_result=shared_result,
+            sort_order=4,
+        )
+    ]
 
     pd.DataFrame(
         [
@@ -3523,19 +3547,14 @@ def test_comparison_service_lists_corpus_comparable_results_across_collections_w
         ]
     ).to_parquet(first_output_dir / "comparable_results.parquet", index=False)
     pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=first_collection_id,
-                comparable_result=shared_result,
-                sort_order=0,
-            ).to_record(),
-            _build_collection_overlay(
-                collection_id=first_collection_id,
-                comparable_result=unique_result,
-                sort_order=1,
-            ).to_record(),
-        ]
+        [record.to_record() for record in first_scoped_results]
     ).to_parquet(first_output_dir / "collection_comparable_results.parquet", index=False)
+    _store_core_comparison_artifacts(
+        comparison_service,
+        first_collection_id,
+        [shared_result, unique_result],
+        first_scoped_results,
+    )
     artifact_registry.upsert(first_collection_id, first_output_dir)
 
     pd.DataFrame([shared_result.to_record()]).to_parquet(
@@ -3543,14 +3562,14 @@ def test_comparison_service_lists_corpus_comparable_results_across_collections_w
         index=False,
     )
     pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=second_collection_id,
-                comparable_result=shared_result,
-                sort_order=4,
-            ).to_record()
-        ]
+        [record.to_record() for record in second_scoped_results]
     ).to_parquet(second_output_dir / "collection_comparable_results.parquet", index=False)
+    _store_core_comparison_artifacts(
+        comparison_service,
+        second_collection_id,
+        [shared_result],
+        second_scoped_results,
+    )
     artifact_registry.upsert(second_collection_id, second_output_dir)
 
     payload = comparison_service.list_corpus_comparable_results()
@@ -3576,7 +3595,7 @@ def test_comparison_service_lists_corpus_comparable_results_across_collections_w
     assert not (second_output_dir / "comparison_rows.parquet").exists()
 
 
-def test_comparison_service_filters_corpus_results_to_one_collection_and_refreshes_stale_overlay(
+def test_comparison_service_filters_corpus_results_to_one_collection_from_repository(
     monkeypatch,
     tmp_path,
 ):
@@ -3607,20 +3626,34 @@ def test_comparison_service_filters_corpus_results_to_one_collection_and_refresh
         source_document_id="paper-shared",
         source_result_id="res-policy-shared-1",
     )
+    first_scoped_results = [
+        _build_collection_overlay(
+            collection_id=first_collection_id,
+            comparable_result=shared_result,
+            sort_order=0,
+        )
+    ]
+    second_scoped_results = [
+        _build_collection_overlay(
+            collection_id=second_collection_id,
+            comparable_result=shared_result,
+            sort_order=7,
+        )
+    ]
 
     pd.DataFrame([shared_result.to_record()]).to_parquet(
         first_output_dir / "comparable_results.parquet",
         index=False,
     )
     pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=first_collection_id,
-                comparable_result=shared_result,
-                sort_order=0,
-            ).to_record()
-        ]
+        [record.to_record() for record in first_scoped_results]
     ).to_parquet(first_output_dir / "collection_comparable_results.parquet", index=False)
+    _store_core_comparison_artifacts(
+        comparison_service,
+        first_collection_id,
+        [shared_result],
+        first_scoped_results,
+    )
     artifact_registry.upsert(first_collection_id, first_output_dir)
 
     pd.DataFrame([shared_result.to_record()]).to_parquet(
@@ -3637,6 +3670,12 @@ def test_comparison_service_filters_corpus_results_to_one_collection_and_refresh
     pd.DataFrame([stale_overlay]).to_parquet(
         second_output_dir / "collection_comparable_results.parquet",
         index=False,
+    )
+    _store_core_comparison_artifacts(
+        comparison_service,
+        second_collection_id,
+        [shared_result],
+        second_scoped_results,
     )
     artifact_registry.upsert(second_collection_id, second_output_dir)
 
@@ -3656,15 +3695,12 @@ def test_comparison_service_filters_corpus_results_to_one_collection_and_refresh
         COLLECTION_COMPARISON_POLICY_VERSION
     )
     assert item["collection_overlays"][0]["assessment_input_fingerprint"] != "cafp_stale"
-    assert (second_output_dir / "comparison_rows.parquet").exists()
+    assert not (second_output_dir / "comparison_rows.parquet").exists()
 
 
-def test_comparison_service_reuses_corpus_manifest_cache_without_rescanning(
-    monkeypatch,
+def test_comparison_service_lists_corpus_results_without_manifest_cache_artifacts(
     tmp_path,
 ):
-    _patch_parquet(monkeypatch)
-
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
 
@@ -3677,55 +3713,36 @@ def test_comparison_service_reuses_corpus_manifest_cache_without_rescanning(
 
     collection = collection_service.create_collection("Corpus Cache Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     comparable_result = _build_test_comparable_result(
         comparable_result_id="cres-cache-1",
         source_document_id="paper-cache-1",
         source_result_id="res-cache-1",
     )
-    pd.DataFrame([comparable_result.to_record()]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=comparable_result,
-                sort_order=0,
-            ).to_record()
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    first_payload = comparison_service.list_corpus_comparable_results()
-
-    cache_table_path, cache_meta_path = comparison_service._resolve_corpus_comparable_results_cache_paths()
-    assert cache_table_path.exists()
-    assert cache_meta_path.exists()
-
-    def fail_scan(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("corpus cache should avoid rescanning collection outputs")
-
-    monkeypatch.setattr(
+    scoped_results = [
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=comparable_result,
+            sort_order=0,
+        )
+    ]
+    _store_core_comparison_artifacts(
         comparison_service,
-        "_scan_corpus_comparable_result_items",
-        fail_scan,
+        collection_id,
+        [comparable_result],
+        scoped_results,
     )
 
-    second_payload = comparison_service.list_corpus_comparable_results()
+    payload = comparison_service.list_corpus_comparable_results()
 
-    assert second_payload == first_payload
+    assert payload["total"] == 1
+    assert payload["items"][0]["comparable_result_id"] == "cres-cache-1"
+    assert not (collection_service.root_dir / "_core_cache").exists()
 
 
-def test_comparison_service_refreshes_corpus_manifest_cache_when_semantic_artifacts_change(
-    monkeypatch,
+def test_comparison_service_reflects_repository_updates_without_manifest_cache(
     tmp_path,
 ):
-    _patch_parquet(monkeypatch)
-
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
 
@@ -3738,28 +3755,25 @@ def test_comparison_service_refreshes_corpus_manifest_cache_when_semantic_artifa
 
     collection = collection_service.create_collection("Corpus Refresh Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     first_result = _build_test_comparable_result(
         comparable_result_id="cres-refresh-1",
         source_document_id="paper-refresh-1",
         source_result_id="res-refresh-1",
     )
-    pd.DataFrame([first_result.to_record()]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
+    first_scoped_results = [
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=first_result,
+            sort_order=0,
+        )
+    ]
+    _store_core_comparison_artifacts(
+        comparison_service,
+        collection_id,
+        [first_result],
+        first_scoped_results,
     )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=first_result,
-                sort_order=0,
-            ).to_record()
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
 
     first_payload = comparison_service.list_corpus_comparable_results()
     assert first_payload["total"] == 1
@@ -3772,50 +3786,33 @@ def test_comparison_service_refreshes_corpus_manifest_cache_when_semantic_artifa
         summary="Impact strength increased to 73 MPa.",
         numeric_value=73.0,
     )
-    pd.DataFrame(
-        [
-            first_result.to_record(),
-            second_result.to_record(),
-        ]
-    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=first_result,
-                sort_order=0,
-            ).to_record(),
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=second_result,
-                sort_order=1,
-            ).to_record(),
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    original_scan = comparison_service._scan_corpus_comparable_result_items
-    scan_calls = 0
-
-    def track_scan(*, collection_id=None):  # noqa: ANN001
-        nonlocal scan_calls
-        scan_calls += 1
-        return original_scan(collection_id=collection_id)
-
-    monkeypatch.setattr(
+    refreshed_scoped_results = [
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=first_result,
+            sort_order=0,
+        ),
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=second_result,
+            sort_order=1,
+        ),
+    ]
+    _store_core_comparison_artifacts(
         comparison_service,
-        "_scan_corpus_comparable_result_items",
-        track_scan,
+        collection_id,
+        [first_result, second_result],
+        refreshed_scoped_results,
     )
 
     refreshed_payload = comparison_service.list_corpus_comparable_results()
 
-    assert scan_calls == 1
     assert refreshed_payload["total"] == 2
     assert {
         item["comparable_result_id"]
         for item in refreshed_payload["items"]
     } == {"cres-refresh-1", "cres-refresh-2"}
+    assert not (collection_service.root_dir / "_core_cache").exists()
 
 
 def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):

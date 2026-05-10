@@ -10,6 +10,7 @@ from domain.core.comparison import (
     ComparisonRowRecord,
 )
 from domain.core.fact_store import CoreFactSet
+from domain.protocol import ProtocolArtifactSet, ProtocolArtifactStatus
 from domain.source import (
     SourceArtifactSet,
     SourceBlock,
@@ -167,3 +168,17 @@ class CoreFactRepository(Protocol):
     ) -> None: ...
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet: ...
+
+
+class ProtocolArtifactRepository(Protocol):
+    backend_name: str
+
+    def replace_collection_artifacts(
+        self,
+        collection_id: str,
+        artifacts: ProtocolArtifactSet,
+    ) -> None: ...
+
+    def read_collection_artifacts(self, collection_id: str) -> ProtocolArtifactSet: ...
+
+    def get_collection_status(self, collection_id: str) -> ProtocolArtifactStatus: ...

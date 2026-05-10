@@ -3,25 +3,23 @@ from __future__ import annotations
 import ast
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from fastapi import HTTPException
 
 from application.derived.protocol.document_meta_service import load_document_title_map
+from infra.persistence.factory import build_protocol_artifact_repository
 
 
-_STEP_FILE = "protocol_steps.parquet"
+protocol_artifact_repository = build_protocol_artifact_repository()
 
 
-def _read_steps(path: Path) -> pd.DataFrame:
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="protocol_steps.parquet 不存在")
-    try:
-        return pd.read_parquet(path)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"无法读取 protocol_steps.parquet: {exc}") from exc
+def _read_steps(collection_id: str) -> pd.DataFrame:
+    artifacts = protocol_artifact_repository.read_collection_artifacts(collection_id)
+    if not artifacts.protocol_steps:
+        raise HTTPException(status_code=404, detail="protocol steps 不存在")
+    return pd.DataFrame([dict(record) for record in artifacts.protocol_steps])
 
 
 def _to_python(value: Any) -> Any:
@@ -85,28 +83,31 @@ def _row_payload(row: pd.Series, title_map: dict[str, str] | None = None) -> dic
         "paper_id": paper_id,
         "paper_title": (title_map or {}).get(paper_id or ""),
         "order": _to_python(row.get("order")),
-        "action": _stringify(row.get("action") or row.get("text")),
+        "action": _stringify(row.get("action") or row.get("raw_text") or row.get("text")),
         "purpose": _to_python(row.get("purpose")),
         "block_type": _to_python(row.get("block_type")),
-        "materials": _to_python(row.get("materials")),
-        "characterization": _to_python(row.get("characterization")),
-        "conditions": _to_python(row.get("conditions")),
+        "materials": _to_python(row.get("materials") or row.get("materials_json")),
+        "characterization": _to_python(
+            row.get("characterization") or row.get("characterization_json")
+        ),
+        "conditions": _to_python(row.get("conditions") or row.get("conditions_json")),
         "confidence_score": _to_python(row.get("confidence_score")),
     }
 
 
 def search_protocol_steps(
-    base_dir: Path,
+    collection_id: str,
     query: str,
     limit: int = 10,
     paper_id: str | None = None,
+    output_path: str | None = None,
 ) -> dict[str, Any]:
     terms = [token.lower() for token in re.findall(r"[A-Za-z0-9\u4e00-\u9fff]+", query) if token]
     if not terms:
         raise HTTPException(status_code=400, detail="q 不能为空")
 
-    steps_df = _read_steps(base_dir / _STEP_FILE)
-    title_map = load_document_title_map(base_dir)
+    steps_df = _read_steps(collection_id)
+    title_map = load_document_title_map(collection_id)
     if paper_id:
         steps_df = steps_df[steps_df.apply(lambda row: _resolve_paper_id(row) == paper_id, axis=1)]
 
@@ -143,7 +144,7 @@ def search_protocol_steps(
     )
     items = scored[:limit]
     return {
-        "output_path": str(base_dir),
+        "output_path": output_path,
         "query": query,
         "paper_id": paper_id,
         "count": len(items),

@@ -212,6 +212,8 @@ The active child execution plan for this freeze is:
 - indexing already runs Core stages before the protocol branch
 - protocol generation is already gated by document suitability
 - `application/goals/` now exists as a thin Goal Brief / Intake surface
+- `domain/goal/` owns the minimal collection-bound conversation model:
+  goal sessions, messages, answer source modes, and user-navigable source links
 
 ### Still Missing Or Blurred
 

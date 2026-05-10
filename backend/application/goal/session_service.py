@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -27,17 +27,17 @@ from application.core.workspace_overview_service import WorkspaceService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
+from domain.goal import (
+    GoalAnswerMode,
+    GoalMessageRecord,
+    GoalSessionRecord,
+    GoalSourceLink,
+    GoalSourceMode,
+)
 from infra.persistence.file._json import read_json, write_json
 
-AnswerMode = Literal["grounded", "hybrid", "general"]
-SourceMode = Literal[
-    "collection_grounded",
-    "collection_limited",
-    "general_fallback",
-    "general_only",
-]
-
-_ANSWER_MODES = {"grounded", "hybrid", "general"}
+AnswerMode = GoalAnswerMode
+SourceMode = GoalSourceMode
 _GENERAL_FALLBACK_PREFIX = (
     "The current collection does not contain structured evidence for this "
     "question. The following answer is general background and should not be "
@@ -66,13 +66,6 @@ def _clean_text(value: Any) -> str | None:
     return text or None
 
 
-def _clean_mode(value: str | None) -> AnswerMode:
-    mode = str(value or "hybrid").strip().lower()
-    if mode not in _ANSWER_MODES:
-        raise ValueError("answer_mode must be one of: grounded, hybrid, general")
-    return mode  # type: ignore[return-value]
-
-
 class GoalSessionService:
     """Collection-bound goal conversation sessions over Core artifacts."""
 
@@ -97,10 +90,13 @@ class GoalSessionService:
             artifact_registry_service
             or ArtifactRegistryService(self.collection_service.root_dir)
         )
-        self.research_view_service = research_view_service or ResearchViewAggregationService(
-            collection_service=self.collection_service,
-            task_service=self.task_service,
-            artifact_registry_service=self.artifact_registry_service,
+        self.research_view_service = (
+            research_view_service
+            or ResearchViewAggregationService(
+                collection_service=self.collection_service,
+                task_service=self.task_service,
+                artifact_registry_service=self.artifact_registry_service,
+            )
         )
         self.workspace_service = workspace_service or WorkspaceService(
             collection_service=self.collection_service,
@@ -138,33 +134,32 @@ class GoalSessionService:
     ) -> dict[str, Any]:
         collection = self.collection_service.get_collection(collection_id)
         now = _now_iso()
-        session = {
-            "session_id": f"gs_{uuid4().hex[:12]}",
-            "user_id": "local-user",
-            "collection_id": collection["collection_id"],
-            "focused_material_id": _clean_text(focused_material_id),
-            "focused_paper_id": _clean_text(focused_paper_id),
-            "goal_text": _clean_text(goal_text),
-            "goal_brief_json": dict(goal_brief_json or {}),
-            "answer_mode": _clean_mode(answer_mode),
-            "rolling_summary": "",
-            "last_evidence_ids": [],
-            "last_material_ids": [],
-            "last_paper_ids": [],
-            "collection_data_version": self._collection_data_version(collection),
-            "created_at": now,
-            "updated_at": now,
-        }
-        self._write_session(session)
-        self._write_messages(session, [])
-        return session
+        session = GoalSessionRecord.create(
+            session_id=f"gs_{uuid4().hex[:12]}",
+            user_id="local-user",
+            collection_id=collection["collection_id"],
+            focused_material_id=focused_material_id,
+            focused_paper_id=focused_paper_id,
+            goal_text=goal_text,
+            goal_brief_json=goal_brief_json,
+            answer_mode=answer_mode,
+            collection_data_version=self._collection_data_version(collection),
+            now_iso=now,
+        )
+        session_record = session.to_record()
+        self._write_session(session_record)
+        self._write_messages(session_record, [])
+        return session_record
 
     def get_session(self, session_id: str) -> dict[str, Any]:
-        session = self._read_session(session_id)
-        session["collection_data_version"] = self._collection_data_version(
-            self.collection_service.get_collection(session["collection_id"])
+        session = GoalSessionRecord.from_mapping(self._read_session(session_id))
+        collection_data_version = self._collection_data_version(
+            self.collection_service.get_collection(session.collection_id)
         )
-        return session
+        return session.with_collection_data_version(
+            collection_data_version=collection_data_version,
+            updated_at=session.updated_at,
+        ).to_record()
 
     def update_session(
         self,
@@ -177,30 +172,39 @@ class GoalSessionService:
         goal_brief_json: Any = _UNSET,
         answer_mode: Any = _UNSET,
     ) -> dict[str, Any]:
-        session = self._read_session(session_id)
+        session = GoalSessionRecord.from_mapping(self._read_session(session_id))
         if collection_id is not _UNSET:
             next_collection_id = _clean_text(collection_id)
             if not next_collection_id:
                 raise ValueError("collection_id cannot be cleared")
-            if next_collection_id != session["collection_id"]:
+            if next_collection_id != session.collection_id:
                 self.collection_service.get_collection(next_collection_id)
-                session["collection_id"] = next_collection_id
+                session = session.bind_collection(next_collection_id)
         if focused_material_id is not _UNSET:
-            session["focused_material_id"] = _clean_text(focused_material_id)
+            session = session.with_focus(
+                focused_material_id=focused_material_id,
+                focused_paper_id=session.focused_paper_id,
+            )
         if focused_paper_id is not _UNSET:
-            session["focused_paper_id"] = _clean_text(focused_paper_id)
+            session = session.with_focus(
+                focused_material_id=session.focused_material_id,
+                focused_paper_id=focused_paper_id,
+            )
         if goal_text is not _UNSET:
-            session["goal_text"] = _clean_text(goal_text)
+            session = session.with_goal_text(goal_text)
         if goal_brief_json is not _UNSET:
-            session["goal_brief_json"] = dict(goal_brief_json or {})
+            session = session.with_goal_brief_json(goal_brief_json)
         if answer_mode is not _UNSET:
-            session["answer_mode"] = _clean_mode(answer_mode)
-        session["collection_data_version"] = self._collection_data_version(
-            self.collection_service.get_collection(session["collection_id"])
+            session = session.with_answer_mode(answer_mode)
+        session = session.with_collection_data_version(
+            collection_data_version=self._collection_data_version(
+                self.collection_service.get_collection(session.collection_id)
+            ),
+            updated_at=_now_iso(),
         )
-        session["updated_at"] = _now_iso()
-        self._write_session(session)
-        return session
+        session_record = session.to_record()
+        self._write_session(session_record)
+        return session_record
 
     def list_messages(self, session_id: str) -> dict[str, Any]:
         session = self._read_session(session_id)
@@ -220,37 +224,42 @@ class GoalSessionService:
         if not user_message:
             raise ValueError("message is required")
 
-        session = self._read_session(session_id)
-        self._apply_page_context(session, page_context or {})
-        command_response = self._apply_inline_command(session, user_message)
-        messages = self._read_messages(session)
+        session = GoalSessionRecord.from_mapping(self._read_session(session_id))
+        session = self._apply_page_context(session, page_context or {})
+        session, command_response = self._apply_inline_command(session, user_message)
+        session_record = session.to_record()
+        messages = self._read_messages(session_record)
         now = _now_iso()
-        user_record = {
-            "message_id": f"msg_{uuid4().hex[:12]}",
-            "role": "user",
-            "content": user_message,
-            "created_at": now,
-        }
-        messages.append(user_record)
+        user_record = GoalMessageRecord.user(
+            message_id=f"msg_{uuid4().hex[:12]}",
+            session_id=session.session_id,
+            content=user_message,
+            created_at=now,
+        )
+        messages.append(user_record.to_record())
 
         if command_response is not None:
-            response = self._build_command_message(session, command_response)
+            response, session = self._build_command_message(session, command_response)
         else:
-            response = self._answer_message(session, user_message)
+            response, session = self._answer_message(session, user_message)
 
         messages.append(response)
-        session["updated_at"] = response["created_at"]
-        self._write_session(session)
-        self._write_messages(session, messages)
+        session_record = session.to_record()
+        self._write_session(session_record)
+        self._write_messages(session_record, messages)
         return response
 
-    def _answer_message(self, session: dict[str, Any], message: str) -> dict[str, Any]:
-        mode: AnswerMode = _clean_mode(session.get("answer_mode"))
+    def _answer_message(
+        self, session: GoalSessionRecord, message: str
+    ) -> tuple[dict[str, Any], GoalSessionRecord]:
+        mode: AnswerMode = session.answer_mode
         context = self._build_collection_context(session) if mode != "general" else {}
         has_collection_context = bool(context.get("has_collection_context"))
         warnings = list(context.get("warnings", []))
         used_evidence_ids = (
-            self._stable_strings(context.get("evidence_ids")) if has_collection_context else []
+            self._stable_strings(context.get("evidence_ids"))
+            if has_collection_context
+            else []
         )
         links = dict(context.get("links") or {})
         source_links = (
@@ -294,106 +303,111 @@ class GoalSessionService:
             answer = self._ensure_general_fallback_boundary(generated)
             used_evidence_ids = []
 
-        response = {
-            "message_id": f"msg_{uuid4().hex[:12]}",
-            "session_id": session["session_id"],
-            "role": "assistant",
-            "answer": answer,
-            "content": answer,
-            "source_mode": source_mode,
-            "used_evidence_ids": used_evidence_ids,
-            "warnings": self._stable_strings(warnings),
-            "links": links,
-            "source_links": source_links,
-            "created_at": _now_iso(),
-        }
-        self._update_session_after_answer(
+        assistant_message = GoalMessageRecord.assistant(
+            message_id=f"msg_{uuid4().hex[:12]}",
+            session_id=session.session_id,
+            content=answer,
+            source_mode=source_mode,
+            used_evidence_ids=used_evidence_ids,
+            warnings=warnings,
+            links=links,
+            source_links=source_links,
+            created_at=_now_iso(),
+        )
+        session = self._update_session_after_answer(
             session,
             user_message=message,
-            response=response,
+            assistant_message=assistant_message,
             context=context,
         )
-        return response
+        return assistant_message.to_record(), session
 
     def _build_command_message(
         self,
-        session: dict[str, Any],
+        session: GoalSessionRecord,
         command_response: str,
-    ) -> dict[str, Any]:
-        response = {
-            "message_id": f"msg_{uuid4().hex[:12]}",
-            "session_id": session["session_id"],
-            "role": "assistant",
-            "answer": command_response,
-            "content": command_response,
-            "source_mode": "collection_limited",
-            "used_evidence_ids": [],
-            "warnings": [],
-            "links": self._session_links(session),
-            "source_links": [],
-            "created_at": _now_iso(),
-        }
-        self._update_session_after_answer(
+    ) -> tuple[dict[str, Any], GoalSessionRecord]:
+        assistant_message = GoalMessageRecord.assistant(
+            message_id=f"msg_{uuid4().hex[:12]}",
+            session_id=session.session_id,
+            content=command_response,
+            source_mode="collection_limited",
+            used_evidence_ids=[],
+            warnings=[],
+            links=self._session_links(session),
+            source_links=[],
+            created_at=_now_iso(),
+        )
+        session = self._update_session_after_answer(
             session,
             user_message=command_response,
-            response=response,
+            assistant_message=assistant_message,
             context={},
         )
-        return response
+        return assistant_message.to_record(), session
 
     def _apply_page_context(
         self,
-        session: dict[str, Any],
+        session: GoalSessionRecord,
         page_context: dict[str, Any],
-    ) -> None:
+    ) -> GoalSessionRecord:
         material_id = _clean_text(page_context.get("material_id"))
-        if material_id:
-            session["focused_material_id"] = material_id
-        paper_id = _clean_text(page_context.get("paper_id") or page_context.get("document_id"))
-        if paper_id:
-            session["focused_paper_id"] = paper_id
+        paper_id = _clean_text(
+            page_context.get("paper_id") or page_context.get("document_id")
+        )
+        return session.with_page_context(material_id=material_id, paper_id=paper_id)
 
     def _apply_inline_command(
         self,
-        session: dict[str, Any],
+        session: GoalSessionRecord,
         message: str,
-    ) -> str | None:
+    ) -> tuple[GoalSessionRecord, str | None]:
         text = message.strip()
         if not text.startswith("$"):
-            return None
+            return session, None
         command, _, argument = text[1:].partition(" ")
         command = command.strip().lower()
         argument = argument.strip()
         if command == "mode":
-            session["answer_mode"] = _clean_mode(argument)
-            return f"Answer mode updated to {session['answer_mode']}."
+            session = session.with_answer_mode(argument)
+            return session, f"Answer mode updated to {session.answer_mode}."
         if command == "material":
-            session["focused_material_id"] = _clean_text(argument)
-            return f"Focused material updated to {session['focused_material_id'] or 'none'}."
+            session = session.with_focus(
+                focused_material_id=argument,
+                focused_paper_id=session.focused_paper_id,
+            )
+            return (
+                session,
+                f"Focused material updated to {session.focused_material_id or 'none'}.",
+            )
         if command in {"paper", "document"}:
-            session["focused_paper_id"] = _clean_text(argument)
-            return f"Focused paper updated to {session['focused_paper_id'] or 'none'}."
+            session = session.with_focus(
+                focused_material_id=session.focused_material_id,
+                focused_paper_id=argument,
+            )
+            return (
+                session,
+                f"Focused paper updated to {session.focused_paper_id or 'none'}.",
+            )
         if command == "goal":
-            session["goal_text"] = _clean_text(argument)
-            return "Goal updated."
+            return session.with_goal_text(argument), "Goal updated."
         if command == "clear" and argument == "focus":
-            session["focused_material_id"] = None
-            session["focused_paper_id"] = None
-            return "Focus cleared."
+            return (
+                session.with_focus(focused_material_id=None, focused_paper_id=None),
+                "Focus cleared.",
+            )
         if command == "collection":
             self.collection_service.get_collection(argument)
-            session["collection_id"] = argument
-            session["focused_material_id"] = None
-            session["focused_paper_id"] = None
-            return f"Bound collection updated to {argument}."
+            session = session.bind_collection(argument, clear_focus=True)
+            return session, f"Bound collection updated to {session.collection_id}."
         raise ValueError(f"unsupported goal session command: ${command}")
 
-    def _build_collection_context(self, session: dict[str, Any]) -> dict[str, Any]:
-        collection_id = session["collection_id"]
+    def _build_collection_context(self, session: GoalSessionRecord) -> dict[str, Any]:
+        collection_id = session.collection_id
         warnings: list[str] = []
         collection = self.collection_service.get_collection(collection_id)
         workspace = self._safe_workspace(collection_id, warnings)
-        focused_material_id = session.get("focused_material_id")
+        focused_material_id = session.focused_material_id
         material_profile = None
         collection_research_view = None
         if focused_material_id:
@@ -414,7 +428,7 @@ class GoalSessionService:
             "collection": collection,
             "workspace": workspace,
             "focused_material_id": focused_material_id,
-            "focused_paper_id": session.get("focused_paper_id"),
+            "focused_paper_id": session.focused_paper_id,
             "material_profile": material_profile,
             "collection_research_view": collection_research_view,
             "comparisons": comparisons,
@@ -432,7 +446,9 @@ class GoalSessionService:
             evidence_ids
             or self._has_non_empty_path(material_profile, ("sample_matrix", "rows"))
             or self._has_non_empty_path(collection_research_view, ("materials",))
-            or self._has_non_empty_path(collection_research_view, ("comparable_groups",))
+            or self._has_non_empty_path(
+                collection_research_view, ("comparable_groups",)
+            )
             or self._has_non_empty_path(comparisons, ("items",))
             or self._has_non_empty_path(evidence_cards, ("items",))
         )
@@ -463,7 +479,9 @@ class GoalSessionService:
         warnings: list[str],
     ) -> dict[str, Any] | None:
         try:
-            return self.research_view_service.get_collection_research_view(collection_id)
+            return self.research_view_service.get_collection_research_view(
+                collection_id
+            )
         except ResearchViewNotReadyError:
             warnings.append("research_view_not_ready")
             return None
@@ -511,7 +529,7 @@ class GoalSessionService:
     def _generate_llm_answer(
         self,
         *,
-        session: dict[str, Any],
+        session: GoalSessionRecord,
         user_message: str,
         source_mode: SourceMode,
         context: dict[str, Any],
@@ -539,7 +557,7 @@ class GoalSessionService:
     def _build_prompt(
         self,
         *,
-        session: dict[str, Any],
+        session: GoalSessionRecord,
         user_message: str,
         source_mode: SourceMode,
         context: dict[str, Any],
@@ -584,12 +602,12 @@ class GoalSessionService:
             )
         prompt = (
             f"Goal session:\n"
-            f"- collection_id: {session.get('collection_id')}\n"
-            f"- focused_material_id: {session.get('focused_material_id')}\n"
-            f"- focused_paper_id: {session.get('focused_paper_id')}\n"
-            f"- goal_text: {session.get('goal_text')}\n"
-            f"- answer_mode: {session.get('answer_mode')}\n"
-            f"- rolling_summary: {session.get('rolling_summary')}\n\n"
+            f"- collection_id: {session.collection_id}\n"
+            f"- focused_material_id: {session.focused_material_id}\n"
+            f"- focused_paper_id: {session.focused_paper_id}\n"
+            f"- goal_text: {session.goal_text}\n"
+            f"- answer_mode: {session.answer_mode}\n"
+            f"- rolling_summary: {session.rolling_summary}\n\n"
             f"User message:\n{user_message}\n\n"
             f"Source links:\n{source_links_text or '[]'}\n\n"
             f"Collection context:\n{context_text or '{}'}"
@@ -598,35 +616,29 @@ class GoalSessionService:
 
     def _update_session_after_answer(
         self,
-        session: dict[str, Any],
+        session: GoalSessionRecord,
         *,
         user_message: str,
-        response: dict[str, Any],
+        assistant_message: GoalMessageRecord,
         context: dict[str, Any],
-    ) -> None:
-        session["last_evidence_ids"] = list(response.get("used_evidence_ids") or [])
-        session["last_material_ids"] = self._stable_strings(context.get("material_ids"))
-        session["last_paper_ids"] = self._stable_strings(context.get("paper_ids"))
-        summary_bits = [
-            session.get("rolling_summary") or "",
-            (
-                f"Last turn source={response.get('source_mode')}; "
-                f"user asked: {user_message[:240]}"
+    ) -> GoalSessionRecord:
+        return session.after_assistant_message(
+            user_message=user_message,
+            assistant_message=assistant_message,
+            material_ids=context.get("material_ids"),
+            paper_ids=context.get("paper_ids"),
+            collection_data_version=self._collection_data_version(
+                self.collection_service.get_collection(session.collection_id)
             ),
-        ]
-        if response.get("source_mode") == "general_fallback":
-            summary_bits.append(
-                "The previous answer used general background and is not collection evidence."
-            )
-        summary = "\n".join(bit for bit in summary_bits if bit).strip()
-        session["rolling_summary"] = summary[-_MAX_ROLLING_SUMMARY_CHARS:]
-        session["collection_data_version"] = self._collection_data_version(
-            self.collection_service.get_collection(session["collection_id"])
+            updated_at=assistant_message.created_at,
+            max_summary_chars=_MAX_ROLLING_SUMMARY_CHARS,
         )
 
     def _collection_data_version(self, collection: dict[str, Any]) -> str:
         collection_id = collection["collection_id"]
-        artifacts = self.collection_service.artifact_repository.read(collection_id) or {}
+        artifacts = (
+            self.collection_service.artifact_repository.read(collection_id) or {}
+        )
         return str(
             artifacts.get("updated_at")
             or collection.get("updated_at")
@@ -634,15 +646,15 @@ class GoalSessionService:
             or ""
         )
 
-    def _session_links(self, session: dict[str, Any]) -> dict[str, str]:
-        collection_id = session["collection_id"]
+    def _session_links(self, session: GoalSessionRecord) -> dict[str, str]:
+        collection_id = session.collection_id
         links = {
             "workspace": f"/collections/{collection_id}",
             "materials": f"/collections/{collection_id}/materials",
             "comparisons": f"/collections/{collection_id}/comparisons",
             "evidence": f"/collections/{collection_id}/evidence",
         }
-        material_id = session.get("focused_material_id")
+        material_id = session.focused_material_id
         if material_id:
             links["focused_material"] = (
                 f"/collections/{collection_id}/materials/{material_id}"
@@ -733,27 +745,28 @@ class GoalSessionService:
     def _public_source_links(
         self, source_refs: list[dict[str, str]]
     ) -> list[dict[str, str]]:
-        return [
-            {
-                "kind": ref["kind"],
-                "label": ref["label"],
-                "href": ref["href"],
-            }
-            for ref in source_refs
-        ]
+        return [GoalSourceLink.from_mapping(ref).to_record() for ref in source_refs]
 
     def _session_dir(self, collection_id: str) -> Path:
         _ = collection_id
         return self.collection_service.root_dir / "_goal_sessions"
 
     def _session_path(self, session: dict[str, Any]) -> Path:
-        return self._session_dir(session["collection_id"]) / f"{session['session_id']}.json"
+        return (
+            self._session_dir(session["collection_id"])
+            / f"{session['session_id']}.json"
+        )
 
     def _messages_path(self, session: dict[str, Any]) -> Path:
-        return self._session_dir(session["collection_id"]) / f"{session['session_id']}.messages.json"
+        return (
+            self._session_dir(session["collection_id"])
+            / f"{session['session_id']}.messages.json"
+        )
 
     def _find_session_path(self, session_id: str) -> Path:
-        path = self.collection_service.root_dir / "_goal_sessions" / f"{session_id}.json"
+        path = (
+            self.collection_service.root_dir / "_goal_sessions" / f"{session_id}.json"
+        )
         if path.exists():
             return path
         raise GoalSessionNotFoundError(session_id)
@@ -786,7 +799,11 @@ class GoalSessionService:
                 text = _clean_text(item)
                 if text:
                     found.append(text)
-            elif key in {"used_evidence_ids", "evidence_ids", "anchor_ids"} and isinstance(item, list):
+            elif key in {
+                "used_evidence_ids",
+                "evidence_ids",
+                "anchor_ids",
+            } and isinstance(item, list):
                 found.extend(text for text in (_clean_text(v) for v in item) if text)
         return self._stable_strings(found)
 
@@ -989,6 +1006,9 @@ class GoalSessionService:
     def _ensure_general_fallback_boundary(self, answer: str) -> str:
         if "not a collection-supported conclusion" in answer.lower():
             return answer
-        if "current collection" in answer.lower() and "general background" in answer.lower():
+        if (
+            "current collection" in answer.lower()
+            and "general background" in answer.lower()
+        ):
             return answer
         return f"{_GENERAL_FALLBACK_PREFIX}{answer.strip()}"

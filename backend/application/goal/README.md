@@ -14,6 +14,12 @@ The active runtime path is a lightweight session over one collection:
 Structured Goal Brief data is optional context for this path. It is not a
 precondition for starting a conversation.
 
+The conversation domain model lives in `domain/goal/session.py`. It owns the
+core chat records and source-boundary rules for `GoalSessionRecord`,
+`GoalMessageRecord`, and `GoalSourceLink`. This package remains responsible for
+orchestration: reading Core artifacts, calling the LLM, and persisting the
+domain records.
+
 - `session_service.py`
   Primary current conversation service. It persists session context, retrieves
   collection artifacts before grounded answers, and labels general fallback

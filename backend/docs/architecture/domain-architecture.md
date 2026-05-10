@@ -76,6 +76,21 @@ Owns the collection-facing summary read model:
 - collection-level warnings
 - navigation links into profiles, evidence, comparisons, and protocol
 
+### Goal
+
+Owns collection-bound conversation state and source-boundary records:
+
+- goal session state
+- user and assistant message records
+- answer source modes
+- user-navigable source links
+- rolling conversation summary metadata
+
+This domain currently models the chat conversation only. It must not introduce
+Goal Consumer / Decision Layer concepts such as coverage assessment, gap
+detection, clue ranking, or next-step decision support until that product slice
+is explicitly added.
+
 ### Documents
 
 Owns document-level profiling:

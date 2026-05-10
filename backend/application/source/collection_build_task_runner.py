@@ -189,10 +189,12 @@ class CollectionBuildTaskRunner:
                 output_path=str(output_dir),
             )
             resolved_build_source_artifacts = self._resolve_build_source_artifacts()
+            source_context = dict(additional_context or {})
+            source_context["collection_id"] = collection_id
             outputs = await resolved_build_source_artifacts(
                 config=config,
                 method=method or IndexingMethod.Standard,
-                additional_context=additional_context,
+                additional_context=source_context,
                 verbose=verbose,
             )
             errors = [str(err) for o in outputs for err in (o.errors or [])]

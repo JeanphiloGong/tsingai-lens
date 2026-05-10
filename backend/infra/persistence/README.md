@@ -26,8 +26,8 @@ for app-layer collection, task, artifact, and Goal session state.
 - `memory/`
   In-memory implementations for tests and isolated runs
 - `sqlite/`
-  SQLite-backed Goal conversation session persistence. The application layer
-  depends on the Goal session repository port and does not import SQLite,
-  table names, SQL, or connection details.
+  SQLite-backed Goal conversation session persistence and Source artifact
+  persistence. The application layer depends on repository ports and does not
+  import SQLite table names, SQL, or connection details.
 - `mysql/`
   Placeholder for future relational persistence work

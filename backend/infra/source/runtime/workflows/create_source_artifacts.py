@@ -12,6 +12,7 @@ from typing import Any
 
 import pandas as pd
 
+from infra.persistence.factory import build_source_artifact_repository
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -59,6 +60,11 @@ async def run_workflow(
     await _clear_directory_storage(context.output_storage, "image_assets")
     for asset_path, asset_bytes in output.figure_assets.items():
         await context.output_storage.set(asset_path, asset_bytes)
+    _persist_source_artifacts(
+        config=config,
+        context=context,
+        output=output,
+    )
     logger.info("Workflow completed: create_source_artifacts")
     return WorkflowFunctionOutput(result=output.documents)
 
@@ -149,3 +155,37 @@ async def _clear_directory_storage(storage: Any, directory: str) -> None:
     keys = [key for key, _ in storage.find(pattern, base_dir=directory)]
     for key in keys:
         await storage.delete(key)
+
+
+def _persist_source_artifacts(
+    *,
+    config: SourceRuntimeConfig,
+    context: PipelineRunContext,
+    output: SourceArtifactBundle,
+) -> None:
+    collection_id = _resolve_collection_id(config=config, context=context)
+    if collection_id is None:
+        return
+    repository = build_source_artifact_repository()
+    repository.replace_collection_artifacts(collection_id, output.to_artifact_set())
+    logger.info(
+        "Persisted Source artifacts to SQLite collection_id=%s document_count=%s table_count=%s table_cell_count=%s",
+        collection_id,
+        len(output.documents),
+        len(output.tables),
+        len(output.table_cells),
+    )
+
+
+def _resolve_collection_id(
+    *,
+    config: SourceRuntimeConfig,
+    context: PipelineRunContext,
+) -> str | None:
+    additional_context = context.state.get("additional_context")
+    if isinstance(additional_context, dict):
+        collection_id = str(additional_context.get("collection_id") or "").strip()
+        if collection_id:
+            return collection_id
+    root_name = Path(config.root_dir).name
+    return root_name if root_name.startswith("col_") else None

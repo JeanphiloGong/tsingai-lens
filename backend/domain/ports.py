@@ -4,6 +4,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
+from domain.source import (
+    SourceArtifactSet,
+    SourceBlock,
+    SourceDocument,
+    SourceFigure,
+    SourceTable,
+    SourceTableCell,
+    SourceTableRow,
+    SourceTextUnit,
+)
+
 
 @dataclass(frozen=True)
 class CollectionPaths:
@@ -79,3 +90,54 @@ class GoalSessionRepository(Protocol):
         session_id: str,
         messages: list[Mapping[str, Any]],
     ) -> None: ...
+
+
+class SourceArtifactRepository(Protocol):
+    backend_name: str
+
+    def replace_collection_artifacts(
+        self,
+        collection_id: str,
+        artifacts: SourceArtifactSet,
+    ) -> None: ...
+
+    def read_collection_artifacts(self, collection_id: str) -> SourceArtifactSet: ...
+
+    def list_documents(self, collection_id: str) -> list[SourceDocument]: ...
+
+    def list_text_units(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+    ) -> list[SourceTextUnit]: ...
+
+    def list_blocks(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+    ) -> list[SourceBlock]: ...
+
+    def list_tables(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+    ) -> list[SourceTable]: ...
+
+    def list_table_rows(
+        self,
+        collection_id: str,
+        table_id: str | None = None,
+    ) -> list[SourceTableRow]: ...
+
+    def list_table_cells(
+        self,
+        collection_id: str,
+        table_id: str | None = None,
+        row_index: int | None = None,
+    ) -> list[SourceTableCell]: ...
+
+    def list_figures(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+    ) -> list[SourceFigure]: ...

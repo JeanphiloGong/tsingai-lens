@@ -7,6 +7,19 @@ from typing import Any
 
 import pandas as pd
 
+from config import DATA_DIR
+from domain.source import SourceArtifactSet
+from infra.persistence.factory import build_source_artifact_repository
+from infra.source.contracts.artifact_schemas import (
+    BLOCKS_FINAL_COLUMNS,
+    DOCUMENTS_FINAL_COLUMNS,
+    FIGURES_FINAL_COLUMNS,
+    TABLE_CELLS_FINAL_COLUMNS,
+    TABLES_FINAL_COLUMNS,
+    TABLE_ROWS_FINAL_COLUMNS,
+    TEXT_UNITS_FINAL_COLUMNS,
+)
+
 
 @dataclass(frozen=True)
 class CollectionArtifactPaths:
@@ -39,6 +52,18 @@ def resolve_collection_artifact_paths(base_dir: str | Path) -> CollectionArtifac
 
 
 def load_collection_inputs(base_dir: str | Path) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    artifacts = _load_source_artifacts_from_repository(base_dir)
+    if artifacts is not None:
+        documents = _records_to_frame(
+            (document.to_record() for document in artifacts.documents),
+            DOCUMENTS_FINAL_COLUMNS,
+        )
+        text_units = _records_to_frame(
+            (text_unit.to_record() for text_unit in artifacts.text_units),
+            TEXT_UNITS_FINAL_COLUMNS,
+        )
+        return documents, text_units if not text_units.empty else None
+
     paths = resolve_collection_artifact_paths(base_dir)
     documents = pd.read_parquet(paths.documents)
     text_units: pd.DataFrame | None = None
@@ -48,6 +73,13 @@ def load_collection_inputs(base_dir: str | Path) -> tuple[pd.DataFrame, pd.DataF
 
 
 def load_blocks_artifact(base_dir: str | Path) -> pd.DataFrame:
+    artifacts = _load_source_artifacts_from_repository(base_dir)
+    if artifacts is not None:
+        return _records_to_frame(
+            (block.to_record() for block in artifacts.blocks),
+            BLOCKS_FINAL_COLUMNS,
+        )
+
     paths = resolve_collection_artifact_paths(base_dir)
     if not paths.blocks.is_file():
         raise FileNotFoundError(paths.blocks)
@@ -68,6 +100,13 @@ def load_blocks_artifact(base_dir: str | Path) -> pd.DataFrame:
 
 
 def load_table_rows_artifact(base_dir: str | Path) -> pd.DataFrame:
+    artifacts = _load_source_artifacts_from_repository(base_dir)
+    if artifacts is not None:
+        return _records_to_frame(
+            (row.to_record() for row in artifacts.table_rows),
+            TABLE_ROWS_FINAL_COLUMNS,
+        )
+
     paths = resolve_collection_artifact_paths(base_dir)
     if not paths.table_rows.is_file():
         raise FileNotFoundError(paths.table_rows)
@@ -83,6 +122,13 @@ def load_table_rows_artifact(base_dir: str | Path) -> pd.DataFrame:
 
 
 def load_table_cells_artifact(base_dir: str | Path) -> pd.DataFrame:
+    artifacts = _load_source_artifacts_from_repository(base_dir)
+    if artifacts is not None:
+        return _records_to_frame(
+            (cell.to_record() for cell in artifacts.table_cells),
+            TABLE_CELLS_FINAL_COLUMNS,
+        )
+
     paths = resolve_collection_artifact_paths(base_dir)
     if not paths.table_cells.is_file():
         raise FileNotFoundError(paths.table_cells)
@@ -98,6 +144,13 @@ def load_table_cells_artifact(base_dir: str | Path) -> pd.DataFrame:
 
 
 def load_figures_artifact(base_dir: str | Path) -> pd.DataFrame:
+    artifacts = _load_source_artifacts_from_repository(base_dir)
+    if artifacts is not None:
+        return _records_to_frame(
+            (figure.to_record() for figure in artifacts.figures),
+            FIGURES_FINAL_COLUMNS,
+        )
+
     paths = resolve_collection_artifact_paths(base_dir)
     if not paths.figures.is_file():
         raise FileNotFoundError(paths.figures)
@@ -110,6 +163,13 @@ def load_figures_artifact(base_dir: str | Path) -> pd.DataFrame:
 
 
 def load_tables_artifact(base_dir: str | Path) -> pd.DataFrame:
+    artifacts = _load_source_artifacts_from_repository(base_dir)
+    if artifacts is not None:
+        return _records_to_frame(
+            (table.to_record() for table in artifacts.tables),
+            TABLES_FINAL_COLUMNS,
+        )
+
     paths = resolve_collection_artifact_paths(base_dir)
     if not paths.tables.is_file():
         raise FileNotFoundError(paths.tables)
@@ -119,6 +179,34 @@ def load_tables_artifact(base_dir: str | Path) -> pd.DataFrame:
     if "document_id" not in normalized.columns:
         normalized["document_id"] = None
     return normalized
+
+
+def _load_source_artifacts_from_repository(
+    base_dir: str | Path,
+) -> SourceArtifactSet | None:
+    if not (DATA_DIR / "lens.sqlite").is_file():
+        return None
+    collection_id = _collection_id_from_base_dir(base_dir)
+    if collection_id is None:
+        return None
+    artifacts = build_source_artifact_repository().read_collection_artifacts(collection_id)
+    return artifacts if artifacts.documents else None
+
+
+def _collection_id_from_base_dir(base_dir: str | Path) -> str | None:
+    base_path = Path(base_dir).expanduser().resolve()
+    if base_path.name == "output":
+        collection_id = base_path.parent.name
+    else:
+        collection_id = base_path.name
+    return collection_id if collection_id.startswith("col_") else None
+
+
+def _records_to_frame(records: Any, columns: list[str]) -> pd.DataFrame:
+    rows = list(records)
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(rows, columns=columns)
 
 
 def build_document_records(

@@ -11,6 +11,7 @@ from domain.ports import (
     ArtifactRepository,
     CollectionRepository,
     GoalSessionRepository,
+    SourceArtifactRepository,
     TaskRepository,
 )
 from infra.persistence.file import (
@@ -23,7 +24,10 @@ from infra.persistence.memory import (
     MemoryCollectionRepository,
     MemoryTaskRepository,
 )
-from infra.persistence.sqlite import SqliteGoalSessionRepository
+from infra.persistence.sqlite import (
+    SqliteGoalSessionRepository,
+    SqliteSourceArtifactRepository,
+)
 
 DEFAULT_PERSISTENCE_BACKEND = "file"
 
@@ -85,6 +89,12 @@ def build_goal_session_repository(
     db_path: Path | None = None,
 ) -> GoalSessionRepository:
     return SqliteGoalSessionRepository(db_path or (DATA_DIR / "lens.sqlite"))
+
+
+def build_source_artifact_repository(
+    db_path: Path | None = None,
+) -> SourceArtifactRepository:
+    return SqliteSourceArtifactRepository(db_path or (DATA_DIR / "lens.sqlite"))
 
 
 def build_persistence_bundle(

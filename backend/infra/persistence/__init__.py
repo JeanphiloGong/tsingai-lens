@@ -6,6 +6,7 @@ from infra.persistence.factory import (
     build_collection_repository,
     build_goal_session_repository,
     build_persistence_bundle,
+    build_source_artifact_repository,
     build_task_repository,
     resolve_persistence_backend,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "build_collection_repository",
     "build_goal_session_repository",
     "build_persistence_bundle",
+    "build_source_artifact_repository",
     "build_task_repository",
     "resolve_persistence_backend",
 ]

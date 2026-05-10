@@ -14,10 +14,14 @@ inspect and cite:
 - `SourceTableRow`
 - `SourceTableCell`
 - `SourceFigure`
+- `SourceArtifactSet`
 
 The domain layer owns semantics such as heading paths, caption proximity,
 complete table rendering, table row construction, unit hints, and stable Source
 table ids.
+
+`SourceArtifactSet` is the collection-level aggregate passed to Source artifact
+repositories when a build replaces a collection's document-structure handoff.
 
 ## Boundaries
 
@@ -26,8 +30,9 @@ cropping, Docling objects, or storage implementations. Those details belong to
 `backend/infra/source/`.
 
 Infrastructure code parses inputs and persists artifacts. When it needs to
-create Source handoff rows, it should construct these domain records first and
-then serialize them into the existing artifact tables.
+create Source handoff rows, it should construct these domain records first.
+SQLite repositories may persist these records directly; parquet output is a
+debug/export representation, not the Source business model.
 
 ## Related Infrastructure
 

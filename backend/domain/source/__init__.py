@@ -4,6 +4,7 @@ from domain.source.artifact_status import ArtifactStatusRecord
 from domain.source.artifacts import (
     SourceBlock,
     SourceBlockType,
+    SourceArtifactSet,
     SourceBoundingBox,
     SourceCharRange,
     SourceDocument,
@@ -36,6 +37,7 @@ __all__ = [
     "CollectionRecord",
     "SourceBlock",
     "SourceBlockType",
+    "SourceArtifactSet",
     "SourceBoundingBox",
     "SourceCharRange",
     "SourceDocument",

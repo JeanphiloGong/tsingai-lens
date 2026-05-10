@@ -124,6 +124,18 @@ class SourceDocument:
     creation_date: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceDocument":
+        return cls(
+            document_id=str(value.get("document_id") or value.get("id") or ""),
+            human_readable_id=safe_int(value.get("human_readable_id")) or 0,
+            title=str(value.get("title") or ""),
+            text=str(value.get("text") or ""),
+            text_unit_ids=_string_tuple(value.get("text_unit_ids")),
+            creation_date=normalize_optional_text(value.get("creation_date")),
+            metadata=_mapping(value.get("metadata")),
+        )
+
     def to_record(self) -> dict[str, Any]:
         return {
             "id": self.document_id,
@@ -143,6 +155,16 @@ class SourceTextUnit:
     text: str
     n_tokens: int | None
     document_ids: tuple[str, ...]
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceTextUnit":
+        return cls(
+            text_unit_id=str(value.get("text_unit_id") or value.get("id") or ""),
+            human_readable_id=safe_int(value.get("human_readable_id")) or 0,
+            text=str(value.get("text") or ""),
+            n_tokens=safe_int(value.get("n_tokens")),
+            document_ids=_string_tuple(value.get("document_ids")),
+        )
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -167,6 +189,22 @@ class SourceBlock:
     char_range: SourceCharRange | None = None
     heading_path: str | None = None
     heading_level: int | None = None
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceBlock":
+        return cls(
+            block_id=str(value.get("block_id") or ""),
+            document_id=str(value.get("document_id") or value.get("id") or ""),
+            block_type=str(value.get("block_type") or "paragraph"),
+            text=str(value.get("text") or ""),
+            block_order=safe_int(value.get("block_order")) or 0,
+            text_unit_ids=_string_tuple(value.get("text_unit_ids")),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            char_range=SourceCharRange.from_value(value.get("char_range")),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+            heading_level=safe_int(value.get("heading_level")),
+        )
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -238,6 +276,22 @@ class SourceTable:
     @property
     def col_count(self) -> int:
         return max((len(row) for row in self.table_matrix), default=0)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceTable":
+        return cls(
+            table_id=str(value.get("table_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            table_order=safe_int(value.get("table_order")) or 0,
+            caption_text=normalize_optional_text(value.get("caption_text")),
+            caption_block_id=normalize_optional_text(value.get("caption_block_id")),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+            column_headers=_string_tuple(value.get("column_headers")),
+            table_matrix=_table_matrix_tuple(value.get("table_matrix")),
+            metadata=_mapping(value.get("metadata")),
+        )
 
     def to_record(self) -> dict[str, Any]:
         matrix = [list(row) for row in self.table_matrix]
@@ -319,6 +373,19 @@ class SourceTableRow:
     bbox: SourceBoundingBox | None = None
     heading_path: str | None = None
 
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceTableRow":
+        return cls(
+            row_id=str(value.get("row_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            table_id=str(value.get("table_id") or ""),
+            row_index=safe_int(value.get("row_index")) or 0,
+            row_text=str(value.get("row_text") or ""),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+        )
+
     def to_record(self) -> dict[str, Any]:
         return {
             "row_id": self.row_id,
@@ -350,6 +417,26 @@ class SourceFigure:
     asset_sha256: str | None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceFigure":
+        return cls(
+            figure_id=str(value.get("figure_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            figure_order=safe_int(value.get("figure_order")) or 0,
+            figure_label=normalize_optional_text(value.get("figure_label")),
+            caption_text=normalize_optional_text(value.get("caption_text")),
+            caption_block_id=normalize_optional_text(value.get("caption_block_id")),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+            image_path=normalize_optional_text(value.get("image_path")),
+            image_mime_type=normalize_optional_text(value.get("image_mime_type")),
+            image_width=safe_int(value.get("image_width")),
+            image_height=safe_int(value.get("image_height")),
+            asset_sha256=normalize_optional_text(value.get("asset_sha256")),
+            metadata=_mapping(value.get("metadata")),
+        )
+
     def to_record(self) -> dict[str, Any]:
         return {
             "figure_id": self.figure_id,
@@ -368,6 +455,52 @@ class SourceFigure:
             "asset_sha256": self.asset_sha256,
             "metadata": dict(self.metadata),
         }
+
+
+@dataclass(frozen=True)
+class SourceArtifactSet:
+    documents: tuple[SourceDocument, ...] = ()
+    text_units: tuple[SourceTextUnit, ...] = ()
+    blocks: tuple[SourceBlock, ...] = ()
+    tables: tuple[SourceTable, ...] = ()
+    table_rows: tuple[SourceTableRow, ...] = ()
+    table_cells: tuple[SourceTableCell, ...] = ()
+    figures: tuple[SourceFigure, ...] = ()
+
+    @classmethod
+    def from_records(
+        cls,
+        *,
+        documents: Iterable[Mapping[str, Any]] = (),
+        text_units: Iterable[Mapping[str, Any]] = (),
+        blocks: Iterable[Mapping[str, Any]] = (),
+        tables: Iterable[Mapping[str, Any]] = (),
+        table_rows: Iterable[Mapping[str, Any]] = (),
+        table_cells: Iterable[Mapping[str, Any]] = (),
+        figures: Iterable[Mapping[str, Any]] = (),
+    ) -> "SourceArtifactSet":
+        return cls(
+            documents=tuple(SourceDocument.from_record(item) for item in documents),
+            text_units=tuple(SourceTextUnit.from_record(item) for item in text_units),
+            blocks=tuple(SourceBlock.from_record(item) for item in blocks),
+            tables=tuple(SourceTable.from_record(item) for item in tables),
+            table_rows=tuple(SourceTableRow.from_record(item) for item in table_rows),
+            table_cells=tuple(SourceTableCell.from_record(item) for item in table_cells),
+            figures=tuple(SourceFigure.from_record(item) for item in figures),
+        )
+
+    def is_empty(self) -> bool:
+        return not any(
+            (
+                self.documents,
+                self.text_units,
+                self.blocks,
+                self.tables,
+                self.table_rows,
+                self.table_cells,
+                self.figures,
+            )
+        )
 
 
 def build_heading_blocks(
@@ -621,6 +754,66 @@ def _is_missing_value(value: Any) -> bool:
     return False
 
 
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if _is_missing_value(value):
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return (text,)
+            return _string_tuple(parsed)
+        return (text,)
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, Mapping)):
+        return tuple(str(item) for item in value if not _is_missing_value(item))
+    return (str(value),)
+
+
+def _table_matrix_tuple(value: Any) -> tuple[tuple[str, ...], ...]:
+    if _is_missing_value(value):
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return ((text,),)
+        return _table_matrix_tuple(parsed)
+    if not isinstance(value, Iterable) or isinstance(value, (bytes, Mapping)):
+        return ((str(value),),)
+
+    rows = []
+    for row in value:
+        if isinstance(row, str) or not isinstance(row, Iterable):
+            rows.append((str(row),))
+        else:
+            rows.append(tuple(str(cell) for cell in row))
+    return tuple(rows)
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    if _is_missing_value(value):
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, Mapping) else {}
+    return {}
+
+
 def _build_caption_blocks(
     blocks: Iterable[SourceBlock | Mapping[str, Any]],
     block_type: str,
@@ -707,6 +900,7 @@ __all__ = [
     "SourceCharRange",
     "SourceDocument",
     "SourceFigure",
+    "SourceArtifactSet",
     "SourceLayoutBlock",
     "SourceTable",
     "SourceTableCell",

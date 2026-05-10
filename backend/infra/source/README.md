@@ -9,6 +9,8 @@ and cite.
 The Source business records and shared structure logic live in
 `backend/domain/source/`. Infrastructure should parse input files, build those
 domain records, and serialize them into the persisted artifact tables.
+The SQLite Source artifact repository is the structured persistence path; local
+parquet files remain useful for previews, exports, and debugging.
 
 Source does not extract scientific facts. It does not decide materials,
 samples, methods, measurements, baselines, comparisons, or report content.

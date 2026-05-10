@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from application.source.collection_service import CollectionService
 from infra.persistence.factory import (
+    build_core_fact_repository,
     build_goal_session_repository,
     build_persistence_bundle,
     build_source_artifact_repository,
@@ -47,6 +48,13 @@ def test_build_goal_session_repository_uses_sqlite_inside_infra(tmp_path):
 
 def test_build_source_artifact_repository_uses_sqlite_inside_infra(tmp_path):
     repository = build_source_artifact_repository(tmp_path / "lens.sqlite")
+
+    assert repository.backend_name == "sqlite"
+    assert repository.db_path == (tmp_path / "lens.sqlite").resolve()
+
+
+def test_build_core_fact_repository_uses_sqlite_inside_infra(tmp_path):
+    repository = build_core_fact_repository(tmp_path / "lens.sqlite")
 
     assert repository.backend_name == "sqlite"
     assert repository.db_path == (tmp_path / "lens.sqlite").resolve()

@@ -28,7 +28,10 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfilesNotReadyError,
 )
 from application.source.collection_service import CollectionService
-from application.core.semantic_build.paper_facts_service import PaperFactsNotReadyError, PaperFactsService
+from application.core.semantic_build.paper_facts_service import (
+    PaperFactsNotReadyError,
+    PaperFactsService,
+)
 from application.source.artifact_registry_service import ArtifactRegistryService
 from domain.core.comparison import (
     CollectionComparableResult,
@@ -36,10 +39,12 @@ from domain.core.comparison import (
     ComparisonRowRecord,
     evaluate_collection_reassessment_reasons,
 )
+from domain.ports import CoreFactRepository
 from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
     restore_frame_from_storage,
 )
+from infra.persistence.factory import build_core_fact_repository
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +195,7 @@ class ComparisonService:
         artifact_registry_service: ArtifactRegistryService | None = None,
         paper_facts_service: PaperFactsService | None = None,
         document_profile_service: DocumentProfileService | None = None,
+        core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.artifact_registry_service = (
@@ -202,6 +208,13 @@ class ComparisonService:
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
+        )
+        self.core_fact_repository = (
+            core_fact_repository
+            or getattr(self.paper_facts_service, "core_fact_repository", None)
+            or build_core_fact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
         )
         self.comparable_result_assembler = ComparableResultAssembler()
         self.comparison_row_projector = ComparisonRowProjector()
@@ -832,6 +845,14 @@ class ComparisonService:
             row_table,
             _COMPARISON_JSON_COLUMNS,
         ).to_parquet(output_dir / _COMPARISON_ROWS_FILE, index=False)
+        self._store_comparison_artifacts(
+            collection_id=collection_id,
+            semantic_tables=ComparisonSemanticTables(
+                comparable_results=comparable_results,
+                collection_comparable_results=refreshed_scoped_results,
+            ),
+            row_table=row_table,
+        )
         write_core_semantic_manifest(output_dir)
         self._invalidate_corpus_comparable_results_cache()
         self.artifact_registry_service.upsert(collection_id, output_dir)
@@ -933,40 +954,39 @@ class ComparisonService:
         collection_id: str,
         base_dir: Path,
     ) -> ComparisonInputFrames:
-        required = (
-            _SAMPLE_VARIANTS_FILE,
-            _MEASUREMENT_RESULTS_FILE,
-            _TEST_CONDITIONS_FILE,
-            _BASELINE_REFERENCES_FILE,
-        )
-        if any(not (base_dir / name).is_file() for name in required):
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if not self._paper_facts_available_for_comparison(facts):
             try:
                 self.paper_facts_service.build_paper_facts(collection_id, base_dir)
             except PaperFactsNotReadyError as exc:
                 raise ComparisonRowsNotReadyError(collection_id, exc.output_dir) from exc
-
-        missing = [name for name in required if not (base_dir / name).is_file()]
-        if missing:
-            raise ComparisonRowsNotReadyError(collection_id, base_dir)
+            facts = self.core_fact_repository.read_collection_facts(collection_id)
 
         return ComparisonInputFrames(
-            sample_variants=restore_frame_from_storage(
-                pd.read_parquet(base_dir / _SAMPLE_VARIANTS_FILE),
-                _SAMPLE_VARIANT_JSON_COLUMNS,
-            ),
-            measurement_results=restore_frame_from_storage(
-                pd.read_parquet(base_dir / _MEASUREMENT_RESULTS_FILE),
-                _MEASUREMENT_RESULT_JSON_COLUMNS,
-            ),
-            test_conditions=restore_frame_from_storage(
-                pd.read_parquet(base_dir / _TEST_CONDITIONS_FILE),
-                _TEST_CONDITION_JSON_COLUMNS,
-            ),
-            baseline_references=restore_frame_from_storage(
-                pd.read_parquet(base_dir / _BASELINE_REFERENCES_FILE),
-                _BASELINE_REFERENCE_JSON_COLUMNS,
-            ),
+            sample_variants=self._records_to_table(facts.sample_variants),
+            measurement_results=self._records_to_table(facts.measurement_results),
+            test_conditions=self._records_to_table(facts.test_conditions),
+            baseline_references=self._records_to_table(facts.baseline_references),
         )
+
+    def _paper_facts_available_for_comparison(self, facts: Any) -> bool:
+        return any(
+            (
+                facts.evidence_anchors,
+                facts.method_facts,
+                facts.sample_variants,
+                facts.test_conditions,
+                facts.baseline_references,
+                facts.measurement_results,
+                facts.characterization_observations,
+                facts.structure_features,
+            )
+        )
+
+    def _records_to_table(self, records: tuple[Any, ...]) -> pd.DataFrame:
+        if not records:
+            return pd.DataFrame()
+        return pd.DataFrame([record.to_record() for record in records])
 
     def _write_comparison_artifacts(
         self,
@@ -989,9 +1009,46 @@ class ComparisonService:
             row_table,
             _COMPARISON_JSON_COLUMNS,
         ).to_parquet(base_dir / _COMPARISON_ROWS_FILE, index=False)
+        self._store_comparison_artifacts(
+            collection_id=collection_id,
+            semantic_tables=semantic_tables,
+            row_table=row_table,
+        )
         write_core_semantic_manifest(base_dir)
         self._invalidate_corpus_comparable_results_cache()
         self.artifact_registry_service.upsert(collection_id, base_dir)
+
+    def _store_comparison_artifacts(
+        self,
+        *,
+        collection_id: str,
+        semantic_tables: ComparisonSemanticTables,
+        row_table: pd.DataFrame,
+    ) -> None:
+        self.core_fact_repository.replace_collection_comparison_artifacts(
+            collection_id,
+            self._records_from_table(
+                semantic_tables.comparable_results,
+                ComparableResult,
+            ),
+            self._records_from_table(
+                semantic_tables.collection_comparable_results,
+                CollectionComparableResult,
+            ),
+            self._records_from_table(row_table, ComparisonRowRecord),
+        )
+
+    def _records_from_table(
+        self,
+        table: pd.DataFrame,
+        record_cls: type,
+    ) -> tuple[Any, ...]:
+        if table is None or table.empty:
+            return ()
+        return tuple(
+            record_cls.from_mapping(dict(row))
+            for _, row in table.iterrows()
+        )
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)

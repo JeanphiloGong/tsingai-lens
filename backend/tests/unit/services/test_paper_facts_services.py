@@ -14,6 +14,9 @@ from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
     ComparisonService,
 )
+from application.core.research_view_aggregation_service import (
+    ResearchViewAggregationService,
+)
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.llm.prompts import (
     build_table_batch_mentions_prompt,
@@ -58,6 +61,13 @@ from domain.core.comparison import (
     ResultValue,
     build_collection_assessment_input_fingerprint,
     evaluate_comparison_assessment,
+)
+from domain.core.fact_store import CoreFactSet
+from domain.core.evidence_backbone import (
+    BaselineReference,
+    MeasurementResult,
+    SampleVariant,
+    TestCondition as CoreTestCondition,
 )
 from infra.source.runtime.source_evidence import (
     build_blocks,
@@ -981,6 +991,10 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
 
     collection = collection_service.create_collection("Evidence Collection")
     collection_id = collection["collection_id"]
+    collection_service.repository.write_files(
+        collection_id,
+        [{"filename": "paper.pdf", "stored_filename": "paper.pdf"}],
+    )
     output_dir = collection_service.get_paths(collection_id).output_dir
 
     documents = pd.DataFrame(
@@ -1039,6 +1053,22 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     assert "limited" in set(comparisons["comparability_status"]) or "comparable" in set(
         comparisons["comparability_status"]
     )
+    stored_facts = paper_facts_service.core_fact_repository.read_collection_facts(
+        collection_id
+    )
+    assert stored_facts.document_profiles[0].document_id == "paper-1"
+    assert len(stored_facts.measurement_results) == 1
+    assert len(stored_facts.comparison_rows) == 1
+    research_view_service = ResearchViewAggregationService(
+        collection_service=collection_service,
+        artifact_registry_service=artifact_registry,
+        document_profile_service=document_profile_service,
+        paper_facts_service=paper_facts_service,
+        comparison_service=comparison_service,
+    )
+    research_view = research_view_service.get_collection_research_view(collection_id)
+    assert research_view["overview"]["measurement_count"] == 1
+    assert research_view["paper_coverage"][0]["document_id"] == "paper-1"
     characterization = pd.read_parquet(output_dir / "characterization_observations.parquet")
     structure_features = pd.read_parquet(output_dir / "structure_features.parquet")
     method_facts = pd.read_parquet(output_dir / "method_facts.parquet")
@@ -1081,6 +1111,100 @@ def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, 
     assert artifacts["comparable_results_ready"] is True
     assert artifacts["collection_comparable_results_ready"] is True
     assert artifacts["comparison_rows_ready"] is True
+
+
+def test_comparison_build_reads_inputs_from_core_fact_repository(monkeypatch, tmp_path):
+    from application.source.artifact_registry_service import ArtifactRegistryService
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    paper_facts_service = PaperFactsService(
+        collection_service,
+        artifact_registry,
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        artifact_registry,
+        paper_facts_service,
+    )
+    collection = collection_service.create_collection("Repository Comparison Collection")
+    collection_id = collection["collection_id"]
+    output_dir = collection_service.get_paths(collection_id).output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    comparison_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            sample_variants=(
+                SampleVariant.from_mapping(
+                    {
+                        "variant_id": "var-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "variant_label": "as-built",
+                        "host_material_system": {"composition": "Ti-6Al-4V"},
+                        "composition": "Ti-6Al-4V",
+                        "process_context": {"process_family": "LPBF"},
+                        "source_anchor_ids": ["anc-1"],
+                    }
+                ),
+            ),
+            test_conditions=(
+                CoreTestCondition.from_mapping(
+                    {
+                        "test_condition_id": "tc-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "condition_payload": {"test_method": "tensile"},
+                        "evidence_anchor_ids": ["anc-1"],
+                    }
+                ),
+            ),
+            baseline_references=(
+                BaselineReference.from_mapping(
+                    {
+                        "baseline_id": "base-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "baseline_type": "as_built_reference",
+                        "baseline_label": "as-built",
+                        "evidence_anchor_ids": ["anc-1"],
+                    }
+                ),
+            ),
+            measurement_results=(
+                MeasurementResult.from_mapping(
+                    {
+                        "result_id": "res-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "variant_id": "var-1",
+                        "property_normalized": "yield_strength",
+                        "result_type": "scalar",
+                        "value_payload": {"value": 940.0, "source_value_text": "940"},
+                        "unit": "MPa",
+                        "test_condition_id": "tc-1",
+                        "baseline_id": "base-1",
+                        "evidence_anchor_ids": ["anc-1"],
+                    }
+                ),
+            ),
+        ),
+    )
+
+    def fail_build(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("comparison inputs should come from CoreFactRepository")
+
+    monkeypatch.setattr(paper_facts_service, "build_paper_facts", fail_build)
+
+    comparisons = comparison_service.build_comparison_rows(collection_id, output_dir)
+
+    assert not comparisons.empty
+    assert comparisons.iloc[0]["comparable_result_id"].startswith("cres_")
+    assert not (output_dir / "sample_variants.parquet").exists()
+    assert not (output_dir / "measurement_results.parquet").exists()
+    assert (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_evidence_service_builds_table_backed_property_cards(monkeypatch, tmp_path):

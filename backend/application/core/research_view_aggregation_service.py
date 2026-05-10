@@ -6,24 +6,20 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
-
 from application.core.comparison_service import (
-    ComparisonRowsNotReadyError,
     ComparisonService,
 )
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
-    DocumentProfilesNotReadyError,
 )
-from application.core.semantic_build.paper_facts_service import (
-    PaperFactsNotReadyError,
-    PaperFactsService,
-)
+from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
+from domain.core.fact_store import CoreFactSet
+from domain.ports import CoreFactRepository
+from infra.persistence.factory import build_core_fact_repository
 
 
 _PROCESS_COLUMN_ORDER = (
@@ -68,6 +64,8 @@ _NON_MATERIAL_SYSTEM_COMPACT_LABELS = {
     "argon",
     "ar",
 }
+_FactRows = dict[str, list[dict[str, Any]]]
+_ComparisonGroups = dict[tuple[str, str, str, str, str], list[dict[str, Any]]]
 
 
 class ResearchViewNotReadyError(RuntimeError):
@@ -116,11 +114,19 @@ class ResearchViewAggregationService:
         paper_facts_service: PaperFactsService | None = None,
         comparison_service: ComparisonService | None = None,
         workspace_service: WorkspaceService | None = None,
+        core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
         self.artifact_registry_service = (
             artifact_registry_service or ArtifactRegistryService()
+        )
+        self.core_fact_repository = (
+            core_fact_repository
+            or getattr(paper_facts_service, "core_fact_repository", None)
+            or build_core_fact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
         )
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
@@ -130,12 +136,14 @@ class ResearchViewAggregationService:
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
             document_profile_service=self.document_profile_service,
+            core_fact_repository=self.core_fact_repository,
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
             paper_facts_service=self.paper_facts_service,
             document_profile_service=self.document_profile_service,
+            core_fact_repository=self.core_fact_repository,
         )
         self.workspace_service = workspace_service or WorkspaceService(
             collection_service=self.collection_service,
@@ -150,8 +158,9 @@ class ResearchViewAggregationService:
         if not files:
             return self._empty_collection_payload(collection_id, collection)
 
-        frames = self._load_fact_frames(collection_id)
-        projection = self._load_comparison_projection(collection_id)
+        facts = self._load_collection_facts(collection_id)
+        frames = self._core_fact_records(facts)
+        projection = self._comparison_projection_from_facts(facts)
         overview = self._build_collection_overview(collection_id, frames, projection)
         paper_coverage = self._build_paper_coverage(collection_id, frames)
         comparable_groups = self._build_comparable_groups(
@@ -222,8 +231,9 @@ class ResearchViewAggregationService:
                 "warnings": [],
             }
 
-        frames = self._load_fact_frames(collection_id)
-        projection = self._load_comparison_projection(collection_id)
+        facts = self._load_collection_facts(collection_id)
+        frames = self._core_fact_records(facts)
+        projection = self._comparison_projection_from_facts(facts)
         comparable_groups = self._build_comparable_groups(
             collection_id,
             projection,
@@ -263,8 +273,9 @@ class ResearchViewAggregationService:
         if not self.collection_service.list_files(collection_id):
             raise ResearchViewMaterialNotFoundError(collection_id, material_id)
 
-        frames = self._load_fact_frames(collection_id)
-        projection = self._load_comparison_projection(collection_id)
+        facts = self._load_collection_facts(collection_id)
+        frames = self._core_fact_records(facts)
+        projection = self._comparison_projection_from_facts(facts)
         material_index_groups = self._build_comparable_groups(
             collection_id,
             projection,
@@ -366,39 +377,72 @@ class ResearchViewAggregationService:
             )
         return self._clean_value(profile)
 
-    def _load_fact_frames(self, collection_id: str) -> dict[str, pd.DataFrame]:
-        try:
-            frames = dict(self.paper_facts_service.read_paper_fact_frames(collection_id))
-        except PaperFactsNotReadyError as exc:
-            raise ResearchViewNotReadyError(collection_id, exc.output_dir) from exc
-        try:
-            frames["document_profiles"] = (
-                self.document_profile_service.read_document_profiles(collection_id)
-            )
-        except (DocumentProfilesNotReadyError, FileNotFoundError):
-            frames["document_profiles"] = pd.DataFrame()
-        return frames
+    def _load_fact_frames(self, collection_id: str) -> _FactRows:
+        return self._core_fact_records(self._load_collection_facts(collection_id))
 
-    def _load_comparison_projection(self, collection_id: str):  # noqa: ANN001
-        try:
-            return self.comparison_service.read_comparison_projection(collection_id)
-        except ComparisonRowsNotReadyError:
+    def _load_collection_facts(self, collection_id: str) -> CoreFactSet:
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if self._core_fact_set_empty(facts):
+            raise ResearchViewNotReadyError(collection_id)
+        return facts
+
+    def _comparison_projection_from_facts(
+        self,
+        facts: CoreFactSet,
+    ) -> list[dict[str, Any]] | None:
+        if not facts.comparison_rows:
             return None
+        return self._records_list(facts.comparison_rows)
+
+    def _core_fact_set_empty(self, facts: CoreFactSet) -> bool:
+        return not any(
+            (
+                facts.document_profiles,
+                facts.evidence_anchors,
+                facts.method_facts,
+                facts.sample_variants,
+                facts.test_conditions,
+                facts.baseline_references,
+                facts.measurement_results,
+                facts.characterization_observations,
+                facts.structure_features,
+            )
+        )
+
+    def _core_fact_records(self, facts: CoreFactSet) -> _FactRows:
+        return {
+            "document_profiles": self._records_list(facts.document_profiles),
+            "evidence_anchors": self._records_list(facts.evidence_anchors),
+            "method_facts": self._records_list(facts.method_facts),
+            "sample_variants": self._records_list(facts.sample_variants),
+            "test_conditions": self._records_list(facts.test_conditions),
+            "baseline_references": self._records_list(facts.baseline_references),
+            "measurement_results": self._records_list(facts.measurement_results),
+            "characterization_observations": self._records_list(
+                facts.characterization_observations
+            ),
+            "structure_features": self._records_list(facts.structure_features),
+        }
+
+    def _records_list(self, records: tuple[Any, ...]) -> list[dict[str, Any]]:
+        if not records:
+            return []
+        return [self._record_to_dict(record.to_record()) for record in records]
 
     def _build_collection_overview(
         self,
         collection_id: str,
-        frames: dict[str, pd.DataFrame],
-        projection,  # noqa: ANN001
+        frames: _FactRows,
+        projection: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        sample_variants = frames.get("sample_variants", pd.DataFrame())
-        measurement_results = frames.get("measurement_results", pd.DataFrame())
-        test_conditions = frames.get("test_conditions", pd.DataFrame())
-        evidence_anchors = frames.get("evidence_anchors", pd.DataFrame())
-        profiles = frames.get("document_profiles", pd.DataFrame())
+        sample_variants = frames.get("sample_variants", [])
+        measurement_results = frames.get("measurement_results", [])
+        test_conditions = frames.get("test_conditions", [])
+        evidence_anchors = frames.get("evidence_anchors", [])
+        profiles = frames.get("document_profiles", [])
         real_variants = [
-            self._series_to_dict(row)
-            for _, row in sample_variants.iterrows()
+            row
+            for row in sample_variants
             if self._is_real_sample_variant(row)
         ]
         process_variables = sorted(
@@ -427,26 +471,27 @@ class ResearchViewAggregationService:
         measured_properties = sorted(
             {
                 prop
-                for prop in self._series_values(measurement_results, "property_normalized")
+                for prop in self._record_values(
+                    measurement_results,
+                    "property_normalized",
+                )
                 if prop
             }
         )
         condition_families = sorted(
             {
                 axis["axis_name"]
-                for _, condition in test_conditions.iterrows()
+                for condition in test_conditions
                 if (
                     axis := self._condition_axis_from_payload(
-                        self._series_to_dict(condition).get("condition_payload")
+                        condition.get("condition_payload")
                     )
                 )
             }
         )
         comparable_group_count = 0
         if projection is not None:
-            comparable_group_count = len(
-                self._group_comparison_rows(projection.comparison_rows)
-            )
+            comparable_group_count = len(self._group_comparison_rows(projection))
         return {
             "collection_id": collection_id,
             "document_count": self._document_count(frames, profiles),
@@ -464,20 +509,20 @@ class ResearchViewAggregationService:
     def _build_paper_coverage(
         self,
         collection_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
-        profiles = frames.get("document_profiles", pd.DataFrame())
+        profiles = frames.get("document_profiles", [])
         rows: list[dict[str, Any]] = []
         for document_id in sorted(self._document_ids_from_frames(frames)):
             document_frames = self._document_frames(frames, document_id)
             sample_count = sum(
                 1
-                for _, row in document_frames["sample_variants"].iterrows()
+                for row in document_frames["sample_variants"]
                 if self._is_real_sample_variant(row)
             )
             process_keys = {
                 key
-                for _, row in document_frames["sample_variants"].iterrows()
+                for row in document_frames["sample_variants"]
                 for key, value in self._as_mapping(row.get("process_context")).items()
                 if self._has_observed_value(value)
             }
@@ -536,7 +581,7 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         document_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> dict[str, Any]:
         document_frames = self._document_frames(frames, document_id)
         sample_matrix = self._build_sample_matrix(
@@ -568,7 +613,7 @@ class ResearchViewAggregationService:
             "collection_id": collection_id,
             "document_id": document_id,
             "paper_title": self._document_title(
-                frames.get("document_profiles", pd.DataFrame()),
+                frames.get("document_profiles", []),
                 document_id,
             ),
             "state": state,
@@ -592,13 +637,13 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         document_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> dict[str, Any]:
-        variants = frames.get("sample_variants", pd.DataFrame())
-        measurements = frames.get("measurement_results", pd.DataFrame())
+        variants = frames.get("sample_variants", [])
+        measurements = frames.get("measurement_results", [])
         variant_rows = [
-            self._series_to_dict(row)
-            for _, row in variants.iterrows()
+            row
+            for row in variants
             if self._is_real_sample_variant(row)
         ]
         variant_ids = {
@@ -609,7 +654,7 @@ class ResearchViewAggregationService:
         for variant_id in sorted(
             {
                 self._safe_text(row.get("variant_id"))
-                for _, row in measurements.iterrows()
+                for row in measurements
                 if self._safe_text(row.get("variant_id"))
             }
             - variant_ids
@@ -626,8 +671,7 @@ class ResearchViewAggregationService:
             )
 
         measurements_by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for _, row in measurements.iterrows():
-            record = self._series_to_dict(row)
+        for record in measurements:
             variant_id = self._safe_text(record.get("variant_id")) or "unassigned"
             measurements_by_variant[variant_id].append(record)
 
@@ -729,16 +773,12 @@ class ResearchViewAggregationService:
 
     def _build_sample_matrix_row(
         self,
-        variant_row: dict[str, Any] | pd.Series,
+        variant_row: dict[str, Any],
         measurements: list[dict[str, Any]],
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         document_material_keys: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        variant = (
-            self._series_to_dict(variant_row)
-            if isinstance(variant_row, pd.Series)
-            else dict(variant_row)
-        )
+        variant = dict(variant_row)
         variant_id = self._safe_text(variant.get("variant_id")) or "unassigned"
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         labels: dict[str, str] = {}
@@ -790,12 +830,8 @@ class ResearchViewAggregationService:
             "warnings": warnings,
         }
 
-    def _is_real_sample_variant(self, variant_row: dict[str, Any] | pd.Series) -> bool:
-        variant = (
-            self._series_to_dict(variant_row)
-            if isinstance(variant_row, pd.Series)
-            else dict(variant_row)
-        )
+    def _is_real_sample_variant(self, variant_row: dict[str, Any]) -> bool:
+        variant = dict(variant_row)
         variant_id = self._safe_text(variant.get("variant_id"))
         if not variant_id:
             return False
@@ -824,12 +860,8 @@ class ResearchViewAggregationService:
             for term in _GENERIC_VARIANT_TERMS
         )
 
-    def _measurement_cell_key(self, measurement_row: dict[str, Any] | pd.Series) -> tuple:
-        measurement = (
-            self._series_to_dict(measurement_row)
-            if isinstance(measurement_row, pd.Series)
-            else dict(measurement_row)
-        )
+    def _measurement_cell_key(self, measurement_row: dict[str, Any]) -> tuple:
+        measurement = dict(measurement_row)
         return (
             self._safe_text(measurement.get("property_normalized"))
             or "unspecified_property",
@@ -890,7 +922,7 @@ class ResearchViewAggregationService:
     def _build_evidence_backed_value(
         self,
         measurements: list[dict[str, Any]],
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> dict[str, Any]:
         if not measurements:
             return self._missing_evidence_backed_value()
@@ -964,12 +996,12 @@ class ResearchViewAggregationService:
         self,
         fact_ids: list[str],
         anchor_ids: list[str],
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
-        anchors = frames.get("evidence_anchors", pd.DataFrame())
+        anchors = frames.get("evidence_anchors", [])
         anchor_lookup = {
-            self._safe_text(row.get("anchor_id")): self._series_to_dict(row)
-            for _, row in anchors.iterrows()
+            self._safe_text(row.get("anchor_id")): row
+            for row in anchors
             if self._safe_text(row.get("anchor_id"))
         }
         deduped_anchor_ids = self._dedupe_strings(anchor_ids)
@@ -1024,24 +1056,23 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         document_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
-        measurements = frames.get("measurement_results", pd.DataFrame())
-        conditions = frames.get("test_conditions", pd.DataFrame())
-        variants = frames.get("sample_variants", pd.DataFrame())
+        measurements = frames.get("measurement_results", [])
+        conditions = frames.get("test_conditions", [])
+        variants = frames.get("sample_variants", [])
         condition_lookup = {
-            self._safe_text(row.get("test_condition_id")): self._series_to_dict(row)
-            for _, row in conditions.iterrows()
+            self._safe_text(row.get("test_condition_id")): row
+            for row in conditions
             if self._safe_text(row.get("test_condition_id"))
         }
         variant_lookup = {
-            self._safe_text(row.get("variant_id")): self._series_to_dict(row)
-            for _, row in variants.iterrows()
+            self._safe_text(row.get("variant_id")): row
+            for row in variants
             if self._safe_text(row.get("variant_id"))
         }
         grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
-        for _, row in measurements.iterrows():
-            measurement = self._series_to_dict(row)
+        for measurement in measurements:
             condition_id = self._safe_text(measurement.get("test_condition_id"))
             condition = condition_lookup.get(condition_id or "")
             if not condition:
@@ -1132,8 +1163,8 @@ class ResearchViewAggregationService:
     def _build_comparable_groups(
         self,
         collection_id: str,
-        projection,  # noqa: ANN001
-        frames: dict[str, pd.DataFrame],
+        projection: list[dict[str, Any]] | None,
+        frames: _FactRows,
         *,
         include_matrix: bool = True,
         material_key: str | None = None,
@@ -1141,10 +1172,8 @@ class ResearchViewAggregationService:
         if projection is None:
             return []
         groups: list[dict[str, Any]] = []
-        for group_key, group_rows in self._group_comparison_rows(
-            projection.comparison_rows
-        ).items():
-            rows = [self._series_to_dict(row) for _, row in group_rows.iterrows()]
+        for group_key, group_rows in self._group_comparison_rows(projection).items():
+            rows = [dict(row) for row in group_rows]
             material, process, test_condition, baseline, variable_axis = group_key
             if material_key is not None and (
                 self._material_key_from_label(material) != material_key
@@ -1221,12 +1250,11 @@ class ResearchViewAggregationService:
 
     def _build_cross_paper_matrix(
         self,
-        group_rows: pd.DataFrame,
-        frames: dict[str, pd.DataFrame],
+        group_rows: list[dict[str, Any]],
+        frames: _FactRows,
     ) -> dict[str, Any]:
         rows = []
-        for _, row in group_rows.iterrows():
-            record = self._series_to_dict(row)
+        for record in group_rows:
             result = self._evidence_value_from_comparison_row(record, frames)
             rows.append(
                 {
@@ -1256,7 +1284,7 @@ class ResearchViewAggregationService:
             )
         group_id = self._slug(
             "|".join(
-                self._safe_text(group_rows.iloc[0].get(column)) or ""
+                self._safe_text(group_rows[0].get(column)) or ""
                 for column in (
                     "material_system_normalized",
                     "process_normalized",
@@ -1265,7 +1293,7 @@ class ResearchViewAggregationService:
                     "variable_axis",
                 )
             )
-        ) if not group_rows.empty else "empty"
+        ) if group_rows else "empty"
         return {
             "matrix_id": f"cross-paper-matrix:{group_id}",
             "group_id": f"comparison-group:{group_id}",
@@ -1303,7 +1331,7 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         document_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
         document_frames = self._document_frames(frames, document_id)
         index = self._build_material_index(document_frames, [])
@@ -1355,7 +1383,7 @@ class ResearchViewAggregationService:
         collection_id: str,
         document_id: str,
         material_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> dict[str, Any] | None:
         document_frames = self._document_frames(frames, document_id)
         material_key = self._material_key_from_material_id(
@@ -1454,8 +1482,8 @@ class ResearchViewAggregationService:
         collection_id: str,  # noqa: ARG002
         document_id: str,
         material_id: str,
-        frames: dict[str, pd.DataFrame],
-    ) -> dict[str, pd.DataFrame]:
+        frames: _FactRows,
+    ) -> _FactRows:
         document_frames = self._document_frames(frames, document_id)
         material_key = self._material_key_from_material_id(
             material_id,
@@ -1463,13 +1491,13 @@ class ResearchViewAggregationService:
             [],
         )
         if material_key is None:
-            return {key: frame.iloc[0:0].copy() for key, frame in document_frames.items()}
+            return {key: [] for key in document_frames}
         return self._filter_frames_for_material_key(material_key, document_frames)
 
     def _build_material_summaries(
         self,
         collection_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         comparable_groups: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         document_material_keys = self._single_material_key_by_document(
@@ -1518,7 +1546,7 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         material_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         comparable_groups: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         material_key = self._material_key_from_material_id(
@@ -1627,24 +1655,24 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         material_key: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
-        profiles = frames.get("document_profiles", pd.DataFrame())
+        profiles = frames.get("document_profiles", [])
         rows: list[dict[str, Any]] = []
         for document_id in sorted(self._document_ids_from_frames(frames)):
             document_frames = self._document_frames(frames, document_id)
-            variants = document_frames.get("sample_variants", pd.DataFrame())
-            measurements = document_frames.get("measurement_results", pd.DataFrame())
-            evidence_anchors = document_frames.get("evidence_anchors", pd.DataFrame())
+            variants = document_frames.get("sample_variants", [])
+            measurements = document_frames.get("measurement_results", [])
+            evidence_anchors = document_frames.get("evidence_anchors", [])
             sample_count = sum(
-                1 for _, row in variants.iterrows() if self._is_real_sample_variant(row)
+                1 for row in variants if self._is_real_sample_variant(row)
             )
-            if sample_count == 0 and measurements.empty:
+            if sample_count == 0 and not measurements:
                 continue
             properties = sorted(
                 {
                     self._safe_text(row.get("property_normalized")) or ""
-                    for _, row in measurements.iterrows()
+                    for row in measurements
                     if self._safe_text(row.get("property_normalized"))
                 }
             )
@@ -1672,7 +1700,7 @@ class ResearchViewAggregationService:
                     "process_families": sorted(
                         {
                             process
-                            for _, row in variants.iterrows()
+                            for row in variants
                             if (process := self._process_family_from_variant(row))
                         }
                     ),
@@ -1697,24 +1725,23 @@ class ResearchViewAggregationService:
     def _build_material_sample_matrix(
         self,
         material_key: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         document_material_keys: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        variants = frames.get("sample_variants", pd.DataFrame())
-        measurements = frames.get("measurement_results", pd.DataFrame())
+        variants = frames.get("sample_variants", [])
+        measurements = frames.get("measurement_results", [])
         material_document_keys = document_material_keys or {
             document_id: material_key
             for document_id in self._document_ids_from_frames(frames)
         }
         variant_rows = [
-            self._series_to_dict(row)
-            for _, row in variants.iterrows()
+            row
+            for row in variants
             if self._material_key_from_variant(row, material_document_keys) == material_key
             and self._is_real_sample_variant(row)
         ]
         measurements_by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for _, row in measurements.iterrows():
-            record = self._series_to_dict(row)
+        for record in measurements:
             variant_id = self._safe_text(record.get("variant_id")) or "unassigned"
             measurements_by_variant[variant_id].append(record)
 
@@ -1797,12 +1824,11 @@ class ResearchViewAggregationService:
     def _build_material_process_ranges(
         self,
         material_key: str,  # noqa: ARG002
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
-        variants = frames.get("sample_variants", pd.DataFrame())
+        variants = frames.get("sample_variants", [])
         grouped: dict[str, list[tuple[dict[str, Any], Any]]] = defaultdict(list)
-        for _, row in variants.iterrows():
-            variant = self._series_to_dict(row)
+        for variant in variants:
             for key, value in self._as_mapping(
                 variant.get("process_context")
             ).items():
@@ -1850,12 +1876,11 @@ class ResearchViewAggregationService:
     def _build_material_property_summaries(
         self,
         material_key: str,  # noqa: ARG002
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
-        measurements = frames.get("measurement_results", pd.DataFrame())
+        measurements = frames.get("measurement_results", [])
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for _, row in measurements.iterrows():
-            measurement = self._series_to_dict(row)
+        for measurement in measurements:
             property_name = (
                 self._safe_text(measurement.get("property_normalized"))
                 or "unspecified_property"
@@ -1926,7 +1951,7 @@ class ResearchViewAggregationService:
     def _build_material_condition_series(
         self,
         collection_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
         series: list[dict[str, Any]] = []
         for document_id in sorted(self._document_ids_from_frames(frames)):
@@ -1941,12 +1966,11 @@ class ResearchViewAggregationService:
 
     def _build_document_process_conditions(
         self,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
-        variants = frames.get("sample_variants", pd.DataFrame())
+        variants = frames.get("sample_variants", [])
         conditions: list[dict[str, Any]] = []
-        for _, row in variants.iterrows():
-            variant = self._series_to_dict(row)
+        for variant in variants:
             process_context = self._as_mapping(variant.get("process_context"))
             if not process_context:
                 continue
@@ -1966,12 +1990,11 @@ class ResearchViewAggregationService:
 
     def _build_document_test_conditions(
         self,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
-        conditions = frames.get("test_conditions", pd.DataFrame())
+        conditions = frames.get("test_conditions", [])
         rows: list[dict[str, Any]] = []
-        for _, row in conditions.iterrows():
-            condition = self._series_to_dict(row)
+        for condition in conditions:
             rows.append(
                 {
                     "test_condition_id": self._safe_text(
@@ -1993,7 +2016,7 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,  # noqa: ARG002
         document_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[dict[str, Any]]:
         sample_matrix = self._build_sample_matrix(collection_id, document_id, frames)
         grouped: dict[str, list[tuple[dict[str, Any], str, dict[str, Any]]]] = defaultdict(list)
@@ -2099,19 +2122,18 @@ class ResearchViewAggregationService:
 
     def _single_material_key_by_document(
         self,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         comparable_groups: list[dict[str, Any]],
     ) -> dict[str, str]:
         candidates: dict[str, set[str]] = defaultdict(set)
-        profiles = frames.get("document_profiles", pd.DataFrame())
+        profiles = frames.get("document_profiles", [])
         for document_id in self._document_ids_from_frames(frames):
             candidates[document_id].update(
                 self._material_keys_from_document_profile(profiles, document_id)
             )
 
-        variants = frames.get("sample_variants", pd.DataFrame())
-        for _, row in variants.iterrows():
-            variant = self._series_to_dict(row)
+        variants = frames.get("sample_variants", [])
+        for variant in variants:
             if not self._is_real_sample_variant(variant):
                 continue
             document_id = self._safe_text(variant.get("document_id"))
@@ -2135,17 +2157,12 @@ class ResearchViewAggregationService:
 
     def _material_keys_from_document_profile(
         self,
-        profiles: pd.DataFrame,
+        profiles: list[dict[str, Any]],
         document_id: str,
     ) -> set[str]:
-        if profiles is None or profiles.empty or "document_id" not in profiles.columns:
+        profile = self._first_record_by_value(profiles, "document_id", document_id)
+        if profile is None:
             return set()
-        matched = profiles[
-            profiles["document_id"].apply(lambda value: self._safe_text(value) == document_id)
-        ]
-        if matched.empty:
-            return set()
-        profile = self._series_to_dict(matched.iloc[0])
         material_keys: set[str] = set()
         for key in (
             "title",
@@ -2187,7 +2204,7 @@ class ResearchViewAggregationService:
 
     def _build_material_index(
         self,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         comparable_groups: list[dict[str, Any]],
     ) -> dict[str, dict[str, Any]]:
         index: dict[str, dict[str, Any]] = {}
@@ -2196,9 +2213,8 @@ class ResearchViewAggregationService:
             frames,
             comparable_groups,
         )
-        variants = frames.get("sample_variants", pd.DataFrame())
-        for _, row in variants.iterrows():
-            variant = self._series_to_dict(row)
+        variants = frames.get("sample_variants", [])
+        for variant in variants:
             if not self._is_real_sample_variant(variant):
                 continue
             material_key = self._material_key_from_variant(
@@ -2224,9 +2240,8 @@ class ResearchViewAggregationService:
             if process := self._process_family_from_variant(variant):
                 entry["process_families"].add(process)
 
-        measurements = frames.get("measurement_results", pd.DataFrame())
-        for _, row in measurements.iterrows():
-            measurement = self._series_to_dict(row)
+        measurements = frames.get("measurement_results", [])
+        for measurement in measurements:
             material_key = variant_to_key.get(
                 self._safe_text(measurement.get("variant_id")) or ""
             )
@@ -2330,111 +2345,85 @@ class ResearchViewAggregationService:
     def _filter_frames_for_material_key(
         self,
         material_key: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         document_material_keys: dict[str, str] | None = None,
-    ) -> dict[str, pd.DataFrame]:
+    ) -> _FactRows:
         material_keys_by_document = document_material_keys or (
             self._single_material_key_by_document(frames, [])
         )
-        variants = frames.get("sample_variants", pd.DataFrame())
-        if variants is None or variants.empty:
-            selected_variants = pd.DataFrame(
-                columns=list(variants.columns) if variants is not None else []
+        variants = frames.get("sample_variants", [])
+        selected_variants = [
+            variant
+            for variant in variants
+            if self._material_key_from_variant(
+                variant,
+                material_keys_by_document,
             )
-        else:
-            selected_variants = variants[
-                variants.apply(
-                    lambda row: self._material_key_from_variant(
-                        row,
-                        material_keys_by_document,
-                    )
-                    == material_key
-                    and self._is_real_sample_variant(row),
-                    axis=1,
-                )
-            ].copy()
+            == material_key
+            and self._is_real_sample_variant(variant)
+        ]
         variant_ids = {
             self._safe_text(row.get("variant_id")) or ""
-            for _, row in selected_variants.iterrows()
+            for row in selected_variants
             if self._safe_text(row.get("variant_id"))
         }
 
-        measurements = frames.get("measurement_results", pd.DataFrame())
-        if (
-            measurements is None
-            or measurements.empty
-            or "variant_id" not in measurements.columns
-        ):
-            selected_measurements = pd.DataFrame(
-                columns=list(measurements.columns) if measurements is not None else []
-            )
-        else:
-            selected_measurements = measurements[
-                measurements["variant_id"].apply(
-                    lambda value: self._safe_text(value) in variant_ids
-                )
-            ].copy()
+        measurements = frames.get("measurement_results", [])
+        selected_measurements = [
+            measurement
+            for measurement in measurements
+            if self._safe_text(measurement.get("variant_id")) in variant_ids
+        ]
 
         condition_ids = {
             self._safe_text(row.get("test_condition_id")) or ""
-            for _, row in selected_measurements.iterrows()
+            for row in selected_measurements
             if self._safe_text(row.get("test_condition_id"))
         }
-        test_conditions = frames.get("test_conditions", pd.DataFrame())
-        if (
-            test_conditions is None
-            or test_conditions.empty
-            or "test_condition_id" not in test_conditions.columns
-        ):
-            selected_conditions = pd.DataFrame(
-                columns=list(test_conditions.columns) if test_conditions is not None else []
-            )
-        else:
-            selected_conditions = test_conditions[
-                test_conditions["test_condition_id"].apply(
-                    lambda value: self._safe_text(value) in condition_ids
-                )
-            ].copy()
+        test_conditions = frames.get("test_conditions", [])
+        selected_conditions = [
+            condition
+            for condition in test_conditions
+            if self._safe_text(condition.get("test_condition_id")) in condition_ids
+        ]
 
         selected = {
-            key: frame.iloc[0:0].copy()
-            for key, frame in frames.items()
+            key: []
+            for key in frames
             if key not in {"sample_variants", "measurement_results", "test_conditions"}
         }
         selected["sample_variants"] = selected_variants
         selected["measurement_results"] = selected_measurements
         selected["test_conditions"] = selected_conditions
-        selected["document_profiles"] = frames.get("document_profiles", pd.DataFrame())
+        selected["document_profiles"] = frames.get("document_profiles", [])
 
         anchor_ids = self._anchor_ids_from_material_frames(selected)
         selected["evidence_anchors"] = self._filter_evidence_anchors(
-            frames.get("evidence_anchors", pd.DataFrame()),
+            frames.get("evidence_anchors", []),
             anchor_ids,
         )
         return selected
 
     def _filter_evidence_anchors(
         self,
-        anchors: pd.DataFrame,
+        anchors: list[dict[str, Any]],
         anchor_ids: list[str],
-    ) -> pd.DataFrame:
-        if anchors is None or anchors.empty or "anchor_id" not in anchors.columns:
-            return pd.DataFrame(columns=list(anchors.columns) if anchors is not None else [])
+    ) -> list[dict[str, Any]]:
+        if not anchors:
+            return []
         wanted = set(self._dedupe_strings(anchor_ids))
-        return anchors[
-            anchors["anchor_id"].apply(lambda value: self._safe_text(value) in wanted)
-        ].copy()
+        return [
+            anchor
+            for anchor in anchors
+            if self._safe_text(anchor.get("anchor_id")) in wanted
+        ]
 
     def _material_key_from_variant(
         self,
-        variant_row: dict[str, Any] | pd.Series,
+        variant_row: dict[str, Any],
         document_material_keys: dict[str, str] | None = None,
     ) -> str | None:
-        variant = (
-            self._series_to_dict(variant_row)
-            if isinstance(variant_row, pd.Series)
-            else dict(variant_row)
-        )
+        variant = dict(variant_row)
         material_key = self._material_key_from_label(self._material_from_variant(variant))
         if material_key is not None:
             return material_key
@@ -2447,9 +2436,9 @@ class ResearchViewAggregationService:
 
     def _material_key_from_comparison_row(
         self,
-        row: dict[str, Any] | pd.Series,
+        row: dict[str, Any],
     ) -> str | None:
-        record = self._series_to_dict(row) if isinstance(row, pd.Series) else dict(row)
+        record = dict(row)
         for key in ("material_system_normalized", "material_system", "material"):
             if material_key := self._material_key_from_label(record.get(key)):
                 return material_key
@@ -2501,7 +2490,7 @@ class ResearchViewAggregationService:
     def _material_key_from_material_id(
         self,
         material_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         comparable_groups: list[dict[str, Any]],
     ) -> str | None:
         requested = self._safe_text(material_id)
@@ -2530,13 +2519,9 @@ class ResearchViewAggregationService:
 
     def _process_family_from_variant(
         self,
-        variant_row: dict[str, Any] | pd.Series,
+        variant_row: dict[str, Any],
     ) -> str | None:
-        variant = (
-            self._series_to_dict(variant_row)
-            if isinstance(variant_row, pd.Series)
-            else dict(variant_row)
-        )
+        variant = dict(variant_row)
         process_context = self._as_mapping(variant.get("process_context"))
         for key in (
             "process_family",
@@ -2612,24 +2597,24 @@ class ResearchViewAggregationService:
 
     def _material_evidence_coverage(
         self,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> dict[str, Any]:
-        measurements = frames.get("measurement_results", pd.DataFrame())
-        if measurements is not None and not measurements.empty:
+        measurements = frames.get("measurement_results", [])
+        if measurements:
             total = int(len(measurements))
             with_evidence = sum(
                 1
-                for _, row in measurements.iterrows()
+                for row in measurements
                 if self._as_list(row.get("evidence_anchor_ids"))
             )
         else:
-            variants = frames.get("sample_variants", pd.DataFrame())
-            total = int(len(variants)) if variants is not None else 0
+            variants = frames.get("sample_variants", [])
+            total = int(len(variants))
             with_evidence = sum(
                 1
-                for _, row in variants.iterrows()
+                for row in variants
                 if self._as_list(row.get("source_anchor_ids"))
-            ) if variants is not None else 0
+            )
         coverage = round(with_evidence / total, 3) if total else None
         return {
             "observed_count": total,
@@ -2639,29 +2624,29 @@ class ResearchViewAggregationService:
 
     def _anchor_ids_from_material_frames(
         self,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[str]:
         anchor_ids: list[str] = []
-        for _, row in frames.get("sample_variants", pd.DataFrame()).iterrows():
+        for row in frames.get("sample_variants", []):
             anchor_ids.extend(self._as_list(row.get("source_anchor_ids")))
-        for _, row in frames.get("measurement_results", pd.DataFrame()).iterrows():
+        for row in frames.get("measurement_results", []):
             anchor_ids.extend(self._as_list(row.get("evidence_anchor_ids")))
-        for _, row in frames.get("test_conditions", pd.DataFrame()).iterrows():
+        for row in frames.get("test_conditions", []):
             anchor_ids.extend(self._as_list(row.get("evidence_anchor_ids")))
         return self._dedupe_strings(anchor_ids)
 
     def _fact_ids_from_material_frames(
         self,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> list[str]:
         return self._dedupe_strings(
             [
                 self._safe_text(row.get("variant_id")) or ""
-                for _, row in frames.get("sample_variants", pd.DataFrame()).iterrows()
+                for row in frames.get("sample_variants", [])
             ]
             + [
                 self._safe_text(row.get("result_id")) or ""
-                for _, row in frames.get("measurement_results", pd.DataFrame()).iterrows()
+                for row in frames.get("measurement_results", [])
             ]
         )
 
@@ -2766,15 +2751,15 @@ class ResearchViewAggregationService:
     def _build_paper_overview(
         self,
         document_id: str,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         sample_matrix: dict[str, Any],
     ) -> dict[str, Any]:
-        sample_variants = frames.get("sample_variants", pd.DataFrame())
-        measurements = frames.get("measurement_results", pd.DataFrame())
-        test_conditions = frames.get("test_conditions", pd.DataFrame())
+        sample_variants = frames.get("sample_variants", [])
+        measurements = frames.get("measurement_results", [])
+        test_conditions = frames.get("test_conditions", [])
         real_variants = [
-            self._series_to_dict(row)
-            for _, row in sample_variants.iterrows()
+            row
+            for row in sample_variants
             if self._is_real_sample_variant(row)
         ]
         return {
@@ -2805,17 +2790,17 @@ class ResearchViewAggregationService:
             "measured_properties": sorted(
                 {
                     self._safe_text(row.get("property_normalized")) or ""
-                    for _, row in measurements.iterrows()
+                    for row in measurements
                     if self._safe_text(row.get("property_normalized"))
                 }
             ),
             "condition_families": sorted(
                 {
                     axis["axis_name"]
-                    for _, row in test_conditions.iterrows()
+                    for row in test_conditions
                     if (
                         axis := self._condition_axis_from_payload(
-                            self._series_to_dict(row).get("condition_payload")
+                            row.get("condition_payload")
                         )
                     )
                 }
@@ -2825,61 +2810,52 @@ class ResearchViewAggregationService:
 
     def _document_frames(
         self,
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
         document_id: str,
-    ) -> dict[str, pd.DataFrame]:
+    ) -> _FactRows:
         return {
-            key: self._filter_frame_by_document(frame, document_id)
-            for key, frame in frames.items()
+            key: self._filter_records_by_document(records, document_id)
+            for key, records in frames.items()
             if key != "document_profiles"
-        } | {"document_profiles": frames.get("document_profiles", pd.DataFrame())}
+        } | {"document_profiles": frames.get("document_profiles", [])}
 
-    def _filter_frame_by_document(
+    def _filter_records_by_document(
         self,
-        frame: pd.DataFrame,
+        records: list[dict[str, Any]],
         document_id: str,
-    ) -> pd.DataFrame:
-        if frame is None or frame.empty or "document_id" not in frame.columns:
-            return pd.DataFrame(columns=list(frame.columns) if frame is not None else [])
-        return frame[
-            frame["document_id"].apply(lambda value: self._safe_text(value) == document_id)
-        ].copy()
+    ) -> list[dict[str, Any]]:
+        return [
+            record
+            for record in records
+            if self._safe_text(record.get("document_id")) == document_id
+        ]
 
-    def _document_ids_from_frames(self, frames: dict[str, pd.DataFrame]) -> set[str]:
+    def _document_ids_from_frames(self, frames: _FactRows) -> set[str]:
         document_ids: set[str] = set()
-        for frame in frames.values():
-            if frame is None or frame.empty or "document_id" not in frame.columns:
-                continue
-            document_ids.update(
-                self._safe_text(value) or ""
-                for value in frame["document_id"].tolist()
-                if self._safe_text(value)
-            )
+        for records in frames.values():
+            for record in records:
+                if document_id := self._safe_text(record.get("document_id")):
+                    document_ids.add(document_id)
         return document_ids
 
-    def _document_title(self, profiles: pd.DataFrame, document_id: str) -> str | None:
-        if profiles is None or profiles.empty or "document_id" not in profiles.columns:
+    def _document_title(
+        self,
+        profiles: list[dict[str, Any]],
+        document_id: str,
+    ) -> str | None:
+        profile = self._first_record_by_value(profiles, "document_id", document_id)
+        if profile is None:
             return None
-        matched = profiles[
-            profiles["document_id"].apply(lambda value: self._safe_text(value) == document_id)
-        ]
-        if matched.empty:
-            return None
-        return self._safe_text(matched.iloc[0].get("title"))
+        return self._safe_text(profile.get("title"))
 
     def _document_source_filename(
         self,
-        profiles: pd.DataFrame,
+        profiles: list[dict[str, Any]],
         document_id: str,
     ) -> str | None:
-        if profiles is None or profiles.empty or "document_id" not in profiles.columns:
+        row = self._first_record_by_value(profiles, "document_id", document_id)
+        if row is None:
             return None
-        matched = profiles[
-            profiles["document_id"].apply(lambda value: self._safe_text(value) == document_id)
-        ]
-        if matched.empty:
-            return None
-        row = matched.iloc[0]
         for key in ("source_filename", "filename", "source_file"):
             if source_filename := self._safe_text(row.get(key)):
                 return source_filename
@@ -2887,10 +2863,10 @@ class ResearchViewAggregationService:
 
     def _document_count(
         self,
-        frames: dict[str, pd.DataFrame],
-        profiles: pd.DataFrame,
+        frames: _FactRows,
+        profiles: list[dict[str, Any]],
     ) -> int:
-        if profiles is not None and not profiles.empty:
+        if profiles:
             return int(len(profiles))
         return len(self._document_ids_from_frames(frames))
 
@@ -2994,11 +2970,11 @@ class ResearchViewAggregationService:
     def _measurement_value_key(
         self,
         measurement: dict[str, Any],
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> tuple[str, str]:
         property_name, condition_id = self._measurement_cell_key(measurement)
         condition = self._row_by_id(
-            frames.get("test_conditions", pd.DataFrame()),
+            frames.get("test_conditions", []),
             "test_condition_id",
             condition_id,
         )
@@ -3014,18 +2990,13 @@ class ResearchViewAggregationService:
 
     def _row_by_id(
         self,
-        frame: pd.DataFrame,
+        records: list[dict[str, Any]],
         id_column: str,
         value: str | None,
     ) -> dict[str, Any] | None:
-        if frame is None or frame.empty or id_column not in frame.columns or not value:
+        if not value:
             return None
-        matched = frame[
-            frame[id_column].apply(lambda candidate: self._safe_text(candidate) == value)
-        ]
-        if matched.empty:
-            return None
-        return self._series_to_dict(matched.iloc[0])
+        return self._first_record_by_value(records, id_column, value)
 
     def _value_from_measurement(self, measurement: dict[str, Any]) -> dict[str, Any]:
         value_payload = self._as_mapping(measurement.get("value_payload"))
@@ -3063,7 +3034,7 @@ class ResearchViewAggregationService:
     def _evidence_value_from_comparison_row(
         self,
         row: dict[str, Any],
-        frames: dict[str, pd.DataFrame],
+        frames: _FactRows,
     ) -> dict[str, Any]:
         value = self._numeric_or_none(row.get("value"))
         unit = self._safe_text(row.get("unit"))
@@ -3100,12 +3071,12 @@ class ResearchViewAggregationService:
 
     def _group_comparison_rows(
         self,
-        rows: pd.DataFrame,
-    ) -> dict[tuple[str, str, str, str, str], pd.DataFrame]:
-        if rows is None or rows.empty:
+        rows: list[dict[str, Any]],
+    ) -> _ComparisonGroups:
+        if not rows:
             return {}
-        grouped: dict[tuple[str, str, str, str, str], list[int]] = defaultdict(list)
-        for index, row in rows.iterrows():
+        grouped: _ComparisonGroups = defaultdict(list)
+        for row in rows:
             key = (
                 self._safe_text(row.get("material_system_normalized"))
                 or "unspecified material",
@@ -3116,8 +3087,8 @@ class ResearchViewAggregationService:
                 or "unspecified baseline",
                 self._safe_text(row.get("variable_axis")) or "",
             )
-            grouped[key].append(index)
-        return {key: rows.loc[indexes].copy() for key, indexes in grouped.items()}
+            grouped[key].append(row)
+        return dict(grouped)
 
     def _comparison_group_title(
         self,
@@ -3190,16 +3161,25 @@ class ResearchViewAggregationService:
                 return material
         return self._safe_text(variant.get("composition"))
 
-    def _series_values(self, frame: pd.DataFrame, column: str) -> list[str]:
-        if frame is None or frame.empty or column not in frame.columns:
-            return []
+    def _record_values(self, records: list[dict[str, Any]], column: str) -> list[str]:
         return [
-            self._safe_text(value) or ""
-            for value in frame[column].tolist()
-            if self._safe_text(value)
+            text
+            for record in records
+            if (text := self._safe_text(record.get(column)))
         ]
 
-    def _series_to_dict(self, row: pd.Series | dict[str, Any]) -> dict[str, Any]:
+    def _first_record_by_value(
+        self,
+        records: list[dict[str, Any]],
+        column: str,
+        value: str,
+    ) -> dict[str, Any] | None:
+        for record in records:
+            if self._safe_text(record.get(column)) == value:
+                return record
+        return None
+
+    def _record_to_dict(self, row: dict[str, Any]) -> dict[str, Any]:
         return {
             str(key): self._clean_value(value)
             for key, value in dict(row).items()

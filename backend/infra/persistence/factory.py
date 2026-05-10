@@ -10,6 +10,7 @@ from config import DATA_DIR
 from domain.ports import (
     ArtifactRepository,
     CollectionRepository,
+    CoreFactRepository,
     GoalSessionRepository,
     SourceArtifactRepository,
     TaskRepository,
@@ -25,6 +26,7 @@ from infra.persistence.memory import (
     MemoryTaskRepository,
 )
 from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
     SqliteGoalSessionRepository,
     SqliteSourceArtifactRepository,
 )
@@ -95,6 +97,12 @@ def build_source_artifact_repository(
     db_path: Path | None = None,
 ) -> SourceArtifactRepository:
     return SqliteSourceArtifactRepository(db_path or (DATA_DIR / "lens.sqlite"))
+
+
+def build_core_fact_repository(
+    db_path: Path | None = None,
+) -> CoreFactRepository:
+    return SqliteCoreFactRepository(db_path or (DATA_DIR / "lens.sqlite"))
 
 
 def build_persistence_bundle(

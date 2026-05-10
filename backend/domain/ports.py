@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
+from domain.core.comparison import (
+    CollectionComparableResult,
+    ComparableResult,
+    ComparisonRowRecord,
+)
+from domain.core.fact_store import CoreFactSet
 from domain.source import (
     SourceArtifactSet,
     SourceBlock,
@@ -141,3 +147,23 @@ class SourceArtifactRepository(Protocol):
         collection_id: str,
         document_id: str | None = None,
     ) -> list[SourceFigure]: ...
+
+
+class CoreFactRepository(Protocol):
+    backend_name: str
+
+    def replace_collection_facts(
+        self,
+        collection_id: str,
+        facts: CoreFactSet,
+    ) -> None: ...
+
+    def replace_collection_comparison_artifacts(
+        self,
+        collection_id: str,
+        comparable_results: tuple[ComparableResult, ...],
+        collection_comparable_results: tuple[CollectionComparableResult, ...],
+        comparison_rows: tuple[ComparisonRowRecord, ...],
+    ) -> None: ...
+
+    def read_collection_facts(self, collection_id: str) -> CoreFactSet: ...

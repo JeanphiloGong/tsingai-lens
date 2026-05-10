@@ -28,10 +28,12 @@ from domain.core.evidence_backbone import (
     CharacterizationObservation,
     EvidenceAnchor,
     MeasurementResult,
+    MethodFact,
     SampleVariant,
     StructureFeature,
     TestCondition,
 )
+from domain.core.fact_store import CoreFactSet
 from domain.core.research_objective import (
     EVIDENCE_ROUTE_ROLE_VALUES,
     EvidenceRoute,
@@ -59,6 +61,7 @@ __all__ = [
     "ComparisonAxis",
     "ComparisonRowRecord",
     "ContextBinding",
+    "CoreFactSet",
     "DocumentProfile",
     "DocumentProfileSummary",
     "EVIDENCE_ROUTE_ROLE_VALUES",
@@ -66,6 +69,7 @@ __all__ = [
     "EvidenceAnchor",
     "EvidenceRoute",
     "MeasurementResult",
+    "MethodFact",
     "NormalizedComparisonContext",
     "ObjectivePaperFrame",
     "PAPER_RELEVANCE_VALUES",

@@ -63,6 +63,9 @@ from domain.core.evidence_backbone import (
     StructureFeature,
     TestCondition,
 )
+from domain.core.document_profile import DocumentProfile
+from domain.core.fact_store import CoreFactSet
+from domain.ports import CoreFactRepository
 from domain.shared.enums import (
     DOC_TYPE_REVIEW,
     EPISTEMIC_DIRECTLY_OBSERVED,
@@ -76,6 +79,7 @@ from infra.persistence.backbone_codec import (
     prepare_frame_for_storage,
     restore_frame_from_storage,
 )
+from infra.persistence.factory import build_core_fact_repository
 logger = logging.getLogger(__name__)
 
 
@@ -464,6 +468,7 @@ class PaperFactsService:
         artifact_registry_service: ArtifactRegistryService | None = None,
         document_profile_service: DocumentProfileService | None = None,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
+        core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.artifact_registry_service = (
@@ -474,6 +479,12 @@ class PaperFactsService:
             artifact_registry_service=self.artifact_registry_service,
         )
         self._structured_extractor = structured_extractor
+        self.core_fact_repository = (
+            core_fact_repository
+            or build_core_fact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
+        )
 
     def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
         if self._structured_extractor is None:
@@ -1112,6 +1123,20 @@ class PaperFactsService:
         measurement_results = self._deduplicate_measurement_results_table(
             measurement_results
         )
+        self.core_fact_repository.replace_collection_facts(
+            collection_id,
+            self._build_core_fact_set(
+                document_profiles=profiles,
+                evidence_anchors=evidence_anchors,
+                method_facts=method_facts,
+                sample_variants=sample_variants,
+                test_conditions=test_conditions,
+                baseline_references=baseline_references,
+                measurement_results=measurement_results,
+                characterization=characterization,
+                structure_features=structure_features,
+            ),
+        )
 
         base_dir.mkdir(parents=True, exist_ok=True)
         prepare_frame_for_storage(
@@ -1255,6 +1280,61 @@ class PaperFactsService:
                 _STRUCTURE_FEATURES_JSON_COLUMNS,
             ),
         }
+
+    def _build_core_fact_set(
+        self,
+        *,
+        document_profiles: pd.DataFrame,
+        evidence_anchors: pd.DataFrame,
+        method_facts: pd.DataFrame,
+        sample_variants: pd.DataFrame,
+        test_conditions: pd.DataFrame,
+        baseline_references: pd.DataFrame,
+        measurement_results: pd.DataFrame,
+        characterization: pd.DataFrame,
+        structure_features: pd.DataFrame,
+    ) -> CoreFactSet:
+        return CoreFactSet(
+            document_profiles=self._records_from_frame(
+                document_profiles,
+                DocumentProfile,
+            ),
+            evidence_anchors=self._records_from_frame(
+                evidence_anchors,
+                EvidenceAnchor,
+            ),
+            method_facts=self._records_from_frame(method_facts, MethodFact),
+            sample_variants=self._records_from_frame(sample_variants, SampleVariant),
+            test_conditions=self._records_from_frame(test_conditions, TestCondition),
+            baseline_references=self._records_from_frame(
+                baseline_references,
+                BaselineReference,
+            ),
+            measurement_results=self._records_from_frame(
+                measurement_results,
+                MeasurementResult,
+            ),
+            characterization_observations=self._records_from_frame(
+                characterization,
+                CharacterizationObservation,
+            ),
+            structure_features=self._records_from_frame(
+                structure_features,
+                StructureFeature,
+            ),
+        )
+
+    def _records_from_frame(
+        self,
+        frame: pd.DataFrame,
+        record_cls: type,
+    ) -> tuple[Any, ...]:
+        if frame is None or frame.empty:
+            return ()
+        return tuple(
+            record_cls.from_mapping(dict(row))
+            for _, row in frame.iterrows()
+        )
 
     def _build_document_state(self) -> dict[str, Any]:
         return {

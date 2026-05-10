@@ -1,7 +1,8 @@
 # Persistence Adapters
 
 This node owns repository construction and persistence backend implementations
-for app-layer collection, task, artifact, and Goal session state.
+for app-layer collection, task, artifact, Goal session, Source artifact, and
+Core semantic fact state.
 
 ## Scope
 
@@ -26,8 +27,9 @@ for app-layer collection, task, artifact, and Goal session state.
 - `memory/`
   In-memory implementations for tests and isolated runs
 - `sqlite/`
-  SQLite-backed Goal conversation session persistence and Source artifact
-  persistence. The application layer depends on repository ports and does not
-  import SQLite table names, SQL, or connection details.
+  SQLite-backed Goal conversation session persistence, Source artifact
+  persistence, and Core semantic fact persistence. The application layer
+  depends on repository ports and does not import SQLite table names, SQL, or
+  connection details.
 - `mysql/`
   Placeholder for future relational persistence work

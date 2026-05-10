@@ -10,6 +10,12 @@ domain-semantic backfill.
   Earlier stabilization wave for the shared parsing seam
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
   Current Core quality hardening wave
+- [`target-centric-collection-extraction-plan.md`](target-centric-collection-extraction-plan.md)
+  Core plan for discovering multiple collection research targets, running
+  independent target processes, and extracting target-scoped facts
+- [`research-objective-domain-model-plan.md`](research-objective-domain-model-plan.md)
+  First implementation slice for adding pure Core domain objects before
+  objective discovery services and artifacts
 - [`pbf-metal-extraction-and-comparison-validation/README.md`](pbf-metal-extraction-and-comparison-validation/README.md)
   Topic family for the PBF-metal validation wave, including the proposal,
   parameter-registry and report-scope note, and executable implementation plan

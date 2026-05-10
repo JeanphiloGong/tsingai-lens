@@ -71,7 +71,9 @@ Supporting research binaries live under `docs/research/assets/`.
   then
   [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md),
   then
-  [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
+  [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md),
+  then
+  [`decisions/rfc-research-objective-first-product-flow.md`](decisions/rfc-research-objective-first-product-flow.md)
 - Collection-bound goal copilot:
   read
   [`decisions/rfc-collection-bound-goal-copilot.md`](decisions/rfc-collection-bound-goal-copilot.md)
@@ -152,6 +154,7 @@ Decisions:
 - [`decisions/rfc-document-result-evidence-chain-contract-freeze.md`](decisions/rfc-document-result-evidence-chain-contract-freeze.md)
 - [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md)
 - [`decisions/rfc-collection-bound-goal-copilot.md`](decisions/rfc-collection-bound-goal-copilot.md)
+- [`decisions/rfc-research-objective-first-product-flow.md`](decisions/rfc-research-objective-first-product-flow.md)
 
 Research:
 

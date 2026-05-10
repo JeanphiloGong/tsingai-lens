@@ -6,6 +6,10 @@ This package owns the backend Source infrastructure. Source turns collection
 input files into observable document-structure artifacts that Core can inspect
 and cite.
 
+The Source business records and shared structure logic live in
+`backend/domain/source/`. Infrastructure should parse input files, build those
+domain records, and serialize them into the persisted artifact tables.
+
 Source does not extract scientific facts. It does not decide materials,
 samples, methods, measurements, baselines, comparisons, or report content.
 Those semantic decisions belong to Core and downstream layers.
@@ -85,7 +89,8 @@ not replacements for the complete table artifact.
 - `runtime/parsers/`
   Parser-specific bundle builders for PDF and plain-text inputs.
 - `runtime/mapping/`
-  Mapping from parser output into Source artifacts.
+  Mapping from parser output into Source domain records and persisted artifact
+  rows.
 - `runtime/storage/`
   Runtime storage and parquet table IO.
 - `runtime/cache/`

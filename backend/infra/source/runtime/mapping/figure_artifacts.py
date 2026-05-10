@@ -8,18 +8,21 @@ from typing import Any
 
 import pandas as pd
 
-from infra.source.contracts.artifact_schemas import FIGURES_FINAL_COLUMNS
-from infra.source.runtime.hashing import gen_sha512_hash
-from infra.source.runtime.mapping.layout_binding import (
+from domain.source import (
+    SourceBoundingBox,
+    SourceFigure,
     build_figure_caption_blocks,
     build_heading_blocks,
     find_nearest_caption_block,
+    normalize_optional_text,
+    resolve_heading_path_for_target,
+)
+from infra.source.contracts.artifact_schemas import FIGURES_FINAL_COLUMNS
+from infra.source.runtime.hashing import gen_sha512_hash
+from infra.source.runtime.mapping.layout_binding import (
     first_bbox,
     first_page,
     normalize_label,
-    normalize_optional_text,
-    resolve_heading_path_for_target,
-    serialize_bbox,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,13 +40,14 @@ def build_pdf_figures(
     if not pictures:
         return pd.DataFrame(columns=FIGURES_FINAL_COLUMNS), {}
 
-    heading_blocks = build_heading_blocks(blocks)
+    block_records = blocks.to_dict(orient="records") if blocks is not None else []
+    heading_blocks = build_heading_blocks(block_records)
     text_item_by_ref = {
         str(item.get("ref")): item
         for item in text_items
         if str(item.get("ref") or "").strip()
     }
-    figure_caption_blocks = build_figure_caption_blocks(blocks)
+    figure_caption_blocks = build_figure_caption_blocks(block_records)
     used_caption_block_ids: set[str] = set()
     rows: list[dict[str, Any]] = []
     figure_assets: dict[str, bytes] = {}
@@ -53,7 +57,7 @@ def build_pdf_figures(
         for figure_order, picture in enumerate(pictures, start=1):
             page = first_page(getattr(picture, "prov", None))
             bbox_obj = first_bbox(getattr(picture, "prov", None))
-            bbox = serialize_bbox(bbox_obj)
+            bbox = SourceBoundingBox.from_value(bbox_obj)
             caption_text, caption_ref, linkage_method = _extract_picture_caption(
                 picture=picture,
                 document=document,
@@ -71,9 +75,9 @@ def build_pdf_figures(
                     used_block_ids=used_caption_block_ids,
                 )
                 if fallback_block is not None:
-                    caption_block_id = str(fallback_block["block_id"])
+                    caption_block_id = str(fallback_block.block_id)
                     caption_text = caption_text or normalize_optional_text(
-                        fallback_block.get("text")
+                        fallback_block.text
                     )
                     linkage_method = "same_page_nearest_caption"
             if caption_block_id is not None:
@@ -99,7 +103,7 @@ def build_pdf_figures(
                     "document_id": document_id,
                     "figure_order": figure_order,
                     "page": page,
-                    "bbox": bbox,
+                    "bbox": bbox.to_json() if bbox else None,
                     "caption_text": caption_text,
                 },
                 ["document_id", "figure_order", "page", "bbox", "caption_text"],
@@ -110,32 +114,32 @@ def build_pdf_figures(
                 figure_assets[image_path] = image_bytes
 
             rows.append(
-                {
-                    "figure_id": figure_id,
-                    "document_id": document_id,
-                    "figure_order": figure_order,
-                    "figure_label": _extract_figure_label(caption_text),
-                    "caption_text": caption_text,
-                    "caption_block_id": caption_block_id,
-                    "page": page,
-                    "bbox": bbox,
-                    "heading_path": resolve_heading_path_for_target(
+                SourceFigure(
+                    figure_id=figure_id,
+                    document_id=document_id,
+                    figure_order=figure_order,
+                    figure_label=_extract_figure_label(caption_text),
+                    caption_text=caption_text,
+                    caption_block_id=caption_block_id,
+                    page=page,
+                    bbox=bbox,
+                    heading_path=resolve_heading_path_for_target(
                         page=page,
                         target_bbox=bbox,
                         heading_blocks=heading_blocks,
                     ),
-                    "image_path": image_path,
-                    "image_mime_type": image_mime_type,
-                    "image_width": image_width,
-                    "image_height": image_height,
-                    "asset_sha256": asset_sha256,
-                    "metadata": {
+                    image_path=image_path,
+                    image_mime_type=image_mime_type,
+                    image_width=image_width,
+                    image_height=image_height,
+                    asset_sha256=asset_sha256,
+                    metadata={
                         "docling_ref": f"#/pictures/{figure_order - 1}",
                         "picture_label": normalize_label(getattr(picture, "label", None)),
                         "caption_linkage_method": linkage_method,
                         "asset_source": asset_source,
                     },
-                }
+                ).to_record()
             )
     finally:
         if pdf_document is not None:

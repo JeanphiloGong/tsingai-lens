@@ -7,13 +7,13 @@ from types import SimpleNamespace
 import pandas as pd
 from PIL import Image
 
+from domain.source import resolve_heading_path_for_target
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.source_evidence import (
     build_blocks,
     build_table_cells,
     build_table_rows,
 )
-from infra.source.runtime.mapping.layout_binding import resolve_heading_path_for_target
 from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle
 
 

@@ -4,6 +4,20 @@ from typing import Any
 
 import pandas as pd
 
+from domain.source import (
+    SourceBoundingBox,
+    SourceTable,
+    SourceTableCell,
+    build_heading_blocks,
+    build_source_table_rows_from_cells,
+    build_table_caption_blocks,
+    extract_unit_hint,
+    find_nearest_caption_block,
+    make_table_id,
+    normalize_optional_text,
+    resolve_heading_path_for_target,
+    safe_int,
+)
 from infra.source.contracts.artifact_schemas import (
     TABLE_CELLS_FINAL_COLUMNS,
     TABLES_FINAL_COLUMNS,
@@ -11,20 +25,10 @@ from infra.source.contracts.artifact_schemas import (
 )
 from infra.source.runtime.hashing import gen_sha512_hash
 from infra.source.runtime.mapping.layout_binding import (
-    build_heading_blocks,
-    build_table_caption_blocks,
-    find_nearest_caption_block,
-    first_non_null,
+    first_bbox,
     first_page,
-    merge_bbox_payloads,
     normalize_label,
-    normalize_optional_text,
-    resolve_heading_path_for_target,
-    safe_int,
-    serialize_bbox,
-    serialize_prov_bbox,
 )
-from infra.source.runtime.source_evidence import extract_unit_hint, make_table_id
 
 
 def build_pdf_tables(
@@ -38,20 +42,21 @@ def build_pdf_tables(
     if not tables:
         return pd.DataFrame(columns=TABLES_FINAL_COLUMNS)
 
-    heading_blocks = build_heading_blocks(blocks)
+    block_records = blocks.to_dict(orient="records") if blocks is not None else []
+    heading_blocks = build_heading_blocks(block_records)
     text_item_by_ref = {
         str(item.get("ref")): item
         for item in text_items
         if str(item.get("ref") or "").strip()
     }
-    table_caption_blocks = build_table_caption_blocks(blocks)
+    table_caption_blocks = build_table_caption_blocks(block_records)
     used_caption_block_ids: set[str] = set()
     rows: list[dict[str, Any]] = []
 
     for table_order, table in enumerate(tables, start=1):
         table_id = make_table_id(document_id, table_order, None)
         page = first_page(getattr(table, "prov", None))
-        bbox = serialize_prov_bbox(getattr(table, "prov", None))
+        bbox = SourceBoundingBox.from_value(first_bbox(getattr(table, "prov", None)))
         caption_text, caption_ref, linkage_method = _extract_table_caption(
             table=table,
             document=document,
@@ -69,16 +74,15 @@ def build_pdf_tables(
                 used_block_ids=used_caption_block_ids,
             )
             if fallback_block is not None:
-                caption_block_id = str(fallback_block["block_id"])
+                caption_block_id = str(fallback_block.block_id)
                 caption_text = caption_text or normalize_optional_text(
-                    fallback_block.get("text")
+                    fallback_block.text
                 )
                 linkage_method = "same_page_nearest_caption"
         if caption_block_id is not None:
             used_caption_block_ids.add(caption_block_id)
 
         matrix = build_docling_table_matrix(table)
-        row_count = len(matrix)
         col_count = max((len(row) for row in matrix), default=0)
         header_paths = build_docling_header_paths(table)
         column_headers = [
@@ -87,32 +91,28 @@ def build_pdf_tables(
         ]
 
         rows.append(
-            {
-                "table_id": table_id,
-                "document_id": document_id,
-                "table_order": table_order,
-                "caption_text": caption_text,
-                "caption_block_id": caption_block_id,
-                "page": page,
-                "bbox": bbox,
-                "heading_path": resolve_heading_path_for_target(
+            SourceTable(
+                table_id=table_id,
+                document_id=document_id,
+                table_order=table_order,
+                caption_text=caption_text,
+                caption_block_id=caption_block_id,
+                page=page,
+                bbox=bbox,
+                heading_path=resolve_heading_path_for_target(
                     page=page,
                     target_bbox=bbox,
                     heading_blocks=heading_blocks,
                 ),
-                "row_count": row_count,
-                "col_count": col_count,
-                "column_headers": column_headers,
-                "table_matrix": matrix,
-                "table_markdown": render_markdown_table(matrix, column_headers),
-                "table_text": render_plain_table_text(matrix),
-                "metadata": {
+                column_headers=tuple(column_headers),
+                table_matrix=tuple(tuple(cell for cell in row) for row in matrix),
+                metadata={
                     "docling_ref": f"#/tables/{table_order - 1}",
                     "table_label": normalize_label(getattr(table, "label", None)),
                     "caption_linkage_method": linkage_method,
                     "column_header_count": len(header_paths),
                 },
-            }
+            ).to_record()
         )
 
     return pd.DataFrame(rows, columns=TABLES_FINAL_COLUMNS)
@@ -125,16 +125,20 @@ def build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
         header_paths = build_docling_header_paths(table)
         table_page = first_page(getattr(table, "prov", None))
 
-        for cell_index, cell in enumerate(getattr(getattr(table, "data", None), "table_cells", []) or []):
+        for cell_index, cell in enumerate(
+            getattr(getattr(table, "data", None), "table_cells", []) or []
+        ):
             row_index = int(getattr(cell, "start_row_offset_idx", 0))
             col_index = int(getattr(cell, "start_col_offset_idx", 0))
             cell_text = str(getattr(cell, "text", "") or "").strip()
             header_path = None
-            if not bool(getattr(cell, "column_header", False)) and not bool(getattr(cell, "row_header", False)):
+            if not bool(getattr(cell, "column_header", False)) and not bool(
+                getattr(cell, "row_header", False)
+            ):
                 header_path = header_paths.get(col_index)
             rows.append(
-                {
-                    "cell_id": gen_sha512_hash(
+                SourceTableCell(
+                    cell_id=gen_sha512_hash(
                         {
                             "document_id": document_id,
                             "table_id": table_id,
@@ -143,19 +147,25 @@ def build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
                             "col_index": col_index,
                             "text": cell_text,
                         },
-                        ["document_id", "table_id", "cell_index", "row_index", "col_index", "text"],
+                        [
+                            "document_id",
+                            "table_id",
+                            "cell_index",
+                            "row_index",
+                            "col_index",
+                            "text",
+                        ],
                     ),
-                    "id": document_id,
-                    "table_id": table_id,
-                    "row_index": row_index,
-                    "col_index": col_index,
-                    "cell_text": cell_text,
-                    "header_path": header_path,
-                    "page": table_page,
-                    "bbox": serialize_bbox(getattr(cell, "bbox", None)),
-                    "char_range": None,
-                    "unit_hint": extract_unit_hint(header_path, cell_text),
-                }
+                    document_id=document_id,
+                    table_id=table_id,
+                    row_index=row_index,
+                    col_index=col_index,
+                    cell_text=cell_text,
+                    header_path=header_path,
+                    page=table_page,
+                    bbox=SourceBoundingBox.from_value(getattr(cell, "bbox", None)),
+                    unit_hint=extract_unit_hint(header_path, cell_text),
+                ).to_record()
             )
     return pd.DataFrame(rows, columns=TABLE_CELLS_FINAL_COLUMNS)
 
@@ -169,44 +179,20 @@ def build_pdf_table_rows(
     if table_cells is None or table_cells.empty:
         return pd.DataFrame(columns=TABLE_ROWS_FINAL_COLUMNS)
 
-    heading_blocks = build_heading_blocks(blocks)
-
-    rows: list[dict[str, Any]] = []
-    for table_id, table_frame in table_cells.groupby("table_id", sort=False):
-        row_indices = {
-            int(value)
-            for value in table_frame["row_index"].dropna().tolist()
-        }
-        for row_index in sorted(row_indices):
-            row_frame = table_frame[table_frame["row_index"].astype(int) == row_index]
-            if row_frame["header_path"].isna().all():
-                continue
-            ordered_cells = row_frame.sort_values("col_index")
-            row_text = " | ".join(
-                str(value).strip()
-                for value in ordered_cells["cell_text"].tolist()
-                if str(value).strip()
-            )
-            if not row_text:
-                continue
-            page = first_non_null(ordered_cells["page"].tolist())
-            row_bbox = merge_bbox_payloads(ordered_cells["bbox"].tolist())
-            rows.append(
-                {
-                    "row_id": f"row_{document_id}_{table_id}_{row_index}",
-                    "document_id": document_id,
-                    "table_id": str(table_id),
-                    "row_index": row_index,
-                    "row_text": row_text,
-                    "page": page,
-                    "bbox": row_bbox,
-                    "heading_path": resolve_heading_path_for_target(
-                        page=page,
-                        target_bbox=row_bbox,
-                        heading_blocks=heading_blocks,
-                    ),
-                }
-            )
+    block_records = blocks.to_dict(orient="records") if blocks is not None else []
+    heading_blocks = build_heading_blocks(block_records)
+    source_cells = [
+        SourceTableCell.from_record(record)
+        for record in table_cells.to_dict(orient="records")
+    ]
+    rows = [
+        row.to_record()
+        for row in build_source_table_rows_from_cells(
+            document_id=document_id,
+            cells=source_cells,
+            heading_blocks=heading_blocks,
+        )
+    ]
 
     return pd.DataFrame(rows, columns=TABLE_ROWS_FINAL_COLUMNS)
 
@@ -272,41 +258,6 @@ def build_docling_table_matrix(table: Any) -> list[list[str]]:
     return matrix
 
 
-def render_markdown_table(matrix: list[list[str]], column_headers: list[str]) -> str | None:
-    if not matrix:
-        return None
-
-    col_count = max(len(column_headers), max((len(row) for row in matrix), default=0))
-    if col_count <= 0:
-        return None
-    normalized_rows = [_normalize_table_row(row, col_count) for row in matrix]
-    header = _normalize_table_row(normalized_rows[0] if normalized_rows else column_headers, col_count)
-    if not any(header):
-        header = _normalize_table_row(column_headers, col_count)
-    if not any(header):
-        header = [f"column_{index + 1}" for index in range(col_count)]
-
-    body_rows = normalized_rows[1:] if normalized_rows else []
-    lines = [
-        "| " + " | ".join(_escape_markdown_cell(value) for value in header) + " |",
-        "| " + " | ".join("---" for _ in range(col_count)) + " |",
-    ]
-    for row in body_rows:
-        lines.append("| " + " | ".join(_escape_markdown_cell(value) for value in row) + " |")
-    return "\n".join(lines)
-
-
-def render_plain_table_text(matrix: list[list[str]]) -> str | None:
-    if not matrix:
-        return None
-    lines = []
-    for row in matrix:
-        line = " | ".join(str(cell).strip() for cell in row if str(cell).strip())
-        if line:
-            lines.append(line)
-    return "\n".join(lines) or None
-
-
 def _extract_table_caption(*, table: Any, document: Any) -> tuple[str | None, str | None, str]:
     caption_text = None
     if hasattr(table, "caption_text"):
@@ -324,14 +275,3 @@ def _extract_table_caption(*, table: Any, document: Any) -> tuple[str | None, st
             caption_text = None
         return caption_text, caption_ref, "docling_caption_ref"
     return caption_text, caption_ref, "none"
-
-
-def _normalize_table_row(row: list[str], col_count: int) -> list[str]:
-    values = [" ".join(str(value or "").split()) for value in row[:col_count]]
-    if len(values) < col_count:
-        values.extend([""] * (col_count - len(values)))
-    return values
-
-
-def _escape_markdown_cell(value: str) -> str:
-    return str(value or "").replace("|", "\\|").strip()

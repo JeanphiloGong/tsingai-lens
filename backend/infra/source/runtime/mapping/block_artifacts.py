@@ -4,10 +4,16 @@ from typing import Any
 
 import pandas as pd
 
+from domain.source import (
+    SourceBlock,
+    SourceBoundingBox,
+    SourceCharRange,
+    normalize_optional_text,
+    update_heading_stack,
+)
 from infra.source.contracts.artifact_schemas import BLOCKS_FINAL_COLUMNS
 from infra.source.runtime.mapping.layout_binding import (
     first_page,
-    normalize_optional_text,
     serialize_char_range,
     serialize_prov_bbox,
 )
@@ -28,19 +34,15 @@ def build_pdf_blocks(
 
     if not any(str(item.get("label") or "").lower() == "title" for item in text_items) and title:
         rows.append(
-            {
-                "block_id": f"blk_{document_id}_{order}",
-                "document_id": document_id,
-                "block_type": "title",
-                "text": title,
-                "block_order": order,
-                "text_unit_ids": [],
-                "page": None,
-                "bbox": None,
-                "char_range": None,
-                "heading_path": title,
-                "heading_level": 0,
-            }
+            SourceBlock(
+                block_id=f"blk_{document_id}_{order}",
+                document_id=document_id,
+                block_type="title",
+                text=title,
+                block_order=order,
+                heading_path=title,
+                heading_level=0,
+            ).to_record()
         )
         order += 1
 
@@ -59,7 +61,7 @@ def build_pdf_blocks(
         heading_level: int | None = None
         if block_type == "heading":
             heading_level = _infer_heading_level_from_text(item["text"])
-            heading_stack = _update_heading_stack(heading_stack, item["text"], heading_level)
+            heading_stack = update_heading_stack(heading_stack, item["text"], heading_level)
             heading_path = " > ".join(heading_stack)
         elif block_type == "title":
             heading_path = item["text"]
@@ -67,19 +69,21 @@ def build_pdf_blocks(
             heading_path = " > ".join(heading_stack) if heading_stack else None
         block_id = f"blk_{document_id}_{order}"
         rows.append(
-            {
-                "block_id": block_id,
-                "document_id": document_id,
-                "block_type": block_type,
-                "text": item["text"],
-                "block_order": order,
-                "text_unit_ids": [item["text_unit_id"]] if item.get("text_unit_id") else [],
-                "page": item["page"],
-                "bbox": item.get("bbox"),
-                "char_range": item["char_range"],
-                "heading_path": heading_path,
-                "heading_level": heading_level,
-            }
+            SourceBlock(
+                block_id=block_id,
+                document_id=document_id,
+                block_type=block_type,
+                text=item["text"],
+                block_order=order,
+                text_unit_ids=tuple(
+                    [item["text_unit_id"]] if item.get("text_unit_id") else []
+                ),
+                page=item["page"],
+                bbox=SourceBoundingBox.from_value(item.get("bbox")),
+                char_range=SourceCharRange.from_value(item["char_range"]),
+                heading_path=heading_path,
+                heading_level=heading_level,
+            ).to_record()
         )
         item["block_id"] = block_id
         item["heading_path"] = heading_path
@@ -87,19 +91,15 @@ def build_pdf_blocks(
 
     if not saw_title and title and not rows:
         rows.append(
-            {
-                "block_id": f"blk_{document_id}_{order}",
-                "document_id": document_id,
-                "block_type": "title",
-                "text": title,
-                "block_order": order,
-                "text_unit_ids": [],
-                "page": None,
-                "bbox": None,
-                "char_range": None,
-                "heading_path": title,
-                "heading_level": 0,
-            }
+            SourceBlock(
+                block_id=f"blk_{document_id}_{order}",
+                document_id=document_id,
+                block_type="title",
+                text=title,
+                block_order=order,
+                heading_path=title,
+                heading_level=0,
+            ).to_record()
         )
 
     return pd.DataFrame(rows, columns=BLOCKS_FINAL_COLUMNS)
@@ -178,17 +178,3 @@ def _infer_heading_level_from_text(text: str) -> int:
     if parts and all(part.isdigit() for part in parts[0].split(".")):
         return len(parts[0].split("."))
     return 1
-
-
-def _update_heading_stack(
-    stack: list[str],
-    heading: str,
-    level: int,
-) -> list[str]:
-    normalized = " ".join(str(heading or "").split())
-    if not normalized:
-        return list(stack)
-    effective_level = max(1, int(level or 1))
-    if effective_level > len(stack) + 1:
-        effective_level = len(stack) + 1
-    return [*stack[: effective_level - 1], normalized]

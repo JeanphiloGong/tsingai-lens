@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from domain.source import SourceDocument, SourceTextUnit
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -55,15 +56,15 @@ def build_pdf_bundle(
     text_units = build_pdf_text_units(document_id, text_items, config)
     final_documents = pd.DataFrame(
         [
-            {
-                "id": document_id,
-                "human_readable_id": 0,
-                "title": title,
-                "text": str(document.export_to_text() or "").strip(),
-                "text_unit_ids": text_units["id"].tolist(),
-                "creation_date": row.get("creation_date"),
-                "metadata": build_source_metadata(row, parser_name="docling"),
-            }
+            SourceDocument(
+                document_id=document_id,
+                human_readable_id=0,
+                title=title,
+                text=str(document.export_to_text() or "").strip(),
+                text_unit_ids=tuple(text_units["id"].tolist()),
+                creation_date=row.get("creation_date"),
+                metadata=build_source_metadata(row, parser_name="docling"),
+            ).to_record()
         ],
         columns=DOCUMENTS_FINAL_COLUMNS,
     )
@@ -149,13 +150,13 @@ def build_pdf_text_units(
             ["document_id", "index", "text"],
         )
         rows.append(
-            {
-                "id": row_id,
-                "human_readable_id": len(rows),
-                "text": text,
-                "n_tokens": len(encode(text)),
-                "document_ids": [document_id],
-            }
+            SourceTextUnit(
+                text_unit_id=row_id,
+                human_readable_id=len(rows),
+                text=text,
+                n_tokens=len(encode(text)),
+                document_ids=(document_id,),
+            ).to_record()
         )
         item["text_unit_id"] = row_id
     return pd.DataFrame(rows, columns=TEXT_UNITS_FINAL_COLUMNS)

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import ast
-import json
 import re
 from typing import Any
 
 import pandas as pd
+
+from domain.source import (
+    SourceBlock,
+    SourceCharRange,
+    SourceTableCell,
+    SourceTableRow,
+    extract_unit_hint,
+    make_table_id,
+    update_heading_stack,
+)
 
 _METHOD_HEADING_PATTERNS = (
     re.compile(r"^(?:\d+(?:\.\d+)*)?\s*(materials?\s+and\s+methods?)$", re.IGNORECASE),
@@ -38,7 +47,6 @@ _FIGURE_TITLE_PATTERN = re.compile(
     r"^\s*(?:fig(?:ure)?\.?)\s+([a-z0-9\-]+)\b[:.\-\s]*(.*)$",
     re.IGNORECASE,
 )
-_UNIT_HINT_PATTERN = re.compile(r"\b(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b", re.IGNORECASE)
 
 
 def build_blocks(
@@ -137,14 +145,6 @@ def classify_heading(line: str) -> str | None:
     return _classify_heading(line)
 
 
-def extract_unit_hint(header_path: str | None, cell_text: str) -> str | None:
-    return _extract_unit_hint(header_path, cell_text)
-
-
-def make_table_id(paper_id: str, order: int, title: str | None) -> str:
-    return _make_table_id(paper_id, order, title)
-
-
 def _extract_blocks_from_text(
     paper_id: str,
     title: str,
@@ -226,7 +226,7 @@ def _extract_blocks_from_text(
         heading_level: int | None = None
         if _looks_like_structural_heading(line):
             heading_level = _infer_heading_level(line)
-            heading_stack = _update_heading_path_stack(heading_stack, line, heading_level)
+            heading_stack = update_heading_stack(heading_stack, line, heading_level)
             heading_path = _serialize_heading_path(heading_stack)
             block_type = "heading"
         else:
@@ -277,20 +277,18 @@ def _extract_table_rows_from_lines(
         if cells is not None:
             if table_id is None:
                 table_counter += 1
-                table_id = _make_table_id(paper_id, table_counter, pending_title)
+                table_id = make_table_id(paper_id, table_counter, pending_title)
                 row_index = 0
             else:
                 rows.append(
-                    {
-                        "row_id": f"row_{table_id}_{row_index}",
-                        "document_id": paper_id,
-                        "table_id": table_id,
-                        "row_index": row_index,
-                        "row_text": " | ".join(cell for cell in cells if cell),
-                        "page": None,
-                        "bbox": None,
-                        "heading_path": pending_heading_path,
-                    }
+                    SourceTableRow(
+                        row_id=f"row_{table_id}_{row_index}",
+                        document_id=paper_id,
+                        table_id=table_id,
+                        row_index=row_index,
+                        row_text=" | ".join(cell for cell in cells if cell),
+                        heading_path=pending_heading_path,
+                    ).to_record()
                 )
             row_index += 1
             continue
@@ -301,7 +299,7 @@ def _extract_table_rows_from_lines(
         row_index = 0
         if _looks_like_structural_heading(line):
             heading_level = _infer_heading_level(line)
-            heading_stack = _update_heading_path_stack(heading_stack, line, heading_level)
+            heading_stack = update_heading_stack(heading_stack, line, heading_level)
 
     return rows
 
@@ -319,19 +317,19 @@ def _build_block_row(
     heading_path: str | None,
     heading_level: int | None,
 ) -> dict[str, Any]:
-    return {
-        "block_id": f"blk_{paper_id}_{block_order}",
-        "document_id": paper_id,
-        "block_type": block_type,
-        "text": text,
-        "block_order": block_order,
-        "text_unit_ids": list(text_unit_ids),
-        "page": page,
-        "bbox": bbox,
-        "char_range": char_range,
-        "heading_path": heading_path,
-        "heading_level": heading_level,
-    }
+    return SourceBlock(
+        block_id=f"blk_{paper_id}_{block_order}",
+        document_id=paper_id,
+        block_type=block_type,
+        text=text,
+        block_order=block_order,
+        text_unit_ids=tuple(text_unit_ids),
+        page=page,
+        bbox=None,
+        char_range=SourceCharRange.from_value(char_range),
+        heading_path=heading_path,
+        heading_level=heading_level,
+    ).to_record()
 
 
 def _find_char_range(
@@ -350,14 +348,7 @@ def _find_char_range(
 
     end_index = index + len(fragment)
     return (
-        json.dumps(
-            {
-                "start": index,
-                "end": end_index,
-            },
-            ensure_ascii=True,
-            sort_keys=True,
-        ),
+        SourceCharRange(index, end_index).to_json(),
         end_index,
     )
 
@@ -389,21 +380,6 @@ def _infer_heading_level(line: str) -> int:
     return len(str(match.group("number")).split("."))
 
 
-def _update_heading_path_stack(
-    stack: list[str],
-    heading: str,
-    level: int,
-) -> list[str]:
-    normalized_heading = " ".join(str(heading or "").split())
-    if not normalized_heading:
-        return list(stack)
-
-    effective_level = max(1, int(level))
-    if effective_level > len(stack) + 1:
-        effective_level = len(stack) + 1
-    return [*stack[: effective_level - 1], normalized_heading]
-
-
 def _serialize_heading_path(stack: list[str]) -> str | None:
     values = [str(item).strip() for item in stack if str(item).strip()]
     if not values:
@@ -423,13 +399,6 @@ def _normalize_line(value: Any) -> str | None:
     if text is None:
         return None
     return " ".join(text.split()).casefold()
-
-
-def _safe_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _extract_table_cells_from_lines(
@@ -462,7 +431,7 @@ def _extract_table_cells_from_lines(
 
         if table_id is None:
             table_counter += 1
-            table_id = _make_table_id(paper_id, table_counter, pending_title)
+            table_id = make_table_id(paper_id, table_counter, pending_title)
             header_cells = [cell or f"column_{index + 1}" for index, cell in enumerate(cells)]
             source_cells = header_cells
         else:
@@ -471,19 +440,16 @@ def _extract_table_cells_from_lines(
         for col_index, cell_text in enumerate(source_cells, start=1):
             header_path = None if row_index == 0 else _resolve_header_path(header_cells, col_index - 1)
             rows.append(
-                {
-                    "cell_id": f"cell_{table_id}_{row_index}_{col_index}",
-                    "document_id": paper_id,
-                    "table_id": table_id,
-                    "row_index": row_index,
-                    "col_index": col_index - 1,
-                    "cell_text": cell_text,
-                    "header_path": header_path,
-                    "page": None,
-                    "bbox": None,
-                    "char_range": None,
-                    "unit_hint": _extract_unit_hint(header_path, cell_text),
-                }
+                SourceTableCell(
+                    cell_id=f"cell_{table_id}_{row_index}_{col_index}",
+                    document_id=paper_id,
+                    table_id=table_id,
+                    row_index=row_index,
+                    col_index=col_index - 1,
+                    cell_text=cell_text,
+                    header_path=header_path,
+                    unit_hint=extract_unit_hint(header_path, cell_text),
+                ).to_record()
             )
         row_index += 1
 
@@ -508,21 +474,6 @@ def _resolve_header_path(header_cells: list[str] | None, index: int) -> str | No
         return None
     text = str(header_cells[index] or "").strip()
     return text or None
-
-
-def _extract_unit_hint(header_path: str | None, cell_text: str) -> str | None:
-    for source in (header_path or "", cell_text):
-        match = _UNIT_HINT_PATTERN.search(str(source or ""))
-        if match:
-            return match.group(1)
-    return None
-
-
-def _make_table_id(paper_id: str, order: int, title: str | None) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", str(title or "").lower()).strip("_")
-    if not slug:
-        slug = f"table_{order}"
-    return f"tbl_{paper_id}_{order}_{slug}"
 
 
 def _build_document_records(

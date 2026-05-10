@@ -9,21 +9,6 @@ DOC_TYPE_MIXED: Final[DocumentType] = "mixed"
 DOC_TYPE_REVIEW: Final[DocumentType] = "review"
 DOC_TYPE_UNCERTAIN: Final[DocumentType] = "uncertain"
 
-ProtocolExtractability: TypeAlias = Literal["yes", "partial", "no", "uncertain"]
-
-PROTOCOL_EXTRACTABLE_YES: Final[ProtocolExtractability] = "yes"
-PROTOCOL_EXTRACTABLE_PARTIAL: Final[ProtocolExtractability] = "partial"
-PROTOCOL_EXTRACTABLE_NO: Final[ProtocolExtractability] = "no"
-PROTOCOL_EXTRACTABLE_UNCERTAIN: Final[ProtocolExtractability] = "uncertain"
-PROTOCOL_SUITABLE_EXTRACTABILITY: Final[frozenset[ProtocolExtractability]] = (
-    frozenset(
-        {
-            PROTOCOL_EXTRACTABLE_YES,
-            PROTOCOL_EXTRACTABLE_PARTIAL,
-        }
-    )
-)
-
 EpistemicStatus: TypeAlias = Literal[
     "directly_observed",
     "normalized_from_evidence",
@@ -78,12 +63,6 @@ __all__ = [
     "EPISTEMIC_NORMALIZED_FROM_EVIDENCE",
     "EPISTEMIC_UNRESOLVED",
     "EpistemicStatus",
-    "PROTOCOL_EXTRACTABLE_NO",
-    "PROTOCOL_EXTRACTABLE_PARTIAL",
-    "PROTOCOL_EXTRACTABLE_UNCERTAIN",
-    "PROTOCOL_EXTRACTABLE_YES",
-    "PROTOCOL_SUITABLE_EXTRACTABILITY",
-    "ProtocolExtractability",
     "TRACEABILITY_STATUS_DIRECT",
     "TRACEABILITY_STATUS_MISSING",
     "TRACEABILITY_STATUS_PARTIAL",

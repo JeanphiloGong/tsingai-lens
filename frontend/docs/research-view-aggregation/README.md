@@ -41,7 +41,6 @@ Excluded:
 
 - backend grouping and deduplication logic
 - graph projection and layout algorithm changes
-- protocol and SOP behavior changes
 - wholesale visual redesign of the SvelteKit application
 
 ## Reading Path

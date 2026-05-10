@@ -190,8 +190,6 @@ class EvidenceOnlyExtractor:
     def extract_document_profile(self, payload):  # noqa: ANN001
         return StructuredDocumentProfile(
             doc_type="experimental",
-            protocol_extractable="yes",
-            protocol_extractability_signals=[],
             parsing_warnings=[],
             confidence=0.9,
         )
@@ -223,7 +221,6 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
-            "protocol_extractable": "yes",
         },
         text_window={
             "window_id": "win-1",
@@ -263,7 +260,6 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
-            "protocol_extractable": "yes",
         },
         table_context={
             "caption_text": "Table 1 Mechanical results.",
@@ -659,7 +655,6 @@ def test_table_batch_payload_truncates_supporting_window_text():
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
-            "protocol_extractable": "yes",
         },
         table_context=None,
         table_rows=[{
@@ -703,7 +698,6 @@ def test_table_batch_payload_includes_source_table_context():
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
-            "protocol_extractable": "yes",
         },
         table_context={
             "caption_text": "Table 1 Mechanical properties.",
@@ -797,7 +791,6 @@ def test_table_batch_payload_bounds_large_table_matrix_to_target_rows():
         source_filename="large-table.pdf",
         profile={
             "doc_type": "experimental",
-            "protocol_extractable": "yes",
         },
         table_context={
             "caption_text": "Table 1 Large result table.",

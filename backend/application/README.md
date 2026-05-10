@@ -27,7 +27,7 @@ Inside it, business responsibilities are now grouped as:
 - [`core/README.md`](core/README.md)
   Research-fact backbone generation and workspace overview assembly
 - [`derived/README.md`](derived/README.md)
-  Graph, reports, and protocol views derived from Core or Source artifacts
+  Graph and report views derived from Core or Source artifacts
 
 ## Related Docs
 

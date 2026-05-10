@@ -12,8 +12,7 @@ delivery sequencing or plan-family routing.
 
 The backend turns collection material into document profiles, a paper-facts
 layer, derived evidence/comparison views, Core-derived graph/report artifacts,
-and conditional protocol outputs, and exposes those results through the public
-HTTP contract.
+and exposes those results through the public HTTP contract.
 
 Within the repository-wide system:
 
@@ -28,7 +27,7 @@ Within the repository-wide system:
 
 - `controllers/`
   Current HTTP route surface for collections, tasks, workspace, graph,
-  protocol, reports, documents, evidence, and comparisons
+  reports, documents, evidence, and comparisons
 - `application/`
   Use-case orchestration layer with active business-domain packages plus some
   remaining legacy flat services
@@ -49,10 +48,7 @@ The backend is still in transition, but its intended shape is already visible:
 - some legacy flat services still remain and should keep shrinking
 - the Lens v1 semantic backbone is now
   `document_profiles -> paper facts family -> evidence_cards plus
-  comparable_results / collection_comparable_results -> row projection /
-  protocol branch`
-- protocol remains a conditional downstream branch rather than the default
-  parsing center
+  comparable_results / collection_comparable_results -> row projection`
 - graph and reports are Core-derived secondary surfaces
 - query now crosses a Source-owned runtime facade rather than importing
   GraphRAG internals from product-facing application code
@@ -67,12 +63,11 @@ larger flat service bag.
 1. collection material enters through collection and ingestion surfaces
 2. indexing orchestration runs Source-side indexing/runtime preparation plus
    the Lens backbone
-3. document profiling produces suitability and routing signals
+3. document profiling produces coarse document-type and review-risk signals
 4. paper-facts extraction produces the primary research objects
 5. evidence and comparable-result generation produce the primary collection
    reading and workspace views, with comparison rows projected downstream
-6. protocol, graph, and report surfaces derive from or sit beside that primary
-   backbone
+6. graph and report surfaces derive from or sit beside that primary backbone
 
 ## Boundary Rules
 
@@ -82,7 +77,6 @@ larger flat service bag.
 - external integrations stay in `infra/`
 - route code should not bypass application-owned orchestration with ad hoc
   engine imports
-- protocol should stay behind documents, evidence, and comparisons
 - product graph and report semantics should stay derived from Core artifacts
 - GraphRAG should remain behind Source-owned seams rather than defining
   product-facing contracts

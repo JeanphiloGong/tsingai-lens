@@ -28,8 +28,6 @@ def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
                 title="LPBF 316L",
                 source_filename="paper.pdf",
                 doc_type="experimental",
-                protocol_extractable="yes",
-                protocol_extractability_signals=("methods",),
                 parsing_warnings=("table fragmented",),
                 confidence=0.88,
             ),

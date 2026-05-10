@@ -326,7 +326,6 @@ def _convert_papers(
                 "research_goal": _profile_payload_text(profile, "research_goal"),
                 "main_variables": _profile_payload_text(profile, "main_variables"),
                 "target_properties": _profile_payload_text(profile, "target_properties"),
-                "protocol_extractable": _first_value(profile, "protocol_extractable"),
                 "confidence": _first_value(profile, "confidence"),
                 "source": source,
             }
@@ -794,11 +793,7 @@ def _remaining_payload(payload: dict[str, Any], *, excluded: set[str]) -> dict[s
 
 
 def _profile_payload(profile: dict[str, Any]) -> dict[str, Any]:
-    for key in ("profile_payload", "protocol_extractability_signals"):
-        value = _dict_value(profile.get(key))
-        if value:
-            return value
-    return {}
+    return _dict_value(profile.get("profile_payload"))
 
 
 def _profile_payload_text(profile: dict[str, Any], key: str) -> str:

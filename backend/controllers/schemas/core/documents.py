@@ -12,7 +12,6 @@ from controllers.schemas.core.evidence_chain import EvidenceChainVariantDossierR
 
 
 DocumentType = Literal["experimental", "review", "mixed", "uncertain"]
-ProtocolExtractableStatus = Literal["yes", "partial", "no", "uncertain"]
 
 
 class DocumentProfileSummaryResponse(BaseModel):
@@ -20,10 +19,6 @@ class DocumentProfileSummaryResponse(BaseModel):
 
     total_documents: int = Field(default=0, description="文档总数")
     by_doc_type: dict[str, int] = Field(default_factory=dict, description="按文档类型统计")
-    by_protocol_extractable: dict[str, int] = Field(
-        default_factory=dict,
-        description="按 protocol suitability 统计",
-    )
     warnings: list[str] = Field(default_factory=list, description="集合级提示")
 
 
@@ -38,14 +33,6 @@ class DocumentProfileItemResponse(BaseModel):
         description="源文件名；缺失时为 null",
     )
     doc_type: DocumentType = Field(..., description="文档类型")
-    protocol_extractable: ProtocolExtractableStatus = Field(
-        ...,
-        description="是否适合 protocol 分支",
-    )
-    protocol_extractability_signals: list[str] = Field(
-        default_factory=list,
-        description="protocol 判断信号",
-    )
     parsing_warnings: list[str] = Field(default_factory=list, description="解析警告")
     confidence: float = Field(..., description="判断置信度")
 

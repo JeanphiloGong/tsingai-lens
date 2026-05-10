@@ -12,12 +12,10 @@ vi.mock('./api', () => ({
 const {
 	buildDocumentTypeStats,
 	buildProfileConclusion,
-	buildProtocolSuitabilityStats,
 	fetchDocumentComparisonSemantics,
 	formatConfidence,
 	getDocumentNextActions,
-	getDocumentTypeBadge,
-	getSuitabilityBadge
+	getDocumentTypeBadge
 } = await import('./documents');
 
 function profile(overrides: Partial<DocumentProfile>): DocumentProfile {
@@ -27,8 +25,6 @@ function profile(overrides: Partial<DocumentProfile>): DocumentProfile {
 		title: null,
 		source_filename: null,
 		doc_type: 'uncertain',
-		protocol_extractable: 'uncertain',
-		protocol_extractability_signals: [],
 		parsing_warnings: [],
 		confidence: null,
 		...overrides
@@ -139,18 +135,16 @@ describe('documents shared helpers', () => {
 
 	it('builds document profile stats with percentages and dominant rows', () => {
 		const profiles = [
-			profile({ document_id: 'review', doc_type: 'review', protocol_extractable: 'no' }),
-			profile({ document_id: 'exp', doc_type: 'experimental', protocol_extractable: 'yes' }),
-			profile({ document_id: 'method', doc_type: 'method', protocol_extractable: 'partial' }),
+			profile({ document_id: 'review', doc_type: 'review' }),
+			profile({ document_id: 'exp', doc_type: 'experimental' }),
+			profile({ document_id: 'method', doc_type: 'method' }),
 			profile({
 				document_id: 'computational',
-				doc_type: 'computational',
-				protocol_extractable: 'uncertain'
+				doc_type: 'computational'
 			})
 		];
 
 		const documentTypes = buildDocumentTypeStats(profiles);
-		const suitability = buildProtocolSuitabilityStats(profiles);
 
 		expect(documentTypes.find((item) => item.key === 'review')).toMatchObject({
 			count: 1,
@@ -162,19 +156,13 @@ describe('documents shared helpers', () => {
 			percent: 0,
 			dominant: false
 		});
-		expect(suitability.find((item) => item.key === 'no')).toMatchObject({
-			count: 1,
-			percent: 25,
-			tone: 'warning'
-		});
 	});
 
 	it('chooses profile conclusions from collection-level usability signals', () => {
-		const reviewProfiles = [profile({ doc_type: 'review', protocol_extractable: 'no' })];
+		const reviewProfiles = [profile({ doc_type: 'review' })];
 		const reviewStats = {
 			total: reviewProfiles.length,
-			documentTypeStats: buildDocumentTypeStats(reviewProfiles),
-			protocolSuitabilityStats: buildProtocolSuitabilityStats(reviewProfiles)
+			documentTypeStats: buildDocumentTypeStats(reviewProfiles)
 		};
 
 		expect(buildProfileConclusion(reviewStats)).toMatchObject({
@@ -183,11 +171,10 @@ describe('documents shared helpers', () => {
 			actionKeys: ['upload_more', 'view_evidence']
 		});
 
-		const readyProfiles = [profile({ doc_type: 'experimental', protocol_extractable: 'yes' })];
+		const readyProfiles = [profile({ doc_type: 'experimental' })];
 		const readyStats = {
 			total: readyProfiles.length,
-			documentTypeStats: buildDocumentTypeStats(readyProfiles),
-			protocolSuitabilityStats: buildProtocolSuitabilityStats(readyProfiles)
+			documentTypeStats: buildDocumentTypeStats(readyProfiles)
 		};
 
 		expect(buildProfileConclusion(readyStats)).toMatchObject({
@@ -198,15 +185,19 @@ describe('documents shared helpers', () => {
 	});
 
 	it('returns document-specific next actions instead of always opening comparisons', () => {
-		expect(
-			getDocumentNextActions(profile({ doc_type: 'review', protocol_extractable: 'no' }))
-		).toEqual(['view_document', 'view_evidence']);
-		expect(
-			getDocumentNextActions(profile({ doc_type: 'experimental', protocol_extractable: 'yes' }))
-		).toEqual(['view_document', 'view_evidence', 'open_comparison']);
-		expect(
-			getDocumentNextActions(profile({ doc_type: 'uncertain', protocol_extractable: 'uncertain' }))
-		).toEqual(['view_document', 'manual_mark']);
+		expect(getDocumentNextActions(profile({ doc_type: 'review' }))).toEqual([
+			'view_document',
+			'view_evidence'
+		]);
+		expect(getDocumentNextActions(profile({ doc_type: 'experimental' }))).toEqual([
+			'view_document',
+			'view_evidence',
+			'open_comparison'
+		]);
+		expect(getDocumentNextActions(profile({ doc_type: 'uncertain' }))).toEqual([
+			'view_document',
+			'manual_mark'
+		]);
 		expect(getDocumentNextActions(profile({ processing_status: 'processing' }))).toEqual([
 			'view_progress',
 			'refresh'
@@ -224,10 +215,6 @@ describe('documents shared helpers', () => {
 		expect(getDocumentTypeBadge('method')).toMatchObject({
 			labelKey: 'profiles.docTypes.method',
 			tone: 'method'
-		});
-		expect(getSuitabilityBadge('no')).toMatchObject({
-			labelKey: 'profiles.suitability.no',
-			tone: 'warning'
 		});
 	});
 });

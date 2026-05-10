@@ -211,8 +211,6 @@ Input:
 Output:
 
 - `doc_type`
-- `protocol_extractable`
-- `protocol_extractability_signals`
 - `parsing_warnings`
 - confidence and contamination markers
 

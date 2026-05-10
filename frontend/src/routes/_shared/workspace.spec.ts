@@ -31,7 +31,6 @@ function buildWorkspacePayload(
 			results: 'ready',
 			evidence: 'ready',
 			comparisons: 'ready',
-			protocol: 'not_started',
 			...overrides.workflow
 		},
 		artifacts: {
@@ -53,10 +52,6 @@ function buildWorkspacePayload(
 			graph_generated: false,
 			graph_ready: false,
 			graph_stale: false,
-			procedure_blocks_generated: false,
-			procedure_blocks_ready: false,
-			protocol_steps_generated: false,
-			protocol_steps_ready: false,
 			updated_at: '2026-04-22T00:00:00Z',
 			...overrides.artifacts
 		},
@@ -67,9 +62,6 @@ function buildWorkspacePayload(
 			can_view_comparisons: true,
 			can_view_graph: false,
 			can_download_graphml: false,
-			can_view_protocol_steps: false,
-			can_search_protocol: false,
-			can_generate_sop: false,
 			...overrides.capabilities
 		},
 		recent_tasks: []

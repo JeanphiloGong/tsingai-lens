@@ -18,6 +18,3 @@ This package owns downstream views that consume Core outputs.
   AI-assisted material review drafts derived from the material research-view
   context pack, with pipeline artifact persistence, evidence-id validation, and
   Markdown/PDF artifacts
-- `protocol/`
-  Conditional protocol branch derived from repository-backed Source artifacts
-  and persisted through the protocol artifact repository

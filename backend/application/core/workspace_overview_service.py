@@ -4,8 +4,6 @@ from domain.shared.enums import (
     DOC_TYPE_MIXED,
     DOC_TYPE_REVIEW,
     DOC_TYPE_UNCERTAIN,
-    PROTOCOL_EXTRACTABLE_PARTIAL,
-    PROTOCOL_EXTRACTABLE_YES,
 )
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import (
@@ -82,10 +80,6 @@ class WorkspaceService:
             "table_rows_ready": False,
             "table_cells_generated": False,
             "table_cells_ready": False,
-            "procedure_blocks_generated": False,
-            "procedure_blocks_ready": False,
-            "protocol_steps_generated": False,
-            "protocol_steps_ready": False,
             "updated_at": self.collection_service.get_collection(collection_id)["updated_at"],
         }
 
@@ -136,10 +130,6 @@ class WorkspaceService:
 
     def _build_capabilities(self, artifacts: dict) -> dict:
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
-        protocol_generated = self._artifact_generated(
-            artifacts,
-            "protocol_steps_generated",
-        )
         comparisons_generated = self._comparisons_generated(artifacts)
         paper_facts_generated = self._artifact_generated(
             artifacts,
@@ -154,9 +144,6 @@ class WorkspaceService:
             "can_view_comparable_results": comparisons_generated,
             "can_view_research_view": paper_facts_generated,
             "can_download_graphml": graph_ready,
-            "can_view_protocol_steps": protocol_generated,
-            "can_search_protocol": protocol_generated,
-            "can_generate_sop": protocol_generated,
         }
 
     def _build_status_summary(
@@ -198,7 +185,6 @@ class WorkspaceService:
             summary = {
                 "total_documents": 0,
                 "by_doc_type": {},
-                "by_protocol_extractable": {},
                 "warnings": [],
             }
         return summary
@@ -224,10 +210,6 @@ class WorkspaceService:
             artifacts,
             "graph_generated",
         )
-        protocol_generated = self._artifact_generated(
-            artifacts,
-            "protocol_steps_generated",
-        )
         documents_ready = self._artifact_ready(
             artifacts,
             "document_profiles_ready",
@@ -236,22 +218,12 @@ class WorkspaceService:
         comparison_ready = self._comparisons_ready(artifacts)
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
         graph_stale = self._artifact_stale(artifacts, "graph_stale")
-        protocol_ready = self._artifact_ready(artifacts, "protocol_steps_ready")
-        protocol_candidates = (
-            document_summary.get("by_protocol_extractable", {}).get(
-                PROTOCOL_EXTRACTABLE_YES, 0
-            )
-            + document_summary.get("by_protocol_extractable", {}).get(
-                PROTOCOL_EXTRACTABLE_PARTIAL, 0
-            )
-        )
 
         any_generated = (
             documents_generated
             or evidence_generated
             or comparisons_generated
             or graph_generated
-            or protocol_generated
         )
         if file_count == 0 and not any_generated:
             return {
@@ -259,7 +231,6 @@ class WorkspaceService:
                 "results": {"status": "not_started", "detail": "Collection results are not generated yet."},
                 "evidence": {"status": "not_started", "detail": "Evidence cards are not generated yet."},
                 "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
-                "protocol": {"status": "not_applicable", "detail": "Protocol branch is unavailable before collection build."},
                 "graph": {"status": "not_started", "detail": "Graph projection is not generated yet."},
             }
         if task_status == "running":
@@ -268,7 +239,6 @@ class WorkspaceService:
                 "results": {"status": "not_started", "detail": "Collection results have not been prepared yet."},
                 "evidence": {"status": "not_started", "detail": "Paper facts extraction has not started yet."},
                 "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
-                "protocol": {"status": "not_started", "detail": "Protocol branch has not started yet."},
                 "graph": {"status": "not_started", "detail": "Graph projection has not started yet."},
             }
 
@@ -362,29 +332,6 @@ class WorkspaceService:
                 "detail": "Collection-scoped comparisons are not generated yet.",
             }
 
-        if protocol_ready:
-            protocol_stage = {"status": "ready", "detail": "Protocol artifacts are available."}
-        elif protocol_generated:
-            protocol_stage = {
-                "status": "limited",
-                "detail": "Protocol artifacts were generated but no usable protocol steps are currently available.",
-            }
-        elif (documents_ready or documents_generated) and protocol_candidates == 0:
-            protocol_stage = {
-                "status": "not_applicable",
-                "detail": "No protocol-suitable documents were detected in this collection.",
-            }
-        elif documents_ready or documents_generated:
-            protocol_stage = {
-                "status": "not_started",
-                "detail": "Protocol branch has not generated artifacts yet.",
-            }
-        else:
-            protocol_stage = {
-                "status": "not_started",
-                "detail": "Protocol branch has not started yet.",
-            }
-
         if graph_ready:
             graph_stage = {
                 "status": "ready",
@@ -416,7 +363,6 @@ class WorkspaceService:
             "results": results_stage,
             "evidence": evidence_stage,
             "comparisons": comparisons_stage,
-            "protocol": protocol_stage,
             "graph": graph_stage,
         }
 
@@ -424,7 +370,6 @@ class WorkspaceService:
         warnings: list[dict] = []
         total_documents = int(document_summary.get("total_documents", 0) or 0)
         by_doc_type = document_summary.get("by_doc_type", {})
-        by_protocol_extractable = document_summary.get("by_protocol_extractable", {})
 
         review_like = int(by_doc_type.get(DOC_TYPE_REVIEW, 0) or 0) + int(
             by_doc_type.get(DOC_TYPE_MIXED, 0) or 0
@@ -434,18 +379,7 @@ class WorkspaceService:
                 {
                     "code": "review_heavy_collection",
                     "severity": "warning",
-                    "message": "Most documents are review-heavy or mixed, so protocol outputs may stay limited.",
-                }
-            )
-        if total_documents and (
-            int(by_protocol_extractable.get(PROTOCOL_EXTRACTABLE_YES, 0) or 0)
-            + int(by_protocol_extractable.get(PROTOCOL_EXTRACTABLE_PARTIAL, 0) or 0)
-        ) == 0:
-            warnings.append(
-                {
-                    "code": "protocol_limited_collection",
-                    "severity": "warning",
-                    "message": "No protocol-suitable documents were detected in this collection.",
+                    "message": "Most documents are review-heavy or mixed; experimental evidence may require manual review.",
                 }
             )
         if int(by_doc_type.get(DOC_TYPE_UNCERTAIN, 0) or 0) > 0:
@@ -458,7 +392,7 @@ class WorkspaceService:
             )
         return warnings
 
-    def _build_links(self, collection_id: str, artifacts: dict) -> dict:
+    def _build_links(self, collection_id: str) -> dict:
         payload = {
             "documents": f"/api/v1/collections/{collection_id}/documents/profiles",
             "documents_profiles": f"/api/v1/collections/{collection_id}/documents/profiles",
@@ -485,16 +419,8 @@ class WorkspaceService:
             "comparisons": f"/api/v1/collections/{collection_id}/comparisons",
             "results": f"/api/v1/collections/{collection_id}/results",
             "comparable_results": f"/api/v1/comparable-results?collection_id={collection_id}",
-            "protocol": None,
-            "protocol_steps": None,
             "graph": f"/api/v1/collections/{collection_id}/graph",
         }
-        if self._artifact_generated(
-            artifacts,
-            "protocol_steps_generated",
-        ):
-            payload["protocol"] = f"/api/v1/collections/{collection_id}/protocol/steps"
-            payload["protocol_steps"] = f"/api/v1/collections/{collection_id}/protocol/steps"
         return payload
 
     def get_workspace_overview(
@@ -596,23 +522,16 @@ class WorkspaceService:
                 "table_rows_ready": bool(artifacts.get("table_rows_ready")),
                 "table_cells_generated": bool(artifacts.get("table_cells_generated")),
                 "table_cells_ready": bool(artifacts.get("table_cells_ready")),
-                "procedure_blocks_generated": bool(artifacts.get("procedure_blocks_generated")),
-                "procedure_blocks_ready": bool(artifacts.get("procedure_blocks_ready")),
-                "protocol_steps_generated": bool(artifacts.get("protocol_steps_generated")),
-                "protocol_steps_ready": bool(artifacts.get("protocol_steps_ready")),
                 "updated_at": artifacts["updated_at"],
             },
             "workflow": self._build_workflow(len(files), latest_task, artifacts, document_summary),
             "document_summary": {
                 "total_documents": int(document_summary.get("total_documents", 0) or 0),
                 "by_doc_type": dict(document_summary.get("by_doc_type", {})),
-                "by_protocol_extractable": dict(
-                    document_summary.get("by_protocol_extractable", {})
-                ),
             },
             "warnings": self._build_warnings(document_summary),
             "latest_task": latest_task,
             "recent_tasks": recent_tasks,
             "capabilities": self._build_capabilities(artifacts),
-            "links": self._build_links(collection_id, artifacts),
+            "links": self._build_links(collection_id),
         }

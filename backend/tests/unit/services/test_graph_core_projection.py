@@ -41,8 +41,6 @@ def _core_graph_fact_set(
                     "title": "Core Route Paper",
                     "source_filename": "paper.txt",
                     "doc_type": "experimental",
-                    "protocol_extractable": "yes",
-                    "protocol_extractability_signals": ["methods_section_detected"],
                     "parsing_warnings": [],
                     "confidence": 0.91,
                 }
@@ -95,8 +93,6 @@ def test_core_projection_builds_route_compatible_graph_payload():
                 "title": "Core Graph Paper",
                 "source_filename": "paper.txt",
                 "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": ["methods_section_detected"],
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
@@ -216,8 +212,6 @@ def test_core_projection_skips_placeholder_semantic_nodes():
                 "title": "Placeholder Graph Paper",
                 "source_filename": "paper.txt",
                 "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
@@ -289,8 +283,6 @@ def test_core_projection_truncation_reserves_backbone_capacity():
                 "title": f"Paper {index}",
                 "source_filename": f"paper-{index}.txt",
                 "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
                 "parsing_warnings": [],
                 "confidence": 0.9,
             }

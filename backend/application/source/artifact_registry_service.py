@@ -6,14 +6,12 @@ from pathlib import Path
 from domain.ports import (
     ArtifactRepository,
     CoreFactRepository,
-    ProtocolArtifactRepository,
     SourceArtifactRepository,
 )
 from domain.source import ArtifactStatusRecord
 from infra.persistence.factory import (
     build_artifact_repository,
     build_core_fact_repository,
-    build_protocol_artifact_repository,
     build_source_artifact_repository,
 )
 
@@ -31,7 +29,6 @@ class ArtifactRegistryService:
         repository: ArtifactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
         core_fact_repository: CoreFactRepository | None = None,
-        protocol_artifact_repository: ProtocolArtifactRepository | None = None,
     ) -> None:
         self.repository = repository or build_artifact_repository(root_dir)
         self.root_dir = self.repository.root_dir
@@ -41,9 +38,6 @@ class ArtifactRegistryService:
         )
         self.core_fact_repository = (
             core_fact_repository or build_core_fact_repository(db_path)
-        )
-        self.protocol_artifact_repository = (
-            protocol_artifact_repository or build_protocol_artifact_repository(db_path)
         )
 
     def build_registry(
@@ -58,9 +52,6 @@ class ArtifactRegistryService:
             collection_id
         )
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
-        protocol_status = self.protocol_artifact_repository.get_collection_status(
-            collection_id
-        )
         source_artifacts_generated = not source_artifacts.is_empty()
         evidence_cards_generated = bool(core_facts.paper_facts_ready)
         evidence_cards_ready = bool(
@@ -119,10 +110,6 @@ class ArtifactRegistryService:
             table_rows_ready=bool(source_artifacts.table_rows),
             table_cells_generated=source_artifacts_generated,
             table_cells_ready=bool(source_artifacts.table_cells),
-            procedure_blocks_generated=protocol_status.procedure_blocks_generated,
-            procedure_blocks_ready=protocol_status.procedure_blocks_ready,
-            protocol_steps_generated=protocol_status.protocol_steps_generated,
-            protocol_steps_ready=protocol_status.protocol_steps_ready,
             updated_at=_now_iso(),
         ).to_record()
         if previous_payload is None:

@@ -13,7 +13,6 @@
 	import {
 		fetchWorkspaceOverview,
 		getOverviewReadinessState,
-		getWorkspaceSurfaceState,
 		type WorkspaceOverview
 	} from '../../_shared/workspace';
 
@@ -36,14 +35,11 @@
 		: formatStatus(collection?.status);
 	$: statusTone = readinessState ?? 'pending';
 	$: updatedAt = collection?.updated_at || workspace?.artifacts.updated_at || '';
-	$: protocolVisible =
-		!workspace || getWorkspaceSurfaceState(workspace, 'protocol') !== 'not_applicable';
 	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/evidence`;
 	$: moreActive =
 		$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
-		$page.url.pathname.startsWith(`/collections/${collectionId}/results`) ||
-		$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`);
+		$page.url.pathname.startsWith(`/collections/${collectionId}/results`);
 
 	$: if (collectionId && collectionId !== loadedWorkspaceId) {
 		loadedWorkspaceId = collectionId;
@@ -199,14 +195,6 @@
 			>
 				{$t('collection.tabs.extractedFacts')}
 			</a>
-			{#if protocolVisible}
-				<a
-					href={`/collections/${collectionId}/protocol`}
-					class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`)}
-				>
-					{$t('collection.tabs.protocol')}
-				</a>
-			{/if}
 		</div>
 	</details>
 </nav>

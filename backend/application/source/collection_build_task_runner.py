@@ -13,7 +13,6 @@ from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.source.task_service import TaskService
-from application.derived.protocol.pipeline_service import build_protocol_artifacts
 from application.source.artifact_registry_service import ArtifactRegistryService
 from utils.logger import bind_request_id, clear_request_id
 
@@ -212,12 +211,9 @@ class CollectionBuildTaskRunner:
                     current_stage="document_profiles_started",
                     progress_percent=70,
                 )
-                document_profiles = self.document_profile_service.build_document_profiles(
+                self.document_profile_service.build_document_profiles(
                     collection_id,
                     output_dir,
-                )
-                protocol_candidate_count = self.document_profile_service.count_protocol_suitable(
-                    document_profiles
                 )
                 self._update_task_progress(
                     task_id,
@@ -249,20 +245,6 @@ class CollectionBuildTaskRunner:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))
                     warnings.append("未生成 comparison rows，当前 collection 还不能直接做结构化比较。")
-                    self.task_service.update_task(task_id, warnings=warnings)
-
-                self._update_task_progress(
-                    task_id,
-                    collection_id,
-                    current_stage="protocol_artifacts_started",
-                    progress_percent=88,
-                )
-                if protocol_candidate_count > 0:
-                    build_protocol_artifacts(collection_id, output_dir)
-                else:
-                    record = self.task_service.get_task(task_id)
-                    warnings = list(record.get("warnings", []))
-                    warnings.append("未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。")
                     self.task_service.update_task(task_id, warnings=warnings)
 
             artifacts = self.artifact_registry_service.upsert(collection_id, output_dir)

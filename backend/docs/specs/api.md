@@ -16,7 +16,6 @@
 - `results` 是核心产品对象资源
 - `documents` 是来源核验资源
 - `evidence/cards` 是支撑型资源，主要服务于 result/document/comparison drilldown
-- `protocol/*` 是条件分支，不是所有 collection 的默认主产物
 - `graph/*`、`reports/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
 - `materials/{material_id}/review-report*` 是基于 material research-view 的
   AI-assisted review draft 生成能力，不是 raw 数据导出
@@ -45,8 +44,7 @@
 6. 从 workspace 进入 `comparisons`
 7. 从 `comparisons` drilldown 到 `results`
 8. 需要核验来源时，从 `results` 回到 `documents`
-9. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
-10. 在 comparison/result/document 中需要核验证据时，调用 traceback 接口并跳转文档查看器
+9. 在 comparison/result/document 中需要核验证据时，调用 traceback 接口并跳转文档查看器
 
 可选 collection-bound 短对话流程：
 
@@ -197,7 +195,7 @@ message 返回必须包含：
 - collection 页面如果要展示任务历史，应走 collection 维度的 tasks 接口
 - `task_type` 对外固定为 `build`
 - `current_stage` 对外应使用：
-  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | paper_facts_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
+  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | paper_facts_started | comparison_rows_started | artifacts_ready | failed`
 - `graphrag_index_started`、`graphrag_index_completed`
   已退役，不再属于公开或内部活动合同
 - Source 结构产物当前包括
@@ -237,8 +235,7 @@ message 返回必须包含：
 
 其中：
 
-- `workflow` 应优先表达 `comparisons`、`results`、`documents`、`protocol`、
-  `graph` 五个阶段的状态
+- `workflow` 应优先表达 `comparisons`、`results`、`documents`、`graph` 四个阶段的状态
   - `evidence` 可以在迁移期继续作为 secondary compatibility field 暴露
 - 状态值应使用显式语义，例如
   `not_started | processing | ready | limited | not_applicable | failed`
@@ -255,8 +252,8 @@ message 返回必须包含：
 - `status_summary=ready`
   应表示 collection-scoped comparison read model 已就绪，即使 row cache 尚未预生成
 - `document_summary` 应来自 `document_profiles` 的 collection 级汇总
-- `warnings` 应表达 review-heavy、protocol-limited、comparison-limited、
-  traceability-limited 等 collection 风险
+- `warnings` 应表达 review-heavy、comparison-limited、traceability-limited 等
+  collection 风险
 - `links` 应指向主资源页面，而不是让前端自己拼内部跳转语义
 - `links.comparisons`、`links.results`、`links.documents`
   应是 collection 主工作流入口
@@ -606,8 +603,6 @@ failed
 - `title`
 - `source_filename`
 - `doc_type`
-- `protocol_extractable`
-- `protocol_extractability_signals`
 - `parsing_warnings`
 - `confidence`
 
@@ -624,9 +619,6 @@ failed
 - 空字符串不应返回给前端，应统一归一化为 `null`
 - `doc_type` 使用
   `experimental | review | mixed | uncertain`
-- `protocol_extractable` 使用
-  `yes | partial | no | uncertain`
-- `protocol_extractability_signals` 当前为预留字段，返回空数组
 - `parsing_warnings` 仅用于固定 triage warning，例如
   `insufficient_content | classification_uncertain`
 - 这是增量字段扩展，不改变 endpoint，也不破坏旧字段
@@ -646,8 +638,6 @@ failed
   "title": "High-Rate Performance of Layered Oxide Cathodes",
   "source_filename": "wang_2024_battery.pdf",
   "doc_type": "experimental",
-  "protocol_extractable": "yes",
-  "protocol_extractability_signals": [],
   "parsing_warnings": [],
   "confidence": 0.91
 }
@@ -1116,23 +1106,9 @@ comparison 对 traceback 的依赖约定：
   `collection_comparable_results` 为语义真源，并可按需重投影 row cache
 - `comparability_status` 使用
   `comparable | limited | not_comparable | insufficient`
-- 前端应把 comparison rows 作为主比较表，而不是把 protocol steps 当主表
+- 前端应把 comparison rows 作为主比较表
 - comparison row 的主 drilldown 应进入 `results/{result_id}`，而不是把 row
   自己当成最终事实页
-
-### Protocol 条件分支
-
-- `GET /api/v1/collections/{collection_id}/protocol/steps`
-- `GET /api/v1/collections/{collection_id}/protocol/search`
-- `POST /api/v1/collections/{collection_id}/protocol/sop`
-
-这些接口仍然保留，但前端不能假设每个 collection 都有高质量 protocol 输出。
-
-前端约束：
-
-- protocol 入口必须保持 collection 维度
-- 如果 workspace 或 document profiles 已经表明 collection 不适合 protocol，
-  前端应降级展示，而不是强推 protocol 页面
 
 ### Graph、Reports 次级界面
 
@@ -1214,9 +1190,6 @@ readiness 类错误至少应包含：
 - `evidence/cards`
   - 作为支撑型资源，未生成时返回 `409`
   - 生成后即使为空也可返回 `200`，`count=0`
-- `protocol/*`
-  - 入口基于 `protocol_steps_generated` 判断是否可访问
-  - `protocol_steps_generated=true` 且 `protocol_steps_ready=false` 时允许返回空列表或空结果
 - `graph`
   - Core graph 输入缺失时返回 `409`
   - 请求的 `node_id` 不存在时，`/graph/nodes/{node_id}/neighbors` 返回 `404`
@@ -1225,8 +1198,7 @@ readiness 类错误至少应包含：
 
 - 浏览器与前端代码只应依赖 `/api/v1/*` 与 `/api/*` 两类前缀
 - collection 详情页的主状态来源是 `workspace`
-- 前端不应把 `sections_ready`、`procedure_blocks_ready` 这类内部产物状态当成长期主合同
-- protocol 页面不是默认首页，comparison workspace 才是
+- 前端不应把内部产物状态当成长期主合同
 - 前端主工作流应理解为 `comparisons -> results -> documents`
 - `results` 是主 drilldown 对象，不应直接用 raw `comparable-results` retrieval payload 代替
 - goal-first 响应只用于 Goal Brief / Intake 与 collection handoff，主展示仍必须消费 Core 资源

@@ -172,8 +172,6 @@ Primary changes:
 
 - remove `/query` assertions and stubs from
   [`tests/integration/test_app_layer_api.py`](../../../tests/integration/test_app_layer_api.py)
-- remove `/query` OpenAPI expectations from
-  [`tests/integration/routers/test_protocol_api.py`](../../../tests/integration/routers/test_protocol_api.py)
 - update [`../specs/api.md`](../../specs/api.md)
 - update [`current-api-surface-migration-checklist.md`](../backend-wide/api-surface-migration/current-state.md)
 - update [`core-first-product-surface-cutover-plan.md`](../backend-wide/core-first-product-surface/implementation-plan.md)

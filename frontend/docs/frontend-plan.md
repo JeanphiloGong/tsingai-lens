@@ -28,7 +28,6 @@
 - Collection-bound AI 研究助手：`POST /api/v1/goal-sessions`、
   `GET|PATCH /api/v1/goal-sessions/{session_id}`、
   `POST|GET /api/v1/goal-sessions/{session_id}/messages`
-- Protocol 结果：`GET /api/v1/collections/{collection_id}/protocol/steps`、`GET /api/v1/collections/{collection_id}/protocol/search`、`POST /api/v1/collections/{collection_id}/protocol/sop`
 
 ## 前端实现约束
 
@@ -53,5 +52,5 @@
 ## 验收重点
 
 - Network 面板中的产品请求只出现 `/api/v1/*` 与 `/api/*`
-- 首页、集合工作区、文件上传、任务轮询、图谱、步骤、SOP 都通过同源入口工作
+- 首页、集合工作区、文件上传、任务轮询、图谱、证据和比较都通过同源入口工作
 - 浏览器中的 API 文档入口固定为 `/api/docs`

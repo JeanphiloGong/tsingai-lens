@@ -66,7 +66,6 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
                         "title": "Core Paper",
                         "source_filename": "paper.txt",
                         "doc_type": "experimental",
-                        "protocol_extractable": "yes",
                         "confidence": 0.91,
                     }
                 ),

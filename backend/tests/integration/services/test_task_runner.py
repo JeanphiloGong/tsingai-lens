@@ -16,7 +16,6 @@ from application.source.collection_build_task_runner import CollectionBuildTaskR
 from application.source.task_service import TaskService
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import (
-    SqliteProtocolArtifactRepository,
     SqliteSourceArtifactRepository,
 )
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
@@ -119,60 +118,14 @@ def _write_source_artifact_outputs(
     )
 
 
-def _write_review_only_outputs(
-    output_dir: Path,
-    *,
-    collection_id: str | None = None,
-    source_repository=None,  # noqa: ANN001
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    collection_id = collection_id or output_dir.parent.name
-    if source_repository is None:
-        source_repository = SqliteSourceArtifactRepository(output_dir.parents[2] / "lens.sqlite")
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "A Review of Composite Fillers",
-                "text": "This review summarizes recent advances in composite fillers and processing routes.",
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "This review summarizes recent advances in composite fillers.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    blocks = build_blocks(documents, text_units)
-    table_rows = build_table_rows(documents, text_units)
-    table_cells = build_table_cells(documents, text_units)
-    source_repository.replace_collection_artifacts(
-        collection_id,
-        SourceArtifactSet.from_records(
-            documents=documents.to_dict(orient="records"),
-            text_units=text_units.to_dict(orient="records"),
-            blocks=blocks.to_dict(orient="records"),
-            table_rows=table_rows.to_dict(orient="records"),
-            table_cells=table_cells.to_dict(orient="records"),
-        ),
-    )
-
-
 def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     import application.source.collection_build_task_runner as task_runner_module
-    import application.derived.protocol.pipeline_service as protocol_pipeline_service
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    protocol_artifact_repository = SqliteProtocolArtifactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
         tmp_path / "collections",
-        protocol_artifact_repository=protocol_artifact_repository,
     )
     runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
 
@@ -194,16 +147,6 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
         )
         return [DummyWorkflowOutput()]
 
-    monkeypatch.setattr(
-        protocol_pipeline_service,
-        "source_artifact_repository",
-        source_artifact_repository,
-    )
-    monkeypatch.setattr(
-        protocol_pipeline_service,
-        "protocol_artifact_repository",
-        protocol_artifact_repository,
-    )
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
@@ -250,87 +193,6 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
-    assert artifacts["procedure_blocks_generated"] is True
-    assert artifacts["procedure_blocks_ready"] is True
-    assert artifacts["protocol_steps_generated"] is True
-    assert artifacts["protocol_steps_ready"] is True
-
-def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
-    monkeypatch, tmp_path
-):
-    import application.source.collection_build_task_runner as task_runner_module
-
-    collection_service = CollectionService(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
-
-    collection = collection_service.create_collection("Review Papers")
-    paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(
-        collection["collection_id"],
-        "paper.txt",
-        b"This review summarizes recent advances in composite fillers.",
-    )
-
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
-    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
-        _write_review_only_outputs(paths.output_dir)
-        return [DummyWorkflowOutput()]
-
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
-    monkeypatch.setattr(
-        task_runner_module,
-        "load_config",
-        lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
-    )
-    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
-
-    task = task_service.create_task(collection["collection_id"], "build")
-    result = asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
-
-    assert result["status"] == "completed"
-    assert "未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。" in result["warnings"]
-    artifacts = artifact_registry.get(collection["collection_id"])
-    assert artifacts["documents_generated"] is True
-    assert artifacts["documents_ready"] is True
-    assert artifacts["document_profiles_generated"] is True
-    assert artifacts["document_profiles_ready"] is True
-    assert artifacts["graph_generated"] is True
-    assert artifacts["graph_ready"] is True
-    assert artifacts["blocks_generated"] is True
-    assert artifacts["blocks_ready"] is True
-    assert artifacts["figures_generated"] is True
-    assert artifacts["figures_ready"] is False
-    assert artifacts["table_rows_generated"] is True
-    assert artifacts["table_rows_ready"] is False
-    assert artifacts["table_cells_generated"] is True
-    assert artifacts["table_cells_ready"] is False
-    assert artifacts["evidence_cards_generated"] is True
-    assert artifacts["evidence_cards_ready"] is False
-    assert artifacts["characterization_observations_generated"] is True
-    assert artifacts["characterization_observations_ready"] is False
-    assert artifacts["structure_features_generated"] is True
-    assert artifacts["structure_features_ready"] is False
-    assert artifacts["test_conditions_generated"] is True
-    assert artifacts["test_conditions_ready"] is False
-    assert artifacts["baseline_references_generated"] is True
-    assert artifacts["baseline_references_ready"] is False
-    assert artifacts["sample_variants_generated"] is True
-    assert artifacts["sample_variants_ready"] is False
-    assert artifacts["measurement_results_generated"] is True
-    assert artifacts["measurement_results_ready"] is False
-    assert artifacts["comparable_results_generated"] is True
-    assert artifacts["comparable_results_ready"] is False
-    assert artifacts["collection_comparable_results_generated"] is True
-    assert artifacts["collection_comparable_results_ready"] is False
-    assert artifacts["comparison_rows_generated"] is True
-    assert artifacts["comparison_rows_ready"] is False
-    assert artifacts["protocol_steps_generated"] is False
-    assert artifacts["protocol_steps_ready"] is False
 
 def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
     import application.source.collection_build_task_runner as task_runner_module

@@ -1382,7 +1382,6 @@ class PaperFactsService:
             "source_filename": source_filename,
             "document_profile": {
                 "doc_type": str(profile.get("doc_type") or ""),
-                "protocol_extractable": str(profile.get("protocol_extractable") or ""),
             },
             "text_window": {
                 "heading": self._normalize_scalar_text(text_window.get("heading")),
@@ -1413,7 +1412,6 @@ class PaperFactsService:
             "source_filename": source_filename,
             "document_profile": {
                 "doc_type": str(profile.get("doc_type") or ""),
-                "protocol_extractable": str(profile.get("protocol_extractable") or ""),
             },
             "table_context": self._build_table_context_payload(
                 table_context=table_context,

@@ -63,8 +63,7 @@ function buildWorkspacePayload() {
 			documents: 'ready',
 			results: 'ready',
 			evidence: 'ready',
-			comparisons: 'ready',
-			protocol: 'not_applicable'
+			comparisons: 'ready'
 		},
 		document_summary: {
 			total_documents: 2,
@@ -72,12 +71,6 @@ function buildWorkspacePayload() {
 				experimental: 2,
 				review: 0,
 				mixed: 0,
-				uncertain: 0
-			},
-			protocol_extractable_counts: {
-				yes: 0,
-				partial: 0,
-				no: 2,
 				uncertain: 0
 			},
 			warnings: []
@@ -102,10 +95,6 @@ function buildWorkspacePayload() {
 			graph_generated: false,
 			graph_ready: false,
 			graph_stale: false,
-			procedure_blocks_generated: false,
-			procedure_blocks_ready: false,
-			protocol_steps_generated: false,
-			protocol_steps_ready: false,
 			updated_at: '2026-04-22T00:00:00Z'
 		},
 		latest_task: null,
@@ -116,10 +105,7 @@ function buildWorkspacePayload() {
 			can_view_evidence: true,
 			can_view_comparisons: true,
 			can_view_graph: false,
-			can_download_graphml: false,
-			can_view_protocol_steps: false,
-			can_search_protocol: false,
-			can_generate_sop: false
+			can_download_graphml: false
 		},
 		links: {
 			workspace: '/collections/col_123',
@@ -127,7 +113,6 @@ function buildWorkspacePayload() {
 			results: '/collections/col_123/results',
 			evidence: '/collections/col_123/evidence',
 			comparisons: '/collections/col_123/comparisons',
-			protocol: '/collections/col_123/protocol',
 			graph: '/collections/col_123/graph'
 		}
 	};

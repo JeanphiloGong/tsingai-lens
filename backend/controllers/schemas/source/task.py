@@ -14,7 +14,6 @@ TaskStage = Literal[
     "document_profiles_started",
     "paper_facts_started",
     "comparison_rows_started",
-    "protocol_artifacts_started",
     "artifacts_ready",
     "failed",
 ]
@@ -106,16 +105,6 @@ class ArtifactStatusResponse(BaseModel):
     table_rows_ready: bool = Field(default=False, description="table_rows 是否已生成且非空")
     table_cells_generated: bool = Field(default=False, description="table_cells 是否已生成")
     table_cells_ready: bool = Field(default=False, description="table_cells 是否已生成且非空")
-    procedure_blocks_generated: bool = Field(default=False, description="procedure_blocks 是否已生成")
-    procedure_blocks_ready: bool = Field(
-        default=False,
-        description="procedure_blocks 是否已生成且非空",
-    )
-    protocol_steps_generated: bool = Field(default=False, description="protocol_steps 是否已生成")
-    protocol_steps_ready: bool = Field(
-        default=False,
-        description="protocol_steps 是否已生成且非空",
-    )
     updated_at: str = Field(..., description="更新时间")
 
 

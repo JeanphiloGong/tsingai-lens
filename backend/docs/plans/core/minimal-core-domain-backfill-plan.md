@@ -45,8 +45,6 @@ Today the `domain/` package is very small:
 
 - [`../../domain/ports.py`](../../../domain/ports.py)
   owns collection, task, and artifact repository protocols
-- [`../../domain/protocol.py`](../../../domain/protocol.py)
-  owns protocol-oriented dataclasses
 
 Meanwhile, stable Core semantics currently live elsewhere:
 

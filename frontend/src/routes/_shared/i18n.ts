@@ -159,7 +159,6 @@ const translations: Record<Language, Translations> = {
 				papers: 'Papers',
 				allComparisons: 'All Comparisons',
 				assistant: 'AI Copilot',
-				protocol: 'Protocol',
 				graph: 'Graph'
 			},
 			actionsLabel: 'Collection actions',
@@ -776,7 +775,7 @@ const translations: Record<Language, Translations> = {
 				ready: {
 					label: 'Ready',
 					title: 'The main collection views are ready',
-					body: 'Start with the collection-level analysis views below. Protocol and graph remain secondary branches.'
+					body: 'Start with the collection-level analysis views below. Graph remains a secondary branch.'
 				},
 				ready_with_limits: {
 					label: 'Ready with limits',
@@ -810,9 +809,7 @@ const translations: Record<Language, Translations> = {
 				documents: 'Documents',
 				graph: 'Graph',
 				graphml: 'GraphML',
-				sections: 'Sections',
-				procedureBlocks: 'Procedure Blocks',
-				protocolSteps: 'Protocol Steps'
+				sections: 'Sections'
 			},
 			ready: 'Ready',
 			pending: 'Pending',
@@ -845,19 +842,16 @@ const translations: Record<Language, Translations> = {
 				'Then inspect one result at a time to understand what was actually extracted.',
 			previewEvidenceLead: 'Trace claims back to the figure, table, or text that supports them.',
 			previewDocumentsLead: 'Separate experimental papers from reviews and mixed documents.',
-			previewProtocolLead: 'Use only when the collection really contains usable procedural detail.',
 			uploadCta: 'Choose papers',
 			uploadWhyTitle: 'Why upload first',
 			uploadWhyBody:
-				'These papers are the raw source material for this collection. Without them, the system cannot extract steps, generate a draft plan, or build the graph.',
+				'These papers are the raw source material for this collection. Without them, the system cannot extract evidence, compare findings, or build the graph.',
 			uploadAfterTitle: 'What you can do after upload and processing',
 			uploadAfterBody:
 				'Once processing finishes, this collection unlocks the main Lens v1 workflow surfaces.',
 			uploadAfterComparisons: 'Inspect normalized comparison rows across the collection',
 			uploadAfterEvidence: 'Inspect evidence cards and source traceability',
-			uploadAfterDocuments:
-				'Check document type and protocol suitability before trusting downstream outputs',
-			uploadAfterProtocol: 'Use protocol browsing only when the collection is actually suitable',
+			uploadAfterDocuments: 'Check document type before trusting downstream outputs',
 			uploadFormTitle: 'Add papers to this collection',
 			uploadFormLead: 'Drop or choose PDF/TXT files. You can start processing right after upload.',
 			controlTitle: 'Control center',
@@ -869,9 +863,6 @@ const translations: Record<Language, Translations> = {
 			primaryActionComparisons: 'Open comparisons',
 			primaryActionResults: 'Open extracted results',
 			primaryActionDocuments: 'Inspect documents',
-			primaryActionProtocol: 'Open protocol branch',
-			primaryActionSteps: 'Review paper steps',
-			primaryActionSop: 'Open draft plan',
 			primaryActionHelperUpload:
 				'Start by adding source papers. Everything else in this collection depends on them.',
 			primaryActionHelperProcess:
@@ -884,8 +875,6 @@ const translations: Record<Language, Translations> = {
 				'Then inspect the result objects to see what each extracted finding actually says.',
 			primaryActionHelperDocuments:
 				'Start with documents if you first need to separate experimental papers from reviews and mixed content.',
-			primaryActionHelperProtocol:
-				'Protocol is available, but only as a follow-on branch after the main collection views.',
 			readyViewsCount: '{count} primary view(s) ready',
 			filesLead:
 				'Upload source papers here. They remain attached to this collection as the base material.',
@@ -912,11 +901,6 @@ const translations: Record<Language, Translations> = {
 			docTypeMixed: 'Mixed',
 			docTypeUncertain: 'Uncertain',
 			docTypeBenchmark: 'Benchmark',
-			protocolSuitabilityTitle: 'Protocol suitability',
-			protocolExtractableYes: 'Good',
-			protocolExtractablePartial: 'Partial',
-			protocolExtractableNo: 'Not suitable',
-			protocolExtractableUncertain: 'Uncertain',
 			statusArtifactsTitle: 'Unlocked content',
 			statusArtifactsEmpty: 'Generated content will appear here after upload and processing.',
 			workflowStates: {
@@ -982,10 +966,7 @@ const translations: Record<Language, Translations> = {
 				comparisons: 'Comparisons',
 				results: 'Extracted Results',
 				documents: 'Documents',
-				protocol: 'Protocol',
-				graph: 'Graph view',
-				steps: 'Paper steps',
-				sop: 'Draft plan'
+				graph: 'Graph view'
 			},
 			noTasks: 'No processing task has run for this collection yet.',
 			warningsTitle: 'Collection warnings',
@@ -994,9 +975,6 @@ const translations: Record<Language, Translations> = {
 			nextComparisons: 'Open comparisons',
 			nextResults: 'Open extracted results',
 			nextDocuments: 'Inspect documents',
-			nextProtocol: 'Open protocol',
-			nextSteps: 'Review paper steps',
-			nextSop: 'Open draft plan',
 			nextGraph: 'Open graph',
 			primaryViewsTitle: 'Primary analysis views',
 			primaryViewsLead:
@@ -1010,13 +988,7 @@ const translations: Record<Language, Translations> = {
 			resultResultsLead:
 				'Inspect one extracted result at a time before jumping back to the paper or the comparison table.',
 			resultDocumentsLead:
-				'Separate experimental papers from reviews before using them in comparison or protocol workflows.',
-			resultProtocolLead:
-				'Use this only when the collection really contains usable procedural detail.',
-			resultStepsLead:
-				'Start here to inspect extracted procedures, materials, sequence, and conditions from the papers.',
-			resultSopLead:
-				'Then move here to review a generated experiment draft built from those extracted steps.',
+				'Separate experimental papers from reviews before using them in comparison workflows.',
 			resultGraphLead:
 				'Use graph view only if you want a secondary relationship view after reading the main pages.',
 			resultLocked: 'Available after processing',
@@ -1075,7 +1047,6 @@ const translations: Record<Language, Translations> = {
 			warningsTitle: 'Profile warnings',
 			emptyWarnings: 'No collection-level profile warnings.',
 			filterDocType: 'Paper type',
-			filterExtractable: 'Protocol suitability',
 			allOption: 'All',
 			totalLabel: 'Papers',
 			docTypeExperimental: 'Experimental paper',
@@ -1084,13 +1055,8 @@ const translations: Record<Language, Translations> = {
 			docTypeComputational: 'Computational paper',
 			docTypeMixed: 'Mixed',
 			docTypeUncertain: 'Uncertain',
-			extractableYes: 'Suitable',
-			extractablePartial: 'Partially suitable',
-			extractableNo: 'Not suitable',
-			extractableUncertain: 'Uncertain',
 			tableDocument: 'Document',
 			tableType: 'Type',
-			tableProtocol: 'Protocol suitability',
 			tableConfidence: 'Confidence',
 			tableWarnings: 'Hint',
 			tableActions: 'Next step',
@@ -1102,7 +1068,6 @@ const translations: Record<Language, Translations> = {
 			filters: {
 				title: 'Document profile filters',
 				type: 'Paper type',
-				suitability: 'Protocol suitability',
 				all: 'All',
 				showing: 'Showing {filtered} / {total} documents'
 			},
@@ -1111,27 +1076,19 @@ const translations: Record<Language, Translations> = {
 				reviewRisk:
 					'This collection is mostly review material and is not suitable for direct experimental result comparison yet. Add experimental or methods papers before entering comparison and graph analysis.',
 				ready:
-					'This collection contains documents that can support step extraction and evidence comparison. Review evidence sources first, then enter comparison.',
+					'This collection contains documents that can support evidence extraction and comparison. Review evidence sources first, then enter comparison.',
 				fewDocuments:
 					'This collection has few documents, so comparison results may be unstable. Add more related papers to improve comparability.',
 				limitedReady:
 					'This collection has some usable procedural or evidence material, but parts of the comparison should still be reviewed carefully.',
 				limited:
-					'This collection does not yet show strong protocol suitability. Review the documents and evidence before using downstream comparisons.',
+					'This collection needs more experimental material before downstream comparisons should be trusted.',
 				pending:
 					'Document profiles have not been generated yet. Refresh or rerun processing after the uploaded documents are ready.'
 			},
 			stats: {
 				documentType: 'Document type distribution',
-				protocolSuitability: 'Protocol suitability',
 				countPercent: '{count} ({percent}%)'
-			},
-			warning: {
-				title: 'Protocol suitability reminder',
-				noSuitableBody:
-					'No document suitable for step extraction was detected in this collection. To generate experimental steps, parameter matrices, or validation plans, add experimental papers, methods papers, or papers with explicit procedures.',
-				readyBody:
-					'This collection contains documents suitable for step extraction. Check original evidence, parameter conditions, and experimental context before using generated output.'
 			},
 			list: {
 				title: 'Document list',
@@ -1161,16 +1118,9 @@ const translations: Record<Language, Translations> = {
 				mixed: 'Mixed',
 				uncertain: 'Uncertain'
 			},
-			suitability: {
-				yes: 'Suitable',
-				partial: 'Partially suitable',
-				no: 'Not suitable',
-				uncertain: 'Uncertain'
-			},
 			table: {
 				document: 'Document',
 				type: 'Type',
-				suitability: 'Protocol suitability',
 				confidence: 'Confidence',
 				hint: 'Hint',
 				next: 'Next step'
@@ -1190,22 +1140,16 @@ const translations: Record<Language, Translations> = {
 			reasons: {
 				label: 'Reason',
 				review: 'Review paper',
-				extractable: 'Procedural details detected',
-				partial: 'Procedural information is incomplete',
-				noProtocol: 'No clear protocol details',
 				insufficient: 'Insufficient information'
 			},
 			hints: {
-				noProtocol: 'No clear experimental steps, parameters, or method details were detected.',
-				extractable: 'Experimental workflow was detected and can support step extraction.',
-				partial: 'Some procedural information exists, but manual review is still needed.',
 				insufficient: 'Information is insufficient and should be checked manually.',
 				processing: 'This document is still being processed. Check progress before analysis.',
 				failed: 'Processing failed for this document. Check the error before trusting output.'
 			},
 			emptyState: {
 				title: 'No documents yet',
-				body: 'After you upload papers or technical documents, Lens will identify document types, judge Protocol suitability, and prepare evidence extraction and comparison analysis.'
+				body: 'After you upload papers or technical documents, Lens will identify document types and prepare evidence extraction and comparison analysis.'
 			},
 			pending: {
 				title: 'Document profiles pending',
@@ -1903,126 +1847,6 @@ const translations: Record<Language, Translations> = {
 			actionExport: 'Export',
 			loading: 'Loading paper workbench'
 		},
-		protocolHub: {
-			title: 'Protocol branch',
-			lead: 'Use this branch only when the collection really contains usable experimental procedures.',
-			readyTitle: 'Protocol outputs are available',
-			readyBody:
-				'This collection currently exposes protocol-facing outputs. Use them as a branch of the workflow, not as the primary collection summary.',
-			limitedTitle: 'Protocol is limited or not yet available',
-			limitedBody:
-				'This collection may still be unsuitable for protocol extraction, or the branch may not be ready yet. Use comparisons, evidence, and document profiles first.',
-			actionsTitle: 'Protocol actions',
-			stepsCta: 'Browse protocol steps',
-			sopCta: 'Open SOP draft'
-		},
-		search: {
-			title: 'Protocol Search',
-			lead: 'Search extracted protocol steps by action, materials, and conditions.',
-			inputLabel: 'Query',
-			placeholder: 'Search for anneal, mix, 600C, Ar...',
-			submit: 'Search',
-			searching: 'Searching...',
-			exampleText: 'anneal 600C Ar',
-			advanced: 'Advanced options',
-			paperIdLabel: 'Paper ID',
-			paperIdPlaceholder: 'Optional paper filter',
-			limitLabel: 'Limit',
-			resultTitle: 'Results',
-			resultCount: '{count} hit(s)',
-			viewSteps: 'View all steps',
-			sourcePaperLabel: 'Source paper',
-			matchFieldsLabel: 'Matched fields',
-			scoreLabel: 'Score',
-			noResults: 'No protocol steps matched this query.',
-			errorNoQuery: 'Enter a query to search protocol steps.'
-		},
-		steps: {
-			title: 'Paper Steps',
-			lead: 'This page shows extracted procedures, materials, and conditions from the source papers.',
-			purpose:
-				'Use this page to answer: what did the papers actually do, in what order, and under which conditions?',
-			blockTypeLabel: 'Block Type',
-			blockTypePlaceholder: 'Optional block type',
-			limitLabel: 'Limit',
-			searchHelper: 'Leave the query empty to browse the full step list.',
-			loading: 'Loading protocol steps...',
-			submit: 'Refresh steps',
-			resultTitle: 'Step list',
-			resultCount: '{count} step(s)',
-			empty: 'No protocol steps are available yet.',
-			sourcePaperLabel: 'Source paper',
-			unknownPaper: 'Untitled paper',
-			notReadyTitle: 'Steps unlock after processing completes',
-			notReadyBody:
-				'Finish processing and protocol artifact generation in the workspace before browsing steps or searching protocol content.',
-			backToWorkspace: 'Back to workspace',
-			nextSop: 'Open draft plan',
-			phaseLabel: 'Phase',
-			confidenceLabel: 'Confidence',
-			materialsTitle: 'Materials',
-			conditionsTitle: 'Conditions',
-			outputLabel: 'Expected output'
-		},
-		sop: {
-			title: 'Draft Plan',
-			lead: 'This page generates a reviewable experiment draft from the extracted paper steps.',
-			purpose:
-				'Use this page to answer: if you were starting from these papers, what experiment draft should you review first?',
-			readinessLoading: 'Checking whether this collection is ready for draft generation...',
-			goalLabel: 'Goal',
-			goalPlaceholder: 'Design a protocol for thermal and mechanical optimization',
-			collectionScopeNote: 'By default, the draft is generated from the whole collection.',
-			advancedTitle: 'Advanced options',
-			advancedLead:
-				'Only add extra constraints if you need them. Most users can leave these empty.',
-			targetPropertiesLabel: 'Target properties (optional)',
-			targetPropertiesPlaceholder: 'mechanical, thermal',
-			maxStepsLabel: 'Max steps (optional)',
-			submit: 'Generate draft plan',
-			generating: 'Generating draft plan...',
-			loadExample: 'Load example goal',
-			loadExampleNote: 'This only fills the form with sample input. It does not submit anything.',
-			exampleTitle: 'What a draft plan looks like',
-			exampleTag: 'Example only',
-			exampleLead:
-				'Use this sample to understand the structure of a generated draft before you run it on real paper steps.',
-			exampleObjective:
-				'Optimize thermal stability and mechanical performance for a composite formulation.',
-			exampleHypothesis:
-				'A staged synthesis, controlled post-treatment, and targeted measurements can balance dispersion, curing, and thermal behavior.',
-			exampleStepOne: 'Prepare precursor materials and document target ratios.',
-			exampleStepTwo: 'Run drying or annealing under a controlled atmosphere.',
-			exampleStepThree: 'Measure mechanical and thermal outcomes against a baseline.',
-			exampleMeasurement:
-				'Track tensile strength, thermal conductivity, and structural characterization.',
-			exampleRisk:
-				'Critical temperatures, durations, or atmosphere settings may still need confirmation from the source papers.',
-			errorGoal: 'Enter a goal before generating a draft plan.',
-			notReadyError: 'Finish processing and generate paper steps before creating a draft plan.',
-			notReadyTitle: 'Generate the draft after paper steps are ready',
-			notReadyBody:
-				'This collection still has no paper steps. Return to the workspace, complete processing, and then generate the draft plan.',
-			notReadyStepOne: 'Upload the source papers into this collection.',
-			notReadyStepTwo: 'Run processing from the workspace.',
-			notReadyStepThree: 'Return here once paper steps are available.',
-			goProcess: 'Go to workspace',
-			backToWorkspace: 'Back to workspace',
-			resultTitle: 'Draft plan result',
-			viewSteps: 'Back to paper steps',
-			sourcePaperLabel: 'Source paper',
-			unknownPaper: 'Untitled paper',
-			objectiveTitle: 'Objective',
-			hypothesisTitle: 'Hypothesis',
-			risksTitle: 'Risks',
-			questionsTitle: 'Open questions',
-			stepsTitle: 'Recommended draft steps',
-			measurementTitle: 'Measurement plan',
-			emptySteps: 'No structured steps were returned.',
-			emptyMeasurement: 'No measurement plan was returned.',
-			emptyRisks: 'No risks were listed.',
-			emptyQuestions: 'No open questions were listed.'
-		},
 		tasks: {
 			title: 'Task History',
 			lead: 'Track processing runs, progress, timestamps, and generated artifacts.',
@@ -2060,7 +1884,6 @@ const translations: Record<Language, Translations> = {
 				document_profiles_started: 'Document Profiles Started',
 				paper_facts_started: 'Paper Facts Started',
 				comparison_rows_started: 'Comparison Rows Started',
-				protocol_artifacts_started: 'Protocol Artifacts Started',
 				artifacts_ready: 'Artifacts Ready',
 				failed: 'Failed'
 			}
@@ -2156,7 +1979,6 @@ const translations: Record<Language, Translations> = {
 			detailAggregateValue: 'Filter value',
 			detailSourceFile: 'Source file',
 			detailDocType: 'Document type',
-			detailProtocol: 'Protocol extractable',
 			detailConfidence: 'Confidence',
 			detailClaim: 'Claim',
 			detailClaimType: 'Claim type',
@@ -2366,7 +2188,7 @@ const translations: Record<Language, Translations> = {
 			pageTitle: 'Lens Guide',
 			eyebrow: 'Docs',
 			title: 'Using Lens',
-			lead: 'Lens is now organized around one researcher workflow: collection workspace, extracted steps, SOP draft, and graph evidence.',
+			lead: 'Lens is now organized around one researcher workflow: collection workspace, evidence review, comparison analysis, and graph evidence.',
 			quickNotesTitle: 'Quick notes',
 			quickNotesSub: 'Before you start',
 			quickNote1: 'PDFs must contain selectable text.',
@@ -2381,22 +2203,22 @@ const translations: Record<Language, Translations> = {
 				'Open the collection workspace and add PDF/TXT files in the files section.',
 			workflowIndexTitle: 'Start processing',
 			workflowIndexDesc: 'Start processing from Workspace and watch task progress inline.',
-			workflowSearchTitle: 'Review extracted steps',
+			workflowSearchTitle: 'Review evidence',
 			workflowSearchDesc:
-				'Use Paper Steps to review what the papers actually did: actions, materials, and conditions.',
-			workflowGraphTitle: 'Generate a draft plan',
+				'Use Evidence to verify where claims, materials, methods, and parameters came from.',
+			workflowGraphTitle: 'Enter comparison',
 			workflowGraphDesc:
-				'Move from Paper Steps to Draft Plan when the collection is ready. Use Graph as supporting evidence.',
+				'Move from Evidence to Comparison when the collection is ready. Use Graph as supporting evidence.',
 			surfaceTitle: 'Primary collection surfaces',
 			surfaceSub: 'Keep the main job focused on four pages.',
 			surfaceWorkspaceTitle: 'Workspace',
 			surfaceWorkspaceDesc:
 				'Upload files, start processing, watch progress, and open advanced analysis from one control center.',
-			surfaceStepsTitle: 'Paper Steps',
-			surfaceStepsDesc: 'Review extracted procedures from the source papers in one page.',
-			surfaceSopTitle: 'Draft Plan',
+			surfaceStepsTitle: 'Evidence Review',
+			surfaceStepsDesc: 'Review source evidence, materials, and conditions in one page.',
+			surfaceSopTitle: 'Comparison Analysis',
 			surfaceSopDesc:
-				'Turn extracted paper procedures into a reviewable experiment draft with goals, steps, risks, and open questions.',
+				'Organize comparable results in one view and judge which findings can really be compared side by side.',
 			surfaceGraphTitle: 'Graph',
 			surfaceGraphDesc:
 				'Use graph preview and GraphML export as secondary analysis, not the primary end state.',
@@ -2600,7 +2422,6 @@ const translations: Record<Language, Translations> = {
 				papers: '文献',
 				allComparisons: '全部比较',
 				assistant: 'AI 助手',
-				protocol: 'Protocol',
 				graph: '图谱'
 			},
 			actionsLabel: '集合操作',
@@ -3202,7 +3023,7 @@ const translations: Record<Language, Translations> = {
 				ready: {
 					label: '已就绪',
 					title: '主要集合视图已经可用',
-					body: '先从下面的集合级分析页面开始，Protocol 和图谱仍然属于次级分支。'
+					body: '先从下面的集合级分析页面开始，图谱仍然属于次级分支。'
 				},
 				ready_with_limits: {
 					label: '部分就绪',
@@ -3236,9 +3057,7 @@ const translations: Record<Language, Translations> = {
 				documents: '文档',
 				graph: '图谱',
 				graphml: 'GraphML',
-				sections: 'sections',
-				procedureBlocks: 'procedure blocks',
-				protocolSteps: 'protocol steps'
+				sections: 'sections'
 			},
 			ready: '已就绪',
 			pending: '待生成',
@@ -3263,17 +3082,14 @@ const translations: Record<Language, Translations> = {
 			previewResultsLead: '再看单条结果，理解每个抽取结果到底说了什么。',
 			previewEvidenceLead: '回到原文确认一个结论到底由什么支撑。',
 			previewDocumentsLead: '先把实验论文、综述和混合内容分开。',
-			previewProtocolLead: '只有在集合确实包含可复用过程时才进入这个分支。',
 			uploadCta: '选择论文',
 			uploadWhyTitle: '为什么要先上传',
-			uploadWhyBody:
-				'论文就是这个集合的原始材料。没有源论文，系统就无法抽取步骤、生成 SOP 或构建图谱。',
+			uploadWhyBody: '论文就是这个集合的原始材料。没有源论文，系统就无法抽取证据、比较结果或构建图谱。',
 			uploadAfterTitle: '上传并处理后可以做什么',
 			uploadAfterBody: '处理完成后，这个集合会进入 Lens v1 的主研究工作流。',
 			uploadAfterComparisons: '查看集合级 comparison rows 和可比性状态',
 			uploadAfterEvidence: '查看 evidence cards 和来源追溯',
-			uploadAfterDocuments: '先确认文档类型和 protocol 适配性，再决定如何使用下游结果',
-			uploadAfterProtocol: '只有在集合适合时才进入 protocol 分支',
+			uploadAfterDocuments: '先确认文档类型，再决定如何使用下游结果',
 			uploadFormTitle: '把论文加入集合',
 			uploadFormLead: '拖拽或选择 PDF/TXT 文件。上传后可以立即启动处理。',
 			controlTitle: '操作中心',
@@ -3284,9 +3100,6 @@ const translations: Record<Language, Translations> = {
 			primaryActionComparisons: '打开比较',
 			primaryActionResults: '打开抽取结果',
 			primaryActionDocuments: '查看文档',
-			primaryActionProtocol: '打开 Protocol 分支',
-			primaryActionSteps: '查看论文步骤',
-			primaryActionSop: '打开方案草案',
 			primaryActionHelperUpload: '先把源论文放进来，后面的所有结果都会建立在这些材料上。',
 			primaryActionHelperProcess:
 				'论文已经上传，现在开始处理，让系统先把这批材料整理成比较、证据和文档筛选结果。',
@@ -3294,7 +3107,6 @@ const translations: Record<Language, Translations> = {
 			primaryActionHelperComparisons: '先看比较，最快判断这批论文里哪些结果值得继续追。',
 			primaryActionHelperResults: '再看结果本体，确认每条抽取结果到底在说什么。',
 			primaryActionHelperDocuments: '先看文档筛选，分清哪些是实验论文，哪些是综述或混合内容。',
-			primaryActionHelperProtocol: '如果还要整理实验步骤，再进入 Protocol 分支。',
 			readyViewsCount: '已就绪主页面 {count} 个',
 			statusTitle: '当前状态',
 			statusLead: '这里告诉你这个集合现在到了哪一步，以及下一步最值得做什么。',
@@ -3314,11 +3126,6 @@ const translations: Record<Language, Translations> = {
 			docTypeMixed: '混合',
 			docTypeUncertain: '不确定',
 			docTypeBenchmark: 'Benchmark',
-			protocolSuitabilityTitle: 'Protocol 适配性',
-			protocolExtractableYes: '适合',
-			protocolExtractablePartial: '部分适合',
-			protocolExtractableNo: '不适合',
-			protocolExtractableUncertain: '不确定',
 			statusArtifactsTitle: '已生成内容',
 			statusArtifactsEmpty: '上传并开始处理后，这里会显示已生成的结果。',
 			workflowStates: {
@@ -3385,9 +3192,6 @@ const translations: Record<Language, Translations> = {
 			resultComparisonsLead: '看这批论文里哪些结果真的能放在一起比较，哪些只是表面相似。',
 			resultResultsLead: '逐条看结果本体，再决定是回到比较页还是进入文档核验。',
 			resultDocumentsLead: '先分清哪些是实验论文，哪些是综述，避免把不适合的材料继续往下用。',
-			resultProtocolLead: '只有当这批论文确实包含可整理的实验过程时，才进入这个分支。',
-			resultStepsLead: '先看这里，确认论文里实际做了什么：步骤顺序、材料和条件。',
-			resultSopLead: '再看这里，把已有步骤整理成一份可审阅的实验方案草案。',
 			resultGraphLead: '如果需要次级关系视图，再来这里看图谱。',
 			resultLocked: '处理完成后可查看',
 			additionalViewsTitle: '附加分支与工具',
@@ -3402,10 +3206,7 @@ const translations: Record<Language, Translations> = {
 				comparisons: '比较',
 				results: '抽取结果',
 				documents: '文档',
-				protocol: 'Protocol',
-				graph: '图谱查看',
-				steps: '论文步骤',
-				sop: '方案草案'
+				graph: '图谱查看'
 			},
 			noTasks: '还没有开始处理。先上传论文，然后启动处理。',
 			warningsTitle: '集合级提醒',
@@ -3413,9 +3214,6 @@ const translations: Record<Language, Translations> = {
 			nextComparisons: '打开比较',
 			nextResults: '打开抽取结果',
 			nextDocuments: '查看文档',
-			nextProtocol: '打开 Protocol',
-			nextSteps: '查看论文步骤',
-			nextSop: '打开方案草案',
 			nextGraph: '打开图谱',
 			advancedTitle: '高级分析与设置',
 			advancedLead: '报告、只读设置和原始标识符都收进这里，保证主流程保持干净。',
@@ -3458,8 +3256,8 @@ const translations: Record<Language, Translations> = {
 		},
 		profiles: {
 			title: '文档画像',
-			description: '识别文档类型与适配性，判断哪些文献适合继续用于证据提取和比较。',
-			lead: '识别文档类型与适配性，判断哪些文献适合继续用于证据提取和比较。',
+			description: '识别文档类型，判断哪些文献适合继续用于证据提取和比较。',
+			lead: '识别文档类型，判断哪些文献适合继续用于证据提取和比较。',
 			loading: '正在加载文档画像...',
 			error: '无法加载文档画像',
 			empty: '当前还没有文档画像结果。',
@@ -3467,7 +3265,6 @@ const translations: Record<Language, Translations> = {
 			warningsTitle: '画像提醒',
 			emptyWarnings: '当前没有集合级画像提醒。',
 			filterDocType: '论文类型',
-			filterExtractable: 'Protocol 适配性',
 			allOption: '全部',
 			totalLabel: '论文数',
 			docTypeExperimental: '实验论文',
@@ -3476,13 +3273,8 @@ const translations: Record<Language, Translations> = {
 			docTypeComputational: '计算论文',
 			docTypeMixed: '混合',
 			docTypeUncertain: '不确定',
-			extractableYes: '适合',
-			extractablePartial: '部分适合',
-			extractableNo: '不适合',
-			extractableUncertain: '不确定',
 			tableDocument: '论文',
 			tableType: '论文类型',
-			tableProtocol: '步骤抽取',
 			tableConfidence: '置信度',
 			tableWarnings: '问题',
 			tableActions: '下一步',
@@ -3494,7 +3286,6 @@ const translations: Record<Language, Translations> = {
 			filters: {
 				title: '文档画像筛选',
 				type: '论文类型',
-				suitability: 'Protocol 适配性',
 				all: '全部',
 				showing: '显示 {filtered} / {total} 篇文档'
 			},
@@ -3502,25 +3293,17 @@ const translations: Record<Language, Translations> = {
 				title: '画像结论',
 				reviewRisk:
 					'当前集合以综述为主，暂不适合直接进行实验结果比较。建议补充实验论文或方法论文后，再进入比较与图谱分析。',
-				ready: '当前集合包含可用于步骤抽取和证据比较的文档。建议先查看证据来源，再进入比较视图。',
+				ready: '当前集合包含可用于证据提取和结果比较的文档。建议先查看证据来源，再进入比较视图。',
 				fewDocuments: '当前集合文档较少，比较结果可能不稳定。建议补充更多相关论文以提高可比性。',
 				limitedReady:
-					'当前集合包含部分可用的步骤或证据信息，但进入比较前仍应检查原文证据和参数条件。',
+					'当前集合包含部分可用的证据信息，但进入比较前仍应检查原文证据和参数条件。',
 				limited:
-					'当前集合尚未显示出明确的 Protocol 适配性。建议先查看文档和证据，再决定是否进入下游比较。',
+					'当前集合还需要更多实验材料，才适合信任下游比较结果。',
 				pending: '当前集合的文档画像尚未生成。请在处理完成后刷新，或回到工作区重新分析。'
 			},
 			stats: {
 				documentType: '文档类型分布',
-				protocolSuitability: 'Protocol 适配性',
 				countPercent: '{count} ({percent}%)'
-			},
-			warning: {
-				title: 'Protocol 适配性提醒',
-				noSuitableBody:
-					'当前集合没有检测到适合步骤抽取的文档。若要生成实验步骤、参数矩阵或验证计划，建议补充实验论文、方法论文或包含明确实验流程的文献。',
-				readyBody:
-					'当前集合包含适合步骤抽取的文档。请在使用生成结果前检查原文证据、参数条件和实验上下文。'
 			},
 			list: {
 				title: '文档列表',
@@ -3550,16 +3333,9 @@ const translations: Record<Language, Translations> = {
 				mixed: '混合',
 				uncertain: '不确定'
 			},
-			suitability: {
-				yes: '适合',
-				partial: '部分适合',
-				no: '不适合',
-				uncertain: '不确定'
-			},
 			table: {
 				document: '文档',
 				type: '类型',
-				suitability: 'Protocol 适配性',
 				confidence: '置信度',
 				hint: '提示',
 				next: '下一步'
@@ -3579,22 +3355,16 @@ const translations: Record<Language, Translations> = {
 			reasons: {
 				label: '原因',
 				review: '综述型文献',
-				extractable: '检测到实验流程',
-				partial: '步骤信息不完整',
-				noProtocol: '缺少明确实验步骤',
 				insufficient: '信息不足'
 			},
 			hints: {
-				noProtocol: '未检测到明确的实验步骤、参数或方法细节。',
-				extractable: '检测到实验流程，可用于步骤抽取。',
-				partial: '检测到部分方法信息，需要人工检查上下文。',
 				insufficient: '信息不足，需要人工检查。',
 				processing: '文档仍在处理中，请先查看进度。',
 				failed: '文档处理失败，请先查看错误再继续分析。'
 			},
 			emptyState: {
 				title: '还没有文档',
-				body: '上传论文或技术文档后，Lens 会识别文档类型、判断 Protocol 适配性，并为证据提取和比较分析做准备。'
+				body: '上传论文或技术文档后，Lens 会识别文档类型，并为证据提取和比较分析做准备。'
 			},
 			pending: {
 				title: '画像待生成',
@@ -4275,116 +4045,6 @@ const translations: Record<Language, Translations> = {
 			actionExport: '导出',
 			loading: '正在加载论文工作台'
 		},
-		protocolHub: {
-			title: 'Protocol 分支',
-			lead: '只有当这批论文确实包含可用的实验过程时，才进入这个分支。',
-			readyTitle: '当前可进入 Protocol 输出',
-			readyBody:
-				'这个集合当前已经暴露 Protocol 相关输出，但它仍然是工作流中的分支，而不是主集合摘要。',
-			limitedTitle: 'Protocol 当前受限或尚未可用',
-			limitedBody:
-				'这个集合可能并不适合 protocol 抽取，或者分支还未就绪。应先看比较、证据和文档画像。',
-			actionsTitle: 'Protocol 操作',
-			stepsCta: '浏览 protocol steps',
-			sopCta: '打开 SOP 草案'
-		},
-		search: {
-			title: '在步骤中搜索',
-			lead: '按动作、材料和条件在 protocol steps 中定位具体步骤。',
-			inputLabel: '检索词',
-			placeholder: '搜索 anneal、mix、600C、Ar...',
-			submit: '检索',
-			searching: '检索中...',
-			exampleText: 'anneal 600C Ar',
-			advanced: '高级选项',
-			paperIdLabel: '论文 ID',
-			paperIdPlaceholder: '可选论文过滤',
-			limitLabel: '返回条数',
-			resultTitle: '结果',
-			resultCount: '{count} 条命中',
-			viewSteps: '查看全部步骤',
-			sourcePaperLabel: '来源论文',
-			matchFieldsLabel: '命中字段',
-			scoreLabel: '分数',
-			noResults: '没有匹配到 protocol steps。',
-			errorNoQuery: '请输入检索词。'
-		},
-		steps: {
-			title: '论文步骤',
-			lead: '这里展示从论文中抽取出的实验步骤、材料和条件。',
-			purpose: '这个页面回答：论文里实际做了什么、按什么顺序做、用了哪些条件？',
-			blockTypeLabel: 'Block 类型',
-			blockTypePlaceholder: '可选 block 类型',
-			limitLabel: '返回条数',
-			searchHelper: '输入动作、材料或条件即可筛选；留空时浏览完整步骤列表。',
-			loading: '步骤加载中...',
-			submit: '刷新步骤',
-			resultTitle: '步骤列表',
-			resultCount: '{count} 个步骤',
-			empty: '当前还没有 protocol steps。',
-			sourcePaperLabel: '来源论文',
-			unknownPaper: '未命名论文',
-			notReadyTitle: '处理完成后才能查看步骤',
-			notReadyBody: '请先回到工作区完成处理和 protocol 产物生成，再浏览步骤或搜索实验内容。',
-			backToWorkspace: '返回工作区',
-			nextSop: '打开方案草案',
-			phaseLabel: '阶段',
-			confidenceLabel: '置信度',
-			materialsTitle: '材料',
-			conditionsTitle: '条件',
-			outputLabel: '预期输出'
-		},
-		sop: {
-			title: '方案草案',
-			lead: '这里根据已抽取的论文步骤，生成一份可审阅的实验方案草案。',
-			purpose: '这个页面回答：如果你准备开始做，接下来可以先审阅怎样的一份实验方案？',
-			readinessLoading: '正在检查这个集合是否已经可以生成方案草案...',
-			goalLabel: '目标',
-			goalPlaceholder: '为热学和力学优化设计实验方案',
-			collectionScopeNote: '默认会基于整个集合生成方案草案。',
-			advancedTitle: '高级选项',
-			advancedLead: '只有在你确实需要额外约束时才填写。大多数情况下可以留空。',
-			targetPropertiesLabel: '目标性质（可选）',
-			targetPropertiesPlaceholder: 'mechanical, thermal',
-			maxStepsLabel: '最大步骤数（可选）',
-			submit: '生成方案草案',
-			generating: '方案草案生成中...',
-			loadExample: '载入示例目标',
-			loadExampleNote: '这只会把示例内容填入表单，不会直接提交。',
-			exampleTitle: '方案草案大致会长什么样',
-			exampleTag: '示例',
-			exampleLead: '先看这个示例，你可以更快理解生成后的方案草案结构。',
-			exampleObjective: '为一套复合材料配方同时优化热稳定性和力学性能。',
-			exampleHypothesis: '通过分阶段制备、受控后处理和目标表征，可以平衡分散、固化与热学表现。',
-			exampleStepOne: '准备前驱体材料，并记录目标配比。',
-			exampleStepTwo: '在受控气氛下完成干燥或退火等后处理。',
-			exampleStepThree: '围绕基线样品测量力学与热学结果。',
-			exampleMeasurement: '关注拉伸强度、热导率和结构表征结果。',
-			exampleRisk: '关键温度、时长或气氛条件仍需要回到源论文中进一步确认。',
-			errorGoal: '请先填写目标，再生成方案草案。',
-			notReadyError: '请先完成处理并生成论文步骤，再生成方案草案。',
-			notReadyTitle: '先生成论文步骤，再来起草方案',
-			notReadyBody: '当前集合还没有可用的论文步骤。请先回到工作区完成处理，再来生成方案草案。',
-			notReadyStepOne: '先把源论文上传到这个集合里。',
-			notReadyStepTwo: '在工作区启动处理流程。',
-			notReadyStepThree: '等论文步骤可用后，再回到这里生成方案草案。',
-			goProcess: '回到工作区去处理',
-			backToWorkspace: '返回工作区',
-			resultTitle: '方案草案结果',
-			viewSteps: '返回论文步骤',
-			sourcePaperLabel: '来源论文',
-			unknownPaper: '未命名论文',
-			objectiveTitle: '实验目标',
-			hypothesisTitle: '假设',
-			risksTitle: '风险',
-			questionsTitle: '待确认问题',
-			stepsTitle: '草案中的推荐步骤',
-			measurementTitle: '表征计划',
-			emptySteps: '没有返回结构化步骤。',
-			emptyMeasurement: '没有返回表征计划。',
-			emptyRisks: '没有列出风险。',
-			emptyQuestions: '没有列出待确认问题。'
-		},
 		tasks: {
 			title: '任务历史',
 			lead: '跟踪处理运行、进度、时间点与产物状态。',
@@ -4422,7 +4082,6 @@ const translations: Record<Language, Translations> = {
 				document_profiles_started: '文档画像生成中',
 				paper_facts_started: '论文事实生成中',
 				comparison_rows_started: '比较行生成中',
-				protocol_artifacts_started: 'Protocol 产物生成中',
 				artifacts_ready: '产物已就绪',
 				failed: '失败'
 			}
@@ -4511,7 +4170,6 @@ const translations: Record<Language, Translations> = {
 			detailAggregateValue: '筛选值',
 			detailSourceFile: '源文件',
 			detailDocType: '文档类型',
-			detailProtocol: '是否适合 protocol',
 			detailConfidence: '置信度',
 			detailClaim: '主张',
 			detailClaimType: '主张类型',
@@ -4717,7 +4375,7 @@ const translations: Record<Language, Translations> = {
 			pageTitle: 'Lens 使用指南',
 			eyebrow: '文档',
 			title: '如何使用 Lens',
-			lead: 'Lens 现在围绕一个科研工作流组织：集合工作区、步骤、SOP 草案，以及图谱证据。',
+			lead: 'Lens 现在围绕一个科研工作流组织：集合工作区、证据审查、比较分析，以及图谱证据。',
 			quickNotesTitle: '快速提示',
 			quickNotesSub: '开始前',
 			quickNote1: 'PDF 需可复制文本，扫描版不支持。',
@@ -4731,19 +4389,18 @@ const translations: Record<Language, Translations> = {
 			workflowUploadDesc: '进入集合工作区，在文件区批量添加 PDF/TXT。',
 			workflowIndexTitle: '启动处理',
 			workflowIndexDesc: '在工作区里启动处理，并内联查看任务进度。',
-			workflowSearchTitle: '审阅抽取步骤',
-			workflowSearchDesc: '在“论文步骤”页查看论文里实际做过的动作、材料和条件。',
-			workflowGraphTitle: '生成方案草案',
-			workflowGraphDesc: '集合就绪后，先看论文步骤，再进入方案草案；图谱作为辅助证据使用。',
+			workflowSearchTitle: '审阅证据',
+			workflowSearchDesc: '在证据页确认结论、材料、方法和参数来自哪里。',
+			workflowGraphTitle: '进入比较',
+			workflowGraphDesc: '集合就绪后，先看证据，再进入比较；图谱作为辅助证据使用。',
 			surfaceTitle: '集合内的 4 个主页面',
 			surfaceSub: '主任务只围绕这四个页面展开。',
 			surfaceWorkspaceTitle: '工作区',
 			surfaceWorkspaceDesc: '上传文件、开始处理、查看进度，并从这里进入高级分析。',
-			surfaceStepsTitle: '论文步骤',
-			surfaceStepsDesc: '在一个页面里查看从论文中抽取出的实验步骤、材料和条件。',
-			surfaceSopTitle: '方案草案',
-			surfaceSopDesc:
-				'把已抽取的论文步骤组织成可审阅的实验方案草案，包含目标、步骤、风险与待确认问题。',
+			surfaceStepsTitle: '证据审查',
+			surfaceStepsDesc: '在一个页面里查看支撑结论的原文证据、材料和条件。',
+			surfaceSopTitle: '比较分析',
+			surfaceSopDesc: '把可比结果组织到同一视图中，判断哪些结论能真正并排比较。',
 			surfaceGraphTitle: '图谱',
 			surfaceGraphDesc: '图谱预览和 GraphML 导出属于辅助分析，不是主终点。',
 			advancedTitle: '高级入口',

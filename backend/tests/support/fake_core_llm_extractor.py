@@ -118,25 +118,18 @@ class FakeCoreLLMStructuredExtractor:
         warnings: list[str] = []
         if review_hits and experimental_score >= 3:
             doc_type = "mixed"
-            protocol_extractable = "partial"
         elif review_hits:
             doc_type = "review"
-            protocol_extractable = "no"
         elif experimental_score >= 5:
             doc_type = "experimental"
-            protocol_extractable = "yes"
         elif experimental_score >= 2:
             doc_type = "experimental"
-            protocol_extractable = "partial"
         else:
             doc_type = "uncertain"
-            protocol_extractable = "uncertain"
             warnings.append("classification_uncertain")
 
         return StructuredDocumentProfile(
             doc_type=doc_type,
-            protocol_extractable=protocol_extractable,
-            protocol_extractability_signals=[],
             parsing_warnings=sorted(set(warnings)),
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )

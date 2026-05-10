@@ -230,8 +230,6 @@ def test_results_route_returns_product_projection_without_row_cache(result_servi
         "title": "Flexural Strength Study",
         "source_filename": "paper.txt",
         "doc_type": "experimental",
-        "protocol_extractable": "yes",
-        "protocol_extractability_signals": [],
         "parsing_warnings": [],
         "confidence": 0.93,
     }
@@ -289,8 +287,6 @@ def test_result_detail_route_returns_document_assessment_evidence_and_actions(
         "title": "Flexural Strength Study",
         "source_filename": "paper.txt",
         "doc_type": "experimental",
-        "protocol_extractable": "yes",
-        "protocol_extractability_signals": [],
         "parsing_warnings": [],
         "confidence": 0.93,
     }
@@ -358,8 +354,6 @@ def test_result_detail_route_returns_pbf_acceptance_chain_fields(result_services
         "title": "Ti64 Tensile Study",
         "source_filename": "ti64.txt",
         "doc_type": "experimental",
-        "protocol_extractable": "yes",
-        "protocol_extractability_signals": [],
         "parsing_warnings": [],
         "confidence": 0.93,
     }

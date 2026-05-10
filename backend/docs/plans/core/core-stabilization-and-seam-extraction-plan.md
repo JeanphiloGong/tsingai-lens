@@ -256,5 +256,4 @@ Expected result:
 - [`../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`../architecture/domain-architecture.md`](../../architecture/domain-architecture.md)
 - [`../../../application/core/README.md`](../../../application/core/README.md)
-- [`../../../application/derived/protocol/README.md`](../../../application/derived/protocol/README.md)
 - [`../../../application/source/README.md`](../../../application/source/README.md)

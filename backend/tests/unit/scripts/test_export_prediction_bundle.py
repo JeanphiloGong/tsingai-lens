@@ -130,8 +130,6 @@ def _write_system_artifacts(backend_root: Path, collection_id: str) -> None:
                         "title": "Prediction Paper",
                         "source_filename": "paper.pdf",
                         "doc_type": "experimental",
-                        "protocol_extractable": "yes",
-                        "protocol_extractability_signals": [],
                         "parsing_warnings": [],
                         "confidence": 0.9,
                     }

@@ -26,7 +26,6 @@ from domain.core.fact_store import CoreFactSet
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
-    SqliteProtocolArtifactRepository,
     SqliteSourceArtifactRepository,
 )
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
@@ -205,7 +204,6 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
                         "title": "Core Projection Paper",
                         "source_filename": "paper.txt",
                         "doc_type": "experimental",
-                        "protocol_extractable": "yes",
                         "confidence": 0.91,
                     }
                 ),
@@ -574,7 +572,6 @@ def app_client(monkeypatch, tmp_path):
     from controllers.core import results as results_controller
     from controllers.goal import intake as goals_controller
     from controllers.derived import graph as graph_controller
-    from controllers.derived import protocol as protocol_controller
     from controllers.derived import reports as reports_controller
     from controllers.source import tasks as tasks_controller
     from controllers.core import workspace as workspace_controller
@@ -583,10 +580,6 @@ def app_client(monkeypatch, tmp_path):
         ReportCommunityListResponse,
         ReportPatternsResponse,
     )
-    import application.derived.protocol.document_meta_service as protocol_document_meta_service
-    import application.derived.protocol.pipeline_service as protocol_pipeline_service
-    import application.derived.protocol.search_service as protocol_search_service
-    import application.derived.protocol.sop_service as protocol_sop_service
     import application.derived.graph_service as graph_service_module
     import application.source.collection_build_task_runner as task_runner_module
     import application.derived.report_service as report_service_module
@@ -608,12 +601,10 @@ def app_client(monkeypatch, tmp_path):
     task_service = TaskService(tmp_path / "tasks")
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    protocol_artifact_repository = SqliteProtocolArtifactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
         tmp_path / "collections",
         source_artifact_repository=source_artifact_repository,
         core_fact_repository=core_fact_repository,
-        protocol_artifact_repository=protocol_artifact_repository,
     )
     document_profile_service = DocumentProfileService(
         collection_service,
@@ -727,33 +718,6 @@ def app_client(monkeypatch, tmp_path):
         "core_fact_repository",
         comparison_service.core_fact_repository,
     )
-    monkeypatch.setattr(protocol_controller, "collection_service", collection_service)
-    monkeypatch.setattr(protocol_controller, "artifact_registry_service", artifact_registry)
-    monkeypatch.setattr(
-        protocol_pipeline_service,
-        "source_artifact_repository",
-        source_artifact_repository,
-    )
-    monkeypatch.setattr(
-        protocol_pipeline_service,
-        "protocol_artifact_repository",
-        protocol_artifact_repository,
-    )
-    monkeypatch.setattr(
-        protocol_sop_service,
-        "protocol_artifact_repository",
-        protocol_artifact_repository,
-    )
-    monkeypatch.setattr(
-        protocol_search_service,
-        "protocol_artifact_repository",
-        protocol_artifact_repository,
-    )
-    monkeypatch.setattr(
-        protocol_document_meta_service,
-        "source_artifact_repository",
-        source_artifact_repository,
-    )
     monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
@@ -855,8 +819,6 @@ def test_collection_task_flow(app_client):
     assert body["table_rows_ready"] is False
     assert body["table_cells_generated"] is True
     assert body["table_cells_ready"] is False
-    assert body["protocol_steps_generated"] is True
-    assert body["protocol_steps_ready"] is True
 
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
     assert graph.status_code == 200
@@ -874,10 +836,6 @@ def test_collection_task_flow(app_client):
     assert graphml.status_code == 200
     assert graphml.headers["content-type"].startswith("application/graphml+xml")
 
-    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
-    assert steps.status_code == 200
-    assert steps.json()["count"] >= 1
-
     profiles = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/documents/profiles")
     assert profiles.status_code == 200
     profiles_body = profiles.json()
@@ -885,7 +843,6 @@ def test_collection_task_flow(app_client):
     assert profiles_body["items"][0]["title"] == "Composite Paper"
     assert profiles_body["items"][0]["source_filename"] == "paper.txt"
     assert profiles_body["items"][0]["doc_type"] == "experimental"
-    assert profiles_body["items"][0]["protocol_extractable"] == "yes"
 
     evidence = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/evidence/cards")
     assert evidence.status_code == 200
@@ -1238,8 +1195,6 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
         "title": "Result Projection Paper",
         "source_filename": "paper-1.pdf",
         "doc_type": "experimental",
-        "protocol_extractable": "yes",
-        "protocol_extractability_signals": [],
         "parsing_warnings": [],
         "confidence": 0.91,
     }
@@ -1613,115 +1568,6 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert "is_update_run" not in captured
     assert captured["verbose"] is True
     assert captured["additional_context"] == {"caller": "legacy-frontend"}
-
-
-def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_exist(app_client):
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Pending Collection"})
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
-        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
-    )
-    assert upload_resp.status_code == 200
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    workspace_body = workspace.json()
-    assert workspace_body["artifacts"]["protocol_steps_generated"] is False
-    assert workspace_body["artifacts"]["protocol_steps_ready"] is False
-    assert workspace_body["artifacts"]["comparable_results_generated"] is False
-    assert workspace_body["artifacts"]["collection_comparable_results_generated"] is False
-    assert workspace_body["artifacts"]["collection_comparable_results_stale"] is False
-    assert workspace_body["artifacts"]["comparison_rows_stale"] is False
-    assert workspace_body["artifacts"]["graph_stale"] is False
-    assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
-
-    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
-    assert steps.status_code == 409
-    steps_detail = steps.json()["detail"]
-    assert steps_detail["code"] == "protocol_artifacts_not_ready"
-    assert steps_detail["collection_id"] == collection_id
-    assert steps_detail["artifacts"]["protocol_steps_generated"] is False
-    assert steps_detail["artifacts"]["protocol_steps_ready"] is False
-
-    search = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/search",
-        params={"q": "anneal", "limit": 5},
-    )
-    assert search.status_code == 409
-    assert search.json()["detail"]["code"] == "protocol_artifacts_not_ready"
-
-    sop = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/sop",
-        json={"goal": "Build a draft SOP"},
-    )
-    assert sop.status_code == 409
-    assert sop.json()["detail"]["code"] == "protocol_artifacts_not_ready"
-
-
-def test_collection_protocol_steps_reads_repository_steps(
-    app_client,
-):
-    from controllers.derived import protocol as protocol_controller
-    from domain.protocol import ProtocolArtifactSet
-
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={"name": "Repository Protocol"},
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    output_dir = Path(workspace.json()["artifacts"]["output_path"])
-    output_dir.mkdir(parents=True, exist_ok=True)
-    protocol_controller.artifact_registry_service.protocol_artifact_repository.replace_collection_artifacts(
-        collection_id,
-        ProtocolArtifactSet(
-            procedure_blocks=(
-                {
-                    "block_id": "pb-1",
-                    "paper_id": "paper-1",
-                    "text": "The mixture was annealed at 600 C.",
-                    "order": 1,
-                },
-            ),
-            protocol_steps=(
-                {
-                    "step_id": "step-1",
-                    "paper_id": "paper-1",
-                    "action": "anneal",
-                    "raw_text": "The mixture was annealed at 600 C.",
-                    "conditions_json": "{}",
-                    "materials_json": "[]",
-                    "characterization_json": "[]",
-                    "controls_json": "[]",
-                    "evidence_refs_json": "[]",
-                    "order": 1,
-                },
-            ),
-        ),
-    )
-    protocol_controller.artifact_registry_service.upsert(collection_id, output_dir)
-
-    workspace_after = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/workspace"
-    )
-    assert workspace_after.status_code == 200
-    artifacts = workspace_after.json()["artifacts"]
-    assert artifacts["protocol_steps_generated"] is True
-    assert artifacts["protocol_steps_ready"] is True
-    assert workspace_after.json()["capabilities"]["can_view_protocol_steps"] is True
-
-    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
-    assert steps.status_code == 200
-    payload = steps.json()
-    assert payload["total"] == 1
-    assert payload["count"] == 1
-    assert payload["items"][0]["action"] == "anneal"
 
 
 def test_reports_routes_are_exposed(app_client):

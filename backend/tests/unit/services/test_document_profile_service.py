@@ -111,20 +111,12 @@ def test_document_profile_service_builds_profiles_and_summary(tmp_path):
     items = {item["document_id"]: item for item in payload["items"]}
     assert items["exp-1"]["title"] == "Composite Experimental Study"
     assert items["exp-1"]["doc_type"] == "experimental"
-    assert items["exp-1"]["protocol_extractable"] == "yes"
     assert items["rev-1"]["doc_type"] == "review"
-    assert items["rev-1"]["protocol_extractable"] == "no"
     assert items["mix-1"]["doc_type"] == "mixed"
-    assert items["mix-1"]["protocol_extractable"] == "partial"
     assert payload["summary"]["by_doc_type"] == {
         "experimental": 1,
         "mixed": 1,
         "review": 1,
-    }
-    assert payload["summary"]["by_protocol_extractable"] == {
-        "no": 1,
-        "partial": 1,
-        "yes": 1,
     }
     facts = profile_service.core_fact_repository.read_collection_facts(collection_id)
     assert len(facts.document_profiles) == 3
@@ -180,7 +172,6 @@ def test_document_profile_service_returns_source_filename_from_file_mapping(tmp_
     assert item["title"] is None
     assert item["source_filename"] == "wang_2024_battery.txt"
     assert item["doc_type"] == "experimental"
-    assert item["protocol_extractable"] == "yes"
 
 
 def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
@@ -209,7 +200,6 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
 
     item = payload["items"][0]
     assert item["doc_type"] == "uncertain"
-    assert item["protocol_extractable"] == "uncertain"
     assert item["parsing_warnings"] == ["insufficient_content"]
 
 
@@ -222,10 +212,6 @@ def test_document_profile_service_normalizes_numpy_array_columns():
                 "document_id": "doc-1",
                 "collection_id": "col-1",
                 "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": np.array(
-                    ["methods density", "condition completeness"]
-                ),
                 "parsing_warnings": np.array(["condition_context_weak"]),
                 "confidence": 0.91,
             }
@@ -234,10 +220,6 @@ def test_document_profile_service_normalizes_numpy_array_columns():
 
     normalized = profile_service._normalize_profiles_table(profiles, "col-1")
 
-    assert normalized.iloc[0]["protocol_extractability_signals"] == [
-        "methods density",
-        "condition completeness",
-    ]
     assert normalized.iloc[0]["parsing_warnings"] == ["condition_context_weak"]
 
 
@@ -282,5 +264,4 @@ def test_document_profile_service_round_trips_repository_storage_fields(tmp_path
     profile_service.build_document_profiles(collection_id)
 
     restored = profile_service.read_document_profiles(collection_id)
-    assert isinstance(restored.iloc[0]["protocol_extractability_signals"], list)
     assert isinstance(restored.iloc[0]["parsing_warnings"], list)

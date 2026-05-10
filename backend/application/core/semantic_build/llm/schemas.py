@@ -593,18 +593,7 @@ class StructuredExtractionBundle(_StrictModel):
 
 class StructuredDocumentProfile(_StrictModel):
     doc_type: Literal["experimental", "review", "mixed", "uncertain"] = "uncertain"
-    protocol_extractable: Literal["yes", "partial", "no", "uncertain"] = "uncertain"
-    protocol_extractability_signals: list[str] = Field(default_factory=list)
     parsing_warnings: list[
         Literal["insufficient_content", "classification_uncertain"]
     ] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-
-    @field_validator("protocol_extractability_signals")
-    @classmethod
-    def _validate_empty_signals(cls, value: list[str]) -> list[str]:
-        if value:
-            raise ValueError(
-                "protocol_extractability_signals must be empty for document triage"
-            )
-        return value

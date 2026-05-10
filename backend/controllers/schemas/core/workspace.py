@@ -72,16 +72,6 @@ class WorkspaceArtifactStatusResponse(BaseModel):
     table_rows_ready: bool = Field(default=False, description="table_rows 是否已生成且非空")
     table_cells_generated: bool = Field(default=False, description="table_cells 是否已生成")
     table_cells_ready: bool = Field(default=False, description="table_cells 是否已生成且非空")
-    procedure_blocks_generated: bool = Field(default=False, description="procedure_blocks 是否已生成")
-    procedure_blocks_ready: bool = Field(
-        default=False,
-        description="procedure_blocks 是否已生成且非空",
-    )
-    protocol_steps_generated: bool = Field(default=False, description="protocol_steps 是否已生成")
-    protocol_steps_ready: bool = Field(
-        default=False,
-        description="protocol_steps 是否已生成且非空",
-    )
     updated_at: str = Field(..., description="更新时间")
 
 
@@ -96,9 +86,6 @@ class WorkspaceCapabilitiesResponse(BaseModel):
     )
     can_view_research_view: bool = Field(default=False, description="是否可查看 research view 聚合")
     can_download_graphml: bool = Field(default=False, description="是否可导出 GraphML")
-    can_view_protocol_steps: bool = Field(default=False, description="是否可查看 protocol steps")
-    can_search_protocol: bool = Field(default=False, description="是否可检索 protocol steps")
-    can_generate_sop: bool = Field(default=False, description="是否可生成 SOP 草案")
 
 
 class WorkspaceStageResponse(BaseModel):
@@ -115,7 +102,6 @@ class WorkspaceWorkflowResponse(BaseModel):
     results: WorkspaceStageResponse = Field(..., description="results 阶段")
     evidence: WorkspaceStageResponse = Field(..., description="evidence 阶段")
     comparisons: WorkspaceStageResponse = Field(..., description="comparisons 阶段")
-    protocol: WorkspaceStageResponse = Field(..., description="protocol 阶段")
     graph: WorkspaceStageResponse = Field(..., description="graph 阶段")
 
 
@@ -124,10 +110,6 @@ class WorkspaceDocumentSummaryResponse(BaseModel):
 
     total_documents: int = Field(default=0, description="文档总数")
     by_doc_type: dict[str, int] = Field(default_factory=dict, description="按文档类型统计")
-    by_protocol_extractable: dict[str, int] = Field(
-        default_factory=dict,
-        description="按 protocol suitability 统计",
-    )
 
 
 class WorkspaceWarningResponse(BaseModel):
@@ -166,8 +148,6 @@ class WorkspaceLinksResponse(BaseModel):
         default=None,
         description="comparable-results 路径",
     )
-    protocol: str | None = Field(default=None, description="protocol 主路径")
-    protocol_steps: str | None = Field(default=None, description="protocol/steps 路径")
     graph: str | None = Field(default=None, description="graph 主路径")
 
 

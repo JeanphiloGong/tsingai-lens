@@ -721,9 +721,6 @@
 					<span class={`trust-chip trust-chip--${surfaceTone('documents')}`}>
 						{$t('overview.cards.trust.documents')}: {surfaceLabel('documents')}
 					</span>
-					<span class={`trust-chip trust-chip--${surfaceTone('protocol')}`}>
-						Protocol: {surfaceLabel('protocol')}
-					</span>
 				</div>
 				<div class="split-actions">
 					<a class="btn btn--ghost btn--small" href={evidenceHref()}>

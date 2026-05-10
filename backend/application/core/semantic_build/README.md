@@ -4,8 +4,7 @@ This package consumes normalized Source artifacts and produces Core semantic
 artifacts.
 
 - `document_profile_service.py`
-  LLM-structured document typing, protocol suitability, and collection
-  summaries
+  LLM-structured document typing and collection summaries
 - `paper_facts_service.py`
   semantic extraction for evidence anchors, method facts, variants, test
   conditions, baselines, and measurement results

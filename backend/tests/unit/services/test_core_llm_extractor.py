@@ -84,7 +84,7 @@ def test_core_llm_extractor_validates_json_text_response():
     mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
         }
     )
@@ -105,7 +105,7 @@ def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
     mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
         }
     )
@@ -172,7 +172,7 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
     mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "text_window": {
                 "text": "Prior work reported lower residual stress with in situ heating.",
                 "heading_path": "Introduction",
@@ -196,7 +196,7 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batc
     mentions = extractor.extract_table_batch_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
             "supporting_text_windows": [],
         }
@@ -258,7 +258,7 @@ def test_core_llm_extractor_validates_lightweight_table_batch_mentions():
     mentions = extractor.extract_table_batch_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "target_rows": [{"row_index": 1, "row_summary": "Sample A | 210 HV", "cells": []}],
             "supporting_text_windows": [],
         }
@@ -311,7 +311,7 @@ def test_core_llm_extractor_accepts_empty_table_batch_mentions():
     mentions = extractor.extract_table_batch_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "target_rows": [{"row_index": 1, "row_summary": "Sample A | no grounded result", "cells": []}],
             "supporting_text_windows": [],
         }
@@ -335,7 +335,7 @@ def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
         extractor.extract_table_batch_mentions(
             {
                 "document_title": "LPBF Paper",
-                "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+                "document_profile": {"doc_type": "experimental"},
                 "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
                 "supporting_text_windows": [],
             }

@@ -17,8 +17,7 @@ This node owns the collection workspace route family in the frontend.
 ## Responsibilities
 
 - render the collection workspace
-- render collection-level document profile screening and Protocol suitability
-  signals
+- render collection-level document profile screening signals
 - render canonical collection materials and collection-scoped material profiles
 - render collection-level evidence cards and source-anchor entry points
 - render global comparison review as a More / All Comparisons surface
@@ -28,7 +27,7 @@ This node owns the collection workspace route family in the frontend.
 - render document detail as a paper reader plus structured understanding workbench
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness
-- surface graph, protocol, and report capabilities to the user
+- surface graph and report capabilities to the user
 - keep source traceback on the document page user-facing: original PDF/PDF.js
   reader first, page-level fallback when precise regions are missing, block IDs
   only for diagnostics
@@ -46,8 +45,6 @@ This node owns the collection workspace route family in the frontend.
 - [`../../../docs/research-view-aggregation/README.md`](../../../docs/research-view-aggregation/README.md)
   Frontend implementation topic for research-view aggregation navigation,
   route state, matrices, evidence drawers, and debug placement
-- [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
-  Collection-facing interface spec for the Lens v1 workspace flow
 - [`core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md`](core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md)
   Frontend-local graph cutover plan for the lean graph contract, canonical
   drilldown, and neighbors expansion

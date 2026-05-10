@@ -16,8 +16,6 @@ from domain.core.document_profile import (
 )
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
-    PROTOCOL_EXTRACTABLE_UNCERTAIN,
-    PROTOCOL_SUITABLE_EXTRACTABILITY,
 )
 from infra.persistence.backbone_codec import normalize_backbone_value
 from infra.persistence.factory import build_core_fact_repository, build_source_artifact_repository
@@ -282,11 +280,10 @@ class DocumentProfileService:
                 file_lookup=file_lookup,
             )
             logger.info(
-                "Document profile extracted collection_id=%s document_id=%s doc_type=%s protocol_extractable=%s block_count=%s warning_count=%s",
+                "Document profile extracted collection_id=%s document_id=%s doc_type=%s block_count=%s warning_count=%s",
                 collection_id,
                 document_id,
                 profiled.get("doc_type"),
-                profiled.get("protocol_extractable"),
                 len(document_blocks),
                 len(profiled.get("parsing_warnings", [])),
             )
@@ -299,8 +296,6 @@ class DocumentProfileService:
                 "title",
                 "source_filename",
                 "doc_type",
-                "protocol_extractable",
-                "protocol_extractability_signals",
                 "parsing_warnings",
                 "confidence",
             ],
@@ -312,10 +307,9 @@ class DocumentProfileService:
         )
         self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
-            "Document profile build finished collection_id=%s profile_count=%s protocol_candidate_count=%s",
+            "Document profile build finished collection_id=%s profile_count=%s",
             collection_id,
             len(profiles),
-            self.count_protocol_suitable(profiles),
         )
         return profiles
 
@@ -328,8 +322,6 @@ class DocumentProfileService:
                 "title",
                 "source_filename",
                 "doc_type",
-                "protocol_extractable",
-                "protocol_extractability_signals",
                 "parsing_warnings",
                 "confidence",
             ],
@@ -350,10 +342,6 @@ class DocumentProfileService:
         if self._structured_extractor is None:
             self._structured_extractor = build_default_core_llm_structured_extractor()
         return self._structured_extractor
-
-    def count_protocol_suitable(self, profiles: pd.DataFrame) -> int:
-        normalized = self._normalize_profiles_table(profiles, None)
-        return int(normalized["protocol_extractable"].isin(list(PROTOCOL_SUITABLE_EXTRACTABILITY)).sum())
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)
@@ -400,8 +388,6 @@ class DocumentProfileService:
                     "title": title,
                     "source_filename": source_filename,
                     "doc_type": DOC_TYPE_UNCERTAIN,
-                    "protocol_extractable": PROTOCOL_EXTRACTABLE_UNCERTAIN,
-                    "protocol_extractability_signals": [],
                     "parsing_warnings": ["insufficient_content"],
                     "confidence": 0.0,
                 }
@@ -411,10 +397,7 @@ class DocumentProfileService:
             profile_payload
         )
         parsing_warnings = list(extracted.parsing_warnings)
-        if (
-            extracted.doc_type == DOC_TYPE_UNCERTAIN
-            or extracted.protocol_extractable == PROTOCOL_EXTRACTABLE_UNCERTAIN
-        ) and "classification_uncertain" not in parsing_warnings:
+        if extracted.doc_type == DOC_TYPE_UNCERTAIN and "classification_uncertain" not in parsing_warnings:
             parsing_warnings.append("classification_uncertain")
         normalized = DocumentProfile.from_mapping(
             {
@@ -423,12 +406,6 @@ class DocumentProfileService:
                 "title": title,
                 "source_filename": source_filename,
                 "doc_type": str(extracted.doc_type or DOC_TYPE_UNCERTAIN),
-                "protocol_extractable": str(
-                    extracted.protocol_extractable or PROTOCOL_EXTRACTABLE_UNCERTAIN
-                ),
-                "protocol_extractability_signals": list(
-                    extracted.protocol_extractability_signals
-                ),
                 "parsing_warnings": parsing_warnings,
                 "confidence": extracted.confidence,
             }
@@ -556,8 +533,6 @@ class DocumentProfileService:
                     "title",
                     "source_filename",
                     "doc_type",
-                    "protocol_extractable",
-                    "protocol_extractability_signals",
                     "parsing_warnings",
                     "confidence",
                 ]
@@ -573,8 +548,6 @@ class DocumentProfileService:
             "title",
             "source_filename",
             "doc_type",
-            "protocol_extractable",
-            "protocol_extractability_signals",
             "parsing_warnings",
             "confidence",
         ]

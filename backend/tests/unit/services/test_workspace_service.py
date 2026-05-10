@@ -66,7 +66,6 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     assert overview["capabilities"]["can_view_graph"] is False
     assert overview["capabilities"]["can_view_results"] is False
     assert overview["capabilities"]["can_view_comparable_results"] is False
-    assert overview["capabilities"]["can_generate_sop"] is False
 
 
 def test_workspace_service_includes_document_summary_and_links(tmp_path):
@@ -128,7 +127,6 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
     assert overview["status_summary"] == "document_profiled"
     assert overview["workflow"]["documents"]["status"] == "ready"
     assert overview["workflow"]["results"]["status"] == "not_started"
-    assert overview["workflow"]["protocol"]["status"] == "not_started"
     assert overview["artifacts"]["document_profiles_generated"] is True
     assert overview["artifacts"]["document_profiles_ready"] is True
     assert overview["artifacts"]["evidence_cards_generated"] is False
@@ -167,7 +165,6 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
                         "title": "Semantic Graph Paper",
                         "source_filename": "paper.txt",
                         "doc_type": "experimental",
-                        "protocol_extractable": "yes",
                         "confidence": 0.9,
                     }
                 ),

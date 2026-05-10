@@ -25,7 +25,6 @@ _JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 DEFAULT_TEXT_WINDOW_PAYLOAD: dict[str, Any] = {
     "document_profile": {
         "doc_type": "experimental",
-        "protocol_extractable": "yes",
     },
     "document_title": (
         "9a72157535fe48449b93c7b989764f12_Residual stress analysis of in situ surface "

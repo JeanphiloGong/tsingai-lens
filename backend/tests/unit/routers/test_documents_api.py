@@ -268,8 +268,6 @@ def test_document_profile_route_returns_single_profile(document_services):
                 "title": "Single Paper",
                 "source_filename": "paper.txt",
                 "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": ["methods_section_detected"],
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
@@ -304,12 +302,6 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
                 "title": "Single Paper",
                 "source_filename": "paper.txt",
                 "doc_type": "research_article",
-                "protocol_extractable": "Laser-TIG hybrid additive manufacturing produced finer grains.",
-                "protocol_extractability_signals": [
-                    "methods_section_detected",
-                    "procedural_actions_detected",
-                    "condition_markers_detected",
-                ],
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
@@ -322,7 +314,6 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
     )
 
     assert payload.doc_type == "experimental"
-    assert payload.protocol_extractable == "uncertain"
 
 
 def test_document_content_route_includes_source_locators(
@@ -377,8 +368,6 @@ def test_document_content_route_includes_source_locators(
                 "title": "Locator Paper",
                 "source_filename": "paper-1.pdf",
                 "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
@@ -459,8 +448,6 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
                 "title": "Profile Paper",
                 "source_filename": "paper.pdf",
                 "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
@@ -595,7 +582,6 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
                         "title": "Other Paper",
                         "source_filename": "other.txt",
                         "doc_type": "experimental",
-                        "protocol_extractable": "yes",
                         "confidence": 0.9,
                     }
                 ),

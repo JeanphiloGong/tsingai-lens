@@ -10,7 +10,6 @@ export type TaskStage =
   | 'document_profiles_started'
   | 'paper_facts_started'
   | 'comparison_rows_started'
-  | 'protocol_artifacts_started'
   | 'artifacts_ready'
   | 'failed';
 

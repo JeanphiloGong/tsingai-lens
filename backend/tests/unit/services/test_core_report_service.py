@@ -39,8 +39,6 @@ def _core_report_fact_set(collection_id: str) -> CoreFactSet:
                     "title": "Core Report Paper",
                     "source_filename": "paper.txt",
                     "doc_type": "experimental",
-                    "protocol_extractable": "yes",
-                    "protocol_extractability_signals": ["methods_section_detected"],
                     "parsing_warnings": [],
                     "confidence": 0.91,
                 }

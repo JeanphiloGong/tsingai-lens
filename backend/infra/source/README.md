@@ -44,9 +44,6 @@ paper facts
       |
       v
 comparison rows
-      |
-      v
-protocol artifacts
 ```
 
 ## Source Artifacts

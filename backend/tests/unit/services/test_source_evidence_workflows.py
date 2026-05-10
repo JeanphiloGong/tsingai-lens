@@ -13,10 +13,8 @@ from infra.source.runtime.source_evidence import (
     build_table_cells,
     build_table_rows,
 )
-from infra.source.runtime.workflows.create_source_artifacts import (
-    _build_pdf_bundle,
-    _resolve_heading_path_for_target,
-)
+from infra.source.runtime.mapping.layout_binding import resolve_heading_path_for_target
+from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle
 
 
 def test_default_source_pipeline_uses_structure_first_handoff_workflow():
@@ -262,11 +260,11 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
             return "\n".join(item.text for item in self.texts)
 
     monkeypatch.setattr(
-        "infra.source.runtime.workflows.create_source_artifacts._convert_pdf_document",
+        "infra.source.runtime.parsers.docling_pdf.convert_pdf_document",
         lambda **_: FakeDocument(),
     )
 
-    bundle = _build_pdf_bundle(
+    bundle = build_pdf_bundle(
         row=pd.Series(
             {
                 "id": "doc-1",
@@ -338,7 +336,7 @@ def test_heading_path_binding_prefers_same_page_bbox_heading_above_target():
     ]
 
     assert (
-        _resolve_heading_path_for_target(
+        resolve_heading_path_for_target(
             page=1,
             target_bbox=target_bbox,
             heading_blocks=heading_blocks,

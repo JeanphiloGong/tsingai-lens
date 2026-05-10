@@ -27,10 +27,7 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.workflows.create_source_artifacts import (
-    _build_pdf_bundle,
-    _build_pdf_converter,
-)
+from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
 
 
 def parse_args() -> argparse.Namespace:
@@ -178,13 +175,13 @@ def _reparse_collection_inputs(
         raise SystemExit(f"no input PDFs found for collection: {collection_dir}")
 
     config = SourceRuntimeConfig(root_dir=str(backend_root))
-    converter = _build_pdf_converter()
+    converter = build_pdf_converter()
     bundles = []
     for index, item in enumerate(inputs, start=1):
         source_path = Path(str(item["source_path"])).expanduser().resolve()
         print(f"[{index}/{len(inputs)}] parsing {source_path.name}", flush=True)
         bundles.append(
-            _build_pdf_bundle(
+            build_pdf_bundle(
                 row=pd.Series(item),
                 payload=source_path.read_bytes(),
                 config=config,

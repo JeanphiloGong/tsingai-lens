@@ -179,13 +179,13 @@ def run_docling_benchmark(
         import pandas as pd
 
         from infra.source.config.source_runtime_config import SourceRuntimeConfig
-        from infra.source.runtime.workflows.create_source_artifacts import (
-            _build_pdf_bundle,
-            _build_pdf_converter,
+        from infra.source.runtime.parsers.docling_pdf import (
+            build_pdf_bundle,
+            build_pdf_converter,
         )
 
         config = SourceRuntimeConfig(root_dir=str(backend_root))
-        converter = _build_pdf_converter()
+        converter = build_pdf_converter()
     except Exception as exc:
         return [
             _error_record(
@@ -210,7 +210,7 @@ def run_docling_benchmark(
                     "metadata": {"benchmark_source": "source_parser_benchmark"},
                 }
             )
-            bundle = _build_pdf_bundle(
+            bundle = build_pdf_bundle(
                 row=row,
                 payload=payload,
                 config=config,

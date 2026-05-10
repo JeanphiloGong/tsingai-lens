@@ -394,6 +394,7 @@ _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
 )
 
 _ALL_TABLES = (*_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
+_STATUS_TABLE = "core_fact_collection_status"
 
 
 class SqliteCoreFactRepository:
@@ -421,6 +422,19 @@ class SqliteCoreFactRepository:
                     collection_id,
                     getattr(facts, spec.attr_name),
                 )
+            self._upsert_status(
+                connection,
+                collection_id,
+                paper_facts_ready=True,
+                comparison_artifacts_ready=(
+                    facts.comparison_artifacts_ready
+                    or bool(
+                        facts.comparable_results
+                        or facts.collection_comparable_results
+                        or facts.comparison_rows
+                    )
+                ),
+            )
 
     def replace_collection_comparison_artifacts(
         self,
@@ -445,6 +459,11 @@ class SqliteCoreFactRepository:
                     collection_id,
                     records_by_attr[spec.attr_name],
                 )
+            self._upsert_status(
+                connection,
+                collection_id,
+                comparison_artifacts_ready=True,
+            )
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet:
         self._ensure_schema()
@@ -453,7 +472,8 @@ class SqliteCoreFactRepository:
                 spec.attr_name: self._read_records(connection, spec, collection_id)
                 for spec in _ALL_TABLES
             }
-        return CoreFactSet(**records_by_attr)
+            status = self._read_status(connection, collection_id, records_by_attr)
+        return CoreFactSet(**status, **records_by_attr)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -471,9 +491,96 @@ class SqliteCoreFactRepository:
 
     def _ensure_schema(self) -> None:
         with self._connection() as connection:
+            self._create_status_table(connection)
             for spec in _ALL_TABLES:
                 self._create_table(connection, spec)
                 self._create_indexes(connection, spec)
+
+    def _create_status_table(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {_STATUS_TABLE} (
+                collection_id TEXT PRIMARY KEY,
+                paper_facts_ready INTEGER NOT NULL DEFAULT 0,
+                comparison_artifacts_ready INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
+    def _upsert_status(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+        *,
+        paper_facts_ready: bool | None = None,
+        comparison_artifacts_ready: bool | None = None,
+    ) -> None:
+        current = connection.execute(
+            f"""
+            SELECT paper_facts_ready, comparison_artifacts_ready
+            FROM {_STATUS_TABLE}
+            WHERE collection_id = ?
+            """,
+            (collection_id,),
+        ).fetchone()
+        next_paper_facts_ready = (
+            bool(current["paper_facts_ready"]) if current else False
+        )
+        next_comparison_artifacts_ready = (
+            bool(current["comparison_artifacts_ready"]) if current else False
+        )
+        if paper_facts_ready is not None:
+            next_paper_facts_ready = bool(paper_facts_ready)
+        if comparison_artifacts_ready is not None:
+            next_comparison_artifacts_ready = bool(comparison_artifacts_ready)
+        connection.execute(
+            f"""
+            INSERT INTO {_STATUS_TABLE} (
+                collection_id,
+                paper_facts_ready,
+                comparison_artifacts_ready
+            )
+            VALUES (?, ?, ?)
+            ON CONFLICT(collection_id) DO UPDATE SET
+                paper_facts_ready = excluded.paper_facts_ready,
+                comparison_artifacts_ready = excluded.comparison_artifacts_ready
+            """,
+            (
+                collection_id,
+                int(next_paper_facts_ready),
+                int(next_comparison_artifacts_ready),
+            ),
+        )
+
+    def _read_status(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+        records_by_attr: dict[str, tuple[Any, ...]],
+    ) -> dict[str, bool]:
+        row = connection.execute(
+            f"""
+            SELECT paper_facts_ready, comparison_artifacts_ready
+            FROM {_STATUS_TABLE}
+            WHERE collection_id = ?
+            """,
+            (collection_id,),
+        ).fetchone()
+        if row is not None:
+            return {
+                "paper_facts_ready": bool(row["paper_facts_ready"]),
+                "comparison_artifacts_ready": bool(
+                    row["comparison_artifacts_ready"]
+                ),
+            }
+        return {
+            "paper_facts_ready": any(
+                records_by_attr[spec.attr_name] for spec in _PAPER_FACT_TABLES
+            ),
+            "comparison_artifacts_ready": any(
+                records_by_attr[spec.attr_name] for spec in _COMPARISON_TABLES
+            ),
+        }
 
     def _create_table(
         self,

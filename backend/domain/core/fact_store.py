@@ -22,6 +22,8 @@ from domain.core.evidence_backbone import (
 
 @dataclass(frozen=True)
 class CoreFactSet:
+    paper_facts_ready: bool = False
+    comparison_artifacts_ready: bool = False
     document_profiles: tuple[DocumentProfile, ...] = ()
     evidence_anchors: tuple[EvidenceAnchor, ...] = ()
     method_facts: tuple[MethodFact, ...] = ()

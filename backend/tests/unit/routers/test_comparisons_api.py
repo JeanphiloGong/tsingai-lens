@@ -14,12 +14,18 @@ except ImportError:  # pragma: no cover
 
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
+from application.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.core_semantic_version import write_core_semantic_manifest
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import comparisons as comparisons_controller
-from domain.core.comparison import build_comparison_row_id
+from domain.core.comparison import (
+    CollectionComparableResult,
+    ComparableResult,
+    ComparisonRowRecord,
+    build_comparison_row_id,
+)
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
@@ -164,6 +170,28 @@ def _write_semantic_comparison_artifacts(
     )
 
 
+def _store_core_comparison_artifacts(
+    comparison_service: ComparisonService,
+    collection_id: str,
+    comparable_results: list[dict],
+    scoped_results: list[dict],
+) -> None:
+    row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=pd.DataFrame(comparable_results),
+        scoped_results=pd.DataFrame(scoped_results),
+    )
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        tuple(ComparableResult.from_mapping(row) for row in comparable_results),
+        tuple(CollectionComparableResult.from_mapping(row) for row in scoped_results),
+        tuple(
+            ComparisonRowRecord.from_mapping(dict(row))
+            for _, row in row_table.iterrows()
+        ),
+    )
+
+
 @pytest.fixture()
 def comparison_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
@@ -215,7 +243,7 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
 ):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _comparison_service = comparison_services
+    collection_service, artifact_registry, comparison_service = comparison_services
     record = collection_service.create_collection(name="Empty Comparisons Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
@@ -232,6 +260,7 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
     documents.to_parquet(output_dir / "documents.parquet", index=False)
     _write_source_artifacts(output_dir, documents, None)
     _write_semantic_comparison_artifacts(output_dir, [], [])
+    _store_core_comparison_artifacts(comparison_service, collection_id, [], [])
     write_core_semantic_manifest(output_dir)
     artifact_registry.upsert(collection_id, output_dir)
 
@@ -250,7 +279,7 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
 ):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _comparison_service = comparison_services
+    collection_service, artifact_registry, comparison_service = comparison_services
     record = collection_service.create_collection(name="Existing Comparisons Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
@@ -291,6 +320,12 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
         [comparable_result],
         [scoped_result],
     )
+    _store_core_comparison_artifacts(
+        comparison_service,
+        collection_id,
+        [comparable_result],
+        [scoped_result],
+    )
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
@@ -321,7 +356,7 @@ def test_comparisons_route_applies_canonical_graph_filters(
 ):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _comparison_service = comparison_services
+    collection_service, artifact_registry, comparison_service = comparison_services
     record = collection_service.create_collection(name="Filtered Comparisons Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
@@ -393,6 +428,12 @@ def test_comparisons_route_applies_canonical_graph_filters(
         [comparable_result_1, comparable_result_2],
         [scoped_result_1, scoped_result_2],
     )
+    _store_core_comparison_artifacts(
+        comparison_service,
+        collection_id,
+        [comparable_result_1, comparable_result_2],
+        [scoped_result_1, scoped_result_2],
+    )
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
@@ -416,7 +457,7 @@ def test_comparison_route_returns_single_row(
 ):
     _patch_parquet(monkeypatch)
 
-    collection_service, artifact_registry, _comparison_service = comparison_services
+    collection_service, artifact_registry, comparison_service = comparison_services
     record = collection_service.create_collection(name="Single Comparison Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
@@ -454,6 +495,12 @@ def test_comparison_route_returns_single_row(
     )
     _write_semantic_comparison_artifacts(
         output_dir,
+        [comparable_result],
+        [scoped_result],
+    )
+    _store_core_comparison_artifacts(
+        comparison_service,
+        collection_id,
         [comparable_result],
         [scoped_result],
     )

@@ -147,7 +147,7 @@ _TEST_SERIES_AXIS_CANDIDATES = (
 class ComparisonRowsNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve comparison rows."""
 
-    def __init__(self, collection_id: str, output_dir: Path) -> None:
+    def __init__(self, collection_id: str, output_dir: Path | None = None) -> None:
         self.collection_id = collection_id
         self.output_dir = output_dir
         super().__init__(f"comparison rows not ready: {collection_id}")
@@ -229,21 +229,21 @@ class ComparisonService:
         test_condition_normalized: str | None = None,
         baseline_normalized: str | None = None,
     ) -> dict[str, Any]:
-        rows = self.read_comparison_rows(collection_id)
-        rows = self._filter_rows(
-            rows,
+        records = self._read_comparison_row_records(collection_id)
+        records = self._filter_row_records(
+            records,
             material_system_normalized=material_system_normalized,
             property_normalized=property_normalized,
             test_condition_normalized=test_condition_normalized,
             baseline_normalized=baseline_normalized,
         )
         items = [
-            self._serialize_row(item)
-            for _, item in rows.iloc[offset : offset + limit].iterrows()
+            self._serialize_row_record(record)
+            for record in records[offset : offset + limit]
         ]
         return {
             "collection_id": collection_id,
-            "total": len(rows),
+            "total": len(records),
             "count": len(items),
             "items": items,
         }
@@ -253,11 +253,11 @@ class ComparisonService:
         collection_id: str,
         row_id: str,
     ) -> dict[str, Any]:
-        rows = self.read_comparison_rows(collection_id)
-        matched = rows[rows["row_id"].astype(str) == str(row_id)]
-        if matched.empty:
-            raise ComparisonRowNotFoundError(collection_id, row_id)
-        return self._serialize_row(matched.iloc[0])
+        row_key = self._safe_text(row_id) or ""
+        for record in self._read_comparison_row_records(collection_id):
+            if self._safe_text(record.row_id) == row_key:
+                return self._serialize_row_record(record)
+        raise ComparisonRowNotFoundError(collection_id, row_id)
 
     def list_corpus_comparable_results(
         self,
@@ -1405,6 +1405,41 @@ class ComparisonService:
             filtered = filtered[
                 filtered[column].apply(lambda value: self._safe_text(value) == expected)
             ]
+        return filtered
+
+    def _read_comparison_row_records(
+        self,
+        collection_id: str,
+    ) -> list[ComparisonRowRecord]:
+        self.collection_service.get_collection(collection_id)
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if not facts.comparison_artifacts_ready:
+            raise ComparisonRowsNotReadyError(collection_id)
+        return list(facts.comparison_rows)
+
+    def _filter_row_records(
+        self,
+        rows: list[ComparisonRowRecord],
+        *,
+        material_system_normalized: str | None = None,
+        property_normalized: str | None = None,
+        test_condition_normalized: str | None = None,
+        baseline_normalized: str | None = None,
+    ) -> list[ComparisonRowRecord]:
+        filters = {
+            "material_system_normalized": self._safe_text(material_system_normalized),
+            "property_normalized": self._safe_text(property_normalized),
+            "test_condition_normalized": self._safe_text(test_condition_normalized),
+            "baseline_normalized": self._safe_text(baseline_normalized),
+        }
+        filtered: list[ComparisonRowRecord] = []
+        for row in rows:
+            if all(
+                not expected
+                or self._safe_text(getattr(row, field_name)) == expected
+                for field_name, expected in filters.items()
+            ):
+                filtered.append(row)
         return filtered
 
     def _serialize_row(self, row: pd.Series) -> dict[str, Any]:

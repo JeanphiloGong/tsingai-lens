@@ -179,6 +179,8 @@ def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
     repository.replace_collection_facts("col_test", facts)
     restored = repository.read_collection_facts("col_test")
 
+    assert restored.paper_facts_ready is True
+    assert restored.comparison_artifacts_ready is True
     assert restored.document_profiles[0].parsing_warnings == ("table fragmented",)
     assert restored.evidence_anchors[0].bbox == {
         "x0": 1.0,
@@ -207,10 +209,19 @@ def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
     )
     refreshed = repository.read_collection_facts("col_test")
 
+    assert refreshed.paper_facts_ready is True
+    assert refreshed.comparison_artifacts_ready is True
     assert refreshed.document_profiles[0].document_id == "doc-1"
     assert refreshed.comparable_results[0].value.numeric_value == 640.0
     assert refreshed.collection_comparable_results[0].sort_order == 2
     assert refreshed.comparison_rows[0].value == 640.0
+
+    repository.replace_collection_comparison_artifacts("col_empty", (), (), ())
+    empty_comparison = repository.read_collection_facts("col_empty")
+
+    assert empty_comparison.paper_facts_ready is False
+    assert empty_comparison.comparison_artifacts_ready is True
+    assert empty_comparison.comparison_rows == ()
 
 
 def _comparable_result(value: int = 620) -> ComparableResult:

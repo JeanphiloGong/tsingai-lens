@@ -28,8 +28,10 @@ Core semantic fact state.
   In-memory implementations for tests and isolated runs
 - `sqlite/`
   SQLite-backed Goal conversation session persistence, Source artifact
-  persistence, and Core semantic fact persistence. The application layer
-  depends on repository ports and does not import SQLite table names, SQL, or
-  connection details.
+  persistence, and Core semantic fact persistence. Core fact storage includes
+  collection-level readiness metadata so empty-but-completed fact families do
+  not require parquet artifact probes. The application layer depends on
+  repository ports and does not import SQLite table names, SQL, or connection
+  details.
 - `mysql/`
   Placeholder for future relational persistence work

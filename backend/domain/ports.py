@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Mapping, Protocol
 
 
 @dataclass(frozen=True)
@@ -65,3 +65,17 @@ class ArtifactRepository(Protocol):
     def read(self, collection_id: str) -> dict | None: ...
 
     def write(self, collection_id: str, payload: dict) -> None: ...
+
+
+class GoalSessionRepository(Protocol):
+    def read_session(self, session_id: str) -> dict[str, Any] | None: ...
+
+    def write_session(self, payload: Mapping[str, Any]) -> None: ...
+
+    def read_messages(self, session_id: str) -> list[dict[str, Any]]: ...
+
+    def write_messages(
+        self,
+        session_id: str,
+        messages: list[Mapping[str, Any]],
+    ) -> None: ...

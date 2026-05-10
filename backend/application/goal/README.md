@@ -18,7 +18,9 @@ The conversation domain model lives in `domain/goal/session.py`. It owns the
 core chat records and source-boundary rules for `GoalSessionRecord`,
 `GoalMessageRecord`, and `GoalSourceLink`. This package remains responsible for
 orchestration: reading Core artifacts, calling the LLM, and persisting the
-domain records.
+domain records through the Goal session repository port. The default SQLite
+storage engine is owned by `infra/persistence/sqlite/`; this package does not
+own database connections, SQL, schema initialization, or row encoding.
 
 - `session_service.py`
   Primary current conversation service. It persists session context, retrieves

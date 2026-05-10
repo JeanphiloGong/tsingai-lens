@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from application.goal.session_service import GoalSessionService
 from application.source.collection_service import CollectionService
+from infra.persistence.factory import build_goal_session_repository
 
 
 class _FakeMessage:
@@ -98,7 +99,9 @@ class _MaterialResearchViewService:
         }
 
 
-def _service(tmp_path, content: str = "draft answer") -> tuple[GoalSessionService, CollectionService]:
+def _service(
+    tmp_path, content: str = "draft answer"
+) -> tuple[GoalSessionService, CollectionService]:
     collection_service = CollectionService(tmp_path / "collections")
     service = GoalSessionService(
         collection_service=collection_service,
@@ -106,6 +109,7 @@ def _service(tmp_path, content: str = "draft answer") -> tuple[GoalSessionServic
         workspace_service=_FakeWorkspaceService(),
         comparison_service=_EmptyComparisonService(),
         paper_facts_service=_EmptyPaperFactsService(),
+        goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
         llm_client=_FakeLLMClient(content),
         model="fake-model",
     )
@@ -212,7 +216,9 @@ def test_hybrid_message_uses_general_fallback_when_collection_has_no_context(tmp
 
 
 def test_material_page_context_scopes_grounded_answer(tmp_path):
-    service, collection_service = _service(tmp_path, content="S001 hardness is supported by [E02].")
+    service, collection_service = _service(
+        tmp_path, content="S001 hardness is supported by [E02]."
+    )
     collection = collection_service.create_collection("Material Collection")
     session = service.create_session(
         collection_id=collection["collection_id"],

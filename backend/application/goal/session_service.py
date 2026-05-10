@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
@@ -34,7 +33,8 @@ from domain.goal import (
     GoalSourceLink,
     GoalSourceMode,
 )
-from infra.persistence.file._json import read_json, write_json
+from domain.ports import GoalSessionRepository
+from infra.persistence.factory import build_goal_session_repository
 
 AnswerMode = GoalAnswerMode
 SourceMode = GoalSourceMode
@@ -79,6 +79,7 @@ class GoalSessionService:
         workspace_service: WorkspaceService | None = None,
         comparison_service: ComparisonService | None = None,
         paper_facts_service: PaperFactsService | None = None,
+        goal_session_repository: GoalSessionRepository | None = None,
         llm_client: Any | None = None,
         model: str | None = None,
     ) -> None:
@@ -110,6 +111,9 @@ class GoalSessionService:
         self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
+        )
+        self.goal_session_repository = (
+            goal_session_repository or build_goal_session_repository()
         )
         self.model = (
             model
@@ -207,10 +211,10 @@ class GoalSessionService:
         return session_record
 
     def list_messages(self, session_id: str) -> dict[str, Any]:
-        session = self._read_session(session_id)
+        session = GoalSessionRecord.from_mapping(self._read_session(session_id))
         return {
-            "session_id": session["session_id"],
-            "items": self._read_messages(session),
+            "session_id": session.session_id,
+            "items": self._read_messages(session.session_id),
         }
 
     def post_message(
@@ -227,8 +231,7 @@ class GoalSessionService:
         session = GoalSessionRecord.from_mapping(self._read_session(session_id))
         session = self._apply_page_context(session, page_context or {})
         session, command_response = self._apply_inline_command(session, user_message)
-        session_record = session.to_record()
-        messages = self._read_messages(session_record)
+        messages = self._read_messages(session.session_id)
         now = _now_iso()
         user_record = GoalMessageRecord.user(
             message_id=f"msg_{uuid4().hex[:12]}",
@@ -747,50 +750,24 @@ class GoalSessionService:
     ) -> list[dict[str, str]]:
         return [GoalSourceLink.from_mapping(ref).to_record() for ref in source_refs]
 
-    def _session_dir(self, collection_id: str) -> Path:
-        _ = collection_id
-        return self.collection_service.root_dir / "_goal_sessions"
-
-    def _session_path(self, session: dict[str, Any]) -> Path:
-        return (
-            self._session_dir(session["collection_id"])
-            / f"{session['session_id']}.json"
-        )
-
-    def _messages_path(self, session: dict[str, Any]) -> Path:
-        return (
-            self._session_dir(session["collection_id"])
-            / f"{session['session_id']}.messages.json"
-        )
-
-    def _find_session_path(self, session_id: str) -> Path:
-        path = (
-            self.collection_service.root_dir / "_goal_sessions" / f"{session_id}.json"
-        )
-        if path.exists():
-            return path
-        raise GoalSessionNotFoundError(session_id)
-
     def _read_session(self, session_id: str) -> dict[str, Any]:
-        path = self._find_session_path(session_id)
-        session = read_json(path, None)
+        session = self.goal_session_repository.read_session(session_id)
         if not isinstance(session, dict):
             raise GoalSessionNotFoundError(session_id)
         return session
 
     def _write_session(self, session: dict[str, Any]) -> None:
-        write_json(self._session_path(session), session)
+        self.goal_session_repository.write_session(session)
 
-    def _read_messages(self, session: dict[str, Any]) -> list[dict[str, Any]]:
-        messages = read_json(self._messages_path(session), [])
-        return messages if isinstance(messages, list) else []
+    def _read_messages(self, session_id: str) -> list[dict[str, Any]]:
+        return self.goal_session_repository.read_messages(session_id)
 
     def _write_messages(
         self,
         session: dict[str, Any],
         messages: list[dict[str, Any]],
     ) -> None:
-        write_json(self._messages_path(session), messages)
+        self.goal_session_repository.write_messages(session["session_id"], messages)
 
     def _collect_evidence_ids(self, value: Any) -> list[str]:
         found: list[str] = []

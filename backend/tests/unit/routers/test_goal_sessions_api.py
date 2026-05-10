@@ -16,6 +16,7 @@ from controllers.schemas.goal.session import (
     GoalSessionCreateRequest,
     GoalSessionMessageRequest,
 )
+from infra.persistence.factory import build_goal_session_repository
 
 
 class _FakeMessage:
@@ -56,6 +57,7 @@ def goal_session_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     service = GoalSessionService(
         collection_service=collection_service,
+        goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
         llm_client=_FakeLLMClient("General background."),
         model="fake-model",
     )
@@ -63,7 +65,9 @@ def goal_session_services(monkeypatch, tmp_path):
     return collection_service, service
 
 
-def test_goal_sessions_route_creates_minimal_session_and_messages(goal_session_services):
+def test_goal_sessions_route_creates_minimal_session_and_messages(
+    goal_session_services,
+):
     collection_service, _service = goal_session_services
     collection = collection_service.create_collection("Copilot Collection")
 

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -16,7 +14,6 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
-from application.core.semantic_build.core_semantic_version import write_core_semantic_manifest
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import comparisons as comparisons_controller
@@ -26,34 +23,6 @@ from domain.core.comparison import (
     ComparisonRowRecord,
     build_comparison_row_id,
 )
-from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        payload = {
-            "columns": list(frame.columns),
-            "records": frame.to_dict(orient="records"),
-        }
-        Path(path).write_text(json.dumps(payload), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload["records"], columns=payload["columns"])
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _write_source_artifacts(
-    output_dir: Path,
-    documents: pd.DataFrame,
-    text_units: pd.DataFrame | None = None,
-) -> None:
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def _build_semantic_comparison_record(
@@ -155,21 +124,6 @@ def _build_semantic_comparison_record(
     return comparable_result, scoped_result, row_id
 
 
-def _write_semantic_comparison_artifacts(
-    output_dir: Path,
-    comparable_results: list[dict],
-    scoped_results: list[dict],
-) -> None:
-    pd.DataFrame(comparable_results).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(scoped_results).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
-
-
 def _store_core_comparison_artifacts(
     comparison_service: ComparisonService,
     collection_id: str,
@@ -239,29 +193,13 @@ def test_comparisons_route_returns_404_for_missing_collection(comparison_service
 
 def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
     comparison_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
     collection_service, artifact_registry, comparison_service = comparison_services
     record = collection_service.create_collection(name="Empty Comparisons Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
 
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "doc-1",
-                "title": "Review of Composite Fillers",
-                "text": "This review summarizes recent advances in composite filler systems.",
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, None)
-    _write_semantic_comparison_artifacts(output_dir, [], [])
     _store_core_comparison_artifacts(comparison_service, collection_id, [], [])
-    write_core_semantic_manifest(output_dir)
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
@@ -275,10 +213,7 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
 
 def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
     comparison_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
     collection_service, artifact_registry, comparison_service = comparison_services
     record = collection_service.create_collection(name="Existing Comparisons Collection")
     collection_id = record["collection_id"]
@@ -315,11 +250,6 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
         unit="mS/cm",
         sort_order=0,
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
-    )
     _store_core_comparison_artifacts(
         comparison_service,
         collection_id,
@@ -352,10 +282,7 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
 
 def test_comparisons_route_applies_canonical_graph_filters(
     comparison_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
     collection_service, artifact_registry, comparison_service = comparison_services
     record = collection_service.create_collection(name="Filtered Comparisons Collection")
     collection_id = record["collection_id"]
@@ -423,11 +350,6 @@ def test_comparisons_route_applies_canonical_graph_filters(
         unit=None,
         sort_order=1,
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result_1, comparable_result_2],
-        [scoped_result_1, scoped_result_2],
-    )
     _store_core_comparison_artifacts(
         comparison_service,
         collection_id,
@@ -453,10 +375,7 @@ def test_comparisons_route_applies_canonical_graph_filters(
 
 def test_comparison_route_returns_single_row(
     comparison_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
     collection_service, artifact_registry, comparison_service = comparison_services
     record = collection_service.create_collection(name="Single Comparison Collection")
     collection_id = record["collection_id"]
@@ -493,11 +412,6 @@ def test_comparison_route_returns_single_row(
         unit="mS/cm",
         sort_order=0,
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
-    )
     _store_core_comparison_artifacts(
         comparison_service,
         collection_id,
@@ -514,40 +428,3 @@ def test_comparison_route_returns_single_row(
     assert payload.result_id == "cres-1"
     assert payload.collection_id == collection_id
     assert payload.display.property_normalized == "conductivity"
-
-
-def test_comparisons_route_returns_409_when_only_row_cache_exists(
-    comparison_services,
-    monkeypatch,
-):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _comparison_service = comparison_services
-    record = collection_service.create_collection(name="Row Cache Only Collection")
-    collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    pd.DataFrame(
-        [
-            {
-                "row_id": "cmp-legacy-1",
-                "collection_id": collection_id,
-                "source_document_id": "paper-1",
-                "property_normalized": "conductivity",
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-            }
-        ]
-    ).to_parquet(output_dir / "comparison_rows.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(comparisons_controller.list_collection_comparisons(collection_id))
-
-    exc = exc_info.value
-    assert exc.status_code == 409
-    assert exc.detail["code"] == "comparison_rows_not_ready"

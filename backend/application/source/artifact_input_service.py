@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from config import DATA_DIR
 from domain.source import SourceArtifactSet
+from domain.ports import SourceArtifactRepository
 from infra.persistence.factory import build_source_artifact_repository
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -21,185 +19,86 @@ from infra.source.contracts.artifact_schemas import (
 )
 
 
-@dataclass(frozen=True)
-class CollectionArtifactPaths:
-    base_dir: Path
-    documents: Path
-    text_units: Path
-    blocks: Path
-    figures: Path
-    tables: Path
-    table_rows: Path
-    table_cells: Path
-    image_assets_dir: Path
-    procedure_blocks: Path
+def load_collection_inputs(
+    collection_id: str,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    documents = _records_to_frame(
+        (document.to_record() for document in artifacts.documents),
+        DOCUMENTS_FINAL_COLUMNS,
+    )
+    text_units = _records_to_frame(
+        (text_unit.to_record() for text_unit in artifacts.text_units),
+        TEXT_UNITS_FINAL_COLUMNS,
+    )
+    return documents, text_units if not text_units.empty else None
 
 
-def resolve_collection_artifact_paths(base_dir: str | Path) -> CollectionArtifactPaths:
-    base_path = Path(base_dir).expanduser().resolve()
-    return CollectionArtifactPaths(
-        base_dir=base_path,
-        documents=base_path / "documents.parquet",
-        text_units=base_path / "text_units.parquet",
-        blocks=base_path / "blocks.parquet",
-        figures=base_path / "figures.parquet",
-        tables=base_path / "tables.parquet",
-        table_rows=base_path / "table_rows.parquet",
-        table_cells=base_path / "table_cells.parquet",
-        image_assets_dir=base_path / "image_assets",
-        procedure_blocks=base_path / "procedure_blocks.parquet",
+def load_blocks_artifact(
+    collection_id: str,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+) -> pd.DataFrame:
+    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    return _records_to_frame(
+        (block.to_record() for block in artifacts.blocks),
+        BLOCKS_FINAL_COLUMNS,
     )
 
 
-def load_collection_inputs(base_dir: str | Path) -> tuple[pd.DataFrame, pd.DataFrame | None]:
-    artifacts = _load_source_artifacts_from_repository(base_dir)
-    if artifacts is not None:
-        documents = _records_to_frame(
-            (document.to_record() for document in artifacts.documents),
-            DOCUMENTS_FINAL_COLUMNS,
-        )
-        text_units = _records_to_frame(
-            (text_unit.to_record() for text_unit in artifacts.text_units),
-            TEXT_UNITS_FINAL_COLUMNS,
-        )
-        return documents, text_units if not text_units.empty else None
-
-    paths = resolve_collection_artifact_paths(base_dir)
-    documents = pd.read_parquet(paths.documents)
-    text_units: pd.DataFrame | None = None
-    if paths.text_units.is_file():
-        text_units = pd.read_parquet(paths.text_units)
-    return documents, text_units
+def load_table_rows_artifact(
+    collection_id: str,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+) -> pd.DataFrame:
+    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    return _records_to_frame(
+        (row.to_record() for row in artifacts.table_rows),
+        TABLE_ROWS_FINAL_COLUMNS,
+    )
 
 
-def load_blocks_artifact(base_dir: str | Path) -> pd.DataFrame:
-    artifacts = _load_source_artifacts_from_repository(base_dir)
-    if artifacts is not None:
-        return _records_to_frame(
-            (block.to_record() for block in artifacts.blocks),
-            BLOCKS_FINAL_COLUMNS,
-        )
-
-    paths = resolve_collection_artifact_paths(base_dir)
-    if not paths.blocks.is_file():
-        raise FileNotFoundError(paths.blocks)
-
-    blocks = pd.read_parquet(paths.blocks)
-    normalized = blocks.copy()
-    if "document_id" not in normalized.columns:
-        if "id" in normalized.columns:
-            normalized["document_id"] = normalized["id"]
-        else:
-            normalized["document_id"] = None
-    if "block_order" not in normalized.columns:
-        if normalized.empty:
-            normalized["block_order"] = pd.Series(dtype="int64")
-        else:
-            normalized["block_order"] = normalized.groupby("document_id").cumcount() + 1
-    return normalized
+def load_table_cells_artifact(
+    collection_id: str,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+) -> pd.DataFrame:
+    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    return _records_to_frame(
+        (cell.to_record() for cell in artifacts.table_cells),
+        TABLE_CELLS_FINAL_COLUMNS,
+    )
 
 
-def load_table_rows_artifact(base_dir: str | Path) -> pd.DataFrame:
-    artifacts = _load_source_artifacts_from_repository(base_dir)
-    if artifacts is not None:
-        return _records_to_frame(
-            (row.to_record() for row in artifacts.table_rows),
-            TABLE_ROWS_FINAL_COLUMNS,
-        )
-
-    paths = resolve_collection_artifact_paths(base_dir)
-    if not paths.table_rows.is_file():
-        raise FileNotFoundError(paths.table_rows)
-
-    table_rows = pd.read_parquet(paths.table_rows)
-    normalized = table_rows.copy()
-    if "document_id" not in normalized.columns:
-        if "id" in normalized.columns:
-            normalized["document_id"] = normalized["id"]
-        else:
-            normalized["document_id"] = None
-    return normalized
+def load_figures_artifact(
+    collection_id: str,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+) -> pd.DataFrame:
+    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    return _records_to_frame(
+        (figure.to_record() for figure in artifacts.figures),
+        FIGURES_FINAL_COLUMNS,
+    )
 
 
-def load_table_cells_artifact(base_dir: str | Path) -> pd.DataFrame:
-    artifacts = _load_source_artifacts_from_repository(base_dir)
-    if artifacts is not None:
-        return _records_to_frame(
-            (cell.to_record() for cell in artifacts.table_cells),
-            TABLE_CELLS_FINAL_COLUMNS,
-        )
-
-    paths = resolve_collection_artifact_paths(base_dir)
-    if not paths.table_cells.is_file():
-        raise FileNotFoundError(paths.table_cells)
-
-    table_cells = pd.read_parquet(paths.table_cells)
-    normalized = table_cells.copy()
-    if "document_id" not in normalized.columns:
-        if "id" in normalized.columns:
-            normalized["document_id"] = normalized["id"]
-        else:
-            normalized["document_id"] = None
-    return normalized
+def load_tables_artifact(
+    collection_id: str,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+) -> pd.DataFrame:
+    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    return _records_to_frame(
+        (table.to_record() for table in artifacts.tables),
+        TABLES_FINAL_COLUMNS,
+    )
 
 
-def load_figures_artifact(base_dir: str | Path) -> pd.DataFrame:
-    artifacts = _load_source_artifacts_from_repository(base_dir)
-    if artifacts is not None:
-        return _records_to_frame(
-            (figure.to_record() for figure in artifacts.figures),
-            FIGURES_FINAL_COLUMNS,
-        )
-
-    paths = resolve_collection_artifact_paths(base_dir)
-    if not paths.figures.is_file():
-        raise FileNotFoundError(paths.figures)
-
-    figures = pd.read_parquet(paths.figures)
-    normalized = figures.copy()
-    if "document_id" not in normalized.columns:
-        normalized["document_id"] = None
-    return normalized
-
-
-def load_tables_artifact(base_dir: str | Path) -> pd.DataFrame:
-    artifacts = _load_source_artifacts_from_repository(base_dir)
-    if artifacts is not None:
-        return _records_to_frame(
-            (table.to_record() for table in artifacts.tables),
-            TABLES_FINAL_COLUMNS,
-        )
-
-    paths = resolve_collection_artifact_paths(base_dir)
-    if not paths.tables.is_file():
-        raise FileNotFoundError(paths.tables)
-
-    tables = pd.read_parquet(paths.tables)
-    normalized = tables.copy()
-    if "document_id" not in normalized.columns:
-        normalized["document_id"] = None
-    return normalized
-
-
-def _load_source_artifacts_from_repository(
-    base_dir: str | Path,
-) -> SourceArtifactSet | None:
-    if not (DATA_DIR / "lens.sqlite").is_file():
-        return None
-    collection_id = _collection_id_from_base_dir(base_dir)
-    if collection_id is None:
-        return None
-    artifacts = build_source_artifact_repository().read_collection_artifacts(collection_id)
-    return artifacts if artifacts.documents else None
-
-
-def _collection_id_from_base_dir(base_dir: str | Path) -> str | None:
-    base_path = Path(base_dir).expanduser().resolve()
-    if base_path.name == "output":
-        collection_id = base_path.parent.name
-    else:
-        collection_id = base_path.name
-    return collection_id if collection_id.startswith("col_") else None
+def _load_source_artifacts(
+    collection_id: str,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+) -> SourceArtifactSet:
+    repository = source_artifact_repository or build_source_artifact_repository()
+    artifacts = repository.read_collection_artifacts(collection_id)
+    if not artifacts.documents:
+        raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
+    return artifacts
 
 
 def _records_to_frame(records: Any, columns: list[str]) -> pd.DataFrame:

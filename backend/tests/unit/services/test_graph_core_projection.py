@@ -383,14 +383,11 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
 
     collection = collection_service.create_collection("Core Projection Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     core_fact_repository.replace_collection_facts(
         collection_id,
         _core_graph_fact_set(collection_id),
     )
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
     payload = graph_service.get_collection_graph(
         collection_id=collection_id,
@@ -401,7 +398,6 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
     assert payload["collection_id"] == collection_id
     assert len(payload["nodes"]) == 7
     assert len(payload["edges"]) == 6
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
     graphml_bytes, filename = graph_service.build_graphml(
         collection_id=collection_id,
@@ -411,7 +407,6 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):

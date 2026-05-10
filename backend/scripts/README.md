@@ -51,9 +51,9 @@ python3 scripts/evaluation/expert_gold/evaluate_gold_vs_prediction.py \
 Use `export_extraction_trace.py` when you want to inspect the concrete Source
 and Core extraction artifacts for one built collection.
 
-The script is read-only against collection artifacts. It reads parquet files
-from a collection output directory and writes normalized JSON, CSV, and
-Markdown review files under `backend/data/traces/`.
+The script is read-only against collection artifacts. It reads Source/Core
+records from the repository and writes normalized JSON, CSV, and Markdown
+review files under `backend/data/traces/`.
 
 Example:
 
@@ -96,8 +96,8 @@ Important files:
 - `summary.json`
   Machine-readable artifact row counts and source paths.
 - `source_tables.md`
-  Human-readable Source table context from `tables.parquet`, with row anchors
-  from `table_rows.parquet`.
+  Human-readable Source table context from `tables`, with row anchors from
+  `table_rows`.
 - `extraction_trace.md`
   Human-readable Core extraction facts, evidence cards, measurement results,
   and evidence anchors.
@@ -116,10 +116,10 @@ The script exports whatever artifacts exist. It does not rebuild a collection.
 
 If a collection was built before a newer Source/Core artifact existed, the
 trace will show missing sections. For example, a collection built before
-`tables.parquet` existed will show:
+`tables` existed will show:
 
 ```text
-No `tables.parquet` rows found.
+No `tables` rows found.
 ```
 
 Rebuild the collection first when you need to inspect newly added artifact

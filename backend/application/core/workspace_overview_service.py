@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from domain.shared.enums import (
     DOC_TYPE_MIXED,
     DOC_TYPE_REVIEW,
@@ -91,21 +89,12 @@ class WorkspaceService:
             "updated_at": self.collection_service.get_collection(collection_id)["updated_at"],
         }
 
-    def _artifact_path_exists(self, artifacts: dict, filename: str) -> bool:
-        output_path = artifacts.get("output_path")
-        if not output_path:
-            return False
-        return (Path(str(output_path)).expanduser().resolve() / filename).exists()
-
     def _artifact_generated(
         self,
         artifacts: dict,
         generated_key: str,
-        filename: str,
     ) -> bool:
-        if generated_key in artifacts:
-            return bool(artifacts.get(generated_key))
-        return self._artifact_path_exists(artifacts, filename)
+        return bool(artifacts.get(generated_key))
 
     def _artifact_ready(
         self,
@@ -125,11 +114,9 @@ class WorkspaceService:
         return self._artifact_generated(
             artifacts,
             "comparable_results_generated",
-            "comparable_results.parquet",
         ) and self._artifact_generated(
             artifacts,
             "collection_comparable_results_generated",
-            "collection_comparable_results.parquet",
         )
 
     def _comparisons_ready(self, artifacts: dict) -> bool:
@@ -152,17 +139,14 @@ class WorkspaceService:
         protocol_generated = self._artifact_generated(
             artifacts,
             "protocol_steps_generated",
-            "protocol_steps.parquet",
         )
         comparisons_generated = self._comparisons_generated(artifacts)
         paper_facts_generated = self._artifact_generated(
             artifacts,
             "sample_variants_generated",
-            "sample_variants.parquet",
         ) or self._artifact_generated(
             artifacts,
             "measurement_results_generated",
-            "measurement_results.parquet",
         )
         return {
             "can_view_graph": graph_ready,
@@ -185,7 +169,6 @@ class WorkspaceService:
         document_profiles_generated = self._artifact_generated(
             artifacts,
             "document_profiles_generated",
-            "document_profiles.parquet",
         )
         comparisons_ready = self._comparisons_ready(artifacts)
         if latest_task:
@@ -231,23 +214,19 @@ class WorkspaceService:
         documents_generated = self._artifact_generated(
             artifacts,
             "document_profiles_generated",
-            "document_profiles.parquet",
         )
         evidence_generated = self._artifact_generated(
             artifacts,
             "evidence_cards_generated",
-            "evidence_cards.parquet",
         )
         comparisons_generated = self._comparisons_generated(artifacts)
         graph_generated = self._artifact_generated(
             artifacts,
             "graph_generated",
-            "comparison_rows.parquet",
         )
         protocol_generated = self._artifact_generated(
             artifacts,
             "protocol_steps_generated",
-            "protocol_steps.parquet",
         )
         documents_ready = self._artifact_ready(
             artifacts,
@@ -513,7 +492,6 @@ class WorkspaceService:
         if self._artifact_generated(
             artifacts,
             "protocol_steps_generated",
-            "protocol_steps.parquet",
         ):
             payload["protocol"] = f"/api/v1/collections/{collection_id}/protocol/steps"
             payload["protocol_steps"] = f"/api/v1/collections/{collection_id}/protocol/steps"

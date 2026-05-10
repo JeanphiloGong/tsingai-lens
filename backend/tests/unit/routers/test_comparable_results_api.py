@@ -156,8 +156,6 @@ def test_comparable_results_route_returns_200_without_row_cache(
     collection_service, _artifact_registry, comparison_service = comparable_result_services
     collection = collection_service.create_collection(name="Comparable Results Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     comparable_result, scoped_result = _build_semantic_comparison_record(
         collection_id=collection_id,
@@ -181,7 +179,6 @@ def test_comparable_results_route_returns_200_without_row_cache(
     assert payload.items[0].comparable_result_id == "cres-route-1"
     assert payload.items[0].observed_collection_ids == [collection_id]
     assert payload.items[0].collection_overlays[0].collection_id == collection_id
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_comparable_result_detail_route_returns_404_when_missing(

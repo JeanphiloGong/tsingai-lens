@@ -13,11 +13,6 @@ from uuid import uuid4
 
 import pandas as pd
 
-from .core_semantic_version import (
-    core_semantic_rebuild_required,
-    purge_stale_core_semantic_artifacts,
-    write_core_semantic_manifest,
-)
 from .document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
@@ -65,7 +60,7 @@ from domain.core.evidence_backbone import (
 )
 from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
-from domain.ports import CoreFactRepository
+from domain.ports import CoreFactRepository, SourceArtifactRepository
 from domain.shared.enums import (
     DOC_TYPE_REVIEW,
     EPISTEMIC_DIRECTLY_OBSERVED,
@@ -74,69 +69,11 @@ from domain.shared.enums import (
     TRACEABILITY_STATUS_DIRECT,
     TRACEABILITY_STATUS_MISSING,
 )
-from infra.persistence.backbone_codec import (
-    normalize_backbone_value,
-    prepare_frame_for_storage,
-    restore_frame_from_storage,
-)
-from infra.persistence.factory import build_core_fact_repository
+from infra.persistence.backbone_codec import normalize_backbone_value
+from infra.persistence.factory import build_core_fact_repository, build_source_artifact_repository
 logger = logging.getLogger(__name__)
 
 
-_EVIDENCE_ANCHORS_FILE = "evidence_anchors.parquet"
-_EVIDENCE_ANCHOR_JSON_COLUMNS = ("char_range", "bbox")
-_METHOD_FACTS_FILE = "method_facts.parquet"
-_METHOD_FACTS_JSON_COLUMNS = (
-    "method_payload",
-    "evidence_anchor_ids",
-)
-_EVIDENCE_CARDS_FILE = "evidence_cards.parquet"
-_EVIDENCE_JSON_COLUMNS = (
-    "evidence_anchors",
-    "material_system",
-    "condition_context",
-)
-_CHARACTERIZATION_OBSERVATIONS_FILE = "characterization_observations.parquet"
-_CHARACTERIZATION_JSON_COLUMNS = (
-    "condition_context",
-    "evidence_anchor_ids",
-)
-_STRUCTURE_FEATURES_FILE = "structure_features.parquet"
-_STRUCTURE_FEATURES_JSON_COLUMNS = ("source_observation_ids",)
-_TEST_CONDITIONS_FILE = "test_conditions.parquet"
-_TEST_CONDITIONS_JSON_COLUMNS = (
-    "condition_payload",
-    "missing_fields",
-    "evidence_anchor_ids",
-)
-_BASELINE_REFERENCES_FILE = "baseline_references.parquet"
-_BASELINE_REFERENCES_JSON_COLUMNS = ("evidence_anchor_ids",)
-_SAMPLE_VARIANTS_FILE = "sample_variants.parquet"
-_SAMPLE_VARIANTS_JSON_COLUMNS = (
-    "host_material_system",
-    "variable_value",
-    "process_context",
-    "profile_payload",
-    "structure_feature_ids",
-    "source_anchor_ids",
-)
-_MEASUREMENT_RESULTS_FILE = "measurement_results.parquet"
-_MEASUREMENT_RESULTS_JSON_COLUMNS = (
-    "value_payload",
-    "structure_feature_ids",
-    "characterization_observation_ids",
-    "evidence_anchor_ids",
-)
-_PAPER_FACT_FRAME_FILES = (
-    _EVIDENCE_ANCHORS_FILE,
-    _METHOD_FACTS_FILE,
-    _TEST_CONDITIONS_FILE,
-    _BASELINE_REFERENCES_FILE,
-    _SAMPLE_VARIANTS_FILE,
-    _MEASUREMENT_RESULTS_FILE,
-    _CHARACTERIZATION_OBSERVATIONS_FILE,
-    _STRUCTURE_FEATURES_FILE,
-)
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _MAX_SUPPORTING_TEXT_WINDOWS = 3
 _MAX_TABLE_ROW_SUPPORTING_TEXT_CHARS = 1200
@@ -469,6 +406,7 @@ class PaperFactsService:
         document_profile_service: DocumentProfileService | None = None,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.artifact_registry_service = (
@@ -477,11 +415,20 @@ class PaperFactsService:
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
             artifact_registry_service=self.artifact_registry_service,
+            core_fact_repository=core_fact_repository,
+            source_artifact_repository=source_artifact_repository,
         )
         self._structured_extractor = structured_extractor
         self.core_fact_repository = (
             core_fact_repository
             or build_core_fact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
+        )
+        self.source_artifact_repository = (
+            source_artifact_repository
+            or getattr(self.document_profile_service, "source_artifact_repository", None)
+            or build_source_artifact_repository(
                 self.collection_service.root_dir.parent / "lens.sqlite"
             )
         )
@@ -566,8 +513,10 @@ class PaperFactsService:
             collection_id,
             document_id,
         )
-        output_dir = self._resolve_output_dir(collection_id)
-        _, text_units = load_collection_inputs(output_dir)
+        _, text_units = load_collection_inputs(
+            collection_id,
+            self.source_artifact_repository,
+        )
         text_unit_lookup = self._build_text_unit_lookup(text_units, document_id)
 
         anchors = self._normalize_evidence_anchors_payload(
@@ -594,19 +543,20 @@ class PaperFactsService:
         }
 
     def read_evidence_cards(self, collection_id: str) -> pd.DataFrame:
-        output_dir = self._resolve_output_dir(collection_id)
-        path = output_dir / _EVIDENCE_CARDS_FILE
-        if not path.is_file() or core_semantic_rebuild_required(output_dir):
-            raise PaperFactsNotReadyError(collection_id, output_dir)
-        cards = restore_frame_from_storage(
-            pd.read_parquet(path),
-            _EVIDENCE_JSON_COLUMNS,
+        frames = self.read_paper_fact_frames(collection_id)
+        cards = self._derive_evidence_cards_table(
+            collection_id=collection_id,
+            evidence_anchors=frames["evidence_anchors"],
+            method_facts=frames["method_facts"],
+            sample_variants=frames["sample_variants"],
+            test_conditions=frames["test_conditions"],
+            baseline_references=frames["baseline_references"],
+            measurement_results=frames["measurement_results"],
         )
         return self._normalize_cards_table(cards, collection_id)
 
     def read_paper_fact_frames(self, collection_id: str) -> dict[str, pd.DataFrame]:
-        output_dir = self._resolve_output_dir(collection_id)
-        return self._load_paper_fact_frames(collection_id, output_dir)
+        return self._load_paper_fact_frames(collection_id)
 
     def build_paper_facts(
         self,
@@ -618,22 +568,32 @@ class PaperFactsService:
             if output_dir is not None
             else self._resolve_output_dir(collection_id)
         )
-        purge_stale_core_semantic_artifacts(base_dir)
-        documents_path = base_dir / "documents.parquet"
-        if not documents_path.is_file():
-            raise PaperFactsNotReadyError(collection_id, base_dir)
-
         try:
             profiles = self.document_profile_service.read_document_profiles(collection_id)
         except DocumentProfilesNotReadyError as exc:
             raise PaperFactsNotReadyError(collection_id, exc.output_dir) from exc
 
-        documents, text_units = load_collection_inputs(base_dir)
         try:
-            blocks = load_blocks_artifact(base_dir)
-            tables = load_tables_artifact(base_dir)
-            table_rows = load_table_rows_artifact(base_dir)
-            table_cells = load_table_cells_artifact(base_dir)
+            documents, text_units = load_collection_inputs(
+                collection_id,
+                self.source_artifact_repository,
+            )
+            blocks = load_blocks_artifact(
+                collection_id,
+                self.source_artifact_repository,
+            )
+            tables = load_tables_artifact(
+                collection_id,
+                self.source_artifact_repository,
+            )
+            table_rows = load_table_rows_artifact(
+                collection_id,
+                self.source_artifact_repository,
+            )
+            table_cells = load_table_cells_artifact(
+                collection_id,
+                self.source_artifact_repository,
+            )
         except FileNotFoundError as exc:
             raise PaperFactsNotReadyError(collection_id, base_dir) from exc
 
@@ -1138,41 +1098,6 @@ class PaperFactsService:
             ),
         )
 
-        base_dir.mkdir(parents=True, exist_ok=True)
-        prepare_frame_for_storage(
-            evidence_anchors,
-            _EVIDENCE_ANCHOR_JSON_COLUMNS,
-        ).to_parquet(base_dir / _EVIDENCE_ANCHORS_FILE, index=False)
-        prepare_frame_for_storage(
-            method_facts,
-            _METHOD_FACTS_JSON_COLUMNS,
-        ).to_parquet(base_dir / _METHOD_FACTS_FILE, index=False)
-        prepare_frame_for_storage(
-            characterization,
-            _CHARACTERIZATION_JSON_COLUMNS,
-        ).to_parquet(base_dir / _CHARACTERIZATION_OBSERVATIONS_FILE, index=False)
-        prepare_frame_for_storage(
-            structure_features,
-            _STRUCTURE_FEATURES_JSON_COLUMNS,
-        ).to_parquet(base_dir / _STRUCTURE_FEATURES_FILE, index=False)
-        prepare_frame_for_storage(
-            test_conditions,
-            _TEST_CONDITIONS_JSON_COLUMNS,
-        ).to_parquet(base_dir / _TEST_CONDITIONS_FILE, index=False)
-        prepare_frame_for_storage(
-            baseline_references,
-            _BASELINE_REFERENCES_JSON_COLUMNS,
-        ).to_parquet(base_dir / _BASELINE_REFERENCES_FILE, index=False)
-        prepare_frame_for_storage(
-            sample_variants,
-            _SAMPLE_VARIANTS_JSON_COLUMNS,
-        ).to_parquet(base_dir / _SAMPLE_VARIANTS_FILE, index=False)
-        prepare_frame_for_storage(
-            measurement_results,
-            _MEASUREMENT_RESULTS_JSON_COLUMNS,
-        ).to_parquet(base_dir / _MEASUREMENT_RESULTS_FILE, index=False)
-
-        write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
             "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s",
@@ -1207,11 +1132,10 @@ class PaperFactsService:
             if output_dir is not None
             else self._resolve_output_dir(collection_id)
         )
-        if core_semantic_rebuild_required(base_dir) or any(
-            not (base_dir / name).is_file() for name in _PAPER_FACT_FRAME_FILES
-        ):
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if not self._paper_fact_frames_available(facts):
             self.build_paper_facts(collection_id, base_dir)
-        frames = self._load_paper_fact_frames(collection_id, base_dir)
+        frames = self._load_paper_fact_frames(collection_id)
         cards_table = self._derive_evidence_cards_table(
             collection_id=collection_id,
             evidence_anchors=frames["evidence_anchors"],
@@ -1221,12 +1145,6 @@ class PaperFactsService:
             baseline_references=frames["baseline_references"],
             measurement_results=frames["measurement_results"],
         )
-        base_dir.mkdir(parents=True, exist_ok=True)
-        prepare_frame_for_storage(
-            cards_table,
-            _EVIDENCE_JSON_COLUMNS,
-        ).to_parquet(base_dir / _EVIDENCE_CARDS_FILE, index=False)
-        write_core_semantic_manifest(base_dir)
         self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
             "Evidence view derivation finished collection_id=%s evidence_cards=%s",
@@ -1238,48 +1156,63 @@ class PaperFactsService:
     def _load_paper_fact_frames(
         self,
         collection_id: str,
-        base_dir: Path,
     ) -> dict[str, pd.DataFrame]:
-        missing = [
-            name for name in _PAPER_FACT_FRAME_FILES if not (base_dir / name).is_file()
-        ]
-        if core_semantic_rebuild_required(base_dir) or missing:
-            raise PaperFactsNotReadyError(collection_id, base_dir)
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if not self._paper_fact_frames_available(facts):
+            raise PaperFactsNotReadyError(collection_id, self._resolve_output_dir(collection_id))
 
         return {
-            "evidence_anchors": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _EVIDENCE_ANCHORS_FILE),
-                _EVIDENCE_ANCHOR_JSON_COLUMNS,
+            "evidence_anchors": self._records_to_frame(
+                facts.evidence_anchors,
+                _EVIDENCE_ANCHOR_COLUMNS,
             ),
-            "method_facts": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _METHOD_FACTS_FILE),
-                _METHOD_FACTS_JSON_COLUMNS,
+            "method_facts": self._records_to_frame(
+                facts.method_facts,
+                _METHOD_FACT_COLUMNS,
             ),
-            "sample_variants": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _SAMPLE_VARIANTS_FILE),
-                _SAMPLE_VARIANTS_JSON_COLUMNS,
+            "sample_variants": self._records_to_frame(
+                facts.sample_variants,
+                _SAMPLE_VARIANT_COLUMNS,
             ),
-            "test_conditions": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _TEST_CONDITIONS_FILE),
-                _TEST_CONDITIONS_JSON_COLUMNS,
+            "test_conditions": self._records_to_frame(
+                facts.test_conditions,
+                _TEST_CONDITION_COLUMNS,
             ),
-            "baseline_references": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _BASELINE_REFERENCES_FILE),
-                _BASELINE_REFERENCES_JSON_COLUMNS,
+            "baseline_references": self._records_to_frame(
+                facts.baseline_references,
+                _BASELINE_REFERENCE_COLUMNS,
             ),
-            "measurement_results": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _MEASUREMENT_RESULTS_FILE),
-                _MEASUREMENT_RESULTS_JSON_COLUMNS,
+            "measurement_results": self._records_to_frame(
+                facts.measurement_results,
+                _MEASUREMENT_RESULT_COLUMNS,
             ),
-            "characterization_observations": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _CHARACTERIZATION_OBSERVATIONS_FILE),
-                _CHARACTERIZATION_JSON_COLUMNS,
+            "characterization_observations": self._records_to_frame(
+                facts.characterization_observations,
+                _CHARACTERIZATION_COLUMNS,
             ),
-            "structure_features": restore_frame_from_storage(
-                pd.read_parquet(base_dir / _STRUCTURE_FEATURES_FILE),
-                _STRUCTURE_FEATURES_JSON_COLUMNS,
+            "structure_features": self._records_to_frame(
+                facts.structure_features,
+                _STRUCTURE_FEATURE_COLUMNS,
             ),
         }
+
+    def _paper_fact_frames_available(self, facts: CoreFactSet) -> bool:
+        return bool(
+            facts.paper_facts_ready
+            or facts.evidence_anchors
+            or facts.method_facts
+            or facts.sample_variants
+            or facts.test_conditions
+            or facts.baseline_references
+            or facts.measurement_results
+            or facts.characterization_observations
+            or facts.structure_features
+        )
+
+    def _records_to_frame(self, records: tuple[Any, ...], columns: list[str]) -> pd.DataFrame:
+        if not records:
+            return pd.DataFrame(columns=columns)
+        return pd.DataFrame([record.to_record() for record in records], columns=columns)
 
     def _build_core_fact_set(
         self,

@@ -30,7 +30,7 @@ Core semantic fact state.
   SQLite-backed Goal conversation session persistence, Source artifact
   persistence, and Core semantic fact persistence. Core fact storage includes
   collection-level readiness metadata so empty-but-completed fact families do
-  not require parquet artifact probes. The application layer depends on
+  not require file artifact probes. The application layer depends on
   repository ports and does not import SQLite table names, SQL, or connection
   details.
 - `mysql/`

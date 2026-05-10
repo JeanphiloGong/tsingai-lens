@@ -406,6 +406,23 @@ class SqliteCoreFactRepository:
         self.db_path = Path(db_path or (DATA_DIR / "lens.sqlite")).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
+    def replace_collection_document_profiles(
+        self,
+        collection_id: str,
+        document_profiles: tuple[DocumentProfile, ...],
+    ) -> None:
+        self._ensure_schema()
+        spec = _PAPER_FACT_TABLES[0]
+        with self._connection() as connection:
+            self._delete_collection(connection, spec, collection_id)
+            self._insert_records(
+                connection,
+                spec,
+                collection_id,
+                document_profiles,
+            )
+            self._upsert_status(connection, collection_id)
+
     def replace_collection_facts(
         self,
         collection_id: str,
@@ -575,7 +592,7 @@ class SqliteCoreFactRepository:
             }
         return {
             "paper_facts_ready": any(
-                records_by_attr[spec.attr_name] for spec in _PAPER_FACT_TABLES
+                records_by_attr[spec.attr_name] for spec in _PAPER_FACT_TABLES[1:]
             ),
             "comparison_artifacts_ready": any(
                 records_by_attr[spec.attr_name] for spec in _COMPARISON_TABLES

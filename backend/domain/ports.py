@@ -153,6 +153,12 @@ class SourceArtifactRepository(Protocol):
 class CoreFactRepository(Protocol):
     backend_name: str
 
+    def replace_collection_document_profiles(
+        self,
+        collection_id: str,
+        document_profiles: tuple[DocumentProfile, ...],
+    ) -> None: ...
+
     def replace_collection_facts(
         self,
         collection_id: str,

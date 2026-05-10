@@ -223,8 +223,6 @@ def test_results_route_returns_product_projection_without_row_cache(result_servi
     collection_service, _artifact_registry, comparison_service = result_services
     collection = collection_service.create_collection(name="Results Projection Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     document_profile = {
         "document_id": "paper-1",
@@ -276,7 +274,6 @@ def test_results_route_returns_product_projection_without_row_cache(result_servi
     assert item.traceability_status == "direct"
     assert item.comparability_status == "comparable"
     assert item.requires_expert_review is False
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_result_detail_route_returns_document_assessment_evidence_and_actions(

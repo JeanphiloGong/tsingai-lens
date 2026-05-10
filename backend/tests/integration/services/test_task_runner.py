@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,19 +28,6 @@ class DummyWorkflowOutput:
         self.errors = errors
 
 
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
 def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     return SimpleNamespace(
         output=SimpleNamespace(base_dir=str(output_dir)),
@@ -57,6 +43,9 @@ def _write_source_artifact_outputs(
     source_repository=None,  # noqa: ANN001
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    collection_id = collection_id or output_dir.parent.name
+    if source_repository is None:
+        source_repository = SqliteSourceArtifactRepository(output_dir.parents[2] / "lens.sqlite")
     documents = pd.DataFrame(
         [
             {
@@ -95,10 +84,6 @@ def _write_source_artifact_outputs(
         ]
     )
     blocks = build_blocks(documents, text_units)
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    blocks.to_parquet(output_dir / "blocks.parquet", index=False)
-    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
     tables = pd.DataFrame(
         [
             {
@@ -121,25 +106,29 @@ def _write_source_artifact_outputs(
     )
     table_rows = build_table_rows(documents, text_units)
     table_cells = build_table_cells(documents, text_units)
-    tables.to_parquet(output_dir / "tables.parquet", index=False)
-    table_rows.to_parquet(output_dir / "table_rows.parquet", index=False)
-    table_cells.to_parquet(output_dir / "table_cells.parquet", index=False)
-    if collection_id and source_repository:
-        source_repository.replace_collection_artifacts(
-            collection_id,
-            SourceArtifactSet.from_records(
-                documents=documents.to_dict(orient="records"),
-                text_units=text_units.to_dict(orient="records"),
-                blocks=blocks.to_dict(orient="records"),
-                tables=tables.to_dict(orient="records"),
-                table_rows=table_rows.to_dict(orient="records"),
-                table_cells=table_cells.to_dict(orient="records"),
-            ),
-        )
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=documents.to_dict(orient="records"),
+            text_units=text_units.to_dict(orient="records"),
+            blocks=blocks.to_dict(orient="records"),
+            tables=tables.to_dict(orient="records"),
+            table_rows=table_rows.to_dict(orient="records"),
+            table_cells=table_cells.to_dict(orient="records"),
+        ),
+    )
 
 
-def _write_review_only_outputs(output_dir: Path) -> None:
+def _write_review_only_outputs(
+    output_dir: Path,
+    *,
+    collection_id: str | None = None,
+    source_repository=None,  # noqa: ANN001
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    collection_id = collection_id or output_dir.parent.name
+    if source_repository is None:
+        source_repository = SqliteSourceArtifactRepository(output_dir.parents[2] / "lens.sqlite")
     documents = pd.DataFrame(
         [
             {
@@ -158,35 +147,22 @@ def _write_review_only_outputs(output_dir: Path) -> None:
             }
         ]
     )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
-    pd.DataFrame(
-        columns=[
-            "table_id",
-            "document_id",
-            "table_order",
-            "caption_text",
-            "caption_block_id",
-            "page",
-            "bbox",
-            "heading_path",
-            "row_count",
-            "col_count",
-            "column_headers",
-            "table_markdown",
-            "table_text",
-            "metadata",
-        ]
-    ).to_parquet(output_dir / "tables.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
+    blocks = build_blocks(documents, text_units)
+    table_rows = build_table_rows(documents, text_units)
+    table_cells = build_table_cells(documents, text_units)
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=documents.to_dict(orient="records"),
+            text_units=text_units.to_dict(orient="records"),
+            blocks=blocks.to_dict(orient="records"),
+            table_rows=table_rows.to_dict(orient="records"),
+            table_cells=table_cells.to_dict(orient="records"),
+        ),
+    )
 
 
 def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
     import application.source.collection_build_task_runner as task_runner_module
     import application.derived.protocol.pipeline_service as protocol_pipeline_service
 
@@ -212,10 +188,8 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
-        collection_id = kwargs.get("additional_context", {}).get("collection_id")
         _write_source_artifact_outputs(
             paths.output_dir,
-            collection_id=collection_id,
             source_repository=source_artifact_repository,
         )
         return [DummyWorkflowOutput()]
@@ -280,20 +254,10 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["procedure_blocks_ready"] is True
     assert artifacts["protocol_steps_generated"] is True
     assert artifacts["protocol_steps_ready"] is True
-    assert paths.output_dir.joinpath("document_profiles.parquet").exists()
-    assert paths.output_dir.joinpath("evidence_cards.parquet").exists()
-    assert paths.output_dir.joinpath("comparable_results.parquet").exists()
-    assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()
-    assert paths.output_dir.joinpath("comparison_rows.parquet").exists()
-    assert paths.output_dir.joinpath("entities.parquet").exists() is False
-    assert paths.output_dir.joinpath("relationships.parquet").exists() is False
-
 
 def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
     monkeypatch, tmp_path
 ):
-    _patch_parquet(monkeypatch)
-
     import application.source.collection_build_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
@@ -367,14 +331,8 @@ def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
     assert artifacts["comparison_rows_ready"] is False
     assert artifacts["protocol_steps_generated"] is False
     assert artifacts["protocol_steps_ready"] is False
-    assert paths.output_dir.joinpath("document_profiles.parquet").exists()
-    assert paths.output_dir.joinpath("comparable_results.parquet").exists()
-    assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()
-
 
 def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
-    _patch_parquet(monkeypatch)
-
     import application.source.collection_build_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")

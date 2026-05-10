@@ -97,19 +97,11 @@ def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
 
     collection = collection_service.create_collection("Core Report Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     core_fact_repository.replace_collection_facts(
         collection_id,
         _core_report_fact_set(collection_id),
     )
-
-    assert not (output_dir / "entities.parquet").exists()
-    assert not (output_dir / "relationships.parquet").exists()
-    assert not (output_dir / "communities.parquet").exists()
-    assert not (output_dir / "community_reports.parquet").exists()
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
     listing = report_service.list_community_reports(
         collection_id=collection_id,
@@ -158,4 +150,3 @@ def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
     assert patterns.total_relationships == 2
     assert patterns.total_documents == 1
     assert patterns.items[0].community_id == 1
-    assert not (output_dir / "comparison_rows.parquet").exists()

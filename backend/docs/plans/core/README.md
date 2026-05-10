@@ -38,6 +38,9 @@ domain-semantic backfill.
   Core traceback vertical slice for reviewable evidence grounding
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
   Backfill stable Core research semantics into `backend/domain/`
+- [`core-api-pandas-retirement-plan.md`](core-api-pandas-retirement-plan.md)
+  Remove pandas from Core/API runtime paths while leaving Source parser
+  internals as the temporary allowed pandas boundary
 
 ## Comparable-Result Family
 

@@ -30,6 +30,3 @@ def _patch_core_llm_extractor(monkeypatch):
         "build_default_core_llm_structured_extractor",
         lambda: fake,
     )
-    monkeypatch.setattr(document_profile_service, "core_semantic_rebuild_required", lambda _base_dir: False)
-    monkeypatch.setattr(paper_facts_service, "core_semantic_rebuild_required", lambda _base_dir: False)
-    monkeypatch.setattr(comparison_service, "core_semantic_rebuild_required", lambda _base_dir: False)

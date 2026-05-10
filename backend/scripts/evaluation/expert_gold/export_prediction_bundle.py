@@ -6,6 +6,7 @@ import ast
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 import pandas as pd
@@ -13,6 +14,13 @@ import pandas as pd
 
 SCHEMA_VERSION = "prediction-bundle-v0.1"
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
+if str(DEFAULT_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
+
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
+)
 DEFAULT_OUTPUT_PATH = (
     DEFAULT_BACKEND_ROOT
     / "tests"
@@ -62,12 +70,12 @@ def parse_args() -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--collection-id",
-        help="Collection id under <backend-root>/data/collections/<collection-id>/output.",
+        help="Collection id under <backend-root>/data/collections/<collection-id>.",
     )
     source.add_argument(
         "--output-dir",
         type=Path,
-        help="Direct collection output directory containing parquet artifacts.",
+        help="Direct collection output directory; collection id is inferred from its parent.",
     )
     parser.add_argument(
         "--backend-root",
@@ -111,12 +119,14 @@ def export_prediction_bundle(
         collection_id=collection_id,
         source_output_dir=source_output_dir,
     )
-    if not output_dir.is_dir():
-        raise SystemExit(f"collection output directory not found: {output_dir}")
+    resolved_collection_id = collection_id or output_dir.parent.name
 
-    records_by_artifact, missing_artifacts = _load_artifacts(output_dir)
+    records_by_artifact, missing_artifacts = _load_artifacts(
+        backend_root=root,
+        collection_id=resolved_collection_id,
+    )
     bundle = build_prediction_bundle(
-        collection_id=collection_id,
+        collection_id=resolved_collection_id,
         source_output_dir=output_dir,
         records_by_artifact=records_by_artifact,
         missing_artifacts=missing_artifacts,
@@ -215,16 +225,56 @@ def _resolve_source_output_dir(
     return backend_root / "data" / "collections" / collection_id / "output"
 
 
-def _load_artifacts(output_dir: Path) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
-    records_by_artifact: dict[str, list[dict[str, Any]]] = {}
-    missing_artifacts: list[str] = []
-    for name in ARTIFACT_NAMES:
-        path = output_dir / f"{name}.parquet"
-        if not path.is_file():
-            records_by_artifact[name] = []
-            missing_artifacts.append(path.name)
-            continue
-        records_by_artifact[name] = _frame_records(pd.read_parquet(path))
+def _load_artifacts(
+    *,
+    backend_root: Path,
+    collection_id: str,
+) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    db_path = backend_root / "data" / "lens.sqlite"
+    source_artifacts = SqliteSourceArtifactRepository(
+        db_path
+    ).read_collection_artifacts(collection_id)
+    core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
+    records_by_artifact: dict[str, list[dict[str, Any]]] = {
+        "documents": [record.to_record() for record in source_artifacts.documents],
+        "document_profiles": [
+            record.to_record() for record in core_facts.document_profiles
+        ],
+        "evidence_anchors": [
+            record.to_record() for record in core_facts.evidence_anchors
+        ],
+        "method_facts": [record.to_record() for record in core_facts.method_facts],
+        "sample_variants": [
+            record.to_record() for record in core_facts.sample_variants
+        ],
+        "test_conditions": [
+            record.to_record() for record in core_facts.test_conditions
+        ],
+        "baseline_references": [
+            record.to_record() for record in core_facts.baseline_references
+        ],
+        "measurement_results": [
+            record.to_record() for record in core_facts.measurement_results
+        ],
+        "characterization_observations": [
+            record.to_record() for record in core_facts.characterization_observations
+        ],
+        "structure_features": [
+            record.to_record() for record in core_facts.structure_features
+        ],
+        "comparable_results": [
+            record.to_record() for record in core_facts.comparable_results
+        ],
+        "collection_comparable_results": [
+            record.to_record() for record in core_facts.collection_comparable_results
+        ],
+        "comparison_rows": [
+            record.to_record() for record in core_facts.comparison_rows
+        ],
+    }
+    missing_artifacts = [
+        name for name in ARTIFACT_NAMES if not records_by_artifact.get(name)
+    ]
     return records_by_artifact, missing_artifacts
 
 
@@ -598,18 +648,6 @@ def _raw_records(rows: list[dict[str, Any]], artifact: str) -> list[dict[str, An
     ]
 
 
-def _frame_records(frame: pd.DataFrame | None) -> list[dict[str, Any]]:
-    if frame is None or frame.empty:
-        return []
-    normalized = frame.copy()
-    for column in normalized.columns:
-        normalized[column] = normalized[column].map(_normalize_value)
-    return [
-        {str(key): _json_safe(value) for key, value in row.items()}
-        for row in normalized.to_dict(orient="records")
-    ]
-
-
 def _normalize_value(value: Any) -> Any:
     if value is None:
         return None
@@ -665,7 +703,7 @@ def _rows_with_numbers(rows: list[dict[str, Any]]):
 
 def _source(artifact: str, row_number: int | None) -> dict[str, Any]:
     return {
-        "artifact": f"{artifact}.parquet",
+        "artifact": artifact,
         "row": row_number,
     }
 

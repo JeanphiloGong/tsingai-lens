@@ -28,6 +28,7 @@ from infra.source.contracts.artifact_schemas import (
     TEXT_UNITS_FINAL_COLUMNS,
 )
 from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,11 +48,6 @@ def parse_args() -> argparse.Namespace:
         "--collection-dir",
         type=Path,
         help="Direct collection directory containing input/ and output/.",
-    )
-    source.add_argument(
-        "--artifact-dir",
-        type=Path,
-        help="Direct artifact output directory containing tables.parquet.",
     )
     parser.add_argument(
         "--backend-root",
@@ -89,16 +85,9 @@ def main() -> None:
         backend_root=backend_root,
         collection_id=args.collection_id,
         collection_dir=args.collection_dir,
-        artifact_dir=args.artifact_dir,
     )
-    artifact_dir = (
-        args.artifact_dir.expanduser().resolve()
-        if args.artifact_dir is not None
-        else collection_dir / "output"
-    )
+    artifact_dir = collection_dir / "output"
     if args.reparse_inputs:
-        if args.artifact_dir is not None:
-            raise SystemExit("--reparse-inputs requires --collection-id or --collection-dir")
         frames = _reparse_collection_inputs(
             backend_root=backend_root,
             collection_dir=collection_dir,
@@ -107,7 +96,10 @@ def main() -> None:
         )
         source_mode = "reparse_inputs"
     else:
-        frames = _load_existing_artifacts(artifact_dir)
+        frames = _load_existing_artifacts(
+            backend_root=backend_root,
+            collection_dir=collection_dir,
+        )
         source_mode = "existing_artifacts"
 
     destination = args.destination.expanduser().resolve()
@@ -127,33 +119,37 @@ def _resolve_collection_dir(
     backend_root: Path,
     collection_id: str | None,
     collection_dir: Path | None,
-    artifact_dir: Path | None,
 ) -> Path:
     if collection_dir is not None:
         return collection_dir.expanduser().resolve()
     if collection_id:
         return backend_root / "data" / "collections" / collection_id
-    if artifact_dir is not None:
-        return artifact_dir.expanduser().resolve().parent
-    raise SystemExit("--collection-id, --collection-dir, or --artifact-dir is required")
+    raise SystemExit("--collection-id or --collection-dir is required")
 
 
-def _load_existing_artifacts(artifact_dir: Path) -> dict[str, pd.DataFrame]:
-    if not artifact_dir.is_dir():
-        raise SystemExit(f"artifact directory not found: {artifact_dir}")
+def _load_existing_artifacts(
+    *,
+    backend_root: Path,
+    collection_dir: Path,
+) -> dict[str, pd.DataFrame]:
+    collection_id = collection_dir.name
+    repository = SqliteSourceArtifactRepository(backend_root / "data" / "lens.sqlite")
+    artifacts = repository.read_collection_artifacts(collection_id)
+    if not artifacts.documents:
+        raise SystemExit(f"source artifacts not found: {collection_id}")
     return {
-        "documents": _read_parquet_if_exists(artifact_dir / "documents.parquet"),
-        "blocks": _read_parquet_if_exists(artifact_dir / "blocks.parquet"),
-        "tables": _read_parquet_if_exists(artifact_dir / "tables.parquet"),
-        "table_rows": _read_parquet_if_exists(artifact_dir / "table_rows.parquet"),
-        "table_cells": _read_parquet_if_exists(artifact_dir / "table_cells.parquet"),
+        "documents": _records_to_frame(artifacts.documents),
+        "text_units": _records_to_frame(artifacts.text_units),
+        "blocks": _records_to_frame(artifacts.blocks),
+        "figures": _records_to_frame(artifacts.figures),
+        "tables": _records_to_frame(artifacts.tables),
+        "table_rows": _records_to_frame(artifacts.table_rows),
+        "table_cells": _records_to_frame(artifacts.table_cells),
     }
 
 
-def _read_parquet_if_exists(path: Path) -> pd.DataFrame:
-    if not path.is_file():
-        return pd.DataFrame()
-    return _normalize_frame(pd.read_parquet(path))
+def _records_to_frame(records: tuple[Any, ...]) -> pd.DataFrame:
+    return _normalize_frame(pd.DataFrame([record.to_record() for record in records]))
 
 
 def _reparse_collection_inputs(

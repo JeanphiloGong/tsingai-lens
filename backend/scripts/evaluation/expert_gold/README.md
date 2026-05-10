@@ -68,7 +68,7 @@ contract and should not be exposed as a frontend or product schema.
 ## Export System Output To Prediction Bundle
 
 After the target papers have been processed by the normal collection build,
-export the system-side parquet artifacts into a prediction bundle:
+export the system-side Source/Core repository records into a prediction bundle:
 
 ```bash
 python3 scripts/evaluation/expert_gold/export_prediction_bundle.py \
@@ -89,9 +89,9 @@ tests/fixtures/local_expert_gold/generated/prediction_bundle.json
 ```
 
 The script is read-only against collection artifacts. It does not rebuild the
-collection and it does not change runtime trace behavior. Missing parquet files
-are represented as zero-row artifact counts and empty lists so the later
-evaluator can report coverage gaps explicitly.
+collection and it does not change runtime trace behavior. Missing repository
+record families are represented as zero-row artifact counts and empty lists so
+the later evaluator can report coverage gaps explicitly.
 
 The prediction bundle uses the same primary families as the gold bundle where
 possible:

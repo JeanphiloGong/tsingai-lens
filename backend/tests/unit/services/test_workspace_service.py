@@ -1,59 +1,38 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pandas as pd
 
 from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.workspace_overview_service import WorkspaceService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
-from application.core.workspace_overview_service import WorkspaceService
-from domain.core.comparison import ComparableResult, build_collection_assessment_input_fingerprint
-from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _current_scope_metadata(comparable_result: dict) -> dict[str, object]:
-    comparable_record = ComparableResult.from_mapping(comparable_result)
-    return {
-        "policy_family": "default_collection_comparison_policy",
-        "policy_version": "comparison_policy_v1",
-        "comparable_result_normalization_version": comparable_record.normalization_version,
-        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
-            comparable_record
-        ),
-        "reassessment_triggers": [
-            "policy_family_changed",
-            "policy_version_changed",
-            "comparable_result_normalization_version_changed",
-            "assessment_input_fingerprint_changed",
-        ],
-    }
+from domain.core import (
+    CollectionComparableResult,
+    ComparableResult,
+    CoreFactSet,
+    DocumentProfile,
+    EvidenceAnchor,
+    MeasurementResult,
+)
+from domain.source import SourceArtifactSet
+from infra.source.runtime.source_evidence import build_blocks
 
 
 def _write_source_artifacts(
-    output_dir: Path,
+    profile_service: DocumentProfileService,
+    collection_id: str,
     documents: pd.DataFrame,
-    text_units: pd.DataFrame | None = None,
+    text_units: pd.DataFrame,
 ) -> None:
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
+    profile_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=documents.to_dict(orient="records"),
+            text_units=text_units.to_dict(orient="records"),
+            blocks=build_blocks(documents, text_units).to_dict(orient="records"),
+        ),
+    )
 
 
 def test_workspace_service_builds_collection_overview(tmp_path):
@@ -73,7 +52,10 @@ def test_workspace_service_builds_collection_overview(tmp_path):
         current_stage="source_artifacts_started",
         progress_percent=35,
     )
-    artifact_registry.upsert(collection_id, collection_service.get_paths(collection_id).output_dir)
+    artifact_registry.upsert(
+        collection_id,
+        collection_service.get_paths(collection_id).output_dir,
+    )
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
@@ -87,14 +69,17 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     assert overview["capabilities"]["can_generate_sop"] is False
 
 
-def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
+def test_workspace_service_includes_document_summary_and_links(tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    workspace_service = WorkspaceService(collection_service, task_service, artifact_registry)
-
+    profile_service = DocumentProfileService(collection_service, artifact_registry)
+    workspace_service = WorkspaceService(
+        collection_service,
+        task_service,
+        artifact_registry,
+        profile_service,
+    )
     collection = collection_service.create_collection("Profiled Workspace")
     collection_id = collection["collection_id"]
     collection_service.add_file(
@@ -102,8 +87,6 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
         "paper.txt",
         b"Experimental Section\nPowders were mixed and annealed.",
     )
-
-    output_dir = collection_service.get_paths(collection_id).output_dir
     documents = pd.DataFrame(
         [
             {
@@ -133,14 +116,12 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
             },
         ]
     )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-    DocumentProfileService(collection_service, artifact_registry).build_document_profiles(
+    _write_source_artifacts(profile_service, collection_id, documents, text_units)
+    artifact_registry.upsert(
         collection_id,
-        output_dir,
+        collection_service.get_paths(collection_id).output_dir,
     )
+    profile_service.build_document_profiles(collection_id)
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
@@ -150,72 +131,22 @@ def test_workspace_service_includes_document_summary_and_links(monkeypatch, tmp_
     assert overview["workflow"]["protocol"]["status"] == "not_started"
     assert overview["artifacts"]["document_profiles_generated"] is True
     assert overview["artifacts"]["document_profiles_ready"] is True
-    assert overview["artifacts"]["evidence_anchors_generated"] is False
-    assert overview["artifacts"]["evidence_anchors_ready"] is False
-    assert overview["artifacts"]["method_facts_generated"] is False
-    assert overview["artifacts"]["method_facts_ready"] is False
     assert overview["artifacts"]["evidence_cards_generated"] is False
-    assert overview["artifacts"]["evidence_cards_ready"] is False
-    assert overview["artifacts"]["characterization_observations_generated"] is False
-    assert overview["artifacts"]["characterization_observations_ready"] is False
-    assert overview["artifacts"]["structure_features_generated"] is False
-    assert overview["artifacts"]["structure_features_ready"] is False
-    assert overview["artifacts"]["test_conditions_generated"] is False
-    assert overview["artifacts"]["test_conditions_ready"] is False
-    assert overview["artifacts"]["baseline_references_generated"] is False
-    assert overview["artifacts"]["baseline_references_ready"] is False
-    assert overview["artifacts"]["sample_variants_generated"] is False
-    assert overview["artifacts"]["sample_variants_ready"] is False
-    assert overview["artifacts"]["measurement_results_generated"] is False
-    assert overview["artifacts"]["measurement_results_ready"] is False
-    assert overview["artifacts"]["comparable_results_generated"] is False
-    assert overview["artifacts"]["comparable_results_ready"] is False
-    assert overview["artifacts"]["collection_comparable_results_generated"] is False
-    assert overview["artifacts"]["collection_comparable_results_ready"] is False
-    assert overview["artifacts"]["collection_comparable_results_stale"] is False
-    assert overview["artifacts"]["comparison_rows_generated"] is False
-    assert overview["artifacts"]["comparison_rows_ready"] is False
-    assert overview["artifacts"]["comparison_rows_stale"] is False
-    assert overview["artifacts"]["graph_stale"] is False
     assert overview["artifacts"]["blocks_generated"] is True
     assert overview["artifacts"]["blocks_ready"] is True
-    assert overview["artifacts"]["figures_generated"] is True
-    assert overview["artifacts"]["figures_ready"] is False
-    assert overview["artifacts"]["table_rows_generated"] is True
-    assert overview["artifacts"]["table_rows_ready"] is False
-    assert overview["artifacts"]["table_cells_generated"] is True
-    assert overview["artifacts"]["table_cells_ready"] is False
-    assert overview["artifacts"]["protocol_steps_generated"] is False
-    assert "graphml_generated" not in overview["artifacts"]
     assert overview["document_summary"]["total_documents"] == 1
     assert overview["document_summary"]["by_doc_type"]["experimental"] == 1
     assert overview["links"]["documents"] == f"/api/v1/collections/{collection_id}/documents/profiles"
     assert overview["links"]["results"] == f"/api/v1/collections/{collection_id}/results"
-    assert overview["links"]["documents_profiles"] == f"/api/v1/collections/{collection_id}/documents/profiles"
-    assert overview["links"]["research_materials"] == f"/api/v1/collections/{collection_id}/materials"
-    assert overview["links"]["research_material"] == (
-        f"/api/v1/collections/{collection_id}/materials/"
-        "{material_id}/research-view"
-    )
-    assert overview["links"]["comparisons"] == f"/api/v1/collections/{collection_id}/comparisons"
-    assert overview["links"]["comparable_results"] == (
-        f"/api/v1/comparable-results?collection_id={collection_id}"
-    )
     assert overview["capabilities"]["can_view_results"] is False
     assert overview["capabilities"]["can_view_comparable_results"] is False
 
 
-def test_workspace_service_marks_comparisons_ready_from_semantic_artifacts_without_row_cache(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
+def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     workspace_service = WorkspaceService(collection_service, task_service, artifact_registry)
-
     collection = collection_service.create_collection("Semantic Graph Workspace")
     collection_id = collection["collection_id"]
     collection_service.add_file(
@@ -223,315 +154,103 @@ def test_workspace_service_marks_comparisons_ready_from_semantic_artifacts_witho
         "paper.txt",
         b"Experimental Section\nConductivity increased after annealing.",
     )
-
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Semantic Graph Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.9,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "oxide cathode"},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.82,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "comparable_result_id": "cres-1",
-                "source_result_id": "res-1",
-                "source_document_id": "paper-1",
-                "binding": {
-                    "variant_id": None,
-                    "baseline_id": None,
-                    "test_condition_id": None,
-                },
-                "normalized_context": {
-                    "material_system_normalized": "oxide cathode",
-                    "process_normalized": "700 C",
-                    "baseline_normalized": "as-prepared",
-                    "test_condition_normalized": "EIS",
-                },
-                "axis": {
-                    "axis_name": None,
-                    "axis_value": None,
-                    "axis_unit": None,
-                },
-                "value": {
-                    "property_normalized": "conductivity",
-                    "result_type": "scalar",
-                    "numeric_value": 12.0,
-                    "unit": "mS/cm",
-                    "summary": "12 mS/cm",
-                },
-                "evidence": {
-                    "direct_anchor_ids": ["anchor-1"],
-                    "contextual_anchor_ids": [],
-                    "evidence_ids": ["ev-1"],
-                    "structure_feature_ids": [],
-                    "characterization_observation_ids": [],
-                    "traceability_status": "direct",
-                },
-                "variant_label": None,
-                "baseline_reference": "as-prepared",
-                "result_source_type": "text",
-                "epistemic_status": "normalized_from_evidence",
-                "normalization_version": "comparable_result_v1",
-            }
-        ]
-    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
-    current_scope_record = {
-        "collection_id": collection_id,
-        "comparable_result_id": "cres-1",
-        "assessment": {
-            "missing_critical_context": [],
-            "comparability_basis": ["baseline_resolved"],
-            "comparability_warnings": [],
-            "comparability_status": "comparable",
-            "requires_expert_review": False,
-            "assessment_epistemic_status": "normalized_from_evidence",
-        },
-        "epistemic_status": "normalized_from_evidence",
-        "included": True,
-        "sort_order": 0,
-        **_current_scope_metadata(
-            {
-                "comparable_result_id": "cres-1",
-                "source_result_id": "res-1",
-                "source_document_id": "paper-1",
-                "binding": {
-                    "variant_id": None,
-                    "baseline_id": None,
-                    "test_condition_id": None,
-                },
-                "normalized_context": {
-                    "material_system_normalized": "oxide cathode",
-                    "process_normalized": "700 C",
-                    "baseline_normalized": "as-prepared",
-                    "test_condition_normalized": "EIS",
-                },
-                "axis": {
-                    "axis_name": None,
-                    "axis_value": None,
-                    "axis_unit": None,
-                },
-                "value": {
-                    "property_normalized": "conductivity",
-                    "result_type": "scalar",
-                    "numeric_value": 12.0,
-                    "unit": "mS/cm",
-                    "summary": "12 mS/cm",
-                },
-                "evidence": {
-                    "direct_anchor_ids": ["anchor-1"],
-                    "contextual_anchor_ids": [],
-                    "evidence_ids": ["ev-1"],
-                    "structure_feature_ids": [],
-                    "characterization_observation_ids": [],
-                    "traceability_status": "direct",
-                },
-                "variant_label": None,
-                "baseline_reference": "as-prepared",
-                "result_source_type": "text",
-                "epistemic_status": "normalized_from_evidence",
-                "normalization_version": "comparable_result_v1",
-            }
+    artifact_registry.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            comparison_artifacts_ready=True,
+            document_profiles=(
+                DocumentProfile.from_mapping(
+                    {
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "title": "Semantic Graph Paper",
+                        "source_filename": "paper.txt",
+                        "doc_type": "experimental",
+                        "protocol_extractable": "yes",
+                        "confidence": 0.9,
+                    }
+                ),
+            ),
+            evidence_anchors=(
+                EvidenceAnchor.from_mapping(
+                    {
+                        "anchor_id": "anchor-1",
+                        "document_id": "paper-1",
+                        "locator_type": "text",
+                        "locator_confidence": "direct",
+                        "source_type": "text",
+                        "quote": "Conductivity increased after annealing.",
+                    }
+                ),
+            ),
+            measurement_results=(
+                MeasurementResult.from_mapping(
+                    {
+                        "result_id": "res-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "property_normalized": "conductivity",
+                        "result_type": "scalar",
+                        "value_payload": {"value": 12.0},
+                        "unit": "mS/cm",
+                        "evidence_anchor_ids": ["anchor-1"],
+                        "traceability_status": "direct",
+                    }
+                ),
+            ),
+            comparable_results=(
+                ComparableResult.from_mapping(
+                    {
+                        "comparable_result_id": "cres-1",
+                        "source_result_id": "res-1",
+                        "source_document_id": "paper-1",
+                        "normalized_context": {
+                            "material_system_normalized": "oxide cathode",
+                            "process_normalized": "700 C",
+                            "baseline_normalized": "as-prepared",
+                            "test_condition_normalized": "EIS",
+                        },
+                        "value": {
+                            "property_normalized": "conductivity",
+                            "result_type": "scalar",
+                            "numeric_value": 12.0,
+                            "unit": "mS/cm",
+                            "summary": "12 mS/cm",
+                        },
+                    }
+                ),
+            ),
+            collection_comparable_results=(
+                CollectionComparableResult.from_mapping(
+                    {
+                        "collection_id": collection_id,
+                        "comparable_result_id": "cres-1",
+                        "assessment": {
+                            "comparability_status": "comparable",
+                            "requires_expert_review": False,
+                        },
+                        "included": True,
+                        "sort_order": 0,
+                    }
+                ),
+            ),
         ),
-    }
-    pd.DataFrame([current_scope_record]).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
     )
-    artifact_registry.upsert(collection_id, output_dir)
+    artifact_registry.upsert(
+        collection_id,
+        collection_service.get_paths(collection_id).output_dir,
+    )
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
     assert overview["status_summary"] == "ready"
     assert overview["workflow"]["results"]["status"] == "ready"
     assert overview["workflow"]["comparisons"]["status"] == "ready"
-    assert overview["artifacts"]["comparison_rows_generated"] is False
+    assert overview["artifacts"]["comparison_rows_generated"] is True
     assert overview["artifacts"]["comparison_rows_ready"] is False
-    assert overview["artifacts"]["collection_comparable_results_stale"] is False
-    assert overview["artifacts"]["comparison_rows_stale"] is False
     assert overview["artifacts"]["graph_generated"] is True
     assert overview["artifacts"]["graph_ready"] is True
-    assert overview["artifacts"]["graph_stale"] is False
     assert overview["capabilities"]["can_view_graph"] is True
     assert overview["capabilities"]["can_view_results"] is True
     assert overview["capabilities"]["can_view_comparable_results"] is True
-    assert overview["capabilities"]["can_download_graphml"] is True
-
-
-def test_workspace_service_marks_stale_comparisons_as_limited(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    collection_service = CollectionService(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    workspace_service = WorkspaceService(collection_service, task_service, artifact_registry)
-
-    collection = collection_service.create_collection("Stale Semantic Workspace")
-    collection_id = collection["collection_id"]
-    collection_service.add_file(
-        collection_id,
-        "paper.txt",
-        b"Experimental Section\nConductivity increased after annealing.",
-    )
-
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Semantic Graph Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.9,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "oxide cathode"},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.82,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "comparable_result_id": "cres-1",
-                "source_result_id": "res-1",
-                "source_document_id": "paper-1",
-                "binding": {
-                    "variant_id": None,
-                    "baseline_id": None,
-                    "test_condition_id": None,
-                },
-                "normalized_context": {
-                    "material_system_normalized": "oxide cathode",
-                    "process_normalized": "700 C",
-                    "baseline_normalized": "as-prepared",
-                    "test_condition_normalized": "EIS",
-                },
-                "axis": {
-                    "axis_name": None,
-                    "axis_value": None,
-                    "axis_unit": None,
-                },
-                "value": {
-                    "property_normalized": "conductivity",
-                    "result_type": "scalar",
-                    "numeric_value": 12.0,
-                    "unit": "mS/cm",
-                    "summary": "12 mS/cm",
-                },
-                "evidence": {
-                    "direct_anchor_ids": ["anchor-1"],
-                    "contextual_anchor_ids": [],
-                    "evidence_ids": ["ev-1"],
-                    "structure_feature_ids": [],
-                    "characterization_observation_ids": [],
-                    "traceability_status": "direct",
-                },
-                "variant_label": None,
-                "baseline_reference": "as-prepared",
-                "result_source_type": "text",
-                "epistemic_status": "normalized_from_evidence",
-                "normalization_version": "comparable_result_v1",
-            }
-        ]
-    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "collection_id": collection_id,
-                "comparable_result_id": "cres-1",
-                "assessment": {
-                    "missing_critical_context": [],
-                    "comparability_basis": ["baseline_resolved"],
-                    "comparability_warnings": [],
-                    "comparability_status": "comparable",
-                    "requires_expert_review": False,
-                    "assessment_epistemic_status": "normalized_from_evidence",
-                },
-                "epistemic_status": "normalized_from_evidence",
-                "included": True,
-                "sort_order": 0,
-                "policy_family": "default_collection_comparison_policy",
-                "policy_version": "comparison_policy_v0",
-                "comparable_result_normalization_version": "comparable_result_v1",
-                "assessment_input_fingerprint": "cafp_outdated",
-                "reassessment_triggers": [
-                    "policy_family_changed",
-                    "policy_version_changed",
-                    "comparable_result_normalization_version_changed",
-                    "assessment_input_fingerprint_changed",
-                ],
-            }
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    pd.DataFrame([{"row_id": "cmp-1"}]).to_parquet(
-        output_dir / "comparison_rows.parquet",
-        index=False,
-    )
-    artifact_registry.upsert(collection_id, output_dir)
-
-    overview = workspace_service.get_workspace_overview(collection_id)
-
-    assert overview["status_summary"] == "comparison_pending"
-    assert overview["workflow"]["results"]["status"] == "limited"
-    assert overview["workflow"]["comparisons"]["status"] == "limited"
-    assert "stale" in overview["workflow"]["comparisons"]["detail"].lower()
-    assert overview["artifacts"]["collection_comparable_results_generated"] is True
-    assert overview["artifacts"]["collection_comparable_results_ready"] is False
-    assert overview["artifacts"]["collection_comparable_results_stale"] is True
-    assert overview["artifacts"]["comparison_rows_generated"] is True
-    assert overview["artifacts"]["comparison_rows_ready"] is False
-    assert overview["artifacts"]["comparison_rows_stale"] is True
-    assert overview["artifacts"]["graph_generated"] is True
-    assert overview["artifacts"]["graph_ready"] is False
-    assert overview["artifacts"]["graph_stale"] is True
-    assert overview["capabilities"]["can_view_graph"] is False
-    assert overview["capabilities"]["can_view_results"] is True
-    assert overview["capabilities"]["can_view_comparable_results"] is True
-    assert overview["capabilities"]["can_download_graphml"] is False

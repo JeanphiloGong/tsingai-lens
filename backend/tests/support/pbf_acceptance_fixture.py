@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
-
-import pandas as pd
 
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
@@ -31,65 +28,6 @@ PBF_YIELD_25_COMPARABLE_ID = "cres-s3-ys-25"
 PBF_YIELD_200_COMPARABLE_ID = "cres-s3-ys-200"
 PBF_ELONGATION_COMPARABLE_ID = "cres-s3-el-25"
 PBF_YIELD_SERIES_KEY = "yield_strength:test_temperature_c"
-
-
-def write_pbf_acceptance_artifacts(
-    output_dir: Path,
-    *,
-    collection_id: str,
-    include_strain_rate: bool = True,
-) -> None:
-    """Write the Slice 5 single-paper PBF evidence-chain fixture."""
-
-    sample_variants = pbf_acceptance_sample_variants(collection_id)
-    test_conditions = pbf_acceptance_test_conditions(
-        collection_id,
-        include_strain_rate=include_strain_rate,
-    )
-    baseline_references = pbf_acceptance_baseline_references(collection_id)
-    measurement_results = pbf_acceptance_measurement_results(collection_id)
-    characterization = pbf_acceptance_characterization_observations(collection_id)
-    structure_features = pbf_acceptance_structure_features(collection_id)
-    comparable_results, scoped_results = pbf_acceptance_comparison_records(
-        collection_id,
-        sample_variants=sample_variants,
-        test_conditions=test_conditions,
-        baseline_references=baseline_references,
-        measurement_results=measurement_results,
-    )
-
-    pd.DataFrame(sample_variants).to_parquet(
-        output_dir / "sample_variants.parquet",
-        index=False,
-    )
-    pd.DataFrame(test_conditions).to_parquet(
-        output_dir / "test_conditions.parquet",
-        index=False,
-    )
-    pd.DataFrame(baseline_references).to_parquet(
-        output_dir / "baseline_references.parquet",
-        index=False,
-    )
-    pd.DataFrame(measurement_results).to_parquet(
-        output_dir / "measurement_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(characterization).to_parquet(
-        output_dir / "characterization_observations.parquet",
-        index=False,
-    )
-    pd.DataFrame(structure_features).to_parquet(
-        output_dir / "structure_features.parquet",
-        index=False,
-    )
-    pd.DataFrame(comparable_results).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(scoped_results).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
 
 
 def pbf_acceptance_assessment_context(

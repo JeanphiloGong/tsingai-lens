@@ -10,7 +10,7 @@ The Source business records and shared structure logic live in
 `backend/domain/source/`. Infrastructure should parse input files, build those
 domain records, and serialize them into the persisted artifact tables.
 The SQLite Source artifact repository is the structured persistence path; local
-parquet files remain useful for previews, exports, and debugging.
+exports and traces are derived from that repository.
 
 Source does not extract scientific facts. It does not decide materials,
 samples, methods, measurements, baselines, comparisons, or report content.
@@ -51,32 +51,32 @@ protocol artifacts
 
 ## Source Artifacts
 
-The final collection-local Source artifact family is:
+The final Source artifact family persisted in the Source repository is:
 
-- `documents.parquet`
+- `documents`
   Document records, source metadata, full text, and text-unit ids.
-- `text_units.parquet`
+- `text_units`
   Text windows used by Core extraction and traceback.
-- `blocks.parquet`
+- `blocks`
   Reading-order blocks with block type, heading path, page, bbox, and
   character range.
-- `figures.parquet`
+- `figures`
   Figure rows with captions, heading context, page, bbox, image asset paths,
   and parser metadata.
-- `tables.parquet`
+- `tables`
   The primary complete-table structure with caption, heading, page, bbox,
   headers, `table_matrix`, Markdown, and plain text.
-- `table_rows.parquet`
+- `table_rows`
   Row-level evidence anchors for table-grounded extraction and traceback.
-- `table_cells.parquet`
+- `table_cells`
   Cell-level evidence anchors with header paths, unit hints, row and column
   indexes, page, and bbox.
 - `image_assets/`
-  Extracted figure crops referenced by `figures.parquet`.
+  Extracted figure crops referenced by Source figure rows.
 
-`tables.parquet` is the primary table context. `table_rows.parquet` and
-`table_cells.parquet` support anchoring, UI drilldown, and debugging; they are
-not replacements for the complete table artifact.
+`tables` is the primary table context. `table_rows` and `table_cells` support
+anchoring, UI drilldown, and debugging; they are not replacements for the
+complete table artifact.
 
 ## Key Areas
 
@@ -94,7 +94,7 @@ not replacements for the complete table artifact.
   Mapping from parser output into Source domain records and persisted artifact
   rows.
 - `runtime/storage/`
-  Runtime storage and parquet table IO.
+  Runtime scratch table storage.
 - `runtime/cache/`
   Runtime cache implementations.
 

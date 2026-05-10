@@ -61,7 +61,7 @@ The backend comparable-result rollout has already corrected the runtime graph
 path:
 
 - graph readiness now comes from semantic comparison artifacts rather than
-  `comparison_rows.parquet`
+  `comparison_rows`
 - graph and report can rebuild row projection on demand from semantic artifacts
 - workspace and task payloads now expose semantic-artifact status explicitly
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 import threading
 import time
@@ -22,9 +21,11 @@ from domain.core.comparison import (
     build_comparison_row_id,
 )
 from domain.core.document_profile import DocumentProfile
+from domain.core.evidence_backbone import EvidenceAnchor, MeasurementResult
 from domain.core.fact_store import CoreFactSet
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
     SqliteProtocolArtifactRepository,
     SqliteSourceArtifactRepository,
 )
@@ -61,19 +62,6 @@ def _wait_for_task_terminal(app_client, task_id: str, timeout_s: float = 5.0) ->
     raise AssertionError(f"task {task_id} did not finish before timeout: {last_body}")
 
 
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
 def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     return SimpleNamespace(
         output=SimpleNamespace(base_dir=str(output_dir)),
@@ -89,6 +77,9 @@ def _write_source_artifact_outputs(
     source_repository=None,  # noqa: ANN001
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    collection_id = collection_id or output_dir.parent.name
+    if source_repository is None:
+        source_repository = SqliteSourceArtifactRepository(output_dir.parents[2] / "lens.sqlite")
     documents = pd.DataFrame(
         [
             {
@@ -127,10 +118,6 @@ def _write_source_artifact_outputs(
         ]
     )
     blocks = build_blocks(documents, text_units)
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    blocks.to_parquet(output_dir / "blocks.parquet", index=False)
-    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
     tables = pd.DataFrame(
         [
             {
@@ -153,71 +140,22 @@ def _write_source_artifact_outputs(
     )
     table_rows = build_table_rows(documents, text_units)
     table_cells = build_table_cells(documents, text_units)
-    tables.to_parquet(output_dir / "tables.parquet", index=False)
-    table_rows.to_parquet(output_dir / "table_rows.parquet", index=False)
-    table_cells.to_parquet(output_dir / "table_cells.parquet", index=False)
-    if collection_id and source_repository:
-        source_repository.replace_collection_artifacts(
-            collection_id,
-            SourceArtifactSet.from_records(
-                documents=documents.to_dict(orient="records"),
-                text_units=text_units.to_dict(orient="records"),
-                blocks=blocks.to_dict(orient="records"),
-                tables=tables.to_dict(orient="records"),
-                table_rows=table_rows.to_dict(orient="records"),
-                table_cells=table_cells.to_dict(orient="records"),
-            ),
-        )
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=documents.to_dict(orient="records"),
+            text_units=text_units.to_dict(orient="records"),
+            blocks=blocks.to_dict(orient="records"),
+            tables=tables.to_dict(orient="records"),
+            table_rows=table_rows.to_dict(orient="records"),
+            table_cells=table_cells.to_dict(orient="records"),
+        ),
+    )
 
 
 def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Core Projection Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": ["methods_section_detected"],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-1",
-                        "source_type": "text",
-                        "section_id": None,
-                        "block_id": None,
-                        "snippet_id": "tu-1",
-                        "figure_or_table": None,
-                        "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
-                    }
-                ],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {
-                    "process": {"temperatures_c": [700.0]},
-                    "baseline": {"control": "as-prepared"},
-                    "test": {"method": "EIS"},
-                },
-                "confidence": 0.83,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    core_repository = SqliteCoreFactRepository(output_dir.parents[2] / "lens.sqlite")
     comparable_result, scoped_result, _row_id = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-graph-1",
@@ -230,7 +168,7 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
         result_source_type="text",
         result_type="scalar",
         result_summary="12 mS/cm",
-        supporting_evidence_ids=["ev-1"],
+        supporting_evidence_ids=["ev_result_res-graph-1"],
         supporting_anchor_ids=["anchor-1"],
         characterization_observation_ids=[],
         structure_feature_ids=[],
@@ -249,13 +187,64 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
         unit="mS/cm",
         sort_order=0,
     )
-    pd.DataFrame([comparable_result]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
+    row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=pd.DataFrame([comparable_result]),
+        scoped_results=pd.DataFrame([scoped_result]),
     )
-    pd.DataFrame([scoped_result]).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
+    core_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            comparison_artifacts_ready=True,
+            document_profiles=(
+                DocumentProfile.from_mapping(
+                    {
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "title": "Core Projection Paper",
+                        "source_filename": "paper.txt",
+                        "doc_type": "experimental",
+                        "protocol_extractable": "yes",
+                        "confidence": 0.91,
+                    }
+                ),
+            ),
+            evidence_anchors=(
+                EvidenceAnchor.from_mapping(
+                    {
+                        "anchor_id": "anchor-1",
+                        "document_id": "paper-1",
+                        "source_type": "text",
+                        "quote": "Conductivity increased to 12 mS/cm after annealing.",
+                    }
+                ),
+            ),
+            measurement_results=(
+                MeasurementResult.from_mapping(
+                    {
+                        "result_id": "res-graph-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "property_normalized": "conductivity",
+                        "result_type": "scalar",
+                        "value_payload": {"value": 12.0},
+                        "unit": "mS/cm",
+                        "evidence_anchor_ids": ["anchor-1"],
+                        "traceability_status": "direct",
+                        "result_source_type": "text",
+                    }
+                ),
+            ),
+            comparable_results=(ComparableResult.from_mapping(comparable_result),),
+            collection_comparable_results=(
+                CollectionComparableResult.from_mapping(scoped_result),
+            ),
+            comparison_rows=tuple(
+                ComparisonRowRecord.from_mapping(dict(row))
+                for _, row in row_table.iterrows()
+            ),
+        ),
     )
 
 
@@ -576,8 +565,6 @@ def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_cli
 
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
     from controllers.source import collections as collections_controller
     from controllers.core import comparable_results as comparable_results_controller
     from controllers.core import comparisons as comparisons_controller
@@ -620,21 +607,33 @@ def app_client(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     protocol_artifact_repository = SqliteProtocolArtifactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
         tmp_path / "collections",
+        source_artifact_repository=source_artifact_repository,
+        core_fact_repository=core_fact_repository,
         protocol_artifact_repository=protocol_artifact_repository,
     )
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        artifact_registry,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
+    )
     paper_facts_service = PaperFactsService(
         collection_service,
         artifact_registry,
         document_profile_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
     )
     comparison_service = ComparisonService(
         collection_service,
         artifact_registry,
         paper_facts_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
     )
     runner = CollectionBuildTaskRunner(
         collection_service,
@@ -667,10 +666,8 @@ def app_client(monkeypatch, tmp_path):
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
-        collection_id = kwargs.get("additional_context", {}).get("collection_id")
         _write_source_artifact_outputs(
             output_dir,
-            collection_id=collection_id,
             source_repository=source_artifact_repository,
         )
         return [DummyWorkflowOutput()]
@@ -1039,14 +1036,6 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
         unit=None,
         sort_order=1,
     )
-    pd.DataFrame([comparable_result_1, comparable_result_2]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame([scoped_result_1, scoped_result_2]).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
     _store_core_comparison_facts(
         comparisons_controller.comparison_service,
         collection_id,
@@ -1170,14 +1159,6 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
         unit="mS/cm",
         sort_order=1,
     )
-    pd.DataFrame([shared_result, unique_result]).to_parquet(
-        first_output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame([first_shared_overlay, unique_overlay]).to_parquet(
-        first_output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
     _store_core_comparison_facts(
         comparable_results_controller.comparison_service,
         first_collection_id,
@@ -1188,18 +1169,9 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
         first_collection_id,
         first_output_dir,
     )
-
-    pd.DataFrame([shared_result]).to_parquet(
-        second_output_dir / "comparable_results.parquet",
-        index=False,
-    )
     second_shared_overlay = dict(first_shared_overlay)
     second_shared_overlay["collection_id"] = second_collection_id
     second_shared_overlay["sort_order"] = 4
-    pd.DataFrame([second_shared_overlay]).to_parquet(
-        second_output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
     _store_core_comparison_facts(
         comparable_results_controller.comparison_service,
         second_collection_id,
@@ -1231,9 +1203,6 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
     assert items_by_id["cres-corpus-unique-1"]["observed_collection_ids"] == [
         first_collection_id
     ]
-    assert not (first_output_dir / "comparison_rows.parquet").exists()
-    assert not (second_output_dir / "comparison_rows.parquet").exists()
-
     detail = app_client.get(
         f"{API_V1_PREFIX}/comparable-results/cres-corpus-shared-1",
         params={"collection_id": second_collection_id},
@@ -1274,11 +1243,6 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
         "parsing_warnings": [],
         "confidence": 0.91,
     }
-    pd.DataFrame([document_profile]).to_parquet(
-        output_dir / "document_profiles.parquet",
-        index=False,
-    )
-
     first_result, first_scoped_result, _ = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-result-1",
@@ -1340,14 +1304,6 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
         value=15.0,
         unit="mS/cm",
         sort_order=1,
-    )
-    pd.DataFrame([first_result, second_result]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame([first_scoped_result, second_scoped_result]).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
     )
     _store_core_comparison_facts(
         results_controller.comparison_service,
@@ -1471,10 +1427,7 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     graph_detail = graph.json()["detail"]
     assert graph_detail["code"] == "graph_not_ready"
     assert graph_detail["collection_id"] == collection_id
-    assert "document_profiles.parquet" in graph_detail["missing_artifacts"]
-    assert "evidence_cards.parquet" in graph_detail["missing_artifacts"]
-    assert "comparable_results.parquet" in graph_detail["missing_artifacts"]
-    assert "collection_comparable_results.parquet" in graph_detail["missing_artifacts"]
+    assert "core_fact_repository.comparison_artifacts" in graph_detail["missing_artifacts"]
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 409
@@ -1504,15 +1457,13 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
         collection_id,
         output_dir,
     )
-    assert not output_dir.joinpath("comparison_rows.parquet").exists()
-
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()
     assert workspace_body["status_summary"] == "ready"
     assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
-    assert workspace_body["artifacts"]["comparison_rows_generated"] is False
-    assert workspace_body["artifacts"]["comparison_rows_ready"] is False
+    assert workspace_body["artifacts"]["comparison_rows_generated"] is True
+    assert workspace_body["artifacts"]["comparison_rows_ready"] is True
     assert workspace_body["artifacts"]["collection_comparable_results_stale"] is False
     assert workspace_body["artifacts"]["comparison_rows_stale"] is False
     assert workspace_body["artifacts"]["graph_generated"] is True
@@ -1529,7 +1480,6 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert graph.status_code == 200
     payload = graph.json()
     assert payload["collection_id"] == collection_id
-    assert not output_dir.joinpath("comparison_rows.parquet").exists()
     assert len(payload["nodes"]) == 7
     assert len(payload["edges"]) == 6
     assert {item["type"] for item in payload["nodes"]} == {
@@ -1551,11 +1501,11 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     }
 
     neighbors = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/graph/nodes/evi:ev-1/neighbors"
+        f"{API_V1_PREFIX}/collections/{collection_id}/graph/nodes/evi:ev_result_res-graph-1/neighbors"
     )
     assert neighbors.status_code == 200
     neighbors_body = neighbors.json()
-    assert neighbors_body["center_node_id"] == "evi:ev-1"
+    assert neighbors_body["center_node_id"] == "evi:ev_result_res-graph-1"
     assert len(neighbors_body["nodes"]) == 3
     assert len(neighbors_body["edges"]) == 2
 

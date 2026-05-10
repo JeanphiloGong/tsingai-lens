@@ -263,29 +263,45 @@ research objective guided extraction
 Core should stop treating material-scoped artifacts as the primary extraction
 shape.
 
-New primary internal artifacts should be:
+The durable implementation should be database-record first. Research-objective
+data should be stored through the Core persistence boundary rather than written
+as standalone repository artifacts.
 
-- `paper_skims.parquet`
-- `research_objectives.parquet`
-- `objective_contexts.parquet`
-- `objective_paper_frames.parquet`
-- `objective_evidence_routes.parquet`
-- `objective_measurement_results.parquet`
-- `objective_comparison_rows.parquet`
-- `objective_reports.parquet`
+New primary Core records should be:
 
-These artifacts should carry objective provenance, but the final facts should
+- `PaperSkim`
+- `ResearchObjective`
+- `ObjectiveContext`
+- `ObjectivePaperFrame`
+- `ObjectiveEvidenceRoute`
+- `ObjectiveMeasurementResult`
+- `ObjectiveComparisonRow`
+- `ObjectiveReport`
+
+The SQLite-backed Core repository should persist those records in tables such
+as:
+
+- `core_paper_skims`
+- `core_research_objectives`
+- `core_objective_contexts`
+- `core_objective_paper_frames`
+- `core_objective_evidence_routes`
+- `core_objective_measurement_results`
+- `core_objective_comparison_rows`
+- `core_objective_reports`
+
+These records should carry objective provenance, but the final facts should
 still normalize reusable material, process, property, condition, baseline, and
 evidence fields. They should not become unstructured objective-local text
 results.
 
-Existing material-first artifacts should no longer be the primary source of
+Existing material-first Core records should no longer be the primary source of
 truth after cutover:
 
-- `sample_variants.parquet`
-- `measurement_results.parquet`
-- `comparison_rows.parquet`
-- `collection_comparable_results.parquet`
+- `SampleVariant`
+- `MeasurementResult`
+- `ComparisonRowRecord`
+- `CollectionComparableResult`
 
 They may be removed, replaced, or generated only as short-lived migration
 diagnostics during the cutover. They should not remain as a second authoritative
@@ -443,20 +459,23 @@ views, not as the route owner.
 
 ## Implementation Sequence
 
-1. Add Core objective artifacts, schemas, prompts, and extractor methods.
-2. Add `research_objective_service.py` for paper skim and objective discovery.
-3. Add `objective_facts_service.py` for objective-paper framing, routing, and
+1. Extend Core domain records, `CoreFactSet`, and `CoreFactRepository` for
+   paper skims and research objectives.
+2. Add SQLite persistence tables and repository methods for objective records.
+3. Add Core objective schemas, prompts, and extractor methods.
+4. Add `research_objective_service.py` for paper skim and objective discovery.
+5. Add `objective_facts_service.py` for objective-paper framing, routing, and
    objective-scoped fact extraction.
-4. Add objective-aware table routing and whole-table extraction for relevant
+6. Add objective-aware table routing and whole-table extraction for relevant
    tables.
-5. Add `objective_comparison_service.py` for objective-scoped comparison rows.
-6. Bump Core semantic version to an objective-facts generation, such as
+7. Add `objective_comparison_service.py` for objective-scoped comparison rows.
+8. Bump Core semantic version to an objective-facts generation, such as
    `objective_facts_v1`.
-7. Add backend `/research-objectives/*` routes and tests.
-8. Replace frontend material workspace navigation with objective workspace
+9. Add backend `/research-objectives/*` routes and tests.
+10. Replace frontend material workspace navigation with objective workspace
    navigation.
-9. Remove material-first route usage from frontend clients.
-10. Remove or disable material-first backend paths once objective-first routes
+11. Remove material-first route usage from frontend clients.
+12. Remove or disable material-first backend paths once objective-first routes
     pass contract tests.
 
 ## Verification

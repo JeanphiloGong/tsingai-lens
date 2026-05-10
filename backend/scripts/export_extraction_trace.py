@@ -6,12 +6,21 @@ import ast
 from datetime import datetime
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 import pandas as pd
 
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(DEFAULT_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
+
+from application.derived.core_fact_projection import build_core_fact_projection_frames
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
+)
 SOURCE_ARTIFACTS = (
     "documents",
     "text_units",
@@ -45,12 +54,12 @@ def parse_args() -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--collection-id",
-        help="Collection id under <backend-root>/data/collections/<collection-id>/output.",
+        help="Collection id under <backend-root>/data/collections/<collection-id>.",
     )
     source.add_argument(
         "--output-dir",
         type=Path,
-        help="Direct collection output directory containing parquet artifacts.",
+        help="Direct collection output directory; collection id is inferred from its parent.",
     )
     parser.add_argument(
         "--backend-root",
@@ -102,23 +111,25 @@ def export_trace(
         collection_id=collection_id,
         source_output_dir=source_output_dir,
     )
-    if not output_dir.is_dir():
-        raise SystemExit(f"collection output directory not found: {output_dir}")
+    resolved_collection_id = collection_id or output_dir.parent.name
 
     resolved_trace_root = (
         Path(trace_root).expanduser().resolve()
         if trace_root is not None
         else backend_root / "data" / "traces"
     )
-    name = trace_name or _default_trace_name(collection_id, output_dir)
+    name = trace_name or _default_trace_name(resolved_collection_id, output_dir)
     destination = resolved_trace_root / name
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "artifacts").mkdir(parents=True, exist_ok=True)
 
-    frames = _load_artifacts(output_dir)
+    frames = _load_artifacts(
+        backend_root=backend_root,
+        collection_id=resolved_collection_id,
+    )
     _write_artifact_exports(destination / "artifacts", frames)
     summary = _build_summary(
-        collection_id=collection_id,
+        collection_id=resolved_collection_id,
         source_output_dir=output_dir,
         trace_dir=destination,
         frames=frames,
@@ -158,14 +169,50 @@ def _default_trace_name(collection_id: str | None, output_dir: Path) -> str:
     return f"{_safe_name(prefix)}-{timestamp}"
 
 
-def _load_artifacts(output_dir: Path) -> dict[str, pd.DataFrame]:
+def _load_artifacts(
+    *,
+    backend_root: Path,
+    collection_id: str,
+) -> dict[str, pd.DataFrame]:
+    db_path = backend_root / "data" / "lens.sqlite"
+    source_artifacts = SqliteSourceArtifactRepository(
+        db_path
+    ).read_collection_artifacts(collection_id)
+    core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
+    projection = build_core_fact_projection_frames(core_facts)
     frames: dict[str, pd.DataFrame] = {}
-    for name in (*SOURCE_ARTIFACTS, *CORE_ARTIFACTS):
-        path = output_dir / f"{name}.parquet"
-        if not path.is_file():
-            frames[name] = pd.DataFrame()
-            continue
-        frames[name] = _normalize_frame(pd.read_parquet(path))
+    source_records = {
+        "documents": source_artifacts.documents,
+        "text_units": source_artifacts.text_units,
+        "blocks": source_artifacts.blocks,
+        "figures": source_artifacts.figures,
+        "tables": source_artifacts.tables,
+        "table_rows": source_artifacts.table_rows,
+        "table_cells": source_artifacts.table_cells,
+    }
+    for name in SOURCE_ARTIFACTS:
+        frames[name] = _normalize_frame(
+            pd.DataFrame([record.to_record() for record in source_records[name]])
+        )
+    core_records = {
+        "document_profiles": core_facts.document_profiles,
+        "evidence_anchors": core_facts.evidence_anchors,
+        "method_facts": core_facts.method_facts,
+        "sample_variants": core_facts.sample_variants,
+        "test_conditions": core_facts.test_conditions,
+        "baseline_references": core_facts.baseline_references,
+        "measurement_results": core_facts.measurement_results,
+        "characterization_observations": core_facts.characterization_observations,
+        "structure_features": core_facts.structure_features,
+        "comparable_results": core_facts.comparable_results,
+        "collection_comparable_results": core_facts.collection_comparable_results,
+    }
+    for name, records in core_records.items():
+        frames[name] = _normalize_frame(
+            pd.DataFrame([record.to_record() for record in records])
+        )
+    frames["evidence_cards"] = _normalize_frame(projection.evidence_cards)
+    frames["comparison_rows"] = _normalize_frame(projection.comparison_rows)
     return frames
 
 
@@ -252,7 +299,7 @@ def _render_source_tables(
     table_cells = frames.get("table_cells", pd.DataFrame())
     lines = ["# Source Tables", ""]
     if tables.empty:
-        lines.extend(["No `tables.parquet` rows found.", ""])
+        lines.extend(["No source table rows found.", ""])
         return "\n".join(lines)
 
     for index, table in enumerate(_frame_records(tables), start=1):

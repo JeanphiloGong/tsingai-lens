@@ -68,7 +68,7 @@ N_TOKENS = "n_tokens"
 CREATION_DATE = "creation_date"
 METADATA = "metadata"
 
-# the following lists define the final content and ordering of columns in the data model parquet outputs
+# The following lists define the final content and ordering of Source artifact records.
 ENTITIES_FINAL_COLUMNS = [
     ID,
     SHORT_ID,

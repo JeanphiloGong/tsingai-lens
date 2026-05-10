@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from domain.ports import CoreFactRepository, SourceArtifactRepository
 from domain.core.document_profile import (
     DocumentProfile,
     summarize_document_profile_collection,
@@ -18,17 +19,9 @@ from domain.shared.enums import (
     PROTOCOL_EXTRACTABLE_UNCERTAIN,
     PROTOCOL_SUITABLE_EXTRACTABILITY,
 )
-from infra.persistence.backbone_codec import (
-    normalize_backbone_value,
-    prepare_frame_for_storage,
-    restore_frame_from_storage,
-)
+from infra.persistence.backbone_codec import normalize_backbone_value
+from infra.persistence.factory import build_core_fact_repository, build_source_artifact_repository
 from application.source.collection_service import CollectionService
-from .core_semantic_version import (
-    core_semantic_rebuild_required,
-    purge_stale_core_semantic_artifacts,
-    write_core_semantic_manifest,
-)
 from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
@@ -42,12 +35,6 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 
 logger = logging.getLogger(__name__)
 
-
-_DOCUMENT_PROFILES_FILE = "document_profiles.parquet"
-_DOCUMENT_PROFILE_JSON_COLUMNS = (
-    "protocol_extractability_signals",
-    "parsing_warnings",
-)
 
 _TITLE_FIELD_CANDIDATES = (
     "parsed_title",
@@ -118,12 +105,26 @@ class DocumentProfileService:
         collection_service: CollectionService | None = None,
         artifact_registry_service: ArtifactRegistryService | None = None,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
+        core_fact_repository: CoreFactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.artifact_registry_service = (
             artifact_registry_service or ArtifactRegistryService()
         )
         self._structured_extractor = structured_extractor
+        self.core_fact_repository = (
+            core_fact_repository
+            or build_core_fact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
+        )
+        self.source_artifact_repository = (
+            source_artifact_repository
+            or build_source_artifact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
+        )
 
     def list_document_profiles(
         self,
@@ -166,13 +167,18 @@ class DocumentProfileService:
         document_id: str,
     ) -> dict[str, Any]:
         output_dir = self._resolve_output_dir(collection_id)
-        documents_path = output_dir / "documents.parquet"
-        if not documents_path.is_file():
-            raise DocumentContentNotReadyError(collection_id, output_dir)
-
-        documents, text_units = load_collection_inputs(output_dir)
         try:
-            blocks = load_blocks_artifact(output_dir)
+            documents, text_units = load_collection_inputs(
+                collection_id,
+                self.source_artifact_repository,
+            )
+        except FileNotFoundError as exc:
+            raise DocumentContentNotReadyError(collection_id, output_dir) from exc
+        try:
+            blocks = load_blocks_artifact(
+                collection_id,
+                self.source_artifact_repository,
+            )
         except FileNotFoundError as exc:
             raise DocumentContentNotReadyError(collection_id, output_dir) from exc
         document_records = build_document_records(documents, text_units)
@@ -224,17 +230,9 @@ class DocumentProfileService:
 
     def read_document_profiles(self, collection_id: str) -> pd.DataFrame:
         output_dir = self._resolve_output_dir(collection_id)
-        path = output_dir / _DOCUMENT_PROFILES_FILE
-        if path.is_file():
-            profiles = restore_frame_from_storage(
-                pd.read_parquet(path),
-                _DOCUMENT_PROFILE_JSON_COLUMNS,
-            )
-            if (
-                self._profile_rebuild_required(profiles)
-                or core_semantic_rebuild_required(output_dir)
-            ) and (output_dir / "documents.parquet").is_file():
-                profiles = self.build_document_profiles(collection_id, output_dir)
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if facts.document_profiles:
+            profiles = self._records_to_frame(facts.document_profiles)
         else:
             profiles = self.build_document_profiles(collection_id, output_dir)
         return self._normalize_profiles_table(profiles, collection_id)
@@ -249,14 +247,18 @@ class DocumentProfileService:
             if output_dir is not None
             else self._resolve_output_dir(collection_id)
         )
-        purge_stale_core_semantic_artifacts(base_dir)
-        documents_path = base_dir / "documents.parquet"
-        if not documents_path.is_file():
-            raise DocumentProfilesNotReadyError(collection_id, base_dir)
-
-        documents, text_units = load_collection_inputs(base_dir)
         try:
-            blocks = load_blocks_artifact(base_dir)
+            documents, text_units = load_collection_inputs(
+                collection_id,
+                self.source_artifact_repository,
+            )
+        except FileNotFoundError as exc:
+            raise DocumentProfilesNotReadyError(collection_id, base_dir) from exc
+        try:
+            blocks = load_blocks_artifact(
+                collection_id,
+                self.source_artifact_repository,
+            )
         except FileNotFoundError as exc:
             raise DocumentProfilesNotReadyError(collection_id, base_dir) from exc
         document_records = build_document_records(documents, text_units)
@@ -304,12 +306,10 @@ class DocumentProfileService:
             ],
         )
         profiles = self._normalize_profiles_table(profiles, collection_id)
-        base_dir.mkdir(parents=True, exist_ok=True)
-        prepare_frame_for_storage(
-            profiles,
-            _DOCUMENT_PROFILE_JSON_COLUMNS,
-        ).to_parquet(base_dir / _DOCUMENT_PROFILES_FILE, index=False)
-        write_core_semantic_manifest(base_dir)
+        self.core_fact_repository.replace_collection_document_profiles(
+            collection_id,
+            self._profile_records_from_frame(profiles),
+        )
         self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
             "Document profile build finished collection_id=%s profile_count=%s protocol_candidate_count=%s",
@@ -318,6 +318,33 @@ class DocumentProfileService:
             self.count_protocol_suitable(profiles),
         )
         return profiles
+
+    def _records_to_frame(self, records: tuple[DocumentProfile, ...]) -> pd.DataFrame:
+        return pd.DataFrame(
+            [record.to_record() for record in records],
+            columns=[
+                "document_id",
+                "collection_id",
+                "title",
+                "source_filename",
+                "doc_type",
+                "protocol_extractable",
+                "protocol_extractability_signals",
+                "parsing_warnings",
+                "confidence",
+            ],
+        )
+
+    def _profile_records_from_frame(
+        self,
+        profiles: pd.DataFrame,
+    ) -> tuple[DocumentProfile, ...]:
+        if profiles is None or profiles.empty:
+            return ()
+        return tuple(
+            DocumentProfile.from_mapping(dict(row))
+            for _, row in profiles.iterrows()
+        )
 
     def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
         if self._structured_extractor is None:
@@ -592,9 +619,6 @@ class DocumentProfileService:
             return None
         text = str(value).strip()
         return text or None
-
-    def _profile_rebuild_required(self, profiles: pd.DataFrame) -> bool:
-        return not {"title", "source_filename"}.issubset(set(profiles.columns))
 
     def _find_profile_row(
         self,

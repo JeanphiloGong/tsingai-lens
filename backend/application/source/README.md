@@ -20,5 +20,4 @@ facts, comparison rows, and protocol artifacts.
   Normalized Source artifact loading for downstream consumers
 - `artifact_registry_service.py`
   Collection artifact readiness and capability flags, including semantic/scope
-  comparison artifacts such as `comparable_results.parquet` and
-  `collection_comparable_results.parquet`
+  comparison artifacts persisted through the Core repository

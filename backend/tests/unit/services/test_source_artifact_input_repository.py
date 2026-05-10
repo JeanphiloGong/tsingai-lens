@@ -84,19 +84,17 @@ def test_artifact_input_service_prefers_sqlite_source_repository(monkeypatch, tm
             ),
         ),
     )
-    monkeypatch.setattr(artifact_input_service, "DATA_DIR", tmp_path)
     monkeypatch.setattr(
         artifact_input_service,
         "build_source_artifact_repository",
         lambda: repository,
     )
 
-    base_dir = tmp_path / "col_source" / "output"
-    documents, text_units = artifact_input_service.load_collection_inputs(base_dir)
-    blocks = artifact_input_service.load_blocks_artifact(base_dir)
-    tables = artifact_input_service.load_tables_artifact(base_dir)
-    table_rows = artifact_input_service.load_table_rows_artifact(base_dir)
-    table_cells = artifact_input_service.load_table_cells_artifact(base_dir)
+    documents, text_units = artifact_input_service.load_collection_inputs("col_source")
+    blocks = artifact_input_service.load_blocks_artifact("col_source")
+    tables = artifact_input_service.load_tables_artifact("col_source")
+    table_rows = artifact_input_service.load_table_rows_artifact("col_source")
+    table_cells = artifact_input_service.load_table_cells_artifact("col_source")
 
     assert documents.iloc[0]["id"] == "doc-1"
     assert text_units is not None

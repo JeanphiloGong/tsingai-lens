@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import pandas as pd
@@ -25,12 +24,13 @@ from domain.core import (
     ComparableResult,
     ComparisonRowRecord,
     CoreFactSet,
+    DocumentProfile,
     MeasurementResult,
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
 )
-from infra.source.runtime.source_evidence import build_blocks
+from domain.source import SourceArtifactSet
 from tests.support.pbf_acceptance_fixture import (
     PBF_BASELINE_LABEL,
     PBF_DOCUMENT_ID,
@@ -49,25 +49,15 @@ from tests.support.pbf_acceptance_fixture import (
 )
 
 
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        payload = {
-            "columns": list(frame.columns),
-            "records": frame.to_dict(orient="records"),
-        }
-        Path(path).write_text(json.dumps(payload), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload["records"], columns=payload["columns"])
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _write_blocks(output_dir: Path, documents: pd.DataFrame) -> None:
-    build_blocks(documents, None).to_parquet(output_dir / "blocks.parquet", index=False)
+def _store_document_profiles(
+    document_profile_service: DocumentProfileService,
+    collection_id: str,
+    profiles: list[dict],
+) -> None:
+    document_profile_service.core_fact_repository.replace_collection_document_profiles(
+        collection_id,
+        tuple(DocumentProfile.from_mapping(row) for row in profiles),
+    )
 
 
 def _build_semantic_comparison_record(
@@ -262,42 +252,15 @@ def test_documents_route_returns_404_for_missing_collection(document_services):
     assert "collection not found" in str(exc.detail)
 
 
-def test_documents_route_returns_200_with_empty_profiles_after_stage_generated(
-    document_services,
-    monkeypatch,
-):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
-    record = collection_service.create_collection(name="Empty Profiles Collection")
-    collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    pd.DataFrame(columns=["id", "title", "text"]).to_parquet(
-        output_dir / "documents.parquet",
-        index=False,
-    )
-    _write_blocks(output_dir, pd.DataFrame(columns=["id", "title", "text"]))
-    artifact_registry.upsert(collection_id, output_dir)
-
-    payload = asyncio.run(
-        documents_controller.list_collection_document_profiles(collection_id)
-    )
-
-    assert payload.collection_id == collection_id
-    assert payload.total == 0
-    assert payload.count == 0
-
-
-def test_document_profile_route_returns_single_profile(document_services, monkeypatch):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+def test_document_profile_route_returns_single_profile(document_services):
+    collection_service, artifact_registry, document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Single Profile Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
 
-    pd.DataFrame(
+    _store_document_profiles(
+        document_profile_service,
+        collection_id,
         [
             {
                 "document_id": "paper-1",
@@ -310,8 +273,8 @@ def test_document_profile_route_returns_single_profile(document_services, monkey
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+        ],
+    )
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
@@ -325,16 +288,15 @@ def test_document_profile_route_returns_single_profile(document_services, monkey
 
 def test_document_profile_route_normalizes_invalid_profile_status_values(
     document_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, artifact_registry, document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Invalid Profile Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
 
-    pd.DataFrame(
+    _store_document_profiles(
+        document_profile_service,
+        collection_id,
         [
             {
                 "document_id": "paper-1",
@@ -351,8 +313,8 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+        ],
+    )
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
@@ -365,26 +327,49 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
 
 def test_document_content_route_includes_source_locators(
     document_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, artifact_registry, document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Document Locator Collection")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
 
-    pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Locator Paper",
-                "source_filename": "paper-1.pdf",
-                "text": "The optimized sample reached 940 MPa. Missing locator paragraph.",
-            }
-        ]
-    ).to_parquet(output_dir / "documents.parquet", index=False)
-    pd.DataFrame(
+    document_profile_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Locator Paper",
+                    "source_filename": "paper-1.pdf",
+                    "text": "The optimized sample reached 940 MPa. Missing locator paragraph.",
+                }
+            ],
+            blocks=[
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-result",
+                    "block_type": "paragraph",
+                    "heading_path": "Results",
+                    "heading_level": 1,
+                    "block_order": 1,
+                    "text": "The optimized sample reached 940 MPa.",
+                    "text_unit_ids": [],
+                    "page": 6,
+                    "bbox": {
+                        "l": 72.4,
+                        "t": 182.1,
+                        "r": 512.8,
+                        "b": 228.6,
+                        "coord_origin": "top_left",
+                    },
+                    "char_range": {"start": 0, "end": 37},
+                },
+            ],
+        ),
+    )
+    _store_document_profiles(
+        document_profile_service,
+        collection_id,
         [
             {
                 "document_id": "paper-1",
@@ -397,40 +382,8 @@ def test_document_content_route_includes_source_locators(
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "block_id": "blk-result",
-                "block_type": "paragraph",
-                "heading_path": "Results",
-                "heading_level": 1,
-                "block_order": 1,
-                "text": "The optimized sample reached 940 MPa.",
-                "text_unit_ids": [],
-                "page": 6,
-                "bbox": json.dumps(
-                    {"l": 72.4, "t": 182.1, "r": 512.8, "b": 228.6, "coord_origin": "top_left"}
-                ),
-                "char_range": json.dumps({"start": 0, "end": 37}),
-            },
-            {
-                "document_id": "paper-1",
-                "block_id": "blk-invalid",
-                "block_type": "paragraph",
-                "heading_path": "Results",
-                "heading_level": 1,
-                "block_order": 2,
-                "text": "Missing locator paragraph.",
-                "text_unit_ids": [],
-                "page": 0,
-                "bbox": "not-json",
-                "char_range": json.dumps({"start": 20, "end": 10}),
-            },
-        ]
-    ).to_parquet(output_dir / "blocks.parquet", index=False)
+        ],
+    )
     artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
@@ -448,11 +401,6 @@ def test_document_content_route_includes_source_locators(
     assert first.char_range is not None
     assert first.char_range.start == 0
     assert first.char_range.end == 37
-
-    second = payload.blocks[1]
-    assert second.page is None
-    assert second.bbox is None
-    assert second.char_range is None
 
 
 def test_document_source_route_streams_manifest_source_file(document_services):
@@ -493,18 +441,17 @@ def test_document_source_route_streams_manifest_source_file(document_services):
 
 def test_document_source_route_resolves_profile_document_id_by_source_filename(
     document_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, artifact_registry, document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Profile Source File Collection")
     collection_id = record["collection_id"]
     paths = collection_service.get_paths(collection_id)
     output_dir = paths.output_dir
     source_path = paths.input_dir / "stored-paper.pdf"
     source_path.write_bytes(b"%PDF-1.4\nprofile fixture\n")
-    pd.DataFrame(
+    _store_document_profiles(
+        document_profile_service,
+        collection_id,
         [
             {
                 "document_id": "profile-hash-doc",
@@ -517,8 +464,8 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
                 "parsing_warnings": [],
                 "confidence": 0.91,
             }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+        ],
+    )
     artifact_registry.upsert(collection_id, output_dir)
     collection_service.repository.write_import_manifest(
         collection_id,
@@ -630,31 +577,31 @@ def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_
 
 def test_document_comparison_semantics_route_returns_404_for_missing_document(
     document_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
     collection_service, artifact_registry, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Missing Document Semantics")
     collection_id = record["collection_id"]
     output_dir = collection_service.get_paths(collection_id).output_dir
 
-    _store_core_document_semantics(comparison_service, collection_id)
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-2",
-                "collection_id": collection_id,
-                "title": "Other Paper",
-                "source_filename": "other.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.9,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
+    comparison_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            comparison_artifacts_ready=True,
+            document_profiles=(
+                DocumentProfile.from_mapping(
+                    {
+                        "document_id": "paper-2",
+                        "collection_id": collection_id,
+                        "title": "Other Paper",
+                        "source_filename": "other.txt",
+                        "doc_type": "experimental",
+                        "protocol_extractable": "yes",
+                        "confidence": 0.9,
+                    }
+                ),
+            ),
+        ),
+    )
     artifact_registry.upsert(collection_id, output_dir)
 
     with pytest.raises(HTTPException) as exc_info:

@@ -3,30 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pandas as pd
-
-from domain.core.comparison import (
-    CollectionComparableResult,
-    ComparableResult,
-    evaluate_collection_reassessment_reasons,
+from domain.ports import (
+    ArtifactRepository,
+    CoreFactRepository,
+    ProtocolArtifactRepository,
+    SourceArtifactRepository,
 )
-from domain.ports import ArtifactRepository, ProtocolArtifactRepository
 from domain.source import ArtifactStatusRecord
 from infra.persistence.factory import (
     build_artifact_repository,
+    build_core_fact_repository,
     build_protocol_artifact_repository,
+    build_source_artifact_repository,
 )
-from infra.persistence.backbone_codec import restore_frame_from_storage
-
-
-_COMPARABLE_RESULT_JSON_COLUMNS = (
-    "binding",
-    "normalized_context",
-    "axis",
-    "value",
-    "evidence",
-)
-_COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS = ("assessment", "reassessment_triggers")
 
 
 def _now_iso() -> str:
@@ -40,12 +29,21 @@ class ArtifactRegistryService:
         self,
         root_dir: Path | None = None,
         repository: ArtifactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository | None = None,
+        core_fact_repository: CoreFactRepository | None = None,
         protocol_artifact_repository: ProtocolArtifactRepository | None = None,
     ) -> None:
         self.repository = repository or build_artifact_repository(root_dir)
         self.root_dir = self.repository.root_dir
+        db_path = self.root_dir.parent / "lens.sqlite"
+        self.source_artifact_repository = (
+            source_artifact_repository or build_source_artifact_repository(db_path)
+        )
+        self.core_fact_repository = (
+            core_fact_repository or build_core_fact_repository(db_path)
+        )
         self.protocol_artifact_repository = (
-            protocol_artifact_repository or build_protocol_artifact_repository()
+            protocol_artifact_repository or build_protocol_artifact_repository(db_path)
         )
 
     def build_registry(
@@ -56,80 +54,71 @@ class ArtifactRegistryService:
         previous_payload: dict | None = None,
     ) -> dict:
         base_dir = Path(output_dir).expanduser().resolve()
-        documents_path = base_dir / "documents.parquet"
-        document_profiles_path = base_dir / "document_profiles.parquet"
-        evidence_anchors_path = base_dir / "evidence_anchors.parquet"
-        method_facts_path = base_dir / "method_facts.parquet"
-        evidence_cards_path = base_dir / "evidence_cards.parquet"
-        characterization_observations_path = base_dir / "characterization_observations.parquet"
-        structure_features_path = base_dir / "structure_features.parquet"
-        test_conditions_path = base_dir / "test_conditions.parquet"
-        baseline_references_path = base_dir / "baseline_references.parquet"
-        sample_variants_path = base_dir / "sample_variants.parquet"
-        measurement_results_path = base_dir / "measurement_results.parquet"
-        comparable_results_path = base_dir / "comparable_results.parquet"
-        collection_comparable_results_path = (
-            base_dir / "collection_comparable_results.parquet"
+        source_artifacts = self.source_artifact_repository.read_collection_artifacts(
+            collection_id
         )
-        comparison_rows_path = base_dir / "comparison_rows.parquet"
-        blocks_path = base_dir / "blocks.parquet"
-        figures_path = base_dir / "figures.parquet"
-        table_rows_path = base_dir / "table_rows.parquet"
-        table_cells_path = base_dir / "table_cells.parquet"
+        core_facts = self.core_fact_repository.read_collection_facts(collection_id)
         protocol_status = self.protocol_artifact_repository.get_collection_status(
             collection_id
         )
-        collection_scope_stale = self._collection_scope_artifacts_stale(
-            collection_id=collection_id,
-            comparable_results_path=comparable_results_path,
-            collection_comparable_results_path=collection_comparable_results_path,
+        source_artifacts_generated = not source_artifacts.is_empty()
+        evidence_cards_generated = bool(core_facts.paper_facts_ready)
+        evidence_cards_ready = bool(
+            core_facts.evidence_anchors
+            or core_facts.method_facts
+            or core_facts.measurement_results
         )
+        comparable_results_generated = bool(core_facts.comparison_artifacts_ready)
+        collection_comparable_results_generated = bool(
+            core_facts.comparison_artifacts_ready
+        )
+        comparison_rows_generated = bool(core_facts.comparison_artifacts_ready)
         payload = ArtifactStatusRecord.build(
             collection_id=collection_id,
             output_path=str(base_dir),
-            documents_generated=documents_path.exists(),
-            documents_ready=self._parquet_has_rows(documents_path),
-            document_profiles_generated=document_profiles_path.exists(),
-            document_profiles_ready=self._parquet_has_rows(document_profiles_path),
-            evidence_anchors_generated=evidence_anchors_path.exists(),
-            evidence_anchors_ready=self._parquet_has_rows(evidence_anchors_path),
-            method_facts_generated=method_facts_path.exists(),
-            method_facts_ready=self._parquet_has_rows(method_facts_path),
-            evidence_cards_generated=evidence_cards_path.exists(),
-            evidence_cards_ready=self._parquet_has_rows(evidence_cards_path),
-            characterization_observations_generated=characterization_observations_path.exists(),
-            characterization_observations_ready=self._parquet_has_rows(
-                characterization_observations_path
+            documents_generated=bool(source_artifacts.documents),
+            documents_ready=bool(source_artifacts.documents),
+            document_profiles_generated=bool(core_facts.document_profiles),
+            document_profiles_ready=bool(core_facts.document_profiles),
+            evidence_anchors_generated=bool(core_facts.paper_facts_ready),
+            evidence_anchors_ready=bool(core_facts.evidence_anchors),
+            method_facts_generated=bool(core_facts.paper_facts_ready),
+            method_facts_ready=bool(core_facts.method_facts),
+            evidence_cards_generated=evidence_cards_generated,
+            evidence_cards_ready=evidence_cards_ready,
+            characterization_observations_generated=bool(core_facts.paper_facts_ready),
+            characterization_observations_ready=bool(
+                core_facts.characterization_observations
             ),
-            structure_features_generated=structure_features_path.exists(),
-            structure_features_ready=self._parquet_has_rows(structure_features_path),
-            test_conditions_generated=test_conditions_path.exists(),
-            test_conditions_ready=self._parquet_has_rows(test_conditions_path),
-            baseline_references_generated=baseline_references_path.exists(),
-            baseline_references_ready=self._parquet_has_rows(baseline_references_path),
-            sample_variants_generated=sample_variants_path.exists(),
-            sample_variants_ready=self._parquet_has_rows(sample_variants_path),
-            measurement_results_generated=measurement_results_path.exists(),
-            measurement_results_ready=self._parquet_has_rows(measurement_results_path),
-            comparable_results_generated=comparable_results_path.exists(),
-            comparable_results_ready=self._parquet_has_rows(comparable_results_path),
-            collection_comparable_results_generated=collection_comparable_results_path.exists(),
-            collection_comparable_results_ready=self._parquet_has_rows(
-                collection_comparable_results_path
+            structure_features_generated=bool(core_facts.paper_facts_ready),
+            structure_features_ready=bool(core_facts.structure_features),
+            test_conditions_generated=bool(core_facts.paper_facts_ready),
+            test_conditions_ready=bool(core_facts.test_conditions),
+            baseline_references_generated=bool(core_facts.paper_facts_ready),
+            baseline_references_ready=bool(core_facts.baseline_references),
+            sample_variants_generated=bool(core_facts.paper_facts_ready),
+            sample_variants_ready=bool(core_facts.sample_variants),
+            measurement_results_generated=bool(core_facts.paper_facts_ready),
+            measurement_results_ready=bool(core_facts.measurement_results),
+            comparable_results_generated=comparable_results_generated,
+            comparable_results_ready=bool(core_facts.comparable_results),
+            collection_comparable_results_generated=collection_comparable_results_generated,
+            collection_comparable_results_ready=bool(
+                core_facts.collection_comparable_results
             ),
-            collection_comparable_results_stale=collection_scope_stale,
-            comparison_rows_generated=comparison_rows_path.exists(),
-            comparison_rows_ready=self._parquet_has_rows(comparison_rows_path),
-            comparison_rows_stale=collection_scope_stale and comparison_rows_path.exists(),
-            graph_stale=collection_scope_stale,
-            blocks_generated=blocks_path.exists(),
-            blocks_ready=self._parquet_has_rows(blocks_path),
-            figures_generated=figures_path.exists(),
-            figures_ready=self._parquet_has_rows(figures_path),
-            table_rows_generated=table_rows_path.exists(),
-            table_rows_ready=self._parquet_has_rows(table_rows_path),
-            table_cells_generated=table_cells_path.exists(),
-            table_cells_ready=self._parquet_has_rows(table_cells_path),
+            collection_comparable_results_stale=False,
+            comparison_rows_generated=comparison_rows_generated,
+            comparison_rows_ready=bool(core_facts.comparison_rows),
+            comparison_rows_stale=False,
+            graph_stale=False,
+            blocks_generated=source_artifacts_generated,
+            blocks_ready=bool(source_artifacts.blocks),
+            figures_generated=source_artifacts_generated,
+            figures_ready=bool(source_artifacts.figures),
+            table_rows_generated=source_artifacts_generated,
+            table_rows_ready=bool(source_artifacts.table_rows),
+            table_cells_generated=source_artifacts_generated,
+            table_cells_ready=bool(source_artifacts.table_cells),
             procedure_blocks_generated=protocol_status.procedure_blocks_generated,
             procedure_blocks_ready=protocol_status.procedure_blocks_ready,
             protocol_steps_generated=protocol_status.protocol_steps_generated,
@@ -147,15 +136,6 @@ class ArtifactRegistryService:
         ):
             payload["updated_at"] = normalized_previous["updated_at"]
         return payload
-
-    def _parquet_has_rows(self, path: Path) -> bool:
-        if not path.exists():
-            return False
-        try:
-            frame = pd.read_parquet(path)
-        except Exception:  # noqa: BLE001
-            return False
-        return not frame.empty
 
     def upsert(self, collection_id: str, output_dir: str | Path) -> dict:
         previous_payload = self.repository.read(collection_id)
@@ -186,57 +166,6 @@ class ArtifactRegistryService:
             self.repository.write(collection_id, normalized)
         return normalized
 
-    def _collection_scope_artifacts_stale(
-        self,
-        *,
-        collection_id: str,
-        comparable_results_path: Path,
-        collection_comparable_results_path: Path,
-    ) -> bool:
-        if not comparable_results_path.exists() or not collection_comparable_results_path.exists():
-            return False
-        try:
-            comparable_results = restore_frame_from_storage(
-                pd.read_parquet(comparable_results_path),
-                _COMPARABLE_RESULT_JSON_COLUMNS,
-            )
-            collection_comparable_results = restore_frame_from_storage(
-                pd.read_parquet(collection_comparable_results_path),
-                _COLLECTION_COMPARABLE_RESULT_JSON_COLUMNS,
-            )
-        except Exception:  # noqa: BLE001
-            return False
-        if comparable_results.empty or collection_comparable_results.empty:
-            return False
-
-        comparable_records: list[ComparableResult] = []
-        for _, row in comparable_results.iterrows():
-            comparable_record = ComparableResult.from_mapping(dict(row))
-            if comparable_record.comparable_result_id:
-                comparable_records.append(comparable_record)
-        scoped_records = [
-            CollectionComparableResult.from_mapping(dict(row))
-            for _, row in collection_comparable_results.iterrows()
-        ]
-        scoped_records_by_result_id = {
-            record.comparable_result_id: record
-            for record in scoped_records
-            if record.collection_id == collection_id and record.comparable_result_id
-        }
-        comparable_result_ids = {
-            record.comparable_result_id for record in comparable_records if record.comparable_result_id
-        }
-        if comparable_result_ids != set(scoped_records_by_result_id):
-            return True
-        for comparable_record in comparable_records:
-            scoped_record = scoped_records_by_result_id.get(
-                comparable_record.comparable_result_id
-            )
-            if scoped_record is None:
-                return True
-            if evaluate_collection_reassessment_reasons(scoped_record, comparable_record):
-                return True
-        return False
 
     def _payload_without_updated_at(self, payload: dict) -> dict:
         return {key: value for key, value in payload.items() if key != "updated_at"}

@@ -16,17 +16,17 @@ of truth.
 
 ### Semantic Truth
 
-- `comparable_results.parquet`
+- `comparable_results`
   reusable `ComparableResult` records for one collection build output
 
 ### Scope Truth
 
-- `collection_comparable_results.parquet`
+- `collection_comparable_results`
   current collection-scoped overlays with assessment and policy metadata
 
 ### Projection And Cache
 
-- `comparison_rows.parquet`
+- `comparison_rows`
   collection-facing row projection that may be regenerated from the semantic and
   scope artifacts
 
@@ -78,10 +78,9 @@ current collection overlays only when scope-sensitive judgment is needed.
 ## Current Contract Notes
 
 - public API authority remains [`../../specs/api.md`](../../specs/api.md)
-- workspace and readiness semantics use `comparable_results.parquet` plus
-  `collection_comparable_results.parquet` as the comparison-semantic readiness
-  basis
-- `comparison_rows.parquet` remains optional projection/cache for routes and
+- workspace and readiness semantics use repository-backed `comparable_results`
+  plus `collection_comparable_results` as the comparison-semantic readiness basis
+- `comparison_rows` remains a repository-backed projection for routes and
   downstream consumers that need row rendering
 - graph and report semantics must continue to consume Core artifacts without
   promoting row cache back into the semantic source of truth

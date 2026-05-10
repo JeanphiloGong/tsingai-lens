@@ -201,9 +201,9 @@ message 返回必须包含：
 - `graphrag_index_started`、`graphrag_index_completed`
   已退役，不再属于公开或内部活动合同
 - Source 结构产物当前包括
-  `documents.parquet`、`text_units.parquet`、`blocks.parquet`、
-  `figures.parquet`、`tables.parquet`、`table_rows.parquet`、
-  `table_cells.parquet` 以及 `image_assets/`
+  `documents`、`text_units`、`blocks`、
+  `figures`、`tables`、`table_rows`、
+  `table_cells` 以及 `image_assets/`
 - `GET /api/v1/tasks/{task_id}/artifacts`
   与 workspace 内的 `artifacts` 都应对 comparison semantic 相关产物额外暴露
   `*_stale` 字段，用来表达：
@@ -243,14 +243,14 @@ message 返回必须包含：
 - 状态值应使用显式语义，例如
   `not_started | processing | ready | limited | not_applicable | failed`
 - `workflow.results`
-  应以 `comparable_results.parquet` 与
-  `collection_comparable_results.parquet` 作为 readiness 语义判断
-  - `comparison_rows.parquet` 只是可重建 projection/cache，不是 results 的
+  应以 `comparable_results` 与
+  `collection_comparable_results` 作为 readiness 语义判断
+  - `comparison_rows` 只是可重建 projection/cache，不是 results 的
     contract 前提
 - `workflow.comparisons`
-  应以 `comparable_results.parquet` 与
-  `collection_comparable_results.parquet` 作为 readiness 语义判断
-  - `comparison_rows.parquet` 只是可重建 projection/cache，不是 comparisons
+  应以 `comparable_results` 与
+  `collection_comparable_results` 作为 readiness 语义判断
+  - `comparison_rows` 只是可重建 projection/cache，不是 comparisons
     或 graph 的 contract 前提
 - `status_summary=ready`
   应表示 collection-scoped comparison read model 已就绪，即使 row cache 尚未预生成
@@ -297,29 +297,29 @@ message 返回必须包含：
   - `generated=true` 仅表示文件或投影前提存在
   - `ready=true` 还要求它们当前没有 stale
 - `figures_generated` / `figures_ready`
-  对应 Source 层 `figures.parquet` 的生成与可消费状态
+  对应 Source 层 `figures` 的生成与可消费状态
   - figure 行可以存在而 `image_path` 为空
   - 这种情况下仍应保留 figure traceability 行，不应直接丢弃
 - `graph_generated`
-  表示 `document_profiles.parquet`、`evidence_cards.parquet`、
-  `comparable_results.parquet`、`collection_comparable_results.parquet`
+  表示 `document_profiles`、`evidence_cards`、
+  `comparable_results`、`collection_comparable_results`
   四个 Core graph 语义输入文件都已生成
 - `graph_ready`
   表示上述 Core graph 语义输入已具备图投影消费条件，而不是
-  `entities.parquet` / `relationships.parquet` 是否存在
+  `entities` / `relationships` 是否存在
 - `artifacts` 不再暴露 `graphml_generated` / `graphml_ready`
   因为 GraphML 已改为基于 Core graph 的按需导出能力，不再是构建阶段的 readiness 产物
 - `capabilities.can_download_graphml`
   应与 `graph_ready` 保持一致，表达当前 collection 是否可以导出按需生成的 GraphML
 - `capabilities.can_view_results`
-  应在 `comparable_results.parquet` 与 `collection_comparable_results.parquet`
+  应在 `comparable_results` 与 `collection_comparable_results`
   已生成时为 `true`
   - 它表达当前 collection 的 product-facing result surface 可被消费
 - `capabilities.can_view_comparable_results`
-  应在 `comparable_results.parquet` 与 `collection_comparable_results.parquet`
+  应在 `comparable_results` 与 `collection_comparable_results`
   已生成时为 `true`
   - 它表达 collection-filtered corpus comparable-result surface 可被消费
-  - 不要求 `comparison_rows.parquet` 预先存在
+  - 不要求 `comparison_rows` 预先存在
 - `capabilities.can_view_research_view`
   应在 paper facts 已生成时为 `true`
   - 它表达 sample matrix / paper coverage 聚合有可消费输入
@@ -783,7 +783,7 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
 - 结果页应同时提供回到 comparison 视图和 source document 的链接
 - 结果页不应把 `binding`、`normalized_context`、`collection_overlays`
   这些 raw semantic 字段直接作为主页面合同
-- `comparison_rows.parquet` 不是 results contract 的语义真源
+- `comparison_rows` 不是 results contract 的语义真源
 - 如果 collection 还没有生成 comparable result semantic artifacts，应返回
   `409 results_not_ready`
 
@@ -856,14 +856,14 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
   应作为 document-side grouped drilldown 的顶层字段，由 backend 从同一 semantic
   truth 投影而来
 - `collection_overlays`
-  必须来自 `collection_comparable_results.parquet`，按 `comparable_result_id`
+  必须来自 `collection_comparable_results`，按 `comparable_result_id`
   关联
 - `collection_overlays`
   必须显式带出评估策略元数据与 reassessment trigger，而不是只返回裸
   assessment 结果
 - `projected_rows`
   只是按需附带的 projection/cache 视图，默认可为空或 `null`
-- 该接口不应要求 `comparison_rows.parquet` 预先存在
+- 该接口不应要求 `comparison_rows` 预先存在
 
 查询参数：
 
@@ -949,7 +949,7 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
 - 如果 `collection_id` 不存在：
   - 结果集按 corpus-wide scan 返回
   - 可附带所有匹配 collection 的 current overlays
-- 该接口不应要求 `comparison_rows.parquet` 预先存在
+- 该接口不应要求 `comparison_rows` 预先存在
 - `GET /api/v1/comparable-results/{comparable_result_id}`
   读取单个 corpus comparable result；如果同时传 `collection_id`，则按该 collection 的
   current scope 解释是否命中
@@ -1112,8 +1112,8 @@ comparison 对 traceback 的依赖约定：
 
 - 一行表示一个可供 collection 级检查的 normalized result，不是 pairwise 对比对象
 - `/comparisons`
-  当前以 `comparable_results.parquet` +
-  `collection_comparable_results.parquet` 为语义真源，并可按需重投影 row cache
+  当前以 `comparable_results` +
+  `collection_comparable_results` 为语义真源，并可按需重投影 row cache
 - `comparability_status` 使用
   `comparable | limited | not_comparable | insufficient`
 - 前端应把 comparison rows 作为主比较表，而不是把 protocol steps 当主表
@@ -1148,14 +1148,14 @@ comparison 对 traceback 的依赖约定：
 Graph 语义约束：
 
 - `/graph` 与 `/graphml` 只消费
-  `document_profiles.parquet`、`evidence_cards.parquet`、
-  `comparable_results.parquet`、`collection_comparable_results.parquet`
+  `document_profiles`、`evidence_cards`、
+  `comparable_results`、`collection_comparable_results`
 - graph 与 report 派生读路径应通过共享的 in-memory projection substrate
-  从这些 semantic artifacts 投影，不要求 `comparison_rows.parquet` 预先存在
+  从这些 semantic artifacts 投影，不要求 `comparison_rows` 预先存在
 - 它们当前是 Core-derived graph projection，不再以
-  `entities.parquet`、`relationships.parquet`、`communities.parquet`
+  `entities`、`relationships`、`communities`
   作为产品语义前提
-- `comparison_rows.parquet` 在这条链路里只是可重建的 projection/cache，
+- `comparison_rows` 在这条链路里只是可重建的 projection/cache，
   graph/report 请求不应把它当成必需输入，也不应为了只读访问而要求先物化它
 - `/graph` 返回结构字段：
   `collection_id / nodes / edges / truncated`

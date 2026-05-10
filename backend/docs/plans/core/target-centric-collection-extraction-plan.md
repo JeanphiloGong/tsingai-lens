@@ -338,33 +338,42 @@ Facts should remain target-scoped. A paper can contribute different facts to
 different targets, and each contribution should preserve the target that
 authorized the extraction.
 
-## Artifacts
+## Core Records
 
 The first implementation can keep routing and target state internal to the
 rebuild run while logging enough detail for diagnosis.
 
-Once the flow is stable, Core can add internal artifacts such as:
+Once the flow is stable, Core should persist target state as database records
+through the Core persistence boundary rather than as standalone repository records.
+The first record families should be:
 
-- `collection_research_targets.parquet`
-- `target_paper_frames.parquet`
-- `target_evidence_routes.parquet`
-- `target_scoped_measurement_results.parquet`
+- `PaperSkim`
+- `ResearchObjective`
+- `ObjectivePaperFrame`
+- `EvidenceRoute`
+- target-scoped measurement and comparison records
 
-These should remain Core internal artifacts in the first wave. They should not
-become public frontend API contracts until the product surface is explicitly
-designed around target selection.
+The SQLite implementation should store them in Core-owned tables such as
+`core_paper_skims`, `core_research_objectives`,
+`core_objective_paper_frames`, and `core_objective_evidence_routes`. These
+records should remain Core internal in the first wave. They should not become
+public frontend API contracts until the product surface is explicitly designed
+around target selection.
 
 ## Execution Order
 
-1. Add collection paper skim over existing Source artifacts and document
+1. Extend Core domain records, `CoreFactSet`, and `CoreFactRepository` for
+   paper skim and research-objective records.
+2. Add SQLite persistence tables and repository methods for those records.
+3. Add collection paper skim over existing Source records and document
    profiles.
-2. Add collection research-target discovery from paper skim outputs.
-3. Start one target process per discovered target.
-4. Add target-paper framing for every target and paper.
-5. Add target context refinement from target-paper frames.
-6. Feed refined target context into section and table routing.
-7. Run targeted fact extraction only on target-authorized source units.
-8. Assemble comparison rows within each target before any cross-target merge.
+4. Add collection research-target discovery from paper skim records.
+5. Start one target process per discovered target.
+6. Add target-paper framing for every target and paper.
+7. Add target context refinement from target-paper frames.
+8. Feed refined target context into section and table routing.
+9. Run targeted fact extraction only on target-authorized source units.
+10. Assemble comparison rows within each target before any cross-target merge.
 
 ## Verification
 
@@ -402,7 +411,7 @@ This plan does not require:
 - public API response-shape changes
 - Source parser changes
 - sending raw PDFs directly to the model
-- durable route artifacts before the process is stable
+- durable route records before the process is stable
 - cross-target report generation
 
 Those can follow after the target-centric Core extraction path proves that it

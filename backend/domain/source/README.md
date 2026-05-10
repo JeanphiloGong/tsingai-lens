@@ -25,14 +25,14 @@ repositories when a build replaces a collection's document-structure handoff.
 
 ## Boundaries
 
-Source domain code must not depend on parser libraries, pandas, parquet, PDF
+Source domain code must not depend on parser libraries, pandas, storage files, PDF
 cropping, Docling objects, or storage implementations. Those details belong to
 `backend/infra/source/`.
 
 Infrastructure code parses inputs and persists artifacts. When it needs to
 create Source handoff rows, it should construct these domain records first.
-SQLite repositories may persist these records directly; parquet output is a
-debug/export representation, not the Source business model.
+SQLite repositories persist these records directly; storage layout details are
+not the Source business model.
 
 ## Related Infrastructure
 
@@ -41,4 +41,4 @@ debug/export representation, not the Source business model.
 - `backend/infra/source/runtime/mapping/`
   Parser-output mapping into Source domain records and artifact rows.
 - `backend/infra/source/contracts/`
-  Persisted artifact column ordering for parquet/json handoff files.
+  Persisted artifact field ordering and schema metadata.

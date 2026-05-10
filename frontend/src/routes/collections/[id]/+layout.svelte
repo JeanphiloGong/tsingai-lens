@@ -41,7 +41,6 @@
 	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/evidence`;
 	$: moreActive =
 		$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`) ||
-		$page.url.pathname.startsWith(`/collections/${collectionId}/assistant`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/results`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`);
@@ -168,6 +167,12 @@
 		{$t('collection.tabs.papers')}
 	</a>
 	<a
+		href={`/collections/${collectionId}/assistant`}
+		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/assistant`)}
+	>
+		{$t('collection.tabs.assistant')}
+	</a>
+	<a
 		href={`/collections/${collectionId}/graph`}
 		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/graph`)}
 	>
@@ -181,12 +186,6 @@
 				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`)}
 			>
 				{$t('collection.tabs.allComparisons')}
-			</a>
-			<a
-				href={`/collections/${collectionId}/assistant`}
-				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/assistant`)}
-			>
-				{$t('collection.tabs.assistant')}
 			</a>
 			<a
 				href={evidenceHref}

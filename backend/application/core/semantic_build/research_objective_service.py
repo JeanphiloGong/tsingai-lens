@@ -24,7 +24,10 @@ from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
 )
-from .llm.schemas import StructuredObjectiveMergePlan
+from .llm.schemas import (
+    StructuredAxisCanonicalizationPlan,
+    StructuredObjectiveMergePlan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +189,12 @@ class ResearchObjectiveService:
                 for item in parsed_objectives.objectives
             )
             if is_question_shaped_objective(objective)
+        )
+        research_objectives = self._canonicalize_research_objective_axes_with_llm(
+            collection_id=collection_id,
+            extractor=extractor,
+            paper_skims=tuple(paper_skims),
+            objectives=research_objectives,
         )
         research_objectives = self._merge_research_objectives_with_llm(
             collection_id=collection_id,
@@ -427,6 +436,161 @@ class ResearchObjectiveService:
             return True
         return False
 
+    def _canonicalize_research_objective_axes_with_llm(
+        self,
+        *,
+        collection_id: str,
+        extractor: CoreLLMStructuredExtractor,
+        paper_skims: tuple[PaperSkim, ...],
+        objectives: tuple[ResearchObjective, ...],
+    ) -> tuple[ResearchObjective, ...]:
+        axis_candidates = self._build_axis_canonicalization_candidates(objectives)
+        if sum(len(values) for values in axis_candidates.values()) <= 1:
+            return objectives
+        payload = {
+            "collection_id": collection_id,
+            "paper_skims": [skim.to_record() for skim in paper_skims],
+            "axis_candidates": axis_candidates,
+        }
+        try:
+            canonicalization_plan = extractor.canonicalize_research_objective_axes(
+                payload
+            )
+        except Exception:
+            logger.warning(
+                "Research objective axis canonicalization failed; using normalized axes collection_id=%s",
+                collection_id,
+                exc_info=True,
+            )
+            return objectives
+
+        axis_mapping = self._validate_axis_canonicalization_plan(
+            canonicalization_plan,
+            axis_candidates=axis_candidates,
+        )
+        if axis_mapping is None:
+            logger.warning(
+                "Research objective axis canonicalization rejected; using normalized axes collection_id=%s",
+                collection_id,
+            )
+            return objectives
+        return tuple(
+            self._apply_axis_canonicalization(objective, axis_mapping)
+            for objective in objectives
+        )
+
+    def _build_axis_canonicalization_candidates(
+        self,
+        objectives: tuple[ResearchObjective, ...],
+    ) -> dict[str, list[str]]:
+        return {
+            "material": self._unique_axis_values(
+                value
+                for objective in objectives
+                for value in objective.material_scope
+            ),
+            "process": self._unique_axis_values(
+                value
+                for objective in objectives
+                for value in objective.process_axes
+            ),
+            "property": self._unique_axis_values(
+                value
+                for objective in objectives
+                for value in objective.property_axes
+            ),
+        }
+
+    def _validate_axis_canonicalization_plan(
+        self,
+        canonicalization_plan: StructuredAxisCanonicalizationPlan,
+        *,
+        axis_candidates: dict[str, list[str]],
+    ) -> dict[str, dict[str, str]] | None:
+        expected_keys = {
+            axis_type: {
+                self._axis_key(value)
+                for value in values
+                if self._axis_key(value)
+            }
+            for axis_type, values in axis_candidates.items()
+        }
+        seen_keys: dict[str, set[str]] = {
+            axis_type: set()
+            for axis_type in expected_keys
+        }
+        axis_mapping: dict[str, dict[str, str]] = {
+            axis_type: {}
+            for axis_type in expected_keys
+        }
+
+        for group in canonicalization_plan.axis_groups:
+            axis_type = group.axis_type
+            if axis_type not in expected_keys:
+                return None
+            aliases = tuple(str(value or "").strip() for value in group.aliases)
+            canonical = str(group.canonical or "").strip()
+            canonical_key = self._axis_key(canonical)
+            alias_keys = tuple(self._axis_key(alias) for alias in aliases)
+            if not aliases or not canonical or not canonical_key:
+                return None
+            if canonical_key not in alias_keys:
+                return None
+            for alias, alias_key in zip(aliases, alias_keys, strict=True):
+                if not alias_key:
+                    return None
+                if not self._axis_alias_matches_canonical(alias, canonical):
+                    return None
+                if alias_key not in expected_keys[axis_type]:
+                    return None
+                if alias_key in seen_keys[axis_type]:
+                    return None
+                seen_keys[axis_type].add(alias_key)
+                axis_mapping[axis_type][alias_key] = canonical
+
+        for axis_type, expected in expected_keys.items():
+            if seen_keys[axis_type] != expected:
+                return None
+        return axis_mapping
+
+    def _apply_axis_canonicalization(
+        self,
+        objective: ResearchObjective,
+        axis_mapping: dict[str, dict[str, str]],
+    ) -> ResearchObjective:
+        payload = objective.to_record()
+        payload["material_scope"] = self._canonicalize_axis_values(
+            objective.material_scope,
+            axis_type="material",
+            axis_mapping=axis_mapping,
+        )
+        payload["process_axes"] = self._canonicalize_axis_values(
+            objective.process_axes,
+            axis_type="process",
+            axis_mapping=axis_mapping,
+        )
+        payload["property_axes"] = self._canonicalize_axis_values(
+            objective.property_axes,
+            axis_type="property",
+            axis_mapping=axis_mapping,
+        )
+        return ResearchObjective.from_mapping(payload)
+
+    def _canonicalize_axis_values(
+        self,
+        values: tuple[str, ...],
+        *,
+        axis_type: str,
+        axis_mapping: dict[str, dict[str, str]],
+    ) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        mapping = axis_mapping.get(axis_type, {})
+        for value in values:
+            canonical = mapping.get(self._axis_key(value), value)
+            self._append_unique_axis(merged, seen, canonical)
+        return merged
+
     def _merge_research_objectives_with_llm(
         self,
         *,
@@ -622,6 +786,9 @@ class ResearchObjectiveService:
             if key not in allowed_axes:
                 return None
             self._append_unique_axis(merged, seen, value)
+        for objective in source_objectives:
+            for value in getattr(objective, source_field):
+                self._append_unique_axis(merged, seen, value)
         return merged
 
     def _allowed_material_axes(
@@ -661,6 +828,13 @@ class ResearchObjectiveService:
 
     def _axis_key_set(self, *values: Any) -> set[str]:
         return {self._axis_key(value) for value in values if self._axis_key(value)}
+
+    def _unique_axis_values(self, values: Any) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            self._append_unique_axis(merged, seen, value)
+        return merged
 
     def _merge_objective_axes(
         self,
@@ -730,6 +904,48 @@ class ResearchObjectiveService:
             if base.strip() and acronym.isalpha() and len(acronym) <= 8:
                 text = base.strip()
         return " ".join(text.split())
+
+    def _axis_alias_matches_canonical(self, alias: str, canonical: str) -> bool:
+        alias_key = self._axis_key(alias)
+        canonical_key = self._axis_key(canonical)
+        if alias_key == canonical_key:
+            return True
+        if self._is_acronym_match(alias_key, canonical_key):
+            return True
+        alias_tokens = self._axis_token_set(alias_key)
+        canonical_tokens = self._axis_token_set(canonical_key)
+        if not alias_tokens or not canonical_tokens:
+            return False
+        overlap = alias_tokens & canonical_tokens
+        return len(overlap) / max(len(alias_tokens), len(canonical_tokens)) >= 0.75
+
+    def _is_acronym_match(self, left: str, right: str) -> bool:
+        for short, long in ((left, right), (right, left)):
+            if len(short) > 8 or not short.isalpha():
+                continue
+            acronym = "".join(token[0] for token in long.split() if token)
+            if acronym and short == acronym:
+                return True
+        return False
+
+    def _axis_token_set(self, value: str) -> set[str]:
+        return {
+            self._normalize_axis_token(token)
+            for token in value.replace("-", " ").replace("/", " ").split()
+            if self._normalize_axis_token(token)
+        }
+
+    def _normalize_axis_token(self, token: str) -> str:
+        normalized = "".join(char for char in token.casefold() if char.isalnum())
+        if len(normalized) > 5 and normalized.endswith("ing"):
+            normalized = normalized[:-3]
+            if len(normalized) >= 2 and normalized[-1] == normalized[-2]:
+                normalized = normalized[:-1]
+        if len(normalized) > 4 and normalized.endswith("ies"):
+            normalized = f"{normalized[:-3]}y"
+        elif len(normalized) > 3 and normalized.endswith("s"):
+            normalized = normalized[:-1]
+        return normalized
 
     def _join_axis_text(self, value: Any) -> str:
         if not isinstance(value, list):

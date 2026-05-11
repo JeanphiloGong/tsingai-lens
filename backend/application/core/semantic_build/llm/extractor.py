@@ -11,6 +11,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 from .schemas import (
+    StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
     StructuredObjectiveMergePlan,
     StructuredPaperSkim,
@@ -21,6 +22,7 @@ from .schemas import (
 from .prompts import (
     build_document_profile_prompt,
     build_paper_skim_prompt,
+    build_research_axis_canonicalization_prompt,
     build_research_objective_discovery_prompt,
     build_research_objective_merge_prompt,
     build_table_batch_mentions_prompt,
@@ -129,6 +131,22 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredObjectiveMergePlan):
             raise TypeError("unexpected research objective merge response type")
+        return response
+
+    def canonicalize_research_objective_axes(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredAxisCanonicalizationPlan:
+        system_prompt, user_prompt = build_research_axis_canonicalization_prompt(
+            payload
+        )
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredAxisCanonicalizationPlan,
+        )
+        if not isinstance(response, StructuredAxisCanonicalizationPlan):
+            raise TypeError("unexpected research axis canonicalization response type")
         return response
 
     def _parse_structured_response(

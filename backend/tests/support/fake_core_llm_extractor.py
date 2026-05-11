@@ -5,6 +5,8 @@ from typing import Any
 
 from application.core.semantic_build.llm.schemas import (
     MeasurementValuePayload,
+    StructuredAxisCanonicalizationGroup,
+    StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
     StructuredPaperSkim,
     StructuredResearchObjective,
@@ -279,6 +281,32 @@ class FakeCoreLLMStructuredExtractor:
                 )
             )
         return StructuredResearchObjectives(objectives=objectives)
+
+    def canonicalize_research_objective_axes(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredAxisCanonicalizationPlan:
+        axis_candidates = (
+            payload.get("axis_candidates")
+            if isinstance(payload.get("axis_candidates"), dict)
+            else {}
+        )
+        return StructuredAxisCanonicalizationPlan(
+            axis_groups=[
+                StructuredAxisCanonicalizationGroup(
+                    axis_type=axis_type,
+                    canonical=str(value),
+                    aliases=[str(value)],
+                    confidence=1.0,
+                    reason="kept separate",
+                )
+                for axis_type, values in axis_candidates.items()
+                if axis_type in {"material", "process", "property"}
+                and isinstance(values, list)
+                for value in values
+                if str(value).strip()
+            ]
+        )
 
     def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
         document_title = str(payload.get("document_title") or "")

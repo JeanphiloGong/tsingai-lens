@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.schemas import (
+    StructuredAxisCanonicalizationPlan,
     StructuredExtractionBundle,
     StructuredObjectiveMergePlan,
     StructuredPaperSkim,
@@ -186,6 +187,40 @@ def test_core_llm_extractor_validates_research_objective_response():
 
     assert isinstance(objectives, StructuredResearchObjectives)
     assert objectives.objectives[0].question.startswith("How does heat treatment")
+
+
+def test_core_llm_extractor_validates_axis_canonicalization_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "axis_groups": [
+            {
+              "axis_type": "process",
+              "canonical": "scanning strategy",
+              "aliases": ["scanning strategy", "scan strategy"],
+              "confidence": 0.95,
+              "reason": "same process variable phrased two ways"
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    canonicalization_plan = extractor.canonicalize_research_objective_axes(
+        {
+            "collection_id": "col-1",
+            "paper_skims": [],
+            "axis_candidates": {
+                "material": [],
+                "process": ["scanning strategy", "scan strategy"],
+                "property": [],
+            },
+        }
+    )
+
+    assert isinstance(canonicalization_plan, StructuredAxisCanonicalizationPlan)
+    assert canonicalization_plan.axis_groups[0].canonical == "scanning strategy"
 
 
 def test_core_llm_extractor_validates_research_objective_merge_response():

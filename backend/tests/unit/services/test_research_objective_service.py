@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.semantic_build.llm.schemas import (
+    StructuredAxisCanonicalizationGroup,
+    StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
     StructuredObjectiveMergeGroup,
     StructuredObjectiveMergePlan,
@@ -21,6 +23,7 @@ class _ObjectiveExtractor:
     def __init__(self) -> None:
         self.skim_payloads: list[dict[str, Any]] = []
         self.discovery_payloads: list[dict[str, Any]] = []
+        self.canonicalization_payloads: list[dict[str, Any]] = []
         self.merge_payloads: list[dict[str, Any]] = []
 
     def extract_document_profile(
@@ -92,6 +95,25 @@ class _ObjectiveExtractor:
                     confidence=0.4,
                     reason="plain material list should be filtered",
                 ),
+            ]
+        )
+
+    def canonicalize_research_objective_axes(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredAxisCanonicalizationPlan:
+        self.canonicalization_payloads.append(payload)
+        return StructuredAxisCanonicalizationPlan(
+            axis_groups=[
+                StructuredAxisCanonicalizationGroup(
+                    axis_type=axis_type,
+                    canonical=value,
+                    aliases=[value],
+                    confidence=1.0,
+                    reason="kept separate",
+                )
+                for axis_type, values in payload["axis_candidates"].items()
+                for value in values
             ]
         )
 
@@ -334,6 +356,142 @@ class _DroppedObjectiveMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                     confidence=candidate["confidence"],
                     reason="invalid plan drops other candidates",
                 )
+            ]
+        )
+
+
+class _CanonicalizingAxisExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        self.skim_payloads.append(payload)
+        return StructuredPaperSkim(
+            doc_role="experimental",
+            candidate_materials=["316L stainless steel"],
+            candidate_processes=["Selective Laser Melting", "scanning strategy"],
+            candidate_properties=[
+                "mechanical properties",
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+                "microhardness",
+                "densification",
+                "microstructure",
+            ],
+            changed_variables=[
+                "energy density",
+                "scan strategy",
+                "scanning speed",
+            ],
+            possible_objectives=[
+                "How do SLM processing parameters affect 316L stainless steel?"
+            ],
+            evidence_density="high",
+            confidence=0.91,
+            warnings=[],
+        )
+
+    def canonicalize_research_objective_axes(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredAxisCanonicalizationPlan:
+        self.canonicalization_payloads.append(payload)
+        return StructuredAxisCanonicalizationPlan(
+            axis_groups=[
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="material",
+                    canonical=value,
+                    aliases=[value],
+                    confidence=1.0,
+                    reason="kept separate",
+                )
+                for value in payload["axis_candidates"]["material"]
+            ]
+            + [
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="process",
+                    canonical="scanning strategy",
+                    aliases=["scanning strategy", "scan strategy"],
+                    confidence=0.95,
+                    reason="same process variable phrased two ways",
+                ),
+                *[
+                    StructuredAxisCanonicalizationGroup(
+                        axis_type="process",
+                        canonical=value,
+                        aliases=[value],
+                        confidence=1.0,
+                        reason="kept separate",
+                    )
+                    for value in payload["axis_candidates"]["process"]
+                    if value not in {"scanning strategy", "scan strategy"}
+                ],
+            ]
+            + [
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="property",
+                    canonical=value,
+                    aliases=[value],
+                    confidence=1.0,
+                    reason="kept separate",
+                )
+                for value in payload["axis_candidates"]["property"]
+            ]
+        )
+
+
+class _InvalidAxisCanonicalizationExtractor(_CanonicalizingAxisExtractor):
+    def canonicalize_research_objective_axes(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredAxisCanonicalizationPlan:
+        self.canonicalization_payloads.append(payload)
+        return StructuredAxisCanonicalizationPlan(
+            axis_groups=[
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="process",
+                    canonical="scanning strategy",
+                    aliases=["scanning strategy", "scan strategy"],
+                    confidence=0.95,
+                    reason="invalid plan drops material and property axes",
+                )
+            ]
+        )
+
+
+class _OverbroadAxisCanonicalizationExtractor(_CanonicalizingAxisExtractor):
+    def canonicalize_research_objective_axes(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredAxisCanonicalizationPlan:
+        self.canonicalization_payloads.append(payload)
+        return StructuredAxisCanonicalizationPlan(
+            axis_groups=[
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="material",
+                    canonical=value,
+                    aliases=[value],
+                    confidence=1.0,
+                    reason="kept separate",
+                )
+                for value in payload["axis_candidates"]["material"]
+            ]
+            + [
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="process",
+                    canonical="Selective Laser Melting",
+                    aliases=payload["axis_candidates"]["process"],
+                    confidence=0.9,
+                    reason="invalidly collapses distinct process axes",
+                ),
+            ]
+            + [
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="property",
+                    canonical=value,
+                    aliases=[value],
+                    confidence=1.0,
+                    reason="kept separate",
+                )
+                for value in payload["axis_candidates"]["property"]
             ]
         )
 
@@ -616,6 +774,61 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
         "microhardness",
     )
     assert mechanical_objective.question.startswith("How do")
+
+
+def test_research_objective_service_canonicalizes_axis_aliases_with_llm(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _CanonicalizingAxisExtractor(),
+    )
+
+    assert len(objectives) == 2
+    all_process_axes = [
+        process_axis
+        for objective in objectives
+        for process_axis in objective.process_axes
+    ]
+    assert "scanning strategy" in all_process_axes
+    assert "scan strategy" not in all_process_axes
+
+
+def test_research_objective_service_falls_back_when_axis_plan_drops_axes(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _InvalidAxisCanonicalizationExtractor(),
+    )
+
+    all_process_axes = [
+        process_axis
+        for objective in objectives
+        for process_axis in objective.process_axes
+    ]
+    assert "scanning strategy" in all_process_axes
+    assert "scan strategy" in all_process_axes
+
+
+def test_research_objective_service_rejects_overbroad_axis_canonicalization(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _OverbroadAxisCanonicalizationExtractor(),
+    )
+
+    assert len(objectives) == 2
+    all_process_axes = [
+        process_axis
+        for objective in objectives
+        for process_axis in objective.process_axes
+    ]
+    assert "Selective Laser Melting" in all_process_axes
+    assert "energy density" in all_process_axes
+    assert "scanning speed" in all_process_axes
+    assert "scan strategy" in all_process_axes
 
 
 def test_research_objective_service_falls_back_when_merge_plan_drops_objective(

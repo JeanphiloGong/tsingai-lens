@@ -638,6 +638,30 @@ class StructuredResearchObjectives(_StrictModel):
         return _normalize_list_container(value)
 
 
+class StructuredAxisCanonicalizationGroup(_StrictModel):
+    axis_type: Literal["material", "process", "property"]
+    canonical: str
+    aliases: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    reason: str
+
+    @field_validator("aliases", mode="before")
+    @classmethod
+    def _normalize_aliases(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredAxisCanonicalizationPlan(_StrictModel):
+    axis_groups: list[StructuredAxisCanonicalizationGroup] = Field(
+        default_factory=list
+    )
+
+    @field_validator("axis_groups", mode="before")
+    @classmethod
+    def _normalize_axis_groups(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
 class StructuredObjectiveMergeGroup(_StrictModel):
     source_objective_ids: list[str] = Field(default_factory=list)
     question: str

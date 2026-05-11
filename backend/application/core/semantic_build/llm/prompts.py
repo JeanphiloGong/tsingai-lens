@@ -427,9 +427,43 @@ def build_research_objective_discovery_prompt(
         "Do not create one objective per mechanical endpoint. Group related "
         "mechanical endpoints into one objective and list the specific endpoints "
         "inside `property_axes`.\n"
+        "Do not collapse distinct `possible_objectives` from a paper skim when "
+        "they cover different property axes. Keep an objective about "
+        "densification/microstructure separate from one about mechanical "
+        "properties unless the skim only provides one explicitly integrated "
+        "research question.\n"
         "For PBF/SLM parameter papers, a good objective set often separates: "
         "densification/relative density, microstructure, and grouped mechanical "
         "properties, instead of four separate tensile/hardness questions.\n"
+    )
+    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+
+
+def build_research_axis_canonicalization_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Canonicalize axis labels used by already-discovered research objectives.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with an `axis_groups` array.\n"
+        "This is axis-label canonicalization, not objective discovery or objective "
+        "merge.\n"
+        "Hard constraints:\n"
+        "- Use only labels from `axis_candidates`. Do not invent new axis labels.\n"
+        "- `canonical` must be copied exactly from one of the group's `aliases`.\n"
+        "- Every candidate axis label must appear exactly once in `aliases` for "
+        "its own axis_type.\n"
+        "- Do not mix axis types. A material alias may only group with material "
+        "aliases; process only with process; property only with property.\n"
+        "- Group aliases only when they clearly refer to the same axis in this "
+        "collection context, such as spelling, acronym, singular/plural, or "
+        "wording variants.\n"
+        "- Do not group broad concepts with specific endpoints unless the labels "
+        "are genuinely the same axis. For example, a general performance category "
+        "should not absorb several distinct measured endpoints.\n"
+        "- If uncertain, keep the label as a single-alias group.\n"
+        "For each group, provide a short reason grounded in the labels and paper "
+        "skim context.\n"
     )
     return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
 

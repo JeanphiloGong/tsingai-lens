@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.schemas import (
     StructuredExtractionBundle,
+    StructuredObjectiveMergePlan,
     StructuredPaperSkim,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
@@ -185,6 +186,39 @@ def test_core_llm_extractor_validates_research_objective_response():
 
     assert isinstance(objectives, StructuredResearchObjectives)
     assert objectives.objectives[0].question.startswith("How does heat treatment")
+
+
+def test_core_llm_extractor_validates_research_objective_merge_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "merged_objectives": [
+            {
+              "source_objective_ids": ["obj-1", "obj-2"],
+              "question": "How do SLM parameters affect mechanical properties of 316L stainless steel?",
+              "material_scope": ["316L stainless steel"],
+              "process_axes": ["Selective Laser Melting", "energy density"],
+              "property_axes": ["yield strength", "elongation"],
+              "comparison_intent": "compare SLM parameter effects on mechanical properties",
+              "confidence": 0.88,
+              "reason": "the source objectives describe the same mechanical comparison"
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    merge_plan = extractor.merge_research_objectives(
+        {
+            "collection_id": "col-1",
+            "paper_skims": [],
+            "candidate_objectives": [],
+        }
+    )
+
+    assert isinstance(merge_plan, StructuredObjectiveMergePlan)
+    assert merge_plan.merged_objectives[0].source_objective_ids == ["obj-1", "obj-2"]
 
 
 def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():

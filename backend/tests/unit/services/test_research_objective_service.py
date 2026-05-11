@@ -4,6 +4,8 @@ from typing import Any
 
 from application.core.semantic_build.llm.schemas import (
     StructuredDocumentProfile,
+    StructuredObjectiveMergeGroup,
+    StructuredObjectiveMergePlan,
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
@@ -19,6 +21,7 @@ class _ObjectiveExtractor:
     def __init__(self) -> None:
         self.skim_payloads: list[dict[str, Any]] = []
         self.discovery_payloads: list[dict[str, Any]] = []
+        self.merge_payloads: list[dict[str, Any]] = []
 
     def extract_document_profile(
         self,
@@ -89,6 +92,27 @@ class _ObjectiveExtractor:
                     confidence=0.4,
                     reason="plain material list should be filtered",
                 ),
+            ]
+        )
+
+    def merge_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveMergePlan:
+        self.merge_payloads.append(payload)
+        return StructuredObjectiveMergePlan(
+            merged_objectives=[
+                StructuredObjectiveMergeGroup(
+                    source_objective_ids=[candidate["objective_id"]],
+                    question=candidate["question"],
+                    material_scope=candidate["material_scope"],
+                    process_axes=candidate["process_axes"],
+                    property_axes=candidate["property_axes"],
+                    comparison_intent=candidate["comparison_intent"],
+                    confidence=candidate["confidence"],
+                    reason=candidate["reason"],
+                )
+                for candidate in payload["candidate_objectives"]
             ]
         )
 
@@ -229,6 +253,165 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                 ),
             ]
         )
+
+    def merge_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveMergePlan:
+        self.merge_payloads.append(payload)
+        candidates = payload["candidate_objectives"]
+        structure_candidates = [
+            candidate
+            for candidate in candidates
+            if "densification" in candidate["property_axes"]
+        ]
+        mechanical_candidates = [
+            candidate
+            for candidate in candidates
+            if "yield strength" in candidate["property_axes"]
+        ]
+        return StructuredObjectiveMergePlan(
+            merged_objectives=[
+                StructuredObjectiveMergeGroup(
+                    source_objective_ids=[
+                        candidate["objective_id"]
+                        for candidate in structure_candidates
+                    ],
+                    question=structure_candidates[0]["question"],
+                    material_scope=structure_candidates[0]["material_scope"],
+                    process_axes=structure_candidates[0]["process_axes"],
+                    property_axes=structure_candidates[0]["property_axes"],
+                    comparison_intent=structure_candidates[0]["comparison_intent"],
+                    confidence=0.9,
+                    reason="kept structure objective separate",
+                ),
+                StructuredObjectiveMergeGroup(
+                    source_objective_ids=[
+                        candidate["objective_id"]
+                        for candidate in mechanical_candidates
+                    ],
+                    question=(
+                        "How do energy density, scanning speed, and scanning "
+                        "strategy affect the mechanical properties of 316L "
+                        "stainless steel?"
+                    ),
+                    material_scope=["316L stainless steel"],
+                    process_axes=_merge_candidate_values(
+                        mechanical_candidates,
+                        "process_axes",
+                    ),
+                    property_axes=_merge_candidate_values(
+                        mechanical_candidates,
+                        "property_axes",
+                    ),
+                    comparison_intent=(
+                        "Compare the combined effects of energy density, scanning "
+                        "speed, and scanning strategy on mechanical properties."
+                    ),
+                    confidence=0.9,
+                    reason="merged overlapping mechanical objectives",
+                ),
+            ]
+        )
+
+
+class _DroppedObjectiveMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def merge_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveMergePlan:
+        self.merge_payloads.append(payload)
+        candidate = payload["candidate_objectives"][0]
+        return StructuredObjectiveMergePlan(
+            merged_objectives=[
+                StructuredObjectiveMergeGroup(
+                    source_objective_ids=[candidate["objective_id"]],
+                    question=candidate["question"],
+                    material_scope=candidate["material_scope"],
+                    process_axes=candidate["process_axes"],
+                    property_axes=candidate["property_axes"],
+                    comparison_intent=candidate["comparison_intent"],
+                    confidence=candidate["confidence"],
+                    reason="invalid plan drops other candidates",
+                )
+            ]
+        )
+
+
+class _InventedAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def merge_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveMergePlan:
+        self.merge_payloads.append(payload)
+        return StructuredObjectiveMergePlan(
+            merged_objectives=[
+                StructuredObjectiveMergeGroup(
+                    source_objective_ids=[candidate["objective_id"]],
+                    question=candidate["question"],
+                    material_scope=candidate["material_scope"],
+                    process_axes=[
+                        *candidate["process_axes"],
+                        "laser power",
+                    ],
+                    property_axes=candidate["property_axes"],
+                    comparison_intent=candidate["comparison_intent"],
+                    confidence=candidate["confidence"],
+                    reason="invalid plan invents an axis",
+                )
+                for candidate in payload["candidate_objectives"]
+            ]
+        )
+
+
+class _DisjointPropertyMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def merge_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveMergePlan:
+        self.merge_payloads.append(payload)
+        candidates = payload["candidate_objectives"]
+        return StructuredObjectiveMergePlan(
+            merged_objectives=[
+                StructuredObjectiveMergeGroup(
+                    source_objective_ids=[
+                        candidate["objective_id"]
+                        for candidate in candidates
+                    ],
+                    question=(
+                        "How do SLM parameters affect densification, "
+                        "microstructure, and mechanical properties of 316L "
+                        "stainless steel?"
+                    ),
+                    material_scope=["316L stainless steel"],
+                    process_axes=_merge_candidate_values(candidates, "process_axes"),
+                    property_axes=_merge_candidate_values(candidates, "property_axes"),
+                    comparison_intent=(
+                        "Compare all reported structural and mechanical outcomes "
+                        "under one objective."
+                    ),
+                    confidence=0.9,
+                    reason="invalid plan merges disjoint property directions",
+                )
+            ]
+        )
+
+
+def _merge_candidate_values(
+    candidates: list[dict[str, Any]],
+    key: str,
+) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        for value in candidate[key]:
+            text = str(value or "").strip()
+            normalized = text.casefold()
+            if not text or normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(text)
+    return merged
 
 
 def test_research_objective_service_builds_and_persists_db_records(tmp_path):
@@ -433,3 +616,81 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
         "microhardness",
     )
     assert mechanical_objective.question.startswith("How do")
+
+
+def test_research_objective_service_falls_back_when_merge_plan_drops_objective(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _DroppedObjectiveMergeExtractor(),
+    )
+
+    assert len(objectives) == 3
+
+
+def test_research_objective_service_falls_back_when_merge_plan_invents_axis(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _InventedAxisMergeExtractor(),
+    )
+
+    assert len(objectives) == 3
+    assert all("laser power" not in objective.process_axes for objective in objectives)
+
+
+def test_research_objective_service_splits_merge_plan_with_disjoint_properties(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _DisjointPropertyMergeExtractor(),
+    )
+
+    assert len(objectives) == 2
+    assert any("densification" in objective.property_axes for objective in objectives)
+    assert any("yield strength" in objective.property_axes for objective in objectives)
+
+
+def _build_duplicate_paper_objectives(
+    tmp_path,
+    extractor: _ObjectiveExtractor,
+):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Merge")
+    collection_id = collection["collection_id"]
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        structured_extractor=extractor,
+    )
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "SLM 316L Mechanical Properties",
+                    "text": (
+                        "Energy density, scanning speed, and scanning strategy "
+                        "changed densification and mechanical properties."
+                    ),
+                    "metadata": {"source_filename": "paper-1.pdf"},
+                }
+            ],
+            blocks=[
+                {
+                    "block_id": "b1",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": (
+                        "Energy density, scanning speed, and scanning strategy "
+                        "changed densification and mechanical properties."
+                    ),
+                    "block_order": 1,
+                }
+            ],
+        ),
+    )
+    return service.build_research_objectives(collection_id)

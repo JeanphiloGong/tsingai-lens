@@ -24,36 +24,13 @@ from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
 )
+from .llm.schemas import StructuredObjectiveMergePlan
 
 logger = logging.getLogger(__name__)
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
 _SKIM_CAPTION_LIMIT = 12
-_PROCESS_AXIS_OVERLAP_THRESHOLD = 0.5
-_MECHANICAL_PROPERTY_AXES = frozenset(
-    {
-        "mechanical properties",
-        "mechanical property",
-        "yield strength",
-        "ultimate tensile strength",
-        "elongation",
-        "hardness",
-        "microhardness",
-    }
-)
-_CORROSION_PROPERTY_AXES = frozenset(
-    {
-        "corrosion properties",
-        "corrosion property",
-        "corrosion potential",
-        "pitting potential",
-        "corrosion current density",
-        "current density",
-        "eis",
-        "passivation behavior",
-    }
-)
 _BROAD_PROPERTY_AXIS_EXPANSIONS = {
     "mechanical properties": (
         "yield strength",
@@ -210,8 +187,11 @@ class ResearchObjectiveService:
             )
             if is_question_shaped_objective(objective)
         )
-        research_objectives = self._merge_overlapping_research_objectives(
-            research_objectives
+        research_objectives = self._merge_research_objectives_with_llm(
+            collection_id=collection_id,
+            extractor=extractor,
+            paper_skims=tuple(paper_skims),
+            objectives=research_objectives,
         )
 
         self.core_fact_repository.replace_collection_research_objectives(
@@ -447,116 +427,254 @@ class ResearchObjectiveService:
             return True
         return False
 
-    def _merge_overlapping_research_objectives(
+    def _merge_research_objectives_with_llm(
         self,
+        *,
+        collection_id: str,
+        extractor: CoreLLMStructuredExtractor,
+        paper_skims: tuple[PaperSkim, ...],
         objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ResearchObjective, ...]:
-        merged: list[ResearchObjective] = []
-        for objective in objectives:
-            merge_index = self._find_merge_target(merged, objective)
-            if merge_index is None:
-                merged.append(objective)
-                continue
-            merged[merge_index] = self._merge_research_objective_pair(
-                merged[merge_index],
-                objective,
+        if len(objectives) <= 1:
+            return objectives
+        payload = {
+            "collection_id": collection_id,
+            "paper_skims": [skim.to_record() for skim in paper_skims],
+            "candidate_objectives": [objective.to_record() for objective in objectives],
+        }
+        try:
+            merge_plan = extractor.merge_research_objectives(payload)
+        except Exception:
+            logger.warning(
+                "Research objective merge decision failed; using normalized objectives collection_id=%s",
+                collection_id,
+                exc_info=True,
             )
-        return tuple(merged)
+            return objectives
 
-    def _find_merge_target(
-        self,
-        candidates: list[ResearchObjective],
-        objective: ResearchObjective,
-    ) -> int | None:
-        for index, candidate in enumerate(candidates):
-            if self._should_merge_research_objectives(candidate, objective):
-                return index
-        return None
+        merged = self._validate_objective_merge_plan(
+            merge_plan,
+            objectives=objectives,
+            paper_skims=paper_skims,
+        )
+        if merged is None:
+            logger.warning(
+                "Research objective merge decision rejected; using normalized objectives collection_id=%s",
+                collection_id,
+            )
+            return objectives
+        return merged
 
-    def _should_merge_research_objectives(
+    def _validate_objective_merge_plan(
         self,
-        left: ResearchObjective,
-        right: ResearchObjective,
-    ) -> bool:
-        left_family = self._objective_property_family(left)
-        if left_family is None or left_family != self._objective_property_family(right):
-            return False
-        left_materials = self._normalized_axis_set(left.material_scope)
-        right_materials = self._normalized_axis_set(right.material_scope)
-        if not left_materials or left_materials != right_materials:
-            return False
-        return self._axis_overlap_ratio(
-            left.process_axes,
-            right.process_axes,
-        ) >= _PROCESS_AXIS_OVERLAP_THRESHOLD
+        merge_plan: StructuredObjectiveMergePlan,
+        *,
+        objectives: tuple[ResearchObjective, ...],
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> tuple[ResearchObjective, ...] | None:
+        objective_by_id = {objective.objective_id: objective for objective in objectives}
+        allowed_material_axes = self._allowed_material_axes(objectives, paper_skims)
+        allowed_process_axes = self._allowed_process_axes(objectives, paper_skims)
+        allowed_property_axes = self._allowed_property_axes(objectives, paper_skims)
+        used_source_ids: set[str] = set()
+        merged_objectives: list[ResearchObjective] = []
 
-    def _merge_research_objective_pair(
+        for group in merge_plan.merged_objectives:
+            source_ids = tuple(
+                str(value or "").strip()
+                for value in group.source_objective_ids
+            )
+            if not source_ids:
+                return None
+            if any(source_id not in objective_by_id for source_id in source_ids):
+                return None
+            if any(source_id in used_source_ids for source_id in source_ids):
+                return None
+            used_source_ids.update(source_ids)
+            source_objectives = tuple(
+                objective_by_id[source_id]
+                for source_id in source_ids
+            )
+            property_components = self._property_overlap_components(source_objectives)
+            if len(property_components) > 1:
+                for component in property_components:
+                    merged_objectives.append(
+                        self._build_objective_from_property_component(component)
+                    )
+                continue
+
+            material_scope = self._validated_merge_axes(
+                tuple(group.material_scope),
+                allowed_axes=allowed_material_axes,
+                source_objectives=source_objectives,
+                source_field="material_scope",
+            )
+            process_axes = self._validated_merge_axes(
+                tuple(group.process_axes),
+                allowed_axes=allowed_process_axes,
+                source_objectives=source_objectives,
+                source_field="process_axes",
+            )
+            property_axes = self._validated_merge_axes(
+                tuple(group.property_axes),
+                allowed_axes=allowed_property_axes,
+                source_objectives=source_objectives,
+                source_field="property_axes",
+            )
+            if material_scope is None or process_axes is None or property_axes is None:
+                return None
+
+            payload = {
+                "objective_id": build_research_objective_id(group.question),
+                "question": group.question,
+                "material_scope": material_scope,
+                "process_axes": process_axes,
+                "property_axes": property_axes,
+                "comparison_intent": group.comparison_intent,
+                "seed_document_ids": self._merge_objective_axes(
+                    source_objectives,
+                    "seed_document_ids",
+                ),
+                "excluded_document_ids": self._merge_objective_axes(
+                    source_objectives,
+                    "excluded_document_ids",
+                ),
+                "confidence": group.confidence,
+                "reason": group.reason,
+            }
+            objective = ResearchObjective.from_mapping(payload)
+            if not objective.comparison_intent:
+                return None
+            if not is_question_shaped_objective(objective):
+                return None
+            merged_objectives.append(objective)
+
+        if used_source_ids != set(objective_by_id):
+            return None
+        return tuple(merged_objectives)
+
+    def _property_overlap_components(
         self,
-        left: ResearchObjective,
-        right: ResearchObjective,
+        objectives: tuple[ResearchObjective, ...],
+    ) -> tuple[tuple[ResearchObjective, ...], ...]:
+        components: list[tuple[list[ResearchObjective], set[str]]] = []
+        for objective in objectives:
+            current_keys = self._axis_key_set(*objective.property_axes)
+            matched_indexes = [
+                index
+                for index, (_, component_keys) in enumerate(components)
+                if current_keys and component_keys.intersection(current_keys)
+            ]
+            if not matched_indexes:
+                components.append(([objective], set(current_keys)))
+                continue
+            first_index = matched_indexes[0]
+            components[first_index][0].append(objective)
+            components[first_index][1].update(current_keys)
+            for index in reversed(matched_indexes[1:]):
+                objectives_to_move, keys_to_move = components.pop(index)
+                components[first_index][0].extend(objectives_to_move)
+                components[first_index][1].update(keys_to_move)
+        return tuple(tuple(component_objectives) for component_objectives, _ in components)
+
+    def _build_objective_from_property_component(
+        self,
+        objectives: tuple[ResearchObjective, ...],
     ) -> ResearchObjective:
-        payload = left.to_record()
-        payload["process_axes"] = self._merge_axes(
-            left.process_axes,
-            right.process_axes,
-        )
-        payload["property_axes"] = self._merge_axes(
-            left.property_axes,
-            right.property_axes,
-        )
-        payload["seed_document_ids"] = self._merge_axes(
-            left.seed_document_ids,
-            right.seed_document_ids,
-        )
-        payload["excluded_document_ids"] = self._merge_axes(
-            left.excluded_document_ids,
-            right.excluded_document_ids,
-        )
-        payload["confidence"] = max(left.confidence, right.confidence)
-        payload["question"] = self._build_merged_question(payload)
+        if len(objectives) == 1:
+            return objectives[0]
+        payload = {
+            "material_scope": self._merge_objective_axes(objectives, "material_scope"),
+            "process_axes": self._merge_objective_axes(objectives, "process_axes"),
+            "property_axes": self._merge_objective_axes(objectives, "property_axes"),
+            "seed_document_ids": self._merge_objective_axes(
+                objectives,
+                "seed_document_ids",
+            ),
+            "excluded_document_ids": self._merge_objective_axes(
+                objectives,
+                "excluded_document_ids",
+            ),
+            "confidence": max(objective.confidence for objective in objectives),
+            "reason": "Merged objectives with overlapping property axes.",
+        }
+        payload["question"] = self._build_research_objective_question(payload)
         payload["objective_id"] = build_research_objective_id(payload["question"])
         payload["comparison_intent"] = self._build_comparison_intent(payload)
-        payload["reason"] = self._merge_reason_text(left.reason, right.reason)
         return ResearchObjective.from_mapping(payload)
 
-    def _objective_property_family(self, objective: ResearchObjective) -> str | None:
-        properties = self._normalized_axis_set(objective.property_axes)
-        if properties & _MECHANICAL_PROPERTY_AXES:
-            return "mechanical"
-        if properties & _CORROSION_PROPERTY_AXES:
-            return "corrosion"
-        return None
-
-    def _axis_overlap_ratio(
+    def _validated_merge_axes(
         self,
-        left: tuple[str, ...],
-        right: tuple[str, ...],
-    ) -> float:
-        left_set = self._normalized_axis_set(left)
-        right_set = self._normalized_axis_set(right)
-        if not left_set or not right_set:
-            return 0.0
-        return len(left_set & right_set) / min(len(left_set), len(right_set))
-
-    def _normalized_axis_set(self, values: tuple[str, ...]) -> set[str]:
-        return {self._axis_key(value) for value in values if self._axis_key(value)}
-
-    def _merge_axes(
-        self,
-        left: tuple[str, ...],
-        right: tuple[str, ...],
-    ) -> list[str]:
+        values: tuple[str, ...],
+        *,
+        allowed_axes: set[str],
+        source_objectives: tuple[ResearchObjective, ...],
+        source_field: str,
+    ) -> list[str] | None:
+        if not values:
+            return self._merge_objective_axes(source_objectives, source_field)
         merged: list[str] = []
         seen: set[str] = set()
-        for value in (*left, *right):
+        for value in values:
+            key = self._axis_key(value)
+            if not key:
+                continue
+            if key not in allowed_axes:
+                return None
             self._append_unique_axis(merged, seen, value)
         return merged
 
-    def _build_merged_question(self, payload: dict[str, Any]) -> str:
-        material_text = (
-            self._join_axis_text(payload.get("material_scope"))
-            or "the material system"
+    def _allowed_material_axes(
+        self,
+        objectives: tuple[ResearchObjective, ...],
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> set[str]:
+        return self._axis_key_set(
+            *(
+                value
+                for objective in objectives
+                for value in objective.material_scope
+            ),
+            *(value for skim in paper_skims for value in skim.candidate_materials),
         )
+
+    def _allowed_process_axes(
+        self,
+        objectives: tuple[ResearchObjective, ...],
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> set[str]:
+        return self._axis_key_set(
+            *(value for objective in objectives for value in objective.process_axes),
+            *(value for skim in paper_skims for value in skim.candidate_processes),
+            *(value for skim in paper_skims for value in skim.changed_variables),
+        )
+
+    def _allowed_property_axes(
+        self,
+        objectives: tuple[ResearchObjective, ...],
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> set[str]:
+        return self._axis_key_set(
+            *(value for objective in objectives for value in objective.property_axes),
+            *(value for skim in paper_skims for value in skim.candidate_properties),
+        )
+
+    def _axis_key_set(self, *values: Any) -> set[str]:
+        return {self._axis_key(value) for value in values if self._axis_key(value)}
+
+    def _merge_objective_axes(
+        self,
+        objectives: tuple[ResearchObjective, ...],
+        field_name: str,
+    ) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for objective in objectives:
+            for value in getattr(objective, field_name):
+                self._append_unique_axis(merged, seen, value)
+        return merged
+
+    def _build_research_objective_question(self, payload: dict[str, Any]) -> str:
         process_text = (
             self._join_axis_text(payload.get("process_axes"))
             or "the studied process axes"
@@ -565,18 +683,11 @@ class ResearchObjectiveService:
             self._join_axis_text(payload.get("property_axes"))
             or "the reported outcomes"
         )
-        return (
-            f"How do {process_text} affect {property_text} of {material_text}?"
+        material_text = (
+            self._join_axis_text(payload.get("material_scope"))
+            or "the material system"
         )
-
-    def _merge_reason_text(self, left: str | None, right: str | None) -> str | None:
-        reasons: list[str] = []
-        seen: set[str] = set()
-        for reason in (left, right):
-            self._append_unique_axis(reasons, seen, reason)
-        if not reasons:
-            return None
-        return " Merged with overlapping objective. ".join(reasons)
+        return f"How do {process_text} affect {property_text} of {material_text}?"
 
     def _build_comparison_intent(self, payload: dict[str, Any]) -> str:
         material_text = (

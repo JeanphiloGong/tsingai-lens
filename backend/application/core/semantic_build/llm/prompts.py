@@ -432,3 +432,38 @@ def build_research_objective_discovery_prompt(
         "properties, instead of four separate tensile/hardness questions.\n"
     )
     return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+
+
+def build_research_objective_merge_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Decide whether already-discovered research objectives should be kept "
+        "separate or merged before persistence.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with a `merged_objectives` array.\n"
+        "This is a merge decision step, not new objective discovery.\n"
+        "Hard constraints:\n"
+        "- Use only the provided `candidate_objectives` and `paper_skims`.\n"
+        "- Every candidate objective id must appear exactly once in "
+        "`source_objective_ids` across the whole response.\n"
+        "- Do not invent new source ids, material_scope values, process_axes, or "
+        "property_axes. Merged axes must come from the candidate objectives or "
+        "paper skims.\n"
+        "- If an objective should not be merged, return a group with only that "
+        "single source id.\n"
+        "- Merge objectives only when they are the same research question split "
+        "by a variable axis or by a subset of closely related property endpoints.\n"
+        "- Do not merge objectives whose `property_axes` are disjoint. Disjoint "
+        "property axes usually mean different research directions.\n"
+        "- Do not merge different research directions. For example, keep "
+        "densification/microstructure separate from mechanical properties unless "
+        "the candidate objectives explicitly frame them as one comparison.\n"
+        "- Keep composition/background/literature-comparison objectives separate "
+        "from current-work performance objectives.\n"
+        "- If uncertain, keep objectives separate.\n"
+        "For each output group, write a question-shaped `question`, a non-empty "
+        "`comparison_intent`, and a short `reason` explaining why the sources "
+        "were merged or kept separate.\n"
+    )
+    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt

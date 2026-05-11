@@ -638,6 +638,37 @@ class StructuredResearchObjectives(_StrictModel):
         return _normalize_list_container(value)
 
 
+class StructuredObjectiveMergeGroup(_StrictModel):
+    source_objective_ids: list[str] = Field(default_factory=list)
+    question: str
+    material_scope: list[str] = Field(default_factory=list)
+    process_axes: list[str] = Field(default_factory=list)
+    property_axes: list[str] = Field(default_factory=list)
+    comparison_intent: str
+    confidence: float = 0.0
+    reason: str
+
+    @field_validator(
+        "source_objective_ids",
+        "material_scope",
+        "process_axes",
+        "property_axes",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredObjectiveMergePlan(_StrictModel):
+    merged_objectives: list[StructuredObjectiveMergeGroup] = Field(default_factory=list)
+
+    @field_validator("merged_objectives", mode="before")
+    @classmethod
+    def _normalize_merged_objectives(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
 class StructuredExtractionBundle(_StrictModel):
     method_facts: list[MethodFactPayload] = Field(default_factory=list)
     sample_variants: list[SampleVariantPayload] = Field(default_factory=list)

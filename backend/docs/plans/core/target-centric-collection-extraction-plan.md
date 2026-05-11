@@ -27,10 +27,16 @@ target context refinement
 target-aware section and table routing
       |
       v
-targeted fact extraction
+target-scoped evidence-unit extraction
       |
       v
-cross-paper comparison inside each target
+evidence resolution
+      |
+      v
+target logic-chain assembly
+      |
+      v
+comparison, report, and workspace projections inside each target
 ```
 
 This plan belongs to the Core semantic-build pipeline because it changes the
@@ -81,15 +87,17 @@ Coarse extraction builds a research map. It extracts:
 - skip reasons for background, composition, modeling, review, or low-value
   blocks
 
-Fact extraction builds comparison-ready evidence. It extracts:
+Final extraction builds logic-chain-ready evidence. It extracts:
 
 - material
 - sample or variant
 - process or treatment
+- resolved sample or experimental condition
 - test condition
 - measured property
 - value and unit
 - baseline or comparison relation
+- author interpretation when available
 - evidence anchor
 
 The first rounds should not emit final measurement facts. They should produce
@@ -308,35 +316,74 @@ should be classified before row-level fact extraction runs, and small relevant
 tables can be passed to the model as whole-table context while preserving
 row-indexed evidence anchors.
 
-## Targeted Fact Extraction
+Routing should also identify table role, column roles, and join keys before
+values are extracted. Paper-local identifiers such as `condition number` and
+`sample number` should be treated as join and traceback keys, not as the final
+condition semantics. If one table defines preparation conditions and another
+table reports results for the same keys, routing should record the join plan
+so the later evidence unit can expose the actual process condition instead of
+only an author-assigned row number.
 
-Final fact extraction should run only on routed source units that are relevant
-to the target.
+## Target-Scoped Evidence-Unit Extraction
+
+Final extraction should run only on routed source units that are relevant to
+the target.
 
 The extractor should receive:
 
 - target workspace context
 - target-paper framing for the paper
 - routed section or table role
+- table schema and join plan when table evidence is involved
 - Source evidence context
 - row and cell locators for tables
 
-The output should stay fact-chain shaped:
+The output should stay evidence-chain shaped:
 
 ```text
 material
 -> sample or variant
 -> process or treatment
+-> resolved preparation or experimental condition
 -> test condition
 -> measured property
 -> value and unit
 -> baseline or comparison
+-> author interpretation where available
 -> evidence anchor
 ```
 
-Facts should remain target-scoped. A paper can contribute different facts to
-different targets, and each contribution should preserve the target that
-authorized the extraction.
+Evidence units should remain target-scoped. A paper can contribute different
+evidence to different targets, and each contribution should preserve the
+target that authorized the extraction.
+
+## Evidence Resolution And Target Logic Chain
+
+The target process should resolve source fragments before downstream views use
+them. Resolution includes:
+
+- joining condition or preparation tables with result tables
+- expanding paper-local identifiers into actual sample or process conditions
+- binding text explanations to table or figure measurements
+- preserving source traceback for every resolved value and claim
+
+The primary target output is a research logic chain, not just comparison-ready
+rows:
+
+```text
+research target
+-> paper contribution and relevance
+-> material system
+-> preparation, process, or treatment route
+-> changed variables and resolved sample conditions
+-> characterization or test method
+-> measured result
+-> author interpretation
+-> cross-paper agreement, conflict, and gaps
+```
+
+Comparison rows, evidence cards, reports, and future API views should be
+projections over these resolved evidence units and target logic chains.
 
 ## Core Records
 
@@ -351,6 +398,7 @@ The first record families should be:
 - `ResearchObjective`
 - `ObjectivePaperFrame`
 - `EvidenceRoute`
+- resolved evidence units and target logic chains
 - target-scoped measurement and comparison records
 
 The SQLite implementation should store them in Core-owned tables such as
@@ -372,8 +420,13 @@ around target selection.
 6. Add target-paper framing for every target and paper.
 7. Add target context refinement from target-paper frames.
 8. Feed refined target context into section and table routing.
-9. Run targeted fact extraction only on target-authorized source units.
-10. Assemble comparison rows within each target before any cross-target merge.
+9. Add table schema routing for table roles, column roles, join keys, and
+   join plans.
+10. Run target-scoped evidence-unit extraction only on target-authorized source
+    units.
+11. Resolve table and text fragments into paper-level target logic chains.
+12. Assemble comparison rows within each target as projections before any
+    cross-target merge.
 
 ## Verification
 
@@ -389,14 +442,21 @@ Unit and integration tests should cover:
 - target context refinement adds aliases and exclusions without leaking them
   into unrelated targets
 - table routing receives target context before final fact extraction
+- table routing distinguishes join keys from real experimental conditions and
+  records how condition/result tables should be joined
 - composition, modeling, and literature-comparison content can be excluded for
   one target while remaining available as background or evidence for another
   target
-- comparison rows are grouped by research target
+- resolved target logic chains preserve material, condition, result,
+  interpretation, and source traceback
+- comparison rows are grouped by research target as projections over resolved
+  evidence units
 
 Collection rebuild checks should confirm:
 
 - final facts are attached to a target
+- condition IDs and sample IDs are resolved into actual process or preparation
+  conditions before downstream comparison
 - material and sample noise drops for the target under review
 - irrelevant tables no longer generate current-work measurements for that
   target

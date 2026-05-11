@@ -14,6 +14,8 @@ The core judgment is:
   should not be the product's primary navigation object
 - research objectives should guide reading, routing, extraction, and
   comparison, but should not become the only owner of extracted facts
+- the final product object should be a traceable research logic chain, not
+  only a comparison table or a set of evidence cards
 - the durable data goal remains a normalized, reusable, evidence-backed
   material fact substrate
 - Core extraction, comparison assembly, backend APIs, and frontend workspace
@@ -27,7 +29,9 @@ The intended product flow becomes:
 collection
 -> research objectives
 -> objective workspace
--> objective-scoped evidence, facts, comparisons, and report
+-> objective-scoped evidence units
+-> paper-level and cross-paper research logic chain
+-> objective report and workspace projections
 ```
 
 The intended backend semantic flow becomes:
@@ -38,9 +42,11 @@ Source artifacts
 -> research objective discovery
 -> objective workspace refinement
 -> objective-paper framing
--> objective-aware evidence routing
--> objective-scoped fact extraction
--> objective-scoped comparison
+-> objective-aware table and evidence routing
+-> objective-scoped evidence-unit extraction
+-> evidence resolution
+-> research logic-chain assembly
+-> objective-scoped comparison and report projections
 ```
 
 ## Relationship To Current Docs
@@ -212,6 +218,38 @@ The objective page should answer:
 - which facts and comparison rows support the answer
 - where each fact traces back into the source documents
 
+### Make The Research Logic Chain The Final Product
+
+Objective-scoped comparison rows and evidence cards are supporting views. They
+are not the final product object by themselves.
+
+The objective workspace should assemble a traceable research logic chain:
+
+```text
+research objective
+-> paper relevance and contribution
+-> material system
+-> sample preparation or treatment route
+-> changed variables and resolved sample conditions
+-> characterization or test method
+-> measured results
+-> author interpretation
+-> cross-paper agreement, conflict, and gaps
+```
+
+For table-heavy papers, this means table identifiers such as `condition
+number` and `sample number` should be retained as paper-local join and
+traceback keys, but downstream logic-chain evidence should expose the resolved
+experimental condition. For example, a mechanical-property objective should
+not leave later stages with only `condition number = 1`; it should join the
+condition table and result table so the evidence unit carries the actual SLM
+condition, such as scan strategy, scanning speed, energy density, and the
+measured mechanical properties.
+
+Comparison matrices, evidence cards, reports, graph nodes, and future material
+database views should be projections over this resolved evidence chain. The
+research logic chain is the reader-facing answer structure.
+
 ## Durable Fact Substrate
 
 Research-objective-first does not mean facts only live under objectives.
@@ -255,6 +293,7 @@ In short:
 ```text
 research objective guided extraction
 -> normalized material fact substrate
+-> resolved evidence units and research logic chains
 -> objective, material, benchmark, and report projections
 ```
 
@@ -274,8 +313,10 @@ New primary Core records should be:
 - `ObjectiveContext`
 - `ObjectivePaperFrame`
 - `ObjectiveEvidenceRoute`
+- `ObjectiveEvidenceUnit`
 - `ObjectiveMeasurementResult`
 - `ObjectiveComparisonRow`
+- `ObjectiveLogicChain`
 - `ObjectiveReport`
 
 The SQLite-backed Core repository should persist those records in tables such
@@ -286,8 +327,10 @@ as:
 - `core_objective_contexts`
 - `core_objective_paper_frames`
 - `core_objective_evidence_routes`
+- `core_objective_evidence_units`
 - `core_objective_measurement_results`
 - `core_objective_comparison_rows`
+- `core_objective_logic_chains`
 - `core_objective_reports`
 
 These records should carry objective provenance, but the final facts should
@@ -368,33 +411,57 @@ Small relevant tables can be sent as whole-table context while preserving
 row-indexed evidence anchors. Large tables should use bounded global context
 plus chunk rows.
 
-### Objective-Scoped Fact Extraction
+Table routing should also identify table roles, column roles, and join plans.
+For example, in an SLM parameter paper, a preparation table can define sample
+conditions while a mechanical-property table reports results for the same
+`condition number` and `sample number`. Those identifiers are not the final
+condition semantics; they are keys used to resolve the real sample condition
+before the logic chain is assembled.
 
-Final facts should be emitted under the objective that authorized extraction:
+### Objective-Scoped Evidence-Unit Extraction
+
+Final extraction should emit evidence units under the objective that authorized
+extraction:
 
 ```text
 objective
 -> material scope
 -> sample or variant
 -> process or treatment
+-> resolved sample or experimental condition
 -> test condition
 -> property
 -> value and unit
 -> baseline or comparison relation
+-> author interpretation where available
 -> evidence anchor
 ```
 
-Facts should keep traceback to document, section, table, row, cell, quote, and
-page or bounding box where available.
+Evidence units should keep traceback to document, section, table, row, cell,
+quote, and page or bounding box where available.
 
 The objective field should be provenance and organization context. It should
 not replace material, sample, process, property, condition, baseline, or
 evidence identity.
 
+### Evidence Resolution And Logic-Chain Assembly
+
+Core should resolve fragments before presenting them as the objective answer.
+Resolution includes joining preparation and result tables, binding text
+interpretations to measured results, and keeping source traceback for every
+resolved claim.
+
+The assembled chain should exist at two levels:
+
+- paper-level logic chain: what one paper contributes to the objective
+- cross-paper logic chain: where papers agree, conflict, leave gaps, or support
+  a shared variable-result relationship
+
 ### Objective-Scoped Comparison
 
-Comparison assembly should group rows by objective first, then by property,
-material facet, process axis, condition, and baseline.
+Comparison assembly should project rows from resolved evidence units and group
+them by objective first, then by property, material facet, process axis,
+condition, and baseline.
 
 The same paper can contribute to multiple objectives, but each contribution
 must preserve the objective-specific route and evidence.
@@ -449,6 +516,7 @@ The objective detail page should show:
 - objective summary
 - paper relevance map
 - process and property axes
+- paper-level and cross-paper research logic chain
 - comparison matrix
 - evidence cards and source traceback
 - routed tables and skipped-table reasons when useful for debugging
@@ -465,17 +533,20 @@ views, not as the route owner.
 3. Add Core objective schemas, prompts, and extractor methods.
 4. Add `research_objective_service.py` for paper skim and objective discovery.
 5. Add `objective_facts_service.py` for objective-paper framing, routing, and
-   objective-scoped fact extraction.
-6. Add objective-aware table routing and whole-table extraction for relevant
-   tables.
-7. Add `objective_comparison_service.py` for objective-scoped comparison rows.
-8. Bump Core semantic version to an objective-facts generation, such as
+   objective-scoped evidence-unit extraction.
+6. Add objective-aware table routing, table schema understanding, and
+   whole-table extraction for relevant tables.
+7. Add evidence resolution and research logic-chain assembly from routed text,
+   table, and figure evidence.
+8. Add `objective_comparison_service.py` for objective-scoped comparison rows
+   as projections over resolved evidence units.
+9. Bump Core semantic version to an objective-facts generation, such as
    `objective_facts_v1`.
-9. Add backend `/research-objectives/*` routes and tests.
-10. Replace frontend material workspace navigation with objective workspace
+10. Add backend `/research-objectives/*` routes and tests.
+11. Replace frontend material workspace navigation with objective workspace
    navigation.
-11. Remove material-first route usage from frontend clients.
-12. Remove or disable material-first backend paths once objective-first routes
+12. Remove material-first route usage from frontend clients.
+13. Remove or disable material-first backend paths once objective-first routes
     pass contract tests.
 
 ## Verification
@@ -489,9 +560,12 @@ Backend semantic tests should prove:
 - objective-local context does not leak across objectives
 - objective-guided extraction still emits normalized reusable material facts
 - table routing uses objective context before fact extraction
+- table routing resolves paper-local join keys into real sample or
+  experimental conditions before logic-chain assembly
 - composition, modeling, literature comparison, and fitting-only tables do not
   produce current-work measurements for unrelated objectives
 - objective facts keep evidence anchors
+- paper-level and cross-paper logic chains preserve evidence traceback
 
 Backend API tests should prove:
 
@@ -515,6 +589,8 @@ The cutover is complete when:
 - the collection workspace is research-objective-first
 - material-first pages are no longer the main product entry
 - Core extraction produces objective-scoped facts and comparison rows
+- Core assembles paper-level and cross-paper research logic chains from
+  resolved evidence units
 - Core facts still normalize into a reusable material fact substrate
 - objective routes are the public backend contract
 - frontend calls objective routes rather than material routes

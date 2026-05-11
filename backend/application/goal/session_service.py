@@ -23,7 +23,6 @@ from application.core.semantic_build.paper_facts_service import (
     PaperFactsService,
 )
 from application.core.workspace_overview_service import WorkspaceService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
 from domain.goal import (
@@ -74,7 +73,6 @@ class GoalSessionService:
         *,
         collection_service: CollectionService | None = None,
         task_service: TaskService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
         research_view_service: ResearchViewAggregationService | None = None,
         workspace_service: WorkspaceService | None = None,
         comparison_service: ComparisonService | None = None,
@@ -87,30 +85,22 @@ class GoalSessionService:
         self.task_service = task_service or TaskService(
             self.collection_service.root_dir.parent / "tasks"
         )
-        self.artifact_registry_service = (
-            artifact_registry_service
-            or ArtifactRegistryService(self.collection_service.root_dir)
-        )
         self.research_view_service = (
             research_view_service
             or ResearchViewAggregationService(
                 collection_service=self.collection_service,
                 task_service=self.task_service,
-                artifact_registry_service=self.artifact_registry_service,
             )
         )
         self.workspace_service = workspace_service or WorkspaceService(
             collection_service=self.collection_service,
             task_service=self.task_service,
-            artifact_registry_service=self.artifact_registry_service,
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
         )
         self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
         )
         self.goal_session_repository = (
             goal_session_repository or build_goal_session_repository()

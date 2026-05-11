@@ -21,7 +21,6 @@ WorkflowStageStatus = Literal[
 class WorkspaceArtifactStatusResponse(BaseModel):
     """Collection-scoped artifact readiness summary."""
 
-    output_path: str = Field(..., description="集合输出目录")
     documents_generated: bool = Field(default=False, description="documents 是否已生成")
     documents_ready: bool = Field(default=False, description="documents 是否已生成且非空")
     document_profiles_generated: bool = Field(default=False, description="document_profiles 是否已生成")

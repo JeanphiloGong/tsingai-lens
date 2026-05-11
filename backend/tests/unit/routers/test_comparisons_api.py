@@ -10,7 +10,6 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
@@ -150,26 +149,23 @@ def _store_core_comparison_artifacts(
 @pytest.fixture()
 def comparison_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    document_profile_service = DocumentProfileService(collection_service)
     paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
     )
     comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
+        collection_service=collection_service,
+        paper_facts_service=paper_facts_service,
     )
 
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
 
-    return collection_service, artifact_registry, comparison_service
+    return collection_service, comparison_service
 
 
 def test_comparisons_route_returns_409_when_rows_are_not_ready(comparison_services):
-    collection_service, _artifact_registry, _comparison_service = comparison_services
+    collection_service, _comparison_service = comparison_services
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -182,7 +178,7 @@ def test_comparisons_route_returns_409_when_rows_are_not_ready(comparison_servic
 
 
 def test_comparisons_route_returns_404_for_missing_collection(comparison_services):
-    _collection_service, _artifact_registry, _comparison_service = comparison_services
+    _collection_service, _comparison_service = comparison_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(comparisons_controller.list_collection_comparisons("col_missing"))
@@ -195,13 +191,11 @@ def test_comparisons_route_returns_404_for_missing_collection(comparison_service
 def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
     comparison_services,
 ):
-    collection_service, artifact_registry, comparison_service = comparison_services
+    collection_service, comparison_service = comparison_services
     record = collection_service.create_collection(name="Empty Comparisons Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
 
     _store_core_comparison_artifacts(comparison_service, collection_id, [], [])
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         comparisons_controller.list_collection_comparisons(collection_id)
@@ -215,10 +209,9 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
 def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
     comparison_services,
 ):
-    collection_service, artifact_registry, comparison_service = comparison_services
+    collection_service, comparison_service = comparison_services
     record = collection_service.create_collection(name="Existing Comparisons Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
 
     comparable_result, scoped_result, row_id = _build_semantic_comparison_record(
         collection_id=collection_id,
@@ -257,7 +250,6 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
         [comparable_result],
         [scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         comparisons_controller.list_collection_comparisons(collection_id)
@@ -284,10 +276,9 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
 def test_comparisons_route_applies_canonical_graph_filters(
     comparison_services,
 ):
-    collection_service, artifact_registry, comparison_service = comparison_services
+    collection_service, comparison_service = comparison_services
     record = collection_service.create_collection(name="Filtered Comparisons Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
 
     comparable_result_1, scoped_result_1, row_id_1 = _build_semantic_comparison_record(
         collection_id=collection_id,
@@ -357,7 +348,6 @@ def test_comparisons_route_applies_canonical_graph_filters(
         [comparable_result_1, comparable_result_2],
         [scoped_result_1, scoped_result_2],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         comparisons_controller.list_collection_comparisons(
@@ -377,10 +367,9 @@ def test_comparisons_route_applies_canonical_graph_filters(
 def test_comparison_route_returns_single_row(
     comparison_services,
 ):
-    collection_service, artifact_registry, comparison_service = comparison_services
+    collection_service, comparison_service = comparison_services
     record = collection_service.create_collection(name="Single Comparison Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
 
     comparable_result, scoped_result, row_id = _build_semantic_comparison_record(
         collection_id=collection_id,
@@ -419,7 +408,6 @@ def test_comparison_route_returns_single_row(
         [comparable_result],
         [scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         comparisons_controller.get_collection_comparison(collection_id, row_id)

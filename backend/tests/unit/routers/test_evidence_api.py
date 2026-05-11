@@ -9,7 +9,6 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
@@ -20,21 +19,19 @@ from domain.core import CoreFactSet, EvidenceAnchor, MeasurementResult, SampleVa
 @pytest.fixture()
 def evidence_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    document_profile_service = DocumentProfileService(collection_service)
     paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
     )
 
     monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
 
-    return collection_service, artifact_registry, paper_facts_service
+    return collection_service, paper_facts_service
 
 
 def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
-    collection_service, _artifact_registry, _paper_facts_service = evidence_services
+    collection_service, _paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -47,7 +44,7 @@ def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
 
 
 def test_evidence_route_returns_404_for_missing_collection(evidence_services):
-    _collection_service, _artifact_registry, _paper_facts_service = evidence_services
+    _collection_service, _paper_facts_service = evidence_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(evidence_controller.list_collection_evidence_cards("col_missing"))
@@ -60,15 +57,13 @@ def test_evidence_route_returns_404_for_missing_collection(evidence_services):
 def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
     evidence_services,
 ):
-    collection_service, artifact_registry, paper_facts_service = evidence_services
+    collection_service, paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Empty Evidence Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
     paper_facts_service.core_fact_repository.replace_collection_facts(
         collection_id,
         CoreFactSet(paper_facts_ready=True),
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         evidence_controller.list_collection_evidence_cards(collection_id)
@@ -80,10 +75,9 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
 
 
 def test_evidence_card_route_returns_single_card(evidence_services):
-    collection_service, artifact_registry, paper_facts_service = evidence_services
+    collection_service, paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Single Evidence Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
     paper_facts_service.core_fact_repository.replace_collection_facts(
         collection_id,
         CoreFactSet(
@@ -133,7 +127,6 @@ def test_evidence_card_route_returns_single_card(evidence_services):
             ),
         ),
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         evidence_controller.get_collection_evidence_card(

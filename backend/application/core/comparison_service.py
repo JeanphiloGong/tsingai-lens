@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import math
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -24,7 +23,6 @@ from application.core.semantic_build.paper_facts_service import (
     PaperFactsNotReadyError,
     PaperFactsService,
 )
-from application.source.artifact_registry_service import ArtifactRegistryService
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
@@ -71,9 +69,8 @@ _TEST_SERIES_AXIS_CANDIDATES = (
 class ComparisonRowsNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve comparison rows."""
 
-    def __init__(self, collection_id: str, output_dir: Path | None = None) -> None:
+    def __init__(self, collection_id: str) -> None:
         self.collection_id = collection_id
-        self.output_dir = output_dir
         super().__init__(f"comparison rows not ready: {collection_id}")
 
 
@@ -116,25 +113,19 @@ class ComparisonService:
     def __init__(
         self,
         collection_service: CollectionService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
         paper_facts_service: PaperFactsService | None = None,
         document_profile_service: DocumentProfileService | None = None,
         core_fact_repository: CoreFactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
-        self.artifact_registry_service = (
-            artifact_registry_service or ArtifactRegistryService()
-        )
         self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
             core_fact_repository=core_fact_repository,
             source_artifact_repository=source_artifact_repository,
         )
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
             core_fact_repository=core_fact_repository,
             source_artifact_repository=source_artifact_repository,
         )
@@ -551,14 +542,9 @@ class ComparisonService:
     def build_comparison_rows(
         self,
         collection_id: str,
-        output_dir: str | Path | None = None,
     ) -> tuple[ComparisonRowRecord, ...]:
-        base_dir = (
-            Path(output_dir).expanduser().resolve()
-            if output_dir is not None
-            else self._resolve_output_dir(collection_id)
-        )
-        records = self._load_comparison_inputs(collection_id, base_dir)
+        self.collection_service.get_collection(collection_id)
+        records = self._load_comparison_inputs(collection_id)
         logger.info(
             "Comparison assembly started collection_id=%s measurement_results=%s sample_variants=%s test_conditions=%s baselines=%s",
             collection_id,
@@ -591,11 +577,10 @@ class ComparisonService:
             logger.warning(
                 "Comparison assembly produced zero rows after filtering collection_id=%s measurement_results=%s",
                 collection_id,
-                len(frames.measurement_results),
+                len(records.measurement_results),
             )
-        self._write_comparison_artifacts(
+        self._store_comparison_artifacts(
             collection_id=collection_id,
-            base_dir=base_dir,
             semantic_records=semantic_records,
             row_records=row_records,
         )
@@ -611,14 +596,13 @@ class ComparisonService:
     def _load_comparison_inputs(
         self,
         collection_id: str,
-        base_dir: Path,
     ) -> ComparisonInputRecords:
         facts = self.core_fact_repository.read_collection_facts(collection_id)
         if not self._paper_facts_available_for_comparison(facts):
             try:
-                self.paper_facts_service.build_paper_facts(collection_id, base_dir)
+                self.paper_facts_service.build_paper_facts(collection_id)
             except PaperFactsNotReadyError as exc:
-                raise ComparisonRowsNotReadyError(collection_id, exc.output_dir) from exc
+                raise ComparisonRowsNotReadyError(collection_id) from exc
             facts = self.core_fact_repository.read_collection_facts(collection_id)
 
         return ComparisonInputRecords(
@@ -659,21 +643,6 @@ class ComparisonService:
             ),
         )
 
-    def _write_comparison_artifacts(
-        self,
-        *,
-        collection_id: str,
-        base_dir: Path,
-        semantic_records: ComparisonSemanticRecords,
-        row_records: tuple[ComparisonRowRecord, ...],
-    ) -> None:
-        self._store_comparison_artifacts(
-            collection_id=collection_id,
-            semantic_records=semantic_records,
-            row_records=row_records,
-        )
-        self.artifact_registry_service.upsert(collection_id, base_dir)
-
     def _store_comparison_artifacts(
         self,
         *,
@@ -687,16 +656,6 @@ class ComparisonService:
             semantic_records.collection_comparable_results,
             row_records,
         )
-
-    def _resolve_output_dir(self, collection_id: str) -> Path:
-        self.collection_service.get_collection(collection_id)
-        try:
-            artifacts = self.artifact_registry_service.get(collection_id)
-        except FileNotFoundError:
-            artifacts = None
-        if artifacts and artifacts.get("output_path"):
-            return Path(str(artifacts["output_path"])).expanduser().resolve()
-        return self.collection_service.get_paths(collection_id).output_dir.resolve()
 
     def _collect_corpus_comparable_result_items(
         self,

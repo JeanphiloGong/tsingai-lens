@@ -4,7 +4,6 @@ import pandas as pd
 
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.workspace_overview_service import WorkspaceService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
 from domain.core import (
@@ -38,8 +37,7 @@ def _write_source_artifacts(
 def test_workspace_service_builds_collection_overview(tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    workspace_service = WorkspaceService(collection_service, task_service, artifact_registry)
+    workspace_service = WorkspaceService(collection_service, task_service)
 
     collection = collection_service.create_collection("Composite Workspace")
     collection_id = collection["collection_id"]
@@ -52,11 +50,6 @@ def test_workspace_service_builds_collection_overview(tmp_path):
         current_stage="source_artifacts_started",
         progress_percent=35,
     )
-    artifact_registry.upsert(
-        collection_id,
-        collection_service.get_paths(collection_id).output_dir,
-    )
-
     overview = workspace_service.get_workspace_overview(collection_id)
 
     assert overview["collection"]["collection_id"] == collection_id
@@ -71,13 +64,11 @@ def test_workspace_service_builds_collection_overview(tmp_path):
 def test_workspace_service_includes_document_summary_and_links(tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    profile_service = DocumentProfileService(collection_service, artifact_registry)
+    profile_service = DocumentProfileService(collection_service)
     workspace_service = WorkspaceService(
         collection_service,
         task_service,
-        artifact_registry,
-        profile_service,
+        document_profile_service=profile_service,
     )
     collection = collection_service.create_collection("Profiled Workspace")
     collection_id = collection["collection_id"]
@@ -116,10 +107,6 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    artifact_registry.upsert(
-        collection_id,
-        collection_service.get_paths(collection_id).output_dir,
-    )
     profile_service.build_document_profiles(collection_id)
 
     overview = workspace_service.get_workspace_overview(collection_id)
@@ -143,8 +130,7 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
 def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    workspace_service = WorkspaceService(collection_service, task_service, artifact_registry)
+    workspace_service = WorkspaceService(collection_service, task_service)
     collection = collection_service.create_collection("Semantic Graph Workspace")
     collection_id = collection["collection_id"]
     collection_service.add_file(
@@ -152,7 +138,7 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
         "paper.txt",
         b"Experimental Section\nConductivity increased after annealing.",
     )
-    artifact_registry.core_fact_repository.replace_collection_facts(
+    workspace_service.core_fact_repository.replace_collection_facts(
         collection_id,
         CoreFactSet(
             paper_facts_ready=True,
@@ -234,11 +220,6 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
             ),
         ),
     )
-    artifact_registry.upsert(
-        collection_id,
-        collection_service.get_paths(collection_id).output_dir,
-    )
-
     overview = workspace_service.get_workspace_overview(collection_id)
 
     assert overview["status_summary"] == "ready"

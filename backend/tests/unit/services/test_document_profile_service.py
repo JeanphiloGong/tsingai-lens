@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 
 from application.core.semantic_build.document_profile_service import DocumentProfileService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from domain.core.document_profile import DocumentProfile
 from domain.source import SourceArtifactSet
@@ -13,11 +12,7 @@ from infra.source.runtime.source_evidence import build_blocks
 
 def _build_profile_service(tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    return collection_service, artifact_registry, DocumentProfileService(
-        collection_service,
-        artifact_registry,
-    )
+    return collection_service, DocumentProfileService(collection_service)
 
 
 def _write_source_artifacts(
@@ -40,9 +35,7 @@ def _write_source_artifacts(
 
 
 def test_document_profile_service_builds_profiles_and_summary(tmp_path):
-    collection_service, artifact_registry, profile_service = _build_profile_service(
-        tmp_path
-    )
+    collection_service, profile_service = _build_profile_service(tmp_path)
     collection = collection_service.create_collection("Profiled Collection")
     collection_id = collection["collection_id"]
 
@@ -101,11 +94,6 @@ def test_document_profile_service_builds_profiles_and_summary(tmp_path):
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    artifact_registry.upsert(
-        collection_id,
-        collection_service.get_paths(collection_id).output_dir,
-    )
-
     payload = profile_service.list_document_profiles(collection_id)
 
     assert payload["count"] == 3
@@ -124,9 +112,7 @@ def test_document_profile_service_builds_profiles_and_summary(tmp_path):
 
 
 def test_document_profile_service_returns_source_filename_from_file_mapping(tmp_path):
-    collection_service, artifact_registry, profile_service = _build_profile_service(
-        tmp_path
-    )
+    collection_service, profile_service = _build_profile_service(tmp_path)
     collection = collection_service.create_collection("Profiled Collection")
     collection_id = collection["collection_id"]
     file_record = collection_service.add_file(
@@ -161,11 +147,6 @@ def test_document_profile_service_returns_source_filename_from_file_mapping(tmp_
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    artifact_registry.upsert(
-        collection_id,
-        collection_service.get_paths(collection_id).output_dir,
-    )
-
     payload = profile_service.list_document_profiles(collection_id)
 
     item = payload["items"][0]
@@ -181,10 +162,8 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
             raise AssertionError("extract_document_profile should not be called")
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     profile_service = DocumentProfileService(
         collection_service,
-        artifact_registry,
         structured_extractor=ExplodingExtractor(),
     )
     collection = collection_service.create_collection("Sparse Profiles")
@@ -192,11 +171,6 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     documents = pd.DataFrame([{"id": "paper-1", "title": "", "text": ""}])
     text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    artifact_registry.upsert(
-        collection_id,
-        collection_service.get_paths(collection_id).output_dir,
-    )
-
     payload = profile_service.list_document_profiles(collection_id)
 
     item = payload["items"][0]
@@ -225,9 +199,7 @@ def test_document_profile_service_normalizes_numpy_array_columns():
 
 
 def test_document_profile_service_round_trips_repository_storage_fields(tmp_path):
-    collection_service, artifact_registry, profile_service = _build_profile_service(
-        tmp_path
-    )
+    collection_service, profile_service = _build_profile_service(tmp_path)
     collection = collection_service.create_collection("Round Trip Profiles")
     collection_id = collection["collection_id"]
     documents = pd.DataFrame(
@@ -257,11 +229,6 @@ def test_document_profile_service_round_trips_repository_storage_fields(tmp_path
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    artifact_registry.upsert(
-        collection_id,
-        collection_service.get_paths(collection_id).output_dir,
-    )
-
     profile_service.build_document_profiles(collection_id)
 
     restored = profile_service.read_document_profiles(collection_id)

@@ -69,6 +69,12 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
+def _collection_output_dir(collection_id: str) -> Path:
+    from controllers.source import collections as collections_controller
+
+    return collections_controller.collection_service.get_paths(collection_id).output_dir
+
+
 def _write_source_artifact_outputs(
     output_dir: Path,
     *,
@@ -606,22 +612,20 @@ def app_client(monkeypatch, tmp_path):
         core_fact_repository=core_fact_repository,
     )
     document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
+        collection_service=collection_service,
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
     )
     paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
     )
     comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
+        collection_service=collection_service,
+        paper_facts_service=paper_facts_service,
+        document_profile_service=document_profile_service,
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
     )
@@ -634,19 +638,20 @@ def app_client(monkeypatch, tmp_path):
         comparison_service,
     )
     workspace_service = WorkspaceService(
-        collection_service,
-        task_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        task_service=task_service,
+        document_profile_service=document_profile_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
     )
     research_view_service = ResearchViewAggregationService(
         collection_service=collection_service,
         task_service=task_service,
-        artifact_registry_service=artifact_registry,
         document_profile_service=document_profile_service,
         paper_facts_service=paper_facts_service,
         comparison_service=comparison_service,
         workspace_service=workspace_service,
+        core_fact_repository=core_fact_repository,
     )
     goal_service = GoalService(collection_service)
 
@@ -925,11 +930,6 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    output_dir = Path(workspace.json()["artifacts"]["output_path"])
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     comparable_result_1, scoped_result_1, row_id_1 = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-1",
@@ -998,10 +998,6 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
         comparable_results=[comparable_result_1, comparable_result_2],
         scoped_results=[scoped_result_1, scoped_result_2],
     )
-    comparisons_controller.comparison_service.artifact_registry_service.upsert(
-        collection_id,
-        output_dir,
-    )
 
     response = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/comparisons",
@@ -1038,20 +1034,6 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
     )
     assert second_create.status_code == 200
     second_collection_id = second_create.json()["collection_id"]
-
-    first_workspace = app_client.get(
-        f"{API_V1_PREFIX}/collections/{first_collection_id}/workspace"
-    )
-    second_workspace = app_client.get(
-        f"{API_V1_PREFIX}/collections/{second_collection_id}/workspace"
-    )
-    assert first_workspace.status_code == 200
-    assert second_workspace.status_code == 200
-
-    first_output_dir = Path(first_workspace.json()["artifacts"]["output_path"])
-    second_output_dir = Path(second_workspace.json()["artifacts"]["output_path"])
-    first_output_dir.mkdir(parents=True, exist_ok=True)
-    second_output_dir.mkdir(parents=True, exist_ok=True)
 
     shared_result, first_shared_overlay, _shared_row_id = _build_semantic_comparison_record(
         collection_id=first_collection_id,
@@ -1121,10 +1103,6 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
         comparable_results=[shared_result, unique_result],
         scoped_results=[first_shared_overlay, unique_overlay],
     )
-    comparable_results_controller.comparison_service.artifact_registry_service.upsert(
-        first_collection_id,
-        first_output_dir,
-    )
     second_shared_overlay = dict(first_shared_overlay)
     second_shared_overlay["collection_id"] = second_collection_id
     second_shared_overlay["sort_order"] = 4
@@ -1133,10 +1111,6 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
         second_collection_id,
         comparable_results=[shared_result],
         scoped_results=[second_shared_overlay],
-    )
-    comparable_results_controller.comparison_service.artifact_registry_service.upsert(
-        second_collection_id,
-        second_output_dir,
     )
 
     response = app_client.get(
@@ -1175,7 +1149,6 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
     app_client,
 ):
     from controllers.core import results as results_controller
-    from controllers.core import workspace as workspace_controller
 
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
@@ -1183,10 +1156,6 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
     )
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    output_dir = Path(workspace.json()["artifacts"]["output_path"])
 
     document_profile = {
         "document_id": "paper-1",
@@ -1265,10 +1234,6 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
         comparable_results=[first_result, second_result],
         scoped_results=[first_scoped_result, second_scoped_result],
         document_profiles=[document_profile],
-    )
-    workspace_controller.workspace_service.artifact_registry_service.upsert(
-        collection_id,
-        output_dir,
     )
 
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
@@ -1402,9 +1367,7 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    output_dir = Path(workspace.json()["artifacts"]["output_path"])
+    output_dir = _collection_output_dir(collection_id)
 
     _write_core_graph_outputs(output_dir, collection_id)
     graph_controller.graph_service.artifact_registry_service.upsert(

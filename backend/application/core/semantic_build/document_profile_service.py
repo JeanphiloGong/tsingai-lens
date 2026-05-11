@@ -7,7 +7,6 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from domain.core.document_profile import (
     DocumentProfile,
@@ -68,18 +67,16 @@ _PROFILE_FRONT_MATTER_HEADINGS = (
 class DocumentProfilesNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve document profile outputs."""
 
-    def __init__(self, collection_id: str, output_dir: Path) -> None:
+    def __init__(self, collection_id: str) -> None:
         self.collection_id = collection_id
-        self.output_dir = output_dir
         super().__init__(f"document profiles not ready: {collection_id}")
 
 
 class DocumentContentNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve document content."""
 
-    def __init__(self, collection_id: str, output_dir: Path) -> None:
+    def __init__(self, collection_id: str) -> None:
         self.collection_id = collection_id
-        self.output_dir = output_dir
         super().__init__(f"document content not ready: {collection_id}")
 
 
@@ -98,15 +95,11 @@ class DocumentProfileService:
     def __init__(
         self,
         collection_service: CollectionService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
-        self.artifact_registry_service = (
-            artifact_registry_service or ArtifactRegistryService()
-        )
         self._structured_extractor = structured_extractor
         self.core_fact_repository = (
             core_fact_repository
@@ -161,11 +154,11 @@ class DocumentProfileService:
         collection_id: str,
         document_id: str,
     ) -> dict[str, Any]:
-        output_dir = self._resolve_output_dir(collection_id)
+        self.collection_service.get_collection(collection_id)
         try:
             artifacts = self._load_source_artifacts(collection_id)
         except FileNotFoundError as exc:
-            raise DocumentContentNotReadyError(collection_id, output_dir) from exc
+            raise DocumentContentNotReadyError(collection_id) from exc
 
         document_records = self._build_document_records(artifacts)
         row = next(
@@ -219,29 +212,24 @@ class DocumentProfileService:
         }
 
     def read_document_profiles(self, collection_id: str) -> tuple[DocumentProfile, ...]:
-        output_dir = self._resolve_output_dir(collection_id)
+        self.collection_service.get_collection(collection_id)
         facts = self.core_fact_repository.read_collection_facts(collection_id)
         if facts.document_profiles:
             return self._normalize_profile_records(
                 facts.document_profiles,
                 collection_id,
             )
-        return self.build_document_profiles(collection_id, output_dir)
+        return self.build_document_profiles(collection_id)
 
     def build_document_profiles(
         self,
         collection_id: str,
-        output_dir: str | Path | None = None,
     ) -> tuple[DocumentProfile, ...]:
-        base_dir = (
-            Path(output_dir).expanduser().resolve()
-            if output_dir is not None
-            else self._resolve_output_dir(collection_id)
-        )
+        self.collection_service.get_collection(collection_id)
         try:
             artifacts = self._load_source_artifacts(collection_id)
         except FileNotFoundError as exc:
-            raise DocumentProfilesNotReadyError(collection_id, base_dir) from exc
+            raise DocumentProfilesNotReadyError(collection_id) from exc
         document_records = self._build_document_records(artifacts)
         blocks_by_doc = self._group_blocks_by_document(artifacts)
         file_lookup = self._build_collection_file_lookup(collection_id)
@@ -279,7 +267,6 @@ class DocumentProfileService:
             collection_id,
             normalized_profiles,
         )
-        self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
             "Document profile build finished collection_id=%s profile_count=%s",
             collection_id,
@@ -291,18 +278,6 @@ class DocumentProfileService:
         if self._structured_extractor is None:
             self._structured_extractor = build_default_core_llm_structured_extractor()
         return self._structured_extractor
-
-    def _resolve_output_dir(self, collection_id: str) -> Path:
-        self.collection_service.get_collection(collection_id)
-        try:
-            artifacts = self.artifact_registry_service.get(collection_id)
-        except FileNotFoundError:
-            artifacts = None
-        if artifacts:
-            output_path = artifacts.get("output_path")
-            if output_path:
-                return Path(str(output_path)).expanduser().resolve()
-        return self.collection_service.get_paths(collection_id).output_dir.resolve()
 
     def _load_source_artifacts(self, collection_id: str) -> SourceArtifactSet:
         artifacts = self.source_artifact_repository.read_collection_artifacts(

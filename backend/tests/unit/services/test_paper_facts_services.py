@@ -888,15 +888,12 @@ def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
     from application.source.collection_service import CollectionService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
-    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    document_profile_service = DocumentProfileService(collection_service)
     paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
     )
 
     normalized = paper_facts_service._normalize_condition_context_payload(
@@ -1281,14 +1278,11 @@ def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
 def test_comparison_service_lists_corpus_results_without_manifest_cache_artifacts(
     tmp_path,
 ):
-    from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
     )
 
     collection = collection_service.create_collection("Corpus Cache Collection")
@@ -1323,14 +1317,11 @@ def test_comparison_service_lists_corpus_results_without_manifest_cache_artifact
 def test_comparison_service_reflects_repository_updates_without_manifest_cache(
     tmp_path,
 ):
-    from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
     )
 
     collection = collection_service.create_collection("Corpus Refresh Collection")

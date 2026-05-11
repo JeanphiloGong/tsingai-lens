@@ -50,16 +50,13 @@ class CollectionBuildTaskRunner:
         )
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
         )
         self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
             document_profile_service=self.document_profile_service,
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
             paper_facts_service=self.paper_facts_service,
         )
 
@@ -211,20 +208,14 @@ class CollectionBuildTaskRunner:
                     current_stage="document_profiles_started",
                     progress_percent=70,
                 )
-                self.document_profile_service.build_document_profiles(
-                    collection_id,
-                    output_dir,
-                )
+                self.document_profile_service.build_document_profiles(collection_id)
                 self._update_task_progress(
                     task_id,
                     collection_id,
                     current_stage="paper_facts_started",
                     progress_percent=76,
                 )
-                evidence_cards = self.paper_facts_service.build_evidence_cards(
-                    collection_id,
-                    output_dir,
-                )
+                evidence_cards = self.paper_facts_service.build_evidence_cards(collection_id)
                 if not evidence_cards:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))
@@ -237,10 +228,7 @@ class CollectionBuildTaskRunner:
                     current_stage="comparison_rows_started",
                     progress_percent=82,
                 )
-                comparison_rows = self.comparison_service.build_comparison_rows(
-                    collection_id,
-                    output_dir,
-                )
+                comparison_rows = self.comparison_service.build_comparison_rows(collection_id)
                 if not comparison_rows:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))

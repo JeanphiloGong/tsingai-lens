@@ -11,7 +11,6 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.comparison_service import ComparisonService
 from domain.core.comparison_projection import ComparisonRowProjector
@@ -215,18 +214,17 @@ def _store_core_document_semantics(
 @pytest.fixture()
 def document_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    comparison_service = ComparisonService(collection_service, artifact_registry)
+    document_profile_service = DocumentProfileService(collection_service)
+    comparison_service = ComparisonService(collection_service)
 
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
     monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
 
-    return collection_service, artifact_registry, document_profile_service, comparison_service
+    return collection_service, document_profile_service, comparison_service
 
 
 def test_documents_route_returns_409_when_profiles_are_not_ready(document_services):
-    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -241,7 +239,7 @@ def test_documents_route_returns_409_when_profiles_are_not_ready(document_servic
 
 
 def test_documents_route_returns_404_for_missing_collection(document_services):
-    _collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    _collection_service, _document_profile_service, _comparison_service = document_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
@@ -254,11 +252,9 @@ def test_documents_route_returns_404_for_missing_collection(document_services):
 
 
 def test_document_profile_route_returns_single_profile(document_services):
-    collection_service, artifact_registry, document_profile_service, _comparison_service = document_services
+    collection_service, document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Single Profile Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
     _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -274,8 +270,6 @@ def test_document_profile_route_returns_single_profile(document_services):
             }
         ],
     )
-    artifact_registry.upsert(collection_id, output_dir)
-
     payload = asyncio.run(
         documents_controller.get_collection_document_profile(collection_id, "paper-1")
     )
@@ -288,11 +282,9 @@ def test_document_profile_route_returns_single_profile(document_services):
 def test_document_profile_route_normalizes_invalid_profile_status_values(
     document_services,
 ):
-    collection_service, artifact_registry, document_profile_service, _comparison_service = document_services
+    collection_service, document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Invalid Profile Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
     _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -308,8 +300,6 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
             }
         ],
     )
-    artifact_registry.upsert(collection_id, output_dir)
-
     payload = asyncio.run(
         documents_controller.get_collection_document_profile(collection_id, "paper-1")
     )
@@ -320,11 +310,9 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
 def test_document_content_route_includes_source_locators(
     document_services,
 ):
-    collection_service, artifact_registry, document_profile_service, _comparison_service = document_services
+    collection_service, document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Document Locator Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
     document_profile_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -374,8 +362,6 @@ def test_document_content_route_includes_source_locators(
             }
         ],
     )
-    artifact_registry.upsert(collection_id, output_dir)
-
     payload = asyncio.run(
         documents_controller.get_collection_document_content(collection_id, "paper-1")
     )
@@ -394,7 +380,7 @@ def test_document_content_route_includes_source_locators(
 
 
 def test_document_source_route_streams_manifest_source_file(document_services):
-    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Source File Collection")
     collection_id = record["collection_id"]
     paths = collection_service.get_paths(collection_id)
@@ -432,11 +418,10 @@ def test_document_source_route_streams_manifest_source_file(document_services):
 def test_document_source_route_resolves_profile_document_id_by_source_filename(
     document_services,
 ):
-    collection_service, artifact_registry, document_profile_service, _comparison_service = document_services
+    collection_service, document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Profile Source File Collection")
     collection_id = record["collection_id"]
     paths = collection_service.get_paths(collection_id)
-    output_dir = paths.output_dir
     source_path = paths.input_dir / "stored-paper.pdf"
     source_path.write_bytes(b"%PDF-1.4\nprofile fixture\n")
     _store_document_profiles(
@@ -454,7 +439,6 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
             }
         ],
     )
-    artifact_registry.upsert(collection_id, output_dir)
     collection_service.repository.write_import_manifest(
         collection_id,
         {
@@ -487,7 +471,7 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
 
 
 def test_document_source_route_returns_409_when_source_is_unavailable(document_services):
-    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Missing Source Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -508,7 +492,7 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     document_services,
     tmp_path,
 ):
-    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record["collection_id"]
     outside_path = tmp_path / "outside.pdf"
@@ -546,7 +530,7 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
 def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_ready(
     document_services,
 ):
-    collection_service, _artifact_registry, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service = document_services
     record = collection_service.create_collection(name="Pending Semantic Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -566,11 +550,9 @@ def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_
 def test_document_comparison_semantics_route_returns_404_for_missing_document(
     document_services,
 ):
-    collection_service, artifact_registry, _document_profile_service, comparison_service = document_services
+    collection_service, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Missing Document Semantics")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
     comparison_service.core_fact_repository.replace_collection_facts(
         collection_id,
         CoreFactSet(
@@ -589,8 +571,6 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
             ),
         ),
     )
-    artifact_registry.upsert(collection_id, output_dir)
-
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
             documents_controller.get_collection_document_comparison_semantics(
@@ -608,7 +588,7 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
 def test_document_comparison_semantics_route_returns_semantic_items_for_document(
     document_services,
 ):
-    collection_service, _artifact_registry, _document_profile_service, comparison_service = document_services
+    collection_service, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Document Semantic Drilldown")
     collection_id = record["collection_id"]
 
@@ -651,7 +631,7 @@ def test_document_comparison_semantics_route_returns_semantic_items_for_document
 def test_document_comparison_semantics_route_can_include_projected_rows(
     document_services,
 ):
-    collection_service, _artifact_registry, _document_profile_service, comparison_service = document_services
+    collection_service, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Document Semantic Projection")
     collection_id = record["collection_id"]
 
@@ -685,7 +665,7 @@ def test_document_comparison_semantics_route_can_include_projected_rows(
 def test_document_comparison_semantics_route_returns_pbf_acceptance_chain(
     document_services,
 ):
-    collection_service, _artifact_registry, _document_profile_service, comparison_service = document_services
+    collection_service, _document_profile_service, comparison_service = document_services
     record = collection_service.create_collection(name="Document Evidence Chain")
     collection_id = record["collection_id"]
     sample_variants = pbf_acceptance_sample_variants(collection_id)

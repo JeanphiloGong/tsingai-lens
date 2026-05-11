@@ -6,7 +6,6 @@ import logging
 import math
 import os
 import re
-from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping
 from urllib.parse import urlencode
@@ -44,7 +43,6 @@ from application.source.artifact_input_service import (
     load_table_rows_artifact,
     load_table_cells_artifact,
 )
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from domain.core.evidence_backbone import (
     BaselineReference,
@@ -384,9 +382,8 @@ _EXTRACTION_UNIT_PATTERN = re.compile(
 class PaperFactsNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve paper facts."""
 
-    def __init__(self, collection_id: str, output_dir: Path) -> None:
+    def __init__(self, collection_id: str) -> None:
         self.collection_id = collection_id
-        self.output_dir = output_dir
         super().__init__(f"paper facts not ready: {collection_id}")
 
 
@@ -405,19 +402,14 @@ class PaperFactsService:
     def __init__(
         self,
         collection_service: CollectionService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
         document_profile_service: DocumentProfileService | None = None,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
-        self.artifact_registry_service = (
-            artifact_registry_service or ArtifactRegistryService()
-        )
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
             core_fact_repository=core_fact_repository,
             source_artifact_repository=source_artifact_repository,
         )
@@ -580,17 +572,12 @@ class PaperFactsService:
     def build_paper_facts(
         self,
         collection_id: str,
-        output_dir: str | Path | None = None,
     ) -> dict[str, tuple[dict[str, Any], ...]]:
-        base_dir = (
-            Path(output_dir).expanduser().resolve()
-            if output_dir is not None
-            else self._resolve_output_dir(collection_id)
-        )
+        self.collection_service.get_collection(collection_id)
         try:
             profiles = self.document_profile_service.read_document_profiles(collection_id)
         except DocumentProfilesNotReadyError as exc:
-            raise PaperFactsNotReadyError(collection_id, exc.output_dir) from exc
+            raise PaperFactsNotReadyError(collection_id) from exc
 
         try:
             documents, text_units = load_collection_inputs(
@@ -614,7 +601,7 @@ class PaperFactsService:
                 self.source_artifact_repository,
             )
         except FileNotFoundError as exc:
-            raise PaperFactsNotReadyError(collection_id, base_dir) from exc
+            raise PaperFactsNotReadyError(collection_id) from exc
 
         document_records = build_document_records(documents, text_units)
         all_text_windows_by_doc = self._build_text_windows_by_document(blocks)
@@ -1114,7 +1101,6 @@ class PaperFactsService:
             ),
         )
 
-        self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
             "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s",
             collection_id,
@@ -1141,16 +1127,11 @@ class PaperFactsService:
     def build_evidence_cards(
         self,
         collection_id: str,
-        output_dir: str | Path | None = None,
     ) -> tuple[dict[str, Any], ...]:
-        base_dir = (
-            Path(output_dir).expanduser().resolve()
-            if output_dir is not None
-            else self._resolve_output_dir(collection_id)
-        )
+        self.collection_service.get_collection(collection_id)
         facts = self.core_fact_repository.read_collection_facts(collection_id)
         if not self._paper_fact_records_available(facts):
-            self.build_paper_facts(collection_id, base_dir)
+            self.build_paper_facts(collection_id)
         records = self._load_paper_fact_records(collection_id)
         cards_table = self._derive_evidence_card_records(
             collection_id=collection_id,
@@ -1161,7 +1142,6 @@ class PaperFactsService:
             baseline_references=records["baseline_references"],
             measurement_results=records["measurement_results"],
         )
-        self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
             "Evidence view derivation finished collection_id=%s evidence_cards=%s",
             collection_id,
@@ -1173,9 +1153,10 @@ class PaperFactsService:
         self,
         collection_id: str,
     ) -> dict[str, tuple[dict[str, Any], ...]]:
+        self.collection_service.get_collection(collection_id)
         facts = self.core_fact_repository.read_collection_facts(collection_id)
         if not self._paper_fact_records_available(facts):
-            raise PaperFactsNotReadyError(collection_id, self._resolve_output_dir(collection_id))
+            raise PaperFactsNotReadyError(collection_id)
 
         return {
             "evidence_anchors": self._records_to_records(
@@ -5612,16 +5593,6 @@ class PaperFactsService:
             )
             records.append(BaselineReference.from_mapping(payload).to_record())
         return tuple(records)
-
-    def _resolve_output_dir(self, collection_id: str) -> Path:
-        self.collection_service.get_collection(collection_id)
-        try:
-            artifacts = self.artifact_registry_service.get(collection_id)
-        except FileNotFoundError:
-            artifacts = None
-        if artifacts and artifacts.get("output_path"):
-            return Path(str(artifacts["output_path"])).expanduser().resolve()
-        return self.collection_service.get_paths(collection_id).output_dir.resolve()
 
 
 __all__ = [

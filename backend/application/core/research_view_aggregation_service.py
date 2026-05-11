@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
-from pathlib import Path
 from typing import Any
 
 from application.core.comparison_service import (
@@ -14,7 +13,6 @@ from application.core.semantic_build.document_profile_service import (
 )
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.workspace_overview_service import WorkspaceService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
 from domain.core.fact_store import CoreFactSet
@@ -71,9 +69,8 @@ _ComparisonGroups = dict[tuple[str, str, str, str, str], list[dict[str, Any]]]
 class ResearchViewNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve research-view aggregation."""
 
-    def __init__(self, collection_id: str, output_dir: Path | None = None) -> None:
+    def __init__(self, collection_id: str) -> None:
         self.collection_id = collection_id
-        self.output_dir = output_dir
         super().__init__(f"research view not ready: {collection_id}")
 
 
@@ -109,7 +106,6 @@ class ResearchViewAggregationService:
         self,
         collection_service: CollectionService | None = None,
         task_service: TaskService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
         document_profile_service: DocumentProfileService | None = None,
         paper_facts_service: PaperFactsService | None = None,
         comparison_service: ComparisonService | None = None,
@@ -118,9 +114,6 @@ class ResearchViewAggregationService:
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
-        self.artifact_registry_service = (
-            artifact_registry_service or ArtifactRegistryService()
-        )
         self.core_fact_repository = (
             core_fact_repository
             or getattr(paper_facts_service, "core_fact_repository", None)
@@ -130,17 +123,15 @@ class ResearchViewAggregationService:
         )
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
+            core_fact_repository=self.core_fact_repository,
         )
         self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
             document_profile_service=self.document_profile_service,
             core_fact_repository=self.core_fact_repository,
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
             paper_facts_service=self.paper_facts_service,
             document_profile_service=self.document_profile_service,
             core_fact_repository=self.core_fact_repository,
@@ -148,7 +139,6 @@ class ResearchViewAggregationService:
         self.workspace_service = workspace_service or WorkspaceService(
             collection_service=self.collection_service,
             task_service=self.task_service,
-            artifact_registry_service=self.artifact_registry_service,
             document_profile_service=self.document_profile_service,
         )
 

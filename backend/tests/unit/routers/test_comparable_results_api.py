@@ -10,7 +10,6 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from controllers.core import comparable_results as comparable_results_controller
 from domain.core import (
@@ -138,8 +137,7 @@ def _store_core_comparable_result_facts(
 @pytest.fixture()
 def comparable_result_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(collection_service, artifact_registry)
+    comparison_service = ComparisonService(collection_service)
 
     monkeypatch.setattr(
         comparable_results_controller,
@@ -147,13 +145,13 @@ def comparable_result_services(monkeypatch, tmp_path):
         comparison_service,
     )
 
-    return collection_service, artifact_registry, comparison_service
+    return collection_service, comparison_service
 
 
 def test_comparable_results_route_returns_200_without_row_cache(
     comparable_result_services,
 ):
-    collection_service, _artifact_registry, comparison_service = comparable_result_services
+    collection_service, comparison_service = comparable_result_services
     collection = collection_service.create_collection(name="Comparable Results Collection")
     collection_id = collection["collection_id"]
 
@@ -184,7 +182,7 @@ def test_comparable_results_route_returns_200_without_row_cache(
 def test_comparable_result_detail_route_returns_404_when_missing(
     comparable_result_services,
 ):
-    _collection_service, _artifact_registry, _comparison_service = comparable_result_services
+    _collection_service, _comparison_service = comparable_result_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(

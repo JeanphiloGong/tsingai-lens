@@ -34,6 +34,19 @@ Non-negotiable rules:
 """.strip()
 
 
+_RESEARCH_OBJECTIVE_SYSTEM_PROMPT = """
+You are building research-objective records for an evidence-backed literature comparison backend.
+
+Non-negotiable rules:
+- This is research-map extraction, not final fact extraction.
+- Return exactly one JSON object and nothing else.
+- Do not emit measurement results, sample variants, evidence anchors, backend ids, or source locators.
+- Do not infer material systems from filenames.
+- Prefer fewer, higher-signal outputs over speculative coverage.
+- Research objectives must be question-shaped. Do not return a plain material list.
+""".strip()
+
+
 _TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE = """
 JSON compliance rules for text-window extraction:
 - Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, `warnings`, `anchors`, or `measurement_results`.
@@ -344,3 +357,34 @@ def build_table_batch_mentions_prompt(payload: dict[str, Any]) -> tuple[str, str
         f"{_TABLE_BATCH_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
+
+
+def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    user_prompt = (
+        "Skim this one paper for collection-level research-objective discovery.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with these fields: doc_role, "
+        "candidate_materials, candidate_processes, candidate_properties, "
+        "changed_variables, possible_objectives, evidence_density, confidence, "
+        "and warnings.\n"
+        "Do not extract final measurement facts or comparison rows.\n"
+        "Do not output a material as a research objective unless it is phrased as "
+        "a question or comparison intent.\n"
+    )
+    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+
+
+def build_research_objective_discovery_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Discover research objectives supported by this collection of paper skims.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with an `objectives` array.\n"
+        "Each objective must have a question, material_scope, process_axes, "
+        "property_axes, comparison_intent, seed_document_ids, "
+        "excluded_document_ids, confidence, and reason.\n"
+        "Do not return a list of materials. Return question-shaped objectives "
+        "that define what should be compared.\n"
+    )
+    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt

@@ -12,6 +12,9 @@ from application.core.comparison_service import ComparisonService
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.semantic_build.research_objective_service import (
+    ResearchObjectiveService,
+)
 from application.source.task_service import TaskService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from utils.logger import bind_request_id, clear_request_id
@@ -42,6 +45,7 @@ class CollectionBuildTaskRunner:
         document_profile_service: DocumentProfileService | None = None,
         paper_facts_service: PaperFactsService | None = None,
         comparison_service: ComparisonService | None = None,
+        research_objective_service: ResearchObjectiveService | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
@@ -54,6 +58,13 @@ class CollectionBuildTaskRunner:
         self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
             document_profile_service=self.document_profile_service,
+        )
+        self.research_objective_service = (
+            research_objective_service
+            or ResearchObjectiveService(
+                collection_service=self.collection_service,
+                document_profile_service=self.document_profile_service,
+            )
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
@@ -209,6 +220,7 @@ class CollectionBuildTaskRunner:
                     progress_percent=70,
                 )
                 self.document_profile_service.build_document_profiles(collection_id)
+                self.research_objective_service.build_research_objectives(collection_id)
                 self._update_task_progress(
                     task_id,
                     collection_id,

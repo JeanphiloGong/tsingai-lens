@@ -6,6 +6,9 @@ from typing import Any
 from application.core.semantic_build.llm.schemas import (
     MeasurementValuePayload,
     StructuredDocumentProfile,
+    StructuredPaperSkim,
+    StructuredResearchObjective,
+    StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTableBatchRowMentions,
     StructuredTableRowMentions,
@@ -133,6 +136,149 @@ class FakeCoreLLMStructuredExtractor:
             parsing_warnings=sorted(set(warnings)),
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
+
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        title = str(payload.get("title") or "").strip()
+        profile = payload.get("document_profile") if isinstance(payload.get("document_profile"), dict) else {}
+        headings = payload.get("headings") if isinstance(payload.get("headings"), list) else []
+        text_preview = str(payload.get("text_preview") or "")
+        table_text = " ".join(
+            str(item.get("caption_text") or "")
+            for item in payload.get("table_captions", [])
+            if isinstance(item, dict)
+        )
+        figure_text = " ".join(
+            str(item.get("caption_text") or "")
+            for item in payload.get("figure_captions", [])
+            if isinstance(item, dict)
+        )
+        combined_text = " ".join(
+            part
+            for part in (
+                title,
+                " ".join(str(item) for item in headings),
+                text_preview,
+                table_text,
+                figure_text,
+            )
+            if part
+        )
+        lowered_text = combined_text.lower()
+
+        material_system = self._infer_material_system(title, combined_text)
+        material_family = material_system.get("family")
+        candidate_materials = (
+            []
+            if material_family == "unspecified material system"
+            else [str(material_family)]
+        )
+        candidate_processes: list[str] = []
+        if any(token in lowered_text for token in ("lpbf", "slm", "laser powder bed fusion")):
+            candidate_processes.append("LPBF")
+        if any(token in lowered_text for token in ("anneal", "heat treatment", "heated")):
+            candidate_processes.append("heat treatment")
+        if "mixed" in lowered_text or "stirred" in lowered_text:
+            candidate_processes.append("mixing")
+
+        candidate_properties = []
+        property_name = self._infer_property(combined_text)
+        if property_name:
+            candidate_properties.append(property_name)
+        changed_variables = []
+        if self._extract_process_context(combined_text).get("temperatures_c"):
+            changed_variables.append("temperature")
+        if self._extract_process_context(combined_text).get("durations"):
+            changed_variables.append("duration")
+        if "anneal" in lowered_text:
+            changed_variables.append("annealing")
+
+        possible_objectives = []
+        if candidate_materials and candidate_properties:
+            process_phrase = (
+                " and ".join(candidate_processes)
+                if candidate_processes
+                else "processing"
+            )
+            possible_objectives.append(
+                f"How does {process_phrase} affect {candidate_properties[0]} of {candidate_materials[0]}?"
+            )
+
+        doc_role = str(profile.get("doc_type") or "").strip() or "uncertain"
+        if doc_role not in {"experimental", "review", "mixed", "uncertain"}:
+            doc_role = "uncertain"
+        evidence_density = (
+            "high"
+            if possible_objectives
+            else "medium" if candidate_materials or candidate_properties else "low"
+        )
+        return StructuredPaperSkim(
+            doc_role=doc_role,
+            candidate_materials=candidate_materials,
+            candidate_processes=candidate_processes,
+            candidate_properties=candidate_properties,
+            changed_variables=changed_variables,
+            possible_objectives=possible_objectives,
+            evidence_density=evidence_density,
+            confidence=0.86 if possible_objectives else 0.62,
+            warnings=[] if possible_objectives else ["objective_uncertain"],
+        )
+
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        skims = payload.get("paper_skims") if isinstance(payload.get("paper_skims"), list) else []
+        objectives: list[StructuredResearchObjective] = []
+        seen_questions: set[str] = set()
+        for skim in skims:
+            if not isinstance(skim, dict):
+                continue
+            possible_objectives = skim.get("possible_objectives")
+            if not isinstance(possible_objectives, list):
+                possible_objectives = []
+            candidate_question = next(
+                (str(item).strip() for item in possible_objectives if str(item).strip()),
+                "",
+            )
+            if not candidate_question:
+                continue
+            key = candidate_question.lower()
+            if key in seen_questions:
+                continue
+            seen_questions.add(key)
+            document_id = str(skim.get("document_id") or "").strip()
+            objectives.append(
+                StructuredResearchObjective(
+                    question=candidate_question,
+                    material_scope=[
+                        str(item)
+                        for item in skim.get("candidate_materials", [])
+                        if str(item).strip()
+                    ],
+                    process_axes=[
+                        str(item)
+                        for item in skim.get("candidate_processes", [])
+                        if str(item).strip()
+                    ],
+                    property_axes=[
+                        str(item)
+                        for item in skim.get("candidate_properties", [])
+                        if str(item).strip()
+                    ],
+                    comparison_intent="compare process or treatment effects across papers",
+                    seed_document_ids=[document_id] if document_id else [],
+                    excluded_document_ids=[
+                        str(item.get("document_id") or "").strip()
+                        for item in skims
+                        if isinstance(item, dict)
+                        and str(item.get("doc_role") or "") == "review"
+                        and str(item.get("document_id") or "").strip()
+                    ],
+                    confidence=0.82,
+                    reason="derived from paper skim objective candidates",
+                )
+            )
+        return StructuredResearchObjectives(objectives=objectives)
 
     def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
         document_title = str(payload.get("document_title") or "")
@@ -480,7 +626,9 @@ class FakeCoreLLMStructuredExtractor:
 
     def _infer_material_system(self, title: str, text: str):
         lowered = f"{title}\n{text}".lower()
-        if "epoxy" in lowered:
+        if "316l" in lowered or "stainless steel" in lowered:
+            family = "316L stainless steel"
+        elif "epoxy" in lowered:
             family = "epoxy composite"
         elif "ti alloy" in lowered or "titanium" in lowered:
             family = "Ti alloy"

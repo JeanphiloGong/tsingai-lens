@@ -16,7 +16,7 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
-from application.derived.core_fact_projection import build_core_fact_projection_frames
+from application.derived.core_fact_projection import build_core_fact_projection_records
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
@@ -179,7 +179,7 @@ def _load_artifacts(
         db_path
     ).read_collection_artifacts(collection_id)
     core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
-    projection = build_core_fact_projection_frames(core_facts)
+    projection = build_core_fact_projection_records(core_facts)
     frames: dict[str, pd.DataFrame] = {}
     source_records = {
         "documents": source_artifacts.documents,
@@ -211,8 +211,8 @@ def _load_artifacts(
         frames[name] = _normalize_frame(
             pd.DataFrame([record.to_record() for record in records])
         )
-    frames["evidence_cards"] = _normalize_frame(projection.evidence_cards)
-    frames["comparison_rows"] = _normalize_frame(projection.comparison_rows)
+    frames["evidence_cards"] = _normalize_frame(pd.DataFrame(projection.evidence_cards))
+    frames["comparison_rows"] = _normalize_frame(pd.DataFrame(projection.comparison_rows))
     return frames
 
 

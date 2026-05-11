@@ -18,12 +18,16 @@ from domain.core.evidence_backbone import (
     StructureFeature,
     TestCondition,
 )
+from domain.core.research_objective import PaperSkim, ResearchObjective
 
 
 @dataclass(frozen=True)
 class CoreFactSet:
+    research_objectives_ready: bool = False
     paper_facts_ready: bool = False
     comparison_artifacts_ready: bool = False
+    paper_skims: tuple[PaperSkim, ...] = ()
+    research_objectives: tuple[ResearchObjective, ...] = ()
     document_profiles: tuple[DocumentProfile, ...] = ()
     evidence_anchors: tuple[EvidenceAnchor, ...] = ()
     method_facts: tuple[MethodFact, ...] = ()

@@ -42,6 +42,14 @@ _CLAIM_SCOPES = {
 }
 _EVIDENCE_SOURCE_TYPES = {"text", "method", "table", "figure"}
 _VALUE_ORIGINS = {"reported", "derived", "estimated"}
+_PAPER_SKIM_DOC_ROLES = {
+    "experimental",
+    "review",
+    "modeling",
+    "mixed",
+    "uncertain",
+}
+_PAPER_SKIM_EVIDENCE_DENSITIES = {"high", "medium", "low", "unknown"}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -549,6 +557,84 @@ class StructuredTableBatchMentions(_StrictModel):
     @field_validator("row_results", mode="before")
     @classmethod
     def _normalize_row_results(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredPaperSkim(_StrictModel):
+    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
+        "uncertain"
+    )
+    candidate_materials: list[str] = Field(default_factory=list)
+    candidate_processes: list[str] = Field(default_factory=list)
+    candidate_properties: list[str] = Field(default_factory=list)
+    changed_variables: list[str] = Field(default_factory=list)
+    possible_objectives: list[str] = Field(default_factory=list)
+    evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "candidate_materials",
+        "candidate_processes",
+        "candidate_properties",
+        "changed_variables",
+        "possible_objectives",
+        "warnings",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+    @field_validator("doc_role", mode="before")
+    @classmethod
+    def _normalize_doc_role(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_PAPER_SKIM_DOC_ROLES,
+            default="uncertain",
+        )
+
+    @field_validator("evidence_density", mode="before")
+    @classmethod
+    def _normalize_evidence_density(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_PAPER_SKIM_EVIDENCE_DENSITIES,
+            default="unknown",
+        )
+
+
+class StructuredResearchObjective(_StrictModel):
+    question: str
+    material_scope: list[str] = Field(default_factory=list)
+    process_axes: list[str] = Field(default_factory=list)
+    property_axes: list[str] = Field(default_factory=list)
+    comparison_intent: str | None = None
+    seed_document_ids: list[str] = Field(default_factory=list)
+    excluded_document_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    reason: str | None = None
+
+    @field_validator(
+        "material_scope",
+        "process_axes",
+        "property_axes",
+        "seed_document_ids",
+        "excluded_document_ids",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredResearchObjectives(_StrictModel):
+    objectives: list[StructuredResearchObjective] = Field(default_factory=list)
+
+    @field_validator("objectives", mode="before")
+    @classmethod
+    def _normalize_objectives(cls, value: object) -> object:
         return _normalize_list_container(value)
 
 

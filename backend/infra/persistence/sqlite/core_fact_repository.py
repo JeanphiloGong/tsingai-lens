@@ -21,7 +21,9 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    PaperSkim,
     SampleVariant,
+    ResearchObjective,
     StructureFeature,
     TestCondition,
 )
@@ -39,6 +41,71 @@ class _TableSpec:
     real_columns: frozenset[str] = frozenset()
     boolean_columns: frozenset[str] = frozenset()
     index_columns: tuple[str, ...] = ()
+
+
+_OBJECTIVE_TABLES: tuple[_TableSpec, ...] = (
+    _TableSpec(
+        table_name="core_paper_skims",
+        attr_name="paper_skims",
+        record_cls=PaperSkim,
+        id_column="document_id",
+        columns=(
+            "document_id",
+            "title",
+            "source_filename",
+            "doc_role",
+            "candidate_materials",
+            "candidate_processes",
+            "candidate_properties",
+            "changed_variables",
+            "possible_objectives",
+            "evidence_density",
+            "confidence",
+            "warnings",
+        ),
+        json_columns=frozenset(
+            {
+                "candidate_materials",
+                "candidate_processes",
+                "candidate_properties",
+                "changed_variables",
+                "possible_objectives",
+                "warnings",
+            }
+        ),
+        real_columns=frozenset({"confidence"}),
+        index_columns=("document_id", "doc_role"),
+    ),
+    _TableSpec(
+        table_name="core_research_objectives",
+        attr_name="research_objectives",
+        record_cls=ResearchObjective,
+        id_column="objective_id",
+        columns=(
+            "objective_id",
+            "question",
+            "material_scope",
+            "process_axes",
+            "property_axes",
+            "comparison_intent",
+            "seed_document_ids",
+            "excluded_document_ids",
+            "confidence",
+            "reason",
+        ),
+        json_columns=frozenset(
+            {
+                "material_scope",
+                "process_axes",
+                "property_axes",
+                "seed_document_ids",
+                "excluded_document_ids",
+            }
+        ),
+        real_columns=frozenset({"confidence"}),
+        index_columns=("objective_id",),
+    ),
+)
 
 
 _PAPER_FACT_TABLES: tuple[_TableSpec, ...] = (
@@ -391,7 +458,8 @@ _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
     ),
 )
 
-_ALL_TABLES = (*_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
+_FACT_REPLACE_TABLES = (*_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
+_ALL_TABLES = (*_OBJECTIVE_TABLES, *_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
 _STATUS_TABLE = "core_fact_collection_status"
 
 
@@ -403,6 +471,33 @@ class SqliteCoreFactRepository:
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = Path(db_path or (DATA_DIR / "lens.sqlite")).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def replace_collection_research_objectives(
+        self,
+        collection_id: str,
+        paper_skims: tuple[PaperSkim, ...],
+        research_objectives: tuple[ResearchObjective, ...],
+    ) -> None:
+        self._ensure_schema()
+        records_by_attr = {
+            "paper_skims": paper_skims,
+            "research_objectives": research_objectives,
+        }
+        with self._connection() as connection:
+            for spec in _OBJECTIVE_TABLES:
+                self._delete_collection(connection, spec, collection_id)
+            for spec in _OBJECTIVE_TABLES:
+                self._insert_records(
+                    connection,
+                    spec,
+                    collection_id,
+                    records_by_attr[spec.attr_name],
+                )
+            self._upsert_status(
+                connection,
+                collection_id,
+                research_objectives_ready=bool(paper_skims or research_objectives),
+            )
 
     def replace_collection_document_profiles(
         self,
@@ -428,9 +523,9 @@ class SqliteCoreFactRepository:
     ) -> None:
         self._ensure_schema()
         with self._connection() as connection:
-            for spec in _ALL_TABLES:
+            for spec in _FACT_REPLACE_TABLES:
                 self._delete_collection(connection, spec, collection_id)
-            for spec in _ALL_TABLES:
+            for spec in _FACT_REPLACE_TABLES:
                 self._insert_records(
                     connection,
                     spec,
@@ -516,10 +611,30 @@ class SqliteCoreFactRepository:
             f"""
             CREATE TABLE IF NOT EXISTS {_STATUS_TABLE} (
                 collection_id TEXT PRIMARY KEY,
+                research_objectives_ready INTEGER NOT NULL DEFAULT 0,
                 paper_facts_ready INTEGER NOT NULL DEFAULT 0,
                 comparison_artifacts_ready INTEGER NOT NULL DEFAULT 0
             )
             """
+        )
+        self._ensure_status_column(
+            connection,
+            "research_objectives_ready",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+
+    def _ensure_status_column(
+        self,
+        connection: sqlite3.Connection,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+        rows = connection.execute(f"PRAGMA table_info({_STATUS_TABLE})").fetchall()
+        existing = {str(row["name"]) for row in rows}
+        if column_name in existing:
+            return
+        connection.execute(
+            f"ALTER TABLE {_STATUS_TABLE} ADD COLUMN {column_name} {column_definition}"
         )
 
     def _upsert_status(
@@ -527,17 +642,24 @@ class SqliteCoreFactRepository:
         connection: sqlite3.Connection,
         collection_id: str,
         *,
+        research_objectives_ready: bool | None = None,
         paper_facts_ready: bool | None = None,
         comparison_artifacts_ready: bool | None = None,
     ) -> None:
         current = connection.execute(
             f"""
-            SELECT paper_facts_ready, comparison_artifacts_ready
+            SELECT
+                research_objectives_ready,
+                paper_facts_ready,
+                comparison_artifacts_ready
             FROM {_STATUS_TABLE}
             WHERE collection_id = ?
             """,
             (collection_id,),
         ).fetchone()
+        next_research_objectives_ready = (
+            bool(current["research_objectives_ready"]) if current else False
+        )
         next_paper_facts_ready = (
             bool(current["paper_facts_ready"]) if current else False
         )
@@ -546,22 +668,27 @@ class SqliteCoreFactRepository:
         )
         if paper_facts_ready is not None:
             next_paper_facts_ready = bool(paper_facts_ready)
+        if research_objectives_ready is not None:
+            next_research_objectives_ready = bool(research_objectives_ready)
         if comparison_artifacts_ready is not None:
             next_comparison_artifacts_ready = bool(comparison_artifacts_ready)
         connection.execute(
             f"""
             INSERT INTO {_STATUS_TABLE} (
                 collection_id,
+                research_objectives_ready,
                 paper_facts_ready,
                 comparison_artifacts_ready
             )
-            VALUES (?, ?, ?)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(collection_id) DO UPDATE SET
+                research_objectives_ready = excluded.research_objectives_ready,
                 paper_facts_ready = excluded.paper_facts_ready,
                 comparison_artifacts_ready = excluded.comparison_artifacts_ready
             """,
             (
                 collection_id,
+                int(next_research_objectives_ready),
                 int(next_paper_facts_ready),
                 int(next_comparison_artifacts_ready),
             ),
@@ -575,7 +702,10 @@ class SqliteCoreFactRepository:
     ) -> dict[str, bool]:
         row = connection.execute(
             f"""
-            SELECT paper_facts_ready, comparison_artifacts_ready
+            SELECT
+                research_objectives_ready,
+                paper_facts_ready,
+                comparison_artifacts_ready
             FROM {_STATUS_TABLE}
             WHERE collection_id = ?
             """,
@@ -583,12 +713,16 @@ class SqliteCoreFactRepository:
         ).fetchone()
         if row is not None:
             return {
+                "research_objectives_ready": bool(row["research_objectives_ready"]),
                 "paper_facts_ready": bool(row["paper_facts_ready"]),
                 "comparison_artifacts_ready": bool(
                     row["comparison_artifacts_ready"]
                 ),
             }
         return {
+            "research_objectives_ready": any(
+                records_by_attr[spec.attr_name] for spec in _OBJECTIVE_TABLES
+            ),
             "paper_facts_ready": any(
                 records_by_attr[spec.attr_name] for spec in _PAPER_FACT_TABLES[1:]
             ),

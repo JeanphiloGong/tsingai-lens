@@ -11,6 +11,8 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    PaperSkim,
+    ResearchObjective,
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
@@ -220,6 +222,105 @@ def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
     assert empty_comparison.paper_facts_ready is False
     assert empty_comparison.comparison_artifacts_ready is True
     assert empty_comparison.comparison_rows == ()
+
+
+def test_sqlite_core_fact_repository_round_trips_research_objectives(tmp_path):
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "title": "LPBF 316L corrosion study",
+            "source_filename": "paper.pdf",
+            "doc_role": "experimental",
+            "candidate_materials": ["316L stainless steel"],
+            "candidate_processes": ["LPBF", "heat treatment"],
+            "candidate_properties": ["corrosion"],
+            "changed_variables": ["heat treatment temperature"],
+            "possible_objectives": [
+                "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
+            ],
+            "evidence_density": "high",
+            "confidence": 0.91,
+            "warnings": [],
+        }
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["LPBF", "heat treatment"],
+            "property_axes": ["corrosion"],
+            "comparison_intent": "compare as-built and heat-treated corrosion behavior",
+            "seed_document_ids": ["paper-1"],
+            "excluded_document_ids": [],
+            "confidence": 0.88,
+            "reason": "paper skim points to a repeated comparison axis",
+        }
+    )
+
+    repository.replace_collection_research_objectives(
+        "col_test",
+        (paper_skim,),
+        (objective,),
+    )
+    restored = repository.read_collection_facts("col_test")
+
+    assert restored.research_objectives_ready is True
+    assert restored.paper_facts_ready is False
+    assert restored.paper_skims[0].candidate_materials == ("316L stainless steel",)
+    assert restored.research_objectives[0].objective_id.startswith("obj_")
+    assert restored.research_objectives[0].seed_document_ids == ("paper-1",)
+
+
+def test_sqlite_core_fact_repository_preserves_research_objectives_when_replacing_facts(
+    tmp_path,
+):
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "candidate_materials": ["316L stainless steel"],
+            "possible_objectives": [
+                "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
+            ],
+        }
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
+            "material_scope": ["316L stainless steel"],
+        }
+    )
+    repository.replace_collection_research_objectives(
+        "col_test",
+        (paper_skim,),
+        (objective,),
+    )
+
+    repository.replace_collection_facts(
+        "col_test",
+        CoreFactSet(
+            document_profiles=(
+                DocumentProfile(
+                    document_id="doc-1",
+                    collection_id="col_test",
+                    title="LPBF 316L",
+                    source_filename="paper.pdf",
+                    doc_type="experimental",
+                    parsing_warnings=(),
+                    confidence=0.88,
+                ),
+            ),
+        ),
+    )
+    restored = repository.read_collection_facts("col_test")
+
+    assert restored.research_objectives_ready is True
+    assert restored.paper_facts_ready is True
+    assert restored.paper_skims[0].document_id == "paper-1"
+    assert restored.research_objectives[0].material_scope == ("316L stainless steel",)
+    assert restored.document_profiles[0].document_id == "doc-1"
 
 
 def _comparable_result(value: int = 620) -> ComparableResult:

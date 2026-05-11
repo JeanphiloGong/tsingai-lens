@@ -8,6 +8,8 @@ from pydantic import ValidationError
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.schemas import (
     StructuredExtractionBundle,
+    StructuredPaperSkim,
+    StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
@@ -116,6 +118,73 @@ def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredTextWindowMentions
     assert "JSON schema:" in parse_call["messages"][1]["content"]
+
+
+def test_core_llm_extractor_validates_paper_skim_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "doc_role": "experimental",
+          "candidate_materials": ["316L stainless steel"],
+          "candidate_processes": ["LPBF", "heat treatment"],
+          "candidate_properties": ["corrosion"],
+          "changed_variables": ["temperature"],
+          "possible_objectives": [
+            "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
+          ],
+          "evidence_density": "high",
+          "confidence": 0.91,
+          "warnings": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "LPBF 316L corrosion study",
+            "text_preview": "LPBF 316L was heat treated.",
+            "table_captions": [],
+        }
+    )
+
+    assert isinstance(skim, StructuredPaperSkim)
+    assert skim.doc_role == "experimental"
+    assert skim.candidate_materials == ["316L stainless steel"]
+
+
+def test_core_llm_extractor_validates_research_objective_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "objectives": [
+            {
+              "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
+              "material_scope": ["316L stainless steel"],
+              "process_axes": ["LPBF", "heat treatment"],
+              "property_axes": ["corrosion"],
+              "comparison_intent": "compare as-built and heat-treated corrosion behavior",
+              "seed_document_ids": ["paper-1"],
+              "excluded_document_ids": [],
+              "confidence": 0.88,
+              "reason": "paper skims share the same comparison axis"
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    objectives = extractor.discover_research_objectives(
+        {
+            "collection_id": "col-1",
+            "paper_skims": [],
+        }
+    )
+
+    assert isinstance(objectives, StructuredResearchObjectives)
+    assert objectives.objectives[0].question.startswith("How does heat treatment")
 
 
 def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():

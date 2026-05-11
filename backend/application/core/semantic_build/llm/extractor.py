@@ -12,11 +12,15 @@ from pydantic import BaseModel
 
 from .schemas import (
     StructuredDocumentProfile,
+    StructuredPaperSkim,
+    StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
 from .prompts import (
     build_document_profile_prompt,
+    build_paper_skim_prompt,
+    build_research_objective_discovery_prompt,
     build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
@@ -84,6 +88,31 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredTableBatchMentions):
             raise TypeError("unexpected table batch extraction response type")
+        return response
+
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        system_prompt, user_prompt = build_paper_skim_prompt(payload)
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredPaperSkim,
+        )
+        if not isinstance(response, StructuredPaperSkim):
+            raise TypeError("unexpected paper skim response type")
+        return response
+
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        system_prompt, user_prompt = build_research_objective_discovery_prompt(payload)
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredResearchObjectives,
+        )
+        if not isinstance(response, StructuredResearchObjectives):
+            raise TypeError("unexpected research objective response type")
         return response
 
     def _parse_structured_response(

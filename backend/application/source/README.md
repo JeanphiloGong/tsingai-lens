@@ -7,7 +7,7 @@ parser implementation layer.
 The Source parser and artifact builder live under
 `backend/infra/source/runtime/`. After that Source runtime finishes, this
 application package starts Core post-processing for document profiles, paper
-facts, and comparison rows.
+skims, research objectives, paper facts, and comparison rows.
 
 - `collection_service.py`
   Collection lifecycle, file membership, import provenance, and goal handoff

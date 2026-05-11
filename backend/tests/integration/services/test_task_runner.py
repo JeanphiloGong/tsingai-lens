@@ -16,6 +16,7 @@ from application.source.collection_build_task_runner import CollectionBuildTaskR
 from application.source.task_service import TaskService
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
@@ -193,6 +194,11 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
+    core_facts = SqliteCoreFactRepository(tmp_path / "lens.sqlite").read_collection_facts(
+        collection["collection_id"]
+    )
+    assert core_facts.research_objectives_ready is True
+    assert core_facts.paper_skims
 
 def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
     import application.source.collection_build_task_runner as task_runner_module

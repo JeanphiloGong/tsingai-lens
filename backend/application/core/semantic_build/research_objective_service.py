@@ -60,6 +60,14 @@ _BROAD_PROPERTY_AXIS_EXPANSIONS = {
         "passivation behavior",
     ),
 }
+_STRUCTURAL_PROPERTY_AXES = (
+    "densification",
+    "relative density",
+    "microstructure",
+)
+_MECHANICAL_PROPERTY_AXES = _BROAD_PROPERTY_AXIS_EXPANSIONS[
+    "mechanical properties"
+]
 
 
 class ResearchObjectivesNotReadyError(RuntimeError):
@@ -202,6 +210,15 @@ class ResearchObjectiveService:
             paper_skims=tuple(paper_skims),
             objectives=research_objectives,
         )
+        research_objectives = self._split_mixed_property_objectives(
+            paper_skims=tuple(paper_skims),
+            objectives=research_objectives,
+        )
+        research_objectives = self._align_research_objective_text_with_axes(
+            paper_skims=tuple(paper_skims),
+            objectives=research_objectives,
+        )
+        research_objectives = self._dedupe_research_objectives(research_objectives)
 
         self.core_fact_repository.replace_collection_research_objectives(
             collection_id,
@@ -717,6 +734,279 @@ class ResearchObjectiveService:
             return None
         return tuple(merged_objectives)
 
+    def _dedupe_research_objectives(
+        self,
+        objectives: tuple[ResearchObjective, ...],
+    ) -> tuple[ResearchObjective, ...]:
+        deduped: list[ResearchObjective] = []
+        seen_objective_ids: set[str] = set()
+        for objective in objectives:
+            if objective.objective_id in seen_objective_ids:
+                continue
+            seen_objective_ids.add(objective.objective_id)
+            deduped.append(objective)
+        return tuple(deduped)
+
+    def _split_mixed_property_objectives(
+        self,
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+        objectives: tuple[ResearchObjective, ...],
+    ) -> tuple[ResearchObjective, ...]:
+        split_objectives: list[ResearchObjective] = []
+        for objective in objectives:
+            split_objectives.extend(
+                self._split_single_mixed_property_objective(
+                    objective,
+                    paper_skims=paper_skims,
+                )
+            )
+        return tuple(split_objectives)
+
+    def _split_single_mixed_property_objective(
+        self,
+        objective: ResearchObjective,
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> tuple[ResearchObjective, ...]:
+        structural_axes = [
+            value
+            for value in objective.property_axes
+            if self._property_axis_matches_any(value, _STRUCTURAL_PROPERTY_AXES)
+        ]
+        mechanical_axes = [
+            value
+            for value in objective.property_axes
+            if self._property_axis_matches_any(value, _MECHANICAL_PROPERTY_AXES)
+        ]
+        grouped_keys = self._axis_key_set(*structural_axes, *mechanical_axes)
+        other_axes = [
+            value
+            for value in objective.property_axes
+            if self._axis_key(value) not in grouped_keys
+        ]
+        if not structural_axes or not mechanical_axes or other_axes:
+            return (objective,)
+
+        return (
+            self._build_property_split_objective(
+                objective,
+                property_axes=structural_axes,
+                paper_skims=paper_skims,
+                reason=(
+                    "Split mixed objective to keep structural and densification "
+                    "outcomes separate from mechanical-property outcomes."
+                ),
+            ),
+            self._build_property_split_objective(
+                objective,
+                property_axes=mechanical_axes,
+                paper_skims=paper_skims,
+                reason=(
+                    "Split mixed objective to keep mechanical-property outcomes "
+                    "separate from structural and densification outcomes."
+                ),
+            ),
+        )
+
+    def _build_property_split_objective(
+        self,
+        objective: ResearchObjective,
+        *,
+        property_axes: list[str],
+        paper_skims: tuple[PaperSkim, ...],
+        reason: str,
+    ) -> ResearchObjective:
+        payload = objective.to_record()
+        payload["property_axes"] = property_axes
+        variable_axes, context_axes = self._split_objective_process_axes(
+            objective,
+            paper_skims=paper_skims,
+        )
+        if len(variable_axes) >= 2:
+            payload["question"] = self._build_aligned_research_objective_question(
+                payload,
+                variable_axes=variable_axes,
+                context_axes=context_axes,
+            )
+            payload["comparison_intent"] = self._build_aligned_comparison_intent(
+                payload,
+                variable_axes=variable_axes,
+                context_axes=context_axes,
+            )
+        else:
+            payload["question"] = self._build_research_objective_question(payload)
+            payload["comparison_intent"] = self._build_comparison_intent(payload)
+        payload["objective_id"] = build_research_objective_id(payload["question"])
+        payload["reason"] = reason
+        return ResearchObjective.from_mapping(payload)
+
+    def _align_research_objective_text_with_axes(
+        self,
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+        objectives: tuple[ResearchObjective, ...],
+    ) -> tuple[ResearchObjective, ...]:
+        return tuple(
+            self._align_single_research_objective_text(
+                objective,
+                paper_skims=paper_skims,
+            )
+            for objective in objectives
+        )
+
+    def _align_single_research_objective_text(
+        self,
+        objective: ResearchObjective,
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> ResearchObjective:
+        variable_axes, context_axes = self._split_objective_process_axes(
+            objective,
+            paper_skims=paper_skims,
+        )
+        if len(variable_axes) < 2:
+            return objective
+
+        question_missing_axes = [
+            axis
+            for axis in variable_axes
+            if not self._axis_label_is_mentioned(objective.question, axis)
+        ]
+        intent_text = str(objective.comparison_intent or "")
+        intent_missing_axes = [
+            axis
+            for axis in variable_axes
+            if not self._axis_label_is_mentioned(intent_text, axis)
+        ]
+        if not question_missing_axes and not intent_missing_axes:
+            return objective
+
+        payload = objective.to_record()
+        if question_missing_axes:
+            payload["question"] = self._build_aligned_research_objective_question(
+                payload,
+                variable_axes=variable_axes,
+                context_axes=context_axes,
+            )
+            payload["objective_id"] = build_research_objective_id(
+                payload["question"]
+            )
+        if intent_missing_axes:
+            payload["comparison_intent"] = self._build_aligned_comparison_intent(
+                payload,
+                variable_axes=variable_axes,
+                context_axes=context_axes,
+            )
+        return ResearchObjective.from_mapping(payload)
+
+    def _split_objective_process_axes(
+        self,
+        objective: ResearchObjective,
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> tuple[list[str], list[str]]:
+        changed_variables = self._relevant_changed_variables(
+            objective,
+            paper_skims=paper_skims,
+        )
+        variable_axes: list[str] = []
+        seen_variable_keys: set[str] = set()
+        for changed_variable in changed_variables:
+            for process_axis in objective.process_axes:
+                if self._axis_values_match(process_axis, changed_variable):
+                    self._append_unique_axis(
+                        variable_axes,
+                        seen_variable_keys,
+                        process_axis,
+                    )
+                    break
+        for process_axis in objective.process_axes:
+            if any(
+                self._axis_values_match(process_axis, changed_variable)
+                for changed_variable in changed_variables
+            ):
+                self._append_unique_axis(
+                    variable_axes,
+                    seen_variable_keys,
+                    process_axis,
+                )
+
+        context_axes: list[str] = []
+        seen_context_keys: set[str] = set()
+        for process_axis in objective.process_axes:
+            if any(
+                self._axis_values_match(process_axis, variable_axis)
+                for variable_axis in variable_axes
+            ):
+                continue
+            self._append_unique_axis(context_axes, seen_context_keys, process_axis)
+        return variable_axes, context_axes
+
+    def _relevant_changed_variables(
+        self,
+        objective: ResearchObjective,
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> list[str]:
+        seeded_skims = [
+            skim
+            for skim in paper_skims
+            if skim.document_id in objective.seed_document_ids
+        ]
+        if not seeded_skims:
+            seeded_skims = list(paper_skims)
+        return self._unique_axis_values(
+            value
+            for skim in seeded_skims
+            for value in skim.changed_variables
+        )
+
+    def _build_aligned_research_objective_question(
+        self,
+        payload: dict[str, Any],
+        *,
+        variable_axes: list[str],
+        context_axes: list[str],
+    ) -> str:
+        variable_text = self._join_axis_text(variable_axes)
+        property_text = (
+            self._join_axis_text(payload.get("property_axes"))
+            or "the reported outcomes"
+        )
+        material_text = (
+            self._join_axis_text(payload.get("material_scope"))
+            or "the material system"
+        )
+        context_text = self._join_axis_text(context_axes)
+        material_phrase = material_text
+        if context_text:
+            material_phrase = f"{material_phrase} processed via {context_text}"
+        return f"How do {variable_text} affect {property_text} of {material_phrase}?"
+
+    def _build_aligned_comparison_intent(
+        self,
+        payload: dict[str, Any],
+        *,
+        variable_axes: list[str],
+        context_axes: list[str],
+    ) -> str:
+        material_text = (
+            self._join_axis_text(payload.get("material_scope"))
+            or "the material system"
+        )
+        variable_text = self._join_axis_text(variable_axes)
+        property_text = (
+            self._join_axis_text(payload.get("property_axes"))
+            or "the reported outcomes"
+        )
+        context_text = self._join_axis_text(context_axes)
+        context_phrase = f" in {context_text}" if context_text else ""
+        return (
+            f"Compare {material_text}{context_phrase} across {variable_text} "
+            f"and evaluate changes in {property_text}."
+        )
+
     def _property_overlap_components(
         self,
         objectives: tuple[ResearchObjective, ...],
@@ -919,6 +1209,21 @@ class ResearchObjectiveService:
         overlap = alias_tokens & canonical_tokens
         return len(overlap) / max(len(alias_tokens), len(canonical_tokens)) >= 0.75
 
+    def _axis_values_match(self, left: str, right: str) -> bool:
+        return self._axis_alias_matches_canonical(left, right)
+
+    def _property_axis_matches_any(
+        self,
+        value: str,
+        candidates: tuple[str, ...],
+    ) -> bool:
+        return any(self._axis_values_match(value, candidate) for candidate in candidates)
+
+    def _axis_label_is_mentioned(self, text: str, axis: str) -> bool:
+        text_tokens = self._axis_token_set(self._axis_key(text))
+        axis_tokens = self._axis_token_set(self._axis_key(axis))
+        return bool(axis_tokens and axis_tokens.issubset(text_tokens))
+
     def _is_acronym_match(self, left: str, right: str) -> bool:
         for short, long in ((left, right), (right, left)):
             if len(short) > 8 or not short.isalpha():
@@ -950,7 +1255,12 @@ class ResearchObjectiveService:
     def _join_axis_text(self, value: Any) -> str:
         if not isinstance(value, list):
             return ""
-        return ", ".join(str(item).strip() for item in value if str(item).strip())
+        items = [str(item).strip() for item in value if str(item).strip()]
+        if len(items) <= 1:
+            return "".join(items)
+        if len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return f"{', '.join(items[:-1])}, and {items[-1]}"
 
     def _group_by_document_id(self, values: tuple[Any, ...]) -> dict[str, list[Any]]:
         grouped: dict[str, list[Any]] = {}

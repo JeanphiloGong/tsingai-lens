@@ -215,6 +215,7 @@ data/tasks/
 data/update_output/
 data/test_file/
 data/collections/cache/
+data/collections/_goal_sessions/
 data/collections/*/meta.json
 data/collections/*/files.json
 data/collections/*/import_manifest.json

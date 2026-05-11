@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from application.core.comparison_assembly import ComparableResultAssembler
-from application.core.comparison_projection import ComparisonRowProjector
+from domain.core.comparison_assembly import ComparableResultAssembler
+from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
     ComparisonService,

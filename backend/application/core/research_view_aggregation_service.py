@@ -382,7 +382,7 @@ class ResearchViewAggregationService:
 
     def _load_collection_facts(self, collection_id: str) -> CoreFactSet:
         facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if self._core_fact_set_empty(facts):
+        if not facts.has_paper_facts():
             raise ResearchViewNotReadyError(collection_id)
         return facts
 
@@ -393,21 +393,6 @@ class ResearchViewAggregationService:
         if not facts.comparison_rows:
             return None
         return self._records_list(facts.comparison_rows)
-
-    def _core_fact_set_empty(self, facts: CoreFactSet) -> bool:
-        return not any(
-            (
-                facts.document_profiles,
-                facts.evidence_anchors,
-                facts.method_facts,
-                facts.sample_variants,
-                facts.test_conditions,
-                facts.baseline_references,
-                facts.measurement_results,
-                facts.characterization_observations,
-                facts.structure_features,
-            )
-        )
 
     def _core_fact_records(self, facts: CoreFactSet) -> _FactRows:
         return {

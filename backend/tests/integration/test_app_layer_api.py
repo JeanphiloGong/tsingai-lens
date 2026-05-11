@@ -12,7 +12,7 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
-from application.core.comparison_projection import ComparisonRowProjector
+from domain.core.comparison_projection import ComparisonRowProjector
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,

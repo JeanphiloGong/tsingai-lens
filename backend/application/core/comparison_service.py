@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from application.core.comparison_assembly import (
+from domain.core.comparison_assembly import (
     ComparableResultAssembler,
     ComparisonInputRecords,
     ComparisonSemanticRecords,
 )
-from application.core.comparison_projection import (
+from domain.core.comparison_projection import (
     ComparisonProjectionRecords,
     ComparisonRowProjector,
 )
@@ -558,16 +558,16 @@ class ComparisonService:
             if output_dir is not None
             else self._resolve_output_dir(collection_id)
         )
-        frames = self._load_comparison_inputs(collection_id, base_dir)
+        records = self._load_comparison_inputs(collection_id, base_dir)
         logger.info(
             "Comparison assembly started collection_id=%s measurement_results=%s sample_variants=%s test_conditions=%s baselines=%s",
             collection_id,
-            len(frames.measurement_results),
-            len(frames.sample_variants),
-            len(frames.test_conditions),
-            len(frames.baseline_references),
+            len(records.measurement_results),
+            len(records.sample_variants),
+            len(records.test_conditions),
+            len(records.baseline_references),
         )
-        if not frames.measurement_results:
+        if not records.measurement_results:
             logger.warning(
                 "Comparison assembly skipped due to empty measurement_results collection_id=%s",
                 collection_id,
@@ -575,14 +575,14 @@ class ComparisonService:
 
         semantic_records = self.comparable_result_assembler.assemble_semantic_records(
             collection_id=collection_id,
-            frames=frames,
+            records=records,
         )
         row_records = self.comparison_row_projector.project_rows_from_semantic_artifacts(
             collection_id=collection_id,
             comparable_results=semantic_records.comparable_results,
             scoped_results=semantic_records.collection_comparable_results,
         )
-        if not frames.measurement_results:
+        if not records.measurement_results:
             logger.warning(
                 "Comparison assembly produced zero rows because upstream measurement_results were empty collection_id=%s",
                 collection_id,

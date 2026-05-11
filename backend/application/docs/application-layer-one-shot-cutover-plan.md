@@ -148,7 +148,7 @@ This makes the dependency direction explicit:
 - Documents owns shared parsing
 - Protocol consumes that parsing
 
-### Move Shared Codec Out Of The Application Root
+### Move Shared Record Normalization Into Domain Shared
 
 Move:
 
@@ -156,12 +156,13 @@ Move:
 
 To:
 
-- `infra/persistence/backbone_codec.py`
+- `domain/shared/record_normalization.py`
 
 Reason:
 
-- the codec is a storage-shaping helper shared by multiple application domains
-- it is not itself an application domain
+- record normalization is a domain value-shaping helper shared by multiple
+  Core application flows
+- it is not itself an application or persistence domain
 - leaving it at the application root keeps the root namespace acting as a junk
   drawer
 
@@ -218,7 +219,7 @@ Reason:
 - any caller importing `application.protocol.source_service`
   -> `application.protocol.artifact_service`
 - any caller importing `application.backbone_codec`
-  -> `infra.persistence.backbone_codec`
+  -> `domain.shared.record_normalization`
 
 ## Execution Order
 
@@ -226,7 +227,7 @@ Reason:
 2. Rewrite controller imports to final domain paths.
 3. Rewrite all unit and integration test imports to final domain paths.
 4. Rename the real Documents/Protocol parsing files and update all callers.
-5. Move `backbone_codec.py` into `infra/persistence/` and rewrite all imports.
+5. Move record normalization into `domain/shared/` and rewrite all imports.
 6. Delete all root compatibility shims.
 7. Delete the Protocol section re-export file.
 8. Remove empty directories or dead exports left by the cutover.
@@ -267,8 +268,8 @@ moved, and then they must be deleted immediately.
   broad but mechanical rewrite
 - the Documents/Protocol rename touches real implementation files, not only
   imports, so call-site verification must be done after rename
-- moving `backbone_codec.py` changes multiple domains at once and should not be
-  split into a separate cleanup later
+- moving record normalization changes multiple domains at once and should not
+  be split into a separate cleanup later
 
 ## Done Criteria
 

@@ -61,9 +61,9 @@ current collection overlays only when scope-sensitive judgment is needed.
 
 - [`../../../domain/core/comparison.py`](../../../domain/core/comparison.py)
   accepted dataclasses, ids, assessments, and reassessment logic
-- [`../../../application/core/comparison_assembly.py`](../../../application/core/comparison_assembly.py)
+- [`../../../domain/core/comparison_assembly.py`](../../../domain/core/comparison_assembly.py)
   materialization of comparable-result and scope artifacts
-- [`../../../application/core/comparison_projection.py`](../../../application/core/comparison_projection.py)
+- [`../../../domain/core/comparison_projection.py`](../../../domain/core/comparison_projection.py)
   row projection from semantic artifacts
 - [`../../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
   artifact IO, collection reads, document inspection, corpus retrieval, and row

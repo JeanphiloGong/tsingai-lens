@@ -37,5 +37,20 @@ class CoreFactSet:
     collection_comparable_results: tuple[CollectionComparableResult, ...] = ()
     comparison_rows: tuple[ComparisonRowRecord, ...] = ()
 
+    def has_paper_facts(self) -> bool:
+        return any(
+            (
+                self.document_profiles,
+                self.evidence_anchors,
+                self.method_facts,
+                self.sample_variants,
+                self.test_conditions,
+                self.baseline_references,
+                self.measurement_results,
+                self.characterization_observations,
+                self.structure_features,
+            )
+        )
+
 
 __all__ = ["CoreFactSet"]

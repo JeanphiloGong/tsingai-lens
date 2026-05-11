@@ -68,8 +68,12 @@ from domain.shared.enums import (
     TRACEABILITY_STATUS_DIRECT,
     TRACEABILITY_STATUS_MISSING,
 )
-from infra.persistence.backbone_codec import normalize_backbone_value
-from infra.persistence.factory import build_core_fact_repository, build_source_artifact_repository
+from domain.shared.record_normalization import normalize_record_value
+from infra.persistence.factory import (
+    build_core_fact_repository,
+    build_source_artifact_repository,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -2693,7 +2697,7 @@ class PaperFactsService:
         explicit_value: Any,
         fallback_text: Any,
     ) -> int | float | None:
-        normalized = normalize_backbone_value(explicit_value)
+        normalized = normalize_record_value(explicit_value)
         if isinstance(normalized, bool):
             return None
         if isinstance(normalized, int):
@@ -4242,7 +4246,7 @@ class PaperFactsService:
         return normalized or None
 
     def _normalize_scalar_variant_value(self, value: Any) -> Any:
-        normalized = normalize_backbone_value(value)
+        normalized = normalize_record_value(value)
         if normalized is None:
             return None
         if isinstance(normalized, bool):
@@ -4277,7 +4281,7 @@ class PaperFactsService:
     def _sanitize_value_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         normalized: dict[str, Any] = {}
         for key, value in payload.items():
-            parsed = normalize_backbone_value(value)
+            parsed = normalize_record_value(value)
             if parsed in (None, "", [], {}):
                 continue
             normalized[key] = parsed
@@ -5089,7 +5093,7 @@ class PaperFactsService:
         }
 
     def _normalize_object(self, value: Any) -> Any:
-        return normalize_backbone_value(value)
+        return normalize_record_value(value)
 
     def _normalize_list(self, value: Any) -> list[str]:
         normalized = self._normalize_object(value)
@@ -5485,7 +5489,7 @@ class PaperFactsService:
         return None
 
     def _coerce_float(self, value: Any) -> float | None:
-        normalized = normalize_backbone_value(value)
+        normalized = normalize_record_value(value)
         if isinstance(normalized, bool):
             return None
         if isinstance(normalized, (int, float)):

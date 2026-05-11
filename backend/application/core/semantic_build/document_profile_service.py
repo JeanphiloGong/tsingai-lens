@@ -7,23 +7,26 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
-from domain.ports import CoreFactRepository, SourceArtifactRepository
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
 from domain.core.document_profile import (
     DocumentProfile,
     summarize_document_profile_collection,
 )
+from domain.ports import CoreFactRepository, SourceArtifactRepository
 from domain.source import SourceArtifactSet
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
 )
-from infra.persistence.backbone_codec import normalize_backbone_value
-from infra.persistence.factory import build_core_fact_repository, build_source_artifact_repository
-from application.source.collection_service import CollectionService
+from domain.shared.record_normalization import normalize_record_value
+from infra.persistence.factory import (
+    build_core_fact_repository,
+    build_source_artifact_repository,
+)
 from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
 )
-from application.source.artifact_registry_service import ArtifactRegistryService
 
 logger = logging.getLogger(__name__)
 
@@ -535,7 +538,7 @@ class DocumentProfileService:
         return grouped
 
     def _normalize_string_list(self, value: Any) -> list[str]:
-        normalized = normalize_backbone_value(value)
+        normalized = normalize_record_value(value)
         if normalized is None:
             return []
         if isinstance(normalized, list):

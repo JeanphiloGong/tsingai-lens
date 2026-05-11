@@ -29,7 +29,7 @@ from domain.core.evidence_backbone import (
     TestCondition,
 )
 from domain.shared.enums import TRACEABILITY_STATUS_MISSING
-from infra.persistence.backbone_codec import normalize_backbone_value
+from domain.shared.record_normalization import normalize_record_value
 
 logger = logging.getLogger(__name__)
 
@@ -79,27 +79,27 @@ class ComparisonSemanticRecords:
 
 
 class ComparableResultAssembler:
-    """Assemble semantic comparison artifacts from paper-facts frames."""
+    """Assemble semantic comparison artifacts from paper-facts records."""
 
     def assemble_semantic_records(
         self,
         *,
         collection_id: str,
-        frames: ComparisonInputRecords,
+        records: ComparisonInputRecords,
     ) -> ComparisonSemanticRecords:
-        sample_lookup = self.index_by_id(frames.sample_variants, "variant_id")
+        sample_lookup = self.index_by_id(records.sample_variants, "variant_id")
         test_condition_lookup = self.index_by_id(
-            frames.test_conditions,
+            records.test_conditions,
             "test_condition_id",
         )
         baseline_lookup = self.index_by_id(
-            frames.baseline_references,
+            records.baseline_references,
             "baseline_id",
         )
 
         comparable_results_by_id: dict[str, ComparableResult] = {}
         scoped_results_by_id: dict[str, CollectionComparableResult] = {}
-        for sort_order, result_record in enumerate(frames.measurement_results):
+        for sort_order, result_record in enumerate(records.measurement_results):
             result_row = result_record.to_record()
             assessment_context = self.build_assessment_context(
                 result_row=result_row,
@@ -733,7 +733,7 @@ class ComparableResultAssembler:
         return self.safe_text(payload)
 
     def normalize_object(self, value: Any) -> Any:
-        return normalize_backbone_value(value)
+        return normalize_record_value(value)
 
     def safe_text(self, value: Any) -> str | None:
         if value is None:

@@ -17,6 +17,18 @@ from domain.core.comparison import (
     build_comparison_row_id,
     evaluate_comparison_assessment,
 )
+from domain.core.comparison_assembly import (
+    COLLECTION_COMPARABLE_RESULT_COLUMNS,
+    COMPARABLE_RESULT_COLUMNS,
+    ComparableResultAssembler,
+    ComparisonInputRecords,
+    ComparisonSemanticRecords,
+)
+from domain.core.comparison_projection import (
+    COMPARISON_ROW_COLUMNS,
+    ComparisonProjectionRecords,
+    ComparisonRowProjector,
+)
 from domain.core.document_profile import (
     DocumentProfile,
     DocumentProfileSummary,
@@ -52,14 +64,22 @@ from domain.core.research_objective import (
 __all__ = [
     "BaselineReference",
     "COMPARABLE_RESULT_NORMALIZATION_VERSION",
+    "COLLECTION_COMPARABLE_RESULT_COLUMNS",
+    "COMPARABLE_RESULT_COLUMNS",
+    "COMPARISON_ROW_COLUMNS",
     "COMPARISON_ROW_PROJECTION_VERSION",
     "CORE_NEUTRAL_DOMAIN_PROFILE",
     "CharacterizationObservation",
     "CollectionComparableResult",
     "ComparableResult",
+    "ComparableResultAssembler",
     "ComparisonAssessment",
     "ComparisonAxis",
+    "ComparisonInputRecords",
+    "ComparisonProjectionRecords",
     "ComparisonRowRecord",
+    "ComparisonRowProjector",
+    "ComparisonSemanticRecords",
     "ContextBinding",
     "CoreFactSet",
     "DocumentProfile",

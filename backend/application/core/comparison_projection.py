@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import logging
+import math
 from typing import Any
-
-import pandas as pd
 
 from domain.core.comparison import (
     COMPARISON_ROW_PROJECTION_VERSION,
@@ -51,61 +51,53 @@ COMPARISON_ROW_COLUMNS = [
 
 
 @dataclass(frozen=True)
-class ComparisonProjectionTables:
-    comparable_results: pd.DataFrame
-    collection_comparable_results: pd.DataFrame
-    comparison_rows: pd.DataFrame
+class ComparisonProjectionRecords:
+    comparable_results: tuple[ComparableResult, ...]
+    collection_comparable_results: tuple[CollectionComparableResult, ...]
+    comparison_rows: tuple[ComparisonRowRecord, ...]
 
 
 class ComparisonRowProjector:
-    """Project collection-scoped semantic comparison artifacts into row records."""
+    """Project collection-scoped semantic comparison records into row records."""
 
     def project_rows_from_semantic_artifacts(
         self,
         *,
         collection_id: str,
-        comparable_results: pd.DataFrame,
-        scoped_results: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if comparable_results.empty or scoped_results.empty:
-            return pd.DataFrame(columns=COMPARISON_ROW_COLUMNS)
+        comparable_results: Iterable[ComparableResult | Mapping[str, Any]],
+        scoped_results: Iterable[CollectionComparableResult | Mapping[str, Any]],
+    ) -> tuple[ComparisonRowRecord, ...]:
+        comparable_records = tuple(
+            _comparable_result_from_value(record) for record in comparable_results
+        )
+        scoped_records = tuple(
+            _collection_comparable_result_from_value(record)
+            for record in scoped_results
+        )
+        if not comparable_records or not scoped_records:
+            return ()
 
         comparable_lookup = {
             record.comparable_result_id: record
-            for record in (
-                ComparableResult.from_mapping(dict(row))
-                for _, row in comparable_results.iterrows()
-            )
+            for record in comparable_records
             if record.comparable_result_id
         }
 
         row_records_by_id: dict[str, ComparisonRowRecord] = {}
-        scoped_view = scoped_results.copy()
-        if "collection_id" in scoped_view.columns:
-            scoped_view = scoped_view[
-                scoped_view["collection_id"].apply(
-                    lambda value: self.safe_text(value) == collection_id
-                )
-            ]
-        if "included" in scoped_view.columns:
-            scoped_view = scoped_view[scoped_view["included"].astype(bool)]
-        scoped_view = scoped_view.assign(
-            _sort_order_key=scoped_view["sort_order"].apply(
-                lambda value: (
-                    1_000_000_000
-                    if value is None or (isinstance(value, float) and pd.isna(value))
-                    else int(value)
-                )
-            )
-            if "sort_order" in scoped_view.columns
-            else 1_000_000_000
-        ).sort_values(
-            by=["_sort_order_key", "comparable_result_id"],
-            kind="stable",
+        scoped_view = sorted(
+            (
+                record
+                for record in scoped_records
+                if self.safe_text(record.collection_id) == collection_id
+                and bool(record.included)
+            ),
+            key=lambda record: (
+                _sort_order_key(record.sort_order),
+                record.comparable_result_id,
+            ),
         )
 
-        for _, row in scoped_view.iterrows():
-            scoped_result = CollectionComparableResult.from_mapping(dict(row))
+        for scoped_result in scoped_view:
             comparable_result = comparable_lookup.get(scoped_result.comparable_result_id)
             if comparable_result is None:
                 logger.warning(
@@ -125,11 +117,8 @@ class ComparisonRowProjector:
                 else row_record
             )
 
-        return self.normalize_rows_table(
-            pd.DataFrame(
-                [record.to_record() for record in row_records_by_id.values()],
-                columns=COMPARISON_ROW_COLUMNS,
-            ),
+        return self.normalize_row_records(
+            row_records_by_id.values(),
             collection_id,
         )
 
@@ -244,25 +233,24 @@ class ComparisonRowProjector:
             unit=existing.unit,
         )
 
-    def normalize_rows_table(
+    def normalize_row_records(
         self,
-        rows: pd.DataFrame,
+        rows: Iterable[ComparisonRowRecord | Mapping[str, Any]],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if rows is None or rows.empty:
-            return pd.DataFrame(columns=COMPARISON_ROW_COLUMNS)
-
-        normalized = rows.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
-        for column in COMPARISON_ROW_COLUMNS:
-            if column not in normalized.columns:
-                normalized[column] = None
-        records = [
-            ComparisonRowRecord.from_mapping(dict(row)).to_record()
-            for _, row in normalized.iterrows()
-        ]
-        return pd.DataFrame(records, columns=COMPARISON_ROW_COLUMNS)
+    ) -> tuple[ComparisonRowRecord, ...]:
+        records = []
+        for row in rows:
+            record = (
+                row
+                if isinstance(row, ComparisonRowRecord)
+                else ComparisonRowRecord.from_mapping(dict(row))
+            )
+            if collection_id is not None and not record.collection_id:
+                record = ComparisonRowRecord.from_mapping(
+                    {**record.to_record(), "collection_id": collection_id}
+                )
+            records.append(record)
+        return tuple(records)
 
     def dedupe_strings(self, values: list[str]) -> list[str]:
         deduped: list[str] = []
@@ -278,13 +266,38 @@ class ComparisonRowProjector:
     def safe_text(self, value: Any) -> str | None:
         if value is None:
             return None
-        if isinstance(value, float) and pd.isna(value):
+        if isinstance(value, float) and math.isnan(value):
             return None
         text = str(value).strip()
         return text or None
 
 
+def _sort_order_key(value: Any) -> int:
+    if value is None:
+        return 1_000_000_000
+    if isinstance(value, float) and math.isnan(value):
+        return 1_000_000_000
+    return int(value)
+
+
+def _comparable_result_from_value(
+    value: ComparableResult | Mapping[str, Any],
+) -> ComparableResult:
+    if isinstance(value, ComparableResult):
+        return value
+    return ComparableResult.from_mapping(value)
+
+
+def _collection_comparable_result_from_value(
+    value: CollectionComparableResult | Mapping[str, Any],
+) -> CollectionComparableResult:
+    if isinstance(value, CollectionComparableResult):
+        return value
+    return CollectionComparableResult.from_mapping(value)
+
+
 __all__ = [
     "COMPARISON_ROW_COLUMNS",
+    "ComparisonProjectionRecords",
     "ComparisonRowProjector",
 ]

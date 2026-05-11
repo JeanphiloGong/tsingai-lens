@@ -96,10 +96,10 @@ def test_artifact_input_service_prefers_sqlite_source_repository(monkeypatch, tm
     table_rows = artifact_input_service.load_table_rows_artifact("col_source")
     table_cells = artifact_input_service.load_table_cells_artifact("col_source")
 
-    assert documents.iloc[0]["id"] == "doc-1"
+    assert documents[0]["id"] == "doc-1"
     assert text_units is not None
-    assert text_units.iloc[0]["id"] == "tu-1"
-    assert blocks.iloc[0]["block_id"] == "blk-1"
-    assert tables.iloc[0]["table_matrix"] == [["Sample", "Value"], ["A", "1"]]
-    assert table_rows.iloc[0]["row_text"] == "A | 1"
-    assert table_cells.iloc[0]["header_path"] == "Value"
+    assert text_units[0]["id"] == "tu-1"
+    assert blocks[0]["block_id"] == "blk-1"
+    assert tables[0]["table_matrix"] == [["Sample", "Value"], ["A", "1"]]
+    assert table_rows[0]["row_text"] == "A | 1"
+    assert table_cells[0]["header_path"] == "Value"

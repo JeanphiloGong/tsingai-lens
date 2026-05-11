@@ -3,15 +3,14 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
+import math
 import os
 import re
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlencode
 from uuid import uuid4
-
-import pandas as pd
 
 from .document_profile_service import (
     DocumentProfileService,
@@ -469,7 +468,7 @@ class PaperFactsService:
         cards = self.read_evidence_cards(collection_id)
         items = [
             self._serialize_card_row(row)
-            for _, row in cards.iloc[offset : offset + limit].iterrows()
+            for row in cards[offset : offset + limit]
         ]
         return {
             "collection_id": collection_id,
@@ -484,10 +483,17 @@ class PaperFactsService:
         evidence_id: str,
     ) -> dict[str, Any]:
         cards = self.read_evidence_cards(collection_id)
-        matched = cards[cards["evidence_id"].astype(str) == str(evidence_id)]
-        if matched.empty:
+        matched = next(
+            (
+                row
+                for row in cards
+                if str(row.get("evidence_id") or "") == str(evidence_id)
+            ),
+            None,
+        )
+        if matched is None:
             raise EvidenceCardNotFoundError(collection_id, evidence_id)
-        return self._serialize_card_row(matched.iloc[0])
+        return self._serialize_card_row(matched)
 
     def get_evidence_traceback(
         self,
@@ -495,11 +501,17 @@ class PaperFactsService:
         evidence_id: str,
     ) -> dict[str, Any]:
         cards = self.read_evidence_cards(collection_id)
-        matched = cards[cards["evidence_id"].astype(str) == str(evidence_id)]
-        if matched.empty:
+        row = next(
+            (
+                card
+                for card in cards
+                if str(card.get("evidence_id") or "") == str(evidence_id)
+            ),
+            None,
+        )
+        if row is None:
             raise EvidenceCardNotFoundError(collection_id, evidence_id)
 
-        row = matched.iloc[0]
         document_id = str(row.get("document_id") or "").strip()
         if not document_id:
             return {
@@ -542,27 +554,30 @@ class PaperFactsService:
             "anchors": resolved_anchors,
         }
 
-    def read_evidence_cards(self, collection_id: str) -> pd.DataFrame:
-        frames = self.read_paper_fact_frames(collection_id)
-        cards = self._derive_evidence_cards_table(
+    def read_evidence_cards(self, collection_id: str) -> tuple[dict[str, Any], ...]:
+        records = self.read_paper_fact_records(collection_id)
+        cards = self._derive_evidence_card_records(
             collection_id=collection_id,
-            evidence_anchors=frames["evidence_anchors"],
-            method_facts=frames["method_facts"],
-            sample_variants=frames["sample_variants"],
-            test_conditions=frames["test_conditions"],
-            baseline_references=frames["baseline_references"],
-            measurement_results=frames["measurement_results"],
+            evidence_anchors=records["evidence_anchors"],
+            method_facts=records["method_facts"],
+            sample_variants=records["sample_variants"],
+            test_conditions=records["test_conditions"],
+            baseline_references=records["baseline_references"],
+            measurement_results=records["measurement_results"],
         )
-        return self._normalize_cards_table(cards, collection_id)
+        return self._normalize_card_records(cards, collection_id)
 
-    def read_paper_fact_frames(self, collection_id: str) -> dict[str, pd.DataFrame]:
-        return self._load_paper_fact_frames(collection_id)
+    def read_paper_fact_records(
+        self,
+        collection_id: str,
+    ) -> dict[str, tuple[dict[str, Any], ...]]:
+        return self._load_paper_fact_records(collection_id)
 
     def build_paper_facts(
         self,
         collection_id: str,
         output_dir: str | Path | None = None,
-    ) -> dict[str, pd.DataFrame]:
+    ) -> dict[str, tuple[dict[str, Any], ...]]:
         base_dir = (
             Path(output_dir).expanduser().resolve()
             if output_dir is not None
@@ -603,15 +618,15 @@ class PaperFactsService:
         table_rows_by_doc = self._group_table_rows_by_document(table_rows)
         table_cells_by_doc = self._group_table_cells_by_document(table_cells)
         profile_by_doc = {
-            str(row.get("document_id")): dict(row)
-            for _, row in profiles.iterrows()
+            profile.document_id: profile.to_record()
+            for profile in profiles
         }
         total_documents = len(document_records)
         total_extraction_units = 0
         selected_text_windows_by_doc: dict[str, list[dict[str, Any]]] = {}
         selected_table_rows_by_doc: dict[str, list[dict[str, Any]]] = {}
         selected_table_row_batches_by_doc: dict[str, list[list[dict[str, Any]]]] = {}
-        for _, candidate_row in document_records.iterrows():
+        for candidate_row in document_records:
             candidate_document_id = str(candidate_row.get("paper_id") or "")
             candidate_profile = profile_by_doc.get(candidate_document_id)
             if not candidate_profile:
@@ -653,7 +668,7 @@ class PaperFactsService:
             len(table_cells),
             total_extraction_units,
         )
-        if table_cells.empty:
+        if not table_cells:
             logger.warning(
                 "Paper facts extraction found empty table_cells collection_id=%s",
                 collection_id,
@@ -674,7 +689,7 @@ class PaperFactsService:
             max_extraction_concurrency,
         )
 
-        for document_position, (_, row) in enumerate(document_records.iterrows(), start=1):
+        for document_position, row in enumerate(document_records, start=1):
             document_id = str(row.get("paper_id") or "")
             profile = profile_by_doc.get(document_id)
             if not profile:
@@ -1015,40 +1030,37 @@ class PaperFactsService:
                 max(total_extraction_units - completed_extraction_units, 0),
             )
 
-        evidence_anchors = self._normalize_evidence_anchors_table(
-            pd.DataFrame(
-                evidence_anchor_rows,
-                columns=_EVIDENCE_ANCHOR_COLUMNS,
-            ),
+        evidence_anchors = self._normalize_evidence_anchor_records(
+            evidence_anchor_rows,
         )
-        method_facts = self._normalize_method_facts_table(
-            pd.DataFrame(method_fact_rows, columns=_METHOD_FACT_COLUMNS),
+        method_facts = self._normalize_method_fact_records(
+            method_fact_rows,
             collection_id,
         )
-        sample_variants = self._normalize_sample_variants_table(
-            pd.DataFrame(sample_variant_rows, columns=_SAMPLE_VARIANT_COLUMNS),
+        sample_variants = self._normalize_sample_variant_records(
+            sample_variant_rows,
             collection_id,
         )
         sample_variants, removed_variant_ids = self._filter_generic_text_sample_variants(
             sample_variants
         )
-        test_conditions = self._normalize_test_conditions_table(
-            pd.DataFrame(test_condition_rows, columns=_TEST_CONDITION_COLUMNS),
+        test_conditions = self._normalize_test_condition_records(
+            test_condition_rows,
             collection_id,
         )
-        baseline_references = self._normalize_baseline_references_table(
-            pd.DataFrame(baseline_rows, columns=_BASELINE_REFERENCE_COLUMNS),
+        baseline_references = self._normalize_baseline_reference_records(
+            baseline_rows,
             collection_id,
         )
-        measurement_results = self._normalize_measurement_results_table(
-            pd.DataFrame(measurement_rows, columns=_MEASUREMENT_RESULT_COLUMNS),
+        measurement_results = self._normalize_measurement_result_records(
+            measurement_rows,
             collection_id,
         )
         measurement_results = self._clear_removed_variant_ids_from_measurements(
             measurement_results,
             removed_variant_ids,
         )
-        if not method_facts.empty and measurement_results.empty:
+        if method_facts and not measurement_results:
             logger.warning(
                 "Paper facts extraction produced zero measurement_results collection_id=%s method_fact_count=%s raw_measurement_count=%s",
                 collection_id,
@@ -1080,7 +1092,7 @@ class PaperFactsService:
             characterization=characterization,
             structure_features=structure_features,
         )
-        measurement_results = self._deduplicate_measurement_results_table(
+        measurement_results = self._deduplicate_measurement_result_records(
             measurement_results
         )
         self.core_fact_repository.replace_collection_facts(
@@ -1126,24 +1138,24 @@ class PaperFactsService:
         self,
         collection_id: str,
         output_dir: str | Path | None = None,
-    ) -> pd.DataFrame:
+    ) -> tuple[dict[str, Any], ...]:
         base_dir = (
             Path(output_dir).expanduser().resolve()
             if output_dir is not None
             else self._resolve_output_dir(collection_id)
         )
         facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if not self._paper_fact_frames_available(facts):
+        if not self._paper_fact_records_available(facts):
             self.build_paper_facts(collection_id, base_dir)
-        frames = self._load_paper_fact_frames(collection_id)
-        cards_table = self._derive_evidence_cards_table(
+        records = self._load_paper_fact_records(collection_id)
+        cards_table = self._derive_evidence_card_records(
             collection_id=collection_id,
-            evidence_anchors=frames["evidence_anchors"],
-            method_facts=frames["method_facts"],
-            sample_variants=frames["sample_variants"],
-            test_conditions=frames["test_conditions"],
-            baseline_references=frames["baseline_references"],
-            measurement_results=frames["measurement_results"],
+            evidence_anchors=records["evidence_anchors"],
+            method_facts=records["method_facts"],
+            sample_variants=records["sample_variants"],
+            test_conditions=records["test_conditions"],
+            baseline_references=records["baseline_references"],
+            measurement_results=records["measurement_results"],
         )
         self.artifact_registry_service.upsert(collection_id, base_dir)
         logger.info(
@@ -1153,50 +1165,50 @@ class PaperFactsService:
         )
         return cards_table
 
-    def _load_paper_fact_frames(
+    def _load_paper_fact_records(
         self,
         collection_id: str,
-    ) -> dict[str, pd.DataFrame]:
+    ) -> dict[str, tuple[dict[str, Any], ...]]:
         facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if not self._paper_fact_frames_available(facts):
+        if not self._paper_fact_records_available(facts):
             raise PaperFactsNotReadyError(collection_id, self._resolve_output_dir(collection_id))
 
         return {
-            "evidence_anchors": self._records_to_frame(
+            "evidence_anchors": self._records_to_records(
                 facts.evidence_anchors,
                 _EVIDENCE_ANCHOR_COLUMNS,
             ),
-            "method_facts": self._records_to_frame(
+            "method_facts": self._records_to_records(
                 facts.method_facts,
                 _METHOD_FACT_COLUMNS,
             ),
-            "sample_variants": self._records_to_frame(
+            "sample_variants": self._records_to_records(
                 facts.sample_variants,
                 _SAMPLE_VARIANT_COLUMNS,
             ),
-            "test_conditions": self._records_to_frame(
+            "test_conditions": self._records_to_records(
                 facts.test_conditions,
                 _TEST_CONDITION_COLUMNS,
             ),
-            "baseline_references": self._records_to_frame(
+            "baseline_references": self._records_to_records(
                 facts.baseline_references,
                 _BASELINE_REFERENCE_COLUMNS,
             ),
-            "measurement_results": self._records_to_frame(
+            "measurement_results": self._records_to_records(
                 facts.measurement_results,
                 _MEASUREMENT_RESULT_COLUMNS,
             ),
-            "characterization_observations": self._records_to_frame(
+            "characterization_observations": self._records_to_records(
                 facts.characterization_observations,
                 _CHARACTERIZATION_COLUMNS,
             ),
-            "structure_features": self._records_to_frame(
+            "structure_features": self._records_to_records(
                 facts.structure_features,
                 _STRUCTURE_FEATURE_COLUMNS,
             ),
         }
 
-    def _paper_fact_frames_available(self, facts: CoreFactSet) -> bool:
+    def _paper_fact_records_available(self, facts: CoreFactSet) -> bool:
         return bool(
             facts.paper_facts_ready
             or facts.evidence_anchors
@@ -1209,64 +1221,69 @@ class PaperFactsService:
             or facts.structure_features
         )
 
-    def _records_to_frame(self, records: tuple[Any, ...], columns: list[str]) -> pd.DataFrame:
+    def _records_to_records(
+        self,
+        records: tuple[Any, ...],
+        columns: list[str],
+    ) -> tuple[dict[str, Any], ...]:
         if not records:
-            return pd.DataFrame(columns=columns)
-        return pd.DataFrame([record.to_record() for record in records], columns=columns)
+            return ()
+        return tuple(
+            {column: payload.get(column) for column in columns}
+            for record in records
+            for payload in (record.to_record(),)
+        )
 
     def _build_core_fact_set(
         self,
         *,
-        document_profiles: pd.DataFrame,
-        evidence_anchors: pd.DataFrame,
-        method_facts: pd.DataFrame,
-        sample_variants: pd.DataFrame,
-        test_conditions: pd.DataFrame,
-        baseline_references: pd.DataFrame,
-        measurement_results: pd.DataFrame,
-        characterization: pd.DataFrame,
-        structure_features: pd.DataFrame,
+        document_profiles: tuple[DocumentProfile, ...],
+        evidence_anchors: tuple[dict[str, Any], ...],
+        method_facts: tuple[dict[str, Any], ...],
+        sample_variants: tuple[dict[str, Any], ...],
+        test_conditions: tuple[dict[str, Any], ...],
+        baseline_references: tuple[dict[str, Any], ...],
+        measurement_results: tuple[dict[str, Any], ...],
+        characterization: tuple[dict[str, Any], ...],
+        structure_features: tuple[dict[str, Any], ...],
     ) -> CoreFactSet:
         return CoreFactSet(
-            document_profiles=self._records_from_frame(
-                document_profiles,
-                DocumentProfile,
-            ),
-            evidence_anchors=self._records_from_frame(
+            document_profiles=document_profiles,
+            evidence_anchors=self._domain_records_from_records(
                 evidence_anchors,
                 EvidenceAnchor,
             ),
-            method_facts=self._records_from_frame(method_facts, MethodFact),
-            sample_variants=self._records_from_frame(sample_variants, SampleVariant),
-            test_conditions=self._records_from_frame(test_conditions, TestCondition),
-            baseline_references=self._records_from_frame(
+            method_facts=self._domain_records_from_records(method_facts, MethodFact),
+            sample_variants=self._domain_records_from_records(sample_variants, SampleVariant),
+            test_conditions=self._domain_records_from_records(test_conditions, TestCondition),
+            baseline_references=self._domain_records_from_records(
                 baseline_references,
                 BaselineReference,
             ),
-            measurement_results=self._records_from_frame(
+            measurement_results=self._domain_records_from_records(
                 measurement_results,
                 MeasurementResult,
             ),
-            characterization_observations=self._records_from_frame(
+            characterization_observations=self._domain_records_from_records(
                 characterization,
                 CharacterizationObservation,
             ),
-            structure_features=self._records_from_frame(
+            structure_features=self._domain_records_from_records(
                 structure_features,
                 StructureFeature,
             ),
         )
 
-    def _records_from_frame(
+    def _domain_records_from_records(
         self,
-        frame: pd.DataFrame,
+        records: tuple[dict[str, Any], ...],
         record_cls: type,
     ) -> tuple[Any, ...]:
-        if frame is None or frame.empty:
+        if not records:
             return ()
         return tuple(
-            record_cls.from_mapping(dict(row))
-            for _, row in frame.iterrows()
+            record_cls.from_mapping(row)
+            for row in records
         )
 
     def _build_document_state(self) -> dict[str, Any]:
@@ -1285,14 +1302,14 @@ class PaperFactsService:
 
     def _filter_generic_text_sample_variants(
         self,
-        sample_variants: pd.DataFrame,
-    ) -> tuple[pd.DataFrame, set[str]]:
-        if sample_variants is None or sample_variants.empty:
-            return self._normalize_sample_variants_table(sample_variants, None), set()
+        sample_variants: tuple[dict[str, Any], ...],
+    ) -> tuple[tuple[dict[str, Any], ...], set[str]]:
+        if not sample_variants:
+            return self._normalize_sample_variant_records(sample_variants, None), set()
 
         table_variant_documents = {
             self._normalize_scalar_text(row.get("document_id"))
-            for _, row in sample_variants.iterrows()
+            for row in sample_variants
             if self._sample_variant_source_kind(row) == "table_row"
         }
         if not table_variant_documents:
@@ -1300,7 +1317,7 @@ class PaperFactsService:
 
         kept_rows: list[dict[str, Any]] = []
         removed_variant_ids: set[str] = set()
-        for _, row in sample_variants.iterrows():
+        for row in sample_variants:
             document_id = self._normalize_scalar_text(row.get("document_id"))
             if (
                 document_id in table_variant_documents
@@ -1315,8 +1332,8 @@ class PaperFactsService:
         if not removed_variant_ids:
             return sample_variants, set()
         return (
-            self._normalize_sample_variants_table(
-                pd.DataFrame(kept_rows, columns=_SAMPLE_VARIANT_COLUMNS),
+            self._normalize_sample_variant_records(
+                kept_rows,
                 None,
             ),
             removed_variant_ids,
@@ -1349,25 +1366,19 @@ class PaperFactsService:
 
     def _clear_removed_variant_ids_from_measurements(
         self,
-        measurement_results: pd.DataFrame,
+        measurement_results: tuple[dict[str, Any], ...],
         removed_variant_ids: set[str],
-    ) -> pd.DataFrame:
-        if (
-            measurement_results is None
-            or measurement_results.empty
-            or not removed_variant_ids
-            or "variant_id" not in measurement_results.columns
-        ):
-            return self._normalize_measurement_results_table(measurement_results, None)
+    ) -> tuple[dict[str, Any], ...]:
+        if not measurement_results or not removed_variant_ids:
+            return self._normalize_measurement_result_records(measurement_results, None)
 
-        normalized = measurement_results.copy()
-        normalized.loc[
-            normalized["variant_id"].apply(
-                lambda value: self._normalize_scalar_text(value) in removed_variant_ids
-            ),
-            "variant_id",
-        ] = None
-        return self._normalize_measurement_results_table(normalized, None)
+        normalized = []
+        for row in measurement_results:
+            payload = dict(row)
+            if self._normalize_scalar_text(payload.get("variant_id")) in removed_variant_ids:
+                payload["variant_id"] = None
+            normalized.append(payload)
+        return self._normalize_measurement_result_records(normalized, None)
 
     def _build_text_window_extraction_payload(
         self,
@@ -2688,7 +2699,7 @@ class PaperFactsService:
         if isinstance(normalized, int):
             return normalized
         if isinstance(normalized, float):
-            if pd.isna(normalized):
+            if math.isnan(normalized):
                 return None
             return int(normalized) if normalized.is_integer() else normalized
         text = self._normalize_scalar_text(explicit_value) or self._normalize_scalar_text(
@@ -3323,17 +3334,11 @@ class PaperFactsService:
 
     def _condition_context_from_method_fact(
         self,
-        method_fact: pd.Series | dict[str, Any],
+        method_fact: Mapping[str, Any],
     ) -> dict[str, Any]:
-        payload = self._normalize_method_payload(
-            dict(method_fact).get("method_payload") if isinstance(method_fact, pd.Series) else method_fact.get("method_payload")
-        )
-        method_role = self._normalize_method_role(
-            dict(method_fact).get("method_role") if isinstance(method_fact, pd.Series) else method_fact.get("method_role")
-        )
-        method_name = self._normalize_scalar_text(
-            dict(method_fact).get("method_name") if isinstance(method_fact, pd.Series) else method_fact.get("method_name")
-        )
+        payload = self._normalize_method_payload(method_fact.get("method_payload"))
+        method_role = self._normalize_method_role(method_fact.get("method_role"))
+        method_name = self._normalize_scalar_text(method_fact.get("method_name"))
         methods = [str(item) for item in payload.get("methods") or [] if str(item).strip()]
         if method_name and method_role in {"characterization", "test"} and method_name not in methods:
             methods = [method_name, *methods]
@@ -3353,23 +3358,23 @@ class PaperFactsService:
             }
         )
 
-    def _derive_evidence_cards_table(
+    def _derive_evidence_card_records(
         self,
         *,
         collection_id: str,
-        evidence_anchors: pd.DataFrame,
-        method_facts: pd.DataFrame,
-        sample_variants: pd.DataFrame,
-        test_conditions: pd.DataFrame,
-        baseline_references: pd.DataFrame,
-        measurement_results: pd.DataFrame,
-    ) -> pd.DataFrame:
+        evidence_anchors: tuple[dict[str, Any], ...],
+        method_facts: tuple[dict[str, Any], ...],
+        sample_variants: tuple[dict[str, Any], ...],
+        test_conditions: tuple[dict[str, Any], ...],
+        baseline_references: tuple[dict[str, Any], ...],
+        measurement_results: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
         anchor_lookup = self._index_rows_by_id(evidence_anchors, "anchor_id")
         sample_lookup = self._index_rows_by_id(sample_variants, "variant_id")
         test_condition_lookup = self._index_rows_by_id(test_conditions, "test_condition_id")
         baseline_lookup = self._index_rows_by_id(baseline_references, "baseline_id")
         document_material_lookup: dict[str, dict[str, Any]] = {}
-        for _, variant in sample_variants.iterrows():
+        for variant in sample_variants:
             document_id = str(variant.get("document_id") or "")
             if document_id and document_id not in document_material_lookup:
                 document_material_lookup[document_id] = self._normalize_material_system_payload(
@@ -3377,95 +3382,78 @@ class PaperFactsService:
                 )
 
         rows: list[dict[str, Any]] = []
-        if method_facts is not None and not method_facts.empty:
-            for _, method_fact in method_facts.iterrows():
-                anchors = self._resolve_anchor_rows(
-                    method_fact.get("evidence_anchor_ids"),
-                    anchor_lookup,
-                )
-                method_role = self._normalize_method_role(method_fact.get("method_role"))
-                rows.append(
-                    {
-                        "evidence_id": self._method_fact_evidence_id(method_fact.get("method_id")),
-                        "document_id": str(method_fact.get("document_id") or ""),
-                        "collection_id": collection_id,
-                        "claim_text": self._summarize_method_fact_card(method_fact),
-                        "claim_type": (
-                            "process"
-                            if method_role == "process"
-                            else "characterization"
-                            if method_role == "characterization"
-                            else "qualitative"
-                        ),
-                        "evidence_source_type": self._determine_evidence_source_type(
-                            anchors,
-                            "method" if method_role == "process" else "text",
-                        ),
-                        "evidence_anchors": anchors,
-                        "material_system": document_material_lookup.get(
-                            str(method_fact.get("document_id") or ""),
-                            {},
-                        ),
-                        "condition_context": self._condition_context_from_method_fact(method_fact),
-                        "confidence": round(float(method_fact.get("confidence") or 0.0), 2),
-                        "traceability_status": (
-                            TRACEABILITY_STATUS_DIRECT if anchors else TRACEABILITY_STATUS_MISSING
-                        ),
-                    }
-                )
+        for method_fact in method_facts:
+            anchors = self._resolve_anchor_rows(
+                method_fact.get("evidence_anchor_ids"),
+                anchor_lookup,
+            )
+            method_role = self._normalize_method_role(method_fact.get("method_role"))
+            rows.append(
+                {
+                    "evidence_id": self._method_fact_evidence_id(method_fact.get("method_id")),
+                    "document_id": str(method_fact.get("document_id") or ""),
+                    "collection_id": collection_id,
+                    "claim_text": self._summarize_method_fact_card(method_fact),
+                    "claim_type": (
+                        "process"
+                        if method_role == "process"
+                        else "characterization"
+                        if method_role == "characterization"
+                        else "qualitative"
+                    ),
+                    "evidence_source_type": self._determine_evidence_source_type(
+                        anchors,
+                        "method" if method_role == "process" else "text",
+                    ),
+                    "evidence_anchors": anchors,
+                    "material_system": document_material_lookup.get(
+                        str(method_fact.get("document_id") or ""),
+                        {},
+                    ),
+                    "condition_context": self._condition_context_from_method_fact(method_fact),
+                    "confidence": round(float(method_fact.get("confidence") or 0.0), 2),
+                    "traceability_status": (
+                        TRACEABILITY_STATUS_DIRECT if anchors else TRACEABILITY_STATUS_MISSING
+                    ),
+                }
+            )
 
-        if measurement_results is not None and not measurement_results.empty:
-            for _, result in measurement_results.iterrows():
-                variant = sample_lookup.get(str(result.get("variant_id") or ""), {})
-                test_condition = test_condition_lookup.get(
-                    str(result.get("test_condition_id") or ""),
-                    {},
-                )
-                baseline = baseline_lookup.get(str(result.get("baseline_id") or ""), {})
-                anchors = self._resolve_anchor_rows(result.get("evidence_anchor_ids"), anchor_lookup)
-                rows.append(
-                    {
-                        "evidence_id": self._measurement_result_evidence_id(result.get("result_id")),
-                        "document_id": str(result.get("document_id") or ""),
-                        "collection_id": collection_id,
-                        "claim_text": self._measurement_result_claim_text(result, variant),
-                        "claim_type": "property",
-                        "evidence_source_type": self._determine_evidence_source_type(
-                            anchors,
-                            self._normalize_scalar_text(result.get("result_source_type")) or "text",
-                        ),
-                        "evidence_anchors": anchors,
-                        "material_system": self._normalize_material_system_payload(
-                            variant.get("host_material_system")
-                        ),
-                        "condition_context": self._normalize_condition_context_payload(
-                            self._condition_context_from_records(test_condition, baseline).model_dump(
-                                exclude_none=True
-                            )
-                        ),
-                        "confidence": 0.0,
-                        "traceability_status": str(
-                            result.get("traceability_status") or TRACEABILITY_STATUS_MISSING
-                        ),
-                    }
-                )
+        for result in measurement_results:
+            variant = sample_lookup.get(str(result.get("variant_id") or ""), {})
+            test_condition = test_condition_lookup.get(
+                str(result.get("test_condition_id") or ""),
+                {},
+            )
+            baseline = baseline_lookup.get(str(result.get("baseline_id") or ""), {})
+            anchors = self._resolve_anchor_rows(result.get("evidence_anchor_ids"), anchor_lookup)
+            rows.append(
+                {
+                    "evidence_id": self._measurement_result_evidence_id(result.get("result_id")),
+                    "document_id": str(result.get("document_id") or ""),
+                    "collection_id": collection_id,
+                    "claim_text": self._measurement_result_claim_text(result, variant),
+                    "claim_type": "property",
+                    "evidence_source_type": self._determine_evidence_source_type(
+                        anchors,
+                        self._normalize_scalar_text(result.get("result_source_type")) or "text",
+                    ),
+                    "evidence_anchors": anchors,
+                    "material_system": self._normalize_material_system_payload(
+                        variant.get("host_material_system")
+                    ),
+                    "condition_context": self._normalize_condition_context_payload(
+                        self._condition_context_from_records(test_condition, baseline).model_dump(
+                            exclude_none=True
+                        )
+                    ),
+                    "confidence": 0.0,
+                    "traceability_status": str(
+                        result.get("traceability_status") or TRACEABILITY_STATUS_MISSING
+                    ),
+                }
+            )
 
-        return self._normalize_cards_table(
-            pd.DataFrame(rows, columns=[
-                "evidence_id",
-                "document_id",
-                "collection_id",
-                "claim_text",
-                "claim_type",
-                "evidence_source_type",
-                "evidence_anchors",
-                "material_system",
-                "condition_context",
-                "confidence",
-                "traceability_status",
-            ]),
-            collection_id,
-        )
+        return self._normalize_card_records(rows, collection_id)
 
     def _resolve_anchor_rows(
         self,
@@ -3498,9 +3486,9 @@ class PaperFactsService:
 
     def _summarize_method_fact_card(
         self,
-        method_fact: pd.Series | dict[str, Any],
+        method_fact: Mapping[str, Any],
     ) -> str:
-        source = dict(method_fact) if isinstance(method_fact, pd.Series) else dict(method_fact)
+        source = dict(method_fact)
         method_role = self._normalize_method_role(source.get("method_role"))
         method_name = self._normalize_scalar_text(source.get("method_name")) or "unspecified method"
         payload = self._normalize_method_payload(source.get("method_payload"))
@@ -3515,10 +3503,10 @@ class PaperFactsService:
 
     def _measurement_result_claim_text(
         self,
-        result_row: pd.Series | dict[str, Any],
+        result_row: Mapping[str, Any],
         variant_row: dict[str, Any] | None,
     ) -> str:
-        source = dict(result_row) if isinstance(result_row, pd.Series) else dict(result_row)
+        source = dict(result_row)
         value_payload = self._normalize_object(source.get("value_payload"))
         if isinstance(value_payload, dict):
             statement = self._normalize_scalar_text(value_payload.get("statement"))
@@ -3877,25 +3865,24 @@ class PaperFactsService:
         self,
         *,
         collection_id: str,
-        method_facts: pd.DataFrame,
-        evidence_anchors: pd.DataFrame,
+        method_facts: tuple[dict[str, Any], ...],
+        evidence_anchors: tuple[dict[str, Any], ...],
         text_windows_by_doc: dict[str, list[dict[str, Any]]],
-    ) -> pd.DataFrame:
+    ) -> tuple[dict[str, Any], ...]:
         rows: list[dict[str, Any]] = []
-        if method_facts is None or method_facts.empty:
-            return self._normalize_characterization_table(
-                pd.DataFrame(columns=_CHARACTERIZATION_COLUMNS),
-                collection_id,
-            )
+        if not method_facts:
+            return self._normalize_characterization_records((), collection_id)
 
         anchor_lookup = {
             str(row.get("anchor_id") or ""): dict(row)
-            for _, row in evidence_anchors.iterrows()
-        } if evidence_anchors is not None and not evidence_anchors.empty else {}
-        characterization_facts = method_facts[
-            method_facts["method_role"].astype(str) == "characterization"
+            for row in evidence_anchors
+        }
+        characterization_facts = [
+            method_fact
+            for method_fact in method_facts
+            if str(method_fact.get("method_role") or "") == "characterization"
         ]
-        for _, method_fact in characterization_facts.iterrows():
+        for method_fact in characterization_facts:
             document_id = str(method_fact.get("document_id") or "")
             if not document_id:
                 continue
@@ -3936,133 +3923,145 @@ class PaperFactsService:
                 ).to_record()
             )
 
-        return self._normalize_characterization_table(
-            pd.DataFrame(rows, columns=_CHARACTERIZATION_COLUMNS),
+        return self._normalize_characterization_records(
+            rows,
             collection_id,
         )
 
     def _build_structure_features(
         self,
-        characterization: pd.DataFrame,
-    ) -> pd.DataFrame:
+        characterization: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
         rows: list[dict[str, Any]] = []
-        if characterization is None or characterization.empty:
-            return self._normalize_structure_features_table(
-                pd.DataFrame(columns=_STRUCTURE_FEATURE_COLUMNS)
-            )
-        for _, observation in characterization.iterrows():
+        if not characterization:
+            return self._normalize_structure_feature_records(())
+        for observation in characterization:
             rows.extend(self._extract_structure_features_from_observation(observation))
-        return self._normalize_structure_features_table(
-            pd.DataFrame(rows, columns=_STRUCTURE_FEATURE_COLUMNS)
-        )
+        return self._normalize_structure_feature_records(rows)
 
     def _attach_variant_ids_to_characterization(
         self,
-        characterization: pd.DataFrame,
-        sample_variants: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if characterization is None or characterization.empty:
-            return self._normalize_characterization_table(characterization, None)
-        if sample_variants is None or sample_variants.empty:
-            return self._normalize_characterization_table(characterization, None)
+        characterization: tuple[dict[str, Any], ...],
+        sample_variants: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if not characterization:
+            return self._normalize_characterization_records(characterization, None)
+        if not sample_variants:
+            return self._normalize_characterization_records(characterization, None)
 
-        normalized = characterization.copy()
-        for index, row in normalized.iterrows():
+        normalized: list[dict[str, Any]] = []
+        for row in characterization:
+            payload = dict(row)
             document_id = str(row.get("document_id") or "")
             document_variants = self._filter_rows_by_document(sample_variants, document_id)
             if len(document_variants) == 1:
-                normalized.at[index, "variant_id"] = document_variants.iloc[0]["variant_id"]
-        return self._normalize_characterization_table(normalized, None)
+                payload["variant_id"] = document_variants[0].get("variant_id")
+            normalized.append(payload)
+        return self._normalize_characterization_records(normalized, None)
 
     def _attach_variant_ids_to_baseline_references(
         self,
-        baseline_references: pd.DataFrame,
-        sample_variants: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if baseline_references is None or baseline_references.empty:
-            return self._normalize_baseline_references_table(baseline_references, None)
+        baseline_references: tuple[dict[str, Any], ...],
+        sample_variants: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if not baseline_references:
+            return self._normalize_baseline_reference_records(baseline_references, None)
 
-        normalized = baseline_references.copy()
-        for index, row in normalized.iterrows():
+        normalized: list[dict[str, Any]] = []
+        for row in baseline_references:
+            payload = dict(row)
             document_id = str(row.get("document_id") or "")
             label = str(row.get("baseline_label") or "").strip().lower()
             if not label:
+                normalized.append(payload)
                 continue
             document_variants = self._filter_rows_by_document(sample_variants, document_id)
-            matched = document_variants[
-                document_variants["variant_label"].astype(str).str.lower() == label
+            matched = [
+                variant
+                for variant in document_variants
+                if str(variant.get("variant_label") or "").lower() == label
             ]
             if len(matched) == 1:
-                normalized.at[index, "variant_id"] = matched.iloc[0]["variant_id"]
-        return self._normalize_baseline_references_table(normalized, None)
+                payload["variant_id"] = matched[0].get("variant_id")
+            normalized.append(payload)
+        return self._normalize_baseline_reference_records(normalized, None)
 
     def _attach_structure_feature_ids_to_variants(
         self,
-        sample_variants: pd.DataFrame,
-        structure_features: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if sample_variants is None or sample_variants.empty:
-            return self._normalize_sample_variants_table(sample_variants, None)
+        sample_variants: tuple[dict[str, Any], ...],
+        structure_features: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if not sample_variants:
+            return self._normalize_sample_variant_records(sample_variants, None)
 
-        normalized = sample_variants.copy()
-        for index, row in normalized.iterrows():
+        normalized: list[dict[str, Any]] = []
+        for row in sample_variants:
+            payload = dict(row)
             variant_id = str(row.get("variant_id") or "")
-            feature_ids = []
-            if not structure_features.empty:
-                matched = structure_features[
-                    structure_features["variant_id"].astype(str) == variant_id
-                ]
-                feature_ids = [
-                    str(value) for value in matched["feature_id"].tolist() if str(value).strip()
-                ]
-            normalized.at[index, "structure_feature_ids"] = feature_ids
-        return self._normalize_sample_variants_table(normalized, None)
+            matched = [
+                feature
+                for feature in structure_features
+                if str(feature.get("variant_id") or "") == variant_id
+            ]
+            payload["structure_feature_ids"] = [
+                str(feature.get("feature_id"))
+                for feature in matched
+                if str(feature.get("feature_id") or "").strip()
+            ]
+            normalized.append(payload)
+        return self._normalize_sample_variant_records(normalized, None)
 
     def _attach_context_to_measurement_results(
         self,
         *,
-        measurement_results: pd.DataFrame,
-        characterization: pd.DataFrame,
-        structure_features: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if measurement_results is None or measurement_results.empty:
-            return self._normalize_measurement_results_table(measurement_results, None)
+        measurement_results: tuple[dict[str, Any], ...],
+        characterization: tuple[dict[str, Any], ...],
+        structure_features: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if not measurement_results:
+            return self._normalize_measurement_result_records(measurement_results, None)
 
-        normalized = measurement_results.copy()
-        for index, row in normalized.iterrows():
+        normalized: list[dict[str, Any]] = []
+        for row in measurement_results:
+            payload = dict(row)
             document_id = str(row.get("document_id") or "")
             variant_id = self._normalize_scalar_text(row.get("variant_id"))
             matched_characterization = self._filter_rows_by_document(characterization, document_id)
             matched_structure = self._filter_rows_by_document(structure_features, document_id)
             if variant_id:
-                if not matched_characterization.empty:
-                    matched_characterization = matched_characterization[
-                        matched_characterization["variant_id"].astype(str) == variant_id
-                    ]
-                if not matched_structure.empty:
-                    matched_structure = matched_structure[
-                        matched_structure["variant_id"].astype(str) == variant_id
-                    ]
-            normalized.at[index, "characterization_observation_ids"] = [
-                str(value)
-                for value in matched_characterization.get("observation_id", pd.Series(dtype=object)).tolist()
-                if str(value).strip()
+                matched_characterization = [
+                    item
+                    for item in matched_characterization
+                    if str(item.get("variant_id") or "") == variant_id
+                ]
+                matched_structure = [
+                    item
+                    for item in matched_structure
+                    if str(item.get("variant_id") or "") == variant_id
+                ]
+            payload["characterization_observation_ids"] = [
+                str(item.get("observation_id"))
+                for item in matched_characterization
+                if str(item.get("observation_id") or "").strip()
             ]
-            normalized.at[index, "structure_feature_ids"] = [
-                str(value)
-                for value in matched_structure.get("feature_id", pd.Series(dtype=object)).tolist()
-                if str(value).strip()
+            payload["structure_feature_ids"] = [
+                str(item.get("feature_id"))
+                for item in matched_structure
+                if str(item.get("feature_id") or "").strip()
             ]
-        return self._normalize_measurement_results_table(normalized, None)
+            normalized.append(payload)
+        return self._normalize_measurement_result_records(normalized, None)
 
     def _filter_rows_by_document(
         self,
-        frame: pd.DataFrame | None,
+        rows: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         document_id: str,
-    ) -> pd.DataFrame:
-        if frame is None or frame.empty or "document_id" not in frame.columns:
-            return pd.DataFrame(columns=frame.columns if frame is not None else [])
-        return frame[frame["document_id"].astype(str) == str(document_id)]
+    ) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in rows
+            if str(row.get("document_id") or "") == str(document_id)
+        ]
 
     def _group_table_cells_by_row(
         self,
@@ -4121,12 +4120,12 @@ class PaperFactsService:
 
     def _build_text_windows_by_document(
         self,
-        blocks: pd.DataFrame,
+        blocks: tuple[dict[str, Any], ...],
     ) -> dict[str, list[dict[str, Any]]]:
-        if blocks is None or blocks.empty:
+        if not blocks:
             return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for _, row in blocks.iterrows():
+        for row in blocks:
             document_id = str(row.get("document_id") or row.get("paper_id") or row.get("id") or "")
             block_payload = dict(row)
             heading_path = self._normalize_scalar_text(block_payload.get("heading_path"))
@@ -4251,7 +4250,7 @@ class PaperFactsService:
         if isinstance(normalized, int):
             return normalized
         if isinstance(normalized, float):
-            if pd.isna(normalized):
+            if math.isnan(normalized):
                 return None
             if normalized.is_integer():
                 return int(normalized)
@@ -4295,7 +4294,7 @@ class PaperFactsService:
 
     def _extract_structure_features_from_observation(
         self,
-        observation: pd.Series,
+        observation: Mapping[str, Any],
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         observation_text = str(observation.get("observation_text") or "")
@@ -4506,12 +4505,12 @@ class PaperFactsService:
 
     def _group_table_rows_by_document(
         self,
-        table_rows: pd.DataFrame,
+        table_rows: tuple[dict[str, Any], ...],
     ) -> dict[str, list[dict[str, Any]]]:
-        if table_rows is None or table_rows.empty:
+        if not table_rows:
             return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for _, row in table_rows.iterrows():
+        for row in table_rows:
             document_id = str(row.get("document_id") or row.get("id") or "")
             grouped.setdefault(document_id, []).append(dict(row))
         for document_id, items in grouped.items():
@@ -4526,12 +4525,12 @@ class PaperFactsService:
 
     def _group_tables_by_document(
         self,
-        tables: pd.DataFrame,
+        tables: tuple[dict[str, Any], ...],
     ) -> dict[str, list[dict[str, Any]]]:
-        if tables is None or tables.empty:
+        if not tables:
             return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for _, row in tables.iterrows():
+        for row in tables:
             document_id = str(row.get("document_id") or row.get("id") or "")
             grouped.setdefault(document_id, []).append(dict(row))
         for document_id, items in grouped.items():
@@ -4554,72 +4553,54 @@ class PaperFactsService:
 
     def _group_table_cells_by_document(
         self,
-        table_cells: pd.DataFrame,
+        table_cells: tuple[dict[str, Any], ...],
     ) -> dict[str, list[dict[str, Any]]]:
-        if table_cells is None or table_cells.empty:
+        if not table_cells:
             return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for _, row in table_cells.iterrows():
+        for row in table_cells:
             document_id = str(row.get("document_id") or row.get("id") or "")
             grouped.setdefault(document_id, []).append(dict(row))
         return grouped
 
-    def _normalize_cards_table(
+    def _normalize_card_records(
         self,
-        cards: pd.DataFrame,
+        cards: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if cards is None or cards.empty:
-            return pd.DataFrame(
-                columns=[
-                    "evidence_id",
-                    "document_id",
-                    "collection_id",
-                    "claim_text",
-                    "claim_type",
-                    "evidence_source_type",
-                    "evidence_anchors",
-                    "material_system",
-                    "condition_context",
-                    "confidence",
-                    "traceability_status",
-                ]
+    ) -> tuple[dict[str, Any], ...]:
+        rows = []
+        for card in cards or ():
+            payload = dict(card)
+            if collection_id is not None and not payload.get("collection_id"):
+                payload["collection_id"] = collection_id
+            payload["evidence_anchors"] = self._normalize_object(
+                payload.get("evidence_anchors")
             )
+            payload["material_system"] = self._normalize_material_system_payload(
+                payload.get("material_system")
+            )
+            payload["condition_context"] = self._normalize_condition_context_payload(
+                payload.get("condition_context")
+            )
+            payload["confidence"] = round(float(payload.get("confidence") or 0.0), 2)
+            rows.append(
+                {
+                    "evidence_id": payload.get("evidence_id"),
+                    "document_id": payload.get("document_id"),
+                    "collection_id": payload.get("collection_id"),
+                    "claim_text": payload.get("claim_text"),
+                    "claim_type": payload.get("claim_type"),
+                    "evidence_source_type": payload.get("evidence_source_type"),
+                    "evidence_anchors": payload.get("evidence_anchors"),
+                    "material_system": payload.get("material_system"),
+                    "condition_context": payload.get("condition_context"),
+                    "confidence": payload.get("confidence"),
+                    "traceability_status": payload.get("traceability_status"),
+                }
+            )
+        return tuple(rows)
 
-        normalized = cards.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
-        if "evidence_anchors" in normalized.columns:
-            normalized["evidence_anchors"] = normalized["evidence_anchors"].apply(self._normalize_object)
-        if "material_system" in normalized.columns:
-            normalized["material_system"] = normalized["material_system"].apply(
-                self._normalize_material_system_payload
-            )
-        if "condition_context" in normalized.columns:
-            normalized["condition_context"] = normalized["condition_context"].apply(
-                self._normalize_condition_context_payload
-            )
-        if "confidence" in normalized.columns:
-            normalized["confidence"] = normalized["confidence"].apply(
-                lambda value: round(float(value or 0.0), 2)
-            )
-        return normalized[
-            [
-                "evidence_id",
-                "document_id",
-                "collection_id",
-                "claim_text",
-                "claim_type",
-                "evidence_source_type",
-                "evidence_anchors",
-                "material_system",
-                "condition_context",
-                "confidence",
-                "traceability_status",
-            ]
-        ]
-
-    def _serialize_card_row(self, row: pd.Series) -> dict[str, Any]:
+    def _serialize_card_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
         collection_id = str(row.get("collection_id") or "")
         document_id = str(row.get("document_id") or "")
         evidence_id = str(row.get("evidence_id") or "")
@@ -4875,14 +4856,14 @@ class PaperFactsService:
 
     def _build_text_unit_lookup(
         self,
-        text_units: pd.DataFrame | None,
+        text_units: tuple[dict[str, Any], ...] | None,
         document_id: str,
     ) -> dict[str, dict[str, Any]]:
-        if text_units is None or text_units.empty:
+        if not text_units:
             return {}
 
         lookup: dict[str, dict[str, Any]] = {}
-        for _, row in text_units.iterrows():
+        for row in text_units:
             text_unit_id = self._normalize_scalar_text(row.get("id"))
             if text_unit_id is None:
                 continue
@@ -5184,73 +5165,60 @@ class PaperFactsService:
 
     def _index_rows_by_id(
         self,
-        frame: pd.DataFrame | None,
+        rows: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         id_column: str,
     ) -> dict[str, dict[str, Any]]:
-        if frame is None or frame.empty or id_column not in frame.columns:
-            return {}
         lookup: dict[str, dict[str, Any]] = {}
-        for _, row in frame.iterrows():
+        for row in rows or ():
             item_id = self._normalize_scalar_text(row.get(id_column))
             if item_id:
                 lookup[item_id] = dict(row)
         return lookup
 
-    def _normalize_evidence_anchors_table(
+    def _normalize_evidence_anchor_records(
         self,
-        evidence_anchors: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if evidence_anchors is None or evidence_anchors.empty:
-            return pd.DataFrame(columns=_EVIDENCE_ANCHOR_COLUMNS)
-
+        evidence_anchors: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], ...]:
         records = []
-        for _, row in evidence_anchors.iterrows():
+        for row in evidence_anchors or ():
             payload = dict(row)
             payload["char_range"] = self._normalize_object(row.get("char_range"))
             payload["bbox"] = self._normalize_object(row.get("bbox"))
             records.append(EvidenceAnchor.from_mapping(payload).to_record())
-        return pd.DataFrame(records, columns=_EVIDENCE_ANCHOR_COLUMNS)
+        return tuple(records)
 
-    def _normalize_method_facts_table(
+    def _normalize_method_fact_records(
         self,
-        method_facts: pd.DataFrame,
+        method_facts: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if method_facts is None or method_facts.empty:
-            return pd.DataFrame(columns=_METHOD_FACT_COLUMNS)
-
-        normalized = method_facts.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
-        if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+    ) -> tuple[dict[str, Any], ...]:
         records = []
-        for _, row in normalized.iterrows():
+        for row in method_facts or ():
             payload = dict(row)
+            if collection_id is not None and not payload.get("collection_id"):
+                payload["collection_id"] = collection_id
+            if not payload.get("domain_profile"):
+                payload["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
             payload["method_role"] = self._normalize_method_role(row.get("method_role"))
             payload["method_payload"] = self._normalize_method_payload(row.get("method_payload"))
             payload["evidence_anchor_ids"] = self._normalize_list(
                 row.get("evidence_anchor_ids")
             )
             records.append(MethodFact.from_mapping(payload).to_record())
-        return pd.DataFrame(records, columns=_METHOD_FACT_COLUMNS)
+        return tuple(records)
 
-    def _normalize_sample_variants_table(
+    def _normalize_sample_variant_records(
         self,
-        sample_variants: pd.DataFrame,
+        sample_variants: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if sample_variants is None or sample_variants.empty:
-            return pd.DataFrame(columns=_SAMPLE_VARIANT_COLUMNS)
-
-        normalized = sample_variants.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
-        if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+    ) -> tuple[dict[str, Any], ...]:
         records = []
-        for _, row in normalized.iterrows():
+        for row in sample_variants or ():
             payload = dict(row)
+            if collection_id is not None and not payload.get("collection_id"):
+                payload["collection_id"] = collection_id
+            if not payload.get("domain_profile"):
+                payload["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
             payload["host_material_system"] = self._normalize_material_system_payload(
                 row.get("host_material_system")
             )
@@ -5268,24 +5236,20 @@ class PaperFactsService:
                 row.get("source_anchor_ids")
             )
             records.append(SampleVariant.from_mapping(payload).to_record())
-        return pd.DataFrame(records, columns=_SAMPLE_VARIANT_COLUMNS)
+        return tuple(records)
 
-    def _normalize_measurement_results_table(
+    def _normalize_measurement_result_records(
         self,
-        measurement_results: pd.DataFrame,
+        measurement_results: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if measurement_results is None or measurement_results.empty:
-            return pd.DataFrame(columns=_MEASUREMENT_RESULT_COLUMNS)
-
-        normalized = measurement_results.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
-        if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+    ) -> tuple[dict[str, Any], ...]:
         records = []
-        for _, row in normalized.iterrows():
+        for row in measurement_results or ():
             payload = dict(row)
+            if collection_id is not None and not payload.get("collection_id"):
+                payload["collection_id"] = collection_id
+            if not payload.get("domain_profile"):
+                payload["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
             value_payload = self._normalize_object(row.get("value_payload"))
             payload["value_payload"] = value_payload if isinstance(value_payload, dict) else {}
             payload["structure_feature_ids"] = self._normalize_list(
@@ -5302,19 +5266,19 @@ class PaperFactsService:
             if self._is_non_measurement_statistic_result(record):
                 continue
             records.append(record)
-        return pd.DataFrame(records, columns=_MEASUREMENT_RESULT_COLUMNS)
+        return tuple(records)
 
-    def _deduplicate_measurement_results_table(
+    def _deduplicate_measurement_result_records(
         self,
-        measurement_results: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if measurement_results is None or measurement_results.empty:
-            return pd.DataFrame(columns=_MEASUREMENT_RESULT_COLUMNS)
+        measurement_results: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if not measurement_results:
+            return ()
 
         records_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
         loose_records: list[dict[str, Any]] = []
-        for _, row in measurement_results.iterrows():
-            record = MeasurementResult.from_mapping(dict(row)).to_record()
+        for row in measurement_results:
+            record = MeasurementResult.from_mapping(row).to_record()
             record["unit"] = self._infer_measurement_unit(record)
             if self._is_non_measurement_statistic_result(record):
                 continue
@@ -5330,10 +5294,7 @@ class PaperFactsService:
             )
 
         records = [*records_by_key.values(), *loose_records]
-        return self._normalize_measurement_results_table(
-            pd.DataFrame(records, columns=_MEASUREMENT_RESULT_COLUMNS),
-            None,
-        )
+        return self._normalize_measurement_result_records(records, None)
 
     def _measurement_result_dedupe_key(
         self,
@@ -5532,7 +5493,7 @@ class PaperFactsService:
                 numeric = float(normalized)
             except (TypeError, ValueError):
                 return None
-            if pd.isna(numeric):
+            if math.isnan(numeric):
                 return None
             return numeric
         text = self._normalize_scalar_text(normalized)
@@ -5576,20 +5537,16 @@ class PaperFactsService:
         lowered = str(text or "").lower()
         return any(term in lowered for term in _STATISTIC_MEASUREMENT_TERMS)
 
-    def _normalize_characterization_table(
+    def _normalize_characterization_records(
         self,
-        characterization: pd.DataFrame,
+        characterization: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if characterization is None or characterization.empty:
-            return pd.DataFrame(columns=_CHARACTERIZATION_COLUMNS)
-
-        normalized = characterization.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
+    ) -> tuple[dict[str, Any], ...]:
         records = []
-        for _, row in normalized.iterrows():
+        for row in characterization or ():
             payload = dict(row)
+            if collection_id is not None and not payload.get("collection_id"):
+                payload["collection_id"] = collection_id
             payload["condition_context"] = self._normalize_condition_context_payload(
                 row.get("condition_context")
             )
@@ -5597,40 +5554,33 @@ class PaperFactsService:
                 row.get("evidence_anchor_ids")
             )
             records.append(CharacterizationObservation.from_mapping(payload).to_record())
-        return pd.DataFrame(records, columns=_CHARACTERIZATION_COLUMNS)
+        return tuple(records)
 
-    def _normalize_structure_features_table(
+    def _normalize_structure_feature_records(
         self,
-        structure_features: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if structure_features is None or structure_features.empty:
-            return pd.DataFrame(columns=_STRUCTURE_FEATURE_COLUMNS)
-
+        structure_features: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], ...]:
         records = []
-        for _, row in structure_features.iterrows():
+        for row in structure_features or ():
             payload = dict(row)
             payload["source_observation_ids"] = self._normalize_list(
                 row.get("source_observation_ids")
             )
             records.append(StructureFeature.from_mapping(payload).to_record())
-        return pd.DataFrame(records, columns=_STRUCTURE_FEATURE_COLUMNS)
+        return tuple(records)
 
-    def _normalize_test_conditions_table(
+    def _normalize_test_condition_records(
         self,
-        test_conditions: pd.DataFrame,
+        test_conditions: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if test_conditions is None or test_conditions.empty:
-            return pd.DataFrame(columns=_TEST_CONDITION_COLUMNS)
-
-        normalized = test_conditions.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
-        if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+    ) -> tuple[dict[str, Any], ...]:
         records = []
-        for _, row in normalized.iterrows():
+        for row in test_conditions or ():
             payload = dict(row)
+            if collection_id is not None and not payload.get("collection_id"):
+                payload["collection_id"] = collection_id
+            if not payload.get("domain_profile"):
+                payload["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
             payload["condition_payload"] = self._normalize_condition_payload(
                 row.get("condition_payload")
             )
@@ -5639,29 +5589,25 @@ class PaperFactsService:
                 row.get("evidence_anchor_ids")
             )
             records.append(TestCondition.from_mapping(payload).to_record())
-        return pd.DataFrame(records, columns=_TEST_CONDITION_COLUMNS)
+        return tuple(records)
 
-    def _normalize_baseline_references_table(
+    def _normalize_baseline_reference_records(
         self,
-        baseline_references: pd.DataFrame,
+        baseline_references: tuple[dict[str, Any], ...] | list[dict[str, Any]],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if baseline_references is None or baseline_references.empty:
-            return pd.DataFrame(columns=_BASELINE_REFERENCE_COLUMNS)
-
-        normalized = baseline_references.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
-        if "domain_profile" not in normalized.columns:
-            normalized["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
+    ) -> tuple[dict[str, Any], ...]:
         records = []
-        for _, row in normalized.iterrows():
+        for row in baseline_references or ():
             payload = dict(row)
+            if collection_id is not None and not payload.get("collection_id"):
+                payload["collection_id"] = collection_id
+            if not payload.get("domain_profile"):
+                payload["domain_profile"] = CORE_NEUTRAL_DOMAIN_PROFILE
             payload["evidence_anchor_ids"] = self._normalize_list(
                 row.get("evidence_anchor_ids")
             )
             records.append(BaselineReference.from_mapping(payload).to_record())
-        return pd.DataFrame(records, columns=_BASELINE_REFERENCE_COLUMNS)
+        return tuple(records)
 
     def _resolve_output_dir(self, collection_id: str) -> Path:
         self.collection_service.get_collection(collection_id)

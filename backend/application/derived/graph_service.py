@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from application.derived.core_fact_projection import build_core_fact_projection_frames
+from application.derived.core_fact_projection import build_core_fact_projection_records
 from application.source.collection_service import CollectionService
 from application.derived.graph_projection_service import (
     load_core_graph_payload,
@@ -86,12 +86,12 @@ def load_graph_payload(
             output_dir=_graph_error_output_dir(collection_id),
             missing_artifacts=["core_fact_repository.comparison_artifacts"],
         )
-    frames = build_core_fact_projection_frames(facts)
+    records = build_core_fact_projection_records(facts)
 
     return load_core_graph_payload(
-        profiles=frames.document_profiles,
-        evidence_cards=frames.evidence_cards,
-        comparison_rows=frames.comparison_rows,
+        profiles=records.document_profiles,
+        evidence_cards=records.evidence_cards,
+        comparison_rows=records.comparison_rows,
         max_nodes=max_nodes,
         min_weight=min_weight,
     )

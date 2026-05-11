@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 import logging
+import math
 from typing import Any
-
-import pandas as pd
 
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
@@ -21,6 +21,12 @@ from domain.core.comparison import (
     build_collection_assessment_input_fingerprint,
     build_comparable_result_id,
     evaluate_comparison_assessment,
+)
+from domain.core.evidence_backbone import (
+    BaselineReference,
+    MeasurementResult,
+    SampleVariant,
+    TestCondition,
 )
 from domain.shared.enums import TRACEABILITY_STATUS_MISSING
 from infra.persistence.backbone_codec import normalize_backbone_value
@@ -59,28 +65,28 @@ COLLECTION_COMPARABLE_RESULT_COLUMNS = [
 
 
 @dataclass(frozen=True)
-class ComparisonInputFrames:
-    sample_variants: pd.DataFrame
-    measurement_results: pd.DataFrame
-    test_conditions: pd.DataFrame
-    baseline_references: pd.DataFrame
+class ComparisonInputRecords:
+    sample_variants: tuple[SampleVariant, ...]
+    measurement_results: tuple[MeasurementResult, ...]
+    test_conditions: tuple[TestCondition, ...]
+    baseline_references: tuple[BaselineReference, ...]
 
 
 @dataclass(frozen=True)
-class ComparisonSemanticTables:
-    comparable_results: pd.DataFrame
-    collection_comparable_results: pd.DataFrame
+class ComparisonSemanticRecords:
+    comparable_results: tuple[ComparableResult, ...]
+    collection_comparable_results: tuple[CollectionComparableResult, ...]
 
 
 class ComparableResultAssembler:
     """Assemble semantic comparison artifacts from paper-facts frames."""
 
-    def assemble_semantic_tables(
+    def assemble_semantic_records(
         self,
         *,
         collection_id: str,
-        frames: ComparisonInputFrames,
-    ) -> ComparisonSemanticTables:
+        frames: ComparisonInputRecords,
+    ) -> ComparisonSemanticRecords:
         sample_lookup = self.index_by_id(frames.sample_variants, "variant_id")
         test_condition_lookup = self.index_by_id(
             frames.test_conditions,
@@ -93,9 +99,8 @@ class ComparableResultAssembler:
 
         comparable_results_by_id: dict[str, ComparableResult] = {}
         scoped_results_by_id: dict[str, CollectionComparableResult] = {}
-        for sort_order, (_, result_row) in enumerate(
-            frames.measurement_results.iterrows()
-        ):
+        for sort_order, result_record in enumerate(frames.measurement_results):
+            result_row = result_record.to_record()
             assessment_context = self.build_assessment_context(
                 result_row=result_row,
                 sample_lookup=sample_lookup,
@@ -139,28 +144,15 @@ class ComparableResultAssembler:
                 else scoped_result
             )
 
-        return ComparisonSemanticTables(
-            comparable_results=self.normalize_comparable_results_table(
-                pd.DataFrame(
-                    [
-                        record.to_record()
-                        for record in comparable_results_by_id.values()
-                    ],
-                    columns=COMPARABLE_RESULT_COLUMNS,
-                )
-            ),
-            collection_comparable_results=self.normalize_collection_comparable_results_table(
-                pd.DataFrame(
-                    [record.to_record() for record in scoped_results_by_id.values()],
-                    columns=COLLECTION_COMPARABLE_RESULT_COLUMNS,
-                )
-            ),
+        return ComparisonSemanticRecords(
+            comparable_results=tuple(comparable_results_by_id.values()),
+            collection_comparable_results=tuple(scoped_results_by_id.values()),
         )
 
     def assemble_comparable_result(
         self,
         *,
-        result_row: pd.Series,
+        result_row: dict[str, Any],
         sample_lookup: dict[str, dict[str, Any]],
         test_condition_lookup: dict[str, dict[str, Any]],
         baseline_lookup: dict[str, dict[str, Any]],
@@ -340,7 +332,7 @@ class ComparableResultAssembler:
     def build_assessment_context(
         self,
         *,
-        result_row: pd.Series,
+        result_row: dict[str, Any],
         sample_lookup: dict[str, dict[str, Any]],
         test_condition_lookup: dict[str, dict[str, Any]],
         baseline_lookup: dict[str, dict[str, Any]],
@@ -355,50 +347,39 @@ class ComparableResultAssembler:
             "measurement_result": dict(result_row),
         }
 
-    def normalize_comparable_results_table(self, results: pd.DataFrame) -> pd.DataFrame:
-        if results is None or results.empty:
-            return pd.DataFrame(columns=COMPARABLE_RESULT_COLUMNS)
-
-        normalized = results.copy()
-        for column in COMPARABLE_RESULT_COLUMNS:
-            if column not in normalized.columns:
-                normalized[column] = None
-        records = [
-            ComparableResult.from_mapping(dict(row)).to_record()
-            for _, row in normalized.iterrows()
-        ]
-        return pd.DataFrame(records, columns=COMPARABLE_RESULT_COLUMNS)
-
-    def normalize_collection_comparable_results_table(
+    def normalize_comparable_results(
         self,
-        results: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if results is None or results.empty:
-            return pd.DataFrame(columns=COLLECTION_COMPARABLE_RESULT_COLUMNS)
+        results: Iterable[ComparableResult | dict[str, Any]],
+    ) -> tuple[ComparableResult, ...]:
+        return tuple(
+            record
+            if isinstance(record, ComparableResult)
+            else ComparableResult.from_mapping(record)
+            for record in results
+        )
 
-        normalized = results.copy()
-        for column in COLLECTION_COMPARABLE_RESULT_COLUMNS:
-            if column not in normalized.columns:
-                normalized[column] = None
-        records = [
-            CollectionComparableResult.from_mapping(dict(row)).to_record()
-            for _, row in normalized.iterrows()
-        ]
-        return pd.DataFrame(records, columns=COLLECTION_COMPARABLE_RESULT_COLUMNS)
+    def normalize_collection_comparable_results(
+        self,
+        results: Iterable[CollectionComparableResult | dict[str, Any]],
+    ) -> tuple[CollectionComparableResult, ...]:
+        return tuple(
+            record
+            if isinstance(record, CollectionComparableResult)
+            else CollectionComparableResult.from_mapping(record)
+            for record in results
+        )
 
     def index_by_id(
         self,
-        frame: pd.DataFrame,
-        id_column: str,
+        records: Iterable[Any],
+        id_field: str,
     ) -> dict[str, dict[str, Any]]:
-        if frame is None or frame.empty:
-            return {}
         lookup: dict[str, dict[str, Any]] = {}
-        for _, row in frame.iterrows():
-            item_id = self.safe_text(row.get(id_column))
+        for record in records:
+            item_id = self.safe_text(getattr(record, id_field, None))
             if not item_id:
                 continue
-            lookup[item_id] = dict(row)
+            lookup[item_id] = record.to_record()
         return lookup
 
     def merge_comparable_results(
@@ -708,7 +689,7 @@ class ComparableResultAssembler:
 
     def build_supporting_evidence_ids(
         self,
-        result_row: pd.Series,
+        result_row: dict[str, Any],
     ) -> list[str]:
         result_id = self.safe_text(result_row.get("result_id"))
         if not result_id:
@@ -744,7 +725,7 @@ class ComparableResultAssembler:
         if isinstance(payload, int):
             return payload
         if isinstance(payload, float):
-            if pd.isna(payload):
+            if math.isnan(payload):
                 return None
             if payload.is_integer():
                 return int(payload)
@@ -757,14 +738,14 @@ class ComparableResultAssembler:
     def safe_text(self, value: Any) -> str | None:
         if value is None:
             return None
-        if isinstance(value, float) and pd.isna(value):
+        if isinstance(value, float) and math.isnan(value):
             return None
         text = str(value).strip()
         return text or None
 
     def safe_float(self, value: Any) -> float | None:
         try:
-            if value is None or (isinstance(value, float) and pd.isna(value)):
+            if value is None or (isinstance(value, float) and math.isnan(value)):
                 return None
             return float(value)
         except Exception:
@@ -775,6 +756,6 @@ __all__ = [
     "COLLECTION_COMPARABLE_RESULT_COLUMNS",
     "COMPARABLE_RESULT_COLUMNS",
     "ComparableResultAssembler",
-    "ComparisonInputFrames",
-    "ComparisonSemanticTables",
+    "ComparisonInputRecords",
+    "ComparisonSemanticRecords",
 ]

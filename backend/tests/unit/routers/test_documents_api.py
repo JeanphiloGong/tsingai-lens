@@ -162,14 +162,15 @@ def _store_core_document_semantics(
     scoped_results = scoped_results or []
     comparison_rows: tuple[ComparisonRowRecord, ...] = ()
     if comparable_results and scoped_results:
-        row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        comparison_rows = ComparisonRowProjector().project_rows_from_semantic_artifacts(
             collection_id=collection_id,
-            comparable_results=pd.DataFrame(comparable_results),
-            scoped_results=pd.DataFrame(scoped_results),
-        )
-        comparison_rows = tuple(
-            ComparisonRowRecord.from_mapping(dict(row))
-            for _, row in row_table.iterrows()
+            comparable_results=(
+                ComparableResult.from_mapping(row) for row in comparable_results
+            ),
+            scoped_results=(
+                CollectionComparableResult.from_mapping(row)
+                for row in scoped_results
+            ),
         )
     comparison_service.core_fact_repository.replace_collection_facts(
         collection_id,

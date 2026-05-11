@@ -166,23 +166,16 @@ def _store_core_comparison_artifacts(
     comparable_results: list[ComparableResult],
     scoped_results: list[CollectionComparableResult],
 ) -> None:
-    row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
         collection_id=collection_id,
-        comparable_results=pd.DataFrame(
-            [record.to_record() for record in comparable_results]
-        ),
-        scoped_results=pd.DataFrame(
-            [record.to_record() for record in scoped_results]
-        ),
+        comparable_results=comparable_results,
+        scoped_results=scoped_results,
     )
     comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
         collection_id,
         tuple(comparable_results),
         tuple(scoped_results),
-        tuple(
-            ComparisonRowRecord.from_mapping(dict(row))
-            for _, row in row_table.iterrows()
-        ),
+        row_records,
     )
 
 
@@ -411,69 +404,65 @@ def test_text_window_test_conditions_skip_empty_payload():
 
 def test_generic_text_samples_are_removed_when_table_samples_exist():
     service = PaperFactsService()
-    samples = service._normalize_sample_variants_table(
-        pd.DataFrame(
-            [
-                {
-                    "variant_id": "var-generic",
-                    "document_id": "paper-1",
-                    "collection_id": "collection-1",
-                    "variant_label": "316L stainless steel samples",
-                    "host_material_system": {},
-                    "composition": None,
-                    "variable_axis_type": None,
-                    "variable_value": None,
-                    "process_context": {},
-                    "profile_payload": {"source_kind": "text_window"},
-                    "structure_feature_ids": [],
-                    "source_anchor_ids": [],
-                    "confidence": 0.8,
-                    "epistemic_status": "inferred_with_low_confidence",
-                },
-                {
-                    "variant_id": "var-1",
-                    "document_id": "paper-1",
-                    "collection_id": "collection-1",
-                    "variant_label": "1",
-                    "host_material_system": {},
-                    "composition": None,
-                    "variable_axis_type": None,
-                    "variable_value": None,
-                    "process_context": {},
-                    "profile_payload": {"source_kind": "table_row"},
-                    "structure_feature_ids": [],
-                    "source_anchor_ids": [],
-                    "confidence": 0.9,
-                    "epistemic_status": "normalized_from_evidence",
-                },
-            ]
-        ),
+    samples = service._normalize_sample_variant_records(
+        [
+            {
+                "variant_id": "var-generic",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_label": "316L stainless steel samples",
+                "host_material_system": {},
+                "composition": None,
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": {},
+                "profile_payload": {"source_kind": "text_window"},
+                "structure_feature_ids": [],
+                "source_anchor_ids": [],
+                "confidence": 0.8,
+                "epistemic_status": "inferred_with_low_confidence",
+            },
+            {
+                "variant_id": "var-1",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_label": "1",
+                "host_material_system": {},
+                "composition": None,
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": {},
+                "profile_payload": {"source_kind": "table_row"},
+                "structure_feature_ids": [],
+                "source_anchor_ids": [],
+                "confidence": 0.9,
+                "epistemic_status": "normalized_from_evidence",
+            },
+        ],
         None,
     )
     filtered, removed_ids = service._filter_generic_text_sample_variants(samples)
 
-    assert set(filtered["variant_label"]) == {"1"}
+    assert {row["variant_label"] for row in filtered} == {"1"}
     assert removed_ids == {"var-generic"}
 
-    measurements = service._normalize_measurement_results_table(
-        pd.DataFrame(
-            [
-                {
-                    "result_id": "res-1",
-                    "document_id": "paper-1",
-                    "collection_id": "collection-1",
-                    "variant_id": "var-generic",
-                    "property_normalized": "density",
-                    "result_type": "scalar",
-                    "claim_scope": "current_work",
-                    "value_payload": {"value": 95.0, "statement": "Relative density was 95%."},
-                    "unit": "%",
-                    "evidence_anchor_ids": ["anchor-1"],
-                    "traceability_status": "direct",
-                    "result_source_type": "text",
-                }
-            ]
-        ),
+    measurements = service._normalize_measurement_result_records(
+        [
+            {
+                "result_id": "res-1",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_id": "var-generic",
+                "property_normalized": "density",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 95.0, "statement": "Relative density was 95%."},
+                "unit": "%",
+                "evidence_anchor_ids": ["anchor-1"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+            }
+        ],
         None,
     )
     cleared = service._clear_removed_variant_ids_from_measurements(
@@ -481,69 +470,67 @@ def test_generic_text_samples_are_removed_when_table_samples_exist():
         removed_ids,
     )
 
-    assert cleared.iloc[0]["variant_id"] is None
+    assert cleared[0]["variant_id"] is None
 
 
 def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistics():
     service = PaperFactsService()
-    measurements = service._normalize_measurement_results_table(
-        pd.DataFrame(
-            [
-                {
-                    "result_id": "res-1",
-                    "document_id": "paper-1",
-                    "collection_id": "collection-1",
-                    "variant_id": "var-1",
-                    "property_normalized": "hardness",
-                    "result_type": "scalar",
-                    "claim_scope": "current_work",
-                    "value_payload": {"value": 187.7, "statement": "Microhardness is 187.7 HV."},
-                    "unit": None,
-                    "evidence_anchor_ids": ["anchor-1"],
-                    "traceability_status": "direct",
-                    "result_source_type": "table",
+    measurements = service._normalize_measurement_result_records(
+        [
+            {
+                "result_id": "res-1",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_id": "var-1",
+                "property_normalized": "hardness",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 187.7, "statement": "Microhardness is 187.7 HV."},
+                "unit": None,
+                "evidence_anchor_ids": ["anchor-1"],
+                "traceability_status": "direct",
+                "result_source_type": "table",
+            },
+            {
+                "result_id": "res-2",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_id": "var-1",
+                "property_normalized": "hardness",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 187.7, "statement": "Microhardness measured at 187.7."},
+                "unit": "HV",
+                "evidence_anchor_ids": ["anchor-2"],
+                "traceability_status": "direct",
+                "result_source_type": "table",
+            },
+            {
+                "result_id": "res-std",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_id": "var-1",
+                "property_normalized": "hardness",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {
+                    "value": 11.4,
+                    "statement": "Standard deviation of microhardness is 11.4 HV.",
                 },
-                {
-                    "result_id": "res-2",
-                    "document_id": "paper-1",
-                    "collection_id": "collection-1",
-                    "variant_id": "var-1",
-                    "property_normalized": "hardness",
-                    "result_type": "scalar",
-                    "claim_scope": "current_work",
-                    "value_payload": {"value": 187.7, "statement": "Microhardness measured at 187.7."},
-                    "unit": "HV",
-                    "evidence_anchor_ids": ["anchor-2"],
-                    "traceability_status": "direct",
-                    "result_source_type": "table",
-                },
-                {
-                    "result_id": "res-std",
-                    "document_id": "paper-1",
-                    "collection_id": "collection-1",
-                    "variant_id": "var-1",
-                    "property_normalized": "hardness",
-                    "result_type": "scalar",
-                    "claim_scope": "current_work",
-                    "value_payload": {
-                        "value": 11.4,
-                        "statement": "Standard deviation of microhardness is 11.4 HV.",
-                    },
-                    "unit": "HV",
-                    "evidence_anchor_ids": ["anchor-std"],
-                    "traceability_status": "direct",
-                    "result_source_type": "table",
-                },
-            ]
-        ),
+                "unit": "HV",
+                "evidence_anchor_ids": ["anchor-std"],
+                "traceability_status": "direct",
+                "result_source_type": "table",
+            },
+        ],
         None,
     )
 
-    deduped = service._deduplicate_measurement_results_table(measurements)
+    deduped = service._deduplicate_measurement_result_records(measurements)
 
     assert len(deduped) == 1
-    assert deduped.iloc[0]["unit"] == "HV"
-    assert set(deduped.iloc[0]["evidence_anchor_ids"]) == {"anchor-1", "anchor-2"}
+    assert deduped[0]["unit"] == "HV"
+    assert set(deduped[0]["evidence_anchor_ids"]) == {"anchor-1", "anchor-2"}
 
 
 def test_pbf_fact_schema_accepts_process_test_and_value_provenance_fields():

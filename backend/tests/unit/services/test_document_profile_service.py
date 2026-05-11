@@ -6,6 +6,7 @@ import pandas as pd
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
+from domain.core.document_profile import DocumentProfile
 from domain.source import SourceArtifactSet
 from infra.source.runtime.source_evidence import build_blocks
 
@@ -206,8 +207,8 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
 def test_document_profile_service_normalizes_numpy_array_columns():
     profile_service = DocumentProfileService()
 
-    profiles = pd.DataFrame(
-        [
+    profiles = [
+        DocumentProfile.from_mapping(
             {
                 "document_id": "doc-1",
                 "collection_id": "col-1",
@@ -215,12 +216,12 @@ def test_document_profile_service_normalizes_numpy_array_columns():
                 "parsing_warnings": np.array(["condition_context_weak"]),
                 "confidence": 0.91,
             }
-        ]
-    )
+        )
+    ]
 
-    normalized = profile_service._normalize_profiles_table(profiles, "col-1")
+    normalized = profile_service._normalize_profile_records(profiles, "col-1")
 
-    assert normalized.iloc[0]["parsing_warnings"] == ["condition_context_weak"]
+    assert normalized[0].to_record()["parsing_warnings"] == ["condition_context_weak"]
 
 
 def test_document_profile_service_round_trips_repository_storage_fields(tmp_path):
@@ -264,4 +265,4 @@ def test_document_profile_service_round_trips_repository_storage_fields(tmp_path
     profile_service.build_document_profiles(collection_id)
 
     restored = profile_service.read_document_profiles(collection_id)
-    assert isinstance(restored.iloc[0]["parsing_warnings"], list)
+    assert isinstance(restored[0].to_record()["parsing_warnings"], list)

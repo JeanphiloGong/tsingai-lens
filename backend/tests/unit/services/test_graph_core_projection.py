@@ -4,8 +4,6 @@ import sys
 from hashlib import sha1
 from types import SimpleNamespace
 
-import pandas as pd
-
 from application.derived.graph_projection_service import load_core_graph_payload
 from domain.core.comparison import ComparisonRowRecord
 from domain.core.document_profile import DocumentProfile
@@ -18,8 +16,8 @@ def _semantic_node_id(prefix: str, label: str) -> str:
     return f"{prefix}:{sha1(label.encode('utf-8')).hexdigest()}"
 
 
-def _comparison_rows_frame(*records: dict) -> pd.DataFrame:
-    return pd.DataFrame(list(records))
+def _comparison_rows_records(*records: dict) -> tuple[dict, ...]:
+    return tuple(records)
 
 
 def _core_graph_fact_set(
@@ -85,51 +83,47 @@ def _core_graph_fact_set(
 
 
 def test_core_projection_builds_route_compatible_graph_payload():
-    profiles = pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "title": "Core Graph Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
+    profiles = (
+        {
+            "document_id": "paper-1",
+            "collection_id": "col-1",
+            "title": "Core Graph Paper",
+            "source_filename": "paper.txt",
+            "doc_type": "experimental",
+            "parsing_warnings": [],
+            "confidence": 0.91,
+        },
     )
-    evidence_cards = pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "claim_text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-1",
-                        "source_type": "text",
-                        "section_id": None,
-                        "block_id": None,
-                        "snippet_id": "tu-1",
-                        "figure_or_table": None,
-                        "quote_span": "Flexural strength increased to 97 MPa.",
-                    }
-                ],
-                "material_system": {"family": "epoxy composite", "composition": None},
-                "condition_context": {
-                    "process": {"temperatures_c": [80.0]},
-                    "baseline": {"control": "untreated baseline"},
-                    "test": {"method": "SEM"},
-                },
-                "confidence": 0.82,
-                "traceability_status": "direct",
-            }
-        ]
+    evidence_cards = (
+        {
+            "evidence_id": "ev-1",
+            "document_id": "paper-1",
+            "collection_id": "col-1",
+            "claim_text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+            "claim_type": "property",
+            "evidence_source_type": "text",
+            "evidence_anchors": [
+                {
+                    "anchor_id": "anchor-1",
+                    "source_type": "text",
+                    "section_id": None,
+                    "block_id": None,
+                    "snippet_id": "tu-1",
+                    "figure_or_table": None,
+                    "quote_span": "Flexural strength increased to 97 MPa.",
+                }
+            ],
+            "material_system": {"family": "epoxy composite", "composition": None},
+            "condition_context": {
+                "process": {"temperatures_c": [80.0]},
+                "baseline": {"control": "untreated baseline"},
+                "test": {"method": "SEM"},
+            },
+            "confidence": 0.82,
+            "traceability_status": "direct",
+        },
     )
-    comparison_rows = _comparison_rows_frame(
+    comparison_rows = _comparison_rows_records(
         {
             "row_id": "cmp-1",
             "collection_id": "col-1",
@@ -204,37 +198,33 @@ def test_core_projection_builds_route_compatible_graph_payload():
 
 
 def test_core_projection_skips_placeholder_semantic_nodes():
-    profiles = pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "title": "Placeholder Graph Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
+    profiles = (
+        {
+            "document_id": "paper-1",
+            "collection_id": "col-1",
+            "title": "Placeholder Graph Paper",
+            "source_filename": "paper.txt",
+            "doc_type": "experimental",
+            "parsing_warnings": [],
+            "confidence": 0.91,
+        },
     )
-    evidence_cards = pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "claim_text": "Qualitative trend reported.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "epoxy composite", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.82,
-                "traceability_status": "direct",
-            }
-        ]
+    evidence_cards = (
+        {
+            "evidence_id": "ev-1",
+            "document_id": "paper-1",
+            "collection_id": "col-1",
+            "claim_text": "Qualitative trend reported.",
+            "claim_type": "property",
+            "evidence_source_type": "text",
+            "evidence_anchors": [],
+            "material_system": {"family": "epoxy composite", "composition": None},
+            "condition_context": {"process": {}, "baseline": {}, "test": {}},
+            "confidence": 0.82,
+            "traceability_status": "direct",
+        },
     )
-    comparison_rows = _comparison_rows_frame(
+    comparison_rows = _comparison_rows_records(
         {
             "row_id": "cmp-1",
             "collection_id": "col-1",
@@ -275,39 +265,35 @@ def test_core_projection_skips_placeholder_semantic_nodes():
 
 
 def test_core_projection_truncation_reserves_backbone_capacity():
-    profiles = pd.DataFrame(
-        [
-            {
-                "document_id": f"paper-{index}",
-                "collection_id": "col-1",
-                "title": f"Paper {index}",
-                "source_filename": f"paper-{index}.txt",
-                "doc_type": "experimental",
-                "parsing_warnings": [],
-                "confidence": 0.9,
-            }
-            for index in range(1, 5)
-        ]
+    profiles = tuple(
+        {
+            "document_id": f"paper-{index}",
+            "collection_id": "col-1",
+            "title": f"Paper {index}",
+            "source_filename": f"paper-{index}.txt",
+            "doc_type": "experimental",
+            "parsing_warnings": [],
+            "confidence": 0.9,
+        }
+        for index in range(1, 5)
     )
-    evidence_cards = pd.DataFrame(
-        [
-            {
-                "evidence_id": f"ev-{index}",
-                "document_id": f"paper-{index}",
-                "collection_id": "col-1",
-                "claim_text": f"Claim {index}",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.82,
-                "traceability_status": "direct",
-            }
-            for index in range(1, 5)
-        ]
+    evidence_cards = tuple(
+        {
+            "evidence_id": f"ev-{index}",
+            "document_id": f"paper-{index}",
+            "collection_id": "col-1",
+            "claim_text": f"Claim {index}",
+            "claim_type": "property",
+            "evidence_source_type": "text",
+            "evidence_anchors": [],
+            "material_system": {"family": "oxide cathode", "composition": None},
+            "condition_context": {"process": {}, "baseline": {}, "test": {}},
+            "confidence": 0.82,
+            "traceability_status": "direct",
+        }
+        for index in range(1, 5)
     )
-    comparison_rows = _comparison_rows_frame(
+    comparison_rows = _comparison_rows_records(
         *[
             {
                 "row_id": f"cmp-{index}",

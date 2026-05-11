@@ -225,7 +225,7 @@ class CollectionBuildTaskRunner:
                     collection_id,
                     output_dir,
                 )
-                if evidence_cards.empty:
+                if not evidence_cards:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))
                     warnings.append("未抽取到 evidence cards，collection 暂时只能依赖 document profiles。")
@@ -241,7 +241,7 @@ class CollectionBuildTaskRunner:
                     collection_id,
                     output_dir,
                 )
-                if comparison_rows.empty:
+                if not comparison_rows:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))
                     warnings.append("未生成 comparison rows，当前 collection 还不能直接做结构化比较。")

@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import math
 from hashlib import sha1
-from typing import Any
-
-import pandas as pd
+from typing import Any, Mapping
 
 
 _NODE_TYPE_PRIORITY = {
@@ -70,9 +68,9 @@ _BACKBONE_TRUNCATION_SHARE = 0.6
 
 
 def load_core_graph_payload(
-    profiles: pd.DataFrame,
-    evidence_cards: pd.DataFrame,
-    comparison_rows: pd.DataFrame,
+    profiles: tuple[dict[str, Any], ...],
+    evidence_cards: tuple[dict[str, Any], ...],
+    comparison_rows: tuple[dict[str, Any], ...],
     max_nodes: int,
     min_weight: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
@@ -82,7 +80,7 @@ def load_core_graph_payload(
     node_index: dict[str, dict[str, Any]] = {}
     edge_index: dict[str, dict[str, Any]] = {}
 
-    for _, row in profiles.iterrows():
+    for row in profiles:
         document_id = _as_text(row.get("document_id"))
         if not document_id:
             continue
@@ -90,7 +88,7 @@ def load_core_graph_payload(
         doc_records[document_id] = record
         _put_node(node_index, record["node"])
 
-    for _, row in evidence_cards.iterrows():
+    for row in evidence_cards:
         evidence_id = _as_text(row.get("evidence_id"))
         if not evidence_id:
             continue
@@ -100,7 +98,7 @@ def load_core_graph_payload(
         if record["document_edge"] is not None:
             _put_edge(edge_index, record["document_edge"])
 
-    for _, row in comparison_rows.iterrows():
+    for row in comparison_rows:
         comparison_id = _as_text(row.get("row_id"))
         if not comparison_id:
             continue
@@ -128,7 +126,7 @@ def load_core_graph_payload(
     return nodes, edges, truncated
 
 
-def _build_document_record(row: pd.Series) -> dict[str, Any]:
+def _build_document_record(row: Mapping[str, Any]) -> dict[str, Any]:
     document_id = _as_text(row.get("document_id")) or ""
     title = _as_text(row.get("title"))
     source_filename = _as_text(row.get("source_filename"))
@@ -145,7 +143,7 @@ def _build_document_record(row: pd.Series) -> dict[str, Any]:
 
 
 def _build_evidence_record(
-    row: pd.Series,
+    row: Mapping[str, Any],
     doc_records: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     evidence_id = _as_text(row.get("evidence_id")) or ""
@@ -173,7 +171,7 @@ def _build_evidence_record(
 
 
 def _build_comparison_projection(
-    row: pd.Series,
+    row: Mapping[str, Any],
     evidence_records: dict[str, dict[str, Any]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     comparison_id = _as_text(row.get("row_id")) or ""
@@ -224,7 +222,7 @@ def _build_comparison_projection(
 
 def _build_semantic_projection(
     *,
-    row: pd.Series,
+    row: Mapping[str, Any],
     comparison_id: str,
     field: str,
     node_type: str,
@@ -413,7 +411,7 @@ def _build_comparison_label(
 def _string_list(value: Any) -> list[str]:
     if value is None:
         return []
-    if isinstance(value, float) and pd.isna(value):
+    if isinstance(value, float) and math.isnan(value):
         return []
     if isinstance(value, (list, tuple, set)):
         items: list[str] = []
@@ -450,7 +448,7 @@ def _clean_graph_text(value: Any) -> str | None:
 def _as_text(value: Any) -> str | None:
     if value is None:
         return None
-    if isinstance(value, float) and pd.isna(value):
+    if isinstance(value, float) and math.isnan(value):
         return None
     text = str(value).strip()
     return text or None

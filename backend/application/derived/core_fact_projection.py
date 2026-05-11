@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pandas as pd
-
 from domain.core.comparison import ComparisonRowRecord
 from domain.core.evidence_backbone import (
     EvidenceAnchor,
@@ -17,19 +15,19 @@ from domain.shared.enums import TRACEABILITY_STATUS_DIRECT, TRACEABILITY_STATUS_
 
 
 @dataclass(frozen=True)
-class CoreFactProjectionFrames:
-    document_profiles: pd.DataFrame
-    evidence_cards: pd.DataFrame
-    comparison_rows: pd.DataFrame
+class CoreFactProjectionRecords:
+    document_profiles: tuple[dict[str, Any], ...]
+    evidence_cards: tuple[dict[str, Any], ...]
+    comparison_rows: tuple[dict[str, Any], ...]
 
 
-def build_core_fact_projection_frames(facts: CoreFactSet) -> CoreFactProjectionFrames:
-    return CoreFactProjectionFrames(
-        document_profiles=pd.DataFrame(
-            [profile.to_record() for profile in facts.document_profiles]
+def build_core_fact_projection_records(facts: CoreFactSet) -> CoreFactProjectionRecords:
+    return CoreFactProjectionRecords(
+        document_profiles=tuple(
+            profile.to_record() for profile in facts.document_profiles
         ),
-        evidence_cards=pd.DataFrame(_build_evidence_card_records(facts)),
-        comparison_rows=pd.DataFrame([row.to_record() for row in facts.comparison_rows]),
+        evidence_cards=tuple(_build_evidence_card_records(facts)),
+        comparison_rows=tuple(row.to_record() for row in facts.comparison_rows),
     )
 
 
@@ -211,6 +209,6 @@ def _text(value: Any) -> str | None:
 
 
 __all__ = [
-    "CoreFactProjectionFrames",
-    "build_core_fact_projection_frames",
+    "CoreFactProjectionRecords",
+    "build_core_fact_projection_records",
 ]

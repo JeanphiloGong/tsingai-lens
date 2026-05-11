@@ -130,19 +130,20 @@ def _store_core_comparison_artifacts(
     comparable_results: list[dict],
     scoped_results: list[dict],
 ) -> None:
-    row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
         collection_id=collection_id,
-        comparable_results=pd.DataFrame(comparable_results),
-        scoped_results=pd.DataFrame(scoped_results),
+        comparable_results=(
+            ComparableResult.from_mapping(row) for row in comparable_results
+        ),
+        scoped_results=(
+            CollectionComparableResult.from_mapping(row) for row in scoped_results
+        ),
     )
     comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
         collection_id,
         tuple(ComparableResult.from_mapping(row) for row in comparable_results),
         tuple(CollectionComparableResult.from_mapping(row) for row in scoped_results),
-        tuple(
-            ComparisonRowRecord.from_mapping(dict(row))
-            for _, row in row_table.iterrows()
-        ),
+        row_records,
     )
 
 

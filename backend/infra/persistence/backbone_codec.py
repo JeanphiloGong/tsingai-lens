@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 from typing import Any
-
-import pandas as pd
 
 
 def normalize_backbone_value(value: Any) -> Any:
-    """Normalize pandas-backed values into stable Python objects."""
+    """Normalize serialized or table-shaped values into stable Python objects."""
     if value is None:
         return None
     if isinstance(value, dict):
@@ -37,6 +36,6 @@ def normalize_backbone_value(value: Any) -> Any:
                 except (ValueError, SyntaxError, json.JSONDecodeError, TypeError):
                     continue
         return text
-    if isinstance(value, float) and pd.isna(value):
+    if isinstance(value, float) and math.isnan(value):
         return None
     return value

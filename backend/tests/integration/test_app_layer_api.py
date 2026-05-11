@@ -186,10 +186,10 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
         unit="mS/cm",
         sort_order=0,
     )
-    row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
         collection_id=collection_id,
-        comparable_results=pd.DataFrame([comparable_result]),
-        scoped_results=pd.DataFrame([scoped_result]),
+        comparable_results=(ComparableResult.from_mapping(comparable_result),),
+        scoped_results=(CollectionComparableResult.from_mapping(scoped_result),),
     )
     core_repository.replace_collection_facts(
         collection_id,
@@ -238,10 +238,7 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
             collection_comparable_results=(
                 CollectionComparableResult.from_mapping(scoped_result),
             ),
-            comparison_rows=tuple(
-                ComparisonRowRecord.from_mapping(dict(row))
-                for _, row in row_table.iterrows()
-            ),
+            comparison_rows=row_records,
         ),
     )
 
@@ -366,10 +363,15 @@ def _store_core_comparison_facts(
     scoped_results: list[dict],
     document_profiles: list[dict] | None = None,
 ) -> None:  # noqa: ANN001
-    row_table = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
         collection_id=collection_id,
-        comparable_results=pd.DataFrame(comparable_results),
-        scoped_results=pd.DataFrame(scoped_results),
+        comparable_results=(
+            ComparableResult.from_mapping(row) for row in comparable_results
+        ),
+        scoped_results=(
+            CollectionComparableResult.from_mapping(row)
+            for row in scoped_results
+        ),
     )
     comparison_service.core_fact_repository.replace_collection_facts(
         collection_id,
@@ -387,10 +389,7 @@ def _store_core_comparison_facts(
                 CollectionComparableResult.from_mapping(row)
                 for row in scoped_results
             ),
-            comparison_rows=tuple(
-                ComparisonRowRecord.from_mapping(dict(row))
-                for _, row in row_table.iterrows()
-            ),
+            comparison_rows=row_records,
         ),
     )
 

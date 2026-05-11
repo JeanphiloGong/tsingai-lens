@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
 
-import pandas as pd
 from fastapi import HTTPException
 
-from application.derived.core_fact_projection import build_core_fact_projection_frames
+from application.derived.core_fact_projection import build_core_fact_projection_records
 from domain.shared.enums import (
     COMPARABILITY_STATUS_COMPARABLE,
     COMPARABILITY_STATUS_INSUFFICIENT,
@@ -55,28 +55,33 @@ class _CoreReportProjection:
     comparison_rows: dict[str, dict[str, Any]]
 
 
-def _read_projection_frames(
+def _read_projection_records(
     collection_id: str | None,
-) -> tuple[str, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[
+    str,
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+]:
     if not collection_id:
         raise HTTPException(status_code=400, detail="collection_id 不能为空")
 
     collection_service.get_collection(collection_id)
-    frames = build_core_fact_projection_frames(
+    records = build_core_fact_projection_records(
         core_fact_repository.read_collection_facts(collection_id)
     )
     return (
         collection_id,
-        frames.document_profiles,
-        frames.evidence_cards,
-        frames.comparison_rows,
+        records.document_profiles,
+        records.evidence_cards,
+        records.comparison_rows,
     )
 
 
 def _safe_text(value: Any) -> str | None:
     if value is None:
         return None
-    if isinstance(value, float) and pd.isna(value):
+    if isinstance(value, float) and math.isnan(value):
         return None
     text = str(value).strip()
     return text or None
@@ -84,7 +89,7 @@ def _safe_text(value: Any) -> str | None:
 
 def _safe_int(value: Any) -> int | None:
     try:
-        if value is None or (isinstance(value, float) and pd.isna(value)):
+        if value is None or (isinstance(value, float) and math.isnan(value)):
             return None
         return int(value)
     except Exception:
@@ -93,7 +98,7 @@ def _safe_int(value: Any) -> int | None:
 
 def _safe_float(value: Any) -> float | None:
     try:
-        if value is None or (isinstance(value, float) and pd.isna(value)):
+        if value is None or (isinstance(value, float) and math.isnan(value)):
             return None
         return float(value)
     except Exception:
@@ -103,7 +108,7 @@ def _safe_float(value: Any) -> float | None:
 def _string_list(value: Any) -> list[str]:
     if value is None:
         return []
-    if isinstance(value, float) and pd.isna(value):
+    if isinstance(value, float) and math.isnan(value):
         return []
     if isinstance(value, (list, tuple, set)):
         items: list[str] = []
@@ -177,17 +182,17 @@ def _build_projection(collection_id: str) -> _CoreReportProjection:
         profiles,
         evidence_cards,
         comparison_rows,
-    ) = _read_projection_frames(collection_id)
+    ) = _read_projection_records(collection_id)
 
     document_lookup: dict[str, dict[str, Any]] = {}
-    for _, row in profiles.iterrows():
+    for row in profiles:
         document_id = _safe_text(row.get("document_id"))
         if not document_id:
             continue
         document_lookup[document_id] = dict(row)
 
     evidence_lookup: dict[str, dict[str, Any]] = {}
-    for _, row in evidence_cards.iterrows():
+    for row in evidence_cards:
         evidence_id = _safe_text(row.get("evidence_id"))
         if not evidence_id:
             continue
@@ -195,7 +200,7 @@ def _build_projection(collection_id: str) -> _CoreReportProjection:
 
     comparison_lookup: dict[str, dict[str, Any]] = {}
     grouped_rows: dict[str, list[dict[str, Any]]] = {}
-    for _, row in comparison_rows.iterrows():
+    for row in comparison_rows:
         row_id = _safe_text(row.get("row_id"))
         if not row_id:
             continue

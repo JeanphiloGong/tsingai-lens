@@ -75,6 +75,20 @@ Non-negotiable rules:
 """.strip()
 
 
+_OBJECTIVE_EVIDENCE_UNIT_SYSTEM_PROMPT = """
+You are extracting objective-scoped evidence units for an evidence-backed literature comparison backend.
+
+Non-negotiable rules:
+- This is final evidence-unit extraction for one research objective and one routed source.
+- Return exactly one JSON object and nothing else.
+- Extract only facts directly supported by `source`; do not use outside knowledge.
+- Use the `objective`, `objective_context`, and `evidence_route` as the research lens.
+- Do not emit backend persistence ids.
+- Every emitted evidence unit must include source_refs copied from the active route/source.
+- Prefer fewer, traceable units over broad speculative coverage.
+""".strip()
+
+
 _TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE = """
 JSON compliance rules for text-window extraction:
 - Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, `warnings`, `anchors`, or `measurement_results`.
@@ -620,3 +634,32 @@ def build_objective_evidence_route_prompt(
         "For text-window routes, leave table-specific objects empty."
     )
     return _OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT, user_prompt
+
+
+def build_objective_evidence_unit_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Extract objective-scoped evidence units from this one routed source.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with an `evidence_units` array.\n"
+        "`unit_kind` must be one of: measurement, test_condition, sample_context, "
+        "process_context, characterization, baseline_reference, comparison, "
+        "interpretation, mixed, unknown.\n"
+        "Use `measurement` for target property results, `test_condition` for "
+        "test environments or standards, `sample_context` / `process_context` "
+        "for sample and process-variable bindings, `characterization` for "
+        "microstructure/defect/phase observations, `comparison` for explicit "
+        "within-paper or cross-paper comparison claims, and `interpretation` "
+        "for author explanations tied to this objective.\n"
+        "For tables, preserve row-level sample/process/test/value bindings in "
+        "`sample_context`, `process_context`, `test_condition`, `value_payload`, "
+        "and `join_keys`. For text, use exact supported statements from the "
+        "provided source text.\n"
+        "Do not extract composition-only, literature-summary, or unrelated facts "
+        "unless the active route role explicitly requires them.\n"
+        "`resolution_status` should be resolved only when source, sample/process "
+        "context, and value or condition are sufficiently bound; otherwise use "
+        "partial or unresolved."
+    )
+    return _OBJECTIVE_EVIDENCE_UNIT_SYSTEM_PROMPT, user_prompt

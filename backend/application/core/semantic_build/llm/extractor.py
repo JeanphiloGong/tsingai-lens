@@ -14,6 +14,7 @@ from .schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
     StructuredObjectiveEvidenceRoutes,
+    StructuredObjectiveEvidenceUnits,
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
@@ -23,6 +24,7 @@ from .schemas import (
 )
 from .prompts import (
     build_document_profile_prompt,
+    build_objective_evidence_unit_prompt,
     build_objective_evidence_route_prompt,
     build_objective_paper_frame_prompt,
     build_paper_skim_prompt,
@@ -179,6 +181,20 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredObjectiveEvidenceRoutes):
             raise TypeError("unexpected objective evidence route response type")
+        return response
+
+    def extract_objective_evidence_units(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceUnits:
+        system_prompt, user_prompt = build_objective_evidence_unit_prompt(payload)
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredObjectiveEvidenceUnits,
+        )
+        if not isinstance(response, StructuredObjectiveEvidenceUnits):
+            raise TypeError("unexpected objective evidence unit response type")
         return response
 
     def _parse_structured_response(

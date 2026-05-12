@@ -72,6 +72,25 @@ _OBJECTIVE_EVIDENCE_ROUTE_ROLES = {
     "modeling_or_prediction",
     "low_value_or_irrelevant",
 }
+_OBJECTIVE_EVIDENCE_UNIT_KINDS = {
+    "measurement",
+    "test_condition",
+    "sample_context",
+    "process_context",
+    "characterization",
+    "baseline_reference",
+    "comparison",
+    "interpretation",
+    "mixed",
+    "unknown",
+}
+_OBJECTIVE_EVIDENCE_RESOLUTION_STATUSES = {
+    "resolved",
+    "partial",
+    "unresolved",
+    "skipped",
+    "unknown",
+}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -831,6 +850,89 @@ class StructuredObjectiveEvidenceRoutes(_StrictModel):
     @field_validator("routes", mode="before")
     @classmethod
     def _normalize_routes(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredObjectiveEvidenceUnit(_StrictModel):
+    unit_kind: Literal[
+        "measurement",
+        "test_condition",
+        "sample_context",
+        "process_context",
+        "characterization",
+        "baseline_reference",
+        "comparison",
+        "interpretation",
+        "mixed",
+        "unknown",
+    ] = "unknown"
+    property_normalized: str | None = None
+    material_system: dict[str, Any] = Field(default_factory=dict)
+    sample_context: dict[str, Any] = Field(default_factory=dict)
+    process_context: dict[str, Any] = Field(default_factory=dict)
+    resolved_condition: dict[str, Any] = Field(default_factory=dict)
+    test_condition: dict[str, Any] = Field(default_factory=dict)
+    value_payload: dict[str, Any] = Field(default_factory=dict)
+    unit: str | None = None
+    baseline_context: dict[str, Any] = Field(default_factory=dict)
+    interpretation: str | None = None
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_anchor_ids: list[str] = Field(default_factory=list)
+    join_keys: dict[str, Any] = Field(default_factory=dict)
+    resolution_status: Literal[
+        "resolved",
+        "partial",
+        "unresolved",
+        "skipped",
+        "unknown",
+    ] = "partial"
+    confidence: float = 0.0
+
+    @field_validator("unit_kind", mode="before")
+    @classmethod
+    def _normalize_unit_kind(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_EVIDENCE_UNIT_KINDS,
+            default="unknown",
+        )
+
+    @field_validator("resolution_status", mode="before")
+    @classmethod
+    def _normalize_resolution_status(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_EVIDENCE_RESOLUTION_STATUSES,
+            default="partial",
+        )
+
+    @field_validator(
+        "material_system",
+        "sample_context",
+        "process_context",
+        "resolved_condition",
+        "test_condition",
+        "value_payload",
+        "baseline_context",
+        "join_keys",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_objects(cls, value: object) -> object:
+        return _normalize_object_container(value)
+
+    @field_validator("source_refs", "evidence_anchor_ids", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredObjectiveEvidenceUnits(_StrictModel):
+    evidence_units: list[StructuredObjectiveEvidenceUnit] = Field(default_factory=list)
+
+    @field_validator("evidence_units", mode="before")
+    @classmethod
+    def _normalize_evidence_units(cls, value: object) -> object:
         return _normalize_list_container(value)
 
 

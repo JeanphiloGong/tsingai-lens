@@ -504,7 +504,7 @@ def test_paper_facts_selects_objective_context_by_text_and_table_route():
     assert table_2_route["role"] == "result_table"
 
 
-def test_paper_facts_replace_objective_evidence_units_from_paper_facts(tmp_path):
+def test_paper_facts_replace_objective_evidence_units_from_paper_facts(tmp_path, caplog):
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     objective = ResearchObjective.from_mapping(
         {
@@ -542,111 +542,112 @@ def test_paper_facts_replace_objective_evidence_units_from_paper_facts(tmp_path)
     )
     service = PaperFactsService(core_fact_repository=repository)
 
-    units = service._replace_objective_evidence_units(
-        collection_id="col-1",
-        evidence_anchors=(
-            {
-                "anchor_id": "anc-table",
-                "document_id": "paper-1",
-                "locator_type": "table",
-                "locator_confidence": "high",
-                "source_type": "table",
-                "page": 5,
-                "quote": "Sample A | 560 MPa",
-                "figure_or_table": "table-2",
-            },
-            {
-                "anchor_id": "anc-test",
-                "document_id": "paper-1",
-                "locator_type": "section",
-                "locator_confidence": "medium",
-                "source_type": "text",
-                "page": 3,
-                "quote": "Tensile tests followed ASTM E8M.",
-                "block_id": "block-test",
-            },
-            {
-                "anchor_id": "anc-sem",
-                "document_id": "paper-1",
-                "locator_type": "section",
-                "locator_confidence": "medium",
-                "source_type": "text",
-                "page": 4,
-                "quote": "SEM showed fine cellular microstructure.",
-                "block_id": "block-sem",
-            },
-        ),
-        sample_variants=(
-            {
-                "variant_id": "var-a",
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "variant_label": "Sample A",
-                "host_material_system": {
-                    "family": "316L stainless steel",
-                    "composition": "316L",
+    with caplog.at_level("INFO"):
+        units = service._replace_objective_evidence_units(
+            collection_id="col-1",
+            evidence_anchors=(
+                {
+                    "anchor_id": "anc-table",
+                    "document_id": "paper-1",
+                    "locator_type": "table",
+                    "locator_confidence": "high",
+                    "source_type": "table",
+                    "page": 5,
+                    "quote": "Sample A | 560 MPa",
+                    "figure_or_table": "table-2",
                 },
-                "variable_axis_type": "scanning speed",
-                "variable_value": "1000 mm/s",
-                "process_context": {
-                    "process": "LPBF",
-                    "scan_speed_mm_s": 1000,
+                {
+                    "anchor_id": "anc-test",
+                    "document_id": "paper-1",
+                    "locator_type": "section",
+                    "locator_confidence": "medium",
+                    "source_type": "text",
+                    "page": 3,
+                    "quote": "Tensile tests followed ASTM E8M.",
+                    "block_id": "block-test",
                 },
-                "confidence": 0.9,
-            },
-        ),
-        test_conditions=(
-            {
-                "test_condition_id": "tc-tensile",
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "property_type": "tensile_mechanics",
-                "template_type": "mechanical_test",
-                "scope_level": "document",
-                "condition_payload": {
-                    "method": "tensile testing",
-                    "standard": "ASTM E8M",
+                {
+                    "anchor_id": "anc-sem",
+                    "document_id": "paper-1",
+                    "locator_type": "section",
+                    "locator_confidence": "medium",
+                    "source_type": "text",
+                    "page": 4,
+                    "quote": "SEM showed fine cellular microstructure.",
+                    "block_id": "block-sem",
                 },
-                "condition_completeness": "partial",
-                "evidence_anchor_ids": ["anc-test"],
-                "confidence": 0.82,
-            },
-        ),
-        baseline_references=(),
-        measurement_results=(
-            {
-                "result_id": "res-yield",
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "variant_id": "var-a",
-                "property_normalized": "yield_strength",
-                "result_type": "scalar",
-                "claim_scope": "current_work",
-                "value_payload": {
-                    "value": 560,
-                    "statement": "Sample A yield strength is 560 MPa.",
+            ),
+            sample_variants=(
+                {
+                    "variant_id": "var-a",
+                    "document_id": "paper-1",
+                    "collection_id": "col-1",
+                    "variant_label": "Sample A",
+                    "host_material_system": {
+                        "family": "316L stainless steel",
+                        "composition": "316L",
+                    },
+                    "variable_axis_type": "scanning speed",
+                    "variable_value": "1000 mm/s",
+                    "process_context": {
+                        "process": "LPBF",
+                        "scan_speed_mm_s": 1000,
+                    },
+                    "confidence": 0.9,
                 },
-                "unit": "MPa",
-                "test_condition_id": "tc-tensile",
-                "evidence_anchor_ids": ["anc-table"],
-                "traceability_status": "direct",
-                "result_source_type": "table",
-            },
-        ),
-        characterization=(
-            {
-                "observation_id": "obs-sem",
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "variant_id": "var-a",
-                "characterization_type": "microstructure",
-                "observation_text": "SEM showed fine cellular microstructure.",
-                "condition_context": {},
-                "evidence_anchor_ids": ["anc-sem"],
-                "confidence": 0.8,
-            },
-        ),
-    )
+            ),
+            test_conditions=(
+                {
+                    "test_condition_id": "tc-tensile",
+                    "document_id": "paper-1",
+                    "collection_id": "col-1",
+                    "property_type": "tensile_mechanics",
+                    "template_type": "mechanical_test",
+                    "scope_level": "document",
+                    "condition_payload": {
+                        "method": "tensile testing",
+                        "standard": "ASTM E8M",
+                    },
+                    "condition_completeness": "partial",
+                    "evidence_anchor_ids": ["anc-test"],
+                    "confidence": 0.82,
+                },
+            ),
+            baseline_references=(),
+            measurement_results=(
+                {
+                    "result_id": "res-yield",
+                    "document_id": "paper-1",
+                    "collection_id": "col-1",
+                    "variant_id": "var-a",
+                    "property_normalized": "yield_strength",
+                    "result_type": "scalar",
+                    "claim_scope": "current_work",
+                    "value_payload": {
+                        "value": 560,
+                        "statement": "Sample A yield strength is 560 MPa.",
+                    },
+                    "unit": "MPa",
+                    "test_condition_id": "tc-tensile",
+                    "evidence_anchor_ids": ["anc-table"],
+                    "traceability_status": "direct",
+                    "result_source_type": "table",
+                },
+            ),
+            characterization=(
+                {
+                    "observation_id": "obs-sem",
+                    "document_id": "paper-1",
+                    "collection_id": "col-1",
+                    "variant_id": "var-a",
+                    "characterization_type": "microstructure",
+                    "observation_text": "SEM showed fine cellular microstructure.",
+                    "condition_context": {},
+                    "evidence_anchor_ids": ["anc-sem"],
+                    "confidence": 0.8,
+                },
+            ),
+        )
 
     facts = repository.read_collection_facts("col-1")
     units_by_kind = {unit.unit_kind: unit for unit in units}
@@ -688,6 +689,24 @@ def test_paper_facts_replace_objective_evidence_units_from_paper_facts(tmp_path)
     assert chain_payload["cross_paper"]["gaps"] == ["comparison_units_missing"]
     paper_chain = chain_payload["paper_chains"][0]
     assert paper_chain["document_id"] == "paper-1"
+    assert any(
+        "Objective evidence-unit replacement started" in record.message
+        and "measurement_results=1" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Objective evidence-unit measurement progress" in record.message
+        and "remaining_results=0" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Objective evidence-unit replacement finished" in record.message
+        and "measurement_units=1" in record.message
+        and "test_condition_units=1" in record.message
+        and "characterization_units=1" in record.message
+        and "logic_chain_count=1" in record.message
+        for record in caplog.records
+    )
     assert paper_chain["measurement_results"][0]["value_payload"]["value"] == 560
     assert paper_chain["test_conditions"][0]["test_condition"][
         "condition_payload"

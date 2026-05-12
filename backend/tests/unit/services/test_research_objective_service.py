@@ -8,6 +8,8 @@ from application.core.semantic_build.llm.schemas import (
     StructuredDocumentProfile,
     StructuredObjectiveEvidenceRoute,
     StructuredObjectiveEvidenceRoutes,
+    StructuredObjectiveEvidenceUnit,
+    StructuredObjectiveEvidenceUnits,
     StructuredObjectiveMergeGroup,
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
@@ -30,6 +32,7 @@ class _ObjectiveExtractor:
         self.merge_payloads: list[dict[str, Any]] = []
         self.frame_payloads: list[dict[str, Any]] = []
         self.route_payloads: list[dict[str, Any]] = []
+        self.unit_payloads: list[dict[str, Any]] = []
 
     def extract_document_profile(
         self,
@@ -293,6 +296,75 @@ class _ObjectiveExtractor:
                 )
             )
         return StructuredObjectiveEvidenceRoutes(routes=routes)
+
+    def extract_objective_evidence_units(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceUnits:
+        self.unit_payloads.append(payload)
+        route = payload["evidence_route"]
+        source = payload["source"]
+        if route["source_kind"] == "table":
+            return StructuredObjectiveEvidenceUnits(
+                evidence_units=[
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="measurement",
+                        property_normalized="corrosion current",
+                        material_system={"family": "316L stainless steel"},
+                        sample_context={"label": "as-built"},
+                        process_context={"process": "LPBF"},
+                        test_condition={"method": "corrosion test"},
+                        value_payload={
+                            "value": 1.2,
+                            "source_value_text": "1.2 uA/cm2",
+                        },
+                        unit="uA/cm2",
+                        join_keys={"sample_key": "as-built"},
+                        resolution_status="resolved",
+                        confidence=0.86,
+                    ),
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="measurement",
+                        property_normalized="corrosion current",
+                        material_system={"family": "316L stainless steel"},
+                        sample_context={"label": "heat-treated"},
+                        process_context={
+                            "process": "LPBF",
+                            "post_treatment_summary": "heat treatment",
+                        },
+                        test_condition={"method": "corrosion test"},
+                        value_payload={
+                            "value": 0.4,
+                            "source_value_text": "0.4 uA/cm2",
+                        },
+                        unit="uA/cm2",
+                        join_keys={"sample_key": "heat-treated"},
+                        resolution_status="resolved",
+                        confidence=0.86,
+                    ),
+                ]
+            )
+        if source.get("text"):
+            return StructuredObjectiveEvidenceUnits(
+                evidence_units=[
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="process_context",
+                        property_normalized=None,
+                        material_system={"family": "316L stainless steel"},
+                        sample_context={"comparison": "before and after heat treatment"},
+                        process_context={
+                            "process": "LPBF",
+                            "post_treatment_summary": "heat treatment",
+                        },
+                        value_payload={
+                            "statement": "LPBF 316L was compared before and after heat treatment."
+                        },
+                        resolution_status="partial",
+                        confidence=0.74,
+                    )
+                ]
+            )
+        return StructuredObjectiveEvidenceUnits()
 
 
 class _BroadObjectiveExtractor(_ObjectiveExtractor):
@@ -851,7 +923,7 @@ def _merge_candidate_values(
     return merged
 
 
-def test_research_objective_service_builds_and_persists_db_records(tmp_path):
+def test_research_objective_service_builds_and_persists_db_records(tmp_path, caplog):
     collection_service = CollectionService(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Collection")
     collection_id = collection["collection_id"]
@@ -932,7 +1004,8 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
         ),
     )
 
-    objectives = service.build_research_objectives(collection_id)
+    with caplog.at_level("INFO"):
+        objectives = service.build_research_objectives(collection_id)
 
     assert len(objectives) == 1
     assert objectives[0].question.startswith("How does heat treatment")
@@ -990,9 +1063,44 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
     assert excluded_table_route.role == "low_value_or_irrelevant"
     assert excluded_table_route.extractable is False
     assert text_route.role == "process_or_treatment"
-    assert facts.objective_evidence_units == ()
-    assert facts.objective_logic_chains == ()
+    assert len(facts.objective_evidence_units) == 3
+    measurement_units = [
+        unit
+        for unit in facts.objective_evidence_units
+        if unit.unit_kind == "measurement"
+    ]
+    assert len(measurement_units) == 2
+    assert {unit.sample_context["label"] for unit in measurement_units} == {
+        "as-built",
+        "heat-treated",
+    }
+    assert all(
+        unit.source_refs[0]["route_id"] == table_route.route_id
+        for unit in measurement_units
+    )
+    process_unit = next(
+        unit
+        for unit in facts.objective_evidence_units
+        if unit.unit_kind == "process_context"
+    )
+    assert process_unit.source_refs[0]["route_id"] == text_route.route_id
+    assert len(facts.objective_logic_chains) == 1
+    chain_payload = facts.objective_logic_chains[0].chain_payload
+    assert chain_payload["schema_version"] == "objective_logic_chain.v1"
+    assert chain_payload["unit_counts_by_kind"]["measurement"] == 2
+    assert chain_payload["cross_paper"]["resolved_measurement_count"] == 2
     assert len(extractor.route_payloads) == 1
+    assert len(extractor.unit_payloads) == 2
+    table_unit_payload = next(
+        payload
+        for payload in extractor.unit_payloads
+        if payload["evidence_route"]["source_kind"] == "table"
+    )
+    assert table_unit_payload["source"]["table_matrix"] == [
+        ["sample", "corrosion current"],
+        ["as-built", "1.2 uA/cm2"],
+        ["heat-treated", "0.4 uA/cm2"],
+    ]
     assert extractor.route_payloads[0]["paper_frame"]["frame_id"] == active_frame.frame_id
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
@@ -1000,6 +1108,36 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
         facts.research_objectives[0].objective_id
     )
     assert extractor.frame_payloads[0]["table_summaries"][0]["table_id"] == "table-1"
+    assert any(
+        "Research objective paper skim document started" in record.message
+        and "document_position=1" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Research objective discovery finished" in record.message
+        and "accepted_objective_count=1" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Research objective paper framing document finished" in record.message
+        and "relevant_tables=1" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Research objective evidence routing frame finished" in record.message
+        and "extractable_route_count=2" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Research objective evidence-unit extraction finished" in record.message
+        and "objective_evidence_units=3" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Research objective logic-chain assembly finished" in record.message
+        and "logic_chain_count=1" in record.message
+        for record in caplog.records
+    )
 
     skim_call_count = len(extractor.skim_payloads)
     assert service.read_research_objectives(collection_id) == objectives

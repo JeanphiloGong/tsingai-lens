@@ -10,6 +10,8 @@ from application.core.semantic_build.llm.schemas import (
     StructuredDocumentProfile,
     StructuredObjectiveEvidenceRoute,
     StructuredObjectiveEvidenceRoutes,
+    StructuredObjectiveEvidenceUnit,
+    StructuredObjectiveEvidenceUnits,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjective,
@@ -489,6 +491,71 @@ class FakeCoreLLMStructuredExtractor:
                 )
             )
         return StructuredObjectiveEvidenceRoutes(routes=routes)
+
+    def extract_objective_evidence_units(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceUnits:
+        route = payload.get("evidence_route")
+        source = payload.get("source")
+        if not isinstance(route, dict) or not isinstance(source, dict):
+            return StructuredObjectiveEvidenceUnits()
+        if route.get("source_kind") == "table":
+            headers = [
+                str(value)
+                for value in source.get("column_headers", [])
+                if str(value).strip()
+            ]
+            matrix = source.get("table_matrix") if isinstance(source.get("table_matrix"), list) else []
+            property_header = next(
+                (
+                    header
+                    for header in headers
+                    if any(
+                        token in header.lower()
+                        for token in (
+                            "strength",
+                            "elongation",
+                            "hardness",
+                            "corrosion",
+                            "density",
+                        )
+                    )
+                ),
+                headers[-1] if headers else "value",
+            )
+            units: list[StructuredObjectiveEvidenceUnit] = []
+            for row in matrix[1:]:
+                if not isinstance(row, list) or len(row) < 2:
+                    continue
+                sample_label = str(row[0]).strip()
+                value_text = str(row[-1]).strip()
+                if not sample_label or not value_text:
+                    continue
+                units.append(
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="measurement",
+                        property_normalized=property_header,
+                        sample_context={"label": sample_label},
+                        value_payload={"source_value_text": value_text},
+                        join_keys={"sample_key": sample_label},
+                        resolution_status="partial",
+                        confidence=0.78,
+                    )
+                )
+            return StructuredObjectiveEvidenceUnits(evidence_units=units)
+        if route.get("source_kind") == "text_window" and source.get("text"):
+            return StructuredObjectiveEvidenceUnits(
+                evidence_units=[
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="process_context",
+                        value_payload={"statement": str(source.get("text"))[:160]},
+                        resolution_status="partial",
+                        confidence=0.7,
+                    )
+                ]
+            )
+        return StructuredObjectiveEvidenceUnits()
 
     def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
         document_title = str(payload.get("document_title") or "")

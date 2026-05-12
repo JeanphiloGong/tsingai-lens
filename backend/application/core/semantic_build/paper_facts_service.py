@@ -1169,14 +1169,10 @@ class PaperFactsService:
                 structure_features=structure_features,
             ),
         )
-        objective_evidence_units = self._replace_objective_evidence_units(
-            collection_id=collection_id,
-            evidence_anchors=evidence_anchors,
-            sample_variants=sample_variants,
-            test_conditions=test_conditions,
-            baseline_references=baseline_references,
-            measurement_results=measurement_results,
-            characterization=characterization,
+        objective_evidence_units = (
+            self.core_fact_repository.read_collection_facts(
+                collection_id
+            ).objective_evidence_units
         )
 
         logger.info(
@@ -1310,9 +1306,28 @@ class PaperFactsService:
     ) -> tuple[ObjectiveEvidenceUnit, ...]:
         facts = self.core_fact_repository.read_collection_facts(collection_id)
         if not facts.research_objectives or not facts.objective_contexts:
+            logger.info(
+                "Objective evidence-unit replacement skipped collection_id=%s reason=objectives_not_ready objective_count=%s objective_context_count=%s",
+                collection_id,
+                len(facts.research_objectives),
+                len(facts.objective_contexts),
+            )
             return ()
 
+        logger.info(
+            "Objective evidence-unit replacement started collection_id=%s objective_count=%s objective_context_count=%s evidence_anchors=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s",
+            collection_id,
+            len(facts.research_objectives),
+            len(facts.objective_contexts),
+            len(evidence_anchors),
+            len(sample_variants),
+            len(test_conditions),
+            len(baseline_references),
+            len(measurement_results),
+            len(characterization),
+        )
         objective_evidence_units = self._build_objective_evidence_units_from_paper_facts(
+            collection_id=collection_id,
             objective_contexts=facts.objective_contexts,
             evidence_anchors=evidence_anchors,
             sample_variants=sample_variants,
@@ -1322,9 +1337,23 @@ class PaperFactsService:
             characterization=characterization,
         )
         objective_logic_chains = self._build_objective_logic_chains_from_units(
+            collection_id=collection_id,
             objectives=facts.research_objectives,
             objective_contexts=facts.objective_contexts,
             objective_evidence_units=objective_evidence_units,
+        )
+        unit_counts: dict[str, int] = {}
+        for unit in objective_evidence_units:
+            unit_counts[unit.unit_kind] = unit_counts.get(unit.unit_kind, 0) + 1
+        logger.info(
+            "Objective evidence-unit replacement finished collection_id=%s objective_evidence_units=%s measurement_units=%s test_condition_units=%s characterization_units=%s comparison_units=%s logic_chain_count=%s",
+            collection_id,
+            len(objective_evidence_units),
+            unit_counts.get("measurement", 0),
+            unit_counts.get("test_condition", 0),
+            unit_counts.get("characterization", 0),
+            unit_counts.get("comparison", 0),
+            len(objective_logic_chains),
         )
         self.core_fact_repository.replace_collection_research_objectives(
             collection_id,
@@ -1341,6 +1370,7 @@ class PaperFactsService:
     def _build_objective_evidence_units_from_paper_facts(
         self,
         *,
+        collection_id: str,
         objective_contexts: tuple[ObjectiveContext, ...],
         evidence_anchors: tuple[dict[str, Any], ...],
         sample_variants: tuple[dict[str, Any], ...],
@@ -1356,7 +1386,15 @@ class PaperFactsService:
         units: list[ObjectiveEvidenceUnit] = []
         seen: set[str] = set()
 
-        for result in measurement_results:
+        logger.info(
+            "Objective evidence-unit measurement phase started collection_id=%s measurement_result_count=%s objective_context_count=%s",
+            collection_id,
+            len(measurement_results),
+            len(objective_contexts),
+        )
+        measurement_units_before = len(units)
+        measurement_facts_matched = 0
+        for result_position, result in enumerate(measurement_results, start=1):
             variant = variants_by_id.get(
                 self._normalize_scalar_text(result.get("variant_id")) or ""
             )
@@ -1372,6 +1410,8 @@ class PaperFactsService:
                 text=self._objective_fact_text(result, variant, condition),
                 require_property_match=True,
             )
+            if contexts:
+                measurement_facts_matched += 1
             for context in contexts:
                 unit = self._objective_measurement_unit_from_result(
                     context=context,
@@ -1385,14 +1425,41 @@ class PaperFactsService:
                     continue
                 seen.add(unit.evidence_unit_id)
                 units.append(unit)
+            logger.info(
+                "Objective evidence-unit measurement progress collection_id=%s result_position=%s measurement_result_count=%s matched_contexts=%s measurement_units=%s completed_results=%s remaining_results=%s",
+                collection_id,
+                result_position,
+                len(measurement_results),
+                len(contexts),
+                len(units) - measurement_units_before,
+                result_position,
+                max(len(measurement_results) - result_position, 0),
+            )
+        logger.info(
+            "Objective evidence-unit measurement phase finished collection_id=%s measurement_result_count=%s matched_measurement_results=%s measurement_units=%s",
+            collection_id,
+            len(measurement_results),
+            measurement_facts_matched,
+            len(units) - measurement_units_before,
+        )
 
-        for condition in test_conditions:
+        logger.info(
+            "Objective evidence-unit test-condition phase started collection_id=%s test_condition_count=%s objective_context_count=%s",
+            collection_id,
+            len(test_conditions),
+            len(objective_contexts),
+        )
+        test_condition_units_before = len(units)
+        test_condition_facts_matched = 0
+        for condition_position, condition in enumerate(test_conditions, start=1):
             contexts = self._select_objective_contexts_for_fact(
                 objective_contexts,
                 property_name=condition.get("property_type"),
                 text=self._objective_fact_text(condition),
                 require_property_match=True,
             )
+            if contexts:
+                test_condition_facts_matched += 1
             for context in contexts:
                 unit = self._objective_test_condition_unit(
                     context=context,
@@ -1403,8 +1470,33 @@ class PaperFactsService:
                     continue
                 seen.add(unit.evidence_unit_id)
                 units.append(unit)
+            logger.info(
+                "Objective evidence-unit test-condition progress collection_id=%s condition_position=%s test_condition_count=%s matched_contexts=%s test_condition_units=%s completed_conditions=%s remaining_conditions=%s",
+                collection_id,
+                condition_position,
+                len(test_conditions),
+                len(contexts),
+                len(units) - test_condition_units_before,
+                condition_position,
+                max(len(test_conditions) - condition_position, 0),
+            )
+        logger.info(
+            "Objective evidence-unit test-condition phase finished collection_id=%s test_condition_count=%s matched_test_conditions=%s test_condition_units=%s",
+            collection_id,
+            len(test_conditions),
+            test_condition_facts_matched,
+            len(units) - test_condition_units_before,
+        )
 
-        for observation in characterization:
+        logger.info(
+            "Objective evidence-unit characterization phase started collection_id=%s characterization_count=%s objective_context_count=%s",
+            collection_id,
+            len(characterization),
+            len(objective_contexts),
+        )
+        characterization_units_before = len(units)
+        characterization_facts_matched = 0
+        for observation_position, observation in enumerate(characterization, start=1):
             variant = variants_by_id.get(
                 self._normalize_scalar_text(observation.get("variant_id")) or ""
             )
@@ -1414,6 +1506,8 @@ class PaperFactsService:
                 text=self._objective_fact_text(observation, variant),
                 require_property_match=False,
             )
+            if contexts:
+                characterization_facts_matched += 1
             for context in contexts:
                 unit = self._objective_characterization_unit(
                     context=context,
@@ -1425,6 +1519,23 @@ class PaperFactsService:
                     continue
                 seen.add(unit.evidence_unit_id)
                 units.append(unit)
+            logger.info(
+                "Objective evidence-unit characterization progress collection_id=%s observation_position=%s characterization_count=%s matched_contexts=%s characterization_units=%s completed_observations=%s remaining_observations=%s",
+                collection_id,
+                observation_position,
+                len(characterization),
+                len(contexts),
+                len(units) - characterization_units_before,
+                observation_position,
+                max(len(characterization) - observation_position, 0),
+            )
+        logger.info(
+            "Objective evidence-unit characterization phase finished collection_id=%s characterization_count=%s matched_characterization_observations=%s characterization_units=%s",
+            collection_id,
+            len(characterization),
+            characterization_facts_matched,
+            len(units) - characterization_units_before,
+        )
 
         return tuple(units)
 
@@ -1888,10 +1999,18 @@ class PaperFactsService:
     def _build_objective_logic_chains_from_units(
         self,
         *,
+        collection_id: str,
         objectives: tuple[Any, ...],
         objective_contexts: tuple[ObjectiveContext, ...],
         objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
     ) -> tuple[ObjectiveLogicChain, ...]:
+        logger.info(
+            "Objective logic-chain assembly started collection_id=%s objective_count=%s objective_context_count=%s objective_evidence_units=%s",
+            collection_id,
+            len(objectives),
+            len(objective_contexts),
+            len(objective_evidence_units),
+        )
         context_by_objective_id = {
             context.objective_id: context
             for context in objective_contexts
@@ -1940,6 +2059,23 @@ class PaperFactsService:
                     }
                 )
             )
+            logger.info(
+                "Objective logic-chain assembly objective finished collection_id=%s objective_id=%s evidence_unit_count=%s document_count=%s measurement_units=%s test_condition_units=%s characterization_units=%s comparison_units=%s",
+                collection_id,
+                objective_id,
+                len(units),
+                len(document_ids),
+                counts_by_kind.get("measurement", 0),
+                counts_by_kind.get("test_condition", 0),
+                counts_by_kind.get("characterization", 0),
+                counts_by_kind.get("comparison", 0),
+            )
+        logger.info(
+            "Objective logic-chain assembly finished collection_id=%s objective_count=%s logic_chain_count=%s",
+            collection_id,
+            len(objectives),
+            len(chains),
+        )
         return tuple(chains)
 
     def _objective_logic_chain_payload(

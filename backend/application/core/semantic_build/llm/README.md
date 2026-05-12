@@ -4,7 +4,8 @@ This package owns the Core-side LLM contract for semantic build.
 
 It defines the prompt text, structured schemas, and extractor orchestration
 used to turn Source structural artifacts into Core semantic extraction inputs
-for `document_profiles` and `paper_facts`.
+for `document_profiles`, `research_objectives`, objective evidence units, and
+`paper_facts`.
 
 It does not own:
 
@@ -15,7 +16,8 @@ It does not own:
 ## Local Components
 
 - `prompts.py`
-  prompt builders for document-profile, text-window, and table-row extraction
+  prompt builders for document-profile, objective, text-window, and table-row
+  extraction
 - `schemas.py`
   structured response models for the Core extraction contract
 - `extractor.py`

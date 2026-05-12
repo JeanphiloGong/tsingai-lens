@@ -12,6 +12,8 @@ from application.source.collection_service import CollectionService
 from domain.core import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
@@ -44,6 +46,7 @@ _FRAME_TABLE_LIMIT = 20
 _FRAME_TABLE_ROW_LIMIT = 6
 _ROUTE_TEXT_CHARS = 1200
 _ROUTE_CANDIDATE_LIMIT = 40
+_OBJECTIVE_EVIDENCE_TEXT_CHARS = 6000
 _BROAD_PROPERTY_AXIS_EXPANSIONS = {
     "mechanical properties": (
         "yield strength",
@@ -271,14 +274,28 @@ class ResearchObjectiveService:
             len(artifacts.documents),
         )
         paper_skims: list[PaperSkim] = []
-        for document in artifacts.documents:
+        document_count = len(artifacts.documents)
+        for document_position, document in enumerate(artifacts.documents, start=1):
+            document_blocks = blocks_by_document_id.get(document.document_id, [])
+            document_tables = tables_by_document_id.get(document.document_id, [])
+            document_figures = figures_by_document_id.get(document.document_id, [])
+            logger.info(
+                "Research objective paper skim document started collection_id=%s document_id=%s document_position=%s document_count=%s block_count=%s table_count=%s figure_count=%s",
+                collection_id,
+                document.document_id,
+                document_position,
+                document_count,
+                len(document_blocks),
+                len(document_tables),
+                len(document_figures),
+            )
             payload = self._build_paper_skim_payload(
                 collection_id=collection_id,
                 document=document,
                 profile=profiles_by_document_id.get(document.document_id),
-                blocks=blocks_by_document_id.get(document.document_id, []),
-                tables=tables_by_document_id.get(document.document_id, []),
-                figures=figures_by_document_id.get(document.document_id, []),
+                blocks=document_blocks,
+                tables=document_tables,
+                figures=document_figures,
             )
             parsed = extractor.extract_paper_skim(payload)
             record = parsed.model_dump()
@@ -289,13 +306,29 @@ class ResearchObjectiveService:
                     "source_filename": self._resolve_source_filename(document),
                 }
             )
-            paper_skims.append(PaperSkim.from_mapping(record))
+            paper_skim = PaperSkim.from_mapping(record)
+            paper_skims.append(paper_skim)
+            logger.info(
+                "Research objective paper skim document finished collection_id=%s document_id=%s document_position=%s document_count=%s doc_role=%s candidate_materials=%s candidate_processes=%s candidate_properties=%s possible_objectives=%s completed_documents=%s remaining_documents=%s",
+                collection_id,
+                document.document_id,
+                document_position,
+                document_count,
+                paper_skim.doc_role,
+                len(paper_skim.candidate_materials),
+                len(paper_skim.candidate_processes),
+                len(paper_skim.candidate_properties),
+                len(paper_skim.possible_objectives),
+                document_position,
+                max(document_count - document_position, 0),
+            )
 
         objective_payload = {
             "collection_id": collection_id,
             "paper_skims": [skim.to_record() for skim in paper_skims],
         }
         parsed_objectives = extractor.discover_research_objectives(objective_payload)
+        discovered_objective_count = len(parsed_objectives.objectives)
         skim_by_document_id = {
             skim.document_id: skim
             for skim in paper_skims
@@ -334,10 +367,23 @@ class ResearchObjectiveService:
             objectives=research_objectives,
         )
         research_objectives = self._dedupe_research_objectives(research_objectives)
+        logger.info(
+            "Research objective discovery finished collection_id=%s paper_skim_count=%s discovered_objective_count=%s accepted_objective_count=%s",
+            collection_id,
+            len(paper_skims),
+            discovered_objective_count,
+            len(research_objectives),
+        )
         objective_contexts = self._build_objective_contexts(
             paper_skims=tuple(paper_skims),
             objectives=research_objectives,
             tables=artifacts.tables,
+        )
+        logger.info(
+            "Research objective context build finished collection_id=%s objective_count=%s context_count=%s",
+            collection_id,
+            len(research_objectives),
+            len(objective_contexts),
         )
         objective_paper_frames = self._build_objective_paper_frames(
             collection_id=collection_id,
@@ -359,6 +405,22 @@ class ResearchObjectiveService:
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
         )
+        objective_evidence_units = self._build_objective_evidence_units(
+            collection_id=collection_id,
+            extractor=extractor,
+            objectives=research_objectives,
+            objective_contexts=objective_contexts,
+            objective_paper_frames=objective_paper_frames,
+            objective_evidence_routes=objective_evidence_routes,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+        )
+        objective_logic_chains = self._build_objective_logic_chains(
+            collection_id=collection_id,
+            objectives=research_objectives,
+            objective_contexts=objective_contexts,
+            objective_evidence_units=objective_evidence_units,
+        )
 
         self.core_fact_repository.replace_collection_research_objectives(
             collection_id,
@@ -367,14 +429,16 @@ class ResearchObjectiveService:
             objective_contexts,
             objective_paper_frames,
             objective_evidence_routes,
-            (),
-            (),
+            objective_evidence_units,
+            objective_logic_chains,
         )
         logger.info(
-            "Research objective build finished collection_id=%s paper_skim_count=%s objective_count=%s",
+            "Research objective build finished collection_id=%s paper_skim_count=%s objective_count=%s objective_evidence_units=%s objective_logic_chains=%s",
             collection_id,
             len(paper_skims),
             len(research_objectives),
+            len(objective_evidence_units),
+            len(objective_logic_chains),
         )
         return research_objectives
 
@@ -569,9 +633,14 @@ class ResearchObjectiveService:
             len(objectives),
             len(documents),
         )
-        for objective in objectives:
+        objective_count = len(objectives)
+        document_count = len(documents)
+        total_frame_requests = objective_count * document_count
+        completed_frame_requests = 0
+        for objective_position, objective in enumerate(objectives, start=1):
             objective_context = context_by_objective_id.get(objective.objective_id)
-            for document in documents:
+            for document_position, document in enumerate(documents, start=1):
+                completed_frame_requests += 1
                 document_id = str(getattr(document, "document_id", "") or "")
                 tables = tables_by_document_id.get(document_id, [])
                 known_table_ids = {
@@ -579,6 +648,20 @@ class ResearchObjectiveService:
                     for table in tables
                     if str(getattr(table, "table_id", "") or "")
                 }
+                logger.info(
+                    "Research objective paper framing document started collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s table_count=%s",
+                    collection_id,
+                    objective.objective_id,
+                    objective_position,
+                    objective_count,
+                    document_id,
+                    document_position,
+                    document_count,
+                    completed_frame_requests - 1,
+                    total_frame_requests,
+                    max(total_frame_requests - completed_frame_requests + 1, 0),
+                    len(tables),
+                )
                 payload = self._build_objective_paper_frame_payload(
                     collection_id=collection_id,
                     objective=objective,
@@ -620,7 +703,25 @@ class ResearchObjectiveService:
                         "excluded_tables": excluded_tables,
                     }
                 )
-                frames.append(ObjectivePaperFrame.from_mapping(record))
+                frame = ObjectivePaperFrame.from_mapping(record)
+                frames.append(frame)
+                logger.info(
+                    "Research objective paper framing document finished collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
+                    collection_id,
+                    objective.objective_id,
+                    objective_position,
+                    objective_count,
+                    document_id,
+                    document_position,
+                    document_count,
+                    frame.relevance,
+                    frame.paper_role,
+                    len(frame.relevant_tables),
+                    len(frame.excluded_tables),
+                    completed_frame_requests,
+                    total_frame_requests,
+                    max(total_frame_requests - completed_frame_requests, 0),
+                )
         logger.info(
             "Research objective paper framing finished collection_id=%s frame_count=%s",
             collection_id,
@@ -654,11 +755,46 @@ class ResearchObjectiveService:
             collection_id,
             len(objective_paper_frames),
         )
-        for frame in objective_paper_frames:
+        frame_count = len(objective_paper_frames)
+        for frame_position, frame in enumerate(objective_paper_frames, start=1):
+            logger.info(
+                "Research objective evidence routing frame started collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s relevance=%s completed_frames=%s remaining_frames=%s",
+                collection_id,
+                frame.objective_id,
+                frame.document_id,
+                frame.frame_id,
+                frame_position,
+                frame_count,
+                frame.relevance,
+                frame_position - 1,
+                max(frame_count - frame_position + 1, 0),
+            )
             if frame.relevance == "irrelevant":
+                logger.info(
+                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s reason=irrelevant completed_frames=%s remaining_frames=%s",
+                    collection_id,
+                    frame.objective_id,
+                    frame.document_id,
+                    frame.frame_id,
+                    frame_position,
+                    frame_count,
+                    frame_position,
+                    max(frame_count - frame_position, 0),
+                )
                 continue
             objective = objective_by_id.get(frame.objective_id)
             if objective is None:
+                logger.info(
+                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s reason=missing_objective completed_frames=%s remaining_frames=%s",
+                    collection_id,
+                    frame.objective_id,
+                    frame.document_id,
+                    frame.frame_id,
+                    frame_position,
+                    frame_count,
+                    frame_position,
+                    max(frame_count - frame_position, 0),
+                )
                 continue
             source_candidates = self._build_route_source_candidates(
                 frame=frame,
@@ -666,7 +802,19 @@ class ResearchObjectiveService:
                 tables=tables_by_document_id.get(frame.document_id, []),
             )
             if not source_candidates:
+                logger.info(
+                    "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s source_candidate_count=0 route_count=0 extractable_route_count=0 completed_frames=%s remaining_frames=%s",
+                    collection_id,
+                    frame.objective_id,
+                    frame.document_id,
+                    frame.frame_id,
+                    frame_position,
+                    frame_count,
+                    frame_position,
+                    max(frame_count - frame_position, 0),
+                )
                 continue
+            frame_route_count_before = len(routes)
             candidate_by_key = {
                 (candidate["source_kind"], candidate["source_ref"]): candidate
                 for candidate in source_candidates
@@ -723,12 +871,672 @@ class ResearchObjectiveService:
                         }
                     )
                 routes.append(ObjectiveEvidenceRoute.from_mapping(record))
+            frame_routes = routes[frame_route_count_before:]
+            logger.info(
+                "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s source_candidate_count=%s route_count=%s extractable_route_count=%s completed_frames=%s remaining_frames=%s",
+                collection_id,
+                frame.objective_id,
+                frame.document_id,
+                frame.frame_id,
+                frame_position,
+                frame_count,
+                len(source_candidates),
+                len(frame_routes),
+                sum(1 for route in frame_routes if route.extractable),
+                frame_position,
+                max(frame_count - frame_position, 0),
+            )
         logger.info(
             "Research objective evidence routing finished collection_id=%s route_count=%s",
             collection_id,
             len(routes),
         )
         return tuple(routes)
+
+    def _build_objective_evidence_units(
+        self,
+        *,
+        collection_id: str,
+        extractor: CoreLLMStructuredExtractor,
+        objectives: tuple[ResearchObjective, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
+        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
+        objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
+        blocks_by_document_id: dict[str, list[Any]],
+        tables_by_document_id: dict[str, list[Any]],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        objective_by_id = {
+            objective.objective_id: objective
+            for objective in objectives
+        }
+        context_by_objective_id = {
+            context.objective_id: context
+            for context in objective_contexts
+        }
+        frame_by_key = {
+            (frame.objective_id, frame.document_id): frame
+            for frame in objective_paper_frames
+        }
+        extractable_routes = tuple(
+            route
+            for route in objective_evidence_routes
+            if route.extractable and route.role != "low_value_or_irrelevant"
+        )
+        logger.info(
+            "Research objective evidence-unit extraction started collection_id=%s route_count=%s extractable_route_count=%s",
+            collection_id,
+            len(objective_evidence_routes),
+            len(extractable_routes),
+        )
+        units: list[ObjectiveEvidenceUnit] = []
+        seen: set[str] = set()
+        for route_position, route in enumerate(extractable_routes, start=1):
+            objective = objective_by_id.get(route.objective_id)
+            if objective is None:
+                logger.info(
+                    "Research objective evidence-unit extraction route skipped collection_id=%s route_id=%s reason=missing_objective route_position=%s route_count=%s",
+                    collection_id,
+                    route.route_id,
+                    route_position,
+                    len(extractable_routes),
+                )
+                continue
+            source = self._build_objective_route_source_payload(
+                route=route,
+                blocks=blocks_by_document_id.get(route.document_id, []),
+                tables=tables_by_document_id.get(route.document_id, []),
+            )
+            if not source:
+                logger.info(
+                    "Research objective evidence-unit extraction route skipped collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s reason=missing_source route_position=%s route_count=%s",
+                    collection_id,
+                    route.route_id,
+                    route.objective_id,
+                    route.document_id,
+                    route.source_kind,
+                    route.source_ref,
+                    route_position,
+                    len(extractable_routes),
+                )
+                continue
+            payload = {
+                "collection_id": collection_id,
+                "objective": objective.to_record(),
+                "objective_context": (
+                    context_by_objective_id[route.objective_id].to_record()
+                    if route.objective_id in context_by_objective_id
+                    else {}
+                ),
+                "paper_frame": (
+                    frame_by_key[(route.objective_id, route.document_id)].to_record()
+                    if (route.objective_id, route.document_id) in frame_by_key
+                    else {}
+                ),
+                "evidence_route": route.to_record(),
+                "source": source,
+            }
+            parsed = extractor.extract_objective_evidence_units(payload)
+            route_unit_start = len(units)
+            for item in parsed.evidence_units:
+                record = item.model_dump()
+                record.update(
+                    {
+                        "objective_id": route.objective_id,
+                        "document_id": route.document_id,
+                        "source_refs": self._objective_route_source_refs(
+                            route=route,
+                            source=source,
+                        ),
+                        "join_keys": record.get("join_keys") or dict(route.join_keys),
+                    }
+                )
+                if not record.get("confidence"):
+                    record["confidence"] = route.confidence
+                unit = ObjectiveEvidenceUnit.from_mapping(record)
+                if not self._objective_evidence_unit_has_payload(unit):
+                    continue
+                if unit.evidence_unit_id in seen:
+                    continue
+                seen.add(unit.evidence_unit_id)
+                units.append(unit)
+            logger.info(
+                "Research objective evidence-unit extraction route finished collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s evidence_units=%s completed_routes=%s remaining_routes=%s",
+                collection_id,
+                route.route_id,
+                route.objective_id,
+                route.document_id,
+                route.source_kind,
+                route.source_ref,
+                route_position,
+                len(extractable_routes),
+                len(units) - route_unit_start,
+                route_position,
+                max(len(extractable_routes) - route_position, 0),
+            )
+        logger.info(
+            "Research objective evidence-unit extraction finished collection_id=%s objective_evidence_units=%s",
+            collection_id,
+            len(units),
+        )
+        return tuple(units)
+
+    def _build_objective_route_source_payload(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        blocks: list[Any],
+        tables: list[Any],
+    ) -> dict[str, Any]:
+        if route.source_kind == "table":
+            table = next(
+                (
+                    candidate
+                    for candidate in tables
+                    if str(getattr(candidate, "table_id", "") or "") == route.source_ref
+                ),
+                None,
+            )
+            if table is None:
+                return {}
+            return {
+                "source_kind": "table",
+                "source_ref": route.source_ref,
+                "document_id": route.document_id,
+                "page": getattr(table, "page", None),
+                "caption_text": getattr(table, "caption_text", None),
+                "heading_path": getattr(table, "heading_path", None),
+                "column_headers": [
+                    str(value)
+                    for value in getattr(table, "column_headers", ()) or ()
+                ],
+                "table_matrix": [
+                    [str(cell) for cell in row]
+                    for row in getattr(table, "table_matrix", ()) or ()
+                    if isinstance(row, (list, tuple))
+                ],
+            }
+        if route.source_kind == "text_window":
+            block = next(
+                (
+                    candidate
+                    for candidate in blocks
+                    if str(getattr(candidate, "block_id", "") or "") == route.source_ref
+                ),
+                None,
+            )
+            if block is None:
+                return {}
+            text = str(getattr(block, "text", "") or "").strip()
+            return {
+                "source_kind": "text_window",
+                "source_ref": route.source_ref,
+                "document_id": route.document_id,
+                "page": getattr(block, "page", None),
+                "block_type": getattr(block, "block_type", None),
+                "heading_path": getattr(block, "heading_path", None),
+                "text": text[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
+            }
+        return {}
+
+    def _objective_route_source_refs(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        ref = {
+            "route_id": route.route_id,
+            "source_kind": route.source_kind,
+            "source_ref": route.source_ref,
+            "role": route.role,
+            "page": source.get("page"),
+        }
+        return (
+            {
+                key: value
+                for key, value in ref.items()
+                if value not in (None, "", [], {})
+            },
+        )
+
+    def _objective_evidence_unit_has_payload(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> bool:
+        return any(
+            (
+                unit.unit_kind != "unknown",
+                unit.property_normalized,
+                unit.material_system,
+                unit.sample_context,
+                unit.process_context,
+                unit.resolved_condition,
+                unit.test_condition,
+                unit.value_payload,
+                unit.baseline_context,
+                unit.interpretation,
+            )
+        )
+
+    def _build_objective_logic_chains(
+        self,
+        *,
+        collection_id: str,
+        objectives: tuple[ResearchObjective, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
+        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> tuple[ObjectiveLogicChain, ...]:
+        context_by_objective_id = {
+            context.objective_id: context
+            for context in objective_contexts
+        }
+        units_by_objective_id: dict[str, list[ObjectiveEvidenceUnit]] = {}
+        for unit in objective_evidence_units:
+            units_by_objective_id.setdefault(unit.objective_id, []).append(unit)
+        logger.info(
+            "Research objective logic-chain assembly started collection_id=%s objective_count=%s objective_evidence_units=%s",
+            collection_id,
+            len(objectives),
+            len(objective_evidence_units),
+        )
+        chains: list[ObjectiveLogicChain] = []
+        for objective in objectives:
+            units = tuple(units_by_objective_id.get(objective.objective_id, ()))
+            if not units:
+                continue
+            chain_payload = self._objective_logic_chain_payload(
+                objective=objective,
+                objective_context=context_by_objective_id.get(objective.objective_id),
+                units=units,
+            )
+            chains.append(
+                ObjectiveLogicChain.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "chain_scope": "objective",
+                        "question": objective.question,
+                        "evidence_unit_ids": [
+                            unit.evidence_unit_id
+                            for unit in units
+                        ],
+                        "chain_payload": chain_payload,
+                        "summary": self._objective_logic_chain_summary(chain_payload),
+                        "confidence": objective.confidence,
+                    }
+                )
+            )
+            logger.info(
+                "Research objective logic-chain assembly objective finished collection_id=%s objective_id=%s evidence_unit_count=%s",
+                collection_id,
+                objective.objective_id,
+                len(units),
+            )
+        logger.info(
+            "Research objective logic-chain assembly finished collection_id=%s logic_chain_count=%s",
+            collection_id,
+            len(chains),
+        )
+        return tuple(chains)
+
+    def _objective_logic_chain_payload(
+        self,
+        *,
+        objective: ResearchObjective,
+        objective_context: ObjectiveContext | None,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[str, Any]:
+        counts_by_kind: dict[str, int] = {}
+        document_ids: list[str] = []
+        for unit in units:
+            counts_by_kind[unit.unit_kind] = counts_by_kind.get(unit.unit_kind, 0) + 1
+            if unit.document_id not in document_ids:
+                document_ids.append(unit.document_id)
+        evidence_unit_ids_by_role = self._objective_evidence_unit_ids_by_role(units)
+        paper_chains = [
+            self._objective_paper_logic_chain(
+                document_id=document_id,
+                units=tuple(unit for unit in units if unit.document_id == document_id),
+            )
+            for document_id in document_ids
+        ]
+        cross_paper = self._objective_cross_paper_logic(
+            paper_chains=paper_chains,
+            units=units,
+        )
+        return {
+            "schema_version": "objective_logic_chain.v1",
+            "objective": objective.to_record(),
+            "context": objective_context.to_record() if objective_context else {},
+            "unit_counts_by_kind": counts_by_kind,
+            "document_ids": document_ids,
+            "evidence_unit_ids_by_role": evidence_unit_ids_by_role,
+            "steps": self._objective_logic_chain_steps(
+                objective=objective,
+                objective_context=objective_context,
+                evidence_unit_ids_by_role=evidence_unit_ids_by_role,
+                cross_paper=cross_paper,
+            ),
+            "paper_chains": paper_chains,
+            "cross_paper": cross_paper,
+        }
+
+    def _objective_paper_logic_chain(
+        self,
+        *,
+        document_id: str,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[str, Any]:
+        measurements = tuple(unit for unit in units if unit.unit_kind == "measurement")
+        test_conditions = tuple(
+            unit for unit in units if unit.unit_kind == "test_condition"
+        )
+        sample_process_units = tuple(
+            unit
+            for unit in units
+            if unit.unit_kind in {"sample_context", "process_context", "measurement"}
+            and (unit.sample_context or unit.process_context)
+        )
+        characterization = tuple(
+            unit for unit in units if unit.unit_kind == "characterization"
+        )
+        comparisons = tuple(unit for unit in units if unit.unit_kind == "comparison")
+        interpretations = tuple(
+            unit for unit in units if unit.unit_kind == "interpretation"
+        )
+        return {
+            "document_id": document_id,
+            "evidence_unit_ids": [unit.evidence_unit_id for unit in units],
+            "sample_and_process_contexts": self._dedupe_chain_items(
+                [
+                    self._objective_sample_process_chain_item(unit)
+                    for unit in sample_process_units
+                ]
+            ),
+            "test_conditions": [
+                self._objective_logic_unit_reference(unit)
+                for unit in test_conditions
+            ],
+            "characterization_observations": [
+                self._objective_logic_unit_reference(unit)
+                for unit in characterization
+            ],
+            "measurement_results": [
+                self._objective_logic_unit_reference(unit)
+                for unit in measurements
+            ],
+            "comparisons": [
+                self._objective_logic_unit_reference(unit)
+                for unit in comparisons
+            ],
+            "author_interpretations": [
+                self._objective_logic_unit_reference(unit)
+                for unit in interpretations
+            ],
+            "resolution": {
+                "measurement_count": len(measurements),
+                "resolved_measurement_count": sum(
+                    1
+                    for unit in measurements
+                    if unit.resolution_status == "resolved"
+                ),
+                "test_condition_count": len(test_conditions),
+                "characterization_count": len(characterization),
+                "comparison_count": len(comparisons),
+                "gaps": self._objective_paper_logic_gaps(
+                    measurements=measurements,
+                    test_conditions=test_conditions,
+                    sample_process_units=sample_process_units,
+                    characterization=characterization,
+                    comparisons=comparisons,
+                ),
+            },
+        }
+
+    def _objective_evidence_unit_ids_by_role(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[str, list[str]]:
+        roles = {
+            "sample_and_process_context": [],
+            "test_and_characterization": [],
+            "measurements": [],
+            "comparisons": [],
+            "interpretations": [],
+            "other": [],
+        }
+        for unit in units:
+            if unit.unit_kind in {"sample_context", "process_context"}:
+                roles["sample_and_process_context"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "test_condition":
+                roles["test_and_characterization"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "characterization":
+                roles["test_and_characterization"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "measurement":
+                roles["measurements"].append(unit.evidence_unit_id)
+                if unit.sample_context or unit.process_context:
+                    roles["sample_and_process_context"].append(unit.evidence_unit_id)
+                if unit.test_condition:
+                    roles["test_and_characterization"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "comparison":
+                roles["comparisons"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "interpretation":
+                roles["interpretations"].append(unit.evidence_unit_id)
+            else:
+                roles["other"].append(unit.evidence_unit_id)
+        return {
+            role: self._dedupe_preserving_order(unit_ids)
+            for role, unit_ids in roles.items()
+            if unit_ids
+        }
+
+    def _objective_logic_chain_steps(
+        self,
+        *,
+        objective: ResearchObjective,
+        objective_context: ObjectiveContext | None,
+        evidence_unit_ids_by_role: dict[str, list[str]],
+        cross_paper: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "step_role": "research_objective",
+                "question": objective.question,
+                "material_scope": list(objective.material_scope),
+                "target_property_axes": (
+                    list(objective_context.target_property_axes)
+                    if objective_context is not None
+                    else []
+                ),
+            },
+            {
+                "step_role": "sample_and_process_context",
+                "evidence_unit_ids": evidence_unit_ids_by_role.get(
+                    "sample_and_process_context",
+                    [],
+                ),
+            },
+            {
+                "step_role": "test_and_characterization",
+                "evidence_unit_ids": evidence_unit_ids_by_role.get(
+                    "test_and_characterization",
+                    [],
+                ),
+            },
+            {
+                "step_role": "measurement_results",
+                "evidence_unit_ids": evidence_unit_ids_by_role.get("measurements", []),
+                "measured_properties": cross_paper.get("measured_properties", []),
+            },
+            {
+                "step_role": "comparison_and_interpretation",
+                "evidence_unit_ids": [
+                    *evidence_unit_ids_by_role.get("comparisons", []),
+                    *evidence_unit_ids_by_role.get("interpretations", []),
+                ],
+            },
+            {
+                "step_role": "cross_paper_resolution",
+                "document_count": cross_paper.get("document_count", 0),
+                "gaps": cross_paper.get("gaps", []),
+            },
+        ]
+
+    def _objective_cross_paper_logic(
+        self,
+        *,
+        paper_chains: list[dict[str, Any]],
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[str, Any]:
+        measurements = tuple(unit for unit in units if unit.unit_kind == "measurement")
+        comparisons = tuple(unit for unit in units if unit.unit_kind == "comparison")
+        gaps = []
+        if not comparisons:
+            gaps.append("comparison_units_missing")
+        if any(
+            unit.resolution_status != "resolved"
+            for unit in measurements
+        ):
+            gaps.append("unresolved_measurements_present")
+        return {
+            "document_count": len(paper_chains),
+            "measured_properties": self._dedupe_preserving_order(
+                [
+                    unit.property_normalized
+                    for unit in measurements
+                    if unit.property_normalized
+                ]
+            ),
+            "sample_labels": self._dedupe_preserving_order(
+                [
+                    str(unit.sample_context.get("label"))
+                    for unit in units
+                    if unit.sample_context.get("label")
+                ]
+            ),
+            "resolved_measurement_count": sum(
+                1
+                for unit in measurements
+                if unit.resolution_status == "resolved"
+            ),
+            "comparison_unit_count": len(comparisons),
+            "comparison_ready": bool(comparisons),
+            "gaps": gaps,
+        }
+
+    def _objective_paper_logic_gaps(
+        self,
+        *,
+        measurements: tuple[ObjectiveEvidenceUnit, ...],
+        test_conditions: tuple[ObjectiveEvidenceUnit, ...],
+        sample_process_units: tuple[ObjectiveEvidenceUnit, ...],
+        characterization: tuple[ObjectiveEvidenceUnit, ...],
+        comparisons: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> list[str]:
+        gaps = []
+        if not sample_process_units:
+            gaps.append("sample_or_process_context_missing")
+        if not test_conditions and not any(unit.test_condition for unit in measurements):
+            gaps.append("test_condition_missing")
+        if not measurements:
+            gaps.append("measurement_results_missing")
+        if not characterization:
+            gaps.append("characterization_observations_missing")
+        if not comparisons:
+            gaps.append("comparison_units_missing")
+        return gaps
+
+    def _objective_sample_process_chain_item(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "evidence_unit_id": unit.evidence_unit_id,
+                "document_id": unit.document_id,
+                "sample_context": dict(unit.sample_context),
+                "process_context": dict(unit.process_context),
+                "join_keys": dict(unit.join_keys),
+                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
+                "resolution_status": unit.resolution_status,
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_logic_unit_reference(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "evidence_unit_id": unit.evidence_unit_id,
+                "document_id": unit.document_id,
+                "unit_kind": unit.unit_kind,
+                "property_normalized": unit.property_normalized,
+                "material_system": dict(unit.material_system),
+                "sample_context": dict(unit.sample_context),
+                "process_context": dict(unit.process_context),
+                "test_condition": dict(unit.test_condition),
+                "value_payload": dict(unit.value_payload),
+                "unit": unit.unit,
+                "baseline_context": dict(unit.baseline_context),
+                "interpretation": unit.interpretation,
+                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
+                "evidence_anchor_ids": list(unit.evidence_anchor_ids),
+                "join_keys": dict(unit.join_keys),
+                "resolution_status": unit.resolution_status,
+                "confidence": unit.confidence,
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_logic_chain_summary(
+        self,
+        chain_payload: dict[str, Any],
+    ) -> str:
+        objective = chain_payload.get("objective", {})
+        question = (
+            objective.get("question")
+            if isinstance(objective, dict)
+            else None
+        )
+        counts = chain_payload.get("unit_counts_by_kind", {})
+        measurement_count = counts.get("measurement", 0) if isinstance(counts, dict) else 0
+        document_ids = chain_payload.get("document_ids", [])
+        document_count = len(document_ids) if isinstance(document_ids, list) else 0
+        return (
+            f"{question or 'Objective'}: assembled {measurement_count} "
+            f"measurement unit(s) across {document_count} document(s)."
+        )
+
+    def _dedupe_chain_items(
+        self,
+        items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in items:
+            key = repr(sorted(item.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
+
+    def _dedupe_preserving_order(
+        self,
+        values: list[str | None],
+    ) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            deduped.append(text)
+        return deduped
 
     def _build_route_source_candidates(
         self,

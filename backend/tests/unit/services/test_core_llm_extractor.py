@@ -10,6 +10,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredExtractionBundle,
     StructuredObjectiveEvidenceRoutes,
+    StructuredObjectiveEvidenceUnits,
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
@@ -365,6 +366,58 @@ def test_core_llm_extractor_validates_objective_evidence_routes_response():
     assert isinstance(routes, StructuredObjectiveEvidenceRoutes)
     assert routes.routes[0].role == "current_experimental_evidence"
     assert routes.routes[0].join_plan == {"join_on": "sample_key"}
+
+
+def test_core_llm_extractor_validates_objective_evidence_units_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "evidence_units": [
+            {
+              "unit_kind": "measurement",
+              "property_normalized": "corrosion current density",
+              "material_system": {"family": "316L stainless steel"},
+              "sample_context": {"label": "heat-treated"},
+              "process_context": {"process": "LPBF"},
+              "resolved_condition": {},
+              "test_condition": {"environment": "NaCl"},
+              "value_payload": {"value": 0.4},
+              "unit": "uA/cm2",
+              "baseline_context": {},
+              "interpretation": null,
+              "source_refs": [
+                {"source_kind": "table", "source_ref": "table-1"}
+              ],
+              "evidence_anchor_ids": [],
+              "join_keys": {"sample_key": "heat-treated"},
+              "resolution_status": "resolved",
+              "confidence": 0.86
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    units = extractor.extract_objective_evidence_units(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "evidence_route": {
+                "source_kind": "table",
+                "source_ref": "table-1",
+            },
+            "source": {
+                "source_kind": "table",
+                "source_ref": "table-1",
+                "table_matrix": [["sample", "corrosion"], ["HT", "0.4"]],
+            },
+        }
+    )
+
+    assert isinstance(units, StructuredObjectiveEvidenceUnits)
+    assert units.evidence_units[0].unit_kind == "measurement"
+    assert units.evidence_units[0].resolution_status == "resolved"
 
 
 def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from .schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
+    StructuredObjectiveEvidenceRoutes,
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
@@ -22,6 +23,7 @@ from .schemas import (
 )
 from .prompts import (
     build_document_profile_prompt,
+    build_objective_evidence_route_prompt,
     build_objective_paper_frame_prompt,
     build_paper_skim_prompt,
     build_research_axis_canonicalization_prompt,
@@ -163,6 +165,20 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredObjectivePaperFrame):
             raise TypeError("unexpected objective paper frame response type")
+        return response
+
+    def route_objective_evidence(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceRoutes:
+        system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredObjectiveEvidenceRoutes,
+        )
+        if not isinstance(response, StructuredObjectiveEvidenceRoutes):
+            raise TypeError("unexpected objective evidence route response type")
         return response
 
     def _parse_structured_response(

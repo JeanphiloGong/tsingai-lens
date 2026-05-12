@@ -6,6 +6,8 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
+    StructuredObjectiveEvidenceRoute,
+    StructuredObjectiveEvidenceRoutes,
     StructuredObjectiveMergeGroup,
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
@@ -27,6 +29,7 @@ class _ObjectiveExtractor:
         self.canonicalization_payloads: list[dict[str, Any]] = []
         self.merge_payloads: list[dict[str, Any]] = []
         self.frame_payloads: list[dict[str, Any]] = []
+        self.route_payloads: list[dict[str, Any]] = []
 
     def extract_document_profile(
         self,
@@ -215,6 +218,81 @@ class _ObjectiveExtractor:
             if any(str(axis or "").lower() in text for axis in axes):
                 table_ids.append(str(table["table_id"]))
         return table_ids
+
+    def route_objective_evidence(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceRoutes:
+        self.route_payloads.append(payload)
+        objective = payload["objective"]
+        routes: list[StructuredObjectiveEvidenceRoute] = []
+        for candidate in payload["source_candidates"]:
+            if candidate["frame_status"] == "excluded":
+                routes.append(
+                    StructuredObjectiveEvidenceRoute(
+                        source_kind=candidate["source_kind"],
+                        source_ref=candidate["source_ref"],
+                        role="low_value_or_irrelevant",
+                        extractable=False,
+                        reason="Excluded by objective paper frame.",
+                        confidence=0.7,
+                    )
+                )
+                continue
+            if candidate["source_kind"] == "text_window":
+                routes.append(
+                    StructuredObjectiveEvidenceRoute(
+                        source_kind="text_window",
+                        source_ref=candidate["source_ref"],
+                        role="process_or_treatment",
+                        extractable=True,
+                        reason="Text window is in a relevant objective section.",
+                        confidence=0.72,
+                    )
+                )
+                continue
+            table_schema = candidate.get("table_schema") or {}
+            text = " ".join(
+                str(value or "")
+                for value in (
+                    candidate.get("caption_text"),
+                    candidate.get("heading_path"),
+                    " ".join(table_schema.get("column_headers") or []),
+                )
+            ).lower()
+            property_axes = [
+                str(axis or "").lower()
+                for axis in objective.get("property_axes", ())
+                if str(axis or "").strip()
+            ]
+            role = (
+                "current_experimental_evidence"
+                if any(axis in text for axis in property_axes)
+                else "process_or_treatment"
+            )
+            routes.append(
+                StructuredObjectiveEvidenceRoute(
+                    source_kind="table",
+                    source_ref=candidate["source_ref"],
+                    role=role,
+                    extractable=True,
+                    reason="Table is relevant for this objective.",
+                    table_schema=table_schema,
+                    column_roles={
+                        header: "target_property"
+                        for header in table_schema.get("column_headers", [])
+                        if any(axis in str(header).lower() for axis in property_axes)
+                    },
+                    join_keys={"sample_key": "sample"}
+                    if "sample" in text
+                    else {},
+                    join_plan={"join_on": "sample_key"}
+                    if "sample" in text
+                    else {},
+                    confidence=0.82,
+                )
+            )
+        return StructuredObjectiveEvidenceRoutes(routes=routes)
 
 
 class _BroadObjectiveExtractor(_ObjectiveExtractor):
@@ -875,6 +953,26 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
     assert active_frame.relevant_tables == ("table-1",)
     assert excluded_frame.relevance == "irrelevant"
     assert excluded_frame.paper_role == "review"
+    table_route = next(
+        route
+        for route in facts.objective_evidence_routes
+        if route.source_kind == "table" and route.source_ref == "table-1"
+    )
+    text_route = next(
+        route
+        for route in facts.objective_evidence_routes
+        if route.source_kind == "text_window" and route.source_ref == "b2"
+    )
+    assert table_route.role == "current_experimental_evidence"
+    assert table_route.extractable is True
+    assert table_route.table_schema["column_headers"] == [
+        "sample",
+        "corrosion current",
+    ]
+    assert table_route.column_roles == {"corrosion current": "target_property"}
+    assert text_route.role == "process_or_treatment"
+    assert len(extractor.route_payloads) == 1
+    assert extractor.route_payloads[0]["paper_frame"]["frame_id"] == active_frame.frame_id
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
     assert extractor.frame_payloads[0]["objective_context"]["objective_id"] == (
@@ -1135,6 +1233,14 @@ def test_research_objective_service_builds_targeted_objective_contexts(
         "table-1",
         "table-2",
     )
+    mechanical_routes = {
+        route.source_ref: route
+        for route in facts.objective_evidence_routes
+        if route.objective_id == mechanical_context.objective_id
+        and route.source_kind == "table"
+    }
+    assert mechanical_routes["table-1"].role == "process_or_treatment"
+    assert mechanical_routes["table-2"].role == "current_experimental_evidence"
 
 
 def test_research_objective_service_canonicalizes_axis_aliases_with_llm(

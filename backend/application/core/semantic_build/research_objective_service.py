@@ -11,6 +11,7 @@ from application.core.semantic_build.document_profile_service import (
 from application.source.collection_service import CollectionService
 from domain.core import (
     ObjectiveContext,
+    ObjectiveEvidenceRoute,
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
@@ -41,6 +42,8 @@ _FRAME_SECTION_SNIPPET_LIMIT = 24
 _FRAME_SECTION_TEXT_CHARS = 900
 _FRAME_TABLE_LIMIT = 20
 _FRAME_TABLE_ROW_LIMIT = 6
+_ROUTE_TEXT_CHARS = 1200
+_ROUTE_CANDIDATE_LIMIT = 40
 _BROAD_PROPERTY_AXIS_EXPANSIONS = {
     "mechanical properties": (
         "yield strength",
@@ -255,6 +258,15 @@ class ResearchObjectiveService:
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
         )
+        objective_evidence_routes = self._build_objective_evidence_routes(
+            collection_id=collection_id,
+            extractor=extractor,
+            objectives=research_objectives,
+            objective_contexts=objective_contexts,
+            objective_paper_frames=objective_paper_frames,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+        )
 
         self.core_fact_repository.replace_collection_research_objectives(
             collection_id,
@@ -262,7 +274,7 @@ class ResearchObjectiveService:
             research_objectives,
             objective_contexts,
             objective_paper_frames,
-            (),
+            objective_evidence_routes,
             (),
             (),
         )
@@ -362,6 +374,196 @@ class ResearchObjectiveService:
         )
         return tuple(frames)
 
+    def _build_objective_evidence_routes(
+        self,
+        *,
+        collection_id: str,
+        extractor: CoreLLMStructuredExtractor,
+        objectives: tuple[ResearchObjective, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
+        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
+        blocks_by_document_id: dict[str, list[Any]],
+        tables_by_document_id: dict[str, list[Any]],
+    ) -> tuple[ObjectiveEvidenceRoute, ...]:
+        objective_by_id = {
+            objective.objective_id: objective
+            for objective in objectives
+        }
+        context_by_objective_id = {
+            context.objective_id: context
+            for context in objective_contexts
+        }
+        routes: list[ObjectiveEvidenceRoute] = []
+        seen: set[tuple[str, str, str, str, str]] = set()
+        logger.info(
+            "Research objective evidence routing started collection_id=%s frame_count=%s",
+            collection_id,
+            len(objective_paper_frames),
+        )
+        for frame in objective_paper_frames:
+            if frame.relevance == "irrelevant":
+                continue
+            objective = objective_by_id.get(frame.objective_id)
+            if objective is None:
+                continue
+            source_candidates = self._build_route_source_candidates(
+                frame=frame,
+                blocks=blocks_by_document_id.get(frame.document_id, []),
+                tables=tables_by_document_id.get(frame.document_id, []),
+            )
+            if not source_candidates:
+                continue
+            candidate_by_key = {
+                (candidate["source_kind"], candidate["source_ref"]): candidate
+                for candidate in source_candidates
+            }
+            payload = {
+                "collection_id": collection_id,
+                "objective": objective.to_record(),
+                "objective_context": (
+                    context_by_objective_id[frame.objective_id].to_record()
+                    if frame.objective_id in context_by_objective_id
+                    else {}
+                ),
+                "paper_frame": frame.to_record(),
+                "source_candidates": source_candidates,
+            }
+            parsed = extractor.route_objective_evidence(payload)
+            for item in parsed.routes:
+                record = item.model_dump()
+                source_kind = str(record.get("source_kind") or "")
+                source_ref = str(record.get("source_ref") or "")
+                candidate = candidate_by_key.get((source_kind, source_ref))
+                if candidate is None:
+                    continue
+                role = str(record.get("role") or "low_value_or_irrelevant")
+                route_key = (
+                    frame.objective_id,
+                    frame.document_id,
+                    source_kind,
+                    source_ref,
+                    role,
+                )
+                if route_key in seen:
+                    continue
+                seen.add(route_key)
+                record.update(
+                    {
+                        "objective_id": frame.objective_id,
+                        "document_id": frame.document_id,
+                        "table_schema": self._route_table_schema_record(
+                            record,
+                            candidate=candidate,
+                        ),
+                        "extractable": self._normalize_route_extractable(record),
+                    }
+                )
+                routes.append(ObjectiveEvidenceRoute.from_mapping(record))
+        logger.info(
+            "Research objective evidence routing finished collection_id=%s route_count=%s",
+            collection_id,
+            len(routes),
+        )
+        return tuple(routes)
+
+    def _build_route_source_candidates(
+        self,
+        *,
+        frame: ObjectivePaperFrame,
+        blocks: list[Any],
+        tables: list[Any],
+    ) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        table_by_id = {
+            str(getattr(table, "table_id", "") or ""): table
+            for table in tables
+            if str(getattr(table, "table_id", "") or "")
+        }
+        for table_id in (*frame.relevant_tables, *frame.excluded_tables):
+            table = table_by_id.get(table_id)
+            if table is None:
+                continue
+            table_schema = self._build_route_table_schema(table)
+            candidates.append(
+                {
+                    "source_kind": "table",
+                    "source_ref": table_id,
+                    "frame_status": (
+                        "excluded"
+                        if table_id in frame.excluded_tables
+                        else "relevant"
+                    ),
+                    "caption_text": getattr(table, "caption_text", None),
+                    "heading_path": getattr(table, "heading_path", None),
+                    "table_schema": table_schema,
+                    "sample_rows": table_schema["sample_rows"],
+                }
+            )
+        relevant_sections = set(frame.relevant_sections)
+        for block in sorted(
+            blocks,
+            key=lambda item: int(getattr(item, "block_order", 0) or 0),
+        ):
+            if len(candidates) >= _ROUTE_CANDIDATE_LIMIT:
+                break
+            block_id = str(getattr(block, "block_id", "") or "")
+            text = str(getattr(block, "text", "") or "").strip()
+            block_type = str(getattr(block, "block_type", "") or "")
+            section_label = self._block_section_label(block)
+            if not block_id or not text or block_type not in {"paragraph", "list_item"}:
+                continue
+            if relevant_sections and section_label not in relevant_sections:
+                continue
+            candidates.append(
+                {
+                    "source_kind": "text_window",
+                    "source_ref": block_id,
+                    "frame_status": "relevant",
+                    "section_label": section_label,
+                    "block_type": block_type,
+                    "text": text[:_ROUTE_TEXT_CHARS],
+                }
+            )
+        return candidates[:_ROUTE_CANDIDATE_LIMIT]
+
+    def _build_route_table_schema(self, table: Any) -> dict[str, Any]:
+        matrix = tuple(getattr(table, "table_matrix", ()) or ())
+        return {
+            "table_id": str(getattr(table, "table_id", "") or ""),
+            "caption_text": getattr(table, "caption_text", None),
+            "heading_path": getattr(table, "heading_path", None),
+            "column_headers": [
+                str(value)
+                for value in getattr(table, "column_headers", ()) or ()
+            ],
+            "row_count": int(getattr(table, "row_count", 0) or 0),
+            "col_count": int(getattr(table, "col_count", 0) or 0),
+            "sample_rows": [
+                [str(cell) for cell in row]
+                for row in matrix[:_FRAME_TABLE_ROW_LIMIT]
+                if isinstance(row, (list, tuple))
+            ],
+        }
+
+    def _route_table_schema_record(
+        self,
+        record: dict[str, Any],
+        *,
+        candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        if record.get("source_kind") != "table":
+            return {}
+        table_schema = record.get("table_schema")
+        if isinstance(table_schema, dict) and table_schema:
+            return table_schema
+        candidate_schema = candidate.get("table_schema")
+        return dict(candidate_schema) if isinstance(candidate_schema, dict) else {}
+
+    def _normalize_route_extractable(self, record: dict[str, Any]) -> bool:
+        if record.get("role") == "low_value_or_irrelevant":
+            return False
+        return bool(record.get("extractable"))
+
     def _build_objective_paper_frame_payload(
         self,
         *,
@@ -446,6 +648,15 @@ class ResearchObjectiveService:
                 }
             )
         return summaries
+
+    def _block_section_label(self, block: Any) -> str:
+        block_type = str(getattr(block, "block_type", "") or "")
+        if block_type == "heading":
+            heading = str(getattr(block, "text", "") or "").strip()
+            if heading:
+                return heading
+        section_label = str(getattr(block, "heading_path", "") or "").strip()
+        return section_label or "Unsectioned"
 
     def _filter_known_values(
         self,

@@ -9,6 +9,7 @@ from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtra
 from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredExtractionBundle,
+    StructuredObjectiveEvidenceRoutes,
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
@@ -317,6 +318,53 @@ def test_core_llm_extractor_validates_objective_paper_frame_response():
     assert isinstance(frame, StructuredObjectivePaperFrame)
     assert frame.relevance == "high"
     assert frame.relevant_tables == ["table-1"]
+
+
+def test_core_llm_extractor_validates_objective_evidence_routes_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "routes": [
+            {
+              "source_kind": "table",
+              "source_ref": "table-1",
+              "role": "current_experimental_evidence",
+              "extractable": true,
+              "reason": "Target result table.",
+              "table_schema": {
+                "column_headers": ["sample", "corrosion current"]
+              },
+              "column_roles": {
+                "corrosion current": "target_property"
+              },
+              "join_keys": {
+                "sample_key": "sample"
+              },
+              "join_plan": {
+                "join_on": "sample_key"
+              },
+              "confidence": 0.88
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    routes = extractor.route_objective_evidence(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "paper_frame": {"frame_id": "opf-1"},
+            "source_candidates": [
+                {"source_kind": "table", "source_ref": "table-1"}
+            ],
+        }
+    )
+
+    assert isinstance(routes, StructuredObjectiveEvidenceRoutes)
+    assert routes.routes[0].role == "current_experimental_evidence"
+    assert routes.routes[0].join_plan == {"join_on": "sample_key"}
 
 
 def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():

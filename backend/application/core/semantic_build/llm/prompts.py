@@ -61,6 +61,20 @@ Non-negotiable rules:
 """.strip()
 
 
+_OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT = """
+You are routing source units for one research objective in an evidence-backed literature comparison backend.
+
+Non-negotiable rules:
+- This is routing only, not final fact extraction.
+- Return exactly one JSON object and nothing else.
+- Return routes only for `source_candidates`; copy `source_kind` and `source_ref` exactly.
+- Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
+- For tables, use `table_schema`, `column_roles`, `join_keys`, and `join_plan` to describe how later extraction should interpret the table.
+- Mark low-value, review, literature-comparison, composition-only, or unrelated units as `extractable: false`.
+- Prefer fewer, higher-confidence extractable routes over speculative coverage.
+""".strip()
+
+
 _TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE = """
 JSON compliance rules for text-window extraction:
 - Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, `warnings`, `anchors`, or `measurement_results`.
@@ -579,3 +593,30 @@ def build_objective_paper_frame_prompt(
         "Do not invent table ids or section labels. If uncertain, leave arrays empty."
     )
     return _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT, user_prompt
+
+
+def build_objective_evidence_route_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Route these source candidates for this one research objective.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with a `routes` array.\n"
+        "Each route must copy `source_kind` and `source_ref` from one "
+        "`source_candidates` item. Do not invent source refs.\n"
+        "`role` must be one of: current_experimental_evidence, "
+        "process_or_treatment, test_condition, composition_or_background, "
+        "characterization, literature_comparison, modeling_or_prediction, "
+        "low_value_or_irrelevant.\n"
+        "Use `current_experimental_evidence` only when the source unit likely "
+        "contains current-work target results for the active objective.\n"
+        "Use `process_or_treatment` or `test_condition` when a unit is mainly "
+        "needed to bind samples, process variables, or test environments.\n"
+        "Use `low_value_or_irrelevant` with `extractable: false` for frame-excluded "
+        "tables, literature summaries, composition-only tables, or unrelated units.\n"
+        "For table routes, include `table_schema` copied or summarized from the "
+        "candidate, assign `column_roles`, and describe `join_keys` / `join_plan` "
+        "when sample, condition, or table indices are needed for later joins.\n"
+        "For text-window routes, leave table-specific objects empty."
+    )
+    return _OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT, user_prompt

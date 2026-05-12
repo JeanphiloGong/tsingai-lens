@@ -61,6 +61,17 @@ _OBJECTIVE_FRAME_PAPER_ROLES = {
     "mixed",
     "uncertain",
 }
+_OBJECTIVE_SOURCE_KINDS = {"text_window", "table", "figure"}
+_OBJECTIVE_EVIDENCE_ROUTE_ROLES = {
+    "current_experimental_evidence",
+    "process_or_treatment",
+    "test_condition",
+    "composition_or_background",
+    "characterization",
+    "literature_comparison",
+    "modeling_or_prediction",
+    "low_value_or_irrelevant",
+}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -767,6 +778,60 @@ class StructuredObjectivePaperFrame(_StrictModel):
             allowed=_OBJECTIVE_FRAME_PAPER_ROLES,
             default="uncertain",
         )
+
+
+class StructuredObjectiveEvidenceRoute(_StrictModel):
+    source_kind: Literal["text_window", "table", "figure"] = "text_window"
+    source_ref: str
+    role: Literal[
+        "current_experimental_evidence",
+        "process_or_treatment",
+        "test_condition",
+        "composition_or_background",
+        "characterization",
+        "literature_comparison",
+        "modeling_or_prediction",
+        "low_value_or_irrelevant",
+    ] = "low_value_or_irrelevant"
+    extractable: bool = False
+    reason: str | None = None
+    table_schema: dict[str, Any] = Field(default_factory=dict)
+    column_roles: dict[str, Any] = Field(default_factory=dict)
+    join_keys: dict[str, Any] = Field(default_factory=dict)
+    join_plan: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 0.0
+
+    @field_validator("source_kind", mode="before")
+    @classmethod
+    def _normalize_source_kind(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_SOURCE_KINDS,
+            default="text_window",
+        )
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_EVIDENCE_ROUTE_ROLES,
+            default="low_value_or_irrelevant",
+        )
+
+    @field_validator("table_schema", "column_roles", "join_keys", "join_plan", mode="before")
+    @classmethod
+    def _normalize_objects(cls, value: object) -> object:
+        return _normalize_object_container(value)
+
+
+class StructuredObjectiveEvidenceRoutes(_StrictModel):
+    routes: list[StructuredObjectiveEvidenceRoute] = Field(default_factory=list)
+
+    @field_validator("routes", mode="before")
+    @classmethod
+    def _normalize_routes(cls, value: object) -> object:
+        return _normalize_list_container(value)
 
 
 class StructuredObjectiveMergePlan(_StrictModel):

@@ -8,6 +8,8 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
+    StructuredObjectiveEvidenceRoute,
+    StructuredObjectiveEvidenceRoutes,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjective,
@@ -395,6 +397,98 @@ class FakeCoreLLMStructuredExtractor:
             relevant_tables=relevant_tables,
             excluded_tables=excluded_tables,
         )
+
+    def route_objective_evidence(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceRoutes:
+        objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
+        property_axes = [
+            str(value).lower()
+            for value in objective.get("property_axes", [])
+            if str(value).strip()
+        ]
+        candidates = (
+            payload.get("source_candidates")
+            if isinstance(payload.get("source_candidates"), list)
+            else []
+        )
+        routes: list[StructuredObjectiveEvidenceRoute] = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            source_kind = str(candidate.get("source_kind") or "text_window")
+            source_ref = str(candidate.get("source_ref") or "")
+            if not source_ref:
+                continue
+            if candidate.get("frame_status") == "excluded":
+                routes.append(
+                    StructuredObjectiveEvidenceRoute(
+                        source_kind=source_kind,
+                        source_ref=source_ref,
+                        role="low_value_or_irrelevant",
+                        extractable=False,
+                        reason="Excluded by objective paper frame.",
+                        confidence=0.7,
+                    )
+                )
+                continue
+            if source_kind == "table":
+                table_schema = (
+                    candidate.get("table_schema")
+                    if isinstance(candidate.get("table_schema"), dict)
+                    else {}
+                )
+                table_text = " ".join(
+                    str(value or "")
+                    for value in (
+                        candidate.get("caption_text"),
+                        candidate.get("heading_path"),
+                        " ".join(
+                            str(item)
+                            for item in table_schema.get("column_headers", [])
+                        ),
+                    )
+                ).lower()
+                role = (
+                    "current_experimental_evidence"
+                    if any(axis in table_text for axis in property_axes)
+                    else "process_or_treatment"
+                )
+                routes.append(
+                    StructuredObjectiveEvidenceRoute(
+                        source_kind="table",
+                        source_ref=source_ref,
+                        role=role,
+                        extractable=True,
+                        reason="Table is relevant to the active objective.",
+                        table_schema=table_schema,
+                        column_roles={
+                            header: "target_property"
+                            for header in table_schema.get("column_headers", [])
+                            if any(axis in str(header).lower() for axis in property_axes)
+                        },
+                        join_keys={"sample_key": "sample"}
+                        if "sample" in table_text
+                        else {},
+                        join_plan={"join_on": "sample_key"}
+                        if "sample" in table_text
+                        else {},
+                        confidence=0.82,
+                    )
+                )
+                continue
+            routes.append(
+                StructuredObjectiveEvidenceRoute(
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    role="process_or_treatment",
+                    extractable=True,
+                    reason="Text window is in a relevant objective section.",
+                    confidence=0.72,
+                )
+            )
+        return StructuredObjectiveEvidenceRoutes(routes=routes)
 
     def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
         document_title = str(payload.get("document_title") or "")

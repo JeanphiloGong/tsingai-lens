@@ -59,6 +59,7 @@ from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
 from domain.core.research_objective import (
     ObjectiveContext,
+    ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
 )
@@ -91,6 +92,11 @@ _TABLE_CONTEXT_LEADING_ROWS = 5
 _TABLE_CONTEXT_TRAILING_ROWS = 3
 _MAX_TEXT_WINDOWS_PER_DOCUMENT = 24
 _INTRODUCTION_WINDOW_LIMIT = 1
+_PAPER_FACT_TEXT_ROUTE_ROLES = {
+    "current_experimental_evidence",
+    "test_condition",
+    "characterization",
+}
 _CHARACTERIZATION_COLUMNS = [
     "observation_id",
     "document_id",
@@ -603,7 +609,15 @@ class PaperFactsService:
         except DocumentProfilesNotReadyError as exc:
             raise PaperFactsNotReadyError(collection_id) from exc
 
-        objective_contexts = self._load_objective_contexts(collection_id)
+        objective_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        objective_contexts = (
+            objective_facts.objective_contexts
+            if objective_facts.research_objectives_ready
+            else ()
+        )
+        objective_route_gate = self._build_objective_route_gate(
+            objective_facts.objective_evidence_routes
+        )
         try:
             documents, text_units = load_collection_inputs(
                 collection_id,
@@ -652,17 +666,39 @@ class PaperFactsService:
             grouped_row_cells = self._group_table_cells_by_row(
                 table_cells_by_doc.get(candidate_document_id, [])
             )
-            selected_text_windows = self._select_text_windows_for_extraction(
-                text_windows=candidate_text_windows,
-                profile=candidate_profile,
-                has_table_rows=bool(candidate_table_rows),
+            route_gated_text_refs = (
+                objective_route_gate.get(candidate_document_id, {}).get(
+                    "text_windows",
+                    set(),
+                )
+                if objective_route_gate is not None
+                else set()
             )
+            if objective_route_gate is None or not route_gated_text_refs:
+                selected_text_windows = self._select_text_windows_for_extraction(
+                    text_windows=candidate_text_windows,
+                    profile=candidate_profile,
+                    has_table_rows=bool(candidate_table_rows),
+                )
+            else:
+                selected_text_windows = self._select_route_gated_text_windows(
+                    text_windows=candidate_text_windows,
+                    document_id=candidate_document_id,
+                    route_gate=objective_route_gate,
+                )
             if str(candidate_profile.get("doc_type") or "") == DOC_TYPE_REVIEW:
                 selected_table_rows: list[dict[str, Any]] = []
-            else:
+            elif objective_route_gate is None:
                 selected_table_rows = self._select_table_rows_for_extraction(
                     table_rows=candidate_table_rows,
                     grouped_row_cells=grouped_row_cells,
+                )
+            else:
+                selected_table_rows = self._select_route_gated_table_rows(
+                    table_rows=candidate_table_rows,
+                    document_id=candidate_document_id,
+                    grouped_row_cells=grouped_row_cells,
+                    route_gate=objective_route_gate,
                 )
             selected_table_row_batches = self._batch_table_rows_for_extraction(
                 selected_table_rows
@@ -709,6 +745,22 @@ class PaperFactsService:
                 "Paper facts objective contexts loaded collection_id=%s objective_context_count=%s",
                 collection_id,
                 len(objective_contexts),
+            )
+        if objective_route_gate is not None:
+            text_route_count = sum(
+                len(document_gate["text_windows"])
+                for document_gate in objective_route_gate.values()
+            )
+            table_route_count = sum(
+                len(document_gate["tables"])
+                for document_gate in objective_route_gate.values()
+            )
+            logger.info(
+                "Paper facts objective route gate loaded collection_id=%s document_count=%s text_window_routes=%s table_routes=%s",
+                collection_id,
+                len(objective_route_gate),
+                text_route_count,
+                table_route_count,
             )
 
         for document_position, row in enumerate(document_records, start=1):
@@ -5371,6 +5423,82 @@ class PaperFactsService:
             item["window"]
             for item in sorted(selected, key=lambda item: item["index"])
         ]
+
+    def _build_objective_route_gate(
+        self,
+        routes: tuple[ObjectiveEvidenceRoute, ...],
+    ) -> dict[str, dict[str, set[str]]] | None:
+        if not routes:
+            return None
+
+        route_gate: dict[str, dict[str, set[str]]] = {}
+        for route in routes:
+            if not route.extractable or route.role == "low_value_or_irrelevant":
+                continue
+            document_id = self._normalize_scalar_text(route.document_id)
+            source_ref = self._normalize_scalar_text(route.source_ref)
+            if not document_id or not source_ref:
+                continue
+            document_gate = route_gate.setdefault(
+                document_id,
+                {"text_windows": set(), "tables": set()},
+            )
+            if (
+                route.source_kind == "text_window"
+                and route.role in _PAPER_FACT_TEXT_ROUTE_ROLES
+            ):
+                document_gate["text_windows"].add(source_ref)
+            elif route.source_kind == "table":
+                document_gate["tables"].add(source_ref)
+        return route_gate
+
+    def _select_route_gated_text_windows(
+        self,
+        *,
+        text_windows: list[dict[str, Any]],
+        document_id: str,
+        route_gate: dict[str, dict[str, set[str]]],
+    ) -> list[dict[str, Any]]:
+        allowed_refs = route_gate.get(document_id, {}).get("text_windows", set())
+        if not allowed_refs:
+            return []
+
+        selected: list[dict[str, Any]] = []
+        for window in text_windows:
+            window_id = self._normalize_scalar_text(window.get("window_id"))
+            block_ids = {
+                block_id
+                for block_id in (
+                    self._normalize_scalar_text(item)
+                    for item in self._normalize_list(window.get("block_ids"))
+                )
+                if block_id
+            }
+            if window_id in allowed_refs or bool(block_ids & allowed_refs):
+                selected.append(window)
+        return selected
+
+    def _select_route_gated_table_rows(
+        self,
+        *,
+        table_rows: list[dict[str, Any]],
+        document_id: str,
+        grouped_row_cells: dict[tuple[str, int], list[dict[str, Any]]],
+        route_gate: dict[str, dict[str, set[str]]],
+    ) -> list[dict[str, Any]]:
+        allowed_table_ids = route_gate.get(document_id, {}).get("tables", set())
+        if not allowed_table_ids:
+            return []
+
+        routed_rows = [
+            row
+            for row in table_rows
+            if self._normalize_scalar_text(row.get("table_id")) in allowed_table_ids
+        ]
+        return self._select_table_rows_for_extraction(
+            table_rows=routed_rows,
+            grouped_row_cells=grouped_row_cells,
+        )
 
     def _select_table_rows_for_extraction(
         self,

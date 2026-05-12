@@ -53,8 +53,17 @@ from domain.core.evidence_backbone import (
     MeasurementResult,
     SampleVariant,
 )
-from domain.core.research_objective import ObjectiveContext, ResearchObjective
-from infra.persistence.sqlite.core_fact_repository import SqliteCoreFactRepository
+from domain.core.research_objective import (
+    ObjectiveContext,
+    ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
+    ResearchObjective,
+)
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
+)
 
 
 def _build_test_comparable_result(
@@ -182,6 +191,20 @@ class EvidenceOnlyExtractor:
         )
 
     def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
+        return StructuredTableBatchMentions()
+
+
+class CountingEvidenceExtractor(EvidenceOnlyExtractor):
+    def __init__(self) -> None:
+        self.text_window_payloads: list[dict] = []
+        self.table_batch_payloads: list[dict] = []
+
+    def extract_text_window_mentions(self, payload):  # noqa: ANN001
+        self.text_window_payloads.append(payload)
+        return super().extract_text_window_mentions(payload)
+
+    def extract_table_batch_mentions(self, payload):  # noqa: ANN001
+        self.table_batch_payloads.append(payload)
         return StructuredTableBatchMentions()
 
 
@@ -502,6 +525,284 @@ def test_paper_facts_selects_objective_context_by_text_and_table_route():
     assert table_2_context == mechanical_context
     assert table_2_route is not None
     assert table_2_route["role"] == "result_table"
+
+
+def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
+    tmp_path,
+    caplog,
+):
+    from application.core.semantic_build.document_profile_service import (
+        DocumentProfileService,
+    )
+    from application.source.collection_service import CollectionService
+    from domain.source import SourceArtifactSet
+
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Route Gated Facts")
+    collection_id = collection["collection_id"]
+    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    extractor = CountingEvidenceExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service=collection_service,
+        structured_extractor=extractor,
+        core_fact_repository=core_repository,
+        source_artifact_repository=source_repository,
+    )
+    service = PaperFactsService(
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
+        structured_extractor=extractor,
+        core_fact_repository=core_repository,
+        source_artifact_repository=source_repository,
+    )
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "LPBF 316L Route Gated Paper",
+                    "text": "Allowed process text. Excluded composition text.",
+                }
+            ],
+            text_units=[
+                {
+                    "id": "tu-1",
+                    "text": "Allowed process text.",
+                    "document_ids": ["paper-1"],
+                },
+                {
+                    "id": "tu-2",
+                    "text": "Excluded composition text.",
+                    "document_ids": ["paper-1"],
+                },
+            ],
+            blocks=[
+                {
+                    "block_id": "block-allowed",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "Allowed process text reports LPBF scan speed.",
+                    "block_order": 1,
+                    "heading_path": "Results",
+                    "text_unit_ids": ["tu-1"],
+                },
+                {
+                    "block_id": "block-excluded",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "Excluded composition text reports Fe Cr Ni only.",
+                    "block_order": 2,
+                    "heading_path": "Composition",
+                    "text_unit_ids": ["tu-2"],
+                },
+            ],
+            tables=[
+                {
+                    "table_id": "table-allowed",
+                    "document_id": "paper-1",
+                    "table_order": 1,
+                    "caption_text": "Allowed tensile results",
+                    "heading_path": "Results",
+                    "column_headers": ["Sample", "Yield strength"],
+                    "table_matrix": [
+                        ["Sample", "Yield strength"],
+                        ["Sample A", "560 MPa"],
+                    ],
+                },
+                {
+                    "table_id": "table-excluded",
+                    "document_id": "paper-1",
+                    "table_order": 2,
+                    "caption_text": "Excluded chemical composition",
+                    "heading_path": "Composition",
+                    "column_headers": ["Fe", "Cr", "Ni"],
+                    "table_matrix": [
+                        ["Fe", "Cr", "Ni"],
+                        ["balance", "17", "12"],
+                    ],
+                },
+            ],
+            table_rows=[
+                {
+                    "row_id": "row-allowed-1",
+                    "document_id": "paper-1",
+                    "table_id": "table-allowed",
+                    "row_index": 1,
+                    "row_text": "Sample A | 560 MPa",
+                    "heading_path": "Results",
+                },
+                {
+                    "row_id": "row-excluded-1",
+                    "document_id": "paper-1",
+                    "table_id": "table-excluded",
+                    "row_index": 1,
+                    "row_text": "balance | 17 | 12",
+                    "heading_path": "Composition",
+                },
+            ],
+            table_cells=[
+                {
+                    "cell_id": "cell-allowed-1",
+                    "document_id": "paper-1",
+                    "table_id": "table-allowed",
+                    "row_index": 1,
+                    "col_index": 1,
+                    "header_path": "Sample",
+                    "cell_text": "Sample A",
+                },
+                {
+                    "cell_id": "cell-allowed-2",
+                    "document_id": "paper-1",
+                    "table_id": "table-allowed",
+                    "row_index": 1,
+                    "col_index": 2,
+                    "header_path": "Yield strength",
+                    "cell_text": "560",
+                    "unit_hint": "MPa",
+                },
+                {
+                    "cell_id": "cell-excluded-1",
+                    "document_id": "paper-1",
+                    "table_id": "table-excluded",
+                    "row_index": 1,
+                    "col_index": 1,
+                    "header_path": "Fe",
+                    "cell_text": "balance",
+                },
+                {
+                    "cell_id": "cell-excluded-2",
+                    "document_id": "paper-1",
+                    "table_id": "table-excluded",
+                    "row_index": 1,
+                    "col_index": 2,
+                    "header_path": "Cr",
+                    "cell_text": "17",
+                    "unit_hint": "wt%",
+                },
+            ],
+        ),
+    )
+
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "question": "How does scan speed affect LPBF 316L yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan speed"],
+            "property_axes": ["yield strength"],
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "question": objective.question,
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["scan speed"],
+            "process_context_axes": ["LPBF"],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+    existing_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-existing",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield_strength",
+            "value_payload": {"value": 560},
+            "resolution_status": "resolved",
+        }
+    )
+    existing_chain = ObjectiveLogicChain.from_mapping(
+        {
+            "logic_chain_id": "olc-existing",
+            "objective_id": objective.objective_id,
+            "chain_scope": "objective",
+            "evidence_unit_ids": [existing_unit.evidence_unit_id],
+            "chain_payload": {"schema_version": "objective_logic_chain.v1"},
+        }
+    )
+    core_repository.replace_collection_research_objectives(
+        collection_id,
+        (),
+        (objective,),
+        (objective_context,),
+        (),
+        (
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "text_window",
+                    "source_ref": "block-allowed",
+                    "role": "current_experimental_evidence",
+                    "extractable": True,
+                }
+            ),
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "text_window",
+                    "source_ref": "block-excluded",
+                    "role": "low_value_or_irrelevant",
+                    "extractable": False,
+                }
+            ),
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "table",
+                    "source_ref": "table-allowed",
+                    "role": "current_experimental_evidence",
+                    "extractable": True,
+                }
+            ),
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "table",
+                    "source_ref": "table-excluded",
+                    "role": "low_value_or_irrelevant",
+                    "extractable": False,
+                }
+            ),
+        ),
+        (existing_unit,),
+        (existing_chain,),
+    )
+
+    with caplog.at_level("INFO"):
+        service.build_paper_facts(collection_id)
+
+    assert len(extractor.text_window_payloads) == 1
+    assert extractor.text_window_payloads[0]["text_window"]["text"].startswith(
+        "Allowed process text"
+    )
+    assert len(extractor.table_batch_payloads) == 1
+    target_rows = extractor.table_batch_payloads[0]["target_rows"]
+    assert len(target_rows) == 1
+    assert target_rows[0]["row_summary"] == "Sample A | 560 MPa"
+    assert all("balance" not in row["row_summary"] for row in target_rows)
+
+    facts = core_repository.read_collection_facts(collection_id)
+    assert facts.objective_evidence_units == (existing_unit,)
+    assert facts.objective_logic_chains == (existing_chain,)
+    assert any(
+        "Paper facts objective route gate loaded" in record.message
+        and "text_window_routes=1" in record.message
+        and "table_routes=1" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts extraction started" in record.message
+        and "total_extraction_units=2" in record.message
+        for record in caplog.records
+    )
 
 
 def test_paper_facts_replace_objective_evidence_units_from_paper_facts(tmp_path, caplog):

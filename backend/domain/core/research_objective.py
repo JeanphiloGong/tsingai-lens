@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha1
+import json
 import math
 import re
 from typing import Any, Final, Mapping
@@ -36,6 +37,26 @@ EVIDENCE_ROUTE_ROLE_VALUES: Final[frozenset[str]] = frozenset(
         "modeling_or_prediction",
         "low_value_or_irrelevant",
     }
+)
+EVIDENCE_UNIT_KIND_VALUES: Final[frozenset[str]] = frozenset(
+    {
+        "measurement",
+        "test_condition",
+        "sample_context",
+        "process_context",
+        "characterization",
+        "baseline_reference",
+        "comparison",
+        "interpretation",
+        "mixed",
+        "unknown",
+    }
+)
+EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
+    {"resolved", "partial", "unresolved", "skipped", "unknown"}
+)
+LOGIC_CHAIN_SCOPE_VALUES: Final[frozenset[str]] = frozenset(
+    {"objective", "paper", "cross_paper"}
 )
 _QUESTION_SIGNAL_TERMS: Final[tuple[str, ...]] = (
     "how ",
@@ -226,6 +247,7 @@ class ObjectiveContext:
 
 @dataclass(frozen=True)
 class ObjectivePaperFrame:
+    frame_id: str
     objective_id: str
     document_id: str
     relevance: str
@@ -241,10 +263,15 @@ class ObjectivePaperFrame:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectivePaperFrame":
+        objective_id = _normalize_text(payload.get("objective_id")) or ""
+        document_id = (
+            _normalize_text(payload.get("document_id") or payload.get("paper_id")) or ""
+        )
         return cls(
-            objective_id=_normalize_text(payload.get("objective_id")) or "",
-            document_id=_normalize_text(payload.get("document_id") or payload.get("paper_id"))
-            or "",
+            frame_id=_normalize_text(payload.get("frame_id"))
+            or _build_scoped_id("opf", objective_id, document_id),
+            objective_id=objective_id,
+            document_id=document_id,
             relevance=_normalize_choice(
                 payload.get("relevance"),
                 allowed=PAPER_RELEVANCE_VALUES,
@@ -275,6 +302,7 @@ class ObjectivePaperFrame:
 
     def to_record(self) -> dict[str, Any]:
         return {
+            "frame_id": self.frame_id,
             "objective_id": self.objective_id,
             "document_id": self.document_id,
             "relevance": self.relevance,
@@ -291,7 +319,8 @@ class ObjectivePaperFrame:
 
 
 @dataclass(frozen=True)
-class EvidenceRoute:
+class ObjectiveEvidenceRoute:
+    route_id: str
     objective_id: str
     document_id: str
     source_kind: str
@@ -299,32 +328,56 @@ class EvidenceRoute:
     role: str
     extractable: bool
     reason: str | None
+    table_schema: dict[str, Any]
+    column_roles: dict[str, Any]
+    join_keys: dict[str, Any]
+    join_plan: dict[str, Any]
     confidence: float
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceRoute":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceRoute":
+        objective_id = _normalize_text(payload.get("objective_id")) or ""
+        document_id = (
+            _normalize_text(payload.get("document_id") or payload.get("paper_id")) or ""
+        )
+        source_kind = _normalize_choice(
+            payload.get("source_kind"),
+            allowed=SOURCE_KIND_VALUES,
+            default="text_window",
+        )
+        source_ref = _normalize_text(payload.get("source_ref")) or ""
+        role = _normalize_choice(
+            payload.get("role"),
+            allowed=EVIDENCE_ROUTE_ROLE_VALUES,
+            default="low_value_or_irrelevant",
+        )
         return cls(
-            objective_id=_normalize_text(payload.get("objective_id")) or "",
-            document_id=_normalize_text(payload.get("document_id") or payload.get("paper_id"))
-            or "",
-            source_kind=_normalize_choice(
-                payload.get("source_kind"),
-                allowed=SOURCE_KIND_VALUES,
-                default="text_window",
+            route_id=_normalize_text(payload.get("route_id"))
+            or _build_scoped_id(
+                "oer",
+                objective_id,
+                document_id,
+                source_kind,
+                source_ref,
+                role,
             ),
-            source_ref=_normalize_text(payload.get("source_ref")) or "",
-            role=_normalize_choice(
-                payload.get("role"),
-                allowed=EVIDENCE_ROUTE_ROLE_VALUES,
-                default="low_value_or_irrelevant",
-            ),
+            objective_id=objective_id,
+            document_id=document_id,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            role=role,
             extractable=_normalize_bool(payload.get("extractable")),
             reason=_normalize_text(payload.get("reason")),
+            table_schema=_normalize_mapping(payload.get("table_schema")),
+            column_roles=_normalize_mapping(payload.get("column_roles")),
+            join_keys=_normalize_mapping(payload.get("join_keys")),
+            join_plan=_normalize_mapping(payload.get("join_plan")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
         )
 
     def to_record(self) -> dict[str, Any]:
         return {
+            "route_id": self.route_id,
             "objective_id": self.objective_id,
             "document_id": self.document_id,
             "source_kind": self.source_kind,
@@ -332,6 +385,161 @@ class EvidenceRoute:
             "role": self.role,
             "extractable": self.extractable,
             "reason": self.reason,
+            "table_schema": dict(self.table_schema),
+            "column_roles": dict(self.column_roles),
+            "join_keys": dict(self.join_keys),
+            "join_plan": dict(self.join_plan),
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class ObjectiveEvidenceUnit:
+    evidence_unit_id: str
+    objective_id: str
+    document_id: str
+    unit_kind: str
+    property_normalized: str | None
+    material_system: dict[str, Any]
+    sample_context: dict[str, Any]
+    process_context: dict[str, Any]
+    resolved_condition: dict[str, Any]
+    test_condition: dict[str, Any]
+    value_payload: dict[str, Any]
+    unit: str | None
+    baseline_context: dict[str, Any]
+    interpretation: str | None
+    source_refs: tuple[dict[str, Any], ...]
+    evidence_anchor_ids: tuple[str, ...]
+    join_keys: dict[str, Any]
+    resolution_status: str
+    confidence: float
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceUnit":
+        objective_id = _normalize_text(payload.get("objective_id")) or ""
+        document_id = (
+            _normalize_text(payload.get("document_id") or payload.get("paper_id")) or ""
+        )
+        unit_kind = _normalize_choice(
+            payload.get("unit_kind"),
+            allowed=EVIDENCE_UNIT_KIND_VALUES,
+            default="unknown",
+        )
+        property_normalized = _normalize_text(payload.get("property_normalized"))
+        source_refs = _normalize_mapping_sequence(payload.get("source_refs"))
+        return cls(
+            evidence_unit_id=_normalize_text(payload.get("evidence_unit_id"))
+            or _build_scoped_id(
+                "oeu",
+                objective_id,
+                document_id,
+                unit_kind,
+                property_normalized,
+                _stable_payload(source_refs),
+                _stable_payload(payload.get("value_payload")),
+            ),
+            objective_id=objective_id,
+            document_id=document_id,
+            unit_kind=unit_kind,
+            property_normalized=property_normalized,
+            material_system=_normalize_mapping(payload.get("material_system")),
+            sample_context=_normalize_mapping(payload.get("sample_context")),
+            process_context=_normalize_mapping(payload.get("process_context")),
+            resolved_condition=_normalize_mapping(payload.get("resolved_condition")),
+            test_condition=_normalize_mapping(payload.get("test_condition")),
+            value_payload=_normalize_mapping(payload.get("value_payload")),
+            unit=_normalize_text(payload.get("unit")),
+            baseline_context=_normalize_mapping(payload.get("baseline_context")),
+            interpretation=_normalize_text(payload.get("interpretation")),
+            source_refs=source_refs,
+            evidence_anchor_ids=normalize_objective_terms(
+                payload.get("evidence_anchor_ids")
+            ),
+            join_keys=_normalize_mapping(payload.get("join_keys")),
+            resolution_status=_normalize_choice(
+                payload.get("resolution_status"),
+                allowed=EVIDENCE_RESOLUTION_STATUS_VALUES,
+                default="unknown",
+            ),
+            confidence=normalize_objective_confidence(payload.get("confidence")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "evidence_unit_id": self.evidence_unit_id,
+            "objective_id": self.objective_id,
+            "document_id": self.document_id,
+            "unit_kind": self.unit_kind,
+            "property_normalized": self.property_normalized,
+            "material_system": dict(self.material_system),
+            "sample_context": dict(self.sample_context),
+            "process_context": dict(self.process_context),
+            "resolved_condition": dict(self.resolved_condition),
+            "test_condition": dict(self.test_condition),
+            "value_payload": dict(self.value_payload),
+            "unit": self.unit,
+            "baseline_context": dict(self.baseline_context),
+            "interpretation": self.interpretation,
+            "source_refs": [dict(item) for item in self.source_refs],
+            "evidence_anchor_ids": list(self.evidence_anchor_ids),
+            "join_keys": dict(self.join_keys),
+            "resolution_status": self.resolution_status,
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class ObjectiveLogicChain:
+    logic_chain_id: str
+    objective_id: str
+    chain_scope: str
+    document_id: str | None
+    question: str | None
+    evidence_unit_ids: tuple[str, ...]
+    chain_payload: dict[str, Any]
+    summary: str | None
+    confidence: float
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveLogicChain":
+        objective_id = _normalize_text(payload.get("objective_id")) or ""
+        chain_scope = _normalize_choice(
+            payload.get("chain_scope"),
+            allowed=LOGIC_CHAIN_SCOPE_VALUES,
+            default="objective",
+        )
+        document_id = _normalize_text(payload.get("document_id") or payload.get("paper_id"))
+        evidence_unit_ids = normalize_objective_terms(payload.get("evidence_unit_ids"))
+        return cls(
+            logic_chain_id=_normalize_text(payload.get("logic_chain_id"))
+            or _build_scoped_id(
+                "olc",
+                objective_id,
+                chain_scope,
+                document_id,
+                _stable_payload(evidence_unit_ids),
+            ),
+            objective_id=objective_id,
+            chain_scope=chain_scope,
+            document_id=document_id,
+            question=_normalize_text(payload.get("question")),
+            evidence_unit_ids=evidence_unit_ids,
+            chain_payload=_normalize_mapping(payload.get("chain_payload")),
+            summary=_normalize_text(payload.get("summary")),
+            confidence=normalize_objective_confidence(payload.get("confidence")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "logic_chain_id": self.logic_chain_id,
+            "objective_id": self.objective_id,
+            "chain_scope": self.chain_scope,
+            "document_id": self.document_id,
+            "question": self.question,
+            "evidence_unit_ids": list(self.evidence_unit_ids),
+            "chain_payload": dict(self.chain_payload),
+            "summary": self.summary,
             "confidence": self.confidence,
         }
 
@@ -442,14 +650,35 @@ def _normalize_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(_normalize_mapping(item) for item in value if isinstance(item, Mapping))
 
 
+def _normalize_mapping_sequence(value: Any) -> tuple[dict[str, Any], ...]:
+    if isinstance(value, Mapping):
+        return (_normalize_mapping(value),)
+    return _normalize_mapping_tuple(value)
+
+
+def _build_scoped_id(prefix: str, *parts: Any) -> str:
+    seed = "|".join(_normalize_text(part) or "" for part in parts) or "unspecified"
+    digest = sha1(seed.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}_{digest}"
+
+
+def _stable_payload(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
 def _is_missing(value: Any) -> bool:
     return value is None or (isinstance(value, float) and math.isnan(value))
 
 
 __all__ = [
+    "EVIDENCE_RESOLUTION_STATUS_VALUES",
     "EVIDENCE_ROUTE_ROLE_VALUES",
-    "EvidenceRoute",
+    "EVIDENCE_UNIT_KIND_VALUES",
+    "LOGIC_CHAIN_SCOPE_VALUES",
     "ObjectiveContext",
+    "ObjectiveEvidenceRoute",
+    "ObjectiveEvidenceUnit",
+    "ObjectiveLogicChain",
     "ObjectivePaperFrame",
     "PAPER_RELEVANCE_VALUES",
     "PAPER_ROLE_VALUES",

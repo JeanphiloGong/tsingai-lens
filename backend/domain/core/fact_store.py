@@ -19,7 +19,15 @@ from domain.core.evidence_backbone import (
     StructureFeature,
     TestCondition,
 )
-from domain.core.research_objective import ObjectiveContext, PaperSkim, ResearchObjective
+from domain.core.research_objective import (
+    ObjectiveContext,
+    ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
+    ObjectivePaperFrame,
+    PaperSkim,
+    ResearchObjective,
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +38,10 @@ class CoreFactSet:
     paper_skims: tuple[PaperSkim, ...] = ()
     research_objectives: tuple[ResearchObjective, ...] = ()
     objective_contexts: tuple[ObjectiveContext, ...] = ()
+    objective_paper_frames: tuple[ObjectivePaperFrame, ...] = ()
+    objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...] = ()
+    objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...] = ()
+    objective_logic_chains: tuple[ObjectiveLogicChain, ...] = ()
     document_profiles: tuple[DocumentProfile, ...] = ()
     evidence_anchors: tuple[EvidenceAnchor, ...] = ()
     method_facts: tuple[MethodFact, ...] = ()

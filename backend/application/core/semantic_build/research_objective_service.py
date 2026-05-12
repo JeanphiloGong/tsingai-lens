@@ -245,6 +245,10 @@ class ResearchObjectiveService:
             tuple(paper_skims),
             research_objectives,
             objective_contexts,
+            (),
+            (),
+            (),
+            (),
         )
         logger.info(
             "Research objective build finished collection_id=%s paper_skim_count=%s objective_count=%s",

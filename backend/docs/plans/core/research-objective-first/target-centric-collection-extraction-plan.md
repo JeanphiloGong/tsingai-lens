@@ -39,6 +39,12 @@ target logic-chain assembly
 comparison, report, and workspace projections inside each target
 ```
 
+The final Core product of this flow is the pair of resolved evidence units and
+target logic chains. Comparison rows, evidence cards, reports, and workspace
+payloads are projections over those records. They exist to review, navigate,
+or present the chain; they should not become separate authoritative semantic
+outputs.
+
 This plan belongs to the Core semantic-build pipeline because it changes the
 order and ownership of Core extraction decisions. It does not change Source
 parser selection, public API routes, frontend contracts, or downstream report,
@@ -341,6 +347,10 @@ The extractor should receive:
 - Source evidence context
 - row and cell locators for tables
 
+The table schema and join plan are extraction inputs, not final user-facing
+facts. They explain how table rows, columns, and paper-local identifiers should
+be bound into complete experimental evidence units.
+
 The output should stay evidence-chain shaped:
 
 ```text
@@ -370,6 +380,12 @@ them. Resolution includes:
 - binding text explanations to table or figure measurements
 - preserving source traceback for every resolved value and claim
 
+Paper-local identifiers such as `condition number` and `sample number` should
+survive as join and traceback keys. They should not be the final condition
+shown to later comparison or report stages when the paper provides enough
+table context to resolve them into real preparation, process, test, or sample
+conditions.
+
 The primary target output is a research logic chain, not just comparison-ready
 rows:
 
@@ -390,26 +406,30 @@ projections over these resolved evidence units and target logic chains.
 
 ## Core Records
 
-The first implementation can keep routing and target state internal to the
-rebuild run while logging enough detail for diagnosis.
-
-Once the flow is stable, Core should persist target state as database records
-through the Core persistence boundary rather than as standalone repository records.
-The first record families should be:
+The minimal data-layer slice persists target state as database records through
+the Core persistence boundary rather than as standalone repository records.
+The first record families are:
 
 - `PaperSkim`
 - `ResearchObjective`
 - `ObjectivePaperFrame`
-- `EvidenceRoute`
-- resolved evidence units and target logic chains
+- `ObjectiveEvidenceRoute`
+- `ObjectiveEvidenceUnit`
+- `ObjectiveLogicChain`
 - target-scoped measurement and comparison records
 
 The SQLite implementation should store them in Core-owned tables such as
 `core_paper_skims`, `core_research_objectives`,
-`core_objective_paper_frames`, and `core_objective_evidence_routes`. These
+`core_objective_paper_frames`, `core_objective_evidence_routes`,
+`core_objective_evidence_units`, and `core_objective_logic_chains`. These
 records should remain Core internal in the first wave. They should not become
 public frontend API contracts until the product surface is explicitly designed
 around target selection.
+
+Resolved evidence units and target logic chains should be the authoritative
+records for later comparison, report, and workspace assembly. Target-scoped
+measurement and comparison records are useful projections, but they should be
+rebuildable from the resolved evidence units and logic chains.
 
 ## Execution Order
 
@@ -427,9 +447,12 @@ around target selection.
    join plans.
 10. Run target-scoped evidence-unit extraction only on target-authorized source
     units.
-11. Resolve table and text fragments into paper-level target logic chains.
-12. Assemble comparison rows within each target as projections before any
-    cross-target merge.
+11. Resolve table and text fragments into complete target-scoped evidence
+    units.
+12. Assemble paper-level and cross-paper target logic chains from resolved
+    evidence units.
+13. Assemble comparison rows, evidence cards, reports, and workspace payloads
+    as projections before any cross-target merge.
 
 ## Verification
 

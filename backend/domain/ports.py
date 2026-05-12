@@ -14,6 +14,10 @@ from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
 from domain.core.research_objective import (
     ObjectiveContext,
+    ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
+    ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
 )
@@ -165,6 +169,10 @@ class CoreFactRepository(Protocol):
         paper_skims: tuple[PaperSkim, ...],
         research_objectives: tuple[ResearchObjective, ...],
         objective_contexts: tuple[ObjectiveContext, ...],
+        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
+        objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
+        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+        objective_logic_chains: tuple[ObjectiveLogicChain, ...],
     ) -> None: ...
 
     def replace_collection_document_profiles(

@@ -16,6 +16,9 @@ The core judgment is:
   comparison, but should not become the only owner of extracted facts
 - the final product object should be a traceable research logic chain, not
   only a comparison table or a set of evidence cards
+- comparison rows, evidence cards, reports, graph nodes, and workspace panels
+  should be projections or support views over resolved evidence units and
+  research logic chains, not separate final answers
 - the durable data goal remains a normalized, reusable, evidence-backed
   material fact substrate
 - Core extraction, comparison assembly, backend APIs, and frontend workspace
@@ -237,6 +240,10 @@ research objective
 -> cross-paper agreement, conflict, and gaps
 ```
 
+This chain is not just a fluent report. It is the resolved answer structure
+that explains why a comparison is valid, which experimental route produced
+each value, and where the claim traces back into the source paper.
+
 For table-heavy papers, this means table identifiers such as `condition
 number` and `sample number` should be retained as paper-local join and
 traceback keys, but downstream logic-chain evidence should expose the resolved
@@ -245,6 +252,12 @@ not leave later stages with only `condition number = 1`; it should join the
 condition table and result table so the evidence unit carries the actual SLM
 condition, such as scan strategy, scanning speed, energy density, and the
 measured mechanical properties.
+
+Evidence resolution is therefore a required product boundary, not an optional
+cleanup step. A comparison row may keep the paper-local key for traceback, but
+the user-facing chain should resolve that key into the real preparation,
+processing, test, or sample condition whenever the source paper provides the
+join information.
 
 Comparison matrices, evidence cards, reports, graph nodes, and future material
 database views should be projections over this resolved evidence chain. The
@@ -337,6 +350,11 @@ These records should carry objective provenance, but the final facts should
 still normalize reusable material, process, property, condition, baseline, and
 evidence fields. They should not become unstructured objective-local text
 results.
+
+`ObjectiveEvidenceUnit` and `ObjectiveLogicChain` are the authoritative Core
+outputs for the objective-first path. Objective comparison rows, evidence
+cards, and reports should be generated from those records as projections for
+review, navigation, and presentation.
 
 Existing material-first Core records should no longer be the primary source of
 truth after cutover:

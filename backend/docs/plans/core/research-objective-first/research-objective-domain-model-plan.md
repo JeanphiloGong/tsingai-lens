@@ -116,6 +116,7 @@ The objective must be question-shaped. A bare material name such as
 
 Recommended fields:
 
+- `frame_id`
 - `objective_id`
 - `document_id`
 - `relevance`
@@ -132,13 +133,14 @@ Recommended fields:
 This object is still coarse extraction. It decides where final fact extraction
 may run; it does not contain final measurement facts.
 
-### EvidenceRoute
+### ObjectiveEvidenceRoute
 
-`EvidenceRoute` describes whether a source unit should be extracted for one
-objective.
+`ObjectiveEvidenceRoute` describes whether a source unit should be extracted
+for one objective.
 
 Recommended fields:
 
+- `route_id`
 - `objective_id`
 - `document_id`
 - `source_kind`
@@ -146,6 +148,10 @@ Recommended fields:
 - `role`
 - `extractable`
 - `reason`
+- `table_schema`
+- `column_roles`
+- `join_keys`
+- `join_plan`
 - `confidence`
 
 The initial source kinds should be simple:
@@ -164,6 +170,50 @@ The initial roles should be enough to support routing:
 - `literature_comparison`
 - `modeling_or_prediction`
 - `low_value_or_irrelevant`
+
+### ObjectiveEvidenceUnit
+
+`ObjectiveEvidenceUnit` stores one resolved target-scoped evidence item after
+routing and extraction.
+
+Recommended fields:
+
+- `evidence_unit_id`
+- `objective_id`
+- `document_id`
+- `unit_kind`
+- `property_normalized`
+- `material_system`
+- `sample_context`
+- `process_context`
+- `resolved_condition`
+- `test_condition`
+- `value_payload`
+- `unit`
+- `baseline_context`
+- `interpretation`
+- `source_refs`
+- `evidence_anchor_ids`
+- `join_keys`
+- `resolution_status`
+- `confidence`
+
+### ObjectiveLogicChain
+
+`ObjectiveLogicChain` stores the assembled research logic chain for one
+objective at paper or cross-paper scope.
+
+Recommended fields:
+
+- `logic_chain_id`
+- `objective_id`
+- `chain_scope`
+- `document_id`
+- `question`
+- `evidence_unit_ids`
+- `chain_payload`
+- `summary`
+- `confidence`
 
 ## Domain Helpers
 
@@ -202,7 +252,7 @@ application-level persistence.
 Implement the first slice in this order:
 
 1. Add `backend/domain/core/research_objective.py`.
-2. Define the four dataclasses and the pure helper functions.
+2. Define the objective-first dataclasses and the pure helper functions.
 3. Export the new objects and helpers from `backend/domain/core/__init__.py`.
 4. Add `backend/tests/unit/domains/test_research_objective_domain.py`.
 5. Verify that domain tests pass before adding any LLM or application service.
@@ -223,8 +273,10 @@ Domain tests should cover:
   a comparison question
 - `ObjectivePaperFrame` can represent `high`, `low`, and `irrelevant`
   relevance states
-- `EvidenceRoute` can represent extractable and skipped routes for text,
+- `ObjectiveEvidenceRoute` can represent extractable and skipped routes for text,
   table, and figure units
+- `ObjectiveEvidenceUnit` can preserve resolved evidence payloads
+- `ObjectiveLogicChain` can preserve assembled chain payloads
 
 Run:
 

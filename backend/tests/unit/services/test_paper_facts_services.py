@@ -656,10 +656,46 @@ def test_paper_facts_replace_objective_evidence_units_from_paper_facts(tmp_path)
         unit.evidence_unit_id
         for unit in units
     }
-    assert facts.objective_logic_chains[0].evidence_unit_ids == tuple(
+    logic_chain = facts.objective_logic_chains[0]
+    assert logic_chain.evidence_unit_ids == tuple(
         unit.evidence_unit_id
         for unit in units
     )
+    assert logic_chain.summary == (
+        "Objective logic chain assembled across 1 paper(s) with 1 resolved "
+        "measurement result(s) for yield_strength."
+    )
+    chain_payload = logic_chain.chain_payload
+    assert chain_payload["schema_version"] == "objective_logic_chain.v1"
+    assert [
+        step["step_role"]
+        for step in chain_payload["steps"]
+    ] == [
+        "research_objective",
+        "sample_and_process_context",
+        "test_and_characterization",
+        "measurement_results",
+        "comparison_and_interpretation",
+        "cross_paper_resolution",
+    ]
+    assert chain_payload["unit_counts_by_kind"] == {
+        "measurement": 1,
+        "test_condition": 1,
+        "characterization": 1,
+    }
+    assert chain_payload["cross_paper"]["measured_properties"] == ["yield_strength"]
+    assert chain_payload["cross_paper"]["comparison_ready"] is False
+    assert chain_payload["cross_paper"]["gaps"] == ["comparison_units_missing"]
+    paper_chain = chain_payload["paper_chains"][0]
+    assert paper_chain["document_id"] == "paper-1"
+    assert paper_chain["measurement_results"][0]["value_payload"]["value"] == 560
+    assert paper_chain["test_conditions"][0]["test_condition"][
+        "condition_payload"
+    ]["standard"] == "ASTM E8M"
+    assert paper_chain["characterization_observations"][0]["value_payload"][
+        "observation_text"
+    ] == "SEM showed fine cellular microstructure."
+    assert paper_chain["resolution"]["gaps"] == ["comparison_units_missing"]
     measurement = units_by_kind["measurement"]
     assert measurement.objective_id == objective.objective_id
     assert measurement.sample_context["label"] == "Sample A"

@@ -1917,6 +1917,13 @@ class PaperFactsService:
                 if unit.document_id not in document_ids:
                     document_ids.append(unit.document_id)
             context = context_by_objective_id.get(objective_id)
+            chain_payload = self._objective_logic_chain_payload(
+                objective=objective,
+                objective_context=context,
+                units=tuple(units),
+                counts_by_kind=counts_by_kind,
+                document_ids=document_ids,
+            )
             chains.append(
                 ObjectiveLogicChain.from_mapping(
                     {
@@ -1927,29 +1934,392 @@ class PaperFactsService:
                             unit.evidence_unit_id
                             for unit in units
                         ],
-                        "chain_payload": {
-                            "unit_counts_by_kind": counts_by_kind,
-                            "document_ids": document_ids,
-                            "target_property_axes": (
-                                list(context.target_property_axes)
-                                if context is not None
-                                else []
-                            ),
-                            "variable_process_axes": (
-                                list(context.variable_process_axes)
-                                if context is not None
-                                else []
-                            ),
-                        },
-                        "summary": (
-                            "Objective logic chain assembled from resolved "
-                            "paper fact evidence units."
-                        ),
+                        "chain_payload": chain_payload,
+                        "summary": self._objective_logic_chain_summary(chain_payload),
                         "confidence": getattr(objective, "confidence", 0.0),
                     }
                 )
             )
         return tuple(chains)
+
+    def _objective_logic_chain_payload(
+        self,
+        *,
+        objective: Any,
+        objective_context: ObjectiveContext | None,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+        counts_by_kind: dict[str, int],
+        document_ids: list[str],
+    ) -> dict[str, Any]:
+        paper_chains = [
+            self._objective_paper_logic_chain(
+                document_id=document_id,
+                units=tuple(
+                    unit
+                    for unit in units
+                    if unit.document_id == document_id
+                ),
+            )
+            for document_id in document_ids
+        ]
+        evidence_unit_ids_by_role = self._objective_evidence_unit_ids_by_role(units)
+        cross_paper = self._objective_cross_paper_logic(
+            paper_chains=paper_chains,
+            units=units,
+        )
+        return {
+            "schema_version": "objective_logic_chain.v1",
+            "objective": {
+                "objective_id": self._normalize_scalar_text(
+                    getattr(objective, "objective_id", None)
+                ),
+                "question": self._normalize_scalar_text(
+                    getattr(objective, "question", None)
+                ),
+                "material_scope": list(getattr(objective, "material_scope", ()) or ()),
+                "process_axes": list(getattr(objective, "process_axes", ()) or ()),
+                "property_axes": list(getattr(objective, "property_axes", ()) or ()),
+            },
+            "context": {
+                "target_property_axes": (
+                    list(objective_context.target_property_axes)
+                    if objective_context is not None
+                    else []
+                ),
+                "variable_process_axes": (
+                    list(objective_context.variable_process_axes)
+                    if objective_context is not None
+                    else []
+                ),
+                "process_context_axes": (
+                    list(objective_context.process_context_axes)
+                    if objective_context is not None
+                    else []
+                ),
+            },
+            "unit_counts_by_kind": counts_by_kind,
+            "document_ids": document_ids,
+            "evidence_unit_ids_by_role": evidence_unit_ids_by_role,
+            "steps": self._objective_logic_chain_steps(
+                objective=objective,
+                objective_context=objective_context,
+                evidence_unit_ids_by_role=evidence_unit_ids_by_role,
+                cross_paper=cross_paper,
+            ),
+            "paper_chains": paper_chains,
+            "cross_paper": cross_paper,
+        }
+
+    def _objective_paper_logic_chain(
+        self,
+        *,
+        document_id: str,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[str, Any]:
+        measurements = tuple(unit for unit in units if unit.unit_kind == "measurement")
+        test_conditions = tuple(
+            unit for unit in units if unit.unit_kind == "test_condition"
+        )
+        sample_process_units = tuple(
+            unit
+            for unit in units
+            if unit.unit_kind in {"sample_context", "process_context", "measurement"}
+            and (unit.sample_context or unit.process_context)
+        )
+        characterization = tuple(
+            unit for unit in units if unit.unit_kind == "characterization"
+        )
+        comparisons = tuple(unit for unit in units if unit.unit_kind == "comparison")
+        interpretations = tuple(
+            unit for unit in units if unit.unit_kind == "interpretation"
+        )
+        gaps = self._objective_paper_logic_gaps(
+            measurements=measurements,
+            test_conditions=test_conditions,
+            sample_process_units=sample_process_units,
+            characterization=characterization,
+            comparisons=comparisons,
+        )
+        return {
+            "document_id": document_id,
+            "evidence_unit_ids": [unit.evidence_unit_id for unit in units],
+            "material_systems": self._dedupe_chain_items(
+                [
+                    unit.material_system
+                    for unit in units
+                    if unit.material_system
+                ]
+            ),
+            "sample_and_process_contexts": self._dedupe_chain_items(
+                [
+                    self._objective_sample_process_chain_item(unit)
+                    for unit in sample_process_units
+                ]
+            ),
+            "test_conditions": [
+                self._objective_logic_unit_reference(unit)
+                for unit in test_conditions
+            ],
+            "characterization_observations": [
+                self._objective_logic_unit_reference(unit)
+                for unit in characterization
+            ],
+            "measurement_results": [
+                self._objective_logic_unit_reference(unit)
+                for unit in measurements
+            ],
+            "comparisons": [
+                self._objective_logic_unit_reference(unit)
+                for unit in comparisons
+            ],
+            "author_interpretations": [
+                self._objective_logic_unit_reference(unit)
+                for unit in interpretations
+            ],
+            "resolution": {
+                "measurement_count": len(measurements),
+                "resolved_measurement_count": sum(
+                    1
+                    for unit in measurements
+                    if unit.resolution_status == "resolved"
+                ),
+                "test_condition_count": len(test_conditions),
+                "characterization_count": len(characterization),
+                "comparison_count": len(comparisons),
+                "gaps": gaps,
+            },
+        }
+
+    def _objective_evidence_unit_ids_by_role(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[str, list[str]]:
+        roles = {
+            "sample_and_process_context": [],
+            "test_and_characterization": [],
+            "measurements": [],
+            "comparisons": [],
+            "interpretations": [],
+            "other": [],
+        }
+        for unit in units:
+            if unit.unit_kind in {"sample_context", "process_context"}:
+                roles["sample_and_process_context"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "test_condition":
+                roles["test_and_characterization"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "characterization":
+                roles["test_and_characterization"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "measurement":
+                roles["measurements"].append(unit.evidence_unit_id)
+                if unit.sample_context or unit.process_context:
+                    roles["sample_and_process_context"].append(unit.evidence_unit_id)
+                if unit.test_condition:
+                    roles["test_and_characterization"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "comparison":
+                roles["comparisons"].append(unit.evidence_unit_id)
+            elif unit.unit_kind == "interpretation":
+                roles["interpretations"].append(unit.evidence_unit_id)
+            else:
+                roles["other"].append(unit.evidence_unit_id)
+        return {
+            role: self._dedupe_preserving_order(unit_ids)
+            for role, unit_ids in roles.items()
+            if unit_ids
+        }
+
+    def _objective_logic_chain_steps(
+        self,
+        *,
+        objective: Any,
+        objective_context: ObjectiveContext | None,
+        evidence_unit_ids_by_role: dict[str, list[str]],
+        cross_paper: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "step_role": "research_objective",
+                "question": self._normalize_scalar_text(
+                    getattr(objective, "question", None)
+                ),
+                "material_scope": list(getattr(objective, "material_scope", ()) or ()),
+                "target_property_axes": (
+                    list(objective_context.target_property_axes)
+                    if objective_context is not None
+                    else []
+                ),
+            },
+            {
+                "step_role": "sample_and_process_context",
+                "evidence_unit_ids": evidence_unit_ids_by_role.get(
+                    "sample_and_process_context",
+                    [],
+                ),
+            },
+            {
+                "step_role": "test_and_characterization",
+                "evidence_unit_ids": evidence_unit_ids_by_role.get(
+                    "test_and_characterization",
+                    [],
+                ),
+            },
+            {
+                "step_role": "measurement_results",
+                "evidence_unit_ids": evidence_unit_ids_by_role.get("measurements", []),
+                "measured_properties": cross_paper.get("measured_properties", []),
+            },
+            {
+                "step_role": "comparison_and_interpretation",
+                "evidence_unit_ids": [
+                    *evidence_unit_ids_by_role.get("comparisons", []),
+                    *evidence_unit_ids_by_role.get("interpretations", []),
+                ],
+            },
+            {
+                "step_role": "cross_paper_resolution",
+                "document_count": cross_paper.get("document_count", 0),
+                "gaps": cross_paper.get("gaps", []),
+            },
+        ]
+
+    def _objective_cross_paper_logic(
+        self,
+        *,
+        paper_chains: list[dict[str, Any]],
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[str, Any]:
+        measurements = tuple(unit for unit in units if unit.unit_kind == "measurement")
+        comparisons = tuple(unit for unit in units if unit.unit_kind == "comparison")
+        gaps = []
+        if not comparisons:
+            gaps.append("comparison_units_missing")
+        unresolved_measurements = [
+            unit.evidence_unit_id
+            for unit in measurements
+            if unit.resolution_status != "resolved"
+        ]
+        if unresolved_measurements:
+            gaps.append("unresolved_measurements_present")
+        return {
+            "document_count": len(paper_chains),
+            "measured_properties": self._dedupe_preserving_order(
+                [
+                    unit.property_normalized
+                    for unit in measurements
+                    if unit.property_normalized
+                ]
+            ),
+            "sample_labels": self._dedupe_preserving_order(
+                [
+                    self._normalize_scalar_text(unit.sample_context.get("label"))
+                    for unit in units
+                    if unit.sample_context.get("label")
+                ]
+            ),
+            "resolved_measurement_count": sum(
+                1
+                for unit in measurements
+                if unit.resolution_status == "resolved"
+            ),
+            "comparison_unit_count": len(comparisons),
+            "comparison_ready": bool(comparisons),
+            "gaps": gaps,
+        }
+
+    def _objective_paper_logic_gaps(
+        self,
+        *,
+        measurements: tuple[ObjectiveEvidenceUnit, ...],
+        test_conditions: tuple[ObjectiveEvidenceUnit, ...],
+        sample_process_units: tuple[ObjectiveEvidenceUnit, ...],
+        characterization: tuple[ObjectiveEvidenceUnit, ...],
+        comparisons: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> list[str]:
+        gaps = []
+        if not sample_process_units:
+            gaps.append("sample_or_process_context_missing")
+        if not test_conditions and not any(unit.test_condition for unit in measurements):
+            gaps.append("test_condition_missing")
+        if not measurements:
+            gaps.append("measurement_results_missing")
+        if not characterization:
+            gaps.append("characterization_observations_missing")
+        if not comparisons:
+            gaps.append("comparison_units_missing")
+        return gaps
+
+    def _objective_sample_process_chain_item(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "evidence_unit_id": unit.evidence_unit_id,
+                "document_id": unit.document_id,
+                "sample_context": dict(unit.sample_context),
+                "process_context": dict(unit.process_context),
+                "join_keys": dict(unit.join_keys),
+                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
+                "resolution_status": unit.resolution_status,
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_logic_unit_reference(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "evidence_unit_id": unit.evidence_unit_id,
+                "document_id": unit.document_id,
+                "unit_kind": unit.unit_kind,
+                "property_normalized": unit.property_normalized,
+                "material_system": dict(unit.material_system),
+                "sample_context": dict(unit.sample_context),
+                "process_context": dict(unit.process_context),
+                "test_condition": dict(unit.test_condition),
+                "value_payload": dict(unit.value_payload),
+                "unit": unit.unit,
+                "baseline_context": dict(unit.baseline_context),
+                "interpretation": unit.interpretation,
+                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
+                "evidence_anchor_ids": list(unit.evidence_anchor_ids),
+                "join_keys": dict(unit.join_keys),
+                "resolution_status": unit.resolution_status,
+                "confidence": unit.confidence,
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _dedupe_chain_items(
+        self,
+        items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for item in items:
+            key = json.dumps(item, ensure_ascii=False, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
+
+    def _objective_logic_chain_summary(
+        self,
+        chain_payload: dict[str, Any],
+    ) -> str:
+        cross_paper = chain_payload.get("cross_paper") or {}
+        measured_properties = cross_paper.get("measured_properties") or []
+        property_text = ", ".join(measured_properties) if measured_properties else "no measured properties"
+        return (
+            "Objective logic chain assembled across "
+            f"{cross_paper.get('document_count', 0)} paper(s) with "
+            f"{cross_paper.get('resolved_measurement_count', 0)} resolved "
+            f"measurement result(s) for {property_text}."
+        )
 
     def _records_to_records(
         self,

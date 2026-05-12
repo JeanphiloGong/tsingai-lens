@@ -58,6 +58,19 @@ class MeasurementItem:
     evidence_ids: list[str]
 
 
+@dataclass(frozen=True)
+class ComparisonItem:
+    index: int
+    record: dict[str, Any]
+    current_sample_key: str
+    baseline_sample_key: str
+    metric: str
+    current_value: float | None
+    baseline_value: float | None
+    unit: str
+    evidence_ids: list[str]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare an expert gold bundle with a system prediction bundle."
@@ -248,6 +261,9 @@ def _evaluate_paper(
         "comparisons": _evaluate_comparisons(
             gold_records["comparisons"],
             prediction_records["comparisons"],
+            prediction_records["samples"],
+            absolute_tolerance=absolute_tolerance,
+            relative_tolerance=relative_tolerance,
         ),
         "evidence": _evaluate_evidence(
             prediction_records,
@@ -502,21 +518,105 @@ def _evaluate_test_conditions(
 def _evaluate_comparisons(
     gold_comparisons: list[dict[str, Any]],
     prediction_comparisons: list[dict[str, Any]],
+    prediction_samples: list[dict[str, Any]],
+    *,
+    absolute_tolerance: float,
+    relative_tolerance: float,
 ) -> dict[str, Any]:
-    prediction_with_baselines = [
-        row
-        for row in prediction_comparisons
-        if row.get("baseline_sample_ids") or _text(row.get("baseline_reference"))
+    prediction_sample_keys = {
+        _text(sample.get("sample_id")): _sample_key_from_prediction(sample)
+        for sample in prediction_samples
+    }
+    gold_items = [
+        item
+        for item in (
+            _gold_comparison_item(index, row)
+            for index, row in enumerate(gold_comparisons)
+        )
+        if item.metric and item.current_sample_key and item.baseline_sample_key
+    ]
+    prediction_items = [
+        item
+        for item in (
+            _prediction_comparison_item(index, row, prediction_sample_keys)
+            for index, row in enumerate(prediction_comparisons)
+        )
+        if item.metric and item.current_sample_key and item.baseline_sample_key
+    ]
+
+    prediction_by_key: dict[tuple[str, str, str], list[ComparisonItem]] = defaultdict(
+        list
+    )
+    for item in prediction_items:
+        prediction_by_key[
+            (item.current_sample_key, item.baseline_sample_key, item.metric)
+        ].append(item)
+
+    used_prediction_indexes: set[int] = set()
+    exact_matches: list[dict[str, Any]] = []
+    value_mismatches: list[dict[str, Any]] = []
+    missing_gold_comparisons: list[dict[str, Any]] = []
+
+    for gold_item in gold_items:
+        candidates = prediction_by_key.get(
+            (
+                gold_item.current_sample_key,
+                gold_item.baseline_sample_key,
+                gold_item.metric,
+            ),
+            [],
+        )
+        exact_candidate = _first_exact_comparison_candidate(
+            gold_item,
+            candidates,
+            used_prediction_indexes=used_prediction_indexes,
+            absolute_tolerance=absolute_tolerance,
+            relative_tolerance=relative_tolerance,
+        )
+        if exact_candidate is not None:
+            used_prediction_indexes.add(exact_candidate.index)
+            exact_matches.append(
+                {
+                    "gold": _comparison_brief(gold_item),
+                    "prediction": _comparison_brief(exact_candidate),
+                }
+            )
+            continue
+        if candidates:
+            value_mismatches.append(
+                {
+                    "gold": _comparison_brief(gold_item),
+                    "prediction_candidates": [
+                        _comparison_brief(candidate)
+                        for candidate in candidates[:5]
+                    ],
+                }
+            )
+            continue
+        missing_gold_comparisons.append(_comparison_brief(gold_item))
+
+    extra_predictions = [
+        _comparison_brief(item)
+        for item in prediction_items
+        if item.index not in used_prediction_indexes
     ]
     return {
         "gold_count": len(gold_comparisons),
         "prediction_count": len(prediction_comparisons),
-        "prediction_with_baseline_context": len(prediction_with_baselines),
-        "pairwise_exact_matching_status": "deferred",
-        "note": (
-            "The current prediction comparison rows are projected result rows, "
-            "not expert-style pairwise sample comparisons."
-        ),
+        "gold_pairwise_count": len(gold_items),
+        "prediction_pairwise_count": len(prediction_items),
+        "exact_match_count": len(exact_matches),
+        "value_mismatch_count": len(value_mismatches),
+        "missing_gold_count": len(missing_gold_comparisons),
+        "extra_prediction_count": len(extra_predictions),
+        "recall": _ratio(len(exact_matches), len(gold_items)),
+        "precision": _ratio(len(exact_matches), len(prediction_items)),
+        "pairwise_exact_matching_status": "active",
+        "exact_matches": exact_matches,
+        "value_mismatches": value_mismatches,
+        "missing_gold_comparisons": missing_gold_comparisons,
+        "extra_prediction_comparisons": extra_predictions[:100],
+        "extra_prediction_comparisons_truncated": len(extra_predictions) > 100,
     }
 
 
@@ -671,6 +771,57 @@ def _prediction_measurement_item(
     )
 
 
+def _gold_comparison_item(index: int, row: dict[str, Any]) -> ComparisonItem:
+    baseline_sample_keys = [
+        _sample_key(item)
+        for item in _string_list(row.get("baseline_sample_ids"))
+        if _sample_key(item)
+    ]
+    return ComparisonItem(
+        index=index,
+        record=row,
+        current_sample_key=_sample_key(row.get("current_sample_id")),
+        baseline_sample_key=(
+            baseline_sample_keys[0]
+            if baseline_sample_keys
+            else _sample_key(row.get("baseline_reference"))
+        ),
+        metric=_normalize_metric(row.get("metric_name") or row.get("comparison_metric")),
+        current_value=_numeric_value(row.get("current_value")),
+        baseline_value=_numeric_value(row.get("baseline_value")),
+        unit=_normalize_unit(row.get("unit")),
+        evidence_ids=_string_list(row.get("evidence_ids")),
+    )
+
+
+def _prediction_comparison_item(
+    index: int,
+    row: dict[str, Any],
+    prediction_sample_keys: dict[str, str],
+) -> ComparisonItem:
+    current_sample_id = _text(row.get("current_sample_id"))
+    baseline_sample_ids = _string_list(row.get("baseline_sample_ids"))
+    baseline_sample_id = baseline_sample_ids[0] if baseline_sample_ids else ""
+    return ComparisonItem(
+        index=index,
+        record=row,
+        current_sample_key=prediction_sample_keys.get(
+            current_sample_id,
+            _sample_key(current_sample_id),
+        ),
+        baseline_sample_key=prediction_sample_keys.get(
+            baseline_sample_id,
+            _sample_key(baseline_sample_id)
+            or _sample_key(row.get("baseline_reference")),
+        ),
+        metric=_normalize_metric(row.get("metric_name") or row.get("comparison_metric")),
+        current_value=_numeric_value(row.get("current_value")),
+        baseline_value=_numeric_value(row.get("baseline_value")),
+        unit=_normalize_unit(row.get("unit")),
+        evidence_ids=_string_list(row.get("evidence_ids") or row.get("anchor_ids")),
+    )
+
+
 def _first_exact_candidate(
     gold_item: MeasurementItem,
     candidates: list[MeasurementItem],
@@ -689,6 +840,37 @@ def _first_exact_candidate(
             relative_tolerance=relative_tolerance,
         ):
             return candidate
+    return None
+
+
+def _first_exact_comparison_candidate(
+    gold_item: ComparisonItem,
+    candidates: list[ComparisonItem],
+    *,
+    used_prediction_indexes: set[int],
+    absolute_tolerance: float,
+    relative_tolerance: float,
+) -> ComparisonItem | None:
+    for candidate in candidates:
+        if candidate.index in used_prediction_indexes:
+            continue
+        if not _units_compatible(gold_item.unit, candidate.unit):
+            continue
+        if not _values_match(
+            gold_item.current_value,
+            candidate.current_value,
+            absolute_tolerance=absolute_tolerance,
+            relative_tolerance=relative_tolerance,
+        ):
+            continue
+        if not _values_match(
+            gold_item.baseline_value,
+            candidate.baseline_value,
+            absolute_tolerance=absolute_tolerance,
+            relative_tolerance=relative_tolerance,
+        ):
+            continue
+        return candidate
     return None
 
 
@@ -718,6 +900,22 @@ def _measurement_brief(item: MeasurementItem) -> dict[str, Any]:
         "sample_key": item.sample_key,
         "metric": item.metric,
         "value": item.value,
+        "unit": item.unit,
+        "evidence_ids": item.evidence_ids,
+        "source": item.record.get("source"),
+    }
+
+
+def _comparison_brief(item: ComparisonItem) -> dict[str, Any]:
+    return {
+        "id": item.record.get("comparison_id"),
+        "current_sample_id": item.record.get("current_sample_id"),
+        "current_sample_key": item.current_sample_key,
+        "baseline_reference": item.record.get("baseline_reference"),
+        "baseline_sample_key": item.baseline_sample_key,
+        "metric": item.metric,
+        "current_value": item.current_value,
+        "baseline_value": item.baseline_value,
         "unit": item.unit,
         "evidence_ids": item.evidence_ids,
         "source": item.record.get("source"),
@@ -756,6 +954,18 @@ def _summarize_paper_reports(paper_reports: list[dict[str, Any]]) -> dict[str, A
         report["measurements"]["exact_match_count"]
         for report in paper_reports
     )
+    gold_comparisons = sum(
+        report["comparisons"]["gold_pairwise_count"]
+        for report in paper_reports
+    )
+    prediction_comparisons = sum(
+        report["comparisons"]["prediction_pairwise_count"]
+        for report in paper_reports
+    )
+    matched_comparisons = sum(
+        report["comparisons"]["exact_match_count"]
+        for report in paper_reports
+    )
     return {
         "papers_evaluated": len(paper_reports),
         "mapped_papers": sum(
@@ -766,11 +976,19 @@ def _summarize_paper_reports(paper_reports: list[dict[str, Any]]) -> dict[str, A
         "sample_recall": _ratio(matched_samples, gold_samples),
         "measurement_recall": _ratio(matched_measurements, gold_measurements),
         "measurement_precision": _ratio(matched_measurements, prediction_measurements),
+        "comparison_recall": _ratio(matched_comparisons, gold_comparisons),
+        "comparison_precision": _ratio(
+            matched_comparisons,
+            prediction_comparisons,
+        ),
         "gold_sample_count": gold_samples,
         "matched_sample_count": matched_samples,
         "gold_core_measurement_count": gold_measurements,
         "prediction_core_measurement_count": prediction_measurements,
         "matched_core_measurement_count": matched_measurements,
+        "gold_pairwise_comparison_count": gold_comparisons,
+        "prediction_pairwise_comparison_count": prediction_comparisons,
+        "matched_pairwise_comparison_count": matched_comparisons,
     }
 
 

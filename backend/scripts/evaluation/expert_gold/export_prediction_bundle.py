@@ -17,7 +17,7 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
-from infra.persistence.sqlite import (
+from infra.persistence.sqlite import (  # noqa: E402
     SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
@@ -43,6 +43,7 @@ ARTIFACT_NAMES = (
     "structure_features",
     "comparable_results",
     "collection_comparable_results",
+    "pairwise_comparison_relations",
     "comparison_rows",
 )
 
@@ -124,6 +125,10 @@ def export_prediction_bundle(
     records_by_artifact, missing_artifacts = _load_artifacts(
         backend_root=root,
         collection_id=resolved_collection_id,
+        db_path=_resolve_repository_db_path(
+            backend_root=root,
+            source_output_dir=output_dir,
+        ),
     )
     bundle = build_prediction_bundle(
         collection_id=resolved_collection_id,
@@ -178,6 +183,7 @@ def build_prediction_bundle(
             records_by_artifact["measurement_results"]
         ),
         "comparisons": _convert_comparisons(
+            records_by_artifact["pairwise_comparison_relations"],
             records_by_artifact["comparison_rows"],
             records_by_artifact["baseline_references"],
         ),
@@ -204,6 +210,10 @@ def build_prediction_bundle(
             records_by_artifact["collection_comparable_results"],
             "collection_comparable_results",
         ),
+        "pairwise_comparison_relations": _raw_records(
+            records_by_artifact["pairwise_comparison_relations"],
+            "pairwise_comparison_relations",
+        ),
         "comparison_rows": _raw_records(
             records_by_artifact["comparison_rows"],
             "comparison_rows",
@@ -229,8 +239,8 @@ def _load_artifacts(
     *,
     backend_root: Path,
     collection_id: str,
+    db_path: Path,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
-    db_path = backend_root / "data" / "lens.sqlite"
     source_artifacts = SqliteSourceArtifactRepository(
         db_path
     ).read_collection_artifacts(collection_id)
@@ -268,6 +278,9 @@ def _load_artifacts(
         "collection_comparable_results": [
             record.to_record() for record in core_facts.collection_comparable_results
         ],
+        "pairwise_comparison_relations": [
+            record.to_record() for record in core_facts.pairwise_comparison_relations
+        ],
         "comparison_rows": [
             record.to_record() for record in core_facts.comparison_rows
         ],
@@ -276,6 +289,17 @@ def _load_artifacts(
         name for name in ARTIFACT_NAMES if not records_by_artifact.get(name)
     ]
     return records_by_artifact, missing_artifacts
+
+
+def _resolve_repository_db_path(
+    *,
+    backend_root: Path,
+    source_output_dir: Path,
+) -> Path:
+    run_scoped_db = source_output_dir.parents[2] / "lens.sqlite"
+    if run_scoped_db.is_file() and run_scoped_db.stat().st_size > 0:
+        return run_scoped_db
+    return backend_root / "data" / "lens.sqlite"
 
 
 def _convert_papers(
@@ -533,9 +557,40 @@ def _convert_measurement_results(rows: list[dict[str, Any]]) -> list[dict[str, A
 
 
 def _convert_comparisons(
+    pairwise_rows: list[dict[str, Any]],
     comparison_rows: list[dict[str, Any]],
     baseline_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    if pairwise_rows:
+        return [
+            {
+                "paper_id": _text(row, "document_id"),
+                "comparison_id": _text(row, "relation_id"),
+                "current_sample_id": _text(row, "current_variant_id"),
+                "baseline_reference": _text(row, "reference_variant_id"),
+                "baseline_sample_ids": [_text(row, "reference_variant_id")]
+                if _text(row, "reference_variant_id")
+                else [],
+                "comparison_type": "pairwise_sample_relation",
+                "comparison_axis": _text(row, "comparison_axis"),
+                "comparison_metric": _text(row, "property_normalized"),
+                "metric_name": _text(row, "property_normalized"),
+                "current_value": _first_value(row, "current_value"),
+                "baseline_value": _first_value(row, "reference_value"),
+                "unit": _text(row, "unit"),
+                "change_direction": _text(row, "direction"),
+                "direction": _text(row, "direction"),
+                "result_summary": "",
+                "comparability_status": "",
+                "comparability_warnings": [],
+                "evidence_ids": _string_list(row.get("evidence_anchor_ids")),
+                "anchor_ids": _string_list(row.get("evidence_anchor_ids")),
+                "relation_payload": _first_value(row, "relation_payload"),
+                "source": _source("pairwise_comparison_relations", row_number),
+            }
+            for row_number, row in _rows_with_numbers(pairwise_rows)
+        ]
+
     if comparison_rows:
         return [
             {

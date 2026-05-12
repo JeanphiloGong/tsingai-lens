@@ -16,6 +16,7 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    PairwiseComparisonRelation,
     SampleVariant,
     StructureFeature,
     TestCondition,
@@ -63,10 +64,11 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(tmp_path):
     assert bundle["metadata"]["schema_version"] == "prediction-bundle-v0.1"
     assert bundle["metadata"]["collection_id"] == collection_id
     assert bundle["metadata"]["artifact_rows"]["measurement_results"] == 1
+    assert bundle["metadata"]["artifact_rows"]["pairwise_comparison_relations"] == 1
     assert bundle["papers"][0]["paper_id"] == "paper-1"
     assert bundle["papers"][0]["title"] == "Prediction Paper"
-    assert bundle["samples"][0]["sample_id"] == "var-1"
-    assert bundle["samples"][0]["evidence_ids"] == ["anchor-sample"]
+    sample = next(row for row in bundle["samples"] if row["sample_id"] == "var-1")
+    assert sample["evidence_ids"] == ["anchor-sample"]
     assert any(
         record["original_parameter_name"] == "laser_power_w"
         and record["sample_reference"] == "var-1"
@@ -75,7 +77,9 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(tmp_path):
     assert bundle["test_conditions"][0]["test_temperature"] == "25"
     assert bundle["measurement_results"][0]["value_payload"]["value"] == 940
     assert bundle["measurement_results"][0]["evidence_ids"] == ["anchor-result"]
-    assert bundle["comparisons"][0]["comparison_id"] == "row-1"
+    assert bundle["comparisons"][0]["comparison_id"] == "rel-1"
+    assert bundle["comparisons"][0]["current_sample_id"] == "var-1"
+    assert bundle["comparisons"][0]["baseline_sample_ids"] == ["var-0"]
     assert bundle["comparisons"][0]["comparison_metric"] == "yield_strength"
     assert bundle["observations"][0]["sample_id"] == "var-1"
     assert bundle["evidence"][0]["quote_or_cell"] == "S1 YS 940 MPa"
@@ -83,6 +87,20 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(tmp_path):
         "artifact": "comparison_rows",
         "row": 1,
     }
+
+    output_dir_prediction_path = tmp_path / "generated" / "prediction_from_output.json"
+    collection_output_dir = backend_root / "data" / "collections" / collection_id / "output"
+    collection_output_dir.mkdir(parents=True)
+    exporter.export_prediction_bundle(
+        backend_root=backend_root,
+        source_output_dir=collection_output_dir,
+        output_path=output_dir_prediction_path,
+    )
+    output_dir_bundle = json.loads(
+        output_dir_prediction_path.read_text(encoding="utf-8")
+    )
+    assert output_dir_bundle["metadata"]["collection_id"] == collection_id
+    assert output_dir_bundle["comparisons"][0]["comparison_id"] == "rel-1"
 
 
 def test_export_prediction_bundle_allows_missing_artifacts(tmp_path):
@@ -176,6 +194,24 @@ def _write_system_artifacts(backend_root: Path, collection_id: str) -> None:
                 ),
             ),
             sample_variants=(
+                SampleVariant.from_mapping(
+                    {
+                        "variant_id": "var-0",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "domain_profile": "materials",
+                        "variant_label": "S0",
+                        "host_material_system": {"normalized": "Ti-6Al-4V"},
+                        "composition": "Ti-6Al-4V",
+                        "variable_axis_type": "post_treatment",
+                        "variable_value": "baseline",
+                        "process_context": {"laser_power_w": 180},
+                        "profile_payload": {},
+                        "structure_feature_ids": [],
+                        "source_anchor_ids": ["anchor-sample"],
+                        "confidence": 0.8,
+                    }
+                ),
                 SampleVariant.from_mapping(
                     {
                         "variant_id": "var-1",
@@ -327,6 +363,31 @@ def _write_system_artifacts(backend_root: Path, collection_id: str) -> None:
                         "assessment": {"status": "comparable"},
                         "included": True,
                         "sort_order": 0,
+                    }
+                ),
+            ),
+            pairwise_comparison_relations=(
+                PairwiseComparisonRelation.from_mapping(
+                    {
+                        "relation_id": "rel-1",
+                        "collection_id": collection_id,
+                        "document_id": "paper-1",
+                        "current_variant_id": "var-1",
+                        "reference_variant_id": "var-0",
+                        "comparison_axis": "laser_power_w",
+                        "property_normalized": "yield_strength",
+                        "current_result_id": "res-1",
+                        "reference_result_id": "res-0",
+                        "current_value": 940,
+                        "reference_value": 880,
+                        "unit": "MPa",
+                        "direction": "increase",
+                        "evidence_anchor_ids": ["anchor-result"],
+                        "relation_payload": {
+                            "current_variant_label": "S1",
+                            "reference_variant_label": "S0",
+                        },
+                        "confidence": 0.8,
                     }
                 ),
             ),

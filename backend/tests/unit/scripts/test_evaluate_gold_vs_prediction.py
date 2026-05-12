@@ -52,6 +52,8 @@ def test_evaluate_gold_vs_prediction_reports_first_pass_alignment(tmp_path):
     assert report["summary"]["sample_recall"] == 1.0
     assert report["summary"]["measurement_recall"] == 0.6667
     assert report["summary"]["measurement_precision"] == 0.5
+    assert report["summary"]["comparison_recall"] == 1.0
+    assert report["summary"]["comparison_precision"] == 1.0
 
     paper = report["papers"][0]
     assert paper["paper_mapping"]["status"] == "mapped"
@@ -62,6 +64,8 @@ def test_evaluate_gold_vs_prediction_reports_first_pass_alignment(tmp_path):
     assert paper["measurements"]["exact_match_count"] == 2
     assert paper["measurements"]["value_mismatch_count"] == 1
     assert paper["measurements"]["duplicate_prediction_groups"][0]["count"] == 2
+    assert paper["comparisons"]["pairwise_exact_matching_status"] == "active"
+    assert paper["comparisons"]["exact_match_count"] == 1
     assert paper["test_conditions"]["missing_gold_condition_families"][0][
         "family"
     ] == "hardness"
@@ -140,6 +144,10 @@ def _gold_bundle() -> dict:
                 "comparison_id": "C001",
                 "current_sample_id": "S002",
                 "baseline_sample_ids": ["S001"],
+                "metric_name": "elongation",
+                "current_value": "10",
+                "baseline_value": "5",
+                "unit": "%",
             }
         ],
         "observations": [],
@@ -231,11 +239,14 @@ def _prediction_bundle() -> dict:
         "comparisons": [
             {
                 "paper_id": paper_id,
-                "comparison_id": "cmp-yield",
-                "current_sample_id": "var-1",
-                "comparison_metric": "yield_strength",
-                "current_value": 100,
-                "evidence_ids": ["ev-yield"],
+                "comparison_id": "cmp-elongation",
+                "current_sample_id": "var-2",
+                "baseline_sample_ids": ["var-1"],
+                "comparison_metric": "elongation",
+                "current_value": 10,
+                "baseline_value": 5,
+                "unit": "%",
+                "evidence_ids": ["ev-elongation"],
             }
         ],
         "observations": [],

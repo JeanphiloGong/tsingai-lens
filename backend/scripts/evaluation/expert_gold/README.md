@@ -106,8 +106,13 @@ possible:
 - `evidence`
 
 It also preserves system-specific raw families such as `comparison_rows`,
-`comparable_results`, `baseline_references`, and `structure_features` with
-artifact row references for later debugging.
+`pairwise_comparison_relations`, `comparable_results`, `baseline_references`,
+and `structure_features` with artifact row references for later debugging.
+
+When Core pairwise comparison relations are available, the exported
+`comparisons` family is built from those relations so expert-style sample vs.
+baseline comparisons can be evaluated directly. Legacy `comparison_rows` are
+kept as raw debugging records.
 
 ## Evaluate Gold Versus Prediction
 
@@ -140,6 +145,7 @@ python3 scripts/evaluation/expert_gold/evaluate_gold_vs_prediction.py \
 The report is a structural first pass. It measures paper mapping, sample
 recall, core measurement value matching, test-condition family coverage,
 evidence coverage, extra predictions, and duplicate predictions. Expert-style
-pairwise comparison matching is reported as deferred because current prediction
-comparison rows are projected result rows rather than pairwise sample-control
-facts.
+pairwise comparison matching is active when the prediction bundle contains
+pairwise comparison relations. A pairwise comparison match requires compatible
+current sample, baseline sample, metric, unit, and numeric values within the
+configured tolerance.

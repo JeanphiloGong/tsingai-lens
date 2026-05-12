@@ -100,6 +100,34 @@ def test_core_llm_extractor_validates_json_text_response():
     assert "JSON schema:" in client.chat.completions.calls[0]["messages"][1]["content"]
 
 
+def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "method_mentions": [],
+          "material_mentions": [],
+          "variant_mentions": [],
+          "condition_mentions": [],
+          "baseline_mentions": [],
+          "result_claims": [],
+          "confidence": 0.9
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    mentions = extractor.extract_text_window_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental"},
+            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
+        }
+    )
+
+    assert isinstance(mentions, StructuredTextWindowMentions)
+    assert mentions.result_claims == []
+
+
 def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     parsed_mentions = StructuredTextWindowMentions()

@@ -8,7 +8,7 @@ from time import perf_counter
 from typing import Any
 
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .schemas import (
     StructuredAxisCanonicalizationPlan,
@@ -235,7 +235,21 @@ class CoreLLMStructuredExtractor:
         if not raw_content:
             raise RuntimeError("structured extraction returned empty response content")
         payload = self._load_json_payload(self._extract_json_object(raw_content))
-        return response_model.model_validate(payload)
+        try:
+            return response_model.model_validate(payload)
+        except ValidationError:
+            if isinstance(payload, dict):
+                extra_keys = set(payload) - set(response_model.model_fields)
+                if extra_keys - {"confidence"}:
+                    raise
+                filtered_payload = {
+                    key: value
+                    for key, value in payload.items()
+                    if key in response_model.model_fields
+                }
+                if filtered_payload != payload:
+                    return response_model.model_validate(filtered_payload)
+            raise
 
     def _parse_provider_structured_response(
         self,

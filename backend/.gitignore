@@ -210,6 +210,8 @@ marimo/_lsp/
 __marimo__/
 
 # Project local runtime data
+data/*.sqlite
+data/*.sqlite-*
 data/logs/
 data/tasks/
 data/update_output/

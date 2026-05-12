@@ -436,6 +436,9 @@ class ResearchObjectiveService:
                 candidate = candidate_by_key.get((source_kind, source_ref))
                 if candidate is None:
                     continue
+                if candidate.get("frame_status") == "excluded":
+                    record["role"] = "low_value_or_irrelevant"
+                    record["extractable"] = False
                 role = str(record.get("role") or "low_value_or_irrelevant")
                 route_key = (
                     frame.objective_id,
@@ -452,12 +455,19 @@ class ResearchObjectiveService:
                         "objective_id": frame.objective_id,
                         "document_id": frame.document_id,
                         "table_schema": self._route_table_schema_record(
-                            record,
                             candidate=candidate,
                         ),
                         "extractable": self._normalize_route_extractable(record),
                     }
                 )
+                if source_kind != "table":
+                    record.update(
+                        {
+                            "column_roles": {},
+                            "join_keys": {},
+                            "join_plan": {},
+                        }
+                    )
                 routes.append(ObjectiveEvidenceRoute.from_mapping(record))
         logger.info(
             "Research objective evidence routing finished collection_id=%s route_count=%s",
@@ -500,30 +510,35 @@ class ResearchObjectiveService:
                 }
             )
         relevant_sections = set(frame.relevant_sections)
-        for block in sorted(
-            blocks,
-            key=lambda item: int(getattr(item, "block_order", 0) or 0),
-        ):
-            if len(candidates) >= _ROUTE_CANDIDATE_LIMIT:
-                break
-            block_id = str(getattr(block, "block_id", "") or "")
-            text = str(getattr(block, "text", "") or "").strip()
-            block_type = str(getattr(block, "block_type", "") or "")
-            section_label = self._block_section_label(block)
-            if not block_id or not text or block_type not in {"paragraph", "list_item"}:
-                continue
-            if relevant_sections and section_label not in relevant_sections:
-                continue
-            candidates.append(
-                {
-                    "source_kind": "text_window",
-                    "source_ref": block_id,
-                    "frame_status": "relevant",
-                    "section_label": section_label,
-                    "block_type": block_type,
-                    "text": text[:_ROUTE_TEXT_CHARS],
-                }
-            )
+        if relevant_sections:
+            for block in sorted(
+                blocks,
+                key=lambda item: int(getattr(item, "block_order", 0) or 0),
+            ):
+                if len(candidates) >= _ROUTE_CANDIDATE_LIMIT:
+                    break
+                block_id = str(getattr(block, "block_id", "") or "")
+                text = str(getattr(block, "text", "") or "").strip()
+                block_type = str(getattr(block, "block_type", "") or "")
+                section_label = self._block_section_label(block)
+                if (
+                    not block_id
+                    or not text
+                    or block_type not in {"paragraph", "list_item"}
+                ):
+                    continue
+                if section_label not in relevant_sections:
+                    continue
+                candidates.append(
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": block_id,
+                        "frame_status": "relevant",
+                        "section_label": section_label,
+                        "block_type": block_type,
+                        "text": text[:_ROUTE_TEXT_CHARS],
+                    }
+                )
         return candidates[:_ROUTE_CANDIDATE_LIMIT]
 
     def _build_route_table_schema(self, table: Any) -> dict[str, Any]:
@@ -547,15 +562,11 @@ class ResearchObjectiveService:
 
     def _route_table_schema_record(
         self,
-        record: dict[str, Any],
         *,
         candidate: dict[str, Any],
     ) -> dict[str, Any]:
-        if record.get("source_kind") != "table":
+        if candidate.get("source_kind") != "table":
             return {}
-        table_schema = record.get("table_schema")
-        if isinstance(table_schema, dict) and table_schema:
-            return table_schema
         candidate_schema = candidate.get("table_schema")
         return dict(candidate_schema) if isinstance(candidate_schema, dict) else {}
 

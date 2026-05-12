@@ -915,6 +915,18 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
                         ["as-built", "1.2 uA/cm2"],
                         ["heat-treated", "0.4 uA/cm2"],
                     ],
+                },
+                {
+                    "table_id": "table-2",
+                    "document_id": "paper-1",
+                    "table_order": 2,
+                    "caption_text": "Nominal chemical composition of 316L powder",
+                    "heading_path": "Experimental",
+                    "column_headers": ["Fe", "Cr", "Ni", "Mo"],
+                    "table_matrix": [
+                        ["Fe", "Cr", "Ni", "Mo"],
+                        ["balance", "17", "12", "2.5"],
+                    ],
                 }
             ],
         ),
@@ -958,6 +970,11 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
         for route in facts.objective_evidence_routes
         if route.source_kind == "table" and route.source_ref == "table-1"
     )
+    excluded_table_route = next(
+        route
+        for route in facts.objective_evidence_routes
+        if route.source_kind == "table" and route.source_ref == "table-2"
+    )
     text_route = next(
         route
         for route in facts.objective_evidence_routes
@@ -970,6 +987,8 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
         "corrosion current",
     ]
     assert table_route.column_roles == {"corrosion current": "target_property"}
+    assert excluded_table_route.role == "low_value_or_irrelevant"
+    assert excluded_table_route.extractable is False
     assert text_route.role == "process_or_treatment"
     assert len(extractor.route_payloads) == 1
     assert extractor.route_payloads[0]["paper_frame"]["frame_id"] == active_frame.frame_id

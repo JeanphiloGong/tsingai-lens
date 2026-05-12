@@ -57,7 +57,11 @@ from domain.core.evidence_backbone import (
 )
 from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
-from domain.core.research_objective import ObjectiveContext
+from domain.core.research_objective import (
+    ObjectiveContext,
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
+)
 from domain.ports import CoreFactRepository, SourceArtifactRepository
 from domain.shared.enums import (
     DOC_TYPE_REVIEW,
@@ -1165,9 +1169,18 @@ class PaperFactsService:
                 structure_features=structure_features,
             ),
         )
+        objective_evidence_units = self._replace_objective_evidence_units(
+            collection_id=collection_id,
+            evidence_anchors=evidence_anchors,
+            sample_variants=sample_variants,
+            test_conditions=test_conditions,
+            baseline_references=baseline_references,
+            measurement_results=measurement_results,
+            characterization=characterization,
+        )
 
         logger.info(
-            "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s",
+            "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s objective_evidence_units=%s",
             collection_id,
             len(evidence_anchors),
             len(method_facts),
@@ -1177,6 +1190,7 @@ class PaperFactsService:
             len(measurement_results),
             len(characterization),
             len(structure_features),
+            len(objective_evidence_units),
         )
         return {
             "evidence_anchors": evidence_anchors,
@@ -1187,6 +1201,9 @@ class PaperFactsService:
             "measurement_results": measurement_results,
             "characterization_observations": characterization,
             "structure_features": structure_features,
+            "objective_evidence_units": tuple(
+                unit.to_record() for unit in objective_evidence_units
+            ),
         }
 
     def build_evidence_cards(
@@ -1279,6 +1296,660 @@ class PaperFactsService:
         if not facts.research_objectives_ready:
             return ()
         return facts.objective_contexts
+
+    def _replace_objective_evidence_units(
+        self,
+        *,
+        collection_id: str,
+        evidence_anchors: tuple[dict[str, Any], ...],
+        sample_variants: tuple[dict[str, Any], ...],
+        test_conditions: tuple[dict[str, Any], ...],
+        baseline_references: tuple[dict[str, Any], ...],
+        measurement_results: tuple[dict[str, Any], ...],
+        characterization: tuple[dict[str, Any], ...],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if not facts.research_objectives or not facts.objective_contexts:
+            return ()
+
+        objective_evidence_units = self._build_objective_evidence_units_from_paper_facts(
+            objective_contexts=facts.objective_contexts,
+            evidence_anchors=evidence_anchors,
+            sample_variants=sample_variants,
+            test_conditions=test_conditions,
+            baseline_references=baseline_references,
+            measurement_results=measurement_results,
+            characterization=characterization,
+        )
+        objective_logic_chains = self._build_objective_logic_chains_from_units(
+            objectives=facts.research_objectives,
+            objective_contexts=facts.objective_contexts,
+            objective_evidence_units=objective_evidence_units,
+        )
+        self.core_fact_repository.replace_collection_research_objectives(
+            collection_id,
+            facts.paper_skims,
+            facts.research_objectives,
+            facts.objective_contexts,
+            facts.objective_paper_frames,
+            facts.objective_evidence_routes,
+            objective_evidence_units,
+            objective_logic_chains,
+        )
+        return objective_evidence_units
+
+    def _build_objective_evidence_units_from_paper_facts(
+        self,
+        *,
+        objective_contexts: tuple[ObjectiveContext, ...],
+        evidence_anchors: tuple[dict[str, Any], ...],
+        sample_variants: tuple[dict[str, Any], ...],
+        test_conditions: tuple[dict[str, Any], ...],
+        baseline_references: tuple[dict[str, Any], ...],
+        measurement_results: tuple[dict[str, Any], ...],
+        characterization: tuple[dict[str, Any], ...],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        anchors_by_id = self._index_rows_by_id(evidence_anchors, "anchor_id")
+        variants_by_id = self._index_rows_by_id(sample_variants, "variant_id")
+        conditions_by_id = self._index_rows_by_id(test_conditions, "test_condition_id")
+        baselines_by_id = self._index_rows_by_id(baseline_references, "baseline_id")
+        units: list[ObjectiveEvidenceUnit] = []
+        seen: set[str] = set()
+
+        for result in measurement_results:
+            variant = variants_by_id.get(
+                self._normalize_scalar_text(result.get("variant_id")) or ""
+            )
+            condition = conditions_by_id.get(
+                self._normalize_scalar_text(result.get("test_condition_id")) or ""
+            )
+            baseline = baselines_by_id.get(
+                self._normalize_scalar_text(result.get("baseline_id")) or ""
+            )
+            contexts = self._select_objective_contexts_for_fact(
+                objective_contexts,
+                property_name=result.get("property_normalized"),
+                text=self._objective_fact_text(result, variant, condition),
+                require_property_match=True,
+            )
+            for context in contexts:
+                unit = self._objective_measurement_unit_from_result(
+                    context=context,
+                    result=result,
+                    variant=variant,
+                    condition=condition,
+                    baseline=baseline,
+                    anchors_by_id=anchors_by_id,
+                )
+                if unit.evidence_unit_id in seen:
+                    continue
+                seen.add(unit.evidence_unit_id)
+                units.append(unit)
+
+        for condition in test_conditions:
+            contexts = self._select_objective_contexts_for_fact(
+                objective_contexts,
+                property_name=condition.get("property_type"),
+                text=self._objective_fact_text(condition),
+                require_property_match=True,
+            )
+            for context in contexts:
+                unit = self._objective_test_condition_unit(
+                    context=context,
+                    condition=condition,
+                    anchors_by_id=anchors_by_id,
+                )
+                if unit.evidence_unit_id in seen:
+                    continue
+                seen.add(unit.evidence_unit_id)
+                units.append(unit)
+
+        for observation in characterization:
+            variant = variants_by_id.get(
+                self._normalize_scalar_text(observation.get("variant_id")) or ""
+            )
+            contexts = self._select_objective_contexts_for_fact(
+                objective_contexts,
+                property_name=observation.get("characterization_type"),
+                text=self._objective_fact_text(observation, variant),
+                require_property_match=False,
+            )
+            for context in contexts:
+                unit = self._objective_characterization_unit(
+                    context=context,
+                    observation=observation,
+                    variant=variant,
+                    anchors_by_id=anchors_by_id,
+                )
+                if unit.evidence_unit_id in seen:
+                    continue
+                seen.add(unit.evidence_unit_id)
+                units.append(unit)
+
+        return tuple(units)
+
+    def _objective_measurement_unit_from_result(
+        self,
+        *,
+        context: ObjectiveContext,
+        result: dict[str, Any],
+        variant: dict[str, Any] | None,
+        condition: dict[str, Any] | None,
+        baseline: dict[str, Any] | None,
+        anchors_by_id: dict[str, dict[str, Any]],
+    ) -> ObjectiveEvidenceUnit:
+        evidence_anchor_ids = tuple(self._normalize_list(result.get("evidence_anchor_ids")))
+        source_refs = self._objective_source_refs(
+            evidence_anchor_ids,
+            anchors_by_id=anchors_by_id,
+            fallback_source_kind=self._normalize_scalar_text(
+                result.get("result_source_type")
+            )
+            or "paper_fact",
+            fallback_source_ref=self._normalize_scalar_text(result.get("result_id")),
+        )
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": context.objective_id,
+                "document_id": result.get("document_id"),
+                "unit_kind": "measurement",
+                "property_normalized": result.get("property_normalized"),
+                "material_system": self._objective_material_system(context, variant),
+                "sample_context": self._objective_sample_context(variant),
+                "process_context": self._objective_process_context(variant),
+                "resolved_condition": self._objective_resolved_condition(
+                    variant=variant,
+                    condition=condition,
+                    baseline=baseline,
+                ),
+                "test_condition": self._objective_test_condition_payload(condition),
+                "value_payload": result.get("value_payload"),
+                "unit": result.get("unit"),
+                "baseline_context": self._objective_baseline_context(baseline),
+                "source_refs": source_refs,
+                "evidence_anchor_ids": evidence_anchor_ids,
+                "join_keys": self._objective_join_keys(
+                    variant=variant,
+                    condition=condition,
+                    baseline=baseline,
+                ),
+                "resolution_status": self._objective_resolution_status(
+                    source_refs=source_refs,
+                    sample_context=self._objective_sample_context(variant),
+                    test_condition=self._objective_test_condition_payload(condition),
+                ),
+                "confidence": self._objective_fact_confidence(result),
+            }
+        )
+
+    def _objective_test_condition_unit(
+        self,
+        *,
+        context: ObjectiveContext,
+        condition: dict[str, Any],
+        anchors_by_id: dict[str, dict[str, Any]],
+    ) -> ObjectiveEvidenceUnit:
+        evidence_anchor_ids = tuple(
+            self._normalize_list(condition.get("evidence_anchor_ids"))
+        )
+        source_refs = self._objective_source_refs(
+            evidence_anchor_ids,
+            anchors_by_id=anchors_by_id,
+            fallback_source_kind="paper_fact",
+            fallback_source_ref=self._normalize_scalar_text(
+                condition.get("test_condition_id")
+            ),
+        )
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": context.objective_id,
+                "document_id": condition.get("document_id"),
+                "unit_kind": "test_condition",
+                "property_normalized": condition.get("property_type"),
+                "material_system": self._objective_material_system(context, None),
+                "resolved_condition": self._objective_test_condition_payload(condition),
+                "test_condition": self._objective_test_condition_payload(condition),
+                "source_refs": source_refs,
+                "evidence_anchor_ids": evidence_anchor_ids,
+                "join_keys": self._objective_join_keys(
+                    variant=None,
+                    condition=condition,
+                    baseline=None,
+                ),
+                "resolution_status": "resolved" if source_refs else "partial",
+                "confidence": self._objective_fact_confidence(condition),
+            }
+        )
+
+    def _objective_characterization_unit(
+        self,
+        *,
+        context: ObjectiveContext,
+        observation: dict[str, Any],
+        variant: dict[str, Any] | None,
+        anchors_by_id: dict[str, dict[str, Any]],
+    ) -> ObjectiveEvidenceUnit:
+        evidence_anchor_ids = tuple(
+            self._normalize_list(observation.get("evidence_anchor_ids"))
+        )
+        source_refs = self._objective_source_refs(
+            evidence_anchor_ids,
+            anchors_by_id=anchors_by_id,
+            fallback_source_kind="paper_fact",
+            fallback_source_ref=self._normalize_scalar_text(
+                observation.get("observation_id")
+            ),
+        )
+        value_payload = {
+            "observation_text": observation.get("observation_text"),
+            "observed_value": observation.get("observed_value"),
+            "observed_unit": observation.get("observed_unit"),
+        }
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": context.objective_id,
+                "document_id": observation.get("document_id"),
+                "unit_kind": "characterization",
+                "property_normalized": observation.get("characterization_type"),
+                "material_system": self._objective_material_system(context, variant),
+                "sample_context": self._objective_sample_context(variant),
+                "process_context": self._objective_process_context(variant),
+                "resolved_condition": observation.get("condition_context"),
+                "value_payload": {
+                    key: value
+                    for key, value in value_payload.items()
+                    if value not in (None, "", [], {})
+                },
+                "unit": observation.get("observed_unit"),
+                "source_refs": source_refs,
+                "evidence_anchor_ids": evidence_anchor_ids,
+                "join_keys": self._objective_join_keys(
+                    variant=variant,
+                    condition=None,
+                    baseline=None,
+                ),
+                "resolution_status": "resolved" if source_refs else "partial",
+                "confidence": self._objective_fact_confidence(observation),
+            }
+        )
+
+    def _select_objective_contexts_for_fact(
+        self,
+        objective_contexts: tuple[ObjectiveContext, ...],
+        *,
+        property_name: Any,
+        text: str,
+        require_property_match: bool,
+    ) -> tuple[ObjectiveContext, ...]:
+        if not objective_contexts:
+            return ()
+        scored: list[tuple[int, int, ObjectiveContext]] = []
+        for index, context in enumerate(objective_contexts):
+            if self._objective_property_matches_axes(
+                property_name,
+                context.excluded_property_axes,
+            ):
+                continue
+            property_matches = self._objective_property_matches_axes(
+                property_name,
+                context.target_property_axes,
+            )
+            if require_property_match and context.target_property_axes and not property_matches:
+                continue
+            score = self._score_objective_context_for_text(context, text)
+            if property_matches:
+                score += 100
+            elif not context.target_property_axes:
+                score += 10
+            if score <= 0:
+                continue
+            scored.append((score, -index, context))
+        if not scored:
+            return ()
+        if len(objective_contexts) == 1:
+            return (scored[0][2],)
+        best_score = max(score for score, _, _ in scored)
+        return tuple(
+            context
+            for score, _, context in scored
+            if score == best_score or score >= 100
+        )
+
+    def _objective_property_matches_axes(
+        self,
+        property_name: Any,
+        axes: tuple[str, ...],
+    ) -> bool:
+        property_key = self._objective_context_match_key(property_name)
+        if not property_key or not axes:
+            return False
+        property_tokens = set(property_key.split())
+        expanded_properties = self._objective_property_expansions(property_key)
+        for axis in axes:
+            axis_key = self._objective_context_match_key(axis)
+            if not axis_key:
+                continue
+            axis_tokens = set(axis_key.split())
+            expanded_axes = self._objective_property_expansions(axis_key)
+            if (
+                axis_key in property_key
+                or property_key in axis_key
+                or axis_tokens <= property_tokens
+                or property_tokens <= axis_tokens
+                or bool(expanded_properties & expanded_axes)
+            ):
+                return True
+        return False
+
+    def _objective_property_expansions(self, value: str) -> set[str]:
+        key = self._objective_context_match_key(value)
+        expansions = {key} if key else set()
+        normalized = key.replace(" ", "_")
+        if normalized in _TENSILE_TEST_PROPERTIES or "tensile" in key:
+            expansions.update(_TENSILE_TEST_PROPERTIES)
+        if normalized in _MICROHARDNESS_TEST_PROPERTIES or "hardness" in key:
+            expansions.update(_MICROHARDNESS_TEST_PROPERTIES)
+        if (
+            normalized in _CHARACTERIZATION_TEST_PROPERTIES
+            or "microstructure" in key
+            or "density" in key
+            or "porosity" in key
+        ):
+            expansions.update(_CHARACTERIZATION_TEST_PROPERTIES)
+        if "mechanical" in key:
+            expansions.update(_TENSILE_TEST_PROPERTIES)
+            expansions.update(_MICROHARDNESS_TEST_PROPERTIES)
+        if "corrosion" in key:
+            expansions.update(
+                {
+                    "corrosion",
+                    "corrosion_current_density",
+                    "corrosion_potential",
+                    "pitting_potential",
+                    "passivation_behavior",
+                }
+            )
+        return {item.replace("_", " ") for item in expansions if item}
+
+    def _objective_fact_text(self, *rows: dict[str, Any] | None) -> str:
+        parts: list[str] = []
+        for row in rows:
+            if not row:
+                continue
+            for value in row.values():
+                text = self._normalize_scalar_text(value)
+                if text:
+                    parts.append(text)
+        return " ".join(parts)
+
+    def _objective_material_system(
+        self,
+        context: ObjectiveContext,
+        variant: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        material = self._normalize_object((variant or {}).get("host_material_system"))
+        payload = dict(material) if isinstance(material, dict) else {}
+        if context.material_scope:
+            payload["objective_material_scope"] = list(context.material_scope)
+        return payload
+
+    def _objective_sample_context(
+        self,
+        variant: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not variant:
+            return {}
+        return {
+            key: value
+            for key, value in {
+                "variant_id": self._normalize_scalar_text(variant.get("variant_id")),
+                "label": self._normalize_scalar_text(variant.get("variant_label")),
+                "variable_axis_type": self._normalize_scalar_text(
+                    variant.get("variable_axis_type")
+                ),
+                "variable_value": self._normalize_object(variant.get("variable_value")),
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_process_context(
+        self,
+        variant: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        process = self._normalize_object((variant or {}).get("process_context"))
+        return dict(process) if isinstance(process, dict) else {}
+
+    def _objective_test_condition_payload(
+        self,
+        condition: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not condition:
+            return {}
+        payload = {
+            "test_condition_id": self._normalize_scalar_text(
+                condition.get("test_condition_id")
+            ),
+            "property_type": self._normalize_scalar_text(condition.get("property_type")),
+            "template_type": self._normalize_scalar_text(condition.get("template_type")),
+            "scope_level": self._normalize_scalar_text(condition.get("scope_level")),
+            "condition_payload": self._normalize_object(
+                condition.get("condition_payload")
+            ),
+            "condition_completeness": self._normalize_scalar_text(
+                condition.get("condition_completeness")
+            ),
+        }
+        return {
+            key: value
+            for key, value in payload.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_baseline_context(
+        self,
+        baseline: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not baseline:
+            return {}
+        return {
+            key: value
+            for key, value in {
+                "baseline_id": self._normalize_scalar_text(baseline.get("baseline_id")),
+                "label": self._normalize_scalar_text(baseline.get("baseline_label")),
+                "baseline_type": self._normalize_scalar_text(
+                    baseline.get("baseline_type")
+                ),
+                "baseline_scope": self._normalize_scalar_text(
+                    baseline.get("baseline_scope")
+                ),
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_resolved_condition(
+        self,
+        *,
+        variant: dict[str, Any] | None,
+        condition: dict[str, Any] | None,
+        baseline: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload = {
+            "sample": self._objective_sample_context(variant),
+            "process": self._objective_process_context(variant),
+            "test": self._objective_test_condition_payload(condition),
+            "baseline": self._objective_baseline_context(baseline),
+        }
+        return {
+            key: value
+            for key, value in payload.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_join_keys(
+        self,
+        *,
+        variant: dict[str, Any] | None,
+        condition: dict[str, Any] | None,
+        baseline: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        keys = {
+            "variant_id": self._normalize_scalar_text((variant or {}).get("variant_id")),
+            "sample_label": self._normalize_scalar_text(
+                (variant or {}).get("variant_label")
+            ),
+            "test_condition_id": self._normalize_scalar_text(
+                (condition or {}).get("test_condition_id")
+            ),
+            "baseline_id": self._normalize_scalar_text(
+                (baseline or {}).get("baseline_id")
+            ),
+        }
+        return {
+            key: value
+            for key, value in keys.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_source_refs(
+        self,
+        evidence_anchor_ids: tuple[str, ...],
+        *,
+        anchors_by_id: dict[str, dict[str, Any]],
+        fallback_source_kind: str,
+        fallback_source_ref: str | None,
+    ) -> tuple[dict[str, Any], ...]:
+        refs: list[dict[str, Any]] = []
+        for anchor_id in evidence_anchor_ids:
+            anchor = anchors_by_id.get(anchor_id)
+            if not anchor:
+                continue
+            source_kind = self._normalize_scalar_text(anchor.get("source_type")) or "text"
+            source_ref = (
+                self._normalize_scalar_text(anchor.get("figure_or_table"))
+                or self._normalize_scalar_text(anchor.get("block_id"))
+                or self._normalize_scalar_text(anchor.get("snippet_id"))
+                or self._normalize_scalar_text(anchor.get("section_id"))
+                or anchor_id
+            )
+            ref = {
+                "anchor_id": anchor_id,
+                "source_kind": source_kind,
+                "source_ref": source_ref,
+                "page": anchor.get("page"),
+                "quote": anchor.get("quote"),
+            }
+            refs.append(
+                {
+                    key: value
+                    for key, value in ref.items()
+                    if value not in (None, "", [], {})
+                }
+            )
+        if refs:
+            return tuple(refs)
+        if fallback_source_ref:
+            return (
+                {
+                    "source_kind": fallback_source_kind,
+                    "source_ref": fallback_source_ref,
+                },
+            )
+        return ()
+
+    def _objective_resolution_status(
+        self,
+        *,
+        source_refs: tuple[dict[str, Any], ...],
+        sample_context: dict[str, Any],
+        test_condition: dict[str, Any],
+    ) -> str:
+        if source_refs and sample_context and test_condition:
+            return "resolved"
+        if source_refs:
+            return "partial"
+        return "unresolved"
+
+    def _objective_fact_confidence(self, row: dict[str, Any]) -> float:
+        confidence = self._coerce_float(row.get("confidence"))
+        if confidence is not None:
+            return max(0.0, min(1.0, round(confidence, 2)))
+        traceability_status = self._normalize_scalar_text(
+            row.get("traceability_status")
+        )
+        if traceability_status == TRACEABILITY_STATUS_DIRECT:
+            return 0.86
+        epistemic_status = self._normalize_scalar_text(row.get("epistemic_status"))
+        if epistemic_status == EPISTEMIC_DIRECTLY_OBSERVED:
+            return 0.84
+        if epistemic_status == EPISTEMIC_NORMALIZED_FROM_EVIDENCE:
+            return 0.78
+        return 0.7
+
+    def _build_objective_logic_chains_from_units(
+        self,
+        *,
+        objectives: tuple[Any, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
+        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> tuple[ObjectiveLogicChain, ...]:
+        context_by_objective_id = {
+            context.objective_id: context
+            for context in objective_contexts
+        }
+        units_by_objective_id: dict[str, list[ObjectiveEvidenceUnit]] = {}
+        for unit in objective_evidence_units:
+            units_by_objective_id.setdefault(unit.objective_id, []).append(unit)
+
+        chains: list[ObjectiveLogicChain] = []
+        for objective in objectives:
+            objective_id = self._normalize_scalar_text(
+                getattr(objective, "objective_id", None)
+            )
+            if not objective_id:
+                continue
+            units = units_by_objective_id.get(objective_id, [])
+            if not units:
+                continue
+            counts_by_kind: dict[str, int] = {}
+            document_ids: list[str] = []
+            for unit in units:
+                counts_by_kind[unit.unit_kind] = counts_by_kind.get(unit.unit_kind, 0) + 1
+                if unit.document_id not in document_ids:
+                    document_ids.append(unit.document_id)
+            context = context_by_objective_id.get(objective_id)
+            chains.append(
+                ObjectiveLogicChain.from_mapping(
+                    {
+                        "objective_id": objective_id,
+                        "chain_scope": "objective",
+                        "question": getattr(objective, "question", None),
+                        "evidence_unit_ids": [
+                            unit.evidence_unit_id
+                            for unit in units
+                        ],
+                        "chain_payload": {
+                            "unit_counts_by_kind": counts_by_kind,
+                            "document_ids": document_ids,
+                            "target_property_axes": (
+                                list(context.target_property_axes)
+                                if context is not None
+                                else []
+                            ),
+                            "variable_process_axes": (
+                                list(context.variable_process_axes)
+                                if context is not None
+                                else []
+                            ),
+                        },
+                        "summary": (
+                            "Objective logic chain assembled from resolved "
+                            "paper fact evidence units."
+                        ),
+                        "confidence": getattr(objective, "confidence", 0.0),
+                    }
+                )
+            )
+        return tuple(chains)
 
     def _records_to_records(
         self,

@@ -6,6 +6,7 @@
 	import {
 		fetchObjectiveResearchView,
 		getResearchViewStateTone,
+		type ObjectiveEvidenceUnit,
 		type ObjectivePaperFrame,
 		type ObjectiveResearchView
 	} from '../../../../_shared/researchView';
@@ -26,6 +27,7 @@
 	);
 	$: routeCount = objectiveView?.evidence_routes.length ?? 0;
 	$: evidenceUnitCount = objectiveView?.evidence_units.length ?? 0;
+	$: evidenceUnits = objectiveView?.evidence_units ?? [];
 	$: if (collectionId && objectiveId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		void loadObjectiveView();
@@ -68,6 +70,69 @@
 			return headers.map((item) => String(item)).join(', ');
 		}
 		return Object.keys(value).length ? JSON.stringify(value) : $t('research.emptyValue');
+	}
+
+	function hasDisplayValue(value: unknown): boolean {
+		if (value === null || value === undefined || value === '') return false;
+		if (Array.isArray(value)) return value.some((item) => hasDisplayValue(item));
+		if (typeof value === 'object') {
+			return Object.values(value as Record<string, unknown>).some((item) => hasDisplayValue(item));
+		}
+		return true;
+	}
+
+	function displayValue(value: unknown): string {
+		if (!hasDisplayValue(value)) return '';
+		if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+			return String(value);
+		}
+		if (Array.isArray(value)) {
+			return value.map((item) => displayValue(item)).filter(Boolean).join(', ');
+		}
+		return Object.entries(value as Record<string, unknown>)
+			.filter(([, item]) => hasDisplayValue(item))
+			.map(([key, item]) => `${key}: ${displayValue(item)}`)
+			.join('; ');
+	}
+
+	function recordEntries(record: Record<string, unknown>, limit = 4) {
+		return Object.entries(record)
+			.filter(([, value]) => hasDisplayValue(value))
+			.slice(0, limit)
+			.map(([key, value]) => ({ key, value: displayValue(value) }));
+	}
+
+	function evidenceUnitTitle(unit: ObjectiveEvidenceUnit) {
+		return unit.property_normalized || unit.unit_kind;
+	}
+
+	function evidenceUnitValue(unit: ObjectiveEvidenceUnit) {
+		const payload = unit.value_payload;
+		return (
+			displayValue(payload.source_value_text) ||
+			displayValue(payload.statement) ||
+			displayValue(payload.observation_text) ||
+			displayValue(payload.observed_value) ||
+			displayValue(payload.value) ||
+			displayValue(unit.interpretation) ||
+			$t('research.objectiveWorkspace.noValue')
+		);
+	}
+
+	function sourceRefLabel(sourceRef: Record<string, unknown>) {
+		const sourceKind = displayValue(sourceRef.source_kind) || $t('research.objectiveWorkspace.source');
+		const sourceRefId =
+			displayValue(sourceRef.source_ref) ||
+			displayValue(sourceRef.table_id) ||
+			displayValue(sourceRef.anchor_id);
+		const page = displayValue(sourceRef.page);
+		return [
+			sourceKind,
+			sourceRefId,
+			page ? $t('research.objectiveWorkspace.page', { page }) : ''
+		]
+			.filter(Boolean)
+			.join(' · ');
 	}
 </script>
 
@@ -264,7 +329,79 @@
 					<h3>{$t('research.objectiveWorkspace.evidenceUnitsTitle')}</h3>
 					<span>{boolState(objectiveView.readiness.evidence_units_ready)}</span>
 				</div>
-				<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
+				{#if evidenceUnits.length}
+					<div class="evidence-unit-list">
+						{#each evidenceUnits as unit (unit.evidence_unit_id)}
+							<article class="evidence-unit-card">
+								<div class="evidence-unit-card__header">
+									<div>
+										<h4>{evidenceUnitTitle(unit)}</h4>
+										<p>{evidenceUnitValue(unit)}</p>
+									</div>
+									<span>{unit.resolution_status}</span>
+								</div>
+								<dl class="evidence-unit-facts">
+									<div>
+										<dt>{$t('research.objectiveWorkspace.kind')}</dt>
+										<dd>{unit.unit_kind}</dd>
+									</div>
+									{#if unit.property_normalized}
+										<div>
+											<dt>{$t('research.objectiveWorkspace.property')}</dt>
+											<dd>{unit.property_normalized}</dd>
+										</div>
+									{/if}
+									{#if unit.unit}
+										<div>
+											<dt>{$t('research.objectiveWorkspace.value')}</dt>
+											<dd>{unit.unit}</dd>
+										</div>
+									{/if}
+									<div>
+										<dt>{$t('research.objectiveWorkspace.status')}</dt>
+										<dd>{unit.resolution_status}</dd>
+									</div>
+								</dl>
+								<div class="evidence-context-grid">
+									{#if recordEntries(unit.sample_context).length}
+										<div>
+											<strong>{$t('research.objectiveWorkspace.sampleContext')}</strong>
+											{#each recordEntries(unit.sample_context) as entry (entry.key)}
+												<span>{entry.key}: {entry.value}</span>
+											{/each}
+										</div>
+									{/if}
+									{#if recordEntries(unit.process_context).length}
+										<div>
+											<strong>{$t('research.objectiveWorkspace.processContext')}</strong>
+											{#each recordEntries(unit.process_context) as entry (entry.key)}
+												<span>{entry.key}: {entry.value}</span>
+											{/each}
+										</div>
+									{/if}
+									{#if recordEntries(unit.test_condition).length}
+										<div>
+											<strong>{$t('research.objectiveWorkspace.testCondition')}</strong>
+											{#each recordEntries(unit.test_condition) as entry (entry.key)}
+												<span>{entry.key}: {entry.value}</span>
+											{/each}
+										</div>
+									{/if}
+								</div>
+								{#if unit.source_refs.length}
+									<div class="evidence-source-row">
+										<strong>{$t('research.objectiveWorkspace.sources')}</strong>
+										{#each unit.source_refs.slice(0, 3) as sourceRef}
+											<span>{sourceRefLabel(sourceRef)}</span>
+										{/each}
+									</div>
+								{/if}
+							</article>
+						{/each}
+					</div>
+				{:else}
+					<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
+				{/if}
 			</div>
 			<div>
 				<div class="section-heading">
@@ -332,7 +469,8 @@
 	.objective-hero h2,
 	.objective-state-card h2,
 	.objective-section h3,
-	.frame-card h4 {
+	.frame-card h4,
+	.evidence-unit-card h4 {
 		margin: 0;
 		color: var(--text-primary);
 	}
@@ -345,6 +483,7 @@
 
 	.objective-hero p,
 	.frame-card p,
+	.evidence-unit-card p,
 	.logic-summary {
 		margin: 0;
 		color: var(--text-secondary);
@@ -416,6 +555,7 @@
 	.context-grid span,
 	.section-heading span,
 	.frame-card dt,
+	.evidence-unit-facts dt,
 	.route-table th {
 		color: var(--text-secondary);
 		font-size: 12px;
@@ -522,6 +662,94 @@
 		line-height: 22px;
 	}
 
+	.evidence-unit-list {
+		display: grid;
+		gap: 12px;
+	}
+
+	.evidence-unit-card {
+		display: grid;
+		gap: 12px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 14px;
+		background: var(--bg-subtle);
+	}
+
+	.evidence-unit-card__header {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.evidence-unit-card__header > div {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.evidence-unit-card__header > span {
+		height: fit-content;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 8px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 16px;
+		background: var(--surface-card);
+	}
+
+	.evidence-unit-card h4 {
+		font-size: 15px;
+		line-height: 21px;
+	}
+
+	.evidence-unit-card p,
+	.evidence-unit-facts dd,
+	.evidence-context-grid span,
+	.evidence-source-row span {
+		overflow-wrap: anywhere;
+	}
+
+	.evidence-unit-facts {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+		margin: 0;
+	}
+
+	.evidence-unit-facts dd {
+		margin: 3px 0 0;
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.evidence-context-grid,
+	.evidence-source-row {
+		display: grid;
+		gap: 8px;
+	}
+
+	.evidence-context-grid > div {
+		display: grid;
+		gap: 4px;
+	}
+
+	.evidence-context-grid strong,
+	.evidence-source-row strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.evidence-context-grid span,
+	.evidence-source-row span {
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
 	.empty-panel {
 		border: 1px dashed var(--border-default);
 		border-radius: var(--radius-md);
@@ -543,7 +771,8 @@
 
 	@media (max-width: 860px) {
 		.objective-hero,
-		.frame-card__header {
+		.frame-card__header,
+		.evidence-unit-card__header {
 			flex-direction: column;
 		}
 
@@ -553,6 +782,7 @@
 
 		.objective-summary-grid,
 		.context-grid,
+		.evidence-unit-facts,
 		.frame-card dl,
 		.objective-section--two {
 			grid-template-columns: 1fr;

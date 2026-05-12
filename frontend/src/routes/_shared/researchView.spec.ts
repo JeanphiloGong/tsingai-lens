@@ -371,7 +371,20 @@ describe('research view shared helpers', () => {
 						extractable: true
 					}
 				],
-				evidence_units: [],
+				evidence_units: [
+					{
+						evidence_unit_id: 'oeu_1',
+						document_id: 'doc_1',
+						unit_kind: 'measurement',
+						property_normalized: 'corrosion_current_density',
+						value_payload: { source_value_text: '0.4 uA/cm2' },
+						sample_context: { label: 'heat-treated' },
+						process_context: { process: 'LPBF' },
+						test_condition: { electrolyte: 'NaCl' },
+						source_refs: [{ source_kind: 'table', source_ref: 'table-1' }],
+						resolution_status: 'resolved'
+					}
+				],
 				logic_chain: null,
 				existing_comparison_rows: []
 			},
@@ -389,7 +402,15 @@ describe('research view shared helpers', () => {
 			source_kind: 'table',
 			extractable: true
 		});
-		expect(objectiveView.evidence_units).toEqual([]);
+		expect(objectiveView.evidence_units[0]).toMatchObject({
+			evidence_unit_id: 'oeu_1',
+			unit_kind: 'measurement',
+			property_normalized: 'corrosion_current_density',
+			value_payload: { source_value_text: '0.4 uA/cm2' },
+			sample_context: { label: 'heat-treated' },
+			source_refs: [{ source_kind: 'table', source_ref: 'table-1' }],
+			resolution_status: 'resolved'
+		});
 		expect(objectiveView.logic_chain).toBeNull();
 	});
 

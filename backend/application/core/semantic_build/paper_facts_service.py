@@ -1356,68 +1356,10 @@ class PaperFactsService:
         measurement_results: tuple[dict[str, Any], ...],
         characterization: tuple[dict[str, Any], ...],
     ) -> tuple[ObjectiveEvidenceUnit, ...]:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if not facts.research_objectives or not facts.objective_contexts:
-            logger.info(
-                "Objective evidence-unit replacement skipped collection_id=%s reason=objectives_not_ready objective_count=%s objective_context_count=%s",
-                collection_id,
-                len(facts.research_objectives),
-                len(facts.objective_contexts),
-            )
-            return ()
-
-        logger.info(
-            "Objective evidence-unit replacement started collection_id=%s objective_count=%s objective_context_count=%s evidence_anchors=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s",
-            collection_id,
-            len(facts.research_objectives),
-            len(facts.objective_contexts),
-            len(evidence_anchors),
-            len(sample_variants),
-            len(test_conditions),
-            len(baseline_references),
-            len(measurement_results),
-            len(characterization),
+        raise RuntimeError(
+            "Objective evidence units are authoritative route-level records; "
+            "legacy paper facts must not replace them."
         )
-        objective_evidence_units = self._build_objective_evidence_units_from_paper_facts(
-            collection_id=collection_id,
-            objective_contexts=facts.objective_contexts,
-            evidence_anchors=evidence_anchors,
-            sample_variants=sample_variants,
-            test_conditions=test_conditions,
-            baseline_references=baseline_references,
-            measurement_results=measurement_results,
-            characterization=characterization,
-        )
-        objective_logic_chains = self._build_objective_logic_chains_from_units(
-            collection_id=collection_id,
-            objectives=facts.research_objectives,
-            objective_contexts=facts.objective_contexts,
-            objective_evidence_units=objective_evidence_units,
-        )
-        unit_counts: dict[str, int] = {}
-        for unit in objective_evidence_units:
-            unit_counts[unit.unit_kind] = unit_counts.get(unit.unit_kind, 0) + 1
-        logger.info(
-            "Objective evidence-unit replacement finished collection_id=%s objective_evidence_units=%s measurement_units=%s test_condition_units=%s characterization_units=%s comparison_units=%s logic_chain_count=%s",
-            collection_id,
-            len(objective_evidence_units),
-            unit_counts.get("measurement", 0),
-            unit_counts.get("test_condition", 0),
-            unit_counts.get("characterization", 0),
-            unit_counts.get("comparison", 0),
-            len(objective_logic_chains),
-        )
-        self.core_fact_repository.replace_collection_research_objectives(
-            collection_id,
-            facts.paper_skims,
-            facts.research_objectives,
-            facts.objective_contexts,
-            facts.objective_paper_frames,
-            facts.objective_evidence_routes,
-            objective_evidence_units,
-            objective_logic_chains,
-        )
-        return objective_evidence_units
 
     def _build_objective_evidence_units_from_paper_facts(
         self,

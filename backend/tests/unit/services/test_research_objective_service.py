@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from application.core.semantic_build.llm.schemas import (
@@ -21,6 +22,12 @@ from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
 )
 from application.source.collection_service import CollectionService
+from domain.core import (
+    ObjectiveContext,
+    ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
+    ObjectivePaperFrame,
+)
 from domain.source import SourceArtifactSet
 
 
@@ -923,6 +930,422 @@ def _merge_candidate_values(
     return merged
 
 
+def test_research_objective_service_forces_extractable_objective_route_roles(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+
+    assert service._normalize_route_extractable(
+        {"role": "current_experimental_evidence", "extractable": False}
+    )
+    assert service._normalize_route_extractable(
+        {"role": "process_or_treatment", "extractable": False}
+    )
+    assert not service._normalize_route_extractable(
+        {"role": "low_value_or_irrelevant", "extractable": True}
+    )
+    assert not service._normalize_route_extractable(
+        {"role": "literature_comparison", "extractable": False}
+    )
+
+
+def test_research_objective_service_normalizes_result_table_values_to_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Sample number": "sample_id",
+                "Condition number": "test_condition",
+                "Yield Strength (MPa)": "result_property",
+                "Standard deviation (HV)": "result_property",
+            },
+            "join_keys": {"condition_key": "Condition number"},
+            "confidence": 0.84,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 4},
+        extracted_record={
+            "unit_kind": "sample_context",
+            "sample_context": {"Sample number": "1"},
+            "process_context": {"Condition number": "1"},
+            "value_payload": {
+                "Sample number": "1",
+                "Yield Strength (MPa)": "236.65",
+                "Standard deviation (HV)": "10.4",
+            },
+            "resolution_status": "partial",
+        },
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["unit_kind"] == "measurement"
+    assert record["property_normalized"] == "Yield Strength"
+    assert record["unit"] == "MPa"
+    assert record["value_payload"] == {
+        "source_value_text": "236.65",
+        "value": 236.65,
+    }
+    assert record["sample_context"] == {"Sample number": "1"}
+    assert record["process_context"] == {"Condition number": "1"}
+    assert record["join_keys"] == {"condition_key": "Condition number"}
+    assert record["resolution_status"] == "resolved"
+    assert record["confidence"] == 0.84
+    assert record["source_refs"] == (
+        {
+            "route_id": route.route_id,
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "role": "current_experimental_evidence",
+            "page": 4,
+        },
+    )
+
+
+def test_research_objective_service_expands_result_table_matrix_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Condition number": "test_condition",
+                "Sample number": "sample_index",
+                "Yield Strength (MPa)": "result_property",
+                "Ultimate Tensile Strength (MPa)": "result_property",
+                "Elongation (%)": "result_property",
+                "Microhadness (HV)": "result_property",
+                "Standard deviation (HV)": "result_property",
+            },
+            "confidence": 0.8,
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 3,
+            "column_headers": [
+                "Condition number",
+                "Sample number",
+                "Yield Strength (MPa)",
+                "Ultimate Tensile Strength (MPa)",
+                "Elongation (%)",
+                "Microhadness (HV)",
+                "Standard deviation (HV)",
+            ],
+            "table_matrix": [
+                [
+                    "Condition number",
+                    "Sample number",
+                    "Yield Strength (MPa)",
+                    "Ultimate Tensile Strength (MPa)",
+                    "Elongation (%)",
+                    "Microhadness (HV)",
+                    "Standard deviation (HV)",
+                ],
+                ["1", "1", "236.65", "375.13", "7.21", "215.65", "10.4"],
+                ["1", "2", "159.97", "196.78", "1.79", "192.275", "10.9"],
+            ],
+        },
+    )
+
+    assert len(records) == 8
+    assert {record["property_normalized"] for record in records} == {
+        "Yield Strength",
+        "Ultimate Tensile Strength",
+        "Elongation",
+        "Microhadness",
+    }
+    assert all(record["unit_kind"] == "measurement" for record in records)
+    assert all(record["resolution_status"] == "resolved" for record in records)
+    assert not any(
+        record["property_normalized"] == "Standard deviation"
+        for record in records
+    )
+    yield_record = next(
+        record
+        for record in records
+        if record["property_normalized"] == "Yield Strength"
+        and record["sample_context"]["Sample number"] == "1"
+    )
+    assert yield_record["sample_context"] == {
+        "Condition number": "1",
+        "Sample number": "1",
+    }
+    assert yield_record["value_payload"] == {
+        "source_value_text": "236.65",
+        "value": 236.65,
+    }
+    assert yield_record["unit"] == "MPa"
+    assert yield_record["join_keys"] == {
+        "condition_number": "1",
+        "sample_number": "1",
+    }
+
+
+def test_research_objective_service_resolves_measurements_from_process_units(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-measurement",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "Yield Strength",
+            "sample_context": {
+                "Condition number": "1",
+                "Sample number": "2",
+            },
+            "value_payload": {
+                "source_value_text": "236.65",
+                "value": 236.65,
+            },
+            "unit": "MPa",
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+    process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-context",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "Condition number": "1",
+                "Sample number": "2",
+            },
+            "process_context": {
+                "Scan strategy": "Chessboard",
+                "Scanning speed (mm/s)": "0.25",
+                "Energy density (J/mm3)": "70",
+            },
+            "test_condition": {
+                "Build atmosphere": "argon",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+    other_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-other-process-context",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "Condition number": "2",
+                "Sample number": "1",
+            },
+            "process_context": {
+                "Scan strategy": "Stripe",
+                "Scanning speed (mm/s)": "0.5",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+
+    resolved_units = service._resolve_objective_evidence_unit_contexts(
+        (measurement, process_context, other_process_context),
+    )
+
+    resolved_measurement = resolved_units[0]
+    assert resolved_measurement.evidence_unit_id == "oeu-measurement"
+    assert resolved_measurement.process_context == {
+        "Scan strategy": "Chessboard",
+        "Scanning speed (mm/s)": "0.25",
+        "Energy density (J/mm3)": "70",
+    }
+    assert resolved_measurement.test_condition == {"Build atmosphere": "argon"}
+    assert resolved_measurement.resolved_condition == {
+        "context_unit_id": "oeu-process-context",
+        "matched_sample_context": {
+            "Condition number": "1",
+            "Sample number": "2",
+        },
+    }
+    assert resolved_measurement.resolution_status == "resolved"
+
+
+def test_research_objective_service_adds_context_hint_route_for_condition_table(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_tables": ["table-2"],
+            "excluded_tables": ["table-1"],
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "question": "How do processing parameters affect yield strength?",
+            "variable_process_axes": [
+                "energy density",
+                "scanning strategy",
+                "scanning speed",
+            ],
+            "target_property_axes": ["yield strength"],
+            "routing_hints": [
+                {
+                    "document_id": "paper-1",
+                    "table_id": "table-1",
+                    "role": "condition_context",
+                    "reason": "Table contains process variables.",
+                }
+            ],
+            "confidence": 0.9,
+        }
+    )
+    routes: list[ObjectiveEvidenceRoute] = []
+
+    service._append_objective_context_hint_routes(
+        routes=routes,
+        seen=set(),
+        frame=frame,
+        objective_context=objective_context,
+        candidate_by_key={
+            ("table", "table-1"): {
+                "source_kind": "table",
+                "source_ref": "table-1",
+                "frame_status": "excluded",
+                "table_schema": {
+                    "column_headers": [
+                        "Condition number",
+                        "Sample number",
+                        "Scan strategy",
+                        "Scanning speed (mm/s)",
+                        "Energy density (J/mm 3 )",
+                        "Relative density",
+                    ],
+                },
+            }
+        },
+    )
+
+    assert len(routes) == 1
+    route = routes[0]
+    assert route.role == "process_or_treatment"
+    assert route.extractable is True
+    assert route.source_ref == "table-1"
+    assert route.column_roles == {
+        "Condition number": "sample_condition",
+        "Sample number": "sample_id",
+        "Scan strategy": "process_variable",
+        "Scanning speed (mm/s)": "process_variable",
+        "Energy density (J/mm 3 )": "process_variable",
+    }
+
+
+def test_research_objective_service_ranks_result_text_candidates(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-structure",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["scanning speed", "energy density"],
+            "measured_property_scope": ["microstructure", "densification"],
+            "relevant_sections": ["Paper title"],
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="intro",
+            block_order=1,
+            block_type="paragraph",
+            heading_path="Paper title",
+            text="Prior work studied 316L stainless steel processing.",
+        ),
+        SimpleNamespace(
+            block_id="microstructure-results",
+            block_order=100,
+            block_type="paragraph",
+            heading_path="3.3. Microstructure",
+            text=(
+                "The higher scanning speed samples showed refined "
+                "microstructure and better densification."
+            ),
+        ),
+        SimpleNamespace(
+            block_id="conclusion",
+            block_order=120,
+            block_type="list_item",
+            heading_path="4. Conclusion",
+            text=(
+                "Samples processed at higher scanning speed exhibited better "
+                "densification and refined microstructure."
+            ),
+        ),
+    ]
+
+    candidates = service._build_route_source_candidates(
+        frame=frame,
+        blocks=blocks,
+        tables=[],
+    )
+
+    candidate_refs = [candidate["source_ref"] for candidate in candidates]
+    assert set(candidate_refs[:2]) == {"microstructure-results", "conclusion"}
+    assert "intro" not in candidate_refs
+
+    routes: list[ObjectiveEvidenceRoute] = []
+    service._append_ranked_text_hint_routes(
+        routes=routes,
+        seen=set(),
+        frame=frame,
+        source_candidates=candidates,
+    )
+
+    assert [route.source_ref for route in routes] == [
+        "conclusion",
+        "microstructure-results",
+    ]
+    assert {route.role for route in routes} == {"characterization"}
+
+
 def test_research_objective_service_builds_and_persists_db_records(tmp_path, caplog):
     collection_service = CollectionService(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Collection")
@@ -1070,7 +1493,7 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
         if unit.unit_kind == "measurement"
     ]
     assert len(measurement_units) == 2
-    assert {unit.sample_context["label"] for unit in measurement_units} == {
+    assert {unit.sample_context["sample"] for unit in measurement_units} == {
         "as-built",
         "heat-treated",
     }

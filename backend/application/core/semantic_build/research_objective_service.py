@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from difflib import SequenceMatcher
+from hashlib import sha1
 import logging
+import re
 from typing import Any
 
 from application.core.semantic_build.document_profile_service import (
@@ -46,7 +48,38 @@ _FRAME_TABLE_LIMIT = 20
 _FRAME_TABLE_ROW_LIMIT = 6
 _ROUTE_TEXT_CHARS = 1200
 _ROUTE_CANDIDATE_LIMIT = 40
+_ROUTE_TEXT_CANDIDATE_LIMIT = 12
+_ROUTE_TEXT_HINT_LIMIT = 3
 _OBJECTIVE_EVIDENCE_TEXT_CHARS = 6000
+_OBJECTIVE_RESULT_VALUE_METADATA_KEYS = {
+    "value",
+    "min",
+    "max",
+    "retention_percent",
+    "direction",
+    "statement",
+    "value_origin",
+    "source_value_text",
+    "source_unit_text",
+    "derivation_formula",
+    "derivation_inputs",
+}
+_OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
+    "standard deviation",
+    "std",
+    "sd",
+    "variance",
+    "error bar",
+    "condition number",
+    "sample number",
+)
+_OBJECTIVE_EXTRACTABLE_ROUTE_ROLES = {
+    "current_experimental_evidence",
+    "process_or_treatment",
+    "test_condition",
+    "characterization",
+}
+_NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _BROAD_PROPERTY_AXIS_EXPANSIONS = {
     "mechanical properties": (
         "yield strength",
@@ -819,13 +852,13 @@ class ResearchObjectiveService:
                 (candidate["source_kind"], candidate["source_ref"]): candidate
                 for candidate in source_candidates
             }
+            objective_context = context_by_objective_id.get(frame.objective_id)
             payload = {
                 "collection_id": collection_id,
                 "objective": objective.to_record(),
                 "objective_context": (
-                    context_by_objective_id[frame.objective_id].to_record()
-                    if frame.objective_id in context_by_objective_id
-                    else {}
+                    objective_context.to_record()
+                    if objective_context is not None else {}
                 ),
                 "paper_frame": frame.to_record(),
                 "source_candidates": source_candidates,
@@ -871,6 +904,19 @@ class ResearchObjectiveService:
                         }
                     )
                 routes.append(ObjectiveEvidenceRoute.from_mapping(record))
+            self._append_objective_context_hint_routes(
+                routes=routes,
+                seen=seen,
+                frame=frame,
+                objective_context=objective_context,
+                candidate_by_key=candidate_by_key,
+            )
+            self._append_ranked_text_hint_routes(
+                routes=routes,
+                seen=seen,
+                frame=frame,
+                source_candidates=source_candidates,
+            )
             frame_routes = routes[frame_route_count_before:]
             logger.info(
                 "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s source_candidate_count=%s route_count=%s extractable_route_count=%s completed_frames=%s remaining_frames=%s",
@@ -892,6 +938,271 @@ class ResearchObjectiveService:
             len(routes),
         )
         return tuple(routes)
+
+    def _append_objective_context_hint_routes(
+        self,
+        *,
+        routes: list[ObjectiveEvidenceRoute],
+        seen: set[tuple[str, str, str, str, str]],
+        frame: ObjectivePaperFrame,
+        objective_context: ObjectiveContext | None,
+        candidate_by_key: dict[tuple[str, str], dict[str, Any]],
+    ) -> None:
+        if objective_context is None:
+            return
+        for hint in objective_context.routing_hints:
+            table_id = str(hint.get("table_id") or "").strip()
+            if not table_id:
+                continue
+            document_id = str(hint.get("document_id") or "").strip()
+            if document_id and document_id != frame.document_id:
+                continue
+            candidate = candidate_by_key.get(("table", table_id))
+            if candidate is None:
+                continue
+            role = self._objective_context_hint_route_role(hint)
+            if role is None:
+                continue
+            route_key = (
+                frame.objective_id,
+                frame.document_id,
+                "table",
+                table_id,
+                role,
+            )
+            if route_key in seen:
+                continue
+            seen.add(route_key)
+            table_schema = self._route_table_schema_record(candidate=candidate)
+            routes.append(
+                ObjectiveEvidenceRoute.from_mapping(
+                    {
+                        "objective_id": frame.objective_id,
+                        "document_id": frame.document_id,
+                        "source_kind": "table",
+                        "source_ref": table_id,
+                        "role": role,
+                        "extractable": True,
+                        "reason": hint.get("reason")
+                        or "Selected from objective context routing hints.",
+                        "table_schema": table_schema,
+                        "column_roles": self._objective_context_hint_column_roles(
+                            objective_context=objective_context,
+                            hint=hint,
+                            table_schema=table_schema,
+                        ),
+                        "join_keys": {},
+                        "join_plan": {},
+                        "confidence": objective_context.confidence,
+                    }
+                )
+            )
+
+    def _objective_context_hint_route_role(
+        self,
+        hint: dict[str, Any],
+    ) -> str | None:
+        role = str(hint.get("role") or "").strip()
+        if role == "result_table":
+            return "current_experimental_evidence"
+        if role in {"condition_context", "process_context", "method_context"}:
+            return "process_or_treatment"
+        return None
+
+    def _objective_context_hint_column_roles(
+        self,
+        *,
+        objective_context: ObjectiveContext,
+        hint: dict[str, Any],
+        table_schema: dict[str, Any],
+    ) -> dict[str, str]:
+        hint_role = str(hint.get("role") or "")
+        roles: dict[str, str] = {}
+        for header in table_schema.get("column_headers", ()):
+            header_text = str(header or "").strip()
+            if not header_text:
+                continue
+            header_key = self._objective_column_key(header_text)
+            if header_key == "condition_number":
+                roles[header_text] = "sample_condition"
+            elif header_key in {"sample", "sample_number"}:
+                roles[header_text] = "sample_id"
+            elif self._objective_value_column_is_statistical(header_text):
+                roles[header_text] = "statistical_measure"
+            elif self._objective_header_matches_any_axis(
+                header_text,
+                objective_context.target_property_axes,
+            ) or (
+                hint_role == "result_table"
+                and header_key == "relative_density"
+                and any(
+                    axis in {"densification", "microstructure"}
+                    for axis in objective_context.target_property_axes
+                )
+            ):
+                roles[header_text] = "target_property"
+            elif self._objective_header_matches_any_axis(
+                header_text,
+                objective_context.variable_process_axes,
+            ) or self._objective_header_looks_process_variable(header_text):
+                roles[header_text] = "process_variable"
+        return roles
+
+    def _append_ranked_text_hint_routes(
+        self,
+        *,
+        routes: list[ObjectiveEvidenceRoute],
+        seen: set[tuple[str, str, str, str, str]],
+        frame: ObjectivePaperFrame,
+        source_candidates: list[dict[str, Any]],
+    ) -> None:
+        existing_refs = {
+            route.source_ref
+            for route in routes
+            if route.objective_id == frame.objective_id
+            and route.document_id == frame.document_id
+            and route.source_kind == "text_window"
+        }
+        ranked_candidates: list[tuple[int, int, dict[str, Any]]] = []
+        for index, candidate in enumerate(source_candidates):
+            if candidate.get("source_kind") != "text_window":
+                continue
+            source_ref = str(candidate.get("source_ref") or "").strip()
+            if not source_ref or source_ref in existing_refs:
+                continue
+            ranked_candidates.append(
+                (
+                    -self._text_hint_route_priority(candidate),
+                    index,
+                    candidate,
+                )
+            )
+        ranked_candidates.sort()
+        added = 0
+        for _, _, candidate in ranked_candidates:
+            source_ref = str(candidate.get("source_ref") or "").strip()
+            role = self._text_hint_route_role(frame=frame, candidate=candidate)
+            route_key = (
+                frame.objective_id,
+                frame.document_id,
+                "text_window",
+                source_ref,
+                role,
+            )
+            if route_key in seen:
+                continue
+            seen.add(route_key)
+            routes.append(
+                ObjectiveEvidenceRoute.from_mapping(
+                    {
+                        "objective_id": frame.objective_id,
+                        "document_id": frame.document_id,
+                        "source_kind": "text_window",
+                        "source_ref": source_ref,
+                        "role": role,
+                        "extractable": True,
+                        "reason": "High-scoring objective text candidate retained for evidence extraction.",
+                        "table_schema": {},
+                        "column_roles": {},
+                        "join_keys": {},
+                        "join_plan": {},
+                        "confidence": 0.62,
+                    }
+                )
+            )
+            added += 1
+            if added >= _ROUTE_TEXT_HINT_LIMIT:
+                break
+
+    def _text_hint_route_priority(self, candidate: dict[str, Any]) -> int:
+        section_key = self._objective_column_key(
+            str(candidate.get("section_label") or "")
+        )
+        priority = 0
+        if "conclusion" in section_key:
+            priority += 8
+        if section_key.startswith(("3_", "4_")):
+            priority += 6
+        if candidate.get("block_type") == "figure_caption":
+            priority += 2
+        if "abstract" in section_key:
+            priority -= 3
+        text = str(candidate.get("text") or "").casefold()
+        if any(
+            token in text
+            for token in (
+                "microstructure",
+                "grain",
+                "dendrite",
+                "defect",
+                "porosity",
+                "sem",
+            )
+        ):
+            priority += 2
+        return priority
+
+    def _text_hint_route_role(
+        self,
+        *,
+        frame: ObjectivePaperFrame,
+        candidate: dict[str, Any],
+    ) -> str:
+        text = " ".join(
+            str(value or "")
+            for value in (
+                candidate.get("section_label"),
+                candidate.get("text"),
+                *frame.measured_property_scope,
+            )
+        ).casefold()
+        if any(
+            token in text
+            for token in (
+                "microstructure",
+                "grain",
+                "dendrite",
+                "defect",
+                "morphology",
+                "porosity",
+                "phase",
+                "sem",
+            )
+        ):
+            return "characterization"
+        return "current_experimental_evidence"
+
+    def _objective_header_matches_any_axis(
+        self,
+        header: str,
+        axes: tuple[str, ...],
+    ) -> bool:
+        header_key = self._objective_column_key(header)
+        for axis in axes:
+            axis_key = self._objective_column_key(axis)
+            if not axis_key:
+                continue
+            if axis_key in header_key or header_key in axis_key:
+                return True
+            if axis_key == "microhardness" and "microh" in header_key:
+                return True
+        return False
+
+    def _objective_header_looks_process_variable(self, header: str) -> bool:
+        header_key = self._objective_column_key(header)
+        return any(
+            token in header_key
+            for token in (
+                "duration",
+                "energy",
+                "hatch",
+                "laser",
+                "power",
+                "scan",
+                "speed",
+                "temperature",
+            )
+        )
 
     def _build_objective_evidence_units(
         self,
@@ -977,21 +1288,21 @@ class ResearchObjectiveService:
             }
             parsed = extractor.extract_objective_evidence_units(payload)
             route_unit_start = len(units)
-            for item in parsed.evidence_units:
-                record = item.model_dump()
-                record.update(
-                    {
-                        "objective_id": route.objective_id,
-                        "document_id": route.document_id,
-                        "source_refs": self._objective_route_source_refs(
-                            route=route,
-                            source=source,
-                        ),
-                        "join_keys": record.get("join_keys") or dict(route.join_keys),
-                    }
+            route_records = self._objective_table_matrix_evidence_unit_records(
+                route=route,
+                source=source,
+            )
+            if not route_records:
+                route_records = tuple(
+                    record
+                    for item in parsed.evidence_units
+                    for record in self._objective_evidence_unit_records_from_extracted(
+                        route=route,
+                        source=source,
+                        extracted_record=item.model_dump(),
+                    )
                 )
-                if not record.get("confidence"):
-                    record["confidence"] = route.confidence
+            for record in route_records:
                 unit = ObjectiveEvidenceUnit.from_mapping(record)
                 if not self._objective_evidence_unit_has_payload(unit):
                     continue
@@ -1018,7 +1329,118 @@ class ResearchObjectiveService:
             collection_id,
             len(units),
         )
-        return tuple(units)
+        return self._resolve_objective_evidence_unit_contexts(tuple(units))
+
+    def _resolve_objective_evidence_unit_contexts(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        context_units_by_key: dict[
+            tuple[str, str, tuple[tuple[str, str], ...]],
+            list[ObjectiveEvidenceUnit],
+        ] = {}
+        for unit in units:
+            if unit.unit_kind == "measurement":
+                continue
+            if not unit.process_context and not unit.test_condition:
+                continue
+            for key in self._objective_sample_context_match_keys(unit.sample_context):
+                context_units_by_key.setdefault(
+                    (unit.objective_id, unit.document_id, key),
+                    [],
+                ).append(unit)
+
+        resolved_units: list[ObjectiveEvidenceUnit] = []
+        for unit in units:
+            if unit.unit_kind != "measurement":
+                resolved_units.append(unit)
+                continue
+            context_unit = self._matching_objective_context_unit(
+                unit=unit,
+                context_units_by_key=context_units_by_key,
+            )
+            if context_unit is None:
+                resolved_units.append(unit)
+                continue
+            merged_process_context = {
+                **context_unit.process_context,
+                **unit.process_context,
+            }
+            merged_test_condition = {
+                **context_unit.test_condition,
+                **unit.test_condition,
+            }
+            if (
+                merged_process_context == unit.process_context
+                and merged_test_condition == unit.test_condition
+            ):
+                resolved_units.append(unit)
+                continue
+            resolved_condition = {
+                **unit.resolved_condition,
+                "context_unit_id": context_unit.evidence_unit_id,
+                "matched_sample_context": dict(context_unit.sample_context),
+            }
+            record = unit.to_record()
+            record.update(
+                {
+                    "process_context": merged_process_context,
+                    "test_condition": merged_test_condition,
+                    "resolved_condition": resolved_condition,
+                    "resolution_status": "resolved",
+                }
+            )
+            resolved_units.append(ObjectiveEvidenceUnit.from_mapping(record))
+        return tuple(resolved_units)
+
+    def _matching_objective_context_unit(
+        self,
+        *,
+        unit: ObjectiveEvidenceUnit,
+        context_units_by_key: dict[
+            tuple[str, str, tuple[tuple[str, str], ...]],
+            list[ObjectiveEvidenceUnit],
+        ],
+    ) -> ObjectiveEvidenceUnit | None:
+        for key in self._objective_sample_context_match_keys(unit.sample_context):
+            candidates = context_units_by_key.get(
+                (unit.objective_id, unit.document_id, key),
+                [],
+            )
+            if len(candidates) == 1:
+                return candidates[0]
+        return None
+
+    def _objective_sample_context_match_keys(
+        self,
+        sample_context: dict[str, Any],
+    ) -> tuple[tuple[tuple[str, str], ...], ...]:
+        items = tuple(
+            sorted(
+                (
+                    column_key,
+                    str(value).strip().casefold(),
+                )
+                for column, value in sample_context.items()
+                if (column_key := self._objective_column_key(str(column)))
+                in {
+                    "condition",
+                    "condition_no",
+                    "condition_number",
+                    "sample",
+                    "sample_id",
+                    "sample_no",
+                    "sample_number",
+                }
+                and str(value).strip()
+            )
+        )
+        if not items:
+            return ()
+        keys: list[tuple[tuple[str, str], ...]] = [items]
+        if len(items) > 1:
+            keys.extend((item,) for item in items)
+        return tuple(keys)
 
     def _build_objective_route_source_payload(
         self,
@@ -1077,6 +1499,399 @@ class ResearchObjectiveService:
                 "text": text[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
             }
         return {}
+
+    def _objective_table_matrix_evidence_unit_records(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        if route.source_kind != "table":
+            return ()
+        headers, data_rows = self._objective_table_matrix_rows(source)
+        if not headers or not data_rows:
+            return ()
+        if route.role == "current_experimental_evidence":
+            return self._objective_result_table_matrix_records(
+                route=route,
+                source=source,
+                headers=headers,
+                data_rows=data_rows,
+            )
+        if route.role == "process_or_treatment":
+            return self._objective_process_table_matrix_records(
+                route=route,
+                source=source,
+                headers=headers,
+                data_rows=data_rows,
+            )
+        return ()
+
+    def _objective_table_matrix_rows(
+        self,
+        source: dict[str, Any],
+    ) -> tuple[tuple[str, ...], tuple[tuple[int, tuple[str, ...]], ...]]:
+        headers = tuple(
+            str(header).strip()
+            for header in source.get("column_headers", ())
+            if str(header).strip()
+        )
+        matrix = tuple(
+            tuple(str(cell).strip() for cell in row)
+            for row in source.get("table_matrix", ())
+            if isinstance(row, (list, tuple))
+        )
+        if not headers or not matrix:
+            return (), ()
+        rows = matrix
+        if self._objective_row_matches_headers(matrix[0], headers):
+            rows = matrix[1:]
+        data_rows = tuple(
+            (row_index, row)
+            for row_index, row in enumerate(rows, start=1)
+            if any(cell for cell in row)
+        )
+        return headers, data_rows
+
+    def _objective_row_matches_headers(
+        self,
+        row: tuple[str, ...],
+        headers: tuple[str, ...],
+    ) -> bool:
+        return tuple(self._objective_column_key(value) for value in row[: len(headers)]) == tuple(
+            self._objective_column_key(value) for value in headers
+        )
+
+    def _objective_result_table_matrix_records(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+        headers: tuple[str, ...],
+        data_rows: tuple[tuple[int, tuple[str, ...]], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        result_columns = self._objective_route_result_columns(route)
+        if not result_columns:
+            return ()
+
+        records: list[dict[str, Any]] = []
+        for row_index, row in data_rows:
+            row_values = self._objective_table_row_values(headers=headers, row=row)
+            row_context = self._objective_table_row_context(
+                route=route,
+                row_values=row_values,
+                result_columns=result_columns,
+            )
+            for result_column in result_columns:
+                raw_value = row_values.get(result_column)
+                if raw_value in (None, ""):
+                    continue
+                property_normalized, unit = self._split_property_unit(result_column)
+                value_payload = {"source_value_text": str(raw_value)}
+                numeric_value = self._coerce_number(raw_value)
+                if numeric_value is not None:
+                    value_payload["value"] = numeric_value
+                records.append(
+                    {
+                        "evidence_unit_id": self._objective_matrix_unit_id(
+                            route=route,
+                            row_index=row_index,
+                            column=result_column,
+                        ),
+                        "objective_id": route.objective_id,
+                        "document_id": route.document_id,
+                        "unit_kind": "measurement",
+                        "property_normalized": property_normalized,
+                        "sample_context": row_context["sample_context"],
+                        "process_context": row_context["process_context"],
+                        "test_condition": row_context["test_condition"],
+                        "value_payload": value_payload,
+                        "unit": unit,
+                        "source_refs": self._objective_route_source_refs(
+                            route=route,
+                            source=source,
+                        ),
+                        "join_keys": self._objective_table_join_keys(
+                            route=route,
+                            row_values=row_values,
+                        ),
+                        "resolution_status": "resolved",
+                        "confidence": route.confidence,
+                    }
+                )
+        return tuple(records)
+
+    def _objective_process_table_matrix_records(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+        headers: tuple[str, ...],
+        data_rows: tuple[tuple[int, tuple[str, ...]], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        result_columns = self._objective_route_result_columns(route)
+        records: list[dict[str, Any]] = []
+        for row_index, row in data_rows:
+            row_values = self._objective_table_row_values(headers=headers, row=row)
+            row_context = self._objective_table_row_context(
+                route=route,
+                row_values=row_values,
+                result_columns=result_columns,
+            )
+            if not row_context["process_context"] and not row_context["test_condition"]:
+                continue
+            records.append(
+                {
+                    "evidence_unit_id": self._objective_matrix_unit_id(
+                        route=route,
+                        row_index=row_index,
+                        column="process_context",
+                    ),
+                    "objective_id": route.objective_id,
+                    "document_id": route.document_id,
+                    "unit_kind": "process_context",
+                    "sample_context": row_context["sample_context"],
+                    "process_context": row_context["process_context"],
+                    "test_condition": row_context["test_condition"],
+                    "source_refs": self._objective_route_source_refs(
+                        route=route,
+                        source=source,
+                    ),
+                    "join_keys": self._objective_table_join_keys(
+                        route=route,
+                        row_values=row_values,
+                    ),
+                    "resolution_status": "resolved",
+                    "confidence": route.confidence,
+                }
+            )
+        return tuple(records)
+
+    def _objective_table_row_values(
+        self,
+        *,
+        headers: tuple[str, ...],
+        row: tuple[str, ...],
+    ) -> dict[str, str]:
+        return {
+            header: row[index]
+            for index, header in enumerate(headers)
+            if index < len(row) and row[index] not in (None, "")
+        }
+
+    def _objective_table_row_context(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        row_values: dict[str, str],
+        result_columns: set[str],
+    ) -> dict[str, dict[str, str]]:
+        sample_context: dict[str, str] = {}
+        process_context: dict[str, str] = {}
+        test_condition: dict[str, str] = {}
+        for column, value in row_values.items():
+            role = str(route.column_roles.get(column) or "").lower()
+            column_key = self._objective_column_key(column)
+            if "sample" in role or column_key in {
+                "condition_number",
+                "sample",
+                "sample_number",
+            }:
+                sample_context[column] = value
+            elif (
+                column in result_columns
+                or self._objective_value_column_is_non_result(column)
+            ):
+                continue
+            elif "process" in role or "variable" in role:
+                process_context[column] = value
+            elif "test" in role or "condition" in role:
+                test_condition[column] = value
+        return {
+            "sample_context": sample_context,
+            "process_context": process_context,
+            "test_condition": test_condition,
+        }
+
+    def _objective_table_join_keys(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        row_values: dict[str, str],
+    ) -> dict[str, Any]:
+        if route.join_keys:
+            return dict(route.join_keys)
+        join_keys = {
+            self._objective_column_key(column): value
+            for column, value in row_values.items()
+            if self._objective_column_key(column)
+            in {"condition_number", "sample", "sample_number"}
+        }
+        return join_keys
+
+    def _objective_matrix_unit_id(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        row_index: int,
+        column: str,
+    ) -> str:
+        seed = "|".join((route.route_id, str(row_index), column))
+        return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+
+    def _objective_evidence_unit_records_from_extracted(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+        extracted_record: dict[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        record = dict(extracted_record)
+        record.update(
+            {
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "source_refs": self._objective_route_source_refs(
+                    route=route,
+                    source=source,
+                ),
+                "join_keys": record.get("join_keys") or dict(route.join_keys),
+            }
+        )
+        if not record.get("confidence"):
+            record["confidence"] = route.confidence
+
+        if route.role != "current_experimental_evidence":
+            return (record,)
+
+        value_payload = (
+            record.get("value_payload")
+            if isinstance(record.get("value_payload"), dict)
+            else {}
+        )
+        result_items = self._objective_result_value_items(
+            route=route,
+            value_payload=value_payload,
+        )
+        if not result_items:
+            return (record,)
+
+        normalized_records: list[dict[str, Any]] = []
+        for property_name, raw_value in result_items:
+            property_normalized, unit = self._split_property_unit(property_name)
+            value_record = {
+                "source_value_text": str(raw_value),
+            }
+            numeric_value = self._coerce_number(raw_value)
+            if numeric_value is not None:
+                value_record["value"] = numeric_value
+            normalized = dict(record)
+            normalized.update(
+                {
+                    "unit_kind": "measurement",
+                    "property_normalized": (
+                        record.get("property_normalized") or property_normalized
+                    ),
+                    "value_payload": value_record,
+                    "unit": record.get("unit") or unit,
+                    "resolution_status": (
+                        "resolved"
+                        if record.get("sample_context")
+                        else record.get("resolution_status")
+                    ),
+                }
+            )
+            normalized_records.append(normalized)
+        return tuple(normalized_records)
+
+    def _objective_result_value_items(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        value_payload: dict[str, Any],
+    ) -> tuple[tuple[str, Any], ...]:
+        if not value_payload:
+            return ()
+        result_columns = self._objective_route_result_columns(route)
+        result_column_by_key = {
+            self._objective_column_key(column): column
+            for column in result_columns
+        }
+        items: list[tuple[str, Any]] = []
+        for key, value in value_payload.items():
+            if value in (None, "", [], {}):
+                continue
+            key_text = str(key or "").strip()
+            if (
+                not key_text
+                or key_text.lower() in _OBJECTIVE_RESULT_VALUE_METADATA_KEYS
+                or self._objective_value_column_is_non_result(key_text)
+            ):
+                continue
+            if result_columns:
+                result_column = result_column_by_key.get(
+                    self._objective_column_key(key_text),
+                )
+                if result_column is None:
+                    continue
+            else:
+                result_column = key_text
+            items.append((result_column, value))
+        return tuple(items)
+
+    def _objective_route_result_columns(
+        self,
+        route: ObjectiveEvidenceRoute,
+    ) -> set[str]:
+        result_columns: set[str] = set()
+        for column, role in route.column_roles.items():
+            column_text = str(column)
+            if self._objective_value_column_is_non_result(column_text):
+                continue
+            role_text = str(role or "").strip().lower()
+            if any(
+                token in role_text
+                for token in ("result", "target", "measurement", "property")
+            ):
+                result_columns.add(column_text)
+        return result_columns
+
+    def _objective_value_column_is_non_result(self, value: str) -> bool:
+        text = " ".join(
+            str(value or "").lower().replace("_", " ").replace("-", " ").split()
+        )
+        if not text:
+            return True
+        return any(term in text for term in _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS)
+
+    def _objective_value_column_is_statistical(self, value: str) -> bool:
+        text = " ".join(
+            str(value or "").lower().replace("_", " ").replace("-", " ").split()
+        )
+        return any(
+            term in text
+            for term in ("standard deviation", "std", "sd", "variance", "error bar")
+        )
+
+    def _objective_column_key(self, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+
+    def _split_property_unit(self, value: str) -> tuple[str, str | None]:
+        text = str(value or "").strip()
+        if text.endswith(")") and "(" in text:
+            name, _, suffix = text.rpartition("(")
+            unit = suffix[:-1].strip()
+            return name.strip() or text, unit or None
+        return text, None
+
+    def _coerce_number(self, value: Any) -> float | None:
+        text = str(value).strip().replace(",", "")
+        if not text:
+            return None
+        match = _NUMBER_PATTERN.search(text)
+        if match is None:
+            return None
+        return float(match.group(0))
 
     def _objective_route_source_refs(
         self,
@@ -1571,27 +2386,52 @@ class ResearchObjectiveService:
                     "sample_rows": table_schema["sample_rows"],
                 }
             )
-        relevant_sections = set(frame.relevant_sections)
-        if relevant_sections:
-            for block in sorted(
-                blocks,
-                key=lambda item: int(getattr(item, "block_order", 0) or 0),
+        candidates.extend(
+            self._build_ranked_route_text_candidates(
+                frame=frame,
+                blocks=blocks,
+                limit=max(_ROUTE_CANDIDATE_LIMIT - len(candidates), 0),
+            )
+        )
+        return candidates[:_ROUTE_CANDIDATE_LIMIT]
+
+    def _build_ranked_route_text_candidates(
+        self,
+        *,
+        frame: ObjectivePaperFrame,
+        blocks: list[Any],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        scored_candidates: list[tuple[int, int, dict[str, Any]]] = []
+        for block in sorted(
+            blocks,
+            key=lambda item: int(getattr(item, "block_order", 0) or 0),
+        ):
+            block_id = str(getattr(block, "block_id", "") or "")
+            text = str(getattr(block, "text", "") or "").strip()
+            block_type = str(getattr(block, "block_type", "") or "")
+            section_label = self._block_section_label(block)
+            if (
+                not block_id
+                or not text
+                or block_type
+                not in {"paragraph", "list_item", "figure_caption"}
             ):
-                if len(candidates) >= _ROUTE_CANDIDATE_LIMIT:
-                    break
-                block_id = str(getattr(block, "block_id", "") or "")
-                text = str(getattr(block, "text", "") or "").strip()
-                block_type = str(getattr(block, "block_type", "") or "")
-                section_label = self._block_section_label(block)
-                if (
-                    not block_id
-                    or not text
-                    or block_type not in {"paragraph", "list_item"}
-                ):
-                    continue
-                if section_label not in relevant_sections:
-                    continue
-                candidates.append(
+                continue
+            score = self._route_text_candidate_score(
+                frame=frame,
+                block_type=block_type,
+                section_label=section_label,
+                text=text,
+            )
+            if score <= 0:
+                continue
+            scored_candidates.append(
+                (
+                    -score,
+                    int(getattr(block, "block_order", 0) or 0),
                     {
                         "source_kind": "text_window",
                         "source_ref": block_id,
@@ -1599,9 +2439,68 @@ class ResearchObjectiveService:
                         "section_label": section_label,
                         "block_type": block_type,
                         "text": text[:_ROUTE_TEXT_CHARS],
-                    }
+                    },
                 )
-        return candidates[:_ROUTE_CANDIDATE_LIMIT]
+            )
+        scored_candidates.sort()
+        return [
+            candidate
+            for _, _, candidate in scored_candidates[: min(limit, _ROUTE_TEXT_CANDIDATE_LIMIT)]
+        ]
+
+    def _route_text_candidate_score(
+        self,
+        *,
+        frame: ObjectivePaperFrame,
+        block_type: str,
+        section_label: str,
+        text: str,
+    ) -> int:
+        text_haystack = text.casefold()
+        if "references" in self._objective_column_key(section_label):
+            return 0
+        score = 0
+        for term in frame.material_match:
+            term_text = str(term or "").strip().casefold()
+            if term_text and term_text in text_haystack:
+                score += 1
+        for term in (*frame.changed_variables, *frame.measured_property_scope):
+            term_text = str(term or "").strip().casefold()
+            if term_text and term_text in text_haystack:
+                score += 4
+        for term in frame.test_environment_scope:
+            term_text = str(term or "").strip().casefold()
+            if term_text and term_text in text_haystack:
+                score += 2
+        section_key = self._objective_column_key(section_label)
+        if section_key.startswith(("3_", "4_")) or "conclusion" in section_key:
+            score += 3
+        if block_type in {"figure_caption", "list_item"}:
+            score += 1
+        if any(
+            token in text_haystack
+            for token in (
+                "affect",
+                "compared",
+                "comparison",
+                "exhibited",
+                "observed",
+                "result",
+                "showed",
+            )
+        ):
+            score += 2
+        if any(
+            token in text_haystack
+            for token in (
+                "fabricated",
+                "processed",
+                "treated",
+                "treatment",
+            )
+        ):
+            score += 2
+        return score if score >= 4 else 0
 
     def _build_route_table_schema(self, table: Any) -> dict[str, Any]:
         matrix = tuple(getattr(table, "table_matrix", ()) or ())
@@ -1633,8 +2532,11 @@ class ResearchObjectiveService:
         return dict(candidate_schema) if isinstance(candidate_schema, dict) else {}
 
     def _normalize_route_extractable(self, record: dict[str, Any]) -> bool:
-        if record.get("role") == "low_value_or_irrelevant":
+        role = str(record.get("role") or "").strip()
+        if role == "low_value_or_irrelevant":
             return False
+        if role in _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES:
+            return True
         return bool(record.get("extractable"))
 
     def _build_objective_paper_frame_payload(

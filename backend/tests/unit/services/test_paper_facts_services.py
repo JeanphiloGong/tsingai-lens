@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from domain.core.comparison_assembly import (
     ComparableResultAssembler,
@@ -805,224 +806,20 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     )
 
 
-def test_paper_facts_replace_objective_evidence_units_from_paper_facts(tmp_path, caplog):
+def test_paper_facts_rejects_legacy_objective_evidence_unit_replacement(tmp_path):
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "obj-mechanical",
-            "question": "How does scan speed affect LPBF 316L yield strength?",
-            "material_scope": ["316L stainless steel"],
-            "process_axes": ["scanning speed"],
-            "property_axes": ["yield strength"],
-            "confidence": 0.9,
-        }
-    )
-    objective_context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "question": objective.question,
-            "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["scanning speed"],
-            "process_context_axes": ["LPBF"],
-            "target_property_axes": ["yield strength", "microstructure"],
-            "excluded_property_axes": ["chemical composition"],
-            "routing_hints": [],
-            "extraction_guidance": {},
-            "confidence": 0.9,
-        }
-    )
-    repository.replace_collection_research_objectives(
-        "col-1",
-        (),
-        (objective,),
-        (objective_context,),
-        (),
-        (),
-        (),
-        (),
-    )
     service = PaperFactsService(core_fact_repository=repository)
 
-    with caplog.at_level("INFO"):
-        units = service._replace_objective_evidence_units(
+    with pytest.raises(RuntimeError, match="legacy paper facts must not replace"):
+        service._replace_objective_evidence_units(
             collection_id="col-1",
-            evidence_anchors=(
-                {
-                    "anchor_id": "anc-table",
-                    "document_id": "paper-1",
-                    "locator_type": "table",
-                    "locator_confidence": "high",
-                    "source_type": "table",
-                    "page": 5,
-                    "quote": "Sample A | 560 MPa",
-                    "figure_or_table": "table-2",
-                },
-                {
-                    "anchor_id": "anc-test",
-                    "document_id": "paper-1",
-                    "locator_type": "section",
-                    "locator_confidence": "medium",
-                    "source_type": "text",
-                    "page": 3,
-                    "quote": "Tensile tests followed ASTM E8M.",
-                    "block_id": "block-test",
-                },
-                {
-                    "anchor_id": "anc-sem",
-                    "document_id": "paper-1",
-                    "locator_type": "section",
-                    "locator_confidence": "medium",
-                    "source_type": "text",
-                    "page": 4,
-                    "quote": "SEM showed fine cellular microstructure.",
-                    "block_id": "block-sem",
-                },
-            ),
-            sample_variants=(
-                {
-                    "variant_id": "var-a",
-                    "document_id": "paper-1",
-                    "collection_id": "col-1",
-                    "variant_label": "Sample A",
-                    "host_material_system": {
-                        "family": "316L stainless steel",
-                        "composition": "316L",
-                    },
-                    "variable_axis_type": "scanning speed",
-                    "variable_value": "1000 mm/s",
-                    "process_context": {
-                        "process": "LPBF",
-                        "scan_speed_mm_s": 1000,
-                    },
-                    "confidence": 0.9,
-                },
-            ),
-            test_conditions=(
-                {
-                    "test_condition_id": "tc-tensile",
-                    "document_id": "paper-1",
-                    "collection_id": "col-1",
-                    "property_type": "tensile_mechanics",
-                    "template_type": "mechanical_test",
-                    "scope_level": "document",
-                    "condition_payload": {
-                        "method": "tensile testing",
-                        "standard": "ASTM E8M",
-                    },
-                    "condition_completeness": "partial",
-                    "evidence_anchor_ids": ["anc-test"],
-                    "confidence": 0.82,
-                },
-            ),
+            evidence_anchors=(),
+            sample_variants=(),
+            test_conditions=(),
             baseline_references=(),
-            measurement_results=(
-                {
-                    "result_id": "res-yield",
-                    "document_id": "paper-1",
-                    "collection_id": "col-1",
-                    "variant_id": "var-a",
-                    "property_normalized": "yield_strength",
-                    "result_type": "scalar",
-                    "claim_scope": "current_work",
-                    "value_payload": {
-                        "value": 560,
-                        "statement": "Sample A yield strength is 560 MPa.",
-                    },
-                    "unit": "MPa",
-                    "test_condition_id": "tc-tensile",
-                    "evidence_anchor_ids": ["anc-table"],
-                    "traceability_status": "direct",
-                    "result_source_type": "table",
-                },
-            ),
-            characterization=(
-                {
-                    "observation_id": "obs-sem",
-                    "document_id": "paper-1",
-                    "collection_id": "col-1",
-                    "variant_id": "var-a",
-                    "characterization_type": "microstructure",
-                    "observation_text": "SEM showed fine cellular microstructure.",
-                    "condition_context": {},
-                    "evidence_anchor_ids": ["anc-sem"],
-                    "confidence": 0.8,
-                },
-            ),
+            measurement_results=(),
+            characterization=(),
         )
-
-    facts = repository.read_collection_facts("col-1")
-    units_by_kind = {unit.unit_kind: unit for unit in units}
-
-    assert set(units_by_kind) == {"measurement", "test_condition", "characterization"}
-    assert {unit.evidence_unit_id for unit in facts.objective_evidence_units} == {
-        unit.evidence_unit_id
-        for unit in units
-    }
-    logic_chain = facts.objective_logic_chains[0]
-    assert logic_chain.evidence_unit_ids == tuple(
-        unit.evidence_unit_id
-        for unit in units
-    )
-    assert logic_chain.summary == (
-        "Objective logic chain assembled across 1 paper(s) with 1 resolved "
-        "measurement result(s) for yield_strength."
-    )
-    chain_payload = logic_chain.chain_payload
-    assert chain_payload["schema_version"] == "objective_logic_chain.v1"
-    assert [
-        step["step_role"]
-        for step in chain_payload["steps"]
-    ] == [
-        "research_objective",
-        "sample_and_process_context",
-        "test_and_characterization",
-        "measurement_results",
-        "comparison_and_interpretation",
-        "cross_paper_resolution",
-    ]
-    assert chain_payload["unit_counts_by_kind"] == {
-        "measurement": 1,
-        "test_condition": 1,
-        "characterization": 1,
-    }
-    assert chain_payload["cross_paper"]["measured_properties"] == ["yield_strength"]
-    assert chain_payload["cross_paper"]["comparison_ready"] is False
-    assert chain_payload["cross_paper"]["gaps"] == ["comparison_units_missing"]
-    paper_chain = chain_payload["paper_chains"][0]
-    assert paper_chain["document_id"] == "paper-1"
-    assert any(
-        "Objective evidence-unit replacement started" in record.message
-        and "measurement_results=1" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Objective evidence-unit measurement progress" in record.message
-        and "remaining_results=0" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Objective evidence-unit replacement finished" in record.message
-        and "measurement_units=1" in record.message
-        and "test_condition_units=1" in record.message
-        and "characterization_units=1" in record.message
-        and "logic_chain_count=1" in record.message
-        for record in caplog.records
-    )
-    assert paper_chain["measurement_results"][0]["value_payload"]["value"] == 560
-    assert paper_chain["test_conditions"][0]["test_condition"][
-        "condition_payload"
-    ]["standard"] == "ASTM E8M"
-    assert paper_chain["characterization_observations"][0]["value_payload"][
-        "observation_text"
-    ] == "SEM showed fine cellular microstructure."
-    assert paper_chain["resolution"]["gaps"] == ["comparison_units_missing"]
-    measurement = units_by_kind["measurement"]
-    assert measurement.objective_id == objective.objective_id
-    assert measurement.sample_context["label"] == "Sample A"
-    assert measurement.process_context["scan_speed_mm_s"] == 1000
-    assert measurement.test_condition["condition_payload"]["standard"] == "ASTM E8M"
-    assert measurement.source_refs[0]["source_ref"] == "table-2"
-    assert measurement.resolution_status == "resolved"
 
 
 def test_document_method_family_conditions_bind_table_results():

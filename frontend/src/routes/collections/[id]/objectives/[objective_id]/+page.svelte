@@ -6,28 +6,63 @@
 	import {
 		fetchObjectiveResearchView,
 		getResearchViewStateTone,
+		type ObjectiveEvidenceRoute,
 		type ObjectiveEvidenceUnit,
 		type ObjectivePaperFrame,
 		type ObjectiveResearchView
 	} from '../../../../_shared/researchView';
 
+	type EvidenceGroup = {
+		kind: string;
+		labelKey: string;
+		units: ObjectiveEvidenceUnit[];
+	};
+
+	type PaperCoverage = {
+		frame: ObjectivePaperFrame;
+		units: ObjectiveEvidenceUnit[];
+		routeCount: number;
+	};
+
+	type LogicStep = {
+		step_id: string;
+		titleKey: string;
+		count: number;
+		ready: boolean;
+		items: string[];
+		emptyKey: string;
+	};
+
+	type SourceEntry = {
+		label: string;
+		documentId: string | null;
+		query: string;
+	};
+
+	const evidenceKindOrder = ['measurement', 'test_condition', 'characterization', 'comparison'];
+
 	let objectiveView: ObjectiveResearchView | null = null;
 	let loading = false;
 	let error = '';
 	let loadedKey = '';
+	let selectedEvidenceUnitId = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
 	$: loadKey = `${collectionId}:${objectiveId}`;
 	$: frames = objectiveView?.paper_frames ?? [];
-	$: relevantFrameCount = frames.filter((frame) => frame.relevance !== 'irrelevant').length;
-	$: tableCount = frames.reduce(
-		(total, frame) => total + frame.relevant_tables.length + frame.excluded_tables.length,
-		0
-	);
-	$: routeCount = objectiveView?.evidence_routes.length ?? 0;
-	$: evidenceUnitCount = objectiveView?.evidence_units.length ?? 0;
 	$: evidenceUnits = objectiveView?.evidence_units ?? [];
+	$: evidenceRoutes = objectiveView?.evidence_routes ?? [];
+	$: relevantFrameCount = frames.filter((frame) => frame.relevance !== 'irrelevant').length;
+	$: evidenceGroups = buildEvidenceGroups(evidenceUnits);
+	$: paperCoverage = buildPaperCoverage(frames, evidenceUnits, evidenceRoutes);
+	$: logicSteps = objectiveView ? buildLogicSteps(objectiveView) : [];
+	$: selectedEvidenceUnit =
+		(selectedEvidenceUnitId
+			? evidenceUnits.find((unit) => unit.evidence_unit_id === selectedEvidenceUnitId)
+			: null) ??
+		evidenceUnits[0] ??
+		null;
 	$: if (collectionId && objectiveId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		void loadObjectiveView();
@@ -87,7 +122,10 @@
 			return String(value);
 		}
 		if (Array.isArray(value)) {
-			return value.map((item) => displayValue(item)).filter(Boolean).join(', ');
+			return value
+				.map((item) => displayValue(item))
+				.filter(Boolean)
+				.join(', ');
 		}
 		return Object.entries(value as Record<string, unknown>)
 			.filter(([, item]) => hasDisplayValue(item))
@@ -95,7 +133,7 @@
 			.join('; ');
 	}
 
-	function recordEntries(record: Record<string, unknown>, limit = 4) {
+	function recordEntries(record: Record<string, unknown>, limit = 5) {
 		return Object.entries(record)
 			.filter(([, value]) => hasDisplayValue(value))
 			.slice(0, limit)
@@ -120,19 +158,212 @@
 	}
 
 	function sourceRefLabel(sourceRef: Record<string, unknown>) {
-		const sourceKind = displayValue(sourceRef.source_kind) || $t('research.objectiveWorkspace.source');
+		const sourceKind =
+			displayValue(sourceRef.source_kind) || $t('research.objectiveWorkspace.source');
 		const sourceRefId =
 			displayValue(sourceRef.source_ref) ||
 			displayValue(sourceRef.table_id) ||
-			displayValue(sourceRef.anchor_id);
+			displayValue(sourceRef.anchor_id) ||
+			displayValue(sourceRef.block_id);
 		const page = displayValue(sourceRef.page);
-		return [
-			sourceKind,
-			sourceRefId,
-			page ? $t('research.objectiveWorkspace.page', { page }) : ''
-		]
+		return [sourceKind, sourceRefId, page ? $t('research.objectiveWorkspace.page', { page }) : '']
 			.filter(Boolean)
 			.join(' · ');
+	}
+
+	function evidenceKindLabelKey(kind: string) {
+		if (kind === 'measurement') return 'research.objectiveWorkspace.measurementResults';
+		if (kind === 'test_condition') return 'research.objectiveWorkspace.testConditions';
+		if (kind === 'characterization')
+			return 'research.objectiveWorkspace.characterizationObservations';
+		if (kind === 'comparison') return 'research.objectiveWorkspace.comparisonEvidence';
+		return 'research.objectiveWorkspace.otherEvidence';
+	}
+
+	function buildEvidenceGroups(units: ObjectiveEvidenceUnit[]): EvidenceGroup[] {
+		const grouped: Record<string, ObjectiveEvidenceUnit[]> = {};
+		for (const unit of units) {
+			grouped[unit.unit_kind] = [...(grouped[unit.unit_kind] ?? []), unit];
+		}
+
+		const kinds = [
+			...evidenceKindOrder.filter((kind) => kind in grouped),
+			...Object.keys(grouped).filter((kind) => !evidenceKindOrder.includes(kind))
+		];
+
+		return kinds.map((kind) => ({
+			kind,
+			labelKey: evidenceKindLabelKey(kind),
+			units: grouped[kind] ?? []
+		}));
+	}
+
+	function objectiveHref() {
+		return resolve('/collections/[id]/objectives/[objective_id]', {
+			id: collectionId,
+			objective_id: objectiveId
+		});
+	}
+
+	function buildPaperCoverage(
+		paperFrames: ObjectivePaperFrame[],
+		units: ObjectiveEvidenceUnit[],
+		routes: ObjectiveEvidenceRoute[]
+	): PaperCoverage[] {
+		return paperFrames
+			.map((frame) => ({
+				frame,
+				units: units.filter((unit) => unit.document_id === frame.document_id),
+				routeCount: routes.filter((route) => route.document_id === frame.document_id).length
+			}))
+			.sort((left, right) => relevanceRank(left.frame) - relevanceRank(right.frame));
+	}
+
+	function relevanceRank(frame: ObjectivePaperFrame) {
+		if (frame.relevance === 'high') return 0;
+		if (frame.relevance === 'medium') return 1;
+		if (frame.relevance === 'low') return 2;
+		if (frame.relevance === 'irrelevant') return 4;
+		return 3;
+	}
+
+	function unitsByKind(units: ObjectiveEvidenceUnit[], kind: string) {
+		return units.filter((unit) => unit.unit_kind === kind);
+	}
+
+	function textList(value: unknown): string[] {
+		if (typeof value === 'string' || typeof value === 'number') {
+			const text = displayValue(value);
+			return text ? [text] : [];
+		}
+		if (Array.isArray(value)) {
+			return value.map((item) => displayValue(item)).filter(Boolean);
+		}
+		if (value && typeof value === 'object') {
+			return Object.values(value as Record<string, unknown>)
+				.map((item) => displayValue(item))
+				.filter(Boolean);
+		}
+		return [];
+	}
+
+	function chainGaps(view: ObjectiveResearchView) {
+		const payload = view.logic_chain?.chain_payload ?? {};
+		const crossPaper = payload.cross_paper;
+		const crossPaperRecord =
+			crossPaper && typeof crossPaper === 'object' && !Array.isArray(crossPaper)
+				? (crossPaper as Record<string, unknown>)
+				: {};
+		return [...textList(payload.gaps), ...textList(crossPaperRecord.gaps)];
+	}
+
+	function buildLogicSteps(view: ObjectiveResearchView): LogicStep[] {
+		const measurements = unitsByKind(view.evidence_units, 'measurement');
+		const conditions = unitsByKind(view.evidence_units, 'test_condition');
+		const observations = unitsByKind(view.evidence_units, 'characterization');
+		const comparisons = unitsByKind(view.evidence_units, 'comparison');
+		const gaps = chainGaps(view);
+		const scopeItems = [
+			...view.objective.material_scope,
+			...view.objective.process_axes,
+			...view.objective.property_axes
+		];
+
+		return [
+			{
+				step_id: 'scope',
+				titleKey: 'research.objectiveWorkspace.scopeStep',
+				count: scopeItems.length,
+				ready: view.readiness.objectives_ready,
+				items: scopeItems.slice(0, 5),
+				emptyKey: 'research.objectiveWorkspace.noScope'
+			},
+			{
+				step_id: 'coverage',
+				titleKey: 'research.objectiveWorkspace.coverageStep',
+				count: relevantFrameCount,
+				ready: view.readiness.frames_ready,
+				items: frames
+					.filter((frame) => frame.relevance !== 'irrelevant')
+					.slice(0, 4)
+					.map((frame) => frameTitle(frame)),
+				emptyKey: 'research.objectiveWorkspace.noCoverage'
+			},
+			{
+				step_id: 'conditions',
+				titleKey: 'research.objectiveWorkspace.conditionsStep',
+				count: conditions.length,
+				ready: view.readiness.evidence_units_ready,
+				items: conditions.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
+				emptyKey: 'research.objectiveWorkspace.noConditions'
+			},
+			{
+				step_id: 'measurements',
+				titleKey: 'research.objectiveWorkspace.measurementsStep',
+				count: measurements.length,
+				ready: view.readiness.evidence_units_ready,
+				items: measurements.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
+				emptyKey: 'research.objectiveWorkspace.noMeasurements'
+			},
+			{
+				step_id: 'observations',
+				titleKey: 'research.objectiveWorkspace.observationsStep',
+				count: observations.length,
+				ready: view.readiness.evidence_units_ready,
+				items: observations.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
+				emptyKey: 'research.objectiveWorkspace.noObservations'
+			},
+			{
+				step_id: 'gaps',
+				titleKey: 'research.objectiveWorkspace.gapsStep',
+				count: gaps.length || comparisons.length,
+				ready: view.readiness.logic_chain_ready,
+				items: (gaps.length ? gaps : comparisons.map((unit) => evidenceUnitValue(unit))).slice(
+					0,
+					4
+				),
+				emptyKey: 'research.objectiveWorkspace.noGaps'
+			}
+		];
+	}
+
+	function queryString(params: [string, string][]) {
+		const query = params
+			.filter(([, value]) => value)
+			.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+			.join('&');
+		return query ? `?${query}` : '';
+	}
+
+	function sourceEntry(
+		unit: ObjectiveEvidenceUnit,
+		sourceRef: Record<string, unknown>
+	): SourceEntry {
+		const documentId = displayValue(sourceRef.document_id) || unit.document_id;
+		const pageNumber = displayValue(sourceRef.page);
+		const sourceId =
+			displayValue(sourceRef.source_ref) ||
+			displayValue(sourceRef.table_id) ||
+			displayValue(sourceRef.anchor_id) ||
+			displayValue(sourceRef.block_id);
+		const params: [string, string][] = [];
+		if (pageNumber) params.push(['page', pageNumber]);
+		if (sourceId) params.push(['source', sourceId]);
+		params.push(['evidence_unit_id', unit.evidence_unit_id], ['return_to', objectiveHref()]);
+
+		return {
+			label: sourceRefLabel(sourceRef),
+			documentId: documentId || null,
+			query: queryString(params)
+		};
+	}
+
+	function sourceEntries(unit: ObjectiveEvidenceUnit): SourceEntry[] {
+		const refs = unit.source_refs.length
+			? unit.source_refs
+			: [{ document_id: unit.document_id, source_kind: 'document', source_ref: unit.document_id }];
+
+		return refs.map((sourceRef) => sourceEntry(unit, sourceRef));
 	}
 </script>
 
@@ -199,222 +430,327 @@
 				<strong>{relevantFrameCount}</strong>
 			</article>
 			<article>
-				<span>{$t('research.objectives.paperFrames')}</span>
-				<strong>{frames.length}</strong>
+				<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
+				<strong>{unitsByKind(evidenceUnits, 'measurement').length}</strong>
 			</article>
 			<article>
-				<span>{$t('research.objectives.routes')}</span>
-				<strong>{routeCount}</strong>
+				<span>{$t('research.objectiveWorkspace.testConditions')}</span>
+				<strong>{unitsByKind(evidenceUnits, 'test_condition').length}</strong>
 			</article>
 			<article>
-				<span>{$t('research.objectives.evidenceUnits')}</span>
-				<strong>{evidenceUnitCount}</strong>
+				<span>{$t('research.objectiveWorkspace.characterizationObservations')}</span>
+				<strong>{unitsByKind(evidenceUnits, 'characterization').length}</strong>
 			</article>
 		</section>
 
-		<section class="objective-section">
+		<section class="objective-section objective-section--logic">
 			<div class="section-heading">
-				<h3>{$t('research.objectiveWorkspace.contextTitle')}</h3>
-				<span>{boolState(objectiveView.readiness.objectives_ready)}</span>
+				<div>
+					<h3>{$t('research.objectiveWorkspace.logicChainTitle')}</h3>
+					<p>
+						{objectiveView.logic_chain?.summary || $t('research.objectiveWorkspace.noLogicChain')}
+					</p>
+				</div>
+				<span>{boolState(objectiveView.readiness.logic_chain_ready)}</span>
 			</div>
-			<div class="context-grid">
-				<div>
-					<span>{$t('research.objectives.materialScope')}</span>
-					<strong>{listLabel(objectiveView.objective.material_scope)}</strong>
-				</div>
-				<div>
-					<span>{$t('research.objectives.processAxes')}</span>
-					<strong>{listLabel(objectiveView.objective.process_axes)}</strong>
-				</div>
-				<div>
-					<span>{$t('research.objectives.propertyAxes')}</span>
-					<strong>{listLabel(objectiveView.objective.property_axes)}</strong>
-				</div>
-				<div>
-					<span>{$t('research.objectiveWorkspace.variableAxes')}</span>
-					<strong>{listLabel(objectiveView.objective_context?.variable_process_axes ?? [])}</strong>
-				</div>
-			</div>
-		</section>
-
-		<section class="objective-section">
-			<div class="section-heading">
-				<h3>{$t('research.objectiveWorkspace.framesTitle')}</h3>
-				<span>{$t('research.objectiveWorkspace.tableCount', { count: tableCount })}</span>
-			</div>
-			{#if frames.length}
-				<div class="frame-list">
-					{#each frames as frame (frame.frame_id)}
-						<article class="frame-card">
-							<div class="frame-card__header">
-								<div>
-									<h4>{frameTitle(frame)}</h4>
-									<p>{frame.background || $t('research.objectiveWorkspace.noBackground')}</p>
-								</div>
-								<div class="frame-card__badges">
-									<span>{frame.relevance}</span>
-									<span>{frame.paper_role}</span>
-								</div>
+			<div class="logic-chain" aria-label={$t('research.objectiveWorkspace.logicChainTitle')}>
+				{#each logicSteps as step (step.step_id)}
+					<article class:logic-step--pending={!step.ready} class="logic-step">
+						<div class="logic-step__marker">{step.count}</div>
+						<div class="logic-step__body">
+							<div class="logic-step__header">
+								<h4>{$t(step.titleKey)}</h4>
+								<span>{boolState(step.ready)}</span>
 							</div>
-							<dl>
-								<div>
-									<dt>{$t('research.objectives.materialScope')}</dt>
-									<dd>{listLabel(frame.material_match)}</dd>
-								</div>
-								<div>
-									<dt>{$t('research.objectiveWorkspace.changedVariables')}</dt>
-									<dd>{listLabel(frame.changed_variables)}</dd>
-								</div>
-								<div>
-									<dt>{$t('research.objectiveWorkspace.measuredScope')}</dt>
-									<dd>{listLabel(frame.measured_property_scope)}</dd>
-								</div>
-								<div>
-									<dt>{$t('research.objectiveWorkspace.relevantSections')}</dt>
-									<dd>{listLabel(frame.relevant_sections)}</dd>
-								</div>
-								<div>
-									<dt>{$t('research.objectiveWorkspace.relevantTables')}</dt>
-									<dd>{listLabel(frame.relevant_tables)}</dd>
-								</div>
-								<div>
-									<dt>{$t('research.objectiveWorkspace.excludedTables')}</dt>
-									<dd>{listLabel(frame.excluded_tables)}</dd>
-								</div>
-							</dl>
-						</article>
-					{/each}
-				</div>
-			{:else}
-				<div class="empty-panel">{$t('research.objectiveWorkspace.noFrames')}</div>
-			{/if}
-		</section>
-
-		<section class="objective-section">
-			<div class="section-heading">
-				<h3>{$t('research.objectiveWorkspace.routesTitle')}</h3>
-				<span>{boolState(objectiveView.readiness.routes_ready)}</span>
+							{#if step.items.length}
+								<ul>
+									{#each step.items as item (item)}
+										<li>{item}</li>
+									{/each}
+								</ul>
+							{:else}
+								<p>{$t(step.emptyKey)}</p>
+							{/if}
+						</div>
+					</article>
+				{/each}
 			</div>
-			{#if objectiveView.evidence_routes.length}
-				<div class="route-table-wrap">
-					<table class="route-table">
-						<thead>
-							<tr>
-								<th>{$t('research.objectiveWorkspace.source')}</th>
-								<th>{$t('research.objectiveWorkspace.role')}</th>
-								<th>{$t('research.objectiveWorkspace.extractable')}</th>
-								<th>{$t('research.objectiveWorkspace.schema')}</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each objectiveView.evidence_routes as route (route.route_id)}
-								<tr>
-									<td>{route.source_kind}: {route.source_ref}</td>
-									<td>{route.role}</td>
-									<td>{boolState(route.extractable)}</td>
-									<td>{routeSchemaLabel(route.table_schema)}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			{:else}
-				<div class="empty-panel">{$t('research.objectiveWorkspace.noRoutes')}</div>
-			{/if}
 		</section>
 
-		<section class="objective-section objective-section--two">
-			<div>
-				<div class="section-heading">
-					<h3>{$t('research.objectiveWorkspace.evidenceUnitsTitle')}</h3>
-					<span>{boolState(objectiveView.readiness.evidence_units_ready)}</span>
-				</div>
-				{#if evidenceUnits.length}
-					<div class="evidence-unit-list">
-						{#each evidenceUnits as unit (unit.evidence_unit_id)}
-							<article class="evidence-unit-card">
-								<div class="evidence-unit-card__header">
+		<section class="objective-workspace-grid">
+			<div class="objective-main-column">
+				<section class="objective-section">
+					<div class="section-heading">
+						<div>
+							<h3>{$t('research.objectiveWorkspace.paperCoverageTitle')}</h3>
+							<p>{$t('research.objectiveWorkspace.paperCoverageBody')}</p>
+						</div>
+						<span>{boolState(objectiveView.readiness.frames_ready)}</span>
+					</div>
+					{#if paperCoverage.length}
+						<div class="paper-coverage-list">
+							{#each paperCoverage as paper (paper.frame.frame_id)}
+								<article class="paper-coverage-card">
 									<div>
-										<h4>{evidenceUnitTitle(unit)}</h4>
-										<p>{evidenceUnitValue(unit)}</p>
+										<h4>{frameTitle(paper.frame)}</h4>
+										<p>
+											{paper.frame.background || $t('research.objectiveWorkspace.noBackground')}
+										</p>
 									</div>
-									<span>{unit.resolution_status}</span>
-								</div>
-								<dl class="evidence-unit-facts">
-									<div>
-										<dt>{$t('research.objectiveWorkspace.kind')}</dt>
-										<dd>{unit.unit_kind}</dd>
+									<div class="paper-coverage-card__meta">
+										<span>{paper.frame.relevance}</span>
+										<span>{paper.frame.paper_role}</span>
+										<span
+											>{$t('research.objectiveWorkspace.unitCount', {
+												count: paper.units.length
+											})}</span
+										>
+										<span
+											>{$t('research.objectiveWorkspace.routeCount', {
+												count: paper.routeCount
+											})}</span
+										>
 									</div>
-									{#if unit.property_normalized}
+									<dl>
 										<div>
-											<dt>{$t('research.objectiveWorkspace.property')}</dt>
-											<dd>{unit.property_normalized}</dd>
+											<dt>{$t('research.objectiveWorkspace.changedVariables')}</dt>
+											<dd>{listLabel(paper.frame.changed_variables)}</dd>
 										</div>
-									{/if}
-									{#if unit.unit}
 										<div>
-											<dt>{$t('research.objectiveWorkspace.value')}</dt>
-											<dd>{unit.unit}</dd>
+											<dt>{$t('research.objectiveWorkspace.measuredScope')}</dt>
+											<dd>{listLabel(paper.frame.measured_property_scope)}</dd>
 										</div>
-									{/if}
-									<div>
-										<dt>{$t('research.objectiveWorkspace.status')}</dt>
-										<dd>{unit.resolution_status}</dd>
+										<div>
+											<dt>{$t('research.objectiveWorkspace.relevantTables')}</dt>
+											<dd>{listLabel(paper.frame.relevant_tables)}</dd>
+										</div>
+									</dl>
+									<a
+										class="source-action"
+										href={resolve('/collections/[id]/documents/[document_id]', {
+											id: collectionId,
+											document_id: paper.frame.document_id
+										})}
+									>
+										{$t('research.objectiveWorkspace.openPaper')}
+									</a>
+								</article>
+							{/each}
+						</div>
+					{:else}
+						<div class="empty-panel">{$t('research.objectiveWorkspace.noFrames')}</div>
+					{/if}
+				</section>
+
+				<section class="objective-section">
+					<div class="section-heading">
+						<div>
+							<h3>{$t('research.objectiveWorkspace.evidenceUnitsTitle')}</h3>
+							<p>{$t('research.objectiveWorkspace.evidenceUnitsBody')}</p>
+						</div>
+						<span>{boolState(objectiveView.readiness.evidence_units_ready)}</span>
+					</div>
+					{#if evidenceGroups.length}
+						<div class="evidence-group-list">
+							{#each evidenceGroups as group (group.kind)}
+								<section class="evidence-group" aria-label={$t(group.labelKey)}>
+									<div class="evidence-group__header">
+										<h4>{$t(group.labelKey)}</h4>
+										<span
+											>{$t('research.objectiveWorkspace.unitCount', {
+												count: group.units.length
+											})}</span
+										>
 									</div>
-								</dl>
-								<div class="evidence-context-grid">
-									{#if recordEntries(unit.sample_context).length}
-										<div>
-											<strong>{$t('research.objectiveWorkspace.sampleContext')}</strong>
-											{#each recordEntries(unit.sample_context) as entry (entry.key)}
-												<span>{entry.key}: {entry.value}</span>
-											{/each}
-										</div>
-									{/if}
-									{#if recordEntries(unit.process_context).length}
-										<div>
-											<strong>{$t('research.objectiveWorkspace.processContext')}</strong>
-											{#each recordEntries(unit.process_context) as entry (entry.key)}
-												<span>{entry.key}: {entry.value}</span>
-											{/each}
-										</div>
-									{/if}
-									{#if recordEntries(unit.test_condition).length}
-										<div>
-											<strong>{$t('research.objectiveWorkspace.testCondition')}</strong>
-											{#each recordEntries(unit.test_condition) as entry (entry.key)}
-												<span>{entry.key}: {entry.value}</span>
-											{/each}
-										</div>
-									{/if}
-								</div>
-								{#if unit.source_refs.length}
-									<div class="evidence-source-row">
-										<strong>{$t('research.objectiveWorkspace.sources')}</strong>
-										{#each unit.source_refs.slice(0, 3) as sourceRef}
-											<span>{sourceRefLabel(sourceRef)}</span>
+									<div class="evidence-unit-list">
+										{#each group.units as unit (unit.evidence_unit_id)}
+											<button
+												class:selected={selectedEvidenceUnit?.evidence_unit_id ===
+													unit.evidence_unit_id}
+												class="evidence-unit-card"
+												type="button"
+												on:click={() => (selectedEvidenceUnitId = unit.evidence_unit_id)}
+											>
+												<span>{evidenceUnitTitle(unit)}</span>
+												<strong>{evidenceUnitValue(unit)}</strong>
+												<small>
+													{unit.document_id || $t('research.emptyValue')} · {confidenceLabel(
+														unit.confidence
+													)}
+												</small>
+											</button>
 										{/each}
 									</div>
-								{/if}
-							</article>
-						{/each}
+								</section>
+							{/each}
+						</div>
+					{:else}
+						<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
+					{/if}
+				</section>
+			</div>
+
+			<aside
+				class="objective-side-panel"
+				aria-label={$t('research.objectiveWorkspace.evidenceDetail')}
+			>
+				<div class="section-heading">
+					<div>
+						<h3>{$t('research.objectiveWorkspace.evidenceDetail')}</h3>
+						<p>{$t('research.objectiveWorkspace.evidenceDetailBody')}</p>
 					</div>
+				</div>
+				{#if selectedEvidenceUnit}
+					<article class="evidence-detail">
+						<div class="evidence-detail__header">
+							<h4>{evidenceUnitTitle(selectedEvidenceUnit)}</h4>
+							<span>{selectedEvidenceUnit.resolution_status}</span>
+						</div>
+						<p>{evidenceUnitValue(selectedEvidenceUnit)}</p>
+						<dl>
+							<div>
+								<dt>{$t('research.objectiveWorkspace.kind')}</dt>
+								<dd>{selectedEvidenceUnit.unit_kind}</dd>
+							</div>
+							{#if selectedEvidenceUnit.property_normalized}
+								<div>
+									<dt>{$t('research.objectiveWorkspace.property')}</dt>
+									<dd>{selectedEvidenceUnit.property_normalized}</dd>
+								</div>
+							{/if}
+							{#if selectedEvidenceUnit.unit}
+								<div>
+									<dt>{$t('research.objectiveWorkspace.value')}</dt>
+									<dd>{selectedEvidenceUnit.unit}</dd>
+								</div>
+							{/if}
+							<div>
+								<dt>{$t('research.objectiveWorkspace.confidence')}</dt>
+								<dd>{confidenceLabel(selectedEvidenceUnit.confidence)}</dd>
+							</div>
+						</dl>
+
+						<div class="evidence-context-list">
+							{#if recordEntries(selectedEvidenceUnit.sample_context).length}
+								<div>
+									<strong>{$t('research.objectiveWorkspace.sampleContext')}</strong>
+									{#each recordEntries(selectedEvidenceUnit.sample_context) as entry (entry.key)}
+										<span>{entry.key}: {entry.value}</span>
+									{/each}
+								</div>
+							{/if}
+							{#if recordEntries(selectedEvidenceUnit.process_context).length}
+								<div>
+									<strong>{$t('research.objectiveWorkspace.processContext')}</strong>
+									{#each recordEntries(selectedEvidenceUnit.process_context) as entry (entry.key)}
+										<span>{entry.key}: {entry.value}</span>
+									{/each}
+								</div>
+							{/if}
+							{#if recordEntries(selectedEvidenceUnit.test_condition).length}
+								<div>
+									<strong>{$t('research.objectiveWorkspace.testCondition')}</strong>
+									{#each recordEntries(selectedEvidenceUnit.test_condition) as entry (entry.key)}
+										<span>{entry.key}: {entry.value}</span>
+									{/each}
+								</div>
+							{/if}
+							{#if recordEntries(selectedEvidenceUnit.resolved_condition).length}
+								<div>
+									<strong>{$t('research.objectiveWorkspace.resolvedCondition')}</strong>
+									{#each recordEntries(selectedEvidenceUnit.resolved_condition) as entry (entry.key)}
+										<span>{entry.key}: {entry.value}</span>
+									{/each}
+								</div>
+							{/if}
+						</div>
+
+						<div class="evidence-source-list">
+							<strong>{$t('research.objectiveWorkspace.sources')}</strong>
+							{#each sourceEntries(selectedEvidenceUnit) as source, index (`${source.label}-${index}`)}
+								{#if source.documentId}
+									<!-- eslint-disable svelte/no-navigation-without-resolve -->
+									<a
+										href={`${resolve('/collections/[id]/documents/[document_id]', {
+											id: collectionId,
+											document_id: source.documentId
+										})}${source.query}`}>{source.label}</a
+									>
+									<!-- eslint-enable svelte/no-navigation-without-resolve -->
+								{:else}
+									<span>{source.label}</span>
+								{/if}
+							{/each}
+						</div>
+					</article>
 				{:else}
 					<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
 				{/if}
-			</div>
-			<div>
-				<div class="section-heading">
-					<h3>{$t('research.objectiveWorkspace.logicChainTitle')}</h3>
-					<span>{boolState(objectiveView.readiness.logic_chain_ready)}</span>
+			</aside>
+		</section>
+
+		<section class="objective-section objective-diagnostics">
+			<div class="section-heading">
+				<div>
+					<h3>{$t('research.objectiveWorkspace.diagnosticsTitle')}</h3>
+					<p>{$t('research.objectiveWorkspace.diagnosticsBody')}</p>
 				</div>
-				{#if objectiveView.logic_chain}
-					<p class="logic-summary">
-						{objectiveView.logic_chain.summary || objectiveView.logic_chain.question}
-					</p>
-				{:else}
-					<div class="empty-panel">{$t('research.objectiveWorkspace.noLogicChain')}</div>
-				{/if}
+			</div>
+			<div class="diagnostics-grid">
+				<details>
+					<summary>
+						{$t('research.objectiveWorkspace.framesTitle')}
+						<span>{frames.length}</span>
+					</summary>
+					{#if frames.length}
+						<div class="diagnostic-list">
+							{#each frames as frame (frame.frame_id)}
+								<article>
+									<strong>{frameTitle(frame)}</strong>
+									<span>{frame.relevance} · {frame.paper_role}</span>
+									<p>
+										{$t('research.objectiveWorkspace.relevantSections')}:
+										{listLabel(frame.relevant_sections)}
+									</p>
+								</article>
+							{/each}
+						</div>
+					{:else}
+						<div class="empty-panel">{$t('research.objectiveWorkspace.noFrames')}</div>
+					{/if}
+				</details>
+				<details>
+					<summary>
+						{$t('research.objectiveWorkspace.routesTitle')}
+						<span>{evidenceRoutes.length}</span>
+					</summary>
+					{#if evidenceRoutes.length}
+						<div class="route-table-wrap">
+							<table class="route-table">
+								<thead>
+									<tr>
+										<th>{$t('research.objectiveWorkspace.source')}</th>
+										<th>{$t('research.objectiveWorkspace.role')}</th>
+										<th>{$t('research.objectiveWorkspace.extractable')}</th>
+										<th>{$t('research.objectiveWorkspace.schema')}</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each evidenceRoutes as route (route.route_id)}
+										<tr>
+											<td>{route.source_kind}: {route.source_ref}</td>
+											<td>{route.role}</td>
+											<td>{boolState(route.extractable)}</td>
+											<td>{routeSchemaLabel(route.table_schema)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{:else}
+						<div class="empty-panel">{$t('research.objectiveWorkspace.noRoutes')}</div>
+					{/if}
+				</details>
 			</div>
 		</section>
 	{/if}
@@ -423,13 +759,15 @@
 <style>
 	.objective-workspace {
 		width: 100%;
-		max-width: 1280px;
+		max-width: 1320px;
 		margin: 0 auto;
 		display: grid;
 		gap: 18px;
 	}
 
-	.back-link {
+	.back-link,
+	.source-action,
+	.evidence-source-list a {
 		width: fit-content;
 		color: var(--color-accent);
 		font-size: 14px;
@@ -440,7 +778,7 @@
 	.objective-state-card,
 	.objective-summary-grid article,
 	.objective-section,
-	.frame-card {
+	.objective-side-panel {
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-lg);
 		background: var(--surface-card);
@@ -457,20 +795,23 @@
 	.objective-hero__main {
 		display: grid;
 		gap: 10px;
+		min-width: 0;
 	}
 
 	.objective-eyebrow {
 		margin: 0;
 		color: var(--text-secondary);
 		font-size: 12px;
+		line-height: 18px;
 		text-transform: uppercase;
 	}
 
 	.objective-hero h2,
 	.objective-state-card h2,
 	.objective-section h3,
-	.frame-card h4,
-	.evidence-unit-card h4 {
+	.objective-section h4,
+	.objective-side-panel h3,
+	.objective-side-panel h4 {
 		margin: 0;
 		color: var(--text-primary);
 	}
@@ -482,13 +823,15 @@
 	}
 
 	.objective-hero p,
-	.frame-card p,
-	.evidence-unit-card p,
-	.logic-summary {
+	.section-heading p,
+	.logic-step p,
+	.paper-coverage-card p,
+	.evidence-detail p,
+	.diagnostic-list p {
 		margin: 0;
 		color: var(--text-secondary);
-		font-size: 15px;
-		line-height: 23px;
+		font-size: 14px;
+		line-height: 22px;
 	}
 
 	.objective-hero__status {
@@ -506,14 +849,19 @@
 		line-height: 34px;
 	}
 
-	.objective-chip-row {
+	.objective-chip-row,
+	.paper-coverage-card__meta {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
 	}
 
 	.objective-chip-row span,
-	.frame-card__badges span {
+	.paper-coverage-card__meta span,
+	.evidence-detail__header span,
+	.logic-step__header span,
+	.evidence-group__header span,
+	.diagnostics-grid summary span {
 		border: 1px solid var(--border-default);
 		border-radius: 999px;
 		padding: 5px 10px;
@@ -542,20 +890,29 @@
 	}
 
 	.objective-summary-grid article,
-	.objective-section {
+	.objective-section,
+	.objective-side-panel {
 		padding: 20px;
 	}
 
-	.objective-summary-grid article {
+	.objective-summary-grid article,
+	.objective-section,
+	.objective-side-panel,
+	.objective-main-column,
+	.evidence-group-list,
+	.evidence-group,
+	.paper-coverage-list,
+	.evidence-detail,
+	.evidence-context-list,
+	.evidence-source-list {
 		display: grid;
-		gap: 4px;
+		gap: 14px;
 	}
 
 	.objective-summary-grid span,
-	.context-grid span,
-	.section-heading span,
-	.frame-card dt,
-	.evidence-unit-facts dt,
+	.section-heading > span,
+	.paper-coverage-card dt,
+	.evidence-detail dt,
 	.route-table th {
 		color: var(--text-secondary);
 		font-size: 12px;
@@ -569,78 +926,241 @@
 		line-height: 30px;
 	}
 
-	.objective-section {
-		display: grid;
-		gap: 16px;
-	}
-
 	.section-heading {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		justify-content: space-between;
-		gap: 12px;
+		gap: 14px;
 	}
 
-	.context-grid {
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 12px;
-	}
-
-	.context-grid div {
+	.section-heading > div {
 		display: grid;
 		gap: 5px;
 		min-width: 0;
 	}
 
-	.context-grid strong {
+	.logic-chain {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 12px;
+	}
+
+	.logic-step {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		gap: 12px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 14px;
+		background: var(--bg-subtle);
+	}
+
+	.logic-step--pending {
+		opacity: 0.72;
+	}
+
+	.logic-step__marker {
+		width: 32px;
+		height: 32px;
+		border-radius: 999px;
+		display: grid;
+		place-items: center;
+		background: var(--surface-card);
 		color: var(--text-primary);
-		font-size: 14px;
-		line-height: 22px;
+		font-weight: 700;
 	}
 
-	.frame-list {
+	.logic-step__body {
 		display: grid;
-		gap: 12px;
+		gap: 8px;
+		min-width: 0;
 	}
 
-	.frame-card {
-		display: grid;
-		gap: 16px;
-		padding: 18px;
-		box-shadow: none;
-	}
-
-	.frame-card__header {
+	.logic-step__header,
+	.evidence-group__header,
+	.evidence-detail__header {
 		display: flex;
+		align-items: flex-start;
 		justify-content: space-between;
-		gap: 12px;
+		gap: 10px;
 	}
 
-	.frame-card__badges {
-		display: flex;
-		flex-wrap: wrap;
-		align-content: flex-start;
-		justify-content: flex-end;
-		gap: 6px;
+	.logic-step h4,
+	.evidence-group h4,
+	.evidence-detail h4 {
+		font-size: 15px;
+		line-height: 21px;
 	}
 
-	.frame-card dl {
+	.logic-step ul {
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.logic-step li,
+	.paper-coverage-card dd,
+	.evidence-detail dd,
+	.evidence-context-list span,
+	.evidence-source-list span,
+	.evidence-source-list a,
+	.route-table td {
+		overflow-wrap: anywhere;
+	}
+
+	.objective-workspace-grid {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+		gap: 16px;
+		align-items: start;
+	}
+
+	.paper-coverage-card {
+		display: grid;
+		gap: 13px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 16px;
+		background: var(--bg-subtle);
+	}
+
+	.paper-coverage-card dl,
+	.evidence-detail dl {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 12px;
 		margin: 0;
 	}
 
-	.frame-card dd {
+	.paper-coverage-card dd,
+	.evidence-detail dd {
 		margin: 4px 0 0;
 		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.evidence-unit-list {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.evidence-unit-card {
+		display: grid;
+		gap: 5px;
+		width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		text-align: left;
+		background: var(--bg-subtle);
+		cursor: pointer;
+	}
+
+	.evidence-unit-card:hover,
+	.evidence-unit-card.selected {
+		border-color: var(--color-accent);
+		background: var(--surface-card);
+	}
+
+	.evidence-unit-card span,
+	.evidence-unit-card small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.evidence-unit-card strong {
+		color: var(--text-primary);
 		font-size: 14px;
-		line-height: 22px;
+		line-height: 21px;
+		font-weight: 600;
+		overflow-wrap: anywhere;
+	}
+
+	.objective-side-panel {
+		position: sticky;
+		top: 18px;
+	}
+
+	.evidence-context-list > div,
+	.evidence-source-list {
+		border-top: 1px solid var(--border-default);
+		padding-top: 12px;
+	}
+
+	.evidence-context-list > div,
+	.evidence-source-list {
+		display: grid;
+		gap: 6px;
+	}
+
+	.evidence-context-list strong,
+	.evidence-source-list strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.evidence-context-list span,
+	.evidence-source-list span {
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.diagnostics-grid {
+		display: grid;
+		gap: 12px;
+	}
+
+	.diagnostics-grid details {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--bg-subtle);
+	}
+
+	.diagnostics-grid summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 14px;
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+
+	.diagnostic-list {
+		display: grid;
+		gap: 10px;
+		padding: 0 14px 14px;
+	}
+
+	.diagnostic-list article {
+		display: grid;
+		gap: 4px;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.diagnostic-list strong {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 20px;
+	}
+
+	.diagnostic-list span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.route-table-wrap {
 		overflow-x: auto;
+		padding: 0 14px 14px;
 	}
 
 	.route-table {
@@ -662,94 +1182,6 @@
 		line-height: 22px;
 	}
 
-	.evidence-unit-list {
-		display: grid;
-		gap: 12px;
-	}
-
-	.evidence-unit-card {
-		display: grid;
-		gap: 12px;
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
-		padding: 14px;
-		background: var(--bg-subtle);
-	}
-
-	.evidence-unit-card__header {
-		display: flex;
-		justify-content: space-between;
-		gap: 12px;
-	}
-
-	.evidence-unit-card__header > div {
-		display: grid;
-		gap: 4px;
-		min-width: 0;
-	}
-
-	.evidence-unit-card__header > span {
-		height: fit-content;
-		border: 1px solid var(--border-default);
-		border-radius: 999px;
-		padding: 4px 8px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 16px;
-		background: var(--surface-card);
-	}
-
-	.evidence-unit-card h4 {
-		font-size: 15px;
-		line-height: 21px;
-	}
-
-	.evidence-unit-card p,
-	.evidence-unit-facts dd,
-	.evidence-context-grid span,
-	.evidence-source-row span {
-		overflow-wrap: anywhere;
-	}
-
-	.evidence-unit-facts {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 10px;
-		margin: 0;
-	}
-
-	.evidence-unit-facts dd {
-		margin: 3px 0 0;
-		color: var(--text-primary);
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.evidence-context-grid,
-	.evidence-source-row {
-		display: grid;
-		gap: 8px;
-	}
-
-	.evidence-context-grid > div {
-		display: grid;
-		gap: 4px;
-	}
-
-	.evidence-context-grid strong,
-	.evidence-source-row strong {
-		color: var(--text-primary);
-		font-size: 13px;
-		line-height: 18px;
-	}
-
-	.evidence-context-grid span,
-	.evidence-source-row span {
-		color: var(--text-secondary);
-		font-size: 13px;
-		line-height: 20px;
-	}
-
 	.empty-panel {
 		border: 1px dashed var(--border-default);
 		border-radius: var(--radius-md);
@@ -760,19 +1192,23 @@
 		background: var(--bg-subtle);
 	}
 
-	.objective-section--two {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+	@media (max-width: 1040px) {
+		.logic-chain,
+		.objective-workspace-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.objective-side-panel {
+			position: static;
+		}
 	}
 
-	.objective-section--two > div {
-		display: grid;
-		gap: 14px;
-	}
-
-	@media (max-width: 860px) {
+	@media (max-width: 760px) {
 		.objective-hero,
-		.frame-card__header,
-		.evidence-unit-card__header {
+		.section-heading,
+		.logic-step__header,
+		.evidence-group__header,
+		.evidence-detail__header {
 			flex-direction: column;
 		}
 
@@ -781,10 +1217,9 @@
 		}
 
 		.objective-summary-grid,
-		.context-grid,
-		.evidence-unit-facts,
-		.frame-card dl,
-		.objective-section--two {
+		.evidence-unit-list,
+		.paper-coverage-card dl,
+		.evidence-detail dl {
 			grid-template-columns: 1fr;
 		}
 	}

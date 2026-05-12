@@ -19,7 +19,9 @@ This node owns the collection workspace route family in the frontend.
 ## Responsibilities
 
 - render the collection workspace
-- render collection-level research objectives and objective-scoped paper frames
+- render collection-level research objectives and objective-scoped logic-chain
+  workspaces with paper coverage, evidence units, source links, and extraction
+  diagnostics
 - render collection-level document profile screening signals
 - render canonical collection materials and collection-scoped material profiles
 - render collection-level evidence cards and source-anchor entry points

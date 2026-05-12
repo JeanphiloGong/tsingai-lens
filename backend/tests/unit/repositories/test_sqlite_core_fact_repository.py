@@ -13,6 +13,7 @@ from domain.core import (
     MethodFact,
     ObjectiveContext,
     PaperSkim,
+    PairwiseComparisonRelation,
     ResearchObjective,
     SampleVariant,
     StructureFeature,
@@ -174,6 +175,27 @@ def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
         ),
         comparable_results=(_comparable_result(),),
         collection_comparable_results=(_collection_comparable_result(),),
+        pairwise_comparison_relations=(
+            PairwiseComparisonRelation(
+                relation_id="pcr-1",
+                collection_id="col_test",
+                document_id="doc-1",
+                current_variant_id="var-1",
+                reference_variant_id="var-2",
+                comparison_axis="scan_strategy",
+                property_normalized="yield_strength",
+                current_result_id="res-1",
+                reference_result_id="res-2",
+                current_value=620,
+                reference_value=580,
+                unit="MPa",
+                direction="increase",
+                evidence_anchor_ids=("anc-1",),
+                relation_payload={"current_variant_label": "HT-SLM"},
+                confidence=0.84,
+                epistemic_status="normalized_from_evidence",
+            ),
+        ),
         comparison_rows=(_comparison_row(),),
     )
 
@@ -200,6 +222,7 @@ def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
     assert restored.structure_features[0].source_observation_ids == ("obs-1",)
     assert restored.comparable_results[0].value.numeric_value == 620.0
     assert restored.collection_comparable_results[0].included is True
+    assert restored.pairwise_comparison_relations[0].comparison_axis == "scan_strategy"
     assert restored.comparison_rows[0].supporting_anchor_ids == ("anc-1",)
 
     repository.replace_collection_comparison_artifacts(

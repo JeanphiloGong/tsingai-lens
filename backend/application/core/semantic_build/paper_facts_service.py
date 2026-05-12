@@ -254,6 +254,25 @@ _PBF_PROCESS_PAYLOAD_KEYS = (
     "powder_size_distribution_um",
     "post_treatment_summary",
 )
+_TENSILE_TEST_PROPERTIES = frozenset(
+    {"yield_strength", "tensile_strength", "strength", "elongation", "modulus"}
+)
+_MICROHARDNESS_TEST_PROPERTIES = frozenset({"hardness", "microhardness"})
+_CHARACTERIZATION_TEST_PROPERTIES = frozenset(
+    {
+        "density",
+        "relative_density",
+        "porosity",
+        "grain_size",
+        "microstructure",
+        "grain_size_primary_dendrite_spacing",
+    }
+)
+_METHOD_FAMILY_PROPERTY_TYPES = (
+    "tensile_mechanics",
+    "microhardness",
+    "density_porosity_microstructure",
+)
 _GENERIC_TEXT_VARIANT_TERMS = (
     "alloy",
     "material",
@@ -1027,8 +1046,20 @@ class PaperFactsService:
                     max(document_total_units - document_completed_units, 0),
                 )
 
+            doc_method_family_condition_start = len(test_condition_rows)
+            self._materialize_document_method_family_test_conditions(
+                collection_id=collection_id,
+                document_id=document_id,
+                text_windows=all_doc_text_windows,
+                evidence_anchor_rows=evidence_anchor_rows,
+                test_condition_rows=test_condition_rows,
+                document_state=document_state,
+            )
+            doc_method_family_condition_count = (
+                len(test_condition_rows) - doc_method_family_condition_start
+            )
             logger.info(
-                "Paper facts extraction document finished collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s",
+                "Paper facts extraction document finished collection_id=%s document_id=%s document_position=%s document_count=%s remaining_documents=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s method_family_test_conditions=%s baselines=%s measurements=%s completed_units=%s total_units=%s remaining_units=%s",
                 collection_id,
                 document_id,
                 document_position,
@@ -1038,6 +1069,7 @@ class PaperFactsService:
                 len(method_fact_rows) - doc_method_start,
                 len(sample_variant_rows) - doc_variant_start,
                 len(test_condition_rows) - doc_condition_start,
+                doc_method_family_condition_count,
                 len(baseline_rows) - doc_baseline_start,
                 len(measurement_rows) - doc_measurement_start,
                 completed_extraction_units,
@@ -1063,6 +1095,9 @@ class PaperFactsService:
             test_condition_rows,
             collection_id,
         )
+        test_conditions = self._filter_superseded_local_test_conditions(
+            test_conditions
+        )
         baseline_references = self._normalize_baseline_reference_records(
             baseline_rows,
             collection_id,
@@ -1074,6 +1109,10 @@ class PaperFactsService:
         measurement_results = self._clear_removed_variant_ids_from_measurements(
             measurement_results,
             removed_variant_ids,
+        )
+        measurement_results = self._attach_document_test_condition_ids_to_measurements(
+            measurement_results=measurement_results,
+            test_conditions=test_conditions,
         )
         if method_facts and not measurement_results:
             logger.warning(
@@ -1088,6 +1127,8 @@ class PaperFactsService:
             method_facts=method_facts,
             evidence_anchors=evidence_anchors,
             text_windows_by_doc=all_text_windows_by_doc,
+            sample_variants=sample_variants,
+            measurement_results=measurement_results,
         )
         characterization = self._attach_variant_ids_to_characterization(
             characterization,
@@ -1330,6 +1371,18 @@ class PaperFactsService:
             for row in sample_variants
             if self._sample_variant_source_kind(row) == "table_row"
         }
+        table_variant_labels_by_document: dict[str, set[str]] = {}
+        for row in sample_variants:
+            document_id = self._normalize_scalar_text(row.get("document_id"))
+            label = self._normalize_scalar_text(row.get("variant_label"))
+            if (
+                document_id
+                and label
+                and self._sample_variant_source_kind(row) == "table_row"
+            ):
+                table_variant_labels_by_document.setdefault(document_id, set()).add(
+                    label.lower()
+                )
         if not table_variant_documents:
             return sample_variants, set()
 
@@ -1337,11 +1390,22 @@ class PaperFactsService:
         removed_variant_ids: set[str] = set()
         for row in sample_variants:
             document_id = self._normalize_scalar_text(row.get("document_id"))
+            variant_id = self._normalize_scalar_text(row.get("variant_id"))
+            if (
+                document_id in table_variant_documents
+                and self._sample_variant_source_kind(row) == "text_window"
+                and (
+                    self._normalize_scalar_text(row.get("variant_label")) or ""
+                ).lower()
+                not in table_variant_labels_by_document.get(document_id or "", set())
+            ):
+                if variant_id:
+                    removed_variant_ids.add(variant_id)
+                continue
             if (
                 document_id in table_variant_documents
                 and self._is_generic_text_sample_variant(row)
             ):
-                variant_id = self._normalize_scalar_text(row.get("variant_id"))
                 if variant_id:
                     removed_variant_ids.add(variant_id)
                 continue
@@ -1397,6 +1461,397 @@ class PaperFactsService:
                 payload["variant_id"] = None
             normalized.append(payload)
         return self._normalize_measurement_result_records(normalized, None)
+
+    def _materialize_document_method_family_test_conditions(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        text_windows: list[dict[str, Any]],
+        evidence_anchor_rows: list[dict[str, Any]],
+        test_condition_rows: list[dict[str, Any]],
+        document_state: dict[str, Any],
+    ) -> None:
+        for candidate in self._build_document_method_family_test_conditions(
+            text_windows
+        ):
+            text_window = candidate["text_window"]
+            anchors = self._materialize_anchor_payloads(
+                anchors=[
+                    EvidenceAnchorPayload(
+                        quote=candidate["quote"],
+                        source_type="text",
+                        page=self._safe_int(text_window.get("page")),
+                    )
+                ],
+                document_id=document_id,
+                text_window=text_window,
+                table_id=None,
+                rows=evidence_anchor_rows,
+                document_state=document_state,
+            )
+            condition_id, created = self._materialize_test_condition_row(
+                collection_id=collection_id,
+                document_id=document_id,
+                payload=candidate["condition"],
+                text_window=text_window,
+                table_id=None,
+                rows=test_condition_rows,
+                document_state=document_state,
+                scope_level="document",
+            )
+            condition_record = created or document_state[
+                "test_condition_records_by_id"
+            ].get(condition_id)
+            if condition_record is None:
+                continue
+            for anchor in anchors:
+                anchor_id = self._normalize_scalar_text(anchor.get("anchor_id"))
+                if (
+                    anchor_id
+                    and anchor_id not in condition_record["evidence_anchor_ids"]
+                ):
+                    condition_record["evidence_anchor_ids"].append(anchor_id)
+            if created:
+                document_state["test_condition_records_by_id"][condition_id] = (
+                    condition_record
+                )
+
+    def _build_document_method_family_test_conditions(
+        self,
+        text_windows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        candidates: dict[str, tuple[int, dict[str, Any]]] = {}
+        for text_window in text_windows:
+            text = self._normalize_scalar_text(text_window.get("text")) or ""
+            if not text:
+                continue
+            combined_text = " ".join(
+                part
+                for part in (
+                    self._normalize_scalar_text(text_window.get("heading")),
+                    self._normalize_scalar_text(text_window.get("heading_path")),
+                    text,
+                )
+                if part
+            )
+            for family in _METHOD_FAMILY_PROPERTY_TYPES:
+                score = self._score_method_family_condition_window(
+                    family,
+                    combined_text,
+                )
+                if score <= 0:
+                    continue
+                quote = self._select_method_family_quote(text, family=family)
+                if not quote:
+                    continue
+                candidate = {
+                    "text_window": text_window,
+                    "quote": quote,
+                    "condition": ExtractedTestConditionPayload(
+                        property_type=family,
+                        condition_payload=self._build_method_family_condition_payload(
+                            family=family,
+                            text=text,
+                        ),
+                        confidence=0.86,
+                    ),
+                }
+                current = candidates.get(family)
+                if current is None or score > current[0]:
+                    candidates[family] = (score, candidate)
+        return [item[1] for item in candidates.values()]
+
+    def _score_method_family_condition_window(
+        self,
+        family: str,
+        text: str,
+    ) -> int:
+        lowered = text.lower()
+        if family == "tensile_mechanics":
+            terms = (
+                ("tensile", 4),
+                ("stress-strain", 3),
+                ("yield strength", 2),
+                ("ultimate tensile", 2),
+                ("astm e8", 4),
+                ("instron", 4),
+                ("strain rate", 2),
+            )
+        elif family == "microhardness":
+            terms = (
+                ("microhardness", 4),
+                ("vickers", 4),
+                ("hardness", 2),
+                ("wilson", 3),
+                ("holding time", 2),
+                ("readings", 2),
+            )
+        elif family == "density_porosity_microstructure":
+            terms = (
+                ("sem", 3),
+                ("imagej", 4),
+                ("porosity", 3),
+                ("relative density", 3),
+                ("microstructure", 2),
+                ("magnification", 2),
+                ("horizontal", 1),
+                ("vertical", 1),
+            )
+        else:
+            return 0
+        return sum(weight for term, weight in terms if term in lowered)
+
+    def _build_method_family_condition_payload(
+        self,
+        *,
+        family: str,
+        text: str,
+    ) -> TestConditionPayloadModel:
+        if family == "tensile_mechanics":
+            payload = {
+                "method": "tensile testing",
+                "methods": ["tensile testing"],
+                "test_method": "tensile testing",
+                "standard": self._extract_first_pattern(
+                    text,
+                    r"\bASTM\s*E8M?\b",
+                ),
+                "instrument": self._extract_first_pattern(
+                    text,
+                    r"\bINSTRON\b[^.;,\n]*",
+                ),
+                "strain_rate_s-1": self._extract_first_pattern(
+                    text,
+                    r"\b\d+(?:\.\d+)?\s*mm\s*/\s*min\b",
+                ),
+                "specimen_geometry": (
+                    "Fig. 2"
+                    if re.search(r"\bFig\.\s*2\b", text, re.IGNORECASE)
+                    else None
+                ),
+                "sample_orientation": self._extract_orientation_phrase(text),
+                "details": self._compact_condition_details(text),
+            }
+        elif family == "microhardness":
+            payload = {
+                "method": "Vickers microhardness",
+                "methods": ["Vickers microhardness"],
+                "test_method": "Vickers microhardness",
+                "instrument": self._extract_first_pattern(
+                    text,
+                    r"\b(?:Vickers\s+)?microhardness[^.;\n]*",
+                ),
+                "load": self._extract_first_pattern(text, r"\b\d+(?:\.\d+)?\s*N\b"),
+                "holding_time": self._extract_first_pattern(
+                    text,
+                    r"\b\d+(?:\.\d+)?\s*s\b",
+                ),
+                "readings_per_sample": self._extract_first_pattern(
+                    text,
+                    r"\b\d+\s+(?:readings|measurements)\b[^.;\n]*",
+                ),
+                "sample_orientation": self._extract_orientation_phrase(text),
+                "details": self._compact_condition_details(text),
+            }
+        else:
+            payload = {
+                "method": "SEM / ImageJ",
+                "methods": self._dedupe_preserving_order(
+                    [
+                        method
+                        for method in ("SEM", "ImageJ")
+                        if method.lower() in text.lower()
+                    ]
+                )
+                or ["SEM / ImageJ"],
+                "test_method": "SEM / ImageJ",
+                "instrument": self._extract_first_pattern(
+                    text,
+                    r"\bFEI[-\s]INSPECT\s*50\s*SEM\b",
+                )
+                or ("SEM" if re.search(r"\bSEM\b", text, re.IGNORECASE) else None),
+                "section_orientation": self._extract_section_orientation_phrase(text),
+                "surface_state": self._extract_surface_preparation_phrase(text),
+                "magnification": self._extract_first_pattern(
+                    text,
+                    r"\b\d+(?:\.\d+)?\s*[x×]\s*(?:-|to)\s*\d+(?:\.\d+)?\s*[x×]\b",
+                ),
+                "details": self._compact_condition_details(text),
+            }
+        return TestConditionPayloadModel(
+            **{
+                key: value
+                for key, value in payload.items()
+                if value not in (None, "", [], {})
+            }
+        )
+
+    def _select_method_family_quote(
+        self,
+        text: str,
+        *,
+        family: str,
+    ) -> str | None:
+        terms = {
+            "tensile_mechanics": ("tensile", "astm", "instron", "stress-strain"),
+            "microhardness": ("microhardness", "vickers", "hardness", "wilson"),
+            "density_porosity_microstructure": (
+                "sem",
+                "imagej",
+                "porosity",
+                "relative density",
+                "microstructure",
+            ),
+        }.get(family, ())
+        normalized_text = self._normalize_scalar_text(text)
+        if not normalized_text:
+            return None
+        for sentence in re.split(r"(?<=[.!?])\s+", normalized_text):
+            if any(term in sentence.lower() for term in terms):
+                return sentence[:900].strip()
+        return normalized_text[:900].strip()
+
+    def _extract_first_pattern(
+        self,
+        text: str,
+        pattern: str,
+    ) -> str | None:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match is None:
+            return None
+        return re.sub(r"\s+", " ", match.group(0)).strip()
+
+    def _extract_orientation_phrase(self, text: str) -> str | None:
+        lowered = text.lower()
+        if "horizontally" in lowered and "substrate" in lowered:
+            return "all blocks built horizontally on substrate"
+        if "horizontal" in lowered and "vertical" in lowered:
+            return "horizontal and vertical sections"
+        if "horizontal" in lowered:
+            return "horizontal"
+        if "vertical" in lowered:
+            return "vertical"
+        return None
+
+    def _extract_section_orientation_phrase(self, text: str) -> str | None:
+        lowered = text.lower()
+        if "horizontal" in lowered and "vertical" in lowered:
+            return "horizontal and vertical sections"
+        return self._extract_orientation_phrase(text)
+
+    def _extract_surface_preparation_phrase(self, text: str) -> str | None:
+        parts = []
+        grit = self._extract_first_pattern(
+            text,
+            r"\b\d+\s*[-–]\s*\d+\s*grit\b",
+        )
+        if grit:
+            parts.append(grit)
+        silica = self._extract_first_pattern(
+            text,
+            r"\bcolloidal\s+silica\b[^.;\n]*",
+        )
+        if silica:
+            parts.append(silica)
+        return "; ".join(parts) if parts else None
+
+    def _compact_condition_details(self, text: str) -> str | None:
+        normalized = self._normalize_scalar_text(text)
+        if not normalized:
+            return None
+        return re.sub(r"\s+", " ", normalized).strip()[:1000]
+
+    def _attach_document_test_condition_ids_to_measurements(
+        self,
+        *,
+        measurement_results: tuple[dict[str, Any], ...],
+        test_conditions: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if not measurement_results or not test_conditions:
+            return self._normalize_measurement_result_records(measurement_results, None)
+
+        valid_condition_ids = {
+            self._normalize_scalar_text(condition.get("test_condition_id"))
+            for condition in test_conditions
+            if self._normalize_scalar_text(condition.get("test_condition_id"))
+        }
+        conditions_by_document: dict[str, dict[str, dict[str, Any]]] = {}
+        for condition in test_conditions:
+            document_id = self._normalize_scalar_text(condition.get("document_id"))
+            raw_property_type = self._normalize_scalar_text(condition.get("property_type"))
+            property_type = (
+                raw_property_type
+                if raw_property_type in _METHOD_FAMILY_PROPERTY_TYPES
+                else self._normalize_property_name(raw_property_type)
+            )
+            if not document_id or property_type not in _METHOD_FAMILY_PROPERTY_TYPES:
+                continue
+            conditions_by_document.setdefault(document_id, {})[property_type] = dict(
+                condition
+            )
+
+        normalized: list[dict[str, Any]] = []
+        for result in measurement_results:
+            payload = dict(result)
+            existing_condition_id = self._normalize_scalar_text(
+                payload.get("test_condition_id")
+            )
+            if existing_condition_id and existing_condition_id not in valid_condition_ids:
+                payload["test_condition_id"] = None
+                existing_condition_id = None
+            if existing_condition_id:
+                normalized.append(payload)
+                continue
+            if self._normalize_scalar_text(payload.get("result_source_type")) != "table":
+                normalized.append(payload)
+                continue
+            document_id = self._normalize_scalar_text(payload.get("document_id"))
+            property_name = self._normalize_property_name(payload.get("property_normalized"))
+            property_type = self._method_family_property_type_for_result(property_name)
+            condition = conditions_by_document.get(document_id or "", {}).get(
+                property_type or ""
+            )
+            if condition is not None:
+                payload["test_condition_id"] = condition.get("test_condition_id")
+            normalized.append(payload)
+        return self._normalize_measurement_result_records(normalized, None)
+
+    def _filter_superseded_local_test_conditions(
+        self,
+        test_conditions: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if not test_conditions:
+            return ()
+        documents_with_method_family_conditions = {
+            self._normalize_scalar_text(row.get("document_id"))
+            for row in test_conditions
+            if self._normalize_scalar_text(row.get("property_type"))
+            in _METHOD_FAMILY_PROPERTY_TYPES
+            and self._normalize_scalar_text(row.get("scope_level")) == "document"
+        }
+        if not documents_with_method_family_conditions:
+            return self._normalize_test_condition_records(test_conditions, None)
+        filtered = [
+            row
+            for row in test_conditions
+            if self._normalize_scalar_text(row.get("document_id"))
+            not in documents_with_method_family_conditions
+            or self._normalize_scalar_text(row.get("scope_level")) == "document"
+        ]
+        return self._normalize_test_condition_records(filtered, None)
+
+    def _method_family_property_type_for_result(
+        self,
+        property_name: str,
+    ) -> str | None:
+        if property_name in _TENSILE_TEST_PROPERTIES:
+            return "tensile_mechanics"
+        if property_name in _MICROHARDNESS_TEST_PROPERTIES:
+            return "microhardness"
+        if property_name in _CHARACTERIZATION_TEST_PROPERTIES:
+            return "density_porosity_microstructure"
+        return None
 
     def _build_text_window_extraction_payload(
         self,
@@ -3130,11 +3585,17 @@ class PaperFactsService:
         table_id: str | None,
         rows: list[dict[str, Any]],
         document_state: dict[str, Any],
+        scope_level: str | None = None,
     ) -> tuple[str, dict[str, Any] | None]:
         normalized_payload = self._normalize_condition_payload(
             payload.condition_payload.model_dump(exclude_none=True, by_alias=True)
         )
-        property_type = self._normalize_property_name(payload.property_type)
+        raw_property_type = self._normalize_scalar_text(payload.property_type)
+        property_type = (
+            raw_property_type
+            if raw_property_type in _METHOD_FAMILY_PROPERTY_TYPES
+            else self._normalize_property_name(payload.property_type)
+        )
         condition_key = (
             document_id,
             property_type,
@@ -3145,11 +3606,11 @@ class PaperFactsService:
             return existing_id, None
 
         template_type = self._infer_condition_template_type(property_type)
-        scope_level = "table" if table_id else "measurement"
+        resolved_scope_level = scope_level or ("table" if table_id else "measurement")
         missing_fields = self._infer_missing_condition_fields(
             payload=normalized_payload,
             template_type=template_type,
-            scope_level=scope_level,
+            scope_level=resolved_scope_level,
         )
         condition_record = TestCondition.from_mapping(
             {
@@ -3159,7 +3620,7 @@ class PaperFactsService:
                 "domain_profile": CORE_NEUTRAL_DOMAIN_PROFILE,
                 "property_type": property_type,
                 "template_type": template_type,
-                "scope_level": scope_level,
+                "scope_level": resolved_scope_level,
                 "condition_payload": normalized_payload,
                 "condition_completeness": self._infer_condition_completeness(
                     payload=normalized_payload,
@@ -4128,15 +4589,36 @@ class PaperFactsService:
         method_facts: tuple[dict[str, Any], ...],
         evidence_anchors: tuple[dict[str, Any], ...],
         text_windows_by_doc: dict[str, list[dict[str, Any]]],
+        sample_variants: tuple[dict[str, Any], ...],
+        measurement_results: tuple[dict[str, Any], ...],
     ) -> tuple[dict[str, Any], ...]:
         rows: list[dict[str, Any]] = []
-        if not method_facts:
-            return self._normalize_characterization_records((), collection_id)
-
         anchor_lookup = {
             str(row.get("anchor_id") or ""): dict(row)
             for row in evidence_anchors
         }
+        dedicated_rows = [
+            *self._build_table_derived_characterization_observations(
+                collection_id=collection_id,
+                sample_variants=sample_variants,
+                measurement_results=measurement_results,
+            ),
+            *self._build_text_derived_characterization_observations(
+                collection_id=collection_id,
+                text_windows_by_doc=text_windows_by_doc,
+                evidence_anchors=evidence_anchors,
+            ),
+        ]
+        rows.extend(dedicated_rows)
+        documents_with_dedicated_observations = {
+            self._normalize_scalar_text(row.get("document_id"))
+            for row in dedicated_rows
+            if self._normalize_scalar_text(row.get("document_id"))
+        }
+
+        if not method_facts:
+            return self._normalize_characterization_records(rows, collection_id)
+
         characterization_facts = [
             method_fact
             for method_fact in method_facts
@@ -4145,6 +4627,8 @@ class PaperFactsService:
         for method_fact in characterization_facts:
             document_id = str(method_fact.get("document_id") or "")
             if not document_id:
+                continue
+            if document_id in documents_with_dedicated_observations:
                 continue
             text_windows = text_windows_by_doc.get(document_id, [])
             anchor_ids = self._normalize_list(method_fact.get("evidence_anchor_ids"))
@@ -4187,6 +4671,386 @@ class PaperFactsService:
             rows,
             collection_id,
         )
+
+    def _build_table_derived_characterization_observations(
+        self,
+        *,
+        collection_id: str,
+        sample_variants: tuple[dict[str, Any], ...],
+        measurement_results: tuple[dict[str, Any], ...],
+    ) -> list[dict[str, Any]]:
+        table_results = [
+            row
+            for row in measurement_results
+            if self._normalize_scalar_text(row.get("result_source_type")) == "table"
+            and self._measurement_numeric_value(
+                self._normalize_object(row.get("value_payload"))
+                if isinstance(self._normalize_object(row.get("value_payload")), dict)
+                else {}
+            )
+            is not None
+        ]
+        if not table_results:
+            return []
+
+        sample_lookup = self._index_rows_by_id(sample_variants, "variant_id")
+        rows: list[dict[str, Any]] = []
+        documents = sorted(
+            {
+                self._normalize_scalar_text(row.get("document_id"))
+                for row in table_results
+                if self._normalize_scalar_text(row.get("document_id"))
+            }
+        )
+        for document_id in documents:
+            document_results = [
+                row
+                for row in table_results
+                if self._normalize_scalar_text(row.get("document_id")) == document_id
+            ]
+            density_results = [
+                row
+                for row in document_results
+                if self._normalize_property_name(row.get("property_normalized"))
+                in {"density", "relative_density"}
+            ]
+            rows.extend(
+                self._build_density_characterization_observations(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    density_results=density_results,
+                    sample_lookup=sample_lookup,
+                )
+            )
+            rows.extend(
+                self._build_strategy_characterization_observations(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    sample_variants=self._filter_rows_by_document(
+                        sample_variants,
+                        document_id,
+                    ),
+                    measurement_results=document_results,
+                    sample_lookup=sample_lookup,
+                )
+            )
+        return rows
+
+    def _build_density_characterization_observations(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        density_results: list[dict[str, Any]],
+        sample_lookup: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not density_results:
+            return []
+        values = [
+            (
+                row,
+                self._measurement_numeric_value(
+                    self._normalize_object(row.get("value_payload"))
+                    if isinstance(self._normalize_object(row.get("value_payload")), dict)
+                    else {}
+                ),
+            )
+            for row in density_results
+        ]
+        numeric_values = [(row, value) for row, value in values if value is not None]
+        if not numeric_values:
+            return []
+
+        min_value = min(value for _, value in numeric_values)
+        max_row, max_value = max(numeric_values, key=lambda item: item[1])
+        anchor_ids = self._dedupe_preserving_order(
+            [
+                anchor_id
+                for row, _ in numeric_values
+                for anchor_id in self._normalize_list(row.get("evidence_anchor_ids"))
+            ]
+        )
+        rows = [
+            CharacterizationObservation.from_mapping(
+                {
+                    "observation_id": f"obs_{uuid4().hex[:12]}",
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                    "variant_id": None,
+                    "characterization_type": "density_porosity_sem_imagej",
+                    "observation_text": (
+                        "Table-derived relative density and porosity evidence "
+                        f"covers {len(numeric_values)} samples with relative "
+                        f"density from {min_value:g}% to {max_value:g}%."
+                    ),
+                    "observed_value": {
+                        "relative_density_min": min_value,
+                        "relative_density_max": max_value,
+                        "sample_count": len(numeric_values),
+                    },
+                    "observed_unit": "%",
+                    "condition_context": {
+                        "test": {"methods": ["SEM", "ImageJ"], "method": "SEM / ImageJ"}
+                    },
+                    "evidence_anchor_ids": anchor_ids,
+                    "confidence": 0.88,
+                    "epistemic_status": EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
+                }
+            ).to_record()
+        ]
+
+        max_variant_id = self._normalize_scalar_text(max_row.get("variant_id"))
+        max_variant = sample_lookup.get(max_variant_id or "", {})
+        max_label = self._normalize_scalar_text(max_variant.get("variant_label")) or "sample"
+        rows.append(
+            CharacterizationObservation.from_mapping(
+                {
+                    "observation_id": f"obs_{uuid4().hex[:12]}",
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                    "variant_id": max_variant_id,
+                    "characterization_type": "highest_density_sample",
+                    "observation_text": (
+                        f"Sample {max_label} has the highest table-derived "
+                        f"relative density at {max_value:g}%."
+                    ),
+                    "observed_value": {"relative_density": max_value},
+                    "observed_unit": "%",
+                    "condition_context": {
+                        "test": {"methods": ["SEM", "ImageJ"], "method": "SEM / ImageJ"}
+                    },
+                    "evidence_anchor_ids": self._normalize_list(
+                        max_row.get("evidence_anchor_ids")
+                    ),
+                    "confidence": 0.9,
+                    "epistemic_status": EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
+                }
+            ).to_record()
+        )
+        return rows
+
+    def _build_strategy_characterization_observations(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        sample_variants: list[dict[str, Any]],
+        measurement_results: list[dict[str, Any]],
+        sample_lookup: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        variants_by_strategy: dict[str, list[dict[str, Any]]] = {}
+        for variant in sample_variants:
+            process_context = self._normalize_condition_payload(
+                variant.get("process_context")
+            )
+            strategy = self._normalize_scalar_text(process_context.get("scan_strategy"))
+            if strategy:
+                variants_by_strategy.setdefault(strategy.upper(), []).append(variant)
+        rows: list[dict[str, Any]] = []
+        for strategy in sorted(variants_by_strategy):
+            variants = variants_by_strategy[strategy]
+            variant_ids = {
+                self._normalize_scalar_text(variant.get("variant_id"))
+                for variant in variants
+                if self._normalize_scalar_text(variant.get("variant_id"))
+            }
+            density_values = []
+            anchor_ids = []
+            for result in measurement_results:
+                if self._normalize_scalar_text(result.get("variant_id")) not in variant_ids:
+                    continue
+                if self._normalize_property_name(result.get("property_normalized")) != "density":
+                    continue
+                payload = self._normalize_object(result.get("value_payload"))
+                value = self._measurement_numeric_value(payload if isinstance(payload, dict) else {})
+                if value is not None:
+                    density_values.append(value)
+                anchor_ids.extend(self._normalize_list(result.get("evidence_anchor_ids")))
+            if not density_values:
+                continue
+            labels = [
+                self._normalize_scalar_text(sample_lookup.get(variant_id or "", {}).get("variant_label"))
+                or self._normalize_scalar_text(variant_id)
+                for variant_id in sorted(variant_ids)
+            ]
+            rows.append(
+                CharacterizationObservation.from_mapping(
+                    {
+                        "observation_id": f"obs_{uuid4().hex[:12]}",
+                        "document_id": document_id,
+                        "collection_id": collection_id,
+                        "variant_id": None,
+                        "characterization_type": f"scan_strategy_{strategy.lower()}",
+                        "observation_text": (
+                            f"Scan strategy {strategy} appears in samples "
+                            f"{', '.join(label for label in labels if label)} with "
+                            f"table-derived relative density from {min(density_values):g}% "
+                            f"to {max(density_values):g}%."
+                        ),
+                        "observed_value": {
+                            "scan_strategy": strategy,
+                            "relative_density_min": min(density_values),
+                            "relative_density_max": max(density_values),
+                            "sample_labels": [label for label in labels if label],
+                        },
+                        "observed_unit": "%",
+                        "condition_context": {
+                            "test": {"methods": ["SEM", "ImageJ"], "method": "SEM / ImageJ"}
+                        },
+                        "evidence_anchor_ids": self._dedupe_preserving_order(anchor_ids),
+                        "confidence": 0.82,
+                        "epistemic_status": EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
+                    }
+                ).to_record()
+            )
+        return rows
+
+    def _build_text_derived_characterization_observations(
+        self,
+        *,
+        collection_id: str,
+        text_windows_by_doc: dict[str, list[dict[str, Any]]],
+        evidence_anchors: tuple[dict[str, Any], ...],
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for document_id, text_windows in text_windows_by_doc.items():
+            for observation_type, terms, text_builder in (
+                (
+                    "sectioned_microstructure",
+                    ("horizontal", "vertical", "sem"),
+                    lambda quote: (
+                        "SEM characterization covers horizontal and vertical "
+                        "sections for microstructure and pore distribution."
+                    ),
+                ),
+                (
+                    "dendrite_cellular_trend",
+                    ("dendrite", "scan"),
+                    lambda quote: quote,
+                ),
+                (
+                    "pore_defect_interpretation",
+                    ("pore", "balling"),
+                    lambda quote: quote,
+                ),
+            ):
+                selected = self._select_characterization_observation_window(
+                    text_windows,
+                    required_terms=terms,
+                )
+                if selected is None:
+                    continue
+                quote = self._select_characterization_observation_quote(
+                    selected,
+                    required_terms=terms,
+                )
+                if not quote:
+                    continue
+                rows.append(
+                    CharacterizationObservation.from_mapping(
+                        {
+                            "observation_id": f"obs_{uuid4().hex[:12]}",
+                            "document_id": document_id,
+                            "collection_id": collection_id,
+                            "variant_id": None,
+                            "characterization_type": observation_type,
+                            "observation_text": text_builder(quote),
+                            "observed_value": {"statement": quote},
+                            "observed_unit": None,
+                            "condition_context": {
+                                "test": {
+                                    "methods": self._extract_characterization_methods(
+                                        quote
+                                    )
+                                    or ["SEM"],
+                                    "method": "SEM",
+                                }
+                            },
+                            "evidence_anchor_ids": self._anchor_ids_for_text_window(
+                                selected,
+                                evidence_anchors,
+                            ),
+                            "confidence": 0.8,
+                            "epistemic_status": EPISTEMIC_INFERRED_FROM_CHARACTERIZATION,
+                        }
+                    ).to_record()
+                )
+        return rows
+
+    def _select_characterization_observation_window(
+        self,
+        text_windows: list[dict[str, Any]],
+        *,
+        required_terms: tuple[str, ...],
+    ) -> dict[str, Any] | None:
+        scored: list[tuple[int, dict[str, Any]]] = []
+        for window in text_windows:
+            text = " ".join(
+                part
+                for part in (
+                    self._normalize_scalar_text(window.get("heading")),
+                    self._normalize_scalar_text(window.get("heading_path")),
+                    self._normalize_scalar_text(window.get("text")),
+                )
+                if part
+            )
+            lowered = text.lower()
+            score = sum(1 for term in required_terms if term in lowered)
+            if score == len(required_terms):
+                scored.append((score, window))
+        if not scored:
+            return None
+        scored.sort(
+            key=lambda item: (
+                item[0],
+                -(self._safe_int(item[1].get("order")) or 0),
+            ),
+            reverse=True,
+        )
+        return scored[0][1]
+
+    def _select_characterization_observation_quote(
+        self,
+        text_window: dict[str, Any],
+        *,
+        required_terms: tuple[str, ...],
+    ) -> str | None:
+        text = self._normalize_scalar_text(text_window.get("text"))
+        if not text:
+            return None
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            lowered = sentence.lower()
+            if all(term in lowered for term in required_terms):
+                return sentence[:900].strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            lowered = sentence.lower()
+            if any(term in lowered for term in required_terms):
+                return sentence[:900].strip()
+        return text[:900].strip()
+
+    def _anchor_ids_for_text_window(
+        self,
+        text_window: dict[str, Any],
+        evidence_anchors: tuple[dict[str, Any], ...],
+    ) -> list[str]:
+        window_block_ids = {
+            self._normalize_scalar_text(block_id)
+            for block_id in self._normalize_list(text_window.get("block_ids"))
+        }
+        window_block_ids.discard(None)
+        window_id = self._normalize_scalar_text(text_window.get("window_id"))
+        if window_id:
+            window_block_ids.add(window_id)
+        anchor_ids = []
+        for anchor in evidence_anchors:
+            block_id = self._normalize_scalar_text(anchor.get("block_id"))
+            section_id = self._normalize_scalar_text(anchor.get("section_id"))
+            if not ({block_id, section_id} & window_block_ids):
+                continue
+            anchor_id = self._normalize_scalar_text(anchor.get("anchor_id"))
+            if anchor_id:
+                anchor_ids.append(anchor_id)
+        return self._dedupe_preserving_order(anchor_ids)
 
     def _build_structure_features(
         self,
@@ -4680,6 +5544,12 @@ class PaperFactsService:
         self,
         property_type: str,
     ) -> str:
+        if property_type == "tensile_mechanics":
+            return "tensile_mechanics"
+        if property_type == "density_porosity_microstructure":
+            return "characterization"
+        if property_type == "microhardness":
+            return "microhardness"
         if property_type in {
             "strength",
             "tensile_strength",

@@ -280,6 +280,14 @@ class TestConditionPayloadModel(_StrictModel):
     frequency_hz: float | None = None
     specimen_geometry: str | None = None
     surface_state: str | None = None
+    standard: str | None = None
+    instrument: str | None = None
+    load: str | None = None
+    holding_time: str | None = None
+    readings_per_sample: str | None = None
+    section_orientation: str | None = None
+    magnification: str | None = None
+    details: str | None = None
 
     @field_validator("methods", "temperatures_c", "durations", mode="before")
     @classmethod

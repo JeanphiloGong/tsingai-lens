@@ -6,6 +6,7 @@ from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
     ComparisonRowRecord,
+    PairwiseComparisonRelation,
 )
 from domain.core.document_profile import DocumentProfile
 from domain.core.evidence_backbone import (
@@ -40,6 +41,7 @@ class CoreFactSet:
     structure_features: tuple[StructureFeature, ...] = ()
     comparable_results: tuple[ComparableResult, ...] = ()
     collection_comparable_results: tuple[CollectionComparableResult, ...] = ()
+    pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = ()
     comparison_rows: tuple[ComparisonRowRecord, ...] = ()
 
     def has_paper_facts(self) -> bool:

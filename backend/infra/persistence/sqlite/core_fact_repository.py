@@ -23,6 +23,7 @@ from domain.core import (
     MethodFact,
     ObjectiveContext,
     PaperSkim,
+    PairwiseComparisonRelation,
     SampleVariant,
     ResearchObjective,
     StructureFeature,
@@ -429,6 +430,40 @@ _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
         index_columns=("comparable_result_id", "included", "sort_order"),
     ),
     _TableSpec(
+        table_name="core_pairwise_comparison_relations",
+        attr_name="pairwise_comparison_relations",
+        record_cls=PairwiseComparisonRelation,
+        id_column="relation_id",
+        columns=(
+            "relation_id",
+            "collection_id",
+            "document_id",
+            "current_variant_id",
+            "reference_variant_id",
+            "comparison_axis",
+            "property_normalized",
+            "current_result_id",
+            "reference_result_id",
+            "current_value",
+            "reference_value",
+            "unit",
+            "direction",
+            "evidence_anchor_ids",
+            "relation_payload",
+            "confidence",
+            "epistemic_status",
+            "relation_version",
+        ),
+        json_columns=frozenset({"evidence_anchor_ids", "relation_payload"}),
+        real_columns=frozenset({"current_value", "reference_value", "confidence"}),
+        index_columns=(
+            "document_id",
+            "current_variant_id",
+            "reference_variant_id",
+            "property_normalized",
+        ),
+    ),
+    _TableSpec(
         table_name="core_comparison_rows",
         attr_name="comparison_rows",
         record_cls=ComparisonRowRecord,
@@ -577,6 +612,7 @@ class SqliteCoreFactRepository:
                     or bool(
                         facts.comparable_results
                         or facts.collection_comparable_results
+                        or facts.pairwise_comparison_relations
                         or facts.comparison_rows
                     )
                 ),
@@ -588,11 +624,13 @@ class SqliteCoreFactRepository:
         comparable_results: tuple[ComparableResult, ...],
         collection_comparable_results: tuple[CollectionComparableResult, ...],
         comparison_rows: tuple[ComparisonRowRecord, ...],
+        pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = (),
     ) -> None:
         self._ensure_schema()
         records_by_attr = {
             "comparable_results": comparable_results,
             "collection_comparable_results": collection_comparable_results,
+            "pairwise_comparison_relations": pairwise_comparison_relations,
             "comparison_rows": comparison_rows,
         }
         with self._connection() as connection:

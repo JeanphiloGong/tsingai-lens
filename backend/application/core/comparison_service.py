@@ -585,10 +585,11 @@ class ComparisonService:
             row_records=row_records,
         )
         logger.info(
-            "Comparison assembly finished collection_id=%s comparable_results=%s collection_comparable_results=%s comparison_rows=%s",
+            "Comparison assembly finished collection_id=%s comparable_results=%s collection_comparable_results=%s pairwise_comparison_relations=%s comparison_rows=%s",
             collection_id,
             len(semantic_records.comparable_results),
             len(semantic_records.collection_comparable_results),
+            len(semantic_records.pairwise_comparison_relations),
             len(row_records),
         )
         return row_records
@@ -641,6 +642,7 @@ class ComparisonService:
                     facts.collection_comparable_results
                 )
             ),
+            pairwise_comparison_relations=facts.pairwise_comparison_relations,
         )
 
     def _store_comparison_artifacts(
@@ -655,6 +657,7 @@ class ComparisonService:
             semantic_records.comparable_results,
             semantic_records.collection_comparable_results,
             row_records,
+            semantic_records.pairwise_comparison_relations,
         )
 
     def _collect_corpus_comparable_result_items(

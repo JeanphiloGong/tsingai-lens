@@ -8,6 +8,7 @@ from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
     ComparisonRowRecord,
+    PairwiseComparisonRelation,
 )
 from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
@@ -184,6 +185,7 @@ class CoreFactRepository(Protocol):
         comparable_results: tuple[ComparableResult, ...],
         collection_comparable_results: tuple[CollectionComparableResult, ...],
         comparison_rows: tuple[ComparisonRowRecord, ...],
+        pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = (),
     ) -> None: ...
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet: ...

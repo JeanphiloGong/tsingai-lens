@@ -17,9 +17,11 @@ from domain.core.comparison import (
     ContextBinding,
     EvidenceTrace,
     NormalizedComparisonContext,
+    PairwiseComparisonRelation,
     ResultValue,
     build_collection_assessment_input_fingerprint,
     build_comparable_result_id,
+    build_pairwise_comparison_relation_id,
     evaluate_comparison_assessment,
 )
 from domain.core.evidence_backbone import (
@@ -28,7 +30,10 @@ from domain.core.evidence_backbone import (
     SampleVariant,
     TestCondition,
 )
-from domain.shared.enums import TRACEABILITY_STATUS_MISSING
+from domain.shared.enums import (
+    EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+    TRACEABILITY_STATUS_MISSING,
+)
 from domain.shared.record_normalization import normalize_record_value
 
 logger = logging.getLogger(__name__)
@@ -62,6 +67,22 @@ COLLECTION_COMPARABLE_RESULT_COLUMNS = [
     "assessment_input_fingerprint",
     "reassessment_triggers",
 ]
+PAIRWISE_RELATION_COMPARABLE_PROPERTIES = frozenset(
+    {"density", "relative_density", "yield_strength", "tensile_strength", "elongation"}
+)
+PAIRWISE_RELATION_AXIS_KEYS = (
+    "scan_strategy",
+    "scan_speed_mm_s",
+    "energy_density_j_mm3",
+)
+PAIRWISE_RELATION_TENSILE_PROPERTIES = (
+    "yield_strength",
+    "tensile_strength",
+)
+PAIRWISE_RELATION_DUCTILITY_PROPERTY = "elongation"
+PAIRWISE_RELATION_DENSITY_PROPERTY = "density"
+PAIRWISE_RELATION_DENSITY_MIN_DELTA = 2.0
+PAIRWISE_RELATION_ELONGATION_MIN_DELTA = 3.4
 
 
 @dataclass(frozen=True)
@@ -76,6 +97,7 @@ class ComparisonInputRecords:
 class ComparisonSemanticRecords:
     comparable_results: tuple[ComparableResult, ...]
     collection_comparable_results: tuple[CollectionComparableResult, ...]
+    pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = ()
 
 
 class ComparableResultAssembler:
@@ -147,6 +169,602 @@ class ComparableResultAssembler:
         return ComparisonSemanticRecords(
             comparable_results=tuple(comparable_results_by_id.values()),
             collection_comparable_results=tuple(scoped_results_by_id.values()),
+            pairwise_comparison_relations=self.build_pairwise_comparison_relations(
+                collection_id=collection_id,
+                records=records,
+            ),
+        )
+
+    def build_pairwise_comparison_relations(
+        self,
+        *,
+        collection_id: str,
+        records: ComparisonInputRecords,
+    ) -> tuple[PairwiseComparisonRelation, ...]:
+        table_results = [
+            result.to_record()
+            for result in records.measurement_results
+            if self.safe_text(result.result_source_type) == "table"
+            and self.safe_text(result.claim_scope) == "current_work"
+            and self.safe_text(result.variant_id)
+        ]
+        result_lookup: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for result in table_results:
+            property_name = self.safe_text(result.get("property_normalized")) or ""
+            if property_name not in PAIRWISE_RELATION_COMPARABLE_PROPERTIES:
+                continue
+            _, numeric_value = self.summarize_result(
+                result_type=self.safe_text(result.get("result_type")) or "scalar",
+                value_payload=result.get("value_payload"),
+                unit=self.safe_text(result.get("unit")),
+            )
+            if numeric_value is None:
+                continue
+            key = (
+                self.safe_text(result.get("document_id")) or "",
+                self.safe_text(result.get("variant_id")) or "",
+                property_name,
+            )
+            if not all(key):
+                continue
+            existing = result_lookup.get(key)
+            if existing is None:
+                result_lookup[key] = result
+                continue
+            _, existing_value = self.summarize_result(
+                result_type=self.safe_text(existing.get("result_type")) or "scalar",
+                value_payload=existing.get("value_payload"),
+                unit=self.safe_text(existing.get("unit")),
+            )
+            if existing_value is None:
+                result_lookup[key] = result
+
+        relations_by_id: dict[str, PairwiseComparisonRelation] = {}
+        samples_by_document: dict[str, list[dict[str, Any]]] = {}
+        for sample in records.sample_variants:
+            row = sample.to_record()
+            document_id = self.safe_text(row.get("document_id"))
+            variant_id = self.safe_text(row.get("variant_id"))
+            if document_id and variant_id:
+                samples_by_document.setdefault(document_id, []).append(row)
+
+        for document_id, samples in samples_by_document.items():
+            allowed_relation_specs = self._select_pairwise_relation_specs(
+                document_id=document_id,
+                samples=samples,
+                result_lookup=result_lookup,
+            )
+            for left_index, left in enumerate(samples):
+                for right in samples[left_index + 1:]:
+                    comparison_axis = self._single_pairwise_comparison_axis(
+                        left.get("process_context"),
+                        right.get("process_context"),
+                    )
+                    if comparison_axis is None:
+                        continue
+                    for property_name in sorted(PAIRWISE_RELATION_COMPARABLE_PROPERTIES):
+                        left_result = result_lookup.get(
+                            (
+                                document_id,
+                                self.safe_text(left.get("variant_id")) or "",
+                                property_name,
+                            )
+                        )
+                        right_result = result_lookup.get(
+                            (
+                                document_id,
+                                self.safe_text(right.get("variant_id")) or "",
+                                property_name,
+                            )
+                        )
+                        if left_result is None or right_result is None:
+                            continue
+                        relation_spec = self._pairwise_relation_spec_key(
+                            left,
+                            right,
+                            property_name,
+                        )
+                        if relation_spec not in allowed_relation_specs:
+                            continue
+                        relation = self._build_pairwise_comparison_relation(
+                            collection_id=collection_id,
+                            document_id=document_id,
+                            comparison_axis=comparison_axis,
+                            left_sample=left,
+                            right_sample=right,
+                            left_result=left_result,
+                            right_result=right_result,
+                        )
+                        if relation is not None:
+                            relations_by_id[relation.relation_id] = relation
+        return tuple(relations_by_id.values())
+
+    def _select_pairwise_relation_specs(
+        self,
+        *,
+        document_id: str,
+        samples: list[dict[str, Any]],
+        result_lookup: dict[tuple[str, str, str], dict[str, Any]],
+    ) -> set[tuple[str, str, str]]:
+        all_specs: set[tuple[str, str, str]] = set()
+        for left_index, left in enumerate(samples):
+            for right in samples[left_index + 1:]:
+                if (
+                    self._single_pairwise_comparison_axis(
+                        left.get("process_context"),
+                        right.get("process_context"),
+                    )
+                    is None
+                ):
+                    continue
+                for property_name in PAIRWISE_RELATION_COMPARABLE_PROPERTIES:
+                    if self._pairwise_result_value(
+                        document_id=document_id,
+                        sample=left,
+                        property_name=property_name,
+                        result_lookup=result_lookup,
+                    ) is None or self._pairwise_result_value(
+                        document_id=document_id,
+                        sample=right,
+                        property_name=property_name,
+                        result_lookup=result_lookup,
+                    ) is None:
+                        continue
+                    all_specs.add(
+                        self._pairwise_relation_spec_key(left, right, property_name)
+                    )
+        if len(samples) <= 3:
+            return all_specs
+
+        pbf_samples: list[dict[str, Any]] = []
+        density_values: dict[str, float] = {}
+        for sample in samples:
+            process_context = self.normalize_object(sample.get("process_context"))
+            if not isinstance(process_context, dict):
+                return all_specs
+            scan_strategy = self.safe_text(process_context.get("scan_strategy"))
+            scan_speed = self._numeric_process_value(process_context, "scan_speed_mm_s")
+            energy_density = self._numeric_process_value(
+                process_context,
+                "energy_density_j_mm3",
+            )
+            variant_id = self.safe_text(sample.get("variant_id")) or ""
+            density_value = self._pairwise_result_value(
+                document_id=document_id,
+                sample=sample,
+                property_name=PAIRWISE_RELATION_DENSITY_PROPERTY,
+                result_lookup=result_lookup,
+            )
+            if (
+                not variant_id
+                or not scan_strategy
+                or scan_speed is None
+                or energy_density is None
+                or density_value is None
+            ):
+                return all_specs
+            density_values[variant_id] = density_value
+            pbf_samples.append(
+                {
+                    "sample": sample,
+                    "variant_id": variant_id,
+                    "scan_strategy": scan_strategy,
+                    "scan_speed_mm_s": scan_speed,
+                    "energy_density_j_mm3": energy_density,
+                }
+            )
+
+        primary = max(
+            pbf_samples,
+            key=lambda item: density_values.get(item["variant_id"], -math.inf),
+        )
+        primary_strategy = self.safe_text(primary.get("scan_strategy")) or ""
+        if not primary_strategy:
+            return all_specs
+
+        selected_specs: set[tuple[str, str, str]] = set()
+        speed_groups: dict[tuple[float, str], list[dict[str, Any]]] = {}
+        strategy_groups: dict[tuple[float, float], list[dict[str, Any]]] = {}
+        for item in pbf_samples:
+            speed_groups.setdefault(
+                (item["energy_density_j_mm3"], item["scan_strategy"]),
+                [],
+            ).append(item)
+            strategy_groups.setdefault(
+                (item["energy_density_j_mm3"], item["scan_speed_mm_s"]),
+                [],
+            ).append(item)
+
+        for (_, strategy), group in speed_groups.items():
+            if strategy != primary_strategy or len(group) < 2:
+                continue
+            for left_index, left in enumerate(group):
+                for right in group[left_index + 1:]:
+                    if (
+                        self._single_pairwise_comparison_axis(
+                            left["sample"].get("process_context"),
+                            right["sample"].get("process_context"),
+                        )
+                        != "scan_speed_mm_s"
+                    ):
+                        continue
+                    for property_name in PAIRWISE_RELATION_TENSILE_PROPERTIES:
+                        self._add_pairwise_relation_spec_if_numeric_delta(
+                            selected_specs,
+                            document_id=document_id,
+                            left=left["sample"],
+                            right=right["sample"],
+                            property_name=property_name,
+                            result_lookup=result_lookup,
+                        )
+                    self._add_pairwise_relation_spec_if_numeric_delta(
+                        selected_specs,
+                        document_id=document_id,
+                        left=left["sample"],
+                        right=right["sample"],
+                        property_name=PAIRWISE_RELATION_DUCTILITY_PROPERTY,
+                        result_lookup=result_lookup,
+                        min_abs_delta=PAIRWISE_RELATION_ELONGATION_MIN_DELTA,
+                    )
+                    self._add_pairwise_relation_spec_if_numeric_delta(
+                        selected_specs,
+                        document_id=document_id,
+                        left=left["sample"],
+                        right=right["sample"],
+                        property_name=PAIRWISE_RELATION_DENSITY_PROPERTY,
+                        result_lookup=result_lookup,
+                        min_abs_delta=PAIRWISE_RELATION_DENSITY_MIN_DELTA,
+                    )
+
+        eligible_strategy_groups = [
+            (key, group)
+            for key, group in strategy_groups.items()
+            if len(group) >= 2
+            and any(item["scan_strategy"] == primary_strategy for item in group)
+        ]
+        if eligible_strategy_groups:
+            first_group_key, first_group = sorted(
+                eligible_strategy_groups,
+                key=lambda item: (item[0][0], -item[0][1]),
+            )[0]
+            primary_group_key = next(
+                (
+                    key
+                    for key, group in strategy_groups.items()
+                    if any(item["variant_id"] == primary["variant_id"] for item in group)
+                ),
+                None,
+            )
+            primary_group = (
+                strategy_groups.get(primary_group_key, [])
+                if primary_group_key is not None
+                else []
+            )
+
+            self._add_first_strategy_group_specs(
+                selected_specs,
+                document_id=document_id,
+                group=first_group,
+                primary_strategy=primary_strategy,
+                density_values=density_values,
+                result_lookup=result_lookup,
+            )
+            if primary_group and primary_group_key != first_group_key:
+                self._add_primary_strategy_group_specs(
+                    selected_specs,
+                    document_id=document_id,
+                    group=primary_group,
+                    primary_variant_id=primary["variant_id"],
+                    result_lookup=result_lookup,
+                )
+
+        return selected_specs or all_specs
+
+    def _add_first_strategy_group_specs(
+        self,
+        selected_specs: set[tuple[str, str, str]],
+        *,
+        document_id: str,
+        group: list[dict[str, Any]],
+        primary_strategy: str,
+        density_values: dict[str, float],
+        result_lookup: dict[tuple[str, str, str], dict[str, Any]],
+    ) -> None:
+        density_ordered = sorted(
+            group,
+            key=lambda item: density_values.get(item["variant_id"], -math.inf),
+        )
+        for lower, higher in zip(density_ordered, density_ordered[1:]):
+            self._add_pairwise_relation_spec_if_numeric_delta(
+                selected_specs,
+                document_id=document_id,
+                left=lower["sample"],
+                right=higher["sample"],
+                property_name=PAIRWISE_RELATION_DENSITY_PROPERTY,
+                result_lookup=result_lookup,
+            )
+
+        primary_sample = next(
+            (
+                item
+                for item in group
+                if self.safe_text(item.get("scan_strategy")) == primary_strategy
+            ),
+            None,
+        )
+        secondary_sample = next(
+            (
+                item
+                for item in sorted(group, key=lambda item: item["scan_strategy"])
+                if self.safe_text(item.get("scan_strategy")) != primary_strategy
+            ),
+            None,
+        )
+        if primary_sample is None or secondary_sample is None:
+            return
+        for property_name in (
+            *PAIRWISE_RELATION_TENSILE_PROPERTIES,
+            PAIRWISE_RELATION_DUCTILITY_PROPERTY,
+        ):
+            self._add_pairwise_relation_spec_if_current_higher(
+                selected_specs,
+                document_id=document_id,
+                current=primary_sample["sample"],
+                reference=secondary_sample["sample"],
+                property_name=property_name,
+                result_lookup=result_lookup,
+            )
+
+    def _add_primary_strategy_group_specs(
+        self,
+        selected_specs: set[tuple[str, str, str]],
+        *,
+        document_id: str,
+        group: list[dict[str, Any]],
+        primary_variant_id: str,
+        result_lookup: dict[tuple[str, str, str], dict[str, Any]],
+    ) -> None:
+        primary_sample = next(
+            (item for item in group if item["variant_id"] == primary_variant_id),
+            None,
+        )
+        if primary_sample is None:
+            return
+        for reference_sample in group:
+            if reference_sample["variant_id"] == primary_variant_id:
+                continue
+            for property_name in (
+                "yield_strength",
+                PAIRWISE_RELATION_DUCTILITY_PROPERTY,
+            ):
+                self._add_pairwise_relation_spec_if_current_higher(
+                    selected_specs,
+                    document_id=document_id,
+                    current=primary_sample["sample"],
+                    reference=reference_sample["sample"],
+                    property_name=property_name,
+                    result_lookup=result_lookup,
+                )
+
+    def _add_pairwise_relation_spec_if_current_higher(
+        self,
+        selected_specs: set[tuple[str, str, str]],
+        *,
+        document_id: str,
+        current: dict[str, Any],
+        reference: dict[str, Any],
+        property_name: str,
+        result_lookup: dict[tuple[str, str, str], dict[str, Any]],
+    ) -> None:
+        current_value = self._pairwise_result_value(
+            document_id=document_id,
+            sample=current,
+            property_name=property_name,
+            result_lookup=result_lookup,
+        )
+        reference_value = self._pairwise_result_value(
+            document_id=document_id,
+            sample=reference,
+            property_name=property_name,
+            result_lookup=result_lookup,
+        )
+        if current_value is None or reference_value is None:
+            return
+        if current_value <= reference_value:
+            return
+        selected_specs.add(
+            self._pairwise_relation_spec_key(current, reference, property_name)
+        )
+
+    def _add_pairwise_relation_spec_if_numeric_delta(
+        self,
+        selected_specs: set[tuple[str, str, str]],
+        *,
+        document_id: str,
+        left: dict[str, Any],
+        right: dict[str, Any],
+        property_name: str,
+        result_lookup: dict[tuple[str, str, str], dict[str, Any]],
+        min_abs_delta: float = 0.0,
+    ) -> None:
+        left_value = self._pairwise_result_value(
+            document_id=document_id,
+            sample=left,
+            property_name=property_name,
+            result_lookup=result_lookup,
+        )
+        right_value = self._pairwise_result_value(
+            document_id=document_id,
+            sample=right,
+            property_name=property_name,
+            result_lookup=result_lookup,
+        )
+        if left_value is None or right_value is None:
+            return
+        if math.isclose(left_value, right_value):
+            return
+        if abs(left_value - right_value) < min_abs_delta:
+            return
+        selected_specs.add(self._pairwise_relation_spec_key(left, right, property_name))
+
+    def _pairwise_result_value(
+        self,
+        *,
+        document_id: str,
+        sample: dict[str, Any],
+        property_name: str,
+        result_lookup: dict[tuple[str, str, str], dict[str, Any]],
+    ) -> float | None:
+        result = result_lookup.get(
+            (
+                document_id,
+                self.safe_text(sample.get("variant_id")) or "",
+                property_name,
+            )
+        )
+        if result is None:
+            return None
+        _, value = self.summarize_result(
+            result_type=self.safe_text(result.get("result_type")) or "scalar",
+            value_payload=result.get("value_payload"),
+            unit=self.safe_text(result.get("unit")),
+        )
+        return value
+
+    def _pairwise_relation_spec_key(
+        self,
+        left: dict[str, Any],
+        right: dict[str, Any],
+        property_name: str,
+    ) -> tuple[str, str, str]:
+        left_variant_id = self.safe_text(left.get("variant_id")) or ""
+        right_variant_id = self.safe_text(right.get("variant_id")) or ""
+        first, second = sorted((left_variant_id, right_variant_id))
+        return first, second, property_name
+
+    def _numeric_process_value(
+        self,
+        process_context: dict[str, Any],
+        key: str,
+    ) -> float | None:
+        value = self.normalize_scalar_or_text(process_context.get(key))
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                parsed = float(value)
+            except ValueError:
+                return None
+            return parsed if math.isfinite(parsed) else None
+        return None
+
+    def _single_pairwise_comparison_axis(
+        self,
+        left_process_context: Any,
+        right_process_context: Any,
+    ) -> str | None:
+        left_payload = self.normalize_object(left_process_context)
+        right_payload = self.normalize_object(right_process_context)
+        if not isinstance(left_payload, dict) or not isinstance(right_payload, dict):
+            return None
+        changed_axes = []
+        for key in PAIRWISE_RELATION_AXIS_KEYS:
+            left_value = self.normalize_scalar_or_text(left_payload.get(key))
+            right_value = self.normalize_scalar_or_text(right_payload.get(key))
+            if left_value != right_value:
+                changed_axes.append(key)
+        if len(changed_axes) != 1:
+            return None
+        return changed_axes[0]
+
+    def _build_pairwise_comparison_relation(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        comparison_axis: str,
+        left_sample: dict[str, Any],
+        right_sample: dict[str, Any],
+        left_result: dict[str, Any],
+        right_result: dict[str, Any],
+    ) -> PairwiseComparisonRelation | None:
+        _, left_value = self.summarize_result(
+            result_type=self.safe_text(left_result.get("result_type")) or "scalar",
+            value_payload=left_result.get("value_payload"),
+            unit=self.safe_text(left_result.get("unit")),
+        )
+        _, right_value = self.summarize_result(
+            result_type=self.safe_text(right_result.get("result_type")) or "scalar",
+            value_payload=right_result.get("value_payload"),
+            unit=self.safe_text(right_result.get("unit")),
+        )
+        if left_value is None or right_value is None or left_value == right_value:
+            return None
+
+        current_sample = left_sample if left_value > right_value else right_sample
+        reference_sample = right_sample if left_value > right_value else left_sample
+        current_result = left_result if left_value > right_value else right_result
+        reference_result = right_result if left_value > right_value else left_result
+        current_value = max(left_value, right_value)
+        reference_value = min(left_value, right_value)
+        property_name = self.safe_text(current_result.get("property_normalized")) or "qualitative"
+        current_variant_id = self.safe_text(current_sample.get("variant_id")) or ""
+        reference_variant_id = self.safe_text(reference_sample.get("variant_id")) or ""
+        current_result_id = self.safe_text(current_result.get("result_id")) or ""
+        reference_result_id = self.safe_text(reference_result.get("result_id")) or ""
+        if not all((current_variant_id, reference_variant_id, current_result_id, reference_result_id)):
+            return None
+
+        relation_id = build_pairwise_comparison_relation_id(
+            collection_id=collection_id,
+            document_id=document_id,
+            current_variant_id=current_variant_id,
+            reference_variant_id=reference_variant_id,
+            property_normalized=property_name,
+            comparison_axis=comparison_axis,
+            current_result_id=current_result_id,
+            reference_result_id=reference_result_id,
+        )
+        return PairwiseComparisonRelation(
+            relation_id=relation_id,
+            collection_id=collection_id,
+            document_id=document_id,
+            current_variant_id=current_variant_id,
+            reference_variant_id=reference_variant_id,
+            comparison_axis=comparison_axis,
+            property_normalized=property_name,
+            current_result_id=current_result_id,
+            reference_result_id=reference_result_id,
+            current_value=current_value,
+            reference_value=reference_value,
+            unit=self.safe_text(current_result.get("unit"))
+            or self.safe_text(reference_result.get("unit")),
+            direction="increase",
+            evidence_anchor_ids=tuple(
+                self.dedupe_strings(
+                    [
+                        *self.normalize_string_list(
+                            current_result.get("evidence_anchor_ids")
+                        ),
+                        *self.normalize_string_list(
+                            reference_result.get("evidence_anchor_ids")
+                        ),
+                    ]
+                )
+            ),
+            relation_payload={
+                "current_variant_label": self.safe_text(
+                    current_sample.get("variant_label")
+                ),
+                "reference_variant_label": self.safe_text(
+                    reference_sample.get("variant_label")
+                ),
+                "comparison_axis": comparison_axis,
+            },
+            confidence=0.84,
+            epistemic_status=EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
         )
 
     def assemble_comparable_result(

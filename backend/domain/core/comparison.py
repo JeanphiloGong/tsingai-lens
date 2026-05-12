@@ -24,6 +24,7 @@ SCALAR_LIKE_RESULT_TYPES: Final[frozenset[str]] = frozenset(
 )
 COMPARABLE_RESULT_NORMALIZATION_VERSION: Final[str] = "comparable_result_v1"
 COMPARISON_ROW_PROJECTION_VERSION: Final[str] = "comparison_row_v1"
+PAIRWISE_COMPARISON_RELATION_VERSION: Final[str] = "pairwise_relation_v1"
 COLLECTION_COMPARISON_POLICY_FAMILY: Final[str] = "default_collection_comparison_policy"
 COLLECTION_COMPARISON_POLICY_VERSION: Final[str] = "comparison_policy_v1"
 COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED: Final[str] = (
@@ -354,6 +355,76 @@ class CollectionComparableResult:
 
 
 @dataclass(frozen=True)
+class PairwiseComparisonRelation:
+    relation_id: str
+    collection_id: str
+    document_id: str
+    current_variant_id: str
+    reference_variant_id: str
+    comparison_axis: str
+    property_normalized: str
+    current_result_id: str
+    reference_result_id: str
+    current_value: float | None
+    reference_value: float | None
+    unit: str | None
+    direction: str
+    evidence_anchor_ids: tuple[str, ...]
+    relation_payload: dict[str, Any]
+    confidence: float
+    epistemic_status: str
+    relation_version: str = PAIRWISE_COMPARISON_RELATION_VERSION
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PairwiseComparisonRelation":
+        return cls(
+            relation_id=_normalize_text(payload.get("relation_id")) or "",
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            document_id=_normalize_text(payload.get("document_id")) or "",
+            current_variant_id=_normalize_text(payload.get("current_variant_id")) or "",
+            reference_variant_id=_normalize_text(payload.get("reference_variant_id")) or "",
+            comparison_axis=_normalize_text(payload.get("comparison_axis")) or "",
+            property_normalized=_normalize_text(payload.get("property_normalized"))
+            or "qualitative",
+            current_result_id=_normalize_text(payload.get("current_result_id")) or "",
+            reference_result_id=_normalize_text(payload.get("reference_result_id")) or "",
+            current_value=_normalize_optional_float(payload.get("current_value")),
+            reference_value=_normalize_optional_float(payload.get("reference_value")),
+            unit=_normalize_text(payload.get("unit")),
+            direction=_normalize_text(payload.get("direction")) or "unknown",
+            evidence_anchor_ids=_normalize_string_tuple(payload.get("evidence_anchor_ids")),
+            relation_payload=_normalize_mapping(payload.get("relation_payload")),
+            confidence=_normalize_optional_float(payload.get("confidence")) or 0.0,
+            epistemic_status=_normalize_text(payload.get("epistemic_status"))
+            or EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
+            relation_version=_normalize_text(payload.get("relation_version"))
+            or PAIRWISE_COMPARISON_RELATION_VERSION,
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "relation_id": self.relation_id,
+            "collection_id": self.collection_id,
+            "document_id": self.document_id,
+            "current_variant_id": self.current_variant_id,
+            "reference_variant_id": self.reference_variant_id,
+            "comparison_axis": self.comparison_axis,
+            "property_normalized": self.property_normalized,
+            "current_result_id": self.current_result_id,
+            "reference_result_id": self.reference_result_id,
+            "current_value": self.current_value,
+            "reference_value": self.reference_value,
+            "unit": self.unit,
+            "direction": self.direction,
+            "evidence_anchor_ids": list(self.evidence_anchor_ids),
+            "relation_payload": dict(self.relation_payload),
+            "confidence": self.confidence,
+            "epistemic_status": self.epistemic_status,
+            "relation_version": self.relation_version,
+        }
+
+
+@dataclass(frozen=True)
 class ComparisonRowRecord:
     row_id: str
     collection_id: str
@@ -506,6 +577,34 @@ def build_comparison_row_id(
             "collection_id": collection_id,
             "comparable_result_id": comparable_result_id,
             "projection_version": projection_version,
+        },
+    )
+
+
+def build_pairwise_comparison_relation_id(
+    *,
+    collection_id: str,
+    document_id: str,
+    current_variant_id: str,
+    reference_variant_id: str,
+    property_normalized: str,
+    comparison_axis: str,
+    current_result_id: str,
+    reference_result_id: str,
+    relation_version: str = PAIRWISE_COMPARISON_RELATION_VERSION,
+) -> str:
+    return _build_deterministic_id(
+        "pcr",
+        {
+            "collection_id": collection_id,
+            "document_id": document_id,
+            "current_variant_id": current_variant_id,
+            "reference_variant_id": reference_variant_id,
+            "property_normalized": property_normalized,
+            "comparison_axis": comparison_axis,
+            "current_result_id": current_result_id,
+            "reference_result_id": reference_result_id,
+            "relation_version": relation_version,
         },
     )
 
@@ -1022,6 +1121,7 @@ __all__ = [
     "COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED",
     "COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED",
     "DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS",
+    "PAIRWISE_COMPARISON_RELATION_VERSION",
     "CollectionComparableResult",
     "ComparableResult",
     "ComparisonAssessment",
@@ -1030,11 +1130,13 @@ __all__ = [
     "ContextBinding",
     "EvidenceTrace",
     "NormalizedComparisonContext",
+    "PairwiseComparisonRelation",
     "ResultValue",
     "SCALAR_LIKE_RESULT_TYPES",
     "build_collection_assessment_input_fingerprint",
     "build_comparable_result_id",
     "build_comparison_row_id",
+    "build_pairwise_comparison_relation_id",
     "evaluate_collection_reassessment_reasons",
     "evaluate_comparison_assessment",
 ]

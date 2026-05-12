@@ -1,31 +1,19 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from types import SimpleNamespace
-
 import numpy as np
 import pandas as pd
-import pytest
 
-from domain.core.comparison_assembly import ComparableResultAssembler
+from domain.core.comparison_assembly import (
+    ComparableResultAssembler,
+    ComparisonInputRecords,
+)
 from domain.core.comparison_projection import ComparisonRowProjector
-from application.core.comparison_service import (
-    ComparisonRowsNotReadyError,
-    ComparisonService,
-)
-from application.core.research_view_aggregation_service import (
-    ResearchViewAggregationService,
-)
-from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.llm.prompts import (
     build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
-from application.core.semantic_build.paper_facts_service import (
-    PaperFactsNotReadyError,
-    PaperFactsService,
-)
+from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.semantic_build.llm.schemas import (
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
@@ -39,10 +27,8 @@ from application.core.semantic_build.llm.schemas import (
     TableRowResultClaimPayload,
     TableRowSubjectMentionPayload,
     StructuredTextWindowMentions,
-    TextWindowBaselineMentionPayload,
     TextWindowMethodMentionPayload,
     TextWindowResultClaimPayload,
-    TextWindowVariantMentionPayload,
 )
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
@@ -55,28 +41,19 @@ from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
     ComparisonAxis,
-    ComparisonRowRecord,
     ContextBinding,
     EvidenceTrace,
     NormalizedComparisonContext,
+    PairwiseComparisonRelation,
     ResultValue,
     build_collection_assessment_input_fingerprint,
     evaluate_comparison_assessment,
 )
-from domain.core.fact_store import CoreFactSet
 from domain.core.evidence_backbone import (
-    BaselineReference,
     MeasurementResult,
     SampleVariant,
-    TestCondition as CoreTestCondition,
 )
 from domain.core.research_objective import ObjectiveContext
-from infra.source.runtime.source_evidence import (
-    build_blocks,
-    build_table_cells,
-    build_table_rows,
-)
-from infra.source.contracts.artifact_schemas import TABLES_FINAL_COLUMNS
 
 
 def _build_test_comparable_result(
@@ -524,6 +501,221 @@ def test_paper_facts_selects_objective_context_by_text_and_table_route():
     assert table_2_context == mechanical_context
     assert table_2_route is not None
     assert table_2_route["role"] == "result_table"
+
+
+def test_document_method_family_conditions_bind_table_results():
+    service = PaperFactsService()
+    text_windows = [
+        {
+            "window_id": "win-tensile",
+            "heading": "Mechanical testing",
+            "heading_path": "Experimental > Mechanical testing",
+            "text": (
+                "Tensile tests followed ASTM E8M on an INSTRON mechanical "
+                "testing machine at a strain rate of 0.02 mm/min with all "
+                "blocks built horizontally on substrate."
+            ),
+            "block_ids": ["blk-tensile"],
+            "page": 2,
+        },
+        {
+            "window_id": "win-hardness",
+            "heading": "Microhardness",
+            "heading_path": "Experimental > Microhardness",
+            "text": (
+                "Vickers microhardness was measured using a Wilson tester "
+                "under a 10 N load and 15 s holding time with 20 readings "
+                "per sample."
+            ),
+            "block_ids": ["blk-hardness"],
+            "page": 3,
+        },
+        {
+            "window_id": "win-sem",
+            "heading": "SEM characterization",
+            "heading_path": "Experimental > SEM characterization",
+            "text": (
+                "Horizontal and vertical sections were polished with 400-1200 "
+                "grit papers and colloidal silica for SEM and ImageJ relative "
+                "density and porosity analysis at 100x-10000x magnification."
+            ),
+            "block_ids": ["blk-sem"],
+            "page": 4,
+        },
+    ]
+    evidence_anchor_rows: list[dict[str, object]] = []
+    test_condition_rows: list[dict[str, object]] = []
+    document_state = service._build_document_state()
+
+    service._materialize_document_method_family_test_conditions(
+        collection_id="col-1",
+        document_id="doc-1",
+        text_windows=text_windows,
+        evidence_anchor_rows=evidence_anchor_rows,
+        test_condition_rows=test_condition_rows,
+        document_state=document_state,
+    )
+
+    test_conditions = service._normalize_test_condition_records(
+        test_condition_rows,
+        "col-1",
+    )
+    assert {row["property_type"] for row in test_conditions} == {
+        "tensile_mechanics",
+        "microhardness",
+        "density_porosity_microstructure",
+    }
+    test_condition_by_type = {
+        row["property_type"]: row
+        for row in test_conditions
+    }
+    tensile_payload = test_condition_by_type["tensile_mechanics"]["condition_payload"]
+    assert tensile_payload["standard"] == "ASTM E8M"
+    assert tensile_payload["strain_rate_s-1"] == "0.02 mm/min"
+
+    measurement_results = service._attach_document_test_condition_ids_to_measurements(
+        measurement_results=(
+            {
+                "result_id": "res-yield",
+                "document_id": "doc-1",
+                "collection_id": "col-1",
+                "variant_id": "var-1",
+                "property_normalized": "yield_strength",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 560},
+                "unit": "MPa",
+                "result_source_type": "table",
+            },
+            {
+                "result_id": "res-hardness",
+                "document_id": "doc-1",
+                "collection_id": "col-1",
+                "variant_id": "var-1",
+                "property_normalized": "hardness",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 215},
+                "unit": "HV",
+                "result_source_type": "table",
+            },
+            {
+                "result_id": "res-density",
+                "document_id": "doc-1",
+                "collection_id": "col-1",
+                "variant_id": "var-1",
+                "property_normalized": "density",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 99.4},
+                "unit": "%",
+                "result_source_type": "table",
+            },
+        ),
+        test_conditions=test_conditions,
+    )
+
+    condition_ids_by_property = {
+        row["property_normalized"]: row["test_condition_id"]
+        for row in measurement_results
+    }
+    assert condition_ids_by_property["yield_strength"] == test_condition_by_type[
+        "tensile_mechanics"
+    ][
+        "test_condition_id"
+    ]
+    assert condition_ids_by_property["hardness"] == test_condition_by_type[
+        "microhardness"
+    ][
+        "test_condition_id"
+    ]
+    assert condition_ids_by_property["density"] == test_condition_by_type[
+        "density_porosity_microstructure"
+    ][
+        "test_condition_id"
+    ]
+
+
+def test_characterization_observations_include_table_derived_pbf_context():
+    service = PaperFactsService()
+    sample_variants = (
+        {
+            "variant_id": "var-1",
+            "document_id": "doc-1",
+            "collection_id": "col-1",
+            "variant_label": "1",
+            "process_context": {"scan_strategy": "A"},
+        },
+        {
+            "variant_id": "var-2",
+            "document_id": "doc-1",
+            "collection_id": "col-1",
+            "variant_label": "2",
+            "process_context": {"scan_strategy": "B"},
+        },
+    )
+    measurement_results = (
+        {
+            "result_id": "res-1",
+            "document_id": "doc-1",
+            "collection_id": "col-1",
+            "variant_id": "var-1",
+            "property_normalized": "density",
+            "result_type": "scalar",
+            "value_payload": {"value": 95.4},
+            "unit": "%",
+            "result_source_type": "table",
+            "evidence_anchor_ids": ["anc-1"],
+        },
+        {
+            "result_id": "res-2",
+            "document_id": "doc-1",
+            "collection_id": "col-1",
+            "variant_id": "var-2",
+            "property_normalized": "density",
+            "result_type": "scalar",
+            "value_payload": {"value": 97.7},
+            "unit": "%",
+            "result_source_type": "table",
+            "evidence_anchor_ids": ["anc-2"],
+        },
+    )
+
+    observations = service._build_characterization_observations(
+        collection_id="col-1",
+        method_facts=(),
+        evidence_anchors=(
+            {"anchor_id": "anc-1", "document_id": "doc-1"},
+            {"anchor_id": "anc-2", "document_id": "doc-1"},
+        ),
+        text_windows_by_doc={
+            "doc-1": [
+                {
+                    "window_id": "win-1",
+                    "block_ids": ["blk-1"],
+                    "text": (
+                        "Horizontal and vertical SEM sections were examined. "
+                        "The dendrite width increased as scan speed decreased. "
+                        "Low energy input caused pores, while overheating led to balling."
+                    ),
+                }
+            ]
+        },
+        sample_variants=sample_variants,
+        measurement_results=measurement_results,
+    )
+
+    observation_types = {row["characterization_type"] for row in observations}
+    assert "density_porosity_sem_imagej" in observation_types
+    assert "highest_density_sample" in observation_types
+    assert "scan_strategy_a" in observation_types
+    assert "scan_strategy_b" in observation_types
+    highest_density = next(
+        row
+        for row in observations
+        if row["characterization_type"] == "highest_density_sample"
+    )
+    assert highest_density["variant_id"] == "var-2"
 
 
 def test_table_row_process_context_uses_cell_header_bindings():
@@ -1345,6 +1537,252 @@ def test_pbf_comparison_assembly_uses_process_test_and_value_context():
 
     assert limited_scope.assessment.comparability_status == "limited"
     assert "strain_rate_s-1" in limited_scope.assessment.missing_critical_context
+
+
+def test_comparison_assembly_builds_pairwise_sample_relations():
+    assembler = ComparableResultAssembler()
+    records = ComparisonInputRecords(
+        sample_variants=(
+            SampleVariant(
+                variant_id="var-a",
+                document_id="doc-1",
+                collection_id="col-1",
+                domain_profile="core_neutral",
+                variant_label="A",
+                host_material_system={"family": "316L stainless steel"},
+                composition=None,
+                variable_axis_type=None,
+                variable_value=None,
+                process_context={
+                    "energy_density_j_mm3": 70,
+                    "scan_speed_mm_s": 0.25,
+                    "scan_strategy": "A",
+                },
+                profile_payload={"source_kind": "table_row"},
+                structure_feature_ids=(),
+                source_anchor_ids=(),
+                confidence=0.9,
+                epistemic_status="normalized_from_evidence",
+            ),
+            SampleVariant(
+                variant_id="var-b",
+                document_id="doc-1",
+                collection_id="col-1",
+                domain_profile="core_neutral",
+                variant_label="B",
+                host_material_system={"family": "316L stainless steel"},
+                composition=None,
+                variable_axis_type=None,
+                variable_value=None,
+                process_context={
+                    "energy_density_j_mm3": 70,
+                    "scan_speed_mm_s": 0.25,
+                    "scan_strategy": "B",
+                },
+                profile_payload={"source_kind": "table_row"},
+                structure_feature_ids=(),
+                source_anchor_ids=(),
+                confidence=0.9,
+                epistemic_status="normalized_from_evidence",
+            ),
+        ),
+        measurement_results=(
+            MeasurementResult(
+                result_id="res-a",
+                document_id="doc-1",
+                collection_id="col-1",
+                domain_profile="core_neutral",
+                variant_id="var-a",
+                property_normalized="yield_strength",
+                result_type="scalar",
+                claim_scope="current_work",
+                value_payload={"value": 560},
+                unit="MPa",
+                test_condition_id=None,
+                baseline_id=None,
+                structure_feature_ids=(),
+                characterization_observation_ids=(),
+                evidence_anchor_ids=("anc-a",),
+                traceability_status="direct",
+                result_source_type="table",
+                epistemic_status="directly_observed",
+            ),
+            MeasurementResult(
+                result_id="res-b",
+                document_id="doc-1",
+                collection_id="col-1",
+                domain_profile="core_neutral",
+                variant_id="var-b",
+                property_normalized="yield_strength",
+                result_type="scalar",
+                claim_scope="current_work",
+                value_payload={"value": 480},
+                unit="MPa",
+                test_condition_id=None,
+                baseline_id=None,
+                structure_feature_ids=(),
+                characterization_observation_ids=(),
+                evidence_anchor_ids=("anc-b",),
+                traceability_status="direct",
+                result_source_type="table",
+                epistemic_status="directly_observed",
+            ),
+        ),
+        test_conditions=(),
+        baseline_references=(),
+    )
+
+    semantic_records = assembler.assemble_semantic_records(
+        collection_id="col-1",
+        records=records,
+    )
+
+    assert len(semantic_records.pairwise_comparison_relations) == 1
+    relation = semantic_records.pairwise_comparison_relations[0]
+    assert isinstance(relation, PairwiseComparisonRelation)
+    assert relation.comparison_axis == "scan_strategy"
+    assert relation.current_variant_id == "var-a"
+    assert relation.reference_variant_id == "var-b"
+    assert relation.current_value == 560
+    assert relation.reference_value == 480
+    assert relation.evidence_anchor_ids == ("anc-a", "anc-b")
+
+
+def test_comparison_assembly_selects_p001_style_salient_pairwise_relations():
+    assembler = ComparableResultAssembler()
+    sample_rows = [
+        ("1", 70, 0.25, "A"),
+        ("2", 70, 0.25, "B"),
+        ("3", 70, 0.25, "C"),
+        ("4", 100, 0.175, "A"),
+        ("5", 150, 0.12, "A"),
+        ("6", 150, 0.12, "B"),
+        ("7", 150, 0.12, "C"),
+        ("8", 70, 0.239, "A"),
+        ("9", 70, 0.239, "B"),
+        ("10", 70, 0.239, "C"),
+        ("11", 100, 0.167, "A"),
+        ("12", 100, 0.167, "B"),
+        ("13", 100, 0.167, "C"),
+        ("14", 150, 0.111, "A"),
+        ("15", 150, 0.111, "B"),
+        ("16", 150, 0.111, "C"),
+    ]
+    values = {
+        "1": (95.4, 236.65, 375.13, 7.21),
+        "2": (97.7, 159.97, 196.78, 1.79),
+        "3": (93.8, 169.40, 199.47, 2.27),
+        "4": (93.9, 341.38, 459.58, 6.62),
+        "5": (97.14, 302.24, 384.50, 6.40),
+        "6": (95.7, 200.31, 278.13, 1.62),
+        "7": (94.3, 263.55, 356.84, 2.93),
+        "8": (96.8, 187.82, 269.95, 3.66),
+        "9": (92.4, 148.36, 178.37, 2.08),
+        "10": (93.8, 161.61, 198.47, 2.12),
+        "11": (96.2, 177.68, 203.48, 3.31),
+        "12": (96.1, 201.08, 239.34, 2.42),
+        "13": (98.0, 186.46, 256.68, 2.194),
+        "14": (99.45, 462.02, 584.44, 41.9),
+        "15": (96.7, 278.76, 342.23, 4.29),
+        "16": (98.6, 414.07, 530.37, 1.17),
+    }
+    properties = (
+        ("density", "%", 0),
+        ("yield_strength", "MPa", 1),
+        ("tensile_strength", "MPa", 2),
+        ("elongation", "%", 3),
+    )
+    samples = tuple(
+        SampleVariant(
+            variant_id=f"var-{label}",
+            document_id="doc-1",
+            collection_id="col-1",
+            domain_profile="core_neutral",
+            variant_label=label,
+            host_material_system={"family": "316L stainless steel"},
+            composition=None,
+            variable_axis_type=None,
+            variable_value=None,
+            process_context={
+                "energy_density_j_mm3": energy_density,
+                "scan_speed_mm_s": scan_speed,
+                "scan_strategy": strategy,
+            },
+            profile_payload={"source_kind": "table_row"},
+            structure_feature_ids=(),
+            source_anchor_ids=(),
+            confidence=0.9,
+            epistemic_status="normalized_from_evidence",
+        )
+        for label, energy_density, scan_speed, strategy in sample_rows
+    )
+    measurements = tuple(
+        MeasurementResult(
+            result_id=f"res-{label}-{property_name}",
+            document_id="doc-1",
+            collection_id="col-1",
+            domain_profile="core_neutral",
+            variant_id=f"var-{label}",
+            property_normalized=property_name,
+            result_type="scalar",
+            claim_scope="current_work",
+            value_payload={"value": values[label][value_index]},
+            unit=unit,
+            test_condition_id=None,
+            baseline_id=None,
+            structure_feature_ids=(),
+            characterization_observation_ids=(),
+            evidence_anchor_ids=(f"anc-{label}-{property_name}",),
+            traceability_status="direct",
+            result_source_type="table",
+            epistemic_status="directly_observed",
+        )
+        for label, *_ in sample_rows
+        for property_name, unit, value_index in properties
+    )
+    records = ComparisonInputRecords(
+        sample_variants=samples,
+        measurement_results=measurements,
+        test_conditions=(),
+        baseline_references=(),
+    )
+
+    semantic_records = assembler.assemble_semantic_records(
+        collection_id="col-1",
+        records=records,
+    )
+
+    relation_keys = {
+        (
+            relation.current_variant_id.removeprefix("var-"),
+            relation.reference_variant_id.removeprefix("var-"),
+            relation.property_normalized,
+        )
+        for relation in semantic_records.pairwise_comparison_relations
+    }
+
+    assert len(relation_keys) == 19
+    assert relation_keys == {
+        ("1", "3", "density"),
+        ("2", "1", "density"),
+        ("1", "2", "yield_strength"),
+        ("1", "2", "tensile_strength"),
+        ("1", "2", "elongation"),
+        ("1", "8", "yield_strength"),
+        ("1", "8", "tensile_strength"),
+        ("1", "8", "elongation"),
+        ("11", "4", "density"),
+        ("4", "11", "yield_strength"),
+        ("4", "11", "tensile_strength"),
+        ("14", "5", "density"),
+        ("14", "5", "yield_strength"),
+        ("14", "5", "tensile_strength"),
+        ("14", "5", "elongation"),
+        ("14", "15", "yield_strength"),
+        ("14", "16", "yield_strength"),
+        ("14", "15", "elongation"),
+        ("14", "16", "elongation"),
+    }
 
 
 def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):

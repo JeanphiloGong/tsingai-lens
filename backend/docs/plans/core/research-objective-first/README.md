@@ -11,6 +11,9 @@ The family keeps multiple live pages because this local subject now needs:
   prompt work
 - an objective-context extraction slice that threads the selected objective
   into paper-fact routing and extraction
+- a P001 gold-gap repair slice that uses the objective-shaped extraction result
+  to finish method-family conditions, pairwise comparison relations, and
+  characterization observations
 
 This is a Core semantic-build topic family. It does not change public API
 routes, frontend contracts, Source artifact production, or downstream report
@@ -28,6 +31,10 @@ ownership by itself.
 - [`objective-context-targeted-extraction-plan.md`](objective-context-targeted-extraction-plan.md)
   Concrete implementation slice for using persisted objective context during
   paper-fact routing, prompts, and deterministic binding
+- [`p001-remaining-gold-gap-repair-plan.md`](p001-remaining-gold-gap-repair-plan.md)
+  Follow-up repair plan after P001 objective-scoped table extraction matches
+  gold exactly, covering method-family test conditions, pairwise comparison
+  relations, and characterization observations
 
 ## Related Docs
 
@@ -37,5 +44,8 @@ ownership by itself.
   Owning Core semantic-build package entry point
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/README.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/README.md)
   Node-local structured-extraction plan family for prompt and routing work
+- [`../pbf-metal-extraction-and-comparison-validation/expert-gold-set-evaluation-plan.md`](../pbf-metal-extraction-and-comparison-validation/expert-gold-set-evaluation-plan.md)
+  PBF-metal expert gold evaluation context used as the first objective-first
+  validation fixture
 - [`../../../../../docs/decisions/rfc-research-objective-first-product-flow.md`](../../../../../docs/decisions/rfc-research-objective-first-product-flow.md)
   Shared product-flow decision for objective-first collection analysis

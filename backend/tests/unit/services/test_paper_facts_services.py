@@ -70,6 +70,7 @@ from domain.core.evidence_backbone import (
     SampleVariant,
     TestCondition as CoreTestCondition,
 )
+from domain.core.research_objective import ObjectiveContext
 from infra.source.runtime.source_evidence import (
     build_blocks,
     build_table_cells,
@@ -334,6 +335,195 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"laser_power_w": null' not in table_batch_prompt
     assert '"strain_rate_s-1": null' not in table_batch_prompt
     assert '"result_claims": [' in table_batch_prompt
+
+
+def test_paper_facts_payloads_include_sanitized_objective_context():
+    service = PaperFactsService()
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-internal-1",
+            "question": "How does scan speed affect LPBF 316L yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["scanning speed"],
+            "process_context_axes": ["LPBF"],
+            "target_property_axes": ["yield strength"],
+            "excluded_property_axes": ["relative density"],
+            "routing_hints": [
+                {
+                    "table_id": "tbl-internal-1",
+                    "document_id": "doc-internal-1",
+                    "role": "result_table",
+                    "strength": "strong",
+                    "matched_property_axes": ["yield strength"],
+                    "matched_variable_process_axes": ["scanning speed"],
+                    "reason": "Table contains target property columns.",
+                }
+            ],
+            "extraction_guidance": {
+                "focus": "Extract mechanical current-work evidence.",
+            },
+            "confidence": 0.9,
+        }
+    )
+
+    text_window_payload = service._build_text_window_extraction_payload(
+        title="Objective Prompt Paper",
+        source_filename="objective.pdf",
+        profile={"doc_type": "experimental"},
+        text_window={
+            "heading": "Results",
+            "heading_path": "Results",
+            "text": "Yield strength increased with scanning speed.",
+            "page": 4,
+        },
+        objective_context=objective_context,
+    )
+
+    assert text_window_payload["objective_context"] == {
+        "focus": "How does scan speed affect LPBF 316L yield strength?",
+        "material_scope": ["316L stainless steel"],
+        "variable_process_axes": ["scanning speed"],
+        "process_context_axes": ["LPBF"],
+        "target_property_axes": ["yield strength"],
+        "excluded_property_axes": ["relative density"],
+        "routing_hints": [],
+        "extraction_guidance": {"focus": "Extract mechanical current-work evidence."},
+        "confidence": 0.9,
+    }
+    _, text_window_prompt = build_text_window_extraction_prompt(text_window_payload)
+    assert "Objective-context rules:" in text_window_prompt
+    assert "objective_context.target_property_axes" in text_window_prompt
+    assert '"objective_id"' not in text_window_prompt
+    assert '"table_id"' not in text_window_prompt
+    assert '"document_id"' not in text_window_prompt
+
+    table_batch_payload = service._build_table_batch_extraction_payload(
+        title="Objective Prompt Paper",
+        source_filename="objective.pdf",
+        profile={"doc_type": "experimental"},
+        table_context={
+            "caption_text": "Mechanical properties by scanning speed.",
+            "column_headers": ["Sample", "Scanning speed", "Yield strength"],
+            "table_matrix": [["Sample", "Scanning speed", "Yield strength"], ["A", "100", "560"]],
+        },
+        table_rows=[{
+            "table_id": "tbl-internal-1",
+            "row_index": 1,
+            "row_text": "A | 100 | 560",
+        }],
+        row_cells_by_index={},
+        text_windows=[],
+        objective_context=objective_context,
+        objective_table_route=objective_context.routing_hints[0],
+    )
+
+    table_objective_context = table_batch_payload["objective_context"]
+    assert table_objective_context["routing_hints"] == [
+        {
+            "role": "result_table",
+            "strength": "strong",
+            "matched_property_axes": ["yield strength"],
+            "matched_variable_process_axes": ["scanning speed"],
+            "reason": "Table contains target property columns.",
+        }
+    ]
+    _, table_batch_prompt = build_table_batch_mentions_prompt(table_batch_payload)
+    assert "The active table route is `result_table`" in table_batch_prompt
+    assert '"objective_id"' not in table_batch_prompt
+    assert '"table_id"' not in table_batch_prompt
+    assert '"document_id"' not in table_batch_prompt
+
+
+def test_paper_facts_selects_objective_context_by_text_and_table_route():
+    service = PaperFactsService()
+    structural_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-structural",
+            "question": "How do SLM parameters affect densification?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["energy density", "scanning speed"],
+            "process_context_axes": ["Selective Laser Melting"],
+            "target_property_axes": ["relative density"],
+            "excluded_property_axes": ["yield strength"],
+            "routing_hints": [
+                {
+                    "table_id": "table-1",
+                    "document_id": "paper-1",
+                    "role": "result_table",
+                    "strength": "strong",
+                    "matched_property_axes": ["relative density"],
+                    "matched_variable_process_axes": ["energy density"],
+                }
+            ],
+            "extraction_guidance": {},
+        }
+    )
+    mechanical_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "question": "How do SLM parameters affect mechanical properties?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["energy density", "scanning speed"],
+            "process_context_axes": ["Selective Laser Melting"],
+            "target_property_axes": ["yield strength", "ultimate tensile strength"],
+            "excluded_property_axes": ["relative density"],
+            "routing_hints": [
+                {
+                    "table_id": "table-1",
+                    "document_id": "paper-1",
+                    "role": "condition_context",
+                    "strength": "strong",
+                    "matched_variable_process_axes": ["energy density"],
+                },
+                {
+                    "table_id": "table-2",
+                    "document_id": "paper-1",
+                    "role": "result_table",
+                    "strength": "strong",
+                    "matched_property_axes": [
+                        "yield strength",
+                        "ultimate tensile strength",
+                    ],
+                },
+            ],
+            "extraction_guidance": {},
+        }
+    )
+    contexts = (structural_context, mechanical_context)
+
+    selected_text_context = service._select_text_window_objective_context(
+        contexts,
+        text_window={
+            "heading": "Mechanical properties",
+            "heading_path": "Results > Mechanical properties",
+            "text": "Yield strength and ultimate tensile strength increased.",
+        },
+    )
+    assert selected_text_context == mechanical_context
+
+    table_1_context, table_1_route = service._select_table_batch_objective_context(
+        contexts,
+        document_id="paper-1",
+        table_id="table-1",
+        table_context={"caption_text": "Processing parameters and relative density."},
+        table_rows=[{"row_index": 1, "row_text": "A | 70 | 99.2"}],
+        row_cells_by_index={},
+    )
+    assert table_1_context == structural_context
+    assert table_1_route is not None
+    assert table_1_route["role"] == "result_table"
+
+    table_2_context, table_2_route = service._select_table_batch_objective_context(
+        contexts,
+        document_id="paper-1",
+        table_id="table-2",
+        table_context={"caption_text": "Mechanical properties."},
+        table_rows=[{"row_index": 1, "row_text": "A | 560 | 690"}],
+        row_cells_by_index={},
+    )
+    assert table_2_context == mechanical_context
+    assert table_2_route is not None
+    assert table_2_route["role"] == "result_table"
 
 
 def test_table_row_process_context_uses_cell_header_bindings():

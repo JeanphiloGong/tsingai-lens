@@ -20,9 +20,10 @@ discovery, objective-scoped fact extraction, API routes, or frontend changes.
 
 Read this with:
 
-- [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
+- [`../minimal-core-domain-backfill-plan.md`](../minimal-core-domain-backfill-plan.md)
 - [`target-centric-collection-extraction-plan.md`](target-centric-collection-extraction-plan.md)
-- [`../../../../docs/decisions/rfc-research-objective-first-product-flow.md`](../../../../docs/decisions/rfc-research-objective-first-product-flow.md)
+- [`objective-context-targeted-extraction-plan.md`](objective-context-targeted-extraction-plan.md)
+- [`../../../../../docs/decisions/rfc-research-objective-first-product-flow.md`](../../../../../docs/decisions/rfc-research-objective-first-product-flow.md)
 
 ## Why This Step Comes First
 

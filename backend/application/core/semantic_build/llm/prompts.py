@@ -321,6 +321,7 @@ def build_document_profile_prompt(payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    objective_guidance = _build_objective_context_guidance(payload)
     user_prompt = (
         "Extract atomic research mentions from this one bounded document window.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
@@ -334,12 +335,14 @@ def build_text_window_extraction_prompt(payload: dict[str, Any]) -> tuple[str, s
         "Do not bind results to variants or baselines unless the text explicitly states the relation.\n"
         "Do not treat previous work, citations, or literature background as current-work results.\n"
         "Do not emit test-condition semantics for characterization methods alone.\n\n"
+        f"{objective_guidance}"
         f"{_TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
 
 
 def build_table_batch_mentions_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    objective_guidance = _build_objective_context_guidance(payload)
     user_prompt = (
         "Extract target-row-grounded lightweight mentions for this batch using the provided table context.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
@@ -354,9 +357,43 @@ def build_table_batch_mentions_prompt(payload: dict[str, Any]) -> tuple[str, str
         "Use `supporting_text_windows` only when they are required to interpret a row.\n"
         "If a row is mostly metadata, labels, or literature summary text, return that "
         "row_index with empty arrays instead of expanding speculative outputs.\n\n"
+        f"{objective_guidance}"
         f"{_TABLE_BATCH_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
+
+
+def _build_objective_context_guidance(payload: dict[str, Any]) -> str:
+    objective_context = payload.get("objective_context")
+    if not isinstance(objective_context, dict) or not objective_context:
+        return ""
+    routes = objective_context.get("routing_hints")
+    route = routes[0] if isinstance(routes, list) and routes else {}
+    role = route.get("role") if isinstance(route, dict) else None
+    route_guidance = ""
+    if role == "result_table":
+        route_guidance = (
+            "- The active table route is `result_table`: extract only target-row "
+            "result claims that match `objective_context.target_property_axes`.\n"
+        )
+    elif role == "condition_context":
+        route_guidance = (
+            "- The active table route is `condition_context`: extract row subjects, "
+            "process mentions, test-condition mentions, and baselines needed for "
+            "binding, and avoid result claims unless a target property is explicitly "
+            "reported in the target row.\n"
+        )
+    return (
+        "Objective-context rules:\n"
+        "- Treat `objective_context.focus` as the current research lens.\n"
+        "- Prefer facts that connect `objective_context.variable_process_axes` to "
+        "`objective_context.target_property_axes` for that lens.\n"
+        "- Treat `objective_context.process_context_axes` as process context, not "
+        "as changed variables unless the input explicitly compares them.\n"
+        "- Do not emit result claims for `objective_context.excluded_property_axes` "
+        "or for unrelated properties outside the current lens.\n"
+        f"{route_guidance}\n"
+    )
 
 
 def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:

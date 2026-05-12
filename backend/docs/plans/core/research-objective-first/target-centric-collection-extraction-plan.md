@@ -46,9 +46,12 @@ graph, and protocol ownership.
 
 Read this with:
 
-- [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/semantic-routing-targeted-extraction-plan.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/semantic-routing-targeted-extraction-plan.md)
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md)
+- [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
+- [`objective-context-targeted-extraction-plan.md`](objective-context-targeted-extraction-plan.md)
+  Concrete implementation slice for threading objective context into
+  paper-fact routing and extraction
+- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/semantic-routing-targeted-extraction-plan.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/semantic-routing-targeted-extraction-plan.md)
+- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md)
 
 ## Why The Flow Changes
 

@@ -322,6 +322,72 @@ message 返回必须包含：
   - 它表达 sample matrix / paper coverage 聚合有可消费输入
   - 空 collection 仍可请求 research-view endpoint，但状态应为 `empty`
 
+### Research Objectives
+
+- `GET /api/v1/collections/{collection_id}/objectives`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
+
+这是 objective-first 工作区的主读取合同。接口只读取已经落库的 Core
+research-objective records，不在 GET 请求中触发 LLM 构建。
+
+Objective list 最小返回结构：
+
+- `collection_id`
+- `state`
+- `readiness`
+- `objectives`
+- `warnings`
+
+Objective research-view 最小返回结构：
+
+- `collection_id`
+- `state`
+- `objective`
+- `objective_context`
+- `readiness`
+- `paper_frames`
+- `evidence_routes`
+- `evidence_units`
+- `logic_chain`
+- `existing_comparison_rows`
+- `warnings`
+
+`objective` 至少包含：
+
+- `objective_id`
+- `question`
+- `material_scope`
+- `process_axes`
+- `property_axes`
+- `comparison_intent`
+- `confidence`
+
+`readiness` 使用：
+
+- `objectives_ready`
+- `frames_ready`
+- `routes_ready`
+- `evidence_units_ready`
+- `logic_chain_ready`
+
+语义要求：
+
+- objective 是主资源身份；material 只作为 scope/facet 展示
+- `/materials` 不返回 objective records
+- `paper_frames` 来自 `ObjectivePaperFrame`，并补充 document title 与
+  source filename
+- `relevant_tables` 与 `excluded_tables` 必须是真实 Source table id
+- `evidence_routes`、`evidence_units`、`logic_chain`
+  在下游 builder 未完成时可以为空，但字段必须保留
+- `existing_comparison_rows` 当前是投影保留字段，不作为第一版 objective
+  research-view 的事实来源
+
+错误语义：
+
+- collection 不存在：`404`
+- research objectives 尚未生成且 collection 非空：`409 research_objectives_not_ready`
+- objective research-view 指向不存在目标：`404 research_objective_not_found`
+
 ### Research View
 
 - `GET /api/v1/collections/{collection_id}/research-view`

@@ -173,6 +173,135 @@ export type ComparableGroup = {
 	warnings: ResearchViewWarning[];
 };
 
+export type ObjectiveWorkspaceReadiness = {
+	objectives_ready: boolean;
+	frames_ready: boolean;
+	routes_ready: boolean;
+	evidence_units_ready: boolean;
+	logic_chain_ready: boolean;
+};
+
+export type ObjectiveSummary = {
+	objective_id: string;
+	question: string;
+	material_scope: string[];
+	process_axes: string[];
+	property_axes: string[];
+	comparison_intent: string | null;
+	confidence: number;
+};
+
+export type ObjectiveListItem = ObjectiveSummary & {
+	state: ResearchViewState;
+	paper_frame_count: number;
+	evidence_route_count: number;
+	evidence_unit_count: number;
+	logic_chain_count: number;
+};
+
+export type ObjectiveContext = {
+	objective_id: string;
+	question: string;
+	material_scope: string[];
+	variable_process_axes: string[];
+	process_context_axes: string[];
+	target_property_axes: string[];
+	excluded_property_axes: string[];
+	routing_hints: Record<string, unknown>[];
+	extraction_guidance: Record<string, unknown>;
+	confidence: number;
+};
+
+export type ObjectivePaperFrame = {
+	frame_id: string;
+	objective_id: string;
+	document_id: string;
+	title: string | null;
+	source_filename: string | null;
+	relevance: string;
+	paper_role: string;
+	background: string | null;
+	material_match: string[];
+	changed_variables: string[];
+	measured_property_scope: string[];
+	test_environment_scope: string[];
+	relevant_sections: string[];
+	relevant_tables: string[];
+	excluded_tables: string[];
+};
+
+export type ObjectiveEvidenceRoute = {
+	route_id: string;
+	objective_id: string;
+	document_id: string;
+	source_kind: string;
+	source_ref: string;
+	role: string;
+	extractable: boolean;
+	reason: string | null;
+	table_schema: Record<string, unknown>;
+	column_roles: Record<string, unknown>;
+	join_keys: Record<string, unknown>;
+	join_plan: Record<string, unknown>;
+	confidence: number;
+};
+
+export type ObjectiveEvidenceUnit = {
+	evidence_unit_id: string;
+	objective_id: string;
+	document_id: string;
+	unit_kind: string;
+	property_normalized: string | null;
+	material_system: Record<string, unknown>;
+	sample_context: Record<string, unknown>;
+	process_context: Record<string, unknown>;
+	resolved_condition: Record<string, unknown>;
+	test_condition: Record<string, unknown>;
+	value_payload: Record<string, unknown>;
+	unit: string | null;
+	baseline_context: Record<string, unknown>;
+	interpretation: string | null;
+	source_refs: Record<string, unknown>[];
+	evidence_anchor_ids: string[];
+	join_keys: Record<string, unknown>;
+	resolution_status: string;
+	confidence: number;
+};
+
+export type ObjectiveLogicChain = {
+	logic_chain_id: string;
+	objective_id: string;
+	chain_scope: string;
+	document_id: string | null;
+	question: string | null;
+	evidence_unit_ids: string[];
+	chain_payload: Record<string, unknown>;
+	summary: string | null;
+	confidence: number;
+};
+
+export type ObjectiveList = {
+	collection_id: string;
+	state: ResearchViewState;
+	readiness: ObjectiveWorkspaceReadiness;
+	objectives: ObjectiveListItem[];
+	warnings: ResearchViewWarning[];
+};
+
+export type ObjectiveResearchView = {
+	collection_id: string;
+	state: ResearchViewState;
+	objective: ObjectiveSummary;
+	objective_context: ObjectiveContext | null;
+	readiness: ObjectiveWorkspaceReadiness;
+	paper_frames: ObjectivePaperFrame[];
+	evidence_routes: ObjectiveEvidenceRoute[];
+	evidence_units: ObjectiveEvidenceUnit[];
+	logic_chain: ObjectiveLogicChain | null;
+	existing_comparison_rows: Record<string, unknown>[];
+	warnings: ResearchViewWarning[];
+};
+
 export type MaterialPaperCoverage = {
 	document_id: string;
 	title: string;
@@ -396,6 +525,17 @@ function normalizeStringRecord(value: unknown): Record<string, string> {
 			.map(([key, item]) => [key, toText(item)] as const)
 			.filter(([, item]) => item !== '')
 	);
+}
+
+function normalizeUnknownRecord(value: unknown): Record<string, unknown> {
+	const record = asRecord(value);
+	return record ? { ...record } : {};
+}
+
+function normalizeUnknownRecordList(value: unknown): Record<string, unknown>[] {
+	return asArray(value)
+		.map((item) => normalizeUnknownRecord(item))
+		.filter((item) => Object.keys(item).length > 0);
 }
 
 function normalizeContextRecord(value: unknown, fallbackKey: string): Record<string, string> {
@@ -657,6 +797,174 @@ export function normalizeConditionSeries(value: unknown): ConditionSeries | null
 			.map((item, index) => normalizeConditionSeriesPoint(item, index))
 			.filter((item): item is ConditionSeriesPoint => item !== null),
 		warnings: normalizeWarnings(record.warnings)
+	};
+}
+
+function normalizeObjectiveReadiness(value: unknown): ObjectiveWorkspaceReadiness {
+	const record = asRecord(value);
+	return {
+		objectives_ready: Boolean(record?.objectives_ready),
+		frames_ready: Boolean(record?.frames_ready),
+		routes_ready: Boolean(record?.routes_ready),
+		evidence_units_ready: Boolean(record?.evidence_units_ready),
+		logic_chain_ready: Boolean(record?.logic_chain_ready)
+	};
+}
+
+function normalizeObjectiveSummary(value: unknown): ObjectiveSummary | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const objectiveId = toText(record.objective_id ?? record.id);
+	const question = toText(record.question ?? record.title);
+	if (!objectiveId && !question) return null;
+
+	return {
+		objective_id: objectiveId || question,
+		question: question || objectiveId,
+		material_scope: toStringList(record.material_scope ?? record.materials),
+		process_axes: toStringList(record.process_axes ?? record.processes),
+		property_axes: toStringList(record.property_axes ?? record.properties),
+		comparison_intent: nonEmptyText(record.comparison_intent ?? record.intent),
+		confidence: toNumber(record.confidence)
+	};
+}
+
+function normalizeObjectiveListItem(value: unknown): ObjectiveListItem | null {
+	const summary = normalizeObjectiveSummary(value);
+	const record = asRecord(value);
+	if (!summary || !record) return null;
+
+	return {
+		...summary,
+		state: normalizeResearchState(record.state, 'partial'),
+		paper_frame_count: toNumber(record.paper_frame_count ?? record.frame_count),
+		evidence_route_count: toNumber(record.evidence_route_count ?? record.route_count),
+		evidence_unit_count: toNumber(record.evidence_unit_count ?? record.unit_count),
+		logic_chain_count: toNumber(record.logic_chain_count ?? record.chain_count)
+	};
+}
+
+function normalizeObjectiveContext(value: unknown): ObjectiveContext | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const objectiveId = toText(record.objective_id ?? record.id);
+	const question = toText(record.question);
+	if (!objectiveId && !question) return null;
+
+	return {
+		objective_id: objectiveId || question,
+		question: question || objectiveId,
+		material_scope: toStringList(record.material_scope ?? record.materials),
+		variable_process_axes: toStringList(record.variable_process_axes),
+		process_context_axes: toStringList(record.process_context_axes),
+		target_property_axes: toStringList(record.target_property_axes),
+		excluded_property_axes: toStringList(record.excluded_property_axes),
+		routing_hints: normalizeUnknownRecordList(record.routing_hints),
+		extraction_guidance: normalizeUnknownRecord(record.extraction_guidance),
+		confidence: toNumber(record.confidence)
+	};
+}
+
+function normalizeObjectivePaperFrame(value: unknown): ObjectivePaperFrame | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const frameId = toText(record.frame_id ?? record.id);
+	const documentId = toText(record.document_id ?? record.paper_id);
+	if (!frameId && !documentId) return null;
+
+	return {
+		frame_id: frameId || documentId,
+		objective_id: toText(record.objective_id),
+		document_id: documentId,
+		title: nonEmptyText(record.title ?? record.paper_title),
+		source_filename: nonEmptyText(record.source_filename),
+		relevance: toText(record.relevance, 'uncertain'),
+		paper_role: toText(record.paper_role, 'uncertain'),
+		background: nonEmptyText(record.background),
+		material_match: toStringList(record.material_match),
+		changed_variables: toStringList(record.changed_variables),
+		measured_property_scope: toStringList(record.measured_property_scope),
+		test_environment_scope: toStringList(record.test_environment_scope),
+		relevant_sections: toStringList(record.relevant_sections),
+		relevant_tables: toStringList(record.relevant_tables),
+		excluded_tables: toStringList(record.excluded_tables)
+	};
+}
+
+function normalizeObjectiveEvidenceRoute(value: unknown): ObjectiveEvidenceRoute | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const routeId = toText(record.route_id ?? record.id);
+	if (!routeId) return null;
+
+	return {
+		route_id: routeId,
+		objective_id: toText(record.objective_id),
+		document_id: toText(record.document_id ?? record.paper_id),
+		source_kind: toText(record.source_kind, 'text_window'),
+		source_ref: toText(record.source_ref),
+		role: toText(record.role, 'low_value_or_irrelevant'),
+		extractable: Boolean(record.extractable),
+		reason: nonEmptyText(record.reason),
+		table_schema: normalizeUnknownRecord(record.table_schema),
+		column_roles: normalizeUnknownRecord(record.column_roles),
+		join_keys: normalizeUnknownRecord(record.join_keys),
+		join_plan: normalizeUnknownRecord(record.join_plan),
+		confidence: toNumber(record.confidence)
+	};
+}
+
+function normalizeObjectiveEvidenceUnit(value: unknown): ObjectiveEvidenceUnit | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
+	if (!evidenceUnitId) return null;
+
+	return {
+		evidence_unit_id: evidenceUnitId,
+		objective_id: toText(record.objective_id),
+		document_id: toText(record.document_id ?? record.paper_id),
+		unit_kind: toText(record.unit_kind, 'unknown'),
+		property_normalized: nonEmptyText(record.property_normalized),
+		material_system: normalizeUnknownRecord(record.material_system),
+		sample_context: normalizeUnknownRecord(record.sample_context),
+		process_context: normalizeUnknownRecord(record.process_context),
+		resolved_condition: normalizeUnknownRecord(record.resolved_condition),
+		test_condition: normalizeUnknownRecord(record.test_condition),
+		value_payload: normalizeUnknownRecord(record.value_payload),
+		unit: nonEmptyText(record.unit),
+		baseline_context: normalizeUnknownRecord(record.baseline_context),
+		interpretation: nonEmptyText(record.interpretation),
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		evidence_anchor_ids: toStringList(record.evidence_anchor_ids),
+		join_keys: normalizeUnknownRecord(record.join_keys),
+		resolution_status: toText(record.resolution_status, 'unknown'),
+		confidence: toNumber(record.confidence)
+	};
+}
+
+function normalizeObjectiveLogicChain(value: unknown): ObjectiveLogicChain | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const logicChainId = toText(record.logic_chain_id ?? record.id);
+	if (!logicChainId) return null;
+
+	return {
+		logic_chain_id: logicChainId,
+		objective_id: toText(record.objective_id),
+		chain_scope: toText(record.chain_scope, 'objective'),
+		document_id: nonEmptyText(record.document_id ?? record.paper_id),
+		question: nonEmptyText(record.question),
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		chain_payload: normalizeUnknownRecord(record.chain_payload),
+		summary: nonEmptyText(record.summary),
+		confidence: toNumber(record.confidence)
 	};
 }
 
@@ -967,7 +1275,10 @@ export function normalizeMaterialProfile(
 	return {
 		collection_id: toText(record?.collection_id, collectionId),
 		material_id: toText(record?.material_id ?? record?.id, materialId),
-		canonical_name: toText(record?.canonical_name ?? record?.name ?? record?.material_system, materialId),
+		canonical_name: toText(
+			record?.canonical_name ?? record?.name ?? record?.material_system,
+			materialId
+		),
 		aliases: toStringList(record?.aliases ?? record?.names),
 		state: normalizeResearchState(
 			record?.state,
@@ -1019,7 +1330,10 @@ export function normalizeDocumentMaterialProfile(
 		collection_id: toText(record?.collection_id, collectionId),
 		document_id: toText(record?.document_id, documentId),
 		material_id: toText(record?.material_id ?? record?.id, materialId),
-		canonical_name: toText(record?.canonical_name ?? record?.name ?? record?.material_system, materialId),
+		canonical_name: toText(
+			record?.canonical_name ?? record?.name ?? record?.material_system,
+			materialId
+		),
 		aliases: toStringList(record?.aliases ?? record?.names),
 		state: normalizeResearchState(
 			record?.state,
@@ -1110,6 +1424,61 @@ export function normalizePaperAggregation(
 	};
 }
 
+export function normalizeObjectiveList(value: unknown, collectionId: string): ObjectiveList {
+	const record = asRecord(value);
+	const objectives = normalizeObjectList(record?.objectives, 'objectives')
+		.map((item) => normalizeObjectiveListItem(item))
+		.filter((item): item is ObjectiveListItem => item !== null);
+
+	return {
+		collection_id: toText(record?.collection_id, collectionId),
+		state: normalizeResearchState(record?.state, objectives.length ? 'partial' : 'empty'),
+		readiness: normalizeObjectiveReadiness(record?.readiness),
+		objectives,
+		warnings: normalizeWarnings(record?.warnings)
+	};
+}
+
+export function normalizeObjectiveResearchView(
+	value: unknown,
+	collectionId: string,
+	objectiveId: string
+): ObjectiveResearchView {
+	const record = asRecord(value);
+	const objective = normalizeObjectiveSummary(record?.objective) ?? {
+		objective_id: objectiveId,
+		question: objectiveId,
+		material_scope: [],
+		process_axes: [],
+		property_axes: [],
+		comparison_intent: null,
+		confidence: 0
+	};
+	const paperFrames = asArray(record?.paper_frames)
+		.map((item) => normalizeObjectivePaperFrame(item))
+		.filter((item): item is ObjectivePaperFrame => item !== null);
+	const evidenceRoutes = asArray(record?.evidence_routes)
+		.map((item) => normalizeObjectiveEvidenceRoute(item))
+		.filter((item): item is ObjectiveEvidenceRoute => item !== null);
+	const evidenceUnits = asArray(record?.evidence_units)
+		.map((item) => normalizeObjectiveEvidenceUnit(item))
+		.filter((item): item is ObjectiveEvidenceUnit => item !== null);
+
+	return {
+		collection_id: toText(record?.collection_id, collectionId),
+		state: normalizeResearchState(record?.state, paperFrames.length ? 'partial' : 'empty'),
+		objective,
+		objective_context: normalizeObjectiveContext(record?.objective_context),
+		readiness: normalizeObjectiveReadiness(record?.readiness),
+		paper_frames: paperFrames,
+		evidence_routes: evidenceRoutes,
+		evidence_units: evidenceUnits,
+		logic_chain: normalizeObjectiveLogicChain(record?.logic_chain),
+		existing_comparison_rows: normalizeUnknownRecordList(record?.existing_comparison_rows),
+		warnings: normalizeWarnings(record?.warnings)
+	};
+}
+
 export async function fetchCollectionResearchView(
 	collectionId: string
 ): Promise<CollectionAggregation> {
@@ -1148,6 +1517,24 @@ export async function fetchDocumentResearchView(
 		`/collections/${encodedCollection}/documents/${encodedDocument}/research-view`
 	);
 	return normalizePaperAggregation(data, collectionId, documentId);
+}
+
+export async function fetchCollectionObjectives(collectionId: string): Promise<ObjectiveList> {
+	const encoded = encodeURIComponent(collectionId);
+	const data = await requestJson(`/collections/${encoded}/objectives`);
+	return normalizeObjectiveList(data, collectionId);
+}
+
+export async function fetchObjectiveResearchView(
+	collectionId: string,
+	objectiveId: string
+): Promise<ObjectiveResearchView> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/research-view`
+	);
+	return normalizeObjectiveResearchView(data, collectionId, objectiveId);
 }
 
 export async function fetchDocumentMaterials(

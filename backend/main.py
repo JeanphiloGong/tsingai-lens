@@ -7,6 +7,7 @@ from controllers.core import (
     comparisons,
     documents,
     evidence,
+    research_objectives,
     research_view,
     results,
     workspace,
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_view.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(comparisons.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(results.router, prefix=PUBLIC_API_V1_PREFIX)

@@ -19,6 +19,7 @@
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
+- 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、`GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
 - 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`
 - 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
 - 结果与文档证据链：`GET /api/v1/collections/{collection_id}/results/{result_id}`、`GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics?include_grouped_projections=true`
@@ -42,6 +43,10 @@
   `test_condition`、`baseline`、`unknown` 结构节点，并用聚合边表达文献、材料、性能和上下文之间的 collection-level 导航关系
 - 单个材料的细粒度样品、工艺变量、性能、发现和证据关系由
   `/collections/{collection_id}/materials/{material_id}` 材料档案内的 material-scoped graph 承载；集合图谱只提供进入材料档案的导航入口
+- `/collections/{collection_id}/objectives` 和
+  `/collections/{collection_id}/objectives/{objective_id}` 是 objective-first
+  工作区入口；它读取 objective list 与 objective research-view，不复用
+  material endpoint 返回目标数据
 - `/collections/{collection_id}/assistant` 使用同源 `goal-sessions` API，是绑定当前
   collection 的研究助手入口；它必须显示 `collection_grounded`、
   `collection_limited`、`general_fallback`、`general_only` 来源边界，并把材料详情页传入的

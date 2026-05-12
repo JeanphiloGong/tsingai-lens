@@ -91,7 +91,9 @@ Supporting research binaries live under `docs/research/assets/`.
   then
   [`contracts/lens-core-artifact-contracts.md`](contracts/lens-core-artifact-contracts.md),
   then
-  [`contracts/research-view-aggregation-contract.md`](contracts/research-view-aggregation-contract.md)
+  [`contracts/research-view-aggregation-contract.md`](contracts/research-view-aggregation-contract.md),
+  then
+  [`contracts/research-objective-workspace-contract.md`](contracts/research-objective-workspace-contract.md)
 - Historical or proposed shared decisions:
   use docs under [`decisions/`](decisions/)
 - Backend implementation and API:
@@ -141,6 +143,7 @@ Contracts:
 - [`contracts/lens-v1-definition.md`](contracts/lens-v1-definition.md)
 - [`contracts/lens-core-artifact-contracts.md`](contracts/lens-core-artifact-contracts.md)
 - [`contracts/research-view-aggregation-contract.md`](contracts/research-view-aggregation-contract.md)
+- [`contracts/research-objective-workspace-contract.md`](contracts/research-objective-workspace-contract.md)
 
 Decisions:
 

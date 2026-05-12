@@ -14,6 +14,10 @@ The family keeps multiple live pages because this local subject now needs:
 - a P001 gold-gap repair slice that uses the objective-shaped extraction result
   to finish method-family conditions, pairwise comparison relations, and
   characterization observations
+- an objective evidence-unit cutover slice that makes
+  `ObjectiveEvidenceUnit` and `ObjectiveLogicChain` the authoritative Core
+  semantic fact path instead of retaining old paper-fact families as the
+  primary downstream contract
 
 This is a Core semantic-build topic family. It does not change public API
 routes, frontend contracts, Source artifact production, or downstream report
@@ -35,6 +39,10 @@ ownership by itself.
   Follow-up repair plan after P001 objective-scoped table extraction matches
   gold exactly, covering method-family test conditions, pairwise comparison
   relations, and characterization observations
+- [`objective-evidence-unit-cutover-plan.md`](objective-evidence-unit-cutover-plan.md)
+  Implementation plan for cutting the objective-first flow over to objective
+  evidence units and logic chains without keeping a long-term compatibility
+  surface over the old paper-fact families
 
 ## Related Docs
 

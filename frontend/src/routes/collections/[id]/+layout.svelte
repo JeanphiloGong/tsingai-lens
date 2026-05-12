@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { errorMessage } from '../../_shared/api';
@@ -149,6 +150,12 @@
 		class:active={$page.url.pathname === `/collections/${collectionId}`}
 	>
 		{$t('collection.tabs.overview')}
+	</a>
+	<a
+		href={resolve('/collections/[id]/objectives', { id: collectionId })}
+		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/objectives`)}
+	>
+		{$t('collection.tabs.objectives')}
 	</a>
 	<a
 		href={`/collections/${collectionId}/materials`}

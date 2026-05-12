@@ -6,6 +6,8 @@ This node owns the collection workspace route family in the frontend.
 
 - `collections/[id]/+layout.svelte`
 - `collections/[id]/+page.svelte`
+- `collections/[id]/objectives/+page.svelte`
+- `collections/[id]/objectives/[objective_id]/+page.svelte`
 - `collections/[id]/materials/+page.svelte`
 - `collections/[id]/materials/[material_id]/+page.svelte`
 - `collections/[id]/documents/+page.svelte`
@@ -17,6 +19,7 @@ This node owns the collection workspace route family in the frontend.
 ## Responsibilities
 
 - render the collection workspace
+- render collection-level research objectives and objective-scoped paper frames
 - render collection-level document profile screening signals
 - render canonical collection materials and collection-scoped material profiles
 - render collection-level evidence cards and source-anchor entry points
@@ -42,6 +45,9 @@ This node owns the collection workspace route family in the frontend.
 - [`../../../../docs/contracts/research-view-aggregation-contract.md`](../../../../docs/contracts/research-view-aggregation-contract.md)
   Shared frontend/backend target contract for paper matrices, collection
   comparable groups, cross-paper matrices, and evidence-backed values
+- [`../../../../docs/contracts/research-objective-workspace-contract.md`](../../../../docs/contracts/research-objective-workspace-contract.md)
+  Shared frontend/backend contract for objective-first workspace routes,
+  payloads, readiness, and paper-frame rendering
 - [`../../../docs/research-view-aggregation/README.md`](../../../docs/research-view-aggregation/README.md)
   Frontend implementation topic for research-view aggregation navigation,
   route state, matrices, evidence drawers, and debug placement

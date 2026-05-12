@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../_shared/api';
 	import {
@@ -280,15 +281,15 @@
 	}
 
 	function readyPrimaryHref() {
-		return `/collections/${collectionId}/materials`;
+		return resolve('/collections/[id]/objectives', { id: collectionId });
 	}
 
 	function readyPrimaryLabel() {
-		return $t('overview.actions.enterMaterials');
+		return $t('overview.actions.enterObjectives');
 	}
 
 	function primaryResearchHref() {
-		return `/collections/${collectionId}/materials`;
+		return resolve('/collections/[id]/objectives', { id: collectionId });
 	}
 
 	function researchStateLabel(state: ResearchViewState) {
@@ -566,7 +567,7 @@
 
 				<div class="split-actions">
 					<a class="btn btn--primary btn--small" href={primaryResearchHref()}>
-						{$t('overview.actions.enterMaterials')}
+						{$t('overview.actions.enterObjectives')}
 					</a>
 					<a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/documents`}>
 						{$t('overview.actions.viewDocumentList')}

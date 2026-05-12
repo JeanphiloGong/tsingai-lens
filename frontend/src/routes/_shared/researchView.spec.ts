@@ -9,9 +9,11 @@ vi.mock('./api', () => ({
 }));
 
 const {
+	fetchCollectionObjectives,
 	fetchCollectionMaterials,
 	fetchCollectionResearchView,
 	fetchDocumentResearchView,
+	fetchObjectiveResearchView,
 	fetchMaterialResearchView,
 	formatShortIdentifier,
 	formatEvidenceBackedValue,
@@ -19,6 +21,7 @@ const {
 	hasObservedValue,
 	normalizeCollectionAggregation,
 	normalizeEvidenceBackedValue,
+	normalizeObjectiveResearchView,
 	normalizePaperAggregation
 } = await import('./researchView');
 
@@ -99,6 +102,63 @@ describe('research view shared helpers', () => {
 		expect(materialProfile.papers[0].title).toBe('paper-a.pdf');
 		expect(materialProfile.papers[0].source_filename).toBe('paper-a.pdf');
 		expect(materialProfile.sample_matrix.rows[0].sample_id).toBe('S1');
+
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			state: 'partial',
+			readiness: {
+				objectives_ready: true,
+				frames_ready: true,
+				routes_ready: false,
+				evidence_units_ready: false,
+				logic_chain_ready: false
+			},
+			objectives: [
+				{
+					objective_id: 'obj_1',
+					question: 'How does heat treatment affect corrosion resistance?',
+					material_scope: ['316L stainless steel'],
+					process_axes: ['heat treatment'],
+					property_axes: ['corrosion resistance'],
+					state: 'partial',
+					paper_frame_count: 2
+				}
+			]
+		});
+
+		const objectives = await fetchCollectionObjectives('col_123');
+
+		expect(requestJson).toHaveBeenLastCalledWith('/collections/col_123/objectives');
+		expect(objectives.objectives[0].objective_id).toBe('obj_1');
+		expect(objectives.objectives[0].paper_frame_count).toBe(2);
+
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			state: 'partial',
+			objective: {
+				objective_id: 'obj_1',
+				question: 'How does heat treatment affect corrosion resistance?'
+			},
+			readiness: {
+				objectives_ready: true,
+				frames_ready: true,
+				routes_ready: false,
+				evidence_units_ready: false,
+				logic_chain_ready: false
+			},
+			paper_frames: [{ frame_id: 'opf_1', document_id: 'doc_1', relevance: 'high' }],
+			evidence_routes: [],
+			evidence_units: [],
+			logic_chain: null
+		});
+
+		const objectiveView = await fetchObjectiveResearchView('col_123', 'obj_1');
+
+		expect(requestJson).toHaveBeenLastCalledWith(
+			'/collections/col_123/objectives/obj_1/research-view'
+		);
+		expect(objectiveView.objective.objective_id).toBe('obj_1');
+		expect(objectiveView.paper_frames[0].frame_id).toBe('opf_1');
 	});
 
 	it('shortens long internal identifiers for display fallback', () => {
@@ -264,6 +324,73 @@ describe('research view shared helpers', () => {
 		});
 		expect(paper.condition_series[0].condition_axis).toBe('temperature');
 		expect(paper.condition_series[0].points[0].result.unit).toBe('MPa');
+	});
+
+	it('normalizes objective research view with paper frames and reserved sections', () => {
+		const objectiveView = normalizeObjectiveResearchView(
+			{
+				collection_id: 'col_123',
+				state: 'partial',
+				objective: {
+					objective_id: 'obj_1',
+					question: 'How does heat treatment affect corrosion resistance?',
+					material_scope: ['316L stainless steel'],
+					process_axes: ['heat treatment'],
+					property_axes: ['corrosion resistance'],
+					confidence: 0.82
+				},
+				objective_context: {
+					objective_id: 'obj_1',
+					variable_process_axes: ['heat treatment'],
+					process_context_axes: ['LPBF'],
+					target_property_axes: ['corrosion resistance']
+				},
+				readiness: {
+					objectives_ready: true,
+					frames_ready: true,
+					routes_ready: true,
+					evidence_units_ready: false,
+					logic_chain_ready: false
+				},
+				paper_frames: [
+					{
+						frame_id: 'opf_1',
+						document_id: 'doc_1',
+						title: 'Paper A',
+						relevance: 'high',
+						relevant_tables: ['table-1']
+					}
+				],
+				evidence_routes: [
+					{
+						route_id: 'oer_1',
+						document_id: 'doc_1',
+						source_kind: 'table',
+						source_ref: 'table-1',
+						role: 'current_experimental_evidence',
+						extractable: true
+					}
+				],
+				evidence_units: [],
+				logic_chain: null,
+				existing_comparison_rows: []
+			},
+			'col_123',
+			'obj_1'
+		);
+
+		expect(objectiveView.objective.material_scope).toEqual(['316L stainless steel']);
+		expect(objectiveView.objective_context?.variable_process_axes).toEqual(['heat treatment']);
+		expect(objectiveView.paper_frames[0]).toMatchObject({
+			document_id: 'doc_1',
+			relevance: 'high'
+		});
+		expect(objectiveView.evidence_routes[0]).toMatchObject({
+			source_kind: 'table',
+			extractable: true
+		});
+		expect(objectiveView.evidence_units).toEqual([]);
+		expect(objectiveView.logic_chain).toBeNull();
 	});
 
 	it('formats and classifies evidence-backed values and states', () => {

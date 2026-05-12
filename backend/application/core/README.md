@@ -15,5 +15,9 @@ artifacts.
   research-facing aggregation over paper facts and comparison projections for
   paper sample matrices, condition series, paper coverage, comparable groups,
   and cross-paper matrices
+- `semantic_build/research_objective_service.py`
+  research-objective discovery plus objective workspace reads over persisted
+  objectives, objective contexts, paper frames, evidence routes, evidence
+  units, and logic chains
 - `workspace_overview_service.py`
   Collection-facing overview assembled from Source state and Core artifacts

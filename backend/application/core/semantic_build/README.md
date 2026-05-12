@@ -6,7 +6,7 @@ artifacts.
 - `document_profile_service.py`
   LLM-structured document typing and collection summaries
 - `research_objective_service.py`
-  collection-level paper skim and research objective records
+  collection-level paper skim, research objective, and objective context records
 - `paper_facts_service.py`
   semantic extraction for evidence anchors, method facts, variants, test
   conditions, baselines, and measurement results

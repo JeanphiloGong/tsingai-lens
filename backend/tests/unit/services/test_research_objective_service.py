@@ -773,11 +773,19 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
     assert len(facts.paper_skims) == 2
     assert facts.paper_skims[0].source_filename == "paper-1.pdf"
     assert facts.research_objectives[0].excluded_document_ids == ("paper-2",)
+    assert len(facts.objective_contexts) == 1
+    objective_context = facts.objective_contexts[0]
+    assert objective_context.objective_id == facts.research_objectives[0].objective_id
+    assert objective_context.target_property_axes == ("corrosion",)
+    assert objective_context.process_context_axes == ("LPBF", "heat treatment")
+    assert objective_context.routing_hints[0]["table_id"] == "table-1"
+    assert objective_context.routing_hints[0]["role"] == "result_table"
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
 
     skim_call_count = len(extractor.skim_payloads)
     assert service.read_research_objectives(collection_id) == objectives
+    assert service.read_objective_contexts(collection_id) == facts.objective_contexts
     assert len(extractor.skim_payloads) == skim_call_count
     output_dir = collection_service.get_paths(collection_id).output_dir
     assert not list(output_dir.glob("*objective*"))
@@ -897,6 +905,127 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
         "microhardness",
     )
     assert mechanical_objective.question.startswith("How do")
+
+
+def test_research_objective_service_builds_targeted_objective_contexts(
+    tmp_path,
+):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Contexts")
+    collection_id = collection["collection_id"]
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        structured_extractor=_DuplicateMechanicalObjectiveExtractor(),
+    )
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "SLM 316L Mechanical Properties",
+                    "text": (
+                        "Energy density, scanning speed, and scanning strategy "
+                        "changed densification and mechanical properties."
+                    ),
+                    "metadata": {"source_filename": "paper-1.pdf"},
+                }
+            ],
+            blocks=[
+                {
+                    "block_id": "b1",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": (
+                        "Energy density, scanning speed, and scanning strategy "
+                        "changed densification and mechanical properties."
+                    ),
+                    "block_order": 1,
+                }
+            ],
+            tables=[
+                {
+                    "table_id": "table-1",
+                    "document_id": "paper-1",
+                    "table_order": 1,
+                    "caption_text": "Table 1 SLM processing parameters along with relative densities.",
+                    "column_headers": [
+                        "Sample number",
+                        "Scan strategy",
+                        "Scanning speed (mm/s)",
+                        "Energy density (J/mm3)",
+                        "Relative density",
+                    ],
+                    "table_matrix": [
+                        [
+                            "Sample number",
+                            "Scan strategy",
+                            "Scanning speed (mm/s)",
+                            "Energy density (J/mm3)",
+                            "Relative density",
+                        ],
+                        ["1", "A", "0.25", "70", "95.4"],
+                    ],
+                },
+                {
+                    "table_id": "table-2",
+                    "document_id": "paper-1",
+                    "table_order": 2,
+                    "caption_text": (
+                        "Table 2 Mechanical properties (yield strength, ultimate "
+                        "tensile strength, and elongation) of SLM processed samples "
+                        "along with microhardness values."
+                    ),
+                    "column_headers": [
+                        "Sample number",
+                        "Yield Strength (MPa)",
+                        "Ultimate Tensile Strength (MPa)",
+                        "Elongation (%)",
+                        "Microhadness (HV)",
+                    ],
+                    "table_matrix": [
+                        [
+                            "Sample number",
+                            "Yield Strength (MPa)",
+                            "Ultimate Tensile Strength (MPa)",
+                            "Elongation (%)",
+                            "Microhadness (HV)",
+                        ],
+                        ["1", "236.65", "375.13", "7.21", "215.65"],
+                    ],
+                },
+            ],
+        ),
+    )
+
+    service.build_research_objectives(collection_id)
+    contexts = service.core_fact_repository.read_collection_facts(
+        collection_id
+    ).objective_contexts
+
+    assert len(contexts) == 2
+    structure_context = next(
+        context for context in contexts if "densification" in context.target_property_axes
+    )
+    mechanical_context = next(
+        context for context in contexts if "yield strength" in context.target_property_axes
+    )
+    assert structure_context.variable_process_axes == (
+        "energy density",
+        "scanning strategy",
+        "scanning speed",
+    )
+    assert structure_context.process_context_axes == ("Selective Laser Melting",)
+    assert [
+        hint["table_id"] for hint in structure_context.routing_hints
+    ] == ["table-1"]
+    assert structure_context.routing_hints[0]["role"] == "result_table"
+    assert [
+        (hint["table_id"], hint["role"]) for hint in mechanical_context.routing_hints
+    ] == [("table-1", "condition_context"), ("table-2", "result_table")]
+    assert "microhardness" in mechanical_context.routing_hints[1][
+        "matched_property_axes"
+    ]
 
 
 def test_research_objective_service_canonicalizes_axis_aliases_with_llm(

@@ -174,6 +174,57 @@ class ResearchObjective:
 
 
 @dataclass(frozen=True)
+class ObjectiveContext:
+    objective_id: str
+    question: str
+    material_scope: tuple[str, ...]
+    variable_process_axes: tuple[str, ...]
+    process_context_axes: tuple[str, ...]
+    target_property_axes: tuple[str, ...]
+    excluded_property_axes: tuple[str, ...]
+    routing_hints: tuple[dict[str, Any], ...]
+    extraction_guidance: dict[str, Any]
+    confidence: float
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveContext":
+        return cls(
+            objective_id=_normalize_text(payload.get("objective_id")) or "",
+            question=_normalize_text(payload.get("question")) or "",
+            material_scope=normalize_objective_terms(payload.get("material_scope")),
+            variable_process_axes=normalize_objective_terms(
+                payload.get("variable_process_axes")
+            ),
+            process_context_axes=normalize_objective_terms(
+                payload.get("process_context_axes")
+            ),
+            target_property_axes=normalize_objective_terms(
+                payload.get("target_property_axes")
+            ),
+            excluded_property_axes=normalize_objective_terms(
+                payload.get("excluded_property_axes")
+            ),
+            routing_hints=_normalize_mapping_tuple(payload.get("routing_hints")),
+            extraction_guidance=_normalize_mapping(payload.get("extraction_guidance")),
+            confidence=normalize_objective_confidence(payload.get("confidence")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "objective_id": self.objective_id,
+            "question": self.question,
+            "material_scope": list(self.material_scope),
+            "variable_process_axes": list(self.variable_process_axes),
+            "process_context_axes": list(self.process_context_axes),
+            "target_property_axes": list(self.target_property_axes),
+            "excluded_property_axes": list(self.excluded_property_axes),
+            "routing_hints": [dict(item) for item in self.routing_hints],
+            "extraction_guidance": dict(self.extraction_guidance),
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
 class ObjectivePaperFrame:
     objective_id: str
     document_id: str
@@ -379,6 +430,18 @@ def _normalize_bool(value: Any) -> bool:
     return bool(value)
 
 
+def _normalize_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
+def _normalize_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(_normalize_mapping(item) for item in value if isinstance(item, Mapping))
+
+
 def _is_missing(value: Any) -> bool:
     return value is None or (isinstance(value, float) and math.isnan(value))
 
@@ -386,6 +449,7 @@ def _is_missing(value: Any) -> bool:
 __all__ = [
     "EVIDENCE_ROUTE_ROLE_VALUES",
     "EvidenceRoute",
+    "ObjectiveContext",
     "ObjectivePaperFrame",
     "PAPER_RELEVANCE_VALUES",
     "PAPER_ROLE_VALUES",

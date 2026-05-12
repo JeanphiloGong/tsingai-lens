@@ -18,7 +18,7 @@ from domain.core.evidence_backbone import (
     StructureFeature,
     TestCondition,
 )
-from domain.core.research_objective import PaperSkim, ResearchObjective
+from domain.core.research_objective import ObjectiveContext, PaperSkim, ResearchObjective
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class CoreFactSet:
     comparison_artifacts_ready: bool = False
     paper_skims: tuple[PaperSkim, ...] = ()
     research_objectives: tuple[ResearchObjective, ...] = ()
+    objective_contexts: tuple[ObjectiveContext, ...] = ()
     document_profiles: tuple[DocumentProfile, ...] = ()
     evidence_anchors: tuple[EvidenceAnchor, ...] = ()
     method_facts: tuple[MethodFact, ...] = ()

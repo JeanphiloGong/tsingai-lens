@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import logging
 from typing import Any
 
@@ -9,6 +10,7 @@ from application.core.semantic_build.document_profile_service import (
 )
 from application.source.collection_service import CollectionService
 from domain.core import (
+    ObjectiveContext,
     PaperSkim,
     ResearchObjective,
     build_research_objective_id,
@@ -130,6 +132,19 @@ class ResearchObjectiveService:
             return facts.research_objectives
         return self.build_research_objectives(collection_id)
 
+    def read_objective_contexts(
+        self,
+        collection_id: str,
+    ) -> tuple[ObjectiveContext, ...]:
+        self.collection_service.get_collection(collection_id)
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if facts.research_objectives_ready:
+            return facts.objective_contexts
+        self.build_research_objectives(collection_id)
+        return self.core_fact_repository.read_collection_facts(
+            collection_id
+        ).objective_contexts
+
     def build_research_objectives(
         self,
         collection_id: str,
@@ -219,11 +234,17 @@ class ResearchObjectiveService:
             objectives=research_objectives,
         )
         research_objectives = self._dedupe_research_objectives(research_objectives)
+        objective_contexts = self._build_objective_contexts(
+            paper_skims=tuple(paper_skims),
+            objectives=research_objectives,
+            tables=artifacts.tables,
+        )
 
         self.core_fact_repository.replace_collection_research_objectives(
             collection_id,
             tuple(paper_skims),
             research_objectives,
+            objective_contexts,
         )
         logger.info(
             "Research objective build finished collection_id=%s paper_skim_count=%s objective_count=%s",
@@ -232,6 +253,207 @@ class ResearchObjectiveService:
             len(research_objectives),
         )
         return research_objectives
+
+    def _build_objective_contexts(
+        self,
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+        objectives: tuple[ResearchObjective, ...],
+        tables: tuple[Any, ...],
+    ) -> tuple[ObjectiveContext, ...]:
+        contexts: list[ObjectiveContext] = []
+        for objective in objectives:
+            relevant_skims = self._select_relevant_skims(
+                objective,
+                paper_skims=paper_skims,
+            )
+            variable_axes, context_axes = self._split_objective_process_axes(
+                objective,
+                paper_skims=paper_skims,
+            )
+            target_properties = list(objective.property_axes)
+            excluded_properties = self._excluded_objective_properties(
+                relevant_skims=relevant_skims,
+                target_properties=target_properties,
+            )
+            routing_hints = self._build_objective_table_routing_hints(
+                objective,
+                tables=tables,
+                target_property_axes=target_properties,
+                variable_process_axes=variable_axes,
+            )
+            contexts.append(
+                ObjectiveContext.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "question": objective.question,
+                        "material_scope": list(objective.material_scope),
+                        "variable_process_axes": variable_axes,
+                        "process_context_axes": context_axes,
+                        "target_property_axes": target_properties,
+                        "excluded_property_axes": excluded_properties,
+                        "routing_hints": routing_hints,
+                        "extraction_guidance": {
+                            "focus": (
+                                "Extract current-work evidence that connects "
+                                "the variable process axes to the target "
+                                "property axes for this objective."
+                            ),
+                            "do_not_treat_as_variables": context_axes,
+                            "do_not_treat_as_result_properties": variable_axes,
+                            "do_not_extract_as_target_results": excluded_properties,
+                        },
+                        "confidence": objective.confidence,
+                    }
+                )
+            )
+        return tuple(contexts)
+
+    def _select_relevant_skims(
+        self,
+        objective: ResearchObjective,
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> tuple[PaperSkim, ...]:
+        seeded = tuple(
+            skim
+            for skim in paper_skims
+            if skim.document_id in objective.seed_document_ids
+        )
+        if seeded:
+            return seeded
+        excluded = set(objective.excluded_document_ids)
+        selected = tuple(skim for skim in paper_skims if skim.document_id not in excluded)
+        return selected or paper_skims
+
+    def _excluded_objective_properties(
+        self,
+        *,
+        relevant_skims: tuple[PaperSkim, ...],
+        target_properties: list[str],
+    ) -> list[str]:
+        candidates = self._unique_axis_values(
+            value
+            for skim in relevant_skims
+            for value in skim.candidate_properties
+        )
+        excluded: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if any(
+                self._axis_values_match(candidate, target_property)
+                for target_property in target_properties
+            ):
+                continue
+            self._append_unique_axis(excluded, seen, candidate)
+        return excluded
+
+    def _build_objective_table_routing_hints(
+        self,
+        objective: ResearchObjective,
+        *,
+        tables: tuple[Any, ...],
+        target_property_axes: list[str],
+        variable_process_axes: list[str],
+    ) -> list[dict[str, Any]]:
+        hints: list[dict[str, Any]] = []
+        selected_document_ids = set(objective.seed_document_ids)
+        excluded_document_ids = set(objective.excluded_document_ids)
+        for table in tables:
+            document_id = str(getattr(table, "document_id", "") or "")
+            if document_id in excluded_document_ids:
+                continue
+            if selected_document_ids and document_id not in selected_document_ids:
+                continue
+            table_text = self._objective_table_search_text(table)
+            matched_property_axes = [
+                axis
+                for axis in target_property_axes
+                if self._source_text_mentions_axis(table_text, axis)
+            ]
+            matched_variable_axes = [
+                axis
+                for axis in variable_process_axes
+                if self._source_text_mentions_axis(table_text, axis)
+            ]
+            if matched_property_axes:
+                role = "result_table"
+                strength = (
+                    "strong"
+                    if matched_variable_axes or len(matched_property_axes) > 1
+                    else "medium"
+                )
+            elif matched_variable_axes:
+                role = "condition_context"
+                strength = "strong" if len(matched_variable_axes) > 1 else "medium"
+            else:
+                continue
+            hints.append(
+                {
+                    "table_id": str(getattr(table, "table_id", "") or ""),
+                    "document_id": document_id,
+                    "caption_text": getattr(table, "caption_text", None),
+                    "role": role,
+                    "strength": strength,
+                    "matched_property_axes": matched_property_axes,
+                    "matched_variable_process_axes": matched_variable_axes,
+                    "reason": self._build_objective_table_routing_reason(
+                        role,
+                        matched_property_axes=matched_property_axes,
+                        matched_variable_axes=matched_variable_axes,
+                    ),
+                }
+            )
+        return hints
+
+    def _objective_table_search_text(self, table: Any) -> str:
+        pieces = [
+            str(getattr(table, "caption_text", "") or ""),
+            " ".join(str(value) for value in getattr(table, "column_headers", ()) or ()),
+        ]
+        for row in tuple(getattr(table, "table_matrix", ()) or ())[:6]:
+            if isinstance(row, (list, tuple)):
+                pieces.append(" ".join(str(cell) for cell in row))
+        return " ".join(piece for piece in pieces if piece.strip())
+
+    def _source_text_mentions_axis(self, text: str, axis: str) -> bool:
+        text_tokens = self._axis_token_set(self._axis_key(text))
+        axis_tokens = self._axis_token_set(self._axis_key(axis))
+        if not axis_tokens or not text_tokens:
+            return False
+        return all(
+            any(
+                axis_token == text_token
+                or self._is_acronym_match(axis_token, text_token)
+                or self._axis_token_is_close(axis_token, text_token)
+                for text_token in text_tokens
+            )
+            for axis_token in axis_tokens
+        )
+
+    def _axis_token_is_close(self, left: str, right: str) -> bool:
+        if left == right:
+            return True
+        if left.startswith("dens") and right.startswith("dens"):
+            return True
+        if abs(len(left) - len(right)) > 2:
+            return False
+        if len(left) < 6 or len(right) < 6:
+            return False
+        return SequenceMatcher(a=left, b=right).ratio() >= 0.88
+
+    def _build_objective_table_routing_reason(
+        self,
+        role: str,
+        *,
+        matched_property_axes: list[str],
+        matched_variable_axes: list[str],
+    ) -> str:
+        if role == "result_table":
+            if matched_variable_axes:
+                return "Table contains target property columns and variable process columns."
+            return "Table contains target property columns."
+        return "Table contains variable process columns and can provide condition context."
 
     def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
         if self._structured_extractor is None:

@@ -11,7 +11,11 @@ from domain.core.comparison import (
 )
 from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
-from domain.core.research_objective import PaperSkim, ResearchObjective
+from domain.core.research_objective import (
+    ObjectiveContext,
+    PaperSkim,
+    ResearchObjective,
+)
 from domain.source import (
     SourceArtifactSet,
     SourceBlock,
@@ -159,6 +163,7 @@ class CoreFactRepository(Protocol):
         collection_id: str,
         paper_skims: tuple[PaperSkim, ...],
         research_objectives: tuple[ResearchObjective, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
     ) -> None: ...
 
     def replace_collection_document_profiles(

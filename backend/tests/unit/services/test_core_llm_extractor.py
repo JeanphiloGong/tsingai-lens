@@ -324,6 +324,47 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
     assert mentions.result_claims[0].claim_scope == "prior_work"
 
 
+def test_core_llm_extractor_accepts_null_result_property_names():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "method_mentions": [],
+          "material_mentions": [],
+          "variant_mentions": [],
+          "condition_mentions": [],
+          "baseline_mentions": [],
+          "result_claims": [
+            {
+              "claim_text": "The behavior was improved.",
+              "property_normalized": null,
+              "result_type": "trend",
+              "value_text": null,
+              "unit": null,
+              "claim_scope": "current_work",
+              "eligible_for_measurement_result": false,
+              "evidence_quote": "The behavior was improved.",
+              "confidence": 0.7
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    mentions = extractor.extract_text_window_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental"},
+            "text_window": {
+                "text": "The behavior was improved.",
+                "heading_path": "Results",
+            },
+        }
+    )
+
+    assert mentions.result_claims[0].property_normalized == ""
+
+
 def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batches(
     monkeypatch,
 ):

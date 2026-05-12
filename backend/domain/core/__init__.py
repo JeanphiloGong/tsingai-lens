@@ -49,6 +49,7 @@ from domain.core.fact_store import CoreFactSet
 from domain.core.research_objective import (
     EVIDENCE_ROUTE_ROLE_VALUES,
     EvidenceRoute,
+    ObjectiveContext,
     ObjectivePaperFrame,
     PAPER_RELEVANCE_VALUES,
     PAPER_ROLE_VALUES,
@@ -91,6 +92,7 @@ __all__ = [
     "MeasurementResult",
     "MethodFact",
     "NormalizedComparisonContext",
+    "ObjectiveContext",
     "ObjectivePaperFrame",
     "PAPER_RELEVANCE_VALUES",
     "PAPER_ROLE_VALUES",

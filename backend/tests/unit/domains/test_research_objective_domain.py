@@ -4,6 +4,7 @@ import pytest
 
 from domain.core import (
     EvidenceRoute,
+    ObjectiveContext,
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
@@ -93,6 +94,40 @@ def test_question_shaped_objective_rejects_bare_material_name() -> None:
 
     assert is_question_shaped_objective(bare_material) is False
     assert is_question_shaped_objective(comparison_question) is True
+
+
+def test_objective_context_round_trips_routing_and_guidance() -> None:
+    context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj_1",
+            "question": "How does scan speed affect density of LPBF 316L?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["scan speed"],
+            "process_context_axes": ["LPBF"],
+            "target_property_axes": ["relative density"],
+            "excluded_property_axes": ["yield strength"],
+            "routing_hints": [
+                {
+                    "table_id": "table_1",
+                    "role": "result_table",
+                    "matched_property_axes": ["relative density"],
+                }
+            ],
+            "extraction_guidance": {
+                "do_not_extract_as_target_results": ["yield strength"],
+            },
+            "confidence": "0.82",
+        }
+    )
+
+    record = context.to_record()
+    assert record["variable_process_axes"] == ["scan speed"]
+    assert record["process_context_axes"] == ["LPBF"]
+    assert record["routing_hints"][0]["table_id"] == "table_1"
+    assert record["extraction_guidance"]["do_not_extract_as_target_results"] == [
+        "yield strength"
+    ]
+    assert record["confidence"] == 0.82
 
 
 @pytest.mark.parametrize(

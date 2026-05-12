@@ -462,6 +462,11 @@ class TextWindowResultClaimPayload(_StrictModel):
             default="unclear",
         )
 
+    @field_validator("property_normalized", mode="before")
+    @classmethod
+    def _normalize_property_normalized(cls, value: object) -> str:
+        return str(value or "").strip()
+
 
 class StructuredTextWindowMentions(_StrictModel):
     method_mentions: list[TextWindowMethodMentionPayload] = Field(default_factory=list)
@@ -525,6 +530,11 @@ class TableRowResultClaimPayload(_StrictModel):
             allowed=_CLAIM_SCOPES,
             default="unclear",
         )
+
+    @field_validator("property_normalized", mode="before")
+    @classmethod
+    def _normalize_property_normalized(cls, value: object) -> str:
+        return str(value or "").strip()
 
 
 class StructuredTableRowMentions(_StrictModel):

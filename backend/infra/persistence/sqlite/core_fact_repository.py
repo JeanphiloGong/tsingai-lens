@@ -21,6 +21,7 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    ObjectiveContext,
     PaperSkim,
     SampleVariant,
     ResearchObjective,
@@ -100,6 +101,37 @@ _OBJECTIVE_TABLES: tuple[_TableSpec, ...] = (
                 "property_axes",
                 "seed_document_ids",
                 "excluded_document_ids",
+            }
+        ),
+        real_columns=frozenset({"confidence"}),
+        index_columns=("objective_id",),
+    ),
+    _TableSpec(
+        table_name="core_objective_contexts",
+        attr_name="objective_contexts",
+        record_cls=ObjectiveContext,
+        id_column="objective_id",
+        columns=(
+            "objective_id",
+            "question",
+            "material_scope",
+            "variable_process_axes",
+            "process_context_axes",
+            "target_property_axes",
+            "excluded_property_axes",
+            "routing_hints",
+            "extraction_guidance",
+            "confidence",
+        ),
+        json_columns=frozenset(
+            {
+                "material_scope",
+                "variable_process_axes",
+                "process_context_axes",
+                "target_property_axes",
+                "excluded_property_axes",
+                "routing_hints",
+                "extraction_guidance",
             }
         ),
         real_columns=frozenset({"confidence"}),
@@ -477,11 +509,13 @@ class SqliteCoreFactRepository:
         collection_id: str,
         paper_skims: tuple[PaperSkim, ...],
         research_objectives: tuple[ResearchObjective, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
     ) -> None:
         self._ensure_schema()
         records_by_attr = {
             "paper_skims": paper_skims,
             "research_objectives": research_objectives,
+            "objective_contexts": objective_contexts,
         }
         with self._connection() as connection:
             for spec in _OBJECTIVE_TABLES:
@@ -496,7 +530,9 @@ class SqliteCoreFactRepository:
             self._upsert_status(
                 connection,
                 collection_id,
-                research_objectives_ready=bool(paper_skims or research_objectives),
+                research_objectives_ready=bool(
+                    paper_skims or research_objectives or objective_contexts
+                ),
             )
 
     def replace_collection_document_profiles(

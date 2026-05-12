@@ -11,6 +11,7 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    ObjectiveContext,
     PaperSkim,
     ResearchObjective,
     SampleVariant,
@@ -257,11 +258,35 @@ def test_sqlite_core_fact_repository_round_trips_research_objectives(tmp_path):
             "reason": "paper skim points to a repeated comparison axis",
         }
     )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "question": objective.question,
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["heat treatment"],
+            "process_context_axes": ["LPBF"],
+            "target_property_axes": ["corrosion"],
+            "excluded_property_axes": [],
+            "routing_hints": [
+                {
+                    "table_id": "table-1",
+                    "role": "result_table",
+                    "matched_property_axes": ["corrosion"],
+                }
+            ],
+            "extraction_guidance": {
+                "do_not_treat_as_variables": ["LPBF"],
+                "do_not_treat_as_result_properties": ["heat treatment"],
+            },
+            "confidence": 0.88,
+        }
+    )
 
     repository.replace_collection_research_objectives(
         "col_test",
         (paper_skim,),
         (objective,),
+        (objective_context,),
     )
     restored = repository.read_collection_facts("col_test")
 
@@ -270,6 +295,8 @@ def test_sqlite_core_fact_repository_round_trips_research_objectives(tmp_path):
     assert restored.paper_skims[0].candidate_materials == ("316L stainless steel",)
     assert restored.research_objectives[0].objective_id.startswith("obj_")
     assert restored.research_objectives[0].seed_document_ids == ("paper-1",)
+    assert restored.objective_contexts[0].objective_id == objective.objective_id
+    assert restored.objective_contexts[0].routing_hints[0]["table_id"] == "table-1"
 
 
 def test_sqlite_core_fact_repository_preserves_research_objectives_when_replacing_facts(
@@ -296,6 +323,15 @@ def test_sqlite_core_fact_repository_preserves_research_objectives_when_replacin
         "col_test",
         (paper_skim,),
         (objective,),
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "question": objective.question,
+                    "material_scope": ["316L stainless steel"],
+                }
+            ),
+        ),
     )
 
     repository.replace_collection_facts(
@@ -320,6 +356,7 @@ def test_sqlite_core_fact_repository_preserves_research_objectives_when_replacin
     assert restored.paper_facts_ready is True
     assert restored.paper_skims[0].document_id == "paper-1"
     assert restored.research_objectives[0].material_scope == ("316L stainless steel",)
+    assert restored.objective_contexts[0].objective_id == objective.objective_id
     assert restored.document_profiles[0].document_id == "doc-1"
 
 

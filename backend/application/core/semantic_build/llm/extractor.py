@@ -14,6 +14,7 @@ from .schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
     StructuredObjectiveMergePlan,
+    StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
@@ -21,6 +22,7 @@ from .schemas import (
 )
 from .prompts import (
     build_document_profile_prompt,
+    build_objective_paper_frame_prompt,
     build_paper_skim_prompt,
     build_research_axis_canonicalization_prompt,
     build_research_objective_discovery_prompt,
@@ -147,6 +149,20 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredAxisCanonicalizationPlan):
             raise TypeError("unexpected research axis canonicalization response type")
+        return response
+
+    def frame_objective_paper(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectivePaperFrame:
+        system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredObjectivePaperFrame,
+        )
+        if not isinstance(response, StructuredObjectivePaperFrame):
+            raise TypeError("unexpected objective paper frame response type")
         return response
 
     def _parse_structured_response(

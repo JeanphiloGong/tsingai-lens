@@ -11,6 +11,7 @@ from application.core.semantic_build.document_profile_service import (
 from application.source.collection_service import CollectionService
 from domain.core import (
     ObjectiveContext,
+    ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
     build_research_objective_id,
@@ -36,6 +37,10 @@ logger = logging.getLogger(__name__)
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
 _SKIM_CAPTION_LIMIT = 12
+_FRAME_SECTION_SNIPPET_LIMIT = 24
+_FRAME_SECTION_TEXT_CHARS = 900
+_FRAME_TABLE_LIMIT = 20
+_FRAME_TABLE_ROW_LIMIT = 6
 _BROAD_PROPERTY_AXIS_EXPANSIONS = {
     "mechanical properties": (
         "yield strength",
@@ -239,13 +244,24 @@ class ResearchObjectiveService:
             objectives=research_objectives,
             tables=artifacts.tables,
         )
+        objective_paper_frames = self._build_objective_paper_frames(
+            collection_id=collection_id,
+            extractor=extractor,
+            objectives=research_objectives,
+            objective_contexts=objective_contexts,
+            paper_skims=tuple(paper_skims),
+            documents=artifacts.documents,
+            profiles_by_document_id=profiles_by_document_id,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+        )
 
         self.core_fact_repository.replace_collection_research_objectives(
             collection_id,
             tuple(paper_skims),
             research_objectives,
             objective_contexts,
-            (),
+            objective_paper_frames,
             (),
             (),
             (),
@@ -257,6 +273,197 @@ class ResearchObjectiveService:
             len(research_objectives),
         )
         return research_objectives
+
+    def _build_objective_paper_frames(
+        self,
+        *,
+        collection_id: str,
+        extractor: CoreLLMStructuredExtractor,
+        objectives: tuple[ResearchObjective, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
+        paper_skims: tuple[PaperSkim, ...],
+        documents: tuple[Any, ...],
+        profiles_by_document_id: dict[str, Any],
+        blocks_by_document_id: dict[str, list[Any]],
+        tables_by_document_id: dict[str, list[Any]],
+    ) -> tuple[ObjectivePaperFrame, ...]:
+        context_by_objective_id = {
+            context.objective_id: context
+            for context in objective_contexts
+        }
+        skim_by_document_id = {
+            skim.document_id: skim
+            for skim in paper_skims
+            if skim.document_id
+        }
+        frames: list[ObjectivePaperFrame] = []
+        logger.info(
+            "Research objective paper framing started collection_id=%s objective_count=%s document_count=%s",
+            collection_id,
+            len(objectives),
+            len(documents),
+        )
+        for objective in objectives:
+            objective_context = context_by_objective_id.get(objective.objective_id)
+            for document in documents:
+                document_id = str(getattr(document, "document_id", "") or "")
+                tables = tables_by_document_id.get(document_id, [])
+                known_table_ids = {
+                    str(getattr(table, "table_id", "") or "")
+                    for table in tables
+                    if str(getattr(table, "table_id", "") or "")
+                }
+                payload = self._build_objective_paper_frame_payload(
+                    collection_id=collection_id,
+                    objective=objective,
+                    objective_context=objective_context,
+                    paper_skim=skim_by_document_id.get(document_id),
+                    document=document,
+                    profile=profiles_by_document_id.get(document_id),
+                    blocks=blocks_by_document_id.get(document_id, []),
+                    tables=tables,
+                )
+                parsed = extractor.frame_objective_paper(payload)
+                record = parsed.model_dump()
+                relevant_tables = self._filter_known_values(
+                    record.get("relevant_tables"),
+                    known_values=known_table_ids,
+                )
+                excluded_tables = tuple(
+                    table_id
+                    for table_id in self._filter_known_values(
+                        record.get("excluded_tables"),
+                        known_values=known_table_ids,
+                    )
+                    if table_id not in set(relevant_tables)
+                )
+                section_labels = {
+                    str(item.get("section_label") or "")
+                    for item in payload["section_snippets"]
+                    if str(item.get("section_label") or "")
+                }
+                record.update(
+                    {
+                        "objective_id": objective.objective_id,
+                        "document_id": document_id,
+                        "relevant_sections": self._filter_known_values(
+                            record.get("relevant_sections"),
+                            known_values=section_labels,
+                        ),
+                        "relevant_tables": relevant_tables,
+                        "excluded_tables": excluded_tables,
+                    }
+                )
+                frames.append(ObjectivePaperFrame.from_mapping(record))
+        logger.info(
+            "Research objective paper framing finished collection_id=%s frame_count=%s",
+            collection_id,
+            len(frames),
+        )
+        return tuple(frames)
+
+    def _build_objective_paper_frame_payload(
+        self,
+        *,
+        collection_id: str,
+        objective: ResearchObjective,
+        objective_context: ObjectiveContext | None,
+        paper_skim: PaperSkim | None,
+        document: Any,
+        profile: Any,
+        blocks: list[Any],
+        tables: list[Any],
+    ) -> dict[str, Any]:
+        return {
+            "collection_id": collection_id,
+            "objective": objective.to_record(),
+            "objective_context": (
+                objective_context.to_record() if objective_context is not None else {}
+            ),
+            "paper_skim": paper_skim.to_record() if paper_skim is not None else {},
+            "document": {
+                "document_id": getattr(document, "document_id", None),
+                "title": getattr(document, "title", None),
+                "source_filename": self._resolve_source_filename(document),
+            },
+            "document_profile": profile.to_record() if profile else {},
+            "section_snippets": self._build_frame_section_snippets(blocks),
+            "table_summaries": self._build_frame_table_summaries(tables),
+        }
+
+    def _build_frame_section_snippets(self, blocks: list[Any]) -> list[dict[str, Any]]:
+        snippets: list[dict[str, Any]] = []
+        for block in sorted(
+            blocks,
+            key=lambda item: int(getattr(item, "block_order", 0) or 0),
+        ):
+            text = str(getattr(block, "text", "") or "").strip()
+            if not text:
+                continue
+            block_type = str(getattr(block, "block_type", "") or "")
+            if block_type not in {"heading", "paragraph", "list_item"}:
+                continue
+            section_label = str(getattr(block, "heading_path", "") or "").strip()
+            if block_type == "heading":
+                section_label = text
+            if not section_label:
+                section_label = "Unsectioned"
+            snippets.append(
+                {
+                    "section_label": section_label,
+                    "block_type": block_type,
+                    "text": text[:_FRAME_SECTION_TEXT_CHARS],
+                }
+            )
+            if len(snippets) >= _FRAME_SECTION_SNIPPET_LIMIT:
+                break
+        return snippets
+
+    def _build_frame_table_summaries(self, tables: list[Any]) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for table in sorted(
+            tables,
+            key=lambda item: int(getattr(item, "table_order", 0) or 0),
+        )[:_FRAME_TABLE_LIMIT]:
+            matrix = tuple(getattr(table, "table_matrix", ()) or ())
+            sample_rows = [
+                [str(cell) for cell in row]
+                for row in matrix[:_FRAME_TABLE_ROW_LIMIT]
+                if isinstance(row, (list, tuple))
+            ]
+            summaries.append(
+                {
+                    "table_id": str(getattr(table, "table_id", "") or ""),
+                    "caption_text": getattr(table, "caption_text", None),
+                    "heading_path": getattr(table, "heading_path", None),
+                    "column_headers": [
+                        str(value)
+                        for value in getattr(table, "column_headers", ()) or ()
+                    ],
+                    "row_count": int(getattr(table, "row_count", 0) or 0),
+                    "col_count": int(getattr(table, "col_count", 0) or 0),
+                    "sample_rows": sample_rows,
+                }
+            )
+        return summaries
+
+    def _filter_known_values(
+        self,
+        values: Any,
+        *,
+        known_values: set[str],
+    ) -> tuple[str, ...]:
+        if not known_values or not isinstance(values, (list, tuple, set)):
+            return ()
+        filtered: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text or text not in known_values or text in seen:
+                continue
+            seen.add(text)
+            filtered.append(text)
+        return tuple(filtered)
 
     def _build_objective_contexts(
         self,

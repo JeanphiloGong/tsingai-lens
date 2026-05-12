@@ -10,6 +10,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredExtractionBundle,
     StructuredObjectiveMergePlan,
+    StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
@@ -282,6 +283,40 @@ def test_core_llm_extractor_validates_research_objective_merge_response():
 
     assert isinstance(merge_plan, StructuredObjectiveMergePlan)
     assert merge_plan.merged_objectives[0].source_objective_ids == ["obj-1", "obj-2"]
+
+
+def test_core_llm_extractor_validates_objective_paper_frame_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "relevance": "high",
+          "paper_role": "primary_experiment",
+          "background": "Direct current-work evidence for the objective.",
+          "material_match": ["316L stainless steel"],
+          "changed_variables": ["heat treatment"],
+          "measured_property_scope": ["corrosion"],
+          "test_environment_scope": ["3.5 wt.% NaCl"],
+          "relevant_sections": ["Results"],
+          "relevant_tables": ["table-1"],
+          "excluded_tables": ["table-2"]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    frame = extractor.frame_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "paper_skim": {"document_id": "paper-1"},
+            "section_snippets": [{"section_label": "Results"}],
+            "table_summaries": [{"table_id": "table-1"}, {"table_id": "table-2"}],
+        }
+    )
+
+    assert isinstance(frame, StructuredObjectivePaperFrame)
+    assert frame.relevance == "high"
+    assert frame.relevant_tables == ["table-1"]
 
 
 def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():

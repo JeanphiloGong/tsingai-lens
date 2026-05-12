@@ -50,6 +50,17 @@ _PAPER_SKIM_DOC_ROLES = {
     "uncertain",
 }
 _PAPER_SKIM_EVIDENCE_DENSITIES = {"high", "medium", "low", "unknown"}
+_OBJECTIVE_FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
+_OBJECTIVE_FRAME_PAPER_ROLES = {
+    "primary_experiment",
+    "supporting_method",
+    "supporting_background",
+    "review",
+    "modeling_only",
+    "irrelevant",
+    "mixed",
+    "uncertain",
+}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -700,6 +711,62 @@ class StructuredObjectiveMergeGroup(_StrictModel):
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
+
+
+class StructuredObjectivePaperFrame(_StrictModel):
+    relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"] = (
+        "uncertain"
+    )
+    paper_role: Literal[
+        "primary_experiment",
+        "supporting_method",
+        "supporting_background",
+        "review",
+        "modeling_only",
+        "irrelevant",
+        "mixed",
+        "uncertain",
+    ] = "uncertain"
+    background: str | None = None
+    material_match: list[str] = Field(default_factory=list)
+    changed_variables: list[str] = Field(default_factory=list)
+    measured_property_scope: list[str] = Field(default_factory=list)
+    test_environment_scope: list[str] = Field(default_factory=list)
+    relevant_sections: list[str] = Field(default_factory=list)
+    relevant_tables: list[str] = Field(default_factory=list)
+    excluded_tables: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "material_match",
+        "changed_variables",
+        "measured_property_scope",
+        "test_environment_scope",
+        "relevant_sections",
+        "relevant_tables",
+        "excluded_tables",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+    @field_validator("relevance", mode="before")
+    @classmethod
+    def _normalize_relevance(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_FRAME_RELEVANCE,
+            default="uncertain",
+        )
+
+    @field_validator("paper_role", mode="before")
+    @classmethod
+    def _normalize_paper_role(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_FRAME_PAPER_ROLES,
+            default="uncertain",
+        )
 
 
 class StructuredObjectiveMergePlan(_StrictModel):

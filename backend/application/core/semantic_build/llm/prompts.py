@@ -47,6 +47,20 @@ Non-negotiable rules:
 """.strip()
 
 
+_OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
+You are framing one paper against one research objective for an evidence-backed literature comparison backend.
+
+Non-negotiable rules:
+- This is coarse objective-paper routing, not final fact extraction.
+- Return exactly one JSON object and nothing else.
+- Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
+- You may return table ids only by copying ids from `table_summaries`.
+- You may return section labels only by copying headings from `section_snippets`.
+- Do not infer material systems from filenames.
+- Prefer a conservative frame: mark unrelated or review-only papers as low, irrelevant, review, or supporting_background.
+""".strip()
+
+
 _TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE = """
 JSON compliance rules for text-window extraction:
 - Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, `warnings`, `anchors`, or `measurement_results`.
@@ -538,3 +552,30 @@ def build_research_objective_merge_prompt(
         "were merged or kept separate.\n"
     )
     return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+
+
+def build_objective_paper_frame_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Frame this one paper for this one research objective.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with these fields: relevance, "
+        "paper_role, background, material_match, changed_variables, "
+        "measured_property_scope, test_environment_scope, relevant_sections, "
+        "relevant_tables, and excluded_tables.\n"
+        "Use the current `objective` and `objective_context` as the research lens.\n"
+        "`relevance` should be high only when the paper directly supports the "
+        "objective's material/process/property comparison. Use medium or low for "
+        "partial support, and irrelevant when the paper does not serve the lens.\n"
+        "`paper_role` should distinguish current experiments from background, "
+        "review, modeling-only, mixed, or irrelevant papers.\n"
+        "`relevant_tables` should include only tables likely useful for later "
+        "objective-scoped extraction. Exclude composition-only, generic parameter, "
+        "review/literature-comparison, or unrelated tables unless they directly "
+        "support this objective.\n"
+        "`excluded_tables` should list visible tables that should not be extracted "
+        "for this objective.\n"
+        "Do not invent table ids or section labels. If uncertain, leave arrays empty."
+    )
+    return _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT, user_prompt

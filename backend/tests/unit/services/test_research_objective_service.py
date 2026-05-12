@@ -8,6 +8,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredDocumentProfile,
     StructuredObjectiveMergeGroup,
     StructuredObjectiveMergePlan,
+    StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
@@ -25,6 +26,7 @@ class _ObjectiveExtractor:
         self.discovery_payloads: list[dict[str, Any]] = []
         self.canonicalization_payloads: list[dict[str, Any]] = []
         self.merge_payloads: list[dict[str, Any]] = []
+        self.frame_payloads: list[dict[str, Any]] = []
 
     def extract_document_profile(
         self,
@@ -137,6 +139,82 @@ class _ObjectiveExtractor:
                 for candidate in payload["candidate_objectives"]
             ]
         )
+
+    def frame_objective_paper(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectivePaperFrame:
+        self.frame_payloads.append(payload)
+        objective = payload["objective"]
+        document = payload["document"]
+        paper_skim = payload["paper_skim"]
+        document_id = str(document.get("document_id") or "")
+        table_summaries = payload["table_summaries"]
+        if document_id in objective.get("excluded_document_ids", ()):
+            return StructuredObjectivePaperFrame(
+                relevance="irrelevant",
+                paper_role="review",
+                background="Excluded by objective discovery.",
+                material_match=[],
+                changed_variables=[],
+                measured_property_scope=[],
+                test_environment_scope=[],
+                relevant_sections=[],
+                relevant_tables=[],
+                excluded_tables=[
+                    table["table_id"]
+                    for table in table_summaries
+                    if table.get("table_id")
+                ],
+            )
+        relevant_tables = self._matching_frame_table_ids(
+            table_summaries,
+            axes=(
+                *objective.get("process_axes", ()),
+                *objective.get("property_axes", ()),
+            ),
+        )
+        section_labels = [
+            item["section_label"]
+            for item in payload["section_snippets"]
+            if item.get("section_label")
+        ]
+        return StructuredObjectivePaperFrame(
+            relevance="high",
+            paper_role="primary_experiment",
+            background="Paper directly supports the active research objective.",
+            material_match=list(paper_skim.get("candidate_materials") or []),
+            changed_variables=list(paper_skim.get("changed_variables") or []),
+            measured_property_scope=list(objective.get("property_axes") or []),
+            test_environment_scope=[],
+            relevant_sections=section_labels[:2],
+            relevant_tables=relevant_tables,
+            excluded_tables=[
+                table["table_id"]
+                for table in table_summaries
+                if table.get("table_id") and table["table_id"] not in relevant_tables
+            ],
+        )
+
+    def _matching_frame_table_ids(
+        self,
+        table_summaries: list[dict[str, Any]],
+        *,
+        axes: tuple[str, ...],
+    ) -> list[str]:
+        table_ids: list[str] = []
+        for table in table_summaries:
+            text = " ".join(
+                str(value or "")
+                for value in (
+                    table.get("caption_text"),
+                    table.get("heading_path"),
+                    " ".join(table.get("column_headers") or []),
+                )
+            ).lower()
+            if any(str(axis or "").lower() in text for axis in axes):
+                table_ids.append(str(table["table_id"]))
+        return table_ids
 
 
 class _BroadObjectiveExtractor(_ObjectiveExtractor):
@@ -780,8 +858,29 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
     assert objective_context.process_context_axes == ("LPBF", "heat treatment")
     assert objective_context.routing_hints[0]["table_id"] == "table-1"
     assert objective_context.routing_hints[0]["role"] == "result_table"
+    assert len(facts.objective_paper_frames) == 2
+    active_frame = next(
+        frame
+        for frame in facts.objective_paper_frames
+        if frame.document_id == "paper-1"
+    )
+    excluded_frame = next(
+        frame
+        for frame in facts.objective_paper_frames
+        if frame.document_id == "paper-2"
+    )
+    assert active_frame.objective_id == facts.research_objectives[0].objective_id
+    assert active_frame.relevance == "high"
+    assert active_frame.paper_role == "primary_experiment"
+    assert active_frame.relevant_tables == ("table-1",)
+    assert excluded_frame.relevance == "irrelevant"
+    assert excluded_frame.paper_role == "review"
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
+    assert extractor.frame_payloads[0]["objective_context"]["objective_id"] == (
+        facts.research_objectives[0].objective_id
+    )
+    assert extractor.frame_payloads[0]["table_summaries"][0]["table_id"] == "table-1"
 
     skim_call_count = len(extractor.skim_payloads)
     assert service.read_research_objectives(collection_id) == objectives
@@ -999,9 +1098,8 @@ def test_research_objective_service_builds_targeted_objective_contexts(
     )
 
     service.build_research_objectives(collection_id)
-    contexts = service.core_fact_repository.read_collection_facts(
-        collection_id
-    ).objective_contexts
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    contexts = facts.objective_contexts
 
     assert len(contexts) == 2
     structure_context = next(
@@ -1026,6 +1124,17 @@ def test_research_objective_service_builds_targeted_objective_contexts(
     assert "microhardness" in mechanical_context.routing_hints[1][
         "matched_property_axes"
     ]
+    frames_by_objective_id = {
+        frame.objective_id: frame
+        for frame in facts.objective_paper_frames
+    }
+    assert frames_by_objective_id[structure_context.objective_id].relevant_tables == (
+        "table-1",
+    )
+    assert frames_by_objective_id[mechanical_context.objective_id].relevant_tables == (
+        "table-1",
+        "table-2",
+    )
 
 
 def test_research_objective_service_canonicalizes_axis_aliases_with_llm(

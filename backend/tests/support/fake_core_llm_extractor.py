@@ -8,6 +8,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
+    StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
@@ -306,6 +307,93 @@ class FakeCoreLLMStructuredExtractor:
                 for value in values
                 if str(value).strip()
             ]
+        )
+
+    def frame_objective_paper(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectivePaperFrame:
+        objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
+        paper_skim = payload.get("paper_skim") if isinstance(payload.get("paper_skim"), dict) else {}
+        document = payload.get("document") if isinstance(payload.get("document"), dict) else {}
+        document_id = str(document.get("document_id") or "")
+        table_summaries = (
+            payload.get("table_summaries")
+            if isinstance(payload.get("table_summaries"), list)
+            else []
+        )
+        excluded_document_ids = {
+            str(value)
+            for value in objective.get("excluded_document_ids", [])
+            if str(value).strip()
+        }
+        if document_id in excluded_document_ids or paper_skim.get("doc_role") == "review":
+            return StructuredObjectivePaperFrame(
+                relevance="irrelevant",
+                paper_role="review",
+                background="Paper does not directly support the objective.",
+                excluded_tables=[
+                    str(table.get("table_id"))
+                    for table in table_summaries
+                    if isinstance(table, dict) and table.get("table_id")
+                ],
+            )
+
+        axes = [
+            str(value).lower()
+            for value in (
+                *(objective.get("process_axes") or []),
+                *(objective.get("property_axes") or []),
+            )
+            if str(value).strip()
+        ]
+        relevant_tables: list[str] = []
+        excluded_tables: list[str] = []
+        for table in table_summaries:
+            if not isinstance(table, dict):
+                continue
+            table_id = str(table.get("table_id") or "")
+            table_text = " ".join(
+                str(value or "")
+                for value in (
+                    table.get("caption_text"),
+                    table.get("heading_path"),
+                    " ".join(str(item) for item in table.get("column_headers") or []),
+                )
+            ).lower()
+            if table_id and any(axis in table_text for axis in axes):
+                relevant_tables.append(table_id)
+            elif table_id:
+                excluded_tables.append(table_id)
+
+        section_labels = [
+            str(item.get("section_label"))
+            for item in payload.get("section_snippets", [])
+            if isinstance(item, dict) and item.get("section_label")
+        ]
+        return StructuredObjectivePaperFrame(
+            relevance="high" if paper_skim else "uncertain",
+            paper_role="primary_experiment",
+            background="Paper directly supports the objective.",
+            material_match=[
+                str(item)
+                for item in paper_skim.get("candidate_materials", [])
+                if str(item).strip()
+            ],
+            changed_variables=[
+                str(item)
+                for item in paper_skim.get("changed_variables", [])
+                if str(item).strip()
+            ],
+            measured_property_scope=[
+                str(item)
+                for item in objective.get("property_axes", [])
+                if str(item).strip()
+            ],
+            test_environment_scope=[],
+            relevant_sections=section_labels[:2],
+            relevant_tables=relevant_tables,
+            excluded_tables=excluded_tables,
         )
 
     def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:

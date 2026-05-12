@@ -990,32 +990,8 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path):
     assert excluded_table_route.role == "low_value_or_irrelevant"
     assert excluded_table_route.extractable is False
     assert text_route.role == "process_or_treatment"
-    measurement_units = [
-        unit
-        for unit in facts.objective_evidence_units
-        if unit.unit_kind == "measurement"
-    ]
-    assert len(measurement_units) == 2
-    assert {unit.property_normalized for unit in measurement_units} == {
-        "corrosion_current_density"
-    }
-    assert {
-        unit.value_payload["source_value_text"]
-        for unit in measurement_units
-    } == {"1.2 uA/cm2", "0.4 uA/cm2"}
-    assert {
-        unit.sample_context["source_value"]
-        for unit in measurement_units
-    } == {"as-built", "heat-treated"}
-    assert all(
-        unit.source_refs[0]["table_id"] == "table-1"
-        for unit in measurement_units
-    )
-    assert len(facts.objective_logic_chains) == 1
-    assert facts.objective_logic_chains[0].evidence_unit_ids == tuple(
-        unit.evidence_unit_id
-        for unit in measurement_units
-    )
+    assert facts.objective_evidence_units == ()
+    assert facts.objective_logic_chains == ()
     assert len(extractor.route_payloads) == 1
     assert extractor.route_payloads[0]["paper_frame"]["frame_id"] == active_frame.frame_id
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"

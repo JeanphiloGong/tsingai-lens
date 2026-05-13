@@ -53,6 +53,9 @@ from domain.core.objective_material_projection import (
     ObjectiveMaterialProjectionRow,
     project_objective_material_rows,
 )
+from domain.core.objective_comparison_projection import (
+    project_objective_comparison_rows,
+)
 from domain.core.research_objective import (
     EVIDENCE_RESOLUTION_STATUS_VALUES,
     EVIDENCE_ROUTE_ROLE_VALUES,
@@ -132,6 +135,7 @@ __all__ = [
     "is_question_shaped_objective",
     "normalize_objective_confidence",
     "normalize_objective_terms",
+    "project_objective_comparison_rows",
     "project_objective_material_rows",
     "summarize_document_profile_collection",
 ]

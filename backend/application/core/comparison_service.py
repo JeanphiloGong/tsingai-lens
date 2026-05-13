@@ -14,6 +14,9 @@ from domain.core.comparison_projection import (
     ComparisonProjectionRecords,
     ComparisonRowProjector,
 )
+from domain.core.objective_comparison_projection import (
+    project_objective_comparison_rows,
+)
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
@@ -544,6 +547,25 @@ class ComparisonService:
         collection_id: str,
     ) -> tuple[ComparisonRowRecord, ...]:
         self.collection_service.get_collection(collection_id)
+        objective_row_records = self._build_objective_comparison_rows(collection_id)
+        if objective_row_records:
+            semantic_records = ComparisonSemanticRecords(
+                comparable_results=(),
+                collection_comparable_results=(),
+                pairwise_comparison_relations=(),
+            )
+            self._store_comparison_artifacts(
+                collection_id=collection_id,
+                semantic_records=semantic_records,
+                row_records=objective_row_records,
+            )
+            logger.info(
+                "Objective comparison projection finished collection_id=%s comparison_rows=%s",
+                collection_id,
+                len(objective_row_records),
+            )
+            return objective_row_records
+
         records = self._load_comparison_inputs(collection_id)
         logger.info(
             "Comparison assembly started collection_id=%s measurement_results=%s sample_variants=%s test_conditions=%s baselines=%s",
@@ -592,6 +614,21 @@ class ComparisonService:
             len(semantic_records.pairwise_comparison_relations),
             len(row_records),
         )
+        return row_records
+
+    def _build_objective_comparison_rows(
+        self,
+        collection_id: str,
+    ) -> tuple[ComparisonRowRecord, ...]:
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if not facts.objective_evidence_units:
+            return ()
+        row_records = project_objective_comparison_rows(
+            collection_id=collection_id,
+            evidence_units=facts.objective_evidence_units,
+        )
+        if not row_records:
+            raise ComparisonRowsNotReadyError(collection_id)
         return row_records
 
     def _load_comparison_inputs(

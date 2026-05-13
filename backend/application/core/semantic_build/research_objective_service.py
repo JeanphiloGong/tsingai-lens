@@ -1390,6 +1390,12 @@ class ResearchObjectiveService:
         resolved_units = self._attach_objective_method_test_conditions_to_measurements(
             resolved_units
         )
+        table_characterization_units = self._build_objective_table_characterization_units(
+            units=resolved_units,
+            objective_contexts=objective_contexts,
+        )
+        if table_characterization_units:
+            resolved_units = (*resolved_units, *table_characterization_units)
         comparison_units = self._build_objective_pairwise_comparison_units(
             resolved_units,
             objective_contexts=objective_contexts,
@@ -1528,6 +1534,12 @@ class ResearchObjectiveService:
         if normalized in _OBJECTIVE_CHARACTERIZATION_METHOD_PROPERTIES:
             return "density_porosity_microstructure"
         return None
+
+    def _objective_property_is_characterization(self, property_name: Any) -> bool:
+        return (
+            self._objective_method_family_for_property(property_name)
+            == "density_porosity_microstructure"
+        )
 
     def _objective_method_family_candidate(
         self,
@@ -1833,6 +1845,269 @@ class ResearchObjectiveService:
             )
             resolved_units.append(ObjectiveEvidenceUnit.from_mapping(record))
         return tuple(resolved_units)
+
+    def _build_objective_table_characterization_units(
+        self,
+        *,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        objective_ids_with_characterization_target = {
+            context.objective_id
+            for context in objective_contexts
+            if any(
+                self._objective_property_is_characterization(axis)
+                for axis in context.target_property_axes
+            )
+        }
+        density_units_by_scope: dict[tuple[str, str], list[ObjectiveEvidenceUnit]] = {}
+        for unit in units:
+            if unit.unit_kind != "measurement":
+                continue
+            if unit.objective_id not in objective_ids_with_characterization_target:
+                continue
+            if self._normalize_property_label(unit.property_normalized) not in {
+                "density",
+                "relative density",
+            }:
+                continue
+            if self._objective_measurement_numeric_value(unit) is None:
+                continue
+            density_units_by_scope.setdefault(
+                (unit.objective_id, unit.document_id),
+                [],
+            ).append(unit)
+
+        records: list[dict[str, Any]] = []
+        for (objective_id, document_id), density_units in density_units_by_scope.items():
+            if not density_units:
+                continue
+            records.extend(
+                self._objective_density_characterization_records(
+                    objective_id=objective_id,
+                    document_id=document_id,
+                    density_units=density_units,
+                )
+            )
+            records.extend(
+                self._objective_strategy_characterization_records(
+                    objective_id=objective_id,
+                    document_id=document_id,
+                    density_units=density_units,
+                )
+            )
+        return tuple(ObjectiveEvidenceUnit.from_mapping(record) for record in records)
+
+    def _objective_density_characterization_records(
+        self,
+        *,
+        objective_id: str,
+        document_id: str,
+        density_units: list[ObjectiveEvidenceUnit],
+    ) -> list[dict[str, Any]]:
+        values = [
+            (unit, self._objective_measurement_numeric_value(unit))
+            for unit in density_units
+        ]
+        numeric_values = [
+            (unit, value)
+            for unit, value in values
+            if value is not None
+        ]
+        if not numeric_values:
+            return []
+        min_value = min(value for _, value in numeric_values)
+        max_unit, max_value = max(numeric_values, key=lambda item: item[1])
+        sample_label = self._objective_sample_label(max_unit.sample_context)
+        source_refs = self._dedupe_objective_source_refs(
+            unit.source_refs
+            for unit, _ in numeric_values
+        )
+        return [
+            self._objective_characterization_record(
+                objective_id=objective_id,
+                document_id=document_id,
+                characterization_type="density_porosity_sem_imagej",
+                property_normalized="relative density",
+                sample_context={"sample_count": len(numeric_values)},
+                value_payload={
+                    "relative_density_min": min_value,
+                    "relative_density_max": max_value,
+                    "sample_count": len(numeric_values),
+                },
+                unit="%",
+                interpretation=(
+                    "Table-derived SEM/ImageJ relative density evidence covers "
+                    f"{len(numeric_values)} samples with relative density from "
+                    f"{min_value:g}% to {max_value:g}%."
+                ),
+                source_refs=source_refs,
+            ),
+            self._objective_characterization_record(
+                objective_id=objective_id,
+                document_id=document_id,
+                characterization_type="highest_density_sample",
+                property_normalized="relative density",
+                sample_context=dict(max_unit.sample_context),
+                process_context=dict(max_unit.process_context),
+                value_payload={
+                    "relative_density": max_value,
+                    "sample_label": sample_label,
+                },
+                unit="%",
+                interpretation=(
+                    f"Sample {sample_label} has the highest table-derived "
+                    f"relative density at {max_value:g}%."
+                ),
+                source_refs=tuple(dict(ref) for ref in max_unit.source_refs),
+            ),
+        ]
+
+    def _objective_strategy_characterization_records(
+        self,
+        *,
+        objective_id: str,
+        document_id: str,
+        density_units: list[ObjectiveEvidenceUnit],
+    ) -> list[dict[str, Any]]:
+        units_by_strategy: dict[str, list[ObjectiveEvidenceUnit]] = {}
+        for unit in density_units:
+            strategy = self._objective_process_value(
+                unit.process_context,
+                "scan_strategy",
+            )
+            if strategy:
+                units_by_strategy.setdefault(strategy.upper(), []).append(unit)
+
+        records: list[dict[str, Any]] = []
+        for strategy in sorted(units_by_strategy):
+            strategy_units = units_by_strategy[strategy]
+            values = [
+                self._objective_measurement_numeric_value(unit)
+                for unit in strategy_units
+            ]
+            numeric_values = [value for value in values if value is not None]
+            if not numeric_values:
+                continue
+            sample_labels = self._dedupe_preserving_order(
+                [
+                    self._objective_sample_label(unit.sample_context)
+                    for unit in strategy_units
+                ]
+            )
+            records.append(
+                self._objective_characterization_record(
+                    objective_id=objective_id,
+                    document_id=document_id,
+                    characterization_type=f"scan_strategy_{strategy.lower()}",
+                    property_normalized="relative density",
+                    sample_context={
+                        "scan_strategy": strategy,
+                        "sample_labels": sample_labels,
+                    },
+                    value_payload={
+                        "scan_strategy": strategy,
+                        "relative_density_min": min(numeric_values),
+                        "relative_density_max": max(numeric_values),
+                    },
+                    unit="%",
+                    interpretation=(
+                        f"Scan strategy {strategy} appears in samples "
+                        f"{', '.join(sample_labels)} with table-derived relative "
+                        f"density from {min(numeric_values):g}% to "
+                        f"{max(numeric_values):g}%."
+                    ),
+                    source_refs=self._dedupe_objective_source_refs(
+                        unit.source_refs for unit in strategy_units
+                    ),
+                )
+            )
+        return records
+
+    def _objective_characterization_record(
+        self,
+        *,
+        objective_id: str,
+        document_id: str,
+        characterization_type: str,
+        property_normalized: str,
+        sample_context: dict[str, Any],
+        value_payload: dict[str, Any],
+        unit: str,
+        interpretation: str,
+        source_refs: tuple[dict[str, Any], ...],
+        process_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        seed = "|".join(
+            (
+                "characterization",
+                objective_id,
+                document_id,
+                characterization_type,
+            )
+        )
+        return {
+            "evidence_unit_id": f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}",
+            "objective_id": objective_id,
+            "document_id": document_id,
+            "unit_kind": "characterization",
+            "property_normalized": property_normalized,
+            "sample_context": sample_context,
+            "process_context": process_context or {},
+            "test_condition": {
+                "method": "SEM / ImageJ",
+                "methods": ["SEM", "ImageJ"],
+                "method_family": "density_porosity_microstructure",
+            },
+            "value_payload": {
+                "characterization_type": characterization_type,
+                **value_payload,
+            },
+            "unit": unit,
+            "interpretation": interpretation,
+            "source_refs": source_refs,
+            "resolution_status": "resolved",
+            "confidence": 0.86,
+        }
+
+    def _objective_process_value(
+        self,
+        process_context: dict[str, Any],
+        target_key: str,
+    ) -> str | None:
+        for key, value in process_context.items():
+            if self._objective_column_key(str(key)) == target_key:
+                text = str(value or "").strip()
+                return text or None
+        return None
+
+    def _objective_sample_label(self, sample_context: dict[str, Any]) -> str:
+        for key in ("Sample number", "sample_number", "sample", "label"):
+            value = sample_context.get(key)
+            if value not in (None, ""):
+                return str(value).strip()
+        for key, value in sample_context.items():
+            if "sample" in self._objective_column_key(str(key)) and value not in (
+                None,
+                "",
+            ):
+                return str(value).strip()
+        return "sample"
+
+    def _dedupe_objective_source_refs(
+        self,
+        source_ref_groups: Any,
+    ) -> tuple[dict[str, Any], ...]:
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for refs in source_ref_groups:
+            for ref in refs:
+                key = json.dumps(ref, ensure_ascii=False, sort_keys=True)
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(dict(ref))
+        return tuple(deduped)
 
     def _resolve_objective_evidence_unit_contexts(
         self,
@@ -3099,7 +3374,9 @@ class ResearchObjectiveService:
         if self._value_payload_numeric_value(value_payload) is not None:
             return record
         normalized = dict(record)
-        if route.role == "characterization":
+        if route.role == "characterization" and self._objective_property_is_characterization(
+            record.get("property_normalized")
+        ):
             normalized["unit_kind"] = "characterization"
         else:
             normalized["unit_kind"] = "interpretation"

@@ -1210,6 +1210,77 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
     )
 
 
+def test_research_objective_service_derives_table_characterization_units(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "target_property_axes": ["densification", "microstructure"],
+        }
+    )
+
+    def density_unit(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        strategy: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "relative density",
+                "sample_context": {"Sample number": sample_number},
+                "process_context": {"Scan strategy": strategy},
+                "value_payload": {"source_value_text": str(value), "value": value},
+                "unit": "%",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-1",
+                        "page": 2,
+                    }
+                ],
+                "resolution_status": "resolved",
+            }
+        )
+
+    units = service._build_objective_table_characterization_units(
+        units=(
+            density_unit("density-s1", sample_number="1", strategy="A", value=95.4),
+            density_unit("density-s2", sample_number="2", strategy="B", value=97.7),
+            density_unit("density-s3", sample_number="3", strategy="C", value=93.8),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    characterization_types = {
+        unit.value_payload["characterization_type"]
+        for unit in units
+    }
+    assert characterization_types == {
+        "density_porosity_sem_imagej",
+        "highest_density_sample",
+        "scan_strategy_a",
+        "scan_strategy_b",
+        "scan_strategy_c",
+    }
+    highest = next(
+        unit
+        for unit in units
+        if unit.value_payload["characterization_type"] == "highest_density_sample"
+    )
+    assert highest.sample_context == {"Sample number": "2"}
+    assert highest.value_payload["relative_density"] == 97.7
+
+
 def test_research_objective_service_does_not_keep_text_trends_as_measurements(
     tmp_path,
 ):
@@ -1253,6 +1324,41 @@ def test_research_objective_service_does_not_keep_text_trends_as_measurements(
             "page": 5,
         },
     )
+
+
+def test_research_objective_service_reclassifies_mechanical_text_trends(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 6},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "value_payload": {"result": "higher for strategy A"},
+            "resolution_status": "partial",
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["unit_kind"] == "interpretation"
+    assert records[0]["interpretation"] == "higher for strategy A"
 
 
 def test_research_objective_service_reclassifies_text_comparison_without_pair_context(

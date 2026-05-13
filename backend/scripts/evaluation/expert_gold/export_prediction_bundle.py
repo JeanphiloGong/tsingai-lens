@@ -343,9 +343,10 @@ def _resolve_repository_db_path(
     backend_root: Path,
     source_output_dir: Path,
 ) -> Path:
-    run_scoped_db = source_output_dir.parents[2] / "lens.sqlite"
-    if run_scoped_db.is_file() and run_scoped_db.stat().st_size > 0:
-        return run_scoped_db
+    for candidate_dir in (source_output_dir, *source_output_dir.parents):
+        run_scoped_db = candidate_dir / "lens.sqlite"
+        if run_scoped_db.is_file() and run_scoped_db.stat().st_size > 0:
+            return run_scoped_db
     return backend_root / "data" / "lens.sqlite"
 
 

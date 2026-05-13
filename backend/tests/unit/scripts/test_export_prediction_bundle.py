@@ -102,6 +102,25 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(tmp_path):
     assert output_dir_bundle["metadata"]["collection_id"] == collection_id
     assert output_dir_bundle["comparisons"][0]["comparison_id"] == "rel-1"
 
+    run_root = tmp_path / "probe-run"
+    run_collection_id = "col-run"
+    run_output_dir = run_root / "collections" / run_collection_id / "output"
+    run_output_dir.mkdir(parents=True)
+    _write_system_artifacts_to_db(run_root / "lens.sqlite", run_collection_id)
+    run_output_prediction_path = tmp_path / "generated" / "prediction_from_run.json"
+
+    exporter.export_prediction_bundle(
+        backend_root=backend_root,
+        source_output_dir=run_output_dir,
+        output_path=run_output_prediction_path,
+    )
+
+    run_output_bundle = json.loads(
+        run_output_prediction_path.read_text(encoding="utf-8")
+    )
+    assert run_output_bundle["metadata"]["collection_id"] == run_collection_id
+    assert run_output_bundle["measurement_results"][0]["result_id"] == "res-1"
+
 
 def test_export_prediction_bundle_projects_objective_first_units(tmp_path):
     exporter = _load_exporter_module()
@@ -281,6 +300,10 @@ def test_export_prediction_bundle_allows_missing_artifacts(tmp_path):
 
 def _write_system_artifacts(backend_root: Path, collection_id: str) -> None:
     db_path = backend_root / "data" / "lens.sqlite"
+    _write_system_artifacts_to_db(db_path, collection_id)
+
+
+def _write_system_artifacts_to_db(db_path: Path, collection_id: str) -> None:
     SqliteSourceArtifactRepository(db_path).replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(

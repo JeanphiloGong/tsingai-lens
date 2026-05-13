@@ -1255,102 +1255,77 @@ def test_research_objective_service_generates_pairwise_comparison_units(
             "target_property_axes": ["yield strength"],
         }
     )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        condition_number: str,
+        sample_number: str,
+        strategy: str,
+        speed: str,
+        value: float,
+        confidence: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "sample_context": {
+                    "Condition number": condition_number,
+                    "Sample number": sample_number,
+                },
+                "process_context": {
+                    "Energy density (J/mm 3 )": "70",
+                    "Scan strategy": strategy,
+                    "Scanning speed (mm/s)": speed,
+                },
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": "MPa",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-2",
+                        "page": 3,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": confidence,
+            }
+        )
+
     measurements = (
-        ObjectiveEvidenceUnit.from_mapping(
-            {
-                "evidence_unit_id": "oeu-s1-yield",
-                "objective_id": "obj-mechanical",
-                "document_id": "paper-1",
-                "unit_kind": "measurement",
-                "property_normalized": "yield strength",
-                "sample_context": {
-                    "Condition number": "1",
-                    "Sample number": "1",
-                },
-                "process_context": {
-                    "Energy density (J/mm 3 )": "70",
-                    "Scan strategy": "A",
-                    "Scanning speed (mm/s)": "0.25",
-                },
-                "value_payload": {
-                    "source_value_text": "236.65",
-                    "value": 236.65,
-                },
-                "unit": "MPa",
-                "source_refs": [
-                    {
-                        "source_kind": "table",
-                        "source_ref": "table-2",
-                        "page": 3,
-                    }
-                ],
-                "resolution_status": "resolved",
-                "confidence": 0.8,
-            }
+        measurement(
+            "oeu-s1-yield",
+            condition_number="1",
+            sample_number="1",
+            strategy="A",
+            speed="0.25",
+            value=236.65,
+            confidence=0.8,
         ),
-        ObjectiveEvidenceUnit.from_mapping(
-            {
-                "evidence_unit_id": "oeu-s2-yield",
-                "objective_id": "obj-mechanical",
-                "document_id": "paper-1",
-                "unit_kind": "measurement",
-                "property_normalized": "yield strength",
-                "sample_context": {
-                    "Condition number": "1",
-                    "Sample number": "2",
-                },
-                "process_context": {
-                    "Energy density (J/mm 3 )": "70",
-                    "Scan strategy": "B",
-                    "Scanning speed (mm/s)": "0.25",
-                },
-                "value_payload": {
-                    "source_value_text": "159.97",
-                    "value": 159.97,
-                },
-                "unit": "MPa",
-                "source_refs": [
-                    {
-                        "source_kind": "table",
-                        "source_ref": "table-2",
-                        "page": 3,
-                    }
-                ],
-                "resolution_status": "resolved",
-                "confidence": 0.7,
-            }
+        measurement(
+            "oeu-s2-yield",
+            condition_number="1",
+            sample_number="2",
+            strategy="B",
+            speed="0.25",
+            value=159.97,
+            confidence=0.7,
         ),
-        ObjectiveEvidenceUnit.from_mapping(
-            {
-                "evidence_unit_id": "oeu-s8-yield",
-                "objective_id": "obj-mechanical",
-                "document_id": "paper-1",
-                "unit_kind": "measurement",
-                "property_normalized": "yield strength",
-                "sample_context": {
-                    "Condition number": "4",
-                    "Sample number": "8",
-                },
-                "process_context": {
-                    "Energy density (J/mm 3 )": "70",
-                    "Scan strategy": "A",
-                    "Scanning speed (mm/s)": "0.239",
-                },
-                "value_payload": {
-                    "source_value_text": "187.82",
-                    "value": 187.82,
-                },
-                "unit": "MPa",
-                "source_refs": [
-                    {
-                        "source_kind": "table",
-                        "source_ref": "table-2",
-                        "page": 3,
-                    }
-                ],
-                "resolution_status": "resolved",
-                "confidence": 0.75,
-            }
+        measurement(
+            "oeu-s8-yield",
+            condition_number="4",
+            sample_number="8",
+            strategy="A",
+            speed="0.239",
+            value=187.82,
+            confidence=0.75,
         ),
     )
 

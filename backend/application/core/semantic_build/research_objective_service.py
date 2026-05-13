@@ -1524,13 +1524,6 @@ class ResearchObjectiveService:
         ]
         if len(changed_axes) != 1:
             return None
-        shared_axes = current_axes.keys() & baseline_axes.keys()
-        if any(
-            current_axes[axis] != baseline_axes[axis]
-            for axis in shared_axes
-            if axis not in changed_axes
-        ):
-            return None
         return changed_axes[0]
 
     def _objective_process_axis_values(
@@ -1553,20 +1546,13 @@ class ResearchObjectiveService:
             for key, value in unit.process_context.items():
                 if not str(value).strip():
                     continue
-                if self._objective_process_context_key_matches_axis(key, axis):
+                if self._axis_values_match(
+                    key,
+                    axis,
+                ) or self._axis_label_is_mentioned(key, axis):
                     axis_values[axis_key] = str(value).strip().casefold()
                     break
         return axis_values
-
-    def _objective_process_context_key_matches_axis(
-        self,
-        key: str,
-        axis: str,
-    ) -> bool:
-        return self._axis_values_match(key, axis) or self._axis_label_is_mentioned(
-            key,
-            axis,
-        )
 
     def _objective_pairwise_comparison_unit(
         self,
@@ -1635,8 +1621,11 @@ class ResearchObjectiveService:
                     ),
                     "evidence_unit_id": baseline.evidence_unit_id,
                 },
-                "source_refs": self._dedupe_source_refs(
-                    (*current.source_refs, *baseline.source_refs)
+                "source_refs": self._dedupe_chain_items(
+                    [
+                        *(dict(source_ref) for source_ref in current.source_refs),
+                        *(dict(source_ref) for source_ref in baseline.source_refs),
+                    ]
                 ),
                 "evidence_anchor_ids": self._dedupe_preserving_order(
                     [
@@ -1685,20 +1674,6 @@ class ResearchObjectiveService:
             for key, value in sorted(sample_context.items())
             if str(value).strip()
         )
-
-    def _dedupe_source_refs(
-        self,
-        source_refs: tuple[dict[str, Any], ...],
-    ) -> tuple[dict[str, Any], ...]:
-        deduped: list[dict[str, Any]] = []
-        seen: set[tuple[tuple[str, Any], ...]] = set()
-        for source_ref in source_refs:
-            key = tuple(sorted(source_ref.items()))
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(dict(source_ref))
-        return tuple(deduped)
 
     def _objective_sample_context_match_keys(
         self,

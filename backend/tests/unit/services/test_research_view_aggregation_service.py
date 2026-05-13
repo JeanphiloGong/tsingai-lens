@@ -14,6 +14,7 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    ObjectiveEvidenceUnit,
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
@@ -58,6 +59,7 @@ class FakeCoreFactRepository:
         profiles: list[dict],
         frames: dict[str, list[dict]],
         comparison_rows: list[dict] | None,
+        objective_units: list[dict] | None = None,
     ) -> None:
         self.facts = CoreFactSet(
             document_profiles=self._records(profiles, DocumentProfile),
@@ -96,6 +98,10 @@ class FakeCoreFactRepository:
             comparison_rows=self._records(
                 comparison_rows if comparison_rows is not None else [],
                 ComparisonRowRecord,
+            ),
+            objective_evidence_units=self._records(
+                objective_units if objective_units is not None else [],
+                ObjectiveEvidenceUnit,
             ),
         )
 
@@ -303,6 +309,80 @@ def _comparison_rows(collection_id: str = "col-1") -> list[dict]:
     ]
 
 
+def _objective_units() -> list[dict]:
+    return [
+        {
+            "evidence_unit_id": "oeu-as-built-icorr",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "as-built"},
+            "process_context": {"process": "LPBF"},
+            "resolved_condition": {"medium": "3.5 wt.% NaCl"},
+            "test_condition": {"method": "potentiodynamic polarization"},
+            "property_normalized": "corrosion current density",
+            "value_payload": {"value": 1.2, "source_value_text": "1.2 uA/cm2"},
+            "unit": "uA/cm2",
+            "source_refs": [
+                {
+                    "route_id": "route-table-1",
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                }
+            ],
+            "evidence_anchor_ids": ["anc-as-built"],
+            "resolution_status": "resolved",
+            "confidence": 0.88,
+        },
+        {
+            "evidence_unit_id": "oeu-heat-treated-icorr",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "heat-treated"},
+            "process_context": {
+                "process": "LPBF",
+                "post_treatment_summary": "solution annealed",
+            },
+            "resolved_condition": {"medium": "3.5 wt.% NaCl"},
+            "test_condition": {"method": "potentiodynamic polarization"},
+            "property_normalized": "corrosion current density",
+            "value_payload": {"value": 0.4, "source_value_text": "0.4 uA/cm2"},
+            "unit": "uA/cm2",
+            "source_refs": [
+                {
+                    "route_id": "route-table-1",
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                }
+            ],
+            "evidence_anchor_ids": ["anc-heat-treated"],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-heat-treatment",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "heat-treated"},
+            "process_context": {"post_treatment_summary": "solution annealed"},
+            "source_refs": [
+                {
+                    "route_id": "route-text-1",
+                    "source_kind": "text_window",
+                    "source_ref": "b2",
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.74,
+        },
+    ]
+
+
 def _service(
     *,
     has_files: bool = True,
@@ -324,8 +404,14 @@ def _service_from_frames(
     frames: dict[str, list[dict]],
     *,
     comparison_rows: list[dict] | None = None,
+    objective_units: list[dict] | None = None,
 ) -> ResearchViewAggregationService:
-    core_fact_repository = FakeCoreFactRepository(profiles, frames, comparison_rows)
+    core_fact_repository = FakeCoreFactRepository(
+        profiles,
+        frames,
+        comparison_rows,
+        objective_units,
+    )
     return ResearchViewAggregationService(
         collection_service=FakeCollectionService(),
         document_profile_service=FakeDocumentProfileService(profiles),
@@ -461,6 +547,60 @@ def test_collection_materials_and_profile_are_material_scoped():
         "yield_strength",
     }
     assert profile["comparison_groups"][0]["material_system"] == "Ti-6Al-4V"
+
+
+def test_collection_materials_can_use_objective_evidence_units_without_old_facts():
+    profiles, _ = _frames()
+    service = _service_from_frames(
+        profiles,
+        {
+            "evidence_anchors": [],
+            "method_facts": [],
+            "sample_variants": [],
+            "test_conditions": [],
+            "baseline_references": [],
+            "measurement_results": [],
+            "characterization_observations": [],
+            "structure_features": [],
+        },
+        objective_units=_objective_units(),
+    )
+
+    materials = service.list_collection_materials("col-1")
+
+    assert materials["state"] == "ready"
+    assert [item["material_id"] for item in materials["materials"]] == [
+        "mat-316l-stainless-steel"
+    ]
+    summary = materials["materials"][0]
+    assert summary["canonical_name"] == "316L stainless steel"
+    assert summary["sample_count"] == 2
+    assert summary["measured_properties"] == ["corrosion current density"]
+    assert summary["evidence_coverage"] == {
+        "observed_count": 3,
+        "with_evidence_count": 3,
+        "coverage": 1.0,
+    }
+
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    assert profile["state"] == "ready"
+    assert profile["overview"]["sample_count"] == 2
+    assert profile["overview"]["measured_properties"] == [
+        "corrosion current density"
+    ]
+    assert [row["sample_label"] for row in profile["sample_matrix"]["rows"]] == [
+        "as-built",
+        "heat-treated",
+    ]
+    assert profile["sample_matrix"]["rows"][0]["values"][
+        "corrosion current density"
+    ]["condition"] == "method: potentiodynamic polarization"
+    assert profile["measured_properties"][0]["display_range"] == "0.4-1.2 uA/cm2"
+    assert profile["evidence_refs"][0]["fact_ids"] == ["oeu-as-built-icorr"]
 
 
 def test_collection_materials_does_not_build_comparison_matrices(monkeypatch):

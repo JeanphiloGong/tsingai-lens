@@ -464,7 +464,7 @@
 							</div>
 							{#if step.items.length}
 								<ul>
-									{#each step.items as item (item)}
+									{#each step.items as item}
 										<li>{item}</li>
 									{/each}
 								</ul>

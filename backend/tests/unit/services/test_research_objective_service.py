@@ -1669,6 +1669,83 @@ def test_research_objective_service_resolves_measurements_from_process_units(
     assert resolved_measurement.resolution_status == "resolved"
 
 
+def test_research_objective_service_resolves_measurements_from_process_label(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-measurement",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "pitting potential",
+            "sample_context": {
+                "Sample": "135 W-750 mm·s -1",
+            },
+            "value_payload": {
+                "source_value_text": "355.4",
+                "value": 355.4,
+            },
+            "unit": "mV",
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-135-750",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "process_context": {
+                "Laser power (W)": "135",
+                "Scan speed (mm·s -1)": "750",
+                "Energy density (J mm -3)": "100",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+    other_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-255-1400",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "process_context": {
+                "Laser power (W)": "255",
+                "Scan speed (mm·s -1)": "1400",
+                "Energy density (J mm -3)": "100",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+
+    resolved_units = service._resolve_objective_evidence_unit_contexts(
+        (
+            measurement,
+            matching_process_context,
+            other_process_context,
+        ),
+    )
+
+    resolved_measurement = resolved_units[0]
+    assert resolved_measurement.process_context == {
+        "Laser power (W)": "135",
+        "Scan speed (mm·s -1)": "750",
+        "Energy density (J mm -3)": "100",
+    }
+    assert resolved_measurement.resolved_condition == {
+        "context_unit_id": "oeu-process-135-750",
+        "matched_sample_context": {},
+    }
+    assert resolved_measurement.resolution_status == "resolved"
+
+
 def test_research_objective_service_generates_pairwise_comparison_units(
     tmp_path,
 ):

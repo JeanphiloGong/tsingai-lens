@@ -2119,11 +2119,19 @@ class ResearchObjectiveService:
             tuple[str, str, tuple[tuple[str, str], ...]],
             list[ObjectiveEvidenceUnit],
         ] = {}
+        context_units_by_scope: dict[
+            tuple[str, str],
+            list[ObjectiveEvidenceUnit],
+        ] = {}
         for unit in units:
             if unit.unit_kind == "measurement":
                 continue
             if not unit.process_context and not unit.test_condition:
                 continue
+            context_units_by_scope.setdefault(
+                (unit.objective_id, unit.document_id),
+                [],
+            ).append(unit)
             for key in self._objective_sample_context_match_keys(unit.sample_context):
                 context_units_by_key.setdefault(
                     (unit.objective_id, unit.document_id, key),
@@ -2138,6 +2146,7 @@ class ResearchObjectiveService:
             context_unit = self._matching_objective_context_unit(
                 unit=unit,
                 context_units_by_key=context_units_by_key,
+                context_units_by_scope=context_units_by_scope,
             )
             if context_unit is None:
                 resolved_units.append(unit)
@@ -2181,6 +2190,10 @@ class ResearchObjectiveService:
             tuple[str, str, tuple[tuple[str, str], ...]],
             list[ObjectiveEvidenceUnit],
         ],
+        context_units_by_scope: dict[
+            tuple[str, str],
+            list[ObjectiveEvidenceUnit],
+        ],
     ) -> ObjectiveEvidenceUnit | None:
         for key in self._objective_sample_context_match_keys(unit.sample_context):
             candidates = context_units_by_key.get(
@@ -2196,7 +2209,91 @@ class ResearchObjectiveService:
             ]
             if len(process_context_candidates) == 1:
                 return process_context_candidates[0]
+        return self._matching_objective_process_label_context_unit(
+            unit=unit,
+            candidates=context_units_by_scope.get(
+                (unit.objective_id, unit.document_id),
+                [],
+            ),
+        )
+
+    def _matching_objective_process_label_context_unit(
+        self,
+        *,
+        unit: ObjectiveEvidenceUnit,
+        candidates: list[ObjectiveEvidenceUnit],
+    ) -> ObjectiveEvidenceUnit | None:
+        sample_label = " ".join(
+            str(value).strip()
+            for value in unit.sample_context.values()
+            if str(value).strip()
+        )
+        if not sample_label:
+            return None
+        sample_numbers = set(self._objective_numeric_match_tokens(sample_label))
+        sample_text = self._objective_match_text(sample_label)
+        scored: list[tuple[int, ObjectiveEvidenceUnit]] = []
+        for candidate in candidates:
+            if not candidate.process_context:
+                continue
+            score = self._objective_process_label_match_score(
+                process_context=candidate.process_context,
+                sample_numbers=sample_numbers,
+                sample_text=sample_text,
+            )
+            if score >= 2:
+                scored.append((score, candidate))
+        if not scored:
+            return None
+        best_score = max(score for score, _candidate in scored)
+        winners = [
+            candidate
+            for score, candidate in scored
+            if score == best_score
+        ]
+        if len(winners) == 1:
+            return winners[0]
         return None
+
+    def _objective_process_label_match_score(
+        self,
+        *,
+        process_context: dict[str, Any],
+        sample_numbers: set[str],
+        sample_text: str,
+    ) -> int:
+        score = 0
+        for value in process_context.values():
+            value_text = str(value).strip()
+            if not value_text:
+                continue
+            for token in self._objective_numeric_match_tokens(value_text):
+                if token in {"1", "-1"}:
+                    continue
+                if token in sample_numbers:
+                    score += 1
+            normalized_value = self._objective_match_text(value_text)
+            if len(normalized_value) >= 3 and normalized_value in sample_text:
+                score += 1
+        return score
+
+    def _objective_numeric_match_tokens(self, value: Any) -> tuple[str, ...]:
+        tokens: list[str] = []
+        for match in _NUMBER_PATTERN.finditer(str(value or "").replace(",", "")):
+            number_text = match.group(0)
+            number = self._coerce_number(number_text)
+            if number is None:
+                continue
+            if number.is_integer():
+                tokens.append(str(int(number)))
+            else:
+                tokens.append(("%f" % number).rstrip("0").rstrip("."))
+        return tuple(tokens)
+
+    def _objective_match_text(self, value: Any) -> str:
+        return " ".join(
+            re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).split()
+        )
 
     def _build_objective_pairwise_comparison_units(
         self,

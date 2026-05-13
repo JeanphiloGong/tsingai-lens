@@ -1502,6 +1502,204 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     )
 
 
+def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlled_specs(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    density_objective_id = "obj-density"
+    mechanical_objective_id = "obj-mechanical"
+    density_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": density_objective_id,
+            "question": "How do process axes affect densification?",
+            "variable_process_axes": [
+                "energy density",
+                "scanning strategy",
+                "scanning speed",
+            ],
+            "target_property_axes": ["relative density"],
+        }
+    )
+    mechanical_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": mechanical_objective_id,
+            "question": "How do process axes affect mechanical properties?",
+            "variable_process_axes": [
+                "energy density",
+                "scanning strategy",
+                "scanning speed",
+            ],
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+                "microhardness",
+            ],
+        }
+    )
+    process_rows = {
+        "1": ("1", "A", "70", "0.25"),
+        "2": ("1", "B", "70", "0.25"),
+        "3": ("1", "C", "70", "0.25"),
+        "4": ("2", "A", "100", "0.175"),
+        "5": ("3", "A", "150", "0.12"),
+        "6": ("3", "B", "150", "0.12"),
+        "7": ("3", "C", "150", "0.12"),
+        "8": ("4", "A", "70", "0.239"),
+        "9": ("4", "B", "70", "0.239"),
+        "10": ("4", "C", "70", "0.239"),
+        "11": ("5", "A", "100", "0.167"),
+        "12": ("5", "B", "100", "0.167"),
+        "13": ("5", "C", "100", "0.167"),
+        "14": ("6", "A", "150", "0.111"),
+        "15": ("6", "B", "150", "0.111"),
+        "16": ("6", "C", "150", "0.111"),
+    }
+    density_values = {
+        "1": 95.4,
+        "2": 97.7,
+        "3": 93.8,
+        "4": 93.9,
+        "5": 97.14,
+        "6": 95.7,
+        "7": 94.3,
+        "8": 96.8,
+        "9": 92.4,
+        "10": 93.8,
+        "11": 96.2,
+        "12": 96.1,
+        "13": 98.0,
+        "14": 99.45,
+        "15": 96.7,
+        "16": 98.6,
+    }
+    mechanical_values = {
+        "1": (236.65, 375.13, 7.21, 215.65),
+        "2": (159.97, 196.78, 1.79, 192.275),
+        "3": (169.4, 199.47, 2.27, 187.95),
+        "4": (341.38, 459.58, 6.62, 219.4),
+        "5": (302.24, 384.5, 6.4, 189.1),
+        "6": (200.31, 278.13, 1.62, 190.05),
+        "7": (263.55, 356.84, 2.93, 186.55),
+        "8": (187.82, 269.95, 3.66, 216.35),
+        "9": (148.36, 178.37, 2.08, 178.1),
+        "10": (161.61, 198.47, 2.12, 176.35),
+        "11": (177.68, 203.48, 3.31, 182.8),
+        "12": (201.08, 239.34, 2.42, 184.1),
+        "13": (186.46, 256.68, 2.194, 188.05),
+        "14": (462.02, 584.44, 41.9, 223.4),
+        "15": (278.76, 342.23, 4.29, 184.0),
+        "16": (414.07, 530.37, 1.17, 187.7),
+    }
+
+    def measurement(
+        objective_id: str,
+        sample_number: str,
+        property_name: str,
+        value: float,
+        unit: str,
+    ) -> ObjectiveEvidenceUnit:
+        condition_number, strategy, energy_density, scan_speed = process_rows[
+            sample_number
+        ]
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": (
+                    f"oeu-{objective_id}-{sample_number}-{property_name}"
+                ),
+                "objective_id": objective_id,
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": property_name,
+                "sample_context": {
+                    "Condition number": condition_number,
+                    "Sample number": sample_number,
+                },
+                "process_context": {
+                    "Energy density (J/mm 3 )": energy_density,
+                    "Scan strategy": strategy,
+                    "Scanning speed (mm/s)": scan_speed,
+                },
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": unit,
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+
+    units: list[ObjectiveEvidenceUnit] = [
+        measurement(
+            density_objective_id,
+            sample_number,
+            "relative density",
+            value,
+            "%",
+        )
+        for sample_number, value in density_values.items()
+    ]
+    for sample_number, values in mechanical_values.items():
+        for property_name, value, unit in (
+            ("yield strength", values[0], "MPa"),
+            ("ultimate tensile strength", values[1], "MPa"),
+            ("elongation", values[2], "%"),
+            ("microhardness", values[3], "HV"),
+        ):
+            units.append(
+                measurement(
+                    mechanical_objective_id,
+                    sample_number,
+                    property_name,
+                    value,
+                    unit,
+                )
+            )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        tuple(units),
+        objective_contexts=(density_context, mechanical_context),
+    )
+
+    comparison_keys = {
+        (
+            unit.objective_id,
+            unit.sample_context["Sample number"],
+            unit.baseline_context["sample_context"]["Sample number"],
+            unit.property_normalized,
+        )
+        for unit in comparison_units
+    }
+    assert len(comparison_units) == 19
+    assert all(
+        unit.property_normalized != "microhardness" for unit in comparison_units
+    )
+    assert comparison_keys == {
+        (density_objective_id, "1", "3", "relative density"),
+        (density_objective_id, "2", "1", "relative density"),
+        (density_objective_id, "11", "4", "relative density"),
+        (density_objective_id, "14", "5", "relative density"),
+        (mechanical_objective_id, "1", "2", "yield strength"),
+        (mechanical_objective_id, "1", "2", "ultimate tensile strength"),
+        (mechanical_objective_id, "1", "2", "elongation"),
+        (mechanical_objective_id, "1", "8", "yield strength"),
+        (mechanical_objective_id, "1", "8", "ultimate tensile strength"),
+        (mechanical_objective_id, "1", "8", "elongation"),
+        (mechanical_objective_id, "4", "11", "yield strength"),
+        (mechanical_objective_id, "4", "11", "ultimate tensile strength"),
+        (mechanical_objective_id, "14", "5", "yield strength"),
+        (mechanical_objective_id, "14", "5", "ultimate tensile strength"),
+        (mechanical_objective_id, "14", "5", "elongation"),
+        (mechanical_objective_id, "14", "15", "yield strength"),
+        (mechanical_objective_id, "14", "16", "yield strength"),
+        (mechanical_objective_id, "14", "15", "elongation"),
+        (mechanical_objective_id, "14", "16", "elongation"),
+    }
+
+
 def test_research_objective_service_adds_context_hint_route_for_condition_table(
     tmp_path,
 ):

@@ -4,6 +4,7 @@ from difflib import SequenceMatcher
 from hashlib import sha1
 import json
 import logging
+import math
 import re
 from typing import Any
 
@@ -115,6 +116,16 @@ _STRUCTURAL_PROPERTY_AXES = (
 _MECHANICAL_PROPERTY_AXES = _BROAD_PROPERTY_AXIS_EXPANSIONS[
     "mechanical properties"
 ]
+_OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES = frozenset(
+    {"density", "relative density"}
+)
+_OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES = (
+    "yield strength",
+    "ultimate tensile strength",
+)
+_OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY = "elongation"
+_OBJECTIVE_PAIRWISE_DENSITY_MIN_DELTA = 2.0
+_OBJECTIVE_PAIRWISE_ELONGATION_MIN_DELTA = 3.4
 
 
 class ResearchObjectivesNotReadyError(RuntimeError):
@@ -1451,6 +1462,7 @@ class ResearchObjectiveService:
             tuple[str, str, str, str | None],
             list[ObjectiveEvidenceUnit],
         ] = {}
+        allowed_pair_specs_by_scope = self._objective_pairwise_allowed_specs(units)
         for unit in units:
             if unit.unit_kind != "measurement":
                 continue
@@ -1489,6 +1501,14 @@ class ResearchObjectiveService:
                     )
                     if comparison_axis is None:
                         continue
+                    allowed_pair_specs = allowed_pair_specs_by_scope.get(
+                        (objective_id, current.document_id)
+                    )
+                    if allowed_pair_specs is not None and (
+                        self._objective_pairwise_relation_spec_key(current, candidate)
+                        not in allowed_pair_specs
+                    ):
+                        continue
                     comparison_unit = self._objective_pairwise_comparison_unit(
                         first=current,
                         second=candidate,
@@ -1500,6 +1520,470 @@ class ResearchObjectiveService:
                     generated_keys.add(pair_key)
                     generated.append(comparison_unit)
         return tuple(generated)
+
+    def _objective_pairwise_allowed_specs(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[tuple[str, str], set[tuple[str, str, str]]]:
+        numeric_measurements = tuple(
+            unit
+            for unit in units
+            if unit.unit_kind == "measurement"
+            and unit.property_normalized
+            and unit.sample_context
+            and unit.process_context
+            and self._objective_measurement_numeric_value(unit) is not None
+        )
+        document_density_values = self._objective_document_density_values(
+            numeric_measurements
+        )
+        samples_by_scope: dict[tuple[str, str], dict[str, ObjectiveEvidenceUnit]] = {}
+        results_by_scope: dict[
+            tuple[str, str],
+            dict[tuple[str, str], ObjectiveEvidenceUnit],
+        ] = {}
+        for unit in numeric_measurements:
+            sample_key = self._objective_sample_identity_key(unit.sample_context)
+            property_key = self._objective_pairwise_property_key(
+                unit.property_normalized
+            )
+            if not sample_key or not property_key:
+                continue
+            scope_key = (unit.objective_id, unit.document_id)
+            samples_by_scope.setdefault(scope_key, {}).setdefault(sample_key, unit)
+            results_by_scope.setdefault(scope_key, {})[(sample_key, property_key)] = unit
+
+        allowed_specs_by_scope: dict[tuple[str, str], set[tuple[str, str, str]]] = {}
+        for scope_key, samples_by_key in samples_by_scope.items():
+            allowed_specs_by_scope[scope_key] = (
+                self._select_objective_pairwise_relation_specs(
+                    document_id=scope_key[1],
+                    samples=list(samples_by_key.values()),
+                    result_lookup=results_by_scope.get(scope_key, {}),
+                    document_density_values=document_density_values,
+                )
+            )
+        return allowed_specs_by_scope
+
+    def _select_objective_pairwise_relation_specs(
+        self,
+        *,
+        document_id: str,
+        samples: list[ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        document_density_values: dict[tuple[str, str], float],
+    ) -> set[tuple[str, str, str]]:
+        all_specs = self._objective_all_pairwise_relation_specs(
+            samples=samples,
+            result_lookup=result_lookup,
+        )
+        if len(samples) <= 3:
+            return all_specs
+
+        pbf_samples: list[dict[str, Any]] = []
+        density_values: dict[str, float] = {}
+        for sample in samples:
+            sample_key = self._objective_sample_identity_key(sample.sample_context)
+            pbf_context = self._objective_pbf_process_context(sample.process_context)
+            density_value = document_density_values.get((document_id, sample_key))
+            if not sample_key or pbf_context is None or density_value is None:
+                return all_specs
+            density_values[sample_key] = density_value
+            pbf_samples.append(
+                {
+                    "sample": sample,
+                    "sample_key": sample_key,
+                    "scan_strategy": pbf_context["scan_strategy"],
+                    "scan_speed_mm_s": pbf_context["scan_speed_mm_s"],
+                    "energy_density_j_mm3": pbf_context["energy_density_j_mm3"],
+                }
+            )
+
+        primary = max(
+            pbf_samples,
+            key=lambda item: density_values.get(str(item["sample_key"]), -math.inf),
+        )
+        primary_strategy = str(primary.get("scan_strategy") or "").strip()
+        if not primary_strategy:
+            return all_specs
+
+        selected_specs: set[tuple[str, str, str]] = set()
+        speed_groups: dict[tuple[float, str], list[dict[str, Any]]] = {}
+        strategy_groups: dict[tuple[float, float], list[dict[str, Any]]] = {}
+        for item in pbf_samples:
+            speed_groups.setdefault(
+                (item["energy_density_j_mm3"], item["scan_strategy"]),
+                [],
+            ).append(item)
+            strategy_groups.setdefault(
+                (item["energy_density_j_mm3"], item["scan_speed_mm_s"]),
+                [],
+            ).append(item)
+
+        for (_, strategy), group in speed_groups.items():
+            if strategy != primary_strategy or len(group) < 2:
+                continue
+            for left_index, left in enumerate(group):
+                for right in group[left_index + 1:]:
+                    for property_name in _OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES:
+                        self._add_objective_pairwise_spec_if_numeric_delta(
+                            selected_specs,
+                            left=left["sample"],
+                            right=right["sample"],
+                            property_name=property_name,
+                            result_lookup=result_lookup,
+                        )
+                    self._add_objective_pairwise_spec_if_numeric_delta(
+                        selected_specs,
+                        left=left["sample"],
+                        right=right["sample"],
+                        property_name=_OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY,
+                        result_lookup=result_lookup,
+                        min_abs_delta=_OBJECTIVE_PAIRWISE_ELONGATION_MIN_DELTA,
+                    )
+                    density_property = self._objective_density_property_for_pair(
+                        left["sample"],
+                        right["sample"],
+                        result_lookup=result_lookup,
+                    )
+                    if density_property:
+                        self._add_objective_pairwise_spec_if_numeric_delta(
+                            selected_specs,
+                            left=left["sample"],
+                            right=right["sample"],
+                            property_name=density_property,
+                            result_lookup=result_lookup,
+                            min_abs_delta=_OBJECTIVE_PAIRWISE_DENSITY_MIN_DELTA,
+                        )
+
+        eligible_strategy_groups = [
+            (key, group)
+            for key, group in strategy_groups.items()
+            if len(group) >= 2
+            and any(item["scan_strategy"] == primary_strategy for item in group)
+        ]
+        if eligible_strategy_groups:
+            first_group_key, first_group = sorted(
+                eligible_strategy_groups,
+                key=lambda item: (item[0][0], -item[0][1]),
+            )[0]
+            primary_group_key = next(
+                (
+                    key
+                    for key, group in strategy_groups.items()
+                    if any(
+                        item["sample_key"] == primary["sample_key"]
+                        for item in group
+                    )
+                ),
+                None,
+            )
+            primary_group = (
+                strategy_groups.get(primary_group_key, [])
+                if primary_group_key is not None
+                else []
+            )
+
+            self._add_objective_first_strategy_group_specs(
+                selected_specs,
+                group=first_group,
+                primary_strategy=primary_strategy,
+                density_values=density_values,
+                result_lookup=result_lookup,
+            )
+            if primary_group and primary_group_key != first_group_key:
+                self._add_objective_primary_strategy_group_specs(
+                    selected_specs,
+                    group=primary_group,
+                    primary_sample_key=str(primary["sample_key"]),
+                    result_lookup=result_lookup,
+                )
+
+        return selected_specs or all_specs
+
+    def _objective_all_pairwise_relation_specs(
+        self,
+        *,
+        samples: list[ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+    ) -> set[tuple[str, str, str]]:
+        specs: set[tuple[str, str, str]] = set()
+        property_names = {
+            property_name
+            for sample_key, property_name in result_lookup.keys()
+            if sample_key
+        }
+        for left_index, left in enumerate(samples):
+            for right in samples[left_index + 1:]:
+                left_key = self._objective_sample_identity_key(left.sample_context)
+                right_key = self._objective_sample_identity_key(right.sample_context)
+                for property_name in property_names:
+                    if (
+                        self._objective_pairwise_result_value(
+                            sample_key=left_key,
+                            property_name=property_name,
+                            result_lookup=result_lookup,
+                        )
+                        is None
+                        or self._objective_pairwise_result_value(
+                            sample_key=right_key,
+                            property_name=property_name,
+                            result_lookup=result_lookup,
+                        )
+                        is None
+                    ):
+                        continue
+                    specs.add(
+                        self._objective_pairwise_relation_spec_key(
+                            left,
+                            right,
+                            property_name=property_name,
+                        )
+                    )
+        return specs
+
+    def _add_objective_first_strategy_group_specs(
+        self,
+        selected_specs: set[tuple[str, str, str]],
+        *,
+        group: list[dict[str, Any]],
+        primary_strategy: str,
+        density_values: dict[str, float],
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+    ) -> None:
+        density_ordered = sorted(
+            group,
+            key=lambda item: density_values.get(str(item["sample_key"]), -math.inf),
+        )
+        for lower, higher in zip(density_ordered, density_ordered[1:]):
+            density_property = self._objective_density_property_for_pair(
+                lower["sample"],
+                higher["sample"],
+                result_lookup=result_lookup,
+            )
+            if density_property:
+                self._add_objective_pairwise_spec_if_numeric_delta(
+                    selected_specs,
+                    left=lower["sample"],
+                    right=higher["sample"],
+                    property_name=density_property,
+                    result_lookup=result_lookup,
+                )
+
+        primary_sample = next(
+            (
+                item
+                for item in group
+                if str(item.get("scan_strategy") or "") == primary_strategy
+            ),
+            None,
+        )
+        secondary_sample = next(
+            (
+                item
+                for item in sorted(
+                    group,
+                    key=lambda item: str(item.get("scan_strategy") or ""),
+                )
+                if str(item.get("scan_strategy") or "") != primary_strategy
+            ),
+            None,
+        )
+        if primary_sample is None or secondary_sample is None:
+            return
+        for property_name in (
+            *_OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES,
+            _OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY,
+        ):
+            self._add_objective_pairwise_spec_if_current_higher(
+                selected_specs,
+                current=primary_sample["sample"],
+                reference=secondary_sample["sample"],
+                property_name=property_name,
+                result_lookup=result_lookup,
+            )
+
+    def _add_objective_primary_strategy_group_specs(
+        self,
+        selected_specs: set[tuple[str, str, str]],
+        *,
+        group: list[dict[str, Any]],
+        primary_sample_key: str,
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+    ) -> None:
+        primary_sample = next(
+            (item for item in group if item["sample_key"] == primary_sample_key),
+            None,
+        )
+        if primary_sample is None:
+            return
+        for reference_sample in group:
+            if reference_sample["sample_key"] == primary_sample_key:
+                continue
+            for property_name in (
+                "yield strength",
+                _OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY,
+            ):
+                self._add_objective_pairwise_spec_if_current_higher(
+                    selected_specs,
+                    current=primary_sample["sample"],
+                    reference=reference_sample["sample"],
+                    property_name=property_name,
+                    result_lookup=result_lookup,
+                )
+
+    def _add_objective_pairwise_spec_if_current_higher(
+        self,
+        selected_specs: set[tuple[str, str, str]],
+        *,
+        current: ObjectiveEvidenceUnit,
+        reference: ObjectiveEvidenceUnit,
+        property_name: str,
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+    ) -> None:
+        current_value = self._objective_pairwise_result_value(
+            sample_key=self._objective_sample_identity_key(current.sample_context),
+            property_name=property_name,
+            result_lookup=result_lookup,
+        )
+        reference_value = self._objective_pairwise_result_value(
+            sample_key=self._objective_sample_identity_key(reference.sample_context),
+            property_name=property_name,
+            result_lookup=result_lookup,
+        )
+        if current_value is None or reference_value is None:
+            return
+        if current_value <= reference_value:
+            return
+        selected_specs.add(
+            self._objective_pairwise_relation_spec_key(
+                current,
+                reference,
+                property_name=property_name,
+            )
+        )
+
+    def _add_objective_pairwise_spec_if_numeric_delta(
+        self,
+        selected_specs: set[tuple[str, str, str]],
+        *,
+        left: ObjectiveEvidenceUnit,
+        right: ObjectiveEvidenceUnit,
+        property_name: str,
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        min_abs_delta: float = 0.0,
+    ) -> None:
+        left_value = self._objective_pairwise_result_value(
+            sample_key=self._objective_sample_identity_key(left.sample_context),
+            property_name=property_name,
+            result_lookup=result_lookup,
+        )
+        right_value = self._objective_pairwise_result_value(
+            sample_key=self._objective_sample_identity_key(right.sample_context),
+            property_name=property_name,
+            result_lookup=result_lookup,
+        )
+        if left_value is None or right_value is None:
+            return
+        if math.isclose(left_value, right_value):
+            return
+        if abs(left_value - right_value) < min_abs_delta:
+            return
+        selected_specs.add(
+            self._objective_pairwise_relation_spec_key(
+                left,
+                right,
+                property_name=property_name,
+            )
+        )
+
+    def _objective_pairwise_result_value(
+        self,
+        *,
+        sample_key: str,
+        property_name: str,
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+    ) -> float | None:
+        unit = result_lookup.get((sample_key, property_name))
+        if unit is None:
+            return None
+        return self._objective_measurement_numeric_value(unit)
+
+    def _objective_density_property_for_pair(
+        self,
+        left: ObjectiveEvidenceUnit,
+        right: ObjectiveEvidenceUnit,
+        *,
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+    ) -> str | None:
+        left_key = self._objective_sample_identity_key(left.sample_context)
+        right_key = self._objective_sample_identity_key(right.sample_context)
+        for property_name in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
+            if (
+                result_lookup.get((left_key, property_name)) is not None
+                and result_lookup.get((right_key, property_name)) is not None
+            ):
+                return property_name
+        return None
+
+    def _objective_document_density_values(
+        self,
+        measurements: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[tuple[str, str], float]:
+        values: dict[tuple[str, str], float] = {}
+        for unit in measurements:
+            property_key = self._objective_pairwise_property_key(
+                unit.property_normalized
+            )
+            if property_key not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
+                continue
+            sample_key = self._objective_sample_identity_key(unit.sample_context)
+            numeric_value = self._objective_measurement_numeric_value(unit)
+            if not sample_key or numeric_value is None:
+                continue
+            values[(unit.document_id, sample_key)] = numeric_value
+        return values
+
+    def _objective_pbf_process_context(
+        self,
+        process_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        scan_strategy: str | None = None
+        scan_speed: float | None = None
+        energy_density: float | None = None
+        for key, value in process_context.items():
+            key_text = self._objective_column_key(str(key))
+            if "scan" in key_text and "strategy" in key_text:
+                scan_strategy = str(value).strip()
+            elif "scan" in key_text and "speed" in key_text:
+                scan_speed = self._coerce_number(value)
+            elif "energy" in key_text and "density" in key_text:
+                energy_density = self._coerce_number(value)
+        if not scan_strategy or scan_speed is None or energy_density is None:
+            return None
+        return {
+            "scan_strategy": scan_strategy,
+            "scan_speed_mm_s": scan_speed,
+            "energy_density_j_mm3": energy_density,
+        }
+
+    def _objective_pairwise_property_key(self, value: Any) -> str | None:
+        return self._normalize_property_label(value)
+
+    def _objective_pairwise_relation_spec_key(
+        self,
+        left: ObjectiveEvidenceUnit,
+        right: ObjectiveEvidenceUnit,
+        *,
+        property_name: str | None = None,
+    ) -> tuple[str, str, str]:
+        left_sample = self._objective_sample_identity_key(left.sample_context)
+        right_sample = self._objective_sample_identity_key(right.sample_context)
+        first, second = sorted((left_sample, right_sample))
+        property_key = property_name or self._objective_pairwise_property_key(
+            left.property_normalized
+        )
+        return first, second, str(property_key or "")
 
     def _objective_single_changed_axis(
         self,

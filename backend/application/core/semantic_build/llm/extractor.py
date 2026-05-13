@@ -13,7 +13,6 @@ from pydantic import BaseModel, ValidationError
 from .schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
-    StructuredObjectiveComparisonSelection,
     StructuredObjectiveEvidenceRoutes,
     StructuredObjectiveEvidenceUnits,
     StructuredObjectiveMergePlan,
@@ -25,7 +24,6 @@ from .schemas import (
 )
 from .prompts import (
     build_document_profile_prompt,
-    build_objective_comparison_selection_prompt,
     build_objective_evidence_unit_prompt,
     build_objective_evidence_route_prompt,
     build_objective_paper_frame_prompt,
@@ -197,22 +195,6 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredObjectiveEvidenceUnits):
             raise TypeError("unexpected objective evidence unit response type")
-        return response
-
-    def select_objective_comparisons(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveComparisonSelection:
-        system_prompt, user_prompt = build_objective_comparison_selection_prompt(
-            payload
-        )
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredObjectiveComparisonSelection,
-        )
-        if not isinstance(response, StructuredObjectiveComparisonSelection):
-            raise TypeError("unexpected objective comparison selection response type")
         return response
 
     def _parse_structured_response(

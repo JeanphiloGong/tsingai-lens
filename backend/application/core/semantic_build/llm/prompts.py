@@ -89,19 +89,6 @@ Non-negotiable rules:
 """.strip()
 
 
-_OBJECTIVE_COMPARISON_SELECTION_SYSTEM_PROMPT = """
-You are selecting author-supported comparison evidence for a materials-literature backend.
-
-Non-negotiable rules:
-- This is a selection step over candidate comparison ids, not new extraction.
-- Return exactly one JSON object and nothing else.
-- Select only candidate ids copied from `candidate_comparisons`.
-- Keep comparisons directly supported or strongly implied by the provided author text and objective context.
-- Do not select every mathematically possible pair from a table.
-- Prefer fewer, higher-signal comparisons over Cartesian coverage.
-""".strip()
-
-
 _TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE = """
 JSON compliance rules for text-window extraction:
 - Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, `warnings`, `anchors`, or `measurement_results`.
@@ -691,28 +678,3 @@ def build_objective_evidence_unit_prompt(
         "partial or unresolved."
     )
     return _OBJECTIVE_EVIDENCE_UNIT_SYSTEM_PROMPT, user_prompt
-
-
-def build_objective_comparison_selection_prompt(
-    payload: dict[str, Any],
-) -> tuple[str, str]:
-    user_prompt = (
-        "Select objective-scoped comparison candidates that should be treated as "
-        "evidence units.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with "
-        "`selected_evidence_unit_ids`, `rejected_evidence_unit_ids`, `reason`, "
-        "and `confidence`.\n"
-        "Use the objective and author text as the authority. Candidate rows are "
-        "derived from table measurements and are only possible comparisons.\n"
-        "Select a candidate only when the author text explicitly compares the "
-        "same process axis, property family, and sample/process conditions, or "
-        "when it is the necessary table-backed resolution of such a textual "
-        "comparison claim.\n"
-        "Reject candidates that merely differ by one process axis but are not "
-        "discussed or emphasized by the author text.\n"
-        "If the text supports a broad claim such as A outperforms B and C, "
-        "select the candidate pairs that instantiate that claim for the matching "
-        "properties and process conditions. If unsure, reject the candidate."
-    )
-    return _OBJECTIVE_COMPARISON_SELECTION_SYSTEM_PROMPT, user_prompt

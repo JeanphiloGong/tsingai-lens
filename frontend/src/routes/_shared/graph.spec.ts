@@ -3,6 +3,7 @@ import {
 	buildCollectionOverviewGraph,
 	buildCollectionGraphmlUrl,
 	buildCytoscapeElements,
+	buildCytoscapeStyles,
 	buildGraphMeta,
 	buildNodeTypeCounts,
 	filterGraphElements,
@@ -140,6 +141,15 @@ describe('graph shared helpers', () => {
 
 		expect(element.data?.label).toBe('Tensile Testing');
 		expect(element.data?.fullLabel).toContain('Details: Tensile Specimens');
+	});
+
+	it('does not emit unsupported Cytoscape shadow style properties', () => {
+		const styleKeys = buildCytoscapeStyles().flatMap((entry) =>
+			Object.keys((entry as { style?: Record<string, unknown> }).style ?? {})
+		);
+
+		expect(styleKeys).not.toEqual(expect.arrayContaining(['shadow-blur', 'shadow-color']));
+		expect(styleKeys).toEqual(expect.arrayContaining(['underlay-color', 'underlay-opacity']));
 	});
 
 	it('projects collection graphs into aggregate overview maps', () => {

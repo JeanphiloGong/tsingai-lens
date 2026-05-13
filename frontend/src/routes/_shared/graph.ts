@@ -728,11 +728,9 @@ export function buildCytoscapeStyles(theme: CytoscapeThemeName = 'light') {
 			style: {
 				'border-width': 3,
 				'border-color': '#2563EB',
-				'shadow-blur': 16,
-				'shadow-color': 'rgba(37, 99, 235, 0.22)',
-				'shadow-opacity': 1,
-				'shadow-offset-x': 0,
-				'shadow-offset-y': 4
+				'underlay-color': 'rgba(37, 99, 235, 0.18)',
+				'underlay-opacity': 1,
+				'underlay-padding': 8
 			}
 		},
 		{
@@ -740,11 +738,9 @@ export function buildCytoscapeStyles(theme: CytoscapeThemeName = 'light') {
 			style: {
 				'border-width': 4,
 				'border-color': '#2563EB',
-				'shadow-blur': 24,
-				'shadow-color': 'rgba(37, 99, 235, 0.28)',
-				'shadow-opacity': 1,
-				'shadow-offset-x': 0,
-				'shadow-offset-y': 6
+				'underlay-color': 'rgba(37, 99, 235, 0.24)',
+				'underlay-opacity': 1,
+				'underlay-padding': 12
 			}
 		},
 		{

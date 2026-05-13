@@ -294,7 +294,6 @@
 			layout: { name: 'preset' },
 			minZoom: 0.2,
 			maxZoom: 2.6,
-			wheelSensitivity: 0.2,
 			boxSelectionEnabled: false
 		});
 

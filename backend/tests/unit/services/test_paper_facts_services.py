@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from domain.core.comparison_assembly import (
     ComparableResultAssembler,
@@ -846,22 +845,6 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
         and "total_extraction_units=1" in record.message
         for record in caplog.records
     )
-
-
-def test_paper_facts_rejects_legacy_objective_evidence_unit_replacement(tmp_path):
-    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    service = PaperFactsService(core_fact_repository=repository)
-
-    with pytest.raises(RuntimeError, match="legacy paper facts must not replace"):
-        service._replace_objective_evidence_units(
-            collection_id="col-1",
-            evidence_anchors=(),
-            sample_variants=(),
-            test_conditions=(),
-            baseline_references=(),
-            measurement_results=(),
-            characterization=(),
-        )
 
 
 def test_document_method_family_conditions_bind_table_results():

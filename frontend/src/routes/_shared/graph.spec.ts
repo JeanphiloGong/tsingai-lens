@@ -114,6 +114,15 @@ describe('graph shared helpers', () => {
 		expect(filtered.edges.map((edge) => edge.id)).toEqual(['e1']);
 	});
 
+	it('initializes unknown node counts for overview metrics', () => {
+		expect(buildNodeTypeCounts(null).unknown).toBe(0);
+		expect(
+			buildNodeTypeCounts({
+				nodes: [{ id: 'weird:1', label: 'Unresolved', type: 'unexpected', degree: 0 }]
+			}).unknown
+		).toBe(1);
+	});
+
 	it('projects collection graphs into aggregate overview maps', () => {
 		const graph: GraphResponse = {
 			collection_id: 'col_1',

@@ -292,7 +292,7 @@ export function buildGraphMeta(
 }
 
 export function buildNodeTypeCounts(graph: Pick<GraphResponse, 'nodes'> | null | undefined) {
-	const counts: Record<string, number> = {};
+	const counts: Record<string, number> = { unknown: 0 };
 	for (const type of graphNodeTypeOrder) {
 		counts[type] = 0;
 	}

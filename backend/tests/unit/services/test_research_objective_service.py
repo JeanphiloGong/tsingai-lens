@@ -1024,6 +1024,62 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
     )
 
 
+def test_research_objective_service_uses_matching_result_headers_when_role_is_broad(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Condition number": "test_condition",
+                "Sample number": "test_condition",
+                "Relative density": "current_experimental_evidence",
+            },
+            "confidence": 0.84,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "target_property_axes": ["densification"],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 2,
+            "column_headers": [
+                "Condition number",
+                "Sample number",
+                "Relative density",
+            ],
+            "table_matrix": [
+                ["Condition number", "Sample number", "Relative density"],
+                ["1", "1", "95.4"],
+                ["1", "2", "97.7"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    assert [record["property_normalized"] for record in records] == [
+        "relative density",
+        "relative density",
+    ]
+    assert [record["value_payload"]["value"] for record in records] == [95.4, 97.7]
+    assert records[0]["sample_context"]["Sample number"] == "1"
+    assert records[1]["sample_context"]["Sample number"] == "2"
+
+
 def test_research_objective_service_does_not_keep_text_trends_as_measurements(
     tmp_path,
 ):

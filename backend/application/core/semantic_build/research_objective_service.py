@@ -2182,6 +2182,27 @@ class ResearchObjectiveService:
             ):
                 result_columns.add(column_text)
                 continue
+            if (
+                route.role == "current_experimental_evidence"
+                and objective_context is not None
+                and self._objective_header_matches_any_axis(
+                    column_text,
+                    objective_context.target_property_axes,
+                )
+            ):
+                result_columns.add(column_text)
+                continue
+            if (
+                route.role == "current_experimental_evidence"
+                and objective_context is not None
+                and self._objective_column_key(column_text) == "relative_density"
+                and any(
+                    axis in {"densification", "microstructure"}
+                    for axis in objective_context.target_property_axes
+                )
+            ):
+                result_columns.add(column_text)
+                continue
             role_label = self._normalize_property_label(role_text)
             if (
                 route.role == "current_experimental_evidence"

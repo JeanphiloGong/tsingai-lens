@@ -489,14 +489,22 @@ must preserve the objective-specific route and evidence.
 The public backend API should move from material routes to research-objective
 routes.
 
-New primary routes:
+The landed first read routes use the `/objectives` collection family documented
+in the backend API spec:
 
 ```text
-GET /api/v1/collections/{collection_id}/research-objectives
-GET /api/v1/collections/{collection_id}/research-objectives/{objective_id}
-GET /api/v1/collections/{collection_id}/research-objectives/{objective_id}/comparison-rows
-GET /api/v1/collections/{collection_id}/research-objectives/{objective_id}/evidence
-GET /api/v1/collections/{collection_id}/research-objectives/{objective_id}/report
+GET /api/v1/collections/{collection_id}/objectives
+GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view
+```
+
+Future objective-scoped comparison, evidence, and report routes should stay in
+that objective route family unless the API spec explicitly renames the resource.
+The intended follow-up surfaces are:
+
+```text
+GET /api/v1/collections/{collection_id}/objectives/{objective_id}/comparison-rows
+GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence
+GET /api/v1/collections/{collection_id}/objectives/{objective_id}/report
 ```
 
 Material-first routes should be removed from the primary product contract after
@@ -550,17 +558,17 @@ views, not as the route owner.
 2. Add SQLite persistence tables and repository methods for objective records.
 3. Add Core objective schemas, prompts, and extractor methods.
 4. Add `research_objective_service.py` for paper skim and objective discovery.
-5. Add `objective_facts_service.py` for objective-paper framing, routing, and
-   objective-scoped evidence-unit extraction.
+5. Add objective-paper framing, routing, and objective-scoped evidence-unit
+   extraction under the Core semantic-build owner.
 6. Add objective-aware table routing, table schema understanding, and
    whole-table extraction for relevant tables.
 7. Add evidence resolution and research logic-chain assembly from routed text,
    table, and figure evidence.
-8. Add `objective_comparison_service.py` for objective-scoped comparison rows
-   as projections over resolved evidence units.
+8. Add objective-scoped comparison rows as projections over resolved evidence
+   units.
 9. Bump Core semantic version to an objective-facts generation, such as
    `objective_facts_v1`.
-10. Add backend `/research-objectives/*` routes and tests.
+10. Add backend `/objectives/*` routes and tests.
 11. Replace frontend material workspace navigation with objective workspace
    navigation.
 12. Remove material-first route usage from frontend clients.
@@ -587,7 +595,7 @@ Backend semantic tests should prove:
 
 Backend API tests should prove:
 
-- `/research-objectives` returns stable objective summaries
+- `/objectives` returns stable objective summaries
 - objective detail, comparison rows, evidence, and report routes are
   collection-scoped
 - removed or retired material routes are not still treated as the primary

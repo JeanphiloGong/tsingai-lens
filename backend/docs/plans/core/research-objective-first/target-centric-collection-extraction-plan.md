@@ -47,8 +47,9 @@ outputs.
 
 This plan belongs to the Core semantic-build pipeline because it changes the
 order and ownership of Core extraction decisions. It does not change Source
-parser selection, public API routes, frontend contracts, or downstream report,
-graph, and protocol ownership.
+parser selection or downstream report, graph, and protocol ownership. The first
+read-only objective workspace API has now landed; broader frontend and public
+API cutover remains separate work.
 
 Read this with:
 
@@ -58,6 +59,38 @@ Read this with:
   paper-fact routing and extraction
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/semantic-routing-targeted-extraction-plan.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/semantic-routing-targeted-extraction-plan.md)
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md)
+
+## Implementation Status
+
+Completed backend slices:
+
+- `PaperSkim`, `ResearchObjective`, `ObjectiveContext`,
+  `ObjectivePaperFrame`, `ObjectiveEvidenceRoute`, `ObjectiveEvidenceUnit`,
+  and `ObjectiveLogicChain` Core domain records.
+- SQLite persistence for `core_paper_skims`, `core_research_objectives`,
+  `core_objective_contexts`, `core_objective_paper_frames`,
+  `core_objective_evidence_routes`, `core_objective_evidence_units`, and
+  `core_objective_logic_chains`.
+- `ResearchObjectiveService` pipeline for paper skim, objective discovery,
+  context build, paper framing, evidence routing, evidence-unit extraction,
+  evidence resolution, and objective logic-chain assembly.
+- Route-gated legacy paper-facts extraction when objective evidence routes are
+  available.
+- Material, comparison, and evidence-card projections that can read objective
+  evidence units without treating old paper facts as the authority.
+- Read-only objective workspace endpoints:
+  `GET /api/v1/collections/{collection_id}/objectives` and
+  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`.
+
+Remaining work:
+
+- Productize the material database projection if it needs durable
+  projection/cache tables beyond service-level projection.
+- Add objective report and workspace product surfaces.
+- Finish frontend objective workspace cutover.
+- Remove or further downgrade old paper-facts authority after material,
+  comparison, evidence-card, report, and workspace projections are all covered
+  by objective evidence units and logic chains.
 
 ## Why The Flow Changes
 
@@ -418,13 +451,14 @@ The first record families are:
 - `ObjectiveLogicChain`
 - target-scoped measurement and comparison records
 
-The SQLite implementation should store them in Core-owned tables such as
+The SQLite implementation stores the landed record families in Core-owned tables
+such as
 `core_paper_skims`, `core_research_objectives`,
-`core_objective_paper_frames`, `core_objective_evidence_routes`,
-`core_objective_evidence_units`, and `core_objective_logic_chains`. These
-records should remain Core internal in the first wave. They should not become
-public frontend API contracts until the product surface is explicitly designed
-around target selection.
+`core_objective_contexts`, `core_objective_paper_frames`,
+`core_objective_evidence_routes`, `core_objective_evidence_units`, and
+`core_objective_logic_chains`. These records remain Core-owned persistence
+records; the public browser contract exposes read models over them rather than
+the table schema itself.
 
 Resolved evidence units and target logic chains should be the authoritative
 records for later comparison, report, and workspace assembly. Target-scoped
@@ -491,14 +525,14 @@ Collection rebuild checks should confirm:
 
 ## Deferred Work
 
-This plan does not require:
+The remaining work does not require:
 
-- frontend target selection UI in the first implementation
-- public API response-shape changes
 - Source parser changes
 - sending raw PDFs directly to the model
-- durable route records before the process is stable
 - cross-target report generation
 
-Those can follow after the target-centric Core extraction path proves that it
-improves fact quality and comparison coherence on real collections.
+Frontend target selection remains follow-up product work. Public API
+response-shape changes and durable route records are no longer future
+prerequisites for this plan: the first read-only objective API and Core
+route/evidence records have landed. Further public API cutover should stay
+aligned with the backend API spec and the objective workspace contract.

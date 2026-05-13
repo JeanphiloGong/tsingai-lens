@@ -6,6 +6,13 @@ This plan records the first backend implementation step for the
 research-objective-first direction: fix the Core domain model before adding new
 LLM services, parquet artifacts, APIs, or frontend routes.
 
+Status: this first domain-model slice is complete. The repository now also has
+the later research-objective service, LLM schemas and prompts, SQLite
+persistence, and read-only objective workspace APIs. Keep this page as the
+historical first-slice plan; use
+[`target-centric-collection-extraction-plan.md`](target-centric-collection-extraction-plan.md)
+for the current end-to-end pipeline status.
+
 The immediate goal is narrow:
 
 - add pure Core domain objects for research objectives, paper skims,
@@ -15,8 +22,9 @@ The immediate goal is narrow:
 - give later application services one stable domain center instead of putting
   objective semantics directly into another large service
 
-This is a backend Core domain-model plan. It does not implement objective
-discovery, objective-scoped fact extraction, API routes, or frontend changes.
+This is a backend Core domain-model plan. Its own slice did not implement
+objective discovery, objective-scoped fact extraction, API routes, or frontend
+changes; those later backend slices have since landed separately.
 
 Read this with:
 
@@ -301,6 +309,7 @@ This slice is complete when:
 - focused domain tests pass
 - no public API, frontend, Source runtime, or paper-facts behavior has changed
 
-After this slice, the next implementation wave can add
-`ResearchObjectiveService` and the LLM schemas/prompts that produce
-`PaperSkim` and `ResearchObjective` records.
+After this slice, the next implementation wave was
+`ResearchObjectiveService` plus the LLM schemas/prompts that produce
+`PaperSkim` and `ResearchObjective` records. That wave has since landed and is
+tracked by the target-centric extraction plan.

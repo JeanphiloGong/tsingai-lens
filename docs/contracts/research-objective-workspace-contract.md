@@ -162,10 +162,10 @@ ObjectivePaperFrameView
 `relevant_tables` and `excluded_tables` should use real Source table ids. The
 backend should filter out hallucinated ids before returning them.
 
-### Reserved Fields
+### Evidence Fields
 
-The first contract should reserve fields that later extraction stages will
-fill:
+The objective research-view response includes the evidence fields produced by
+the objective-first Core pipeline:
 
 ```text
 ObjectiveEvidenceRoute[]
@@ -173,9 +173,11 @@ ObjectiveEvidenceUnit[]
 ObjectiveLogicChain | null
 ```
 
-The frontend should render these as empty states until those builders are
-implemented. It should not infer routes or evidence units from raw material
-payloads.
+The backend now has builders for routes, evidence units, and logic chains.
+These fields may still be empty for collections built before the objective
+pipeline ran, failed builds, or objectives with no extractable evidence. The
+frontend should render those as empty states and should not infer routes or
+evidence units from raw material payloads.
 
 ## Frontend Migration
 
@@ -185,10 +187,11 @@ ergonomic:
 - the current material list region becomes a research-objective list
 - the material detail header becomes objective question and axis context
 - the existing evidence or card region first renders paper frames
-- future tabs may show routes, evidence units, logic chain, and objective
-  report as those backend slices land
+- tabs may show routes, evidence units, logic chain, and objective report as
+  the frontend adopts the landed backend fields
 - existing comparison rows can remain in a lower section labeled as current
-  extracted evidence until objective-scoped evidence units replace them
+  extracted evidence until the objective-scoped projections replace them in the
+  browser workflow
 
 The frontend should prefer a clean route for the new resource:
 
@@ -210,7 +213,8 @@ Backend first slice:
 - add the objective research-view endpoint
 - return persisted `ResearchObjective`, `ObjectiveContext`, and
   `ObjectivePaperFrame` data
-- include empty `evidence_routes`, `evidence_units`, and `logic_chain` fields
+- include `evidence_routes`, `evidence_units`, and `logic_chain` fields from
+  the objective pipeline when available
 - expose readiness flags that match the available builders
 
 Frontend first slice:
@@ -219,7 +223,8 @@ Frontend first slice:
 - adapt the current material workspace layout to read objectives instead of
   materials
 - show objective list, objective detail, and paper frames
-- keep routes, evidence units, and logic chain as empty-state panels
+- render routes, evidence units, and logic chain from the backend fields, with
+  empty states when a collection has not produced them
 - keep old material navigation available until the objective route is usable
 
 The two slices should meet at mocked or fixture-backed payloads with the
@@ -229,31 +234,32 @@ The two slices should meet at mocked or fixture-backed payloads with the
 
 The first contract does not require:
 
-- changing the paper-facts extraction algorithm
-- implementing `ObjectiveEvidenceRoute` or `ObjectiveEvidenceUnit` builders
 - replacing all material pages immediately
 - deleting existing material APIs
 - generating final objective reports
 - changing graph, report, or goal-session contracts
 
-Those should remain follow-up work after the objective workspace can render
-real objective and paper-frame data.
+The first contract has since grown beyond paper-frame-only rendering: route,
+evidence-unit, and logic-chain fields are part of the backend payload. Replacing
+all material pages, deleting material APIs, and generating final objective
+reports remain follow-up work.
 
 ## Verification
 
 Backend checks should cover:
 
 - objective list response for a built collection
-- objective research-view response with paper frames
-- empty route, evidence-unit, and logic-chain fields when those stages are not
-  ready
+- objective research-view response with paper frames, routes, evidence units,
+  and logic-chain readiness
+- empty route, evidence-unit, and logic-chain states for collections built
+  before those records exist
 - no material endpoint returns objective records by accident
 
 Frontend checks should cover:
 
 - objective list loading from `/api/v1/collections/{collection_id}/objectives`
 - objective detail and paper frames rendering from the objective research-view
-- empty states for routes, evidence units, and logic chain
+- route, evidence-unit, and logic-chain rendering plus empty states
 - continued access to old material pages during transition
 
 End-to-end acceptance for the first wave is:
@@ -264,7 +270,5 @@ build collection
 -> select a research objective
 -> see objective axes and paper frames
 -> inspect relevant and excluded tables
+-> inspect routed evidence, extracted evidence units, and logic-chain readiness
 ```
-
-The workflow may still show empty route and evidence-unit tabs until the next
-Core extraction slices land.

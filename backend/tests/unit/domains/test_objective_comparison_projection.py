@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from domain.core import ObjectiveEvidenceUnit, project_objective_comparison_rows
+from domain.core import (
+    ObjectiveEvidenceUnit,
+    project_objective_comparison_rows,
+    project_objective_comparison_semantics,
+)
 
 
 def test_project_objective_comparison_rows_from_measurement_units():
@@ -62,6 +66,40 @@ def test_project_objective_comparison_rows_from_measurement_units():
     assert row.value == 1.2
     assert row.unit == "uA/cm2"
     assert row.missing_critical_context == ()
+
+    semantics = project_objective_comparison_semantics(
+        collection_id="col-1",
+        evidence_units=(
+            ObjectiveEvidenceUnit.from_mapping(
+                {
+                    "evidence_unit_id": "oeu-as-built-icorr",
+                    "objective_id": "obj-corrosion",
+                    "document_id": "paper-1",
+                    "unit_kind": "measurement",
+                    "material_system": {"name": "316L stainless steel"},
+                    "sample_context": {"sample": "as-built"},
+                    "process_context": {"process": "LPBF"},
+                    "test_condition": {"method": "polarization"},
+                    "property_normalized": "corrosion current density",
+                    "value_payload": {
+                        "value": 1.2,
+                        "source_value_text": "1.2 uA/cm2",
+                    },
+                    "unit": "uA/cm2",
+                    "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
+                    "evidence_anchor_ids": ["anc-1"],
+                    "resolution_status": "resolved",
+                }
+            ),
+        ),
+    )
+    assert len(semantics.comparable_results) == 1
+    assert len(semantics.collection_comparable_results) == 1
+    assert semantics.comparable_results[0].source_result_id == "oeu-as-built-icorr"
+    assert (
+        semantics.collection_comparable_results[0].comparable_result_id
+        == "objective:oeu-as-built-icorr"
+    )
 
 
 def test_project_objective_comparison_rows_marks_missing_context():

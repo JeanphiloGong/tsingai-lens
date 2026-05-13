@@ -26,6 +26,8 @@ class FakeCoreFactRepository:
 
     def __init__(self, facts: CoreFactSet) -> None:
         self.facts = facts
+        self.comparable_results = ()
+        self.collection_comparable_results = ()
         self.comparison_rows = ()
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet:  # noqa: ARG002
@@ -34,11 +36,13 @@ class FakeCoreFactRepository:
     def replace_collection_comparison_artifacts(
         self,
         collection_id: str,  # noqa: ARG002
-        comparable_results: tuple,  # noqa: ARG002
-        collection_comparable_results: tuple,  # noqa: ARG002
+        comparable_results: tuple,
+        collection_comparable_results: tuple,
         comparison_rows: tuple,
         pairwise_comparison_relations: tuple = (),  # noqa: ARG002
     ) -> None:
+        self.comparable_results = comparable_results
+        self.collection_comparable_results = collection_comparable_results
         self.comparison_rows = comparison_rows
 
 
@@ -82,6 +86,8 @@ def test_comparison_service_projects_rows_from_objective_measurements():
     rows = service.build_comparison_rows("col-1")
 
     assert len(rows) == 1
+    assert len(repository.comparable_results) == 1
+    assert len(repository.collection_comparable_results) == 1
     assert repository.comparison_rows == rows
     assert rows[0].comparable_result_id == "objective:oeu-as-built-icorr"
     assert rows[0].material_system_normalized == "316L stainless steel"

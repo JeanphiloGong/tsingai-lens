@@ -55,6 +55,7 @@ from domain.core.objective_material_projection import (
 )
 from domain.core.objective_comparison_projection import (
     project_objective_comparison_rows,
+    project_objective_comparison_semantics,
 )
 from domain.core.research_objective import (
     EVIDENCE_RESOLUTION_STATUS_VALUES,
@@ -136,6 +137,7 @@ __all__ = [
     "normalize_objective_confidence",
     "normalize_objective_terms",
     "project_objective_comparison_rows",
+    "project_objective_comparison_semantics",
     "project_objective_material_rows",
     "summarize_document_profile_collection",
 ]

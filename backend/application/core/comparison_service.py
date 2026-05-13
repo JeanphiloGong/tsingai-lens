@@ -15,7 +15,7 @@ from domain.core.comparison_projection import (
     ComparisonRowProjector,
 )
 from domain.core.objective_comparison_projection import (
-    project_objective_comparison_rows,
+    project_objective_comparison_semantics,
 )
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
@@ -547,24 +547,30 @@ class ComparisonService:
         collection_id: str,
     ) -> tuple[ComparisonRowRecord, ...]:
         self.collection_service.get_collection(collection_id)
-        objective_row_records = self._build_objective_comparison_rows(collection_id)
-        if objective_row_records:
-            semantic_records = ComparisonSemanticRecords(
-                comparable_results=(),
-                collection_comparable_results=(),
-                pairwise_comparison_relations=(),
+        objective_semantic_records = self._build_objective_comparison_semantics(
+            collection_id
+        )
+        if objective_semantic_records is not None:
+            row_records = self.comparison_row_projector.project_rows_from_semantic_artifacts(
+                collection_id=collection_id,
+                comparable_results=objective_semantic_records.comparable_results,
+                scoped_results=objective_semantic_records.collection_comparable_results,
             )
+            if not row_records:
+                raise ComparisonRowsNotReadyError(collection_id)
             self._store_comparison_artifacts(
                 collection_id=collection_id,
-                semantic_records=semantic_records,
-                row_records=objective_row_records,
+                semantic_records=objective_semantic_records,
+                row_records=row_records,
             )
             logger.info(
-                "Objective comparison projection finished collection_id=%s comparison_rows=%s",
+                "Objective comparison projection finished collection_id=%s comparable_results=%s collection_comparable_results=%s comparison_rows=%s",
                 collection_id,
-                len(objective_row_records),
+                len(objective_semantic_records.comparable_results),
+                len(objective_semantic_records.collection_comparable_results),
+                len(row_records),
             )
-            return objective_row_records
+            return row_records
 
         records = self._load_comparison_inputs(collection_id)
         logger.info(
@@ -616,20 +622,20 @@ class ComparisonService:
         )
         return row_records
 
-    def _build_objective_comparison_rows(
+    def _build_objective_comparison_semantics(
         self,
         collection_id: str,
-    ) -> tuple[ComparisonRowRecord, ...]:
+    ) -> ComparisonSemanticRecords | None:
         facts = self.core_fact_repository.read_collection_facts(collection_id)
         if not facts.objective_evidence_units:
-            return ()
-        row_records = project_objective_comparison_rows(
+            return None
+        semantic_records = project_objective_comparison_semantics(
             collection_id=collection_id,
             evidence_units=facts.objective_evidence_units,
         )
-        if not row_records:
+        if not semantic_records.comparable_results:
             raise ComparisonRowsNotReadyError(collection_id)
-        return row_records
+        return semantic_records
 
     def _load_comparison_inputs(
         self,

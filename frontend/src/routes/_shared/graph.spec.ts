@@ -277,4 +277,36 @@ describe('graph shared helpers', () => {
 
 		expect(linked.map((item) => item.row_id)).toEqual(['row_1']);
 	});
+
+	it('matches formatted aggregate condition labels to comparison rows', () => {
+		const rawCondition =
+			'details: tensile specimens were tested to failure; method_family: tensile_mechanics; test_method: tensile testing';
+		const row = {
+			row_id: 'row_2',
+			result_id: 'res_2',
+			source_document_id: 'doc_1',
+			display: {
+				material_system_normalized: '',
+				process_normalized: '',
+				property_normalized: '',
+				result_summary: '',
+				test_condition_normalized: rawCondition,
+				baseline_normalized: ''
+			}
+		} as ComparisonRow;
+
+		const linked = getLinkedComparisons(
+			{
+				kind: 'node',
+				node: {
+					id: 'tc:tensile',
+					label: formatGraphLabel(rawCondition),
+					type: 'test_condition'
+				}
+			},
+			[row]
+		);
+
+		expect(linked.map((item) => item.row_id)).toEqual(['row_2']);
+	});
 });

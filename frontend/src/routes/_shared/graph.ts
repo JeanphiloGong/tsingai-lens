@@ -954,6 +954,7 @@ function collectComparisonOverviewBuckets(
 function normalizeSearch(value?: string | null) {
 	return String(value ?? '')
 		.toLowerCase()
+		.replace(/_+/g, ' ')
 		.replace(/\s+/g, ' ')
 		.trim();
 }

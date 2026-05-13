@@ -178,6 +178,19 @@ function objectivePayload() {
 				source_refs: [],
 				resolution_status: 'resolved',
 				confidence: 0.82
+			},
+			{
+				evidence_unit_id: 'unit_compare',
+				objective_id: 'obj_1',
+				document_id: 'doc_1',
+				unit_kind: 'comparison',
+				property_normalized: 'yield strength',
+				value_payload: {
+					statement: 'Heat-treated samples exceeded the as-built baseline.'
+				},
+				source_refs: [],
+				resolution_status: 'resolved',
+				confidence: 0.79
 			}
 		],
 		logic_chain: {
@@ -245,6 +258,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Characterization observations' }))
 			.toBeInTheDocument();
 		await expect
+			.element(browserPage.getByRole('heading', { name: 'Comparison evidence' }))
+			.toBeInTheDocument();
+		await expect
 			.element(browserPage.getByText('No cross-paper comparison unit yet.'))
 			.toBeInTheDocument();
 		await expect
@@ -264,5 +280,28 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
 		).toEqual(['/api/v1/collections/col_123/objectives/obj_1/research-view']);
+	});
+
+	it('filters evidence units by kind and updates the inspector', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence units' }))
+			.toBeInTheDocument();
+		await browserPage.getByLabelText('Evidence kind').selectOptions('comparison');
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Comparison evidence' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Measurement results' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage
+					.getByRole('complementary', { name: 'Evidence detail' })
+					.getByText('Heat-treated samples exceeded the as-built baseline.')
+			)
+			.toBeInTheDocument();
 	});
 });

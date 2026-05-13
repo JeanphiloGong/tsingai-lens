@@ -39,6 +39,12 @@
 		query: string;
 	};
 
+	type FilterOption = {
+		value: string;
+		label: string;
+		count: number;
+	};
+
 	const evidenceKindOrder = ['measurement', 'test_condition', 'characterization', 'comparison'];
 
 	let objectiveView: ObjectiveResearchView | null = null;
@@ -46,6 +52,8 @@
 	let error = '';
 	let loadedKey = '';
 	let selectedEvidenceUnitId = '';
+	let selectedEvidenceKind = 'all';
+	let selectedEvidenceDocumentId = 'all';
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
@@ -54,14 +62,33 @@
 	$: evidenceUnits = objectiveView?.evidence_units ?? [];
 	$: evidenceRoutes = objectiveView?.evidence_routes ?? [];
 	$: relevantFrameCount = frames.filter((frame) => frame.relevance !== 'irrelevant').length;
-	$: evidenceGroups = buildEvidenceGroups(evidenceUnits);
+	$: evidenceKindOptions = buildEvidenceKindOptions(evidenceUnits);
+	$: evidenceDocumentOptions = buildEvidenceDocumentOptions(frames, evidenceUnits);
+	$: if (
+		selectedEvidenceKind !== 'all' &&
+		!evidenceKindOptions.some((option) => option.value === selectedEvidenceKind)
+	) {
+		selectedEvidenceKind = 'all';
+	}
+	$: if (
+		selectedEvidenceDocumentId !== 'all' &&
+		!evidenceDocumentOptions.some((option) => option.value === selectedEvidenceDocumentId)
+	) {
+		selectedEvidenceDocumentId = 'all';
+	}
+	$: filteredEvidenceUnits = filterEvidenceUnits(
+		evidenceUnits,
+		selectedEvidenceKind,
+		selectedEvidenceDocumentId
+	);
+	$: evidenceGroups = buildEvidenceGroups(filteredEvidenceUnits);
 	$: paperCoverage = buildPaperCoverage(frames, evidenceUnits, evidenceRoutes);
 	$: logicSteps = objectiveView ? buildLogicSteps(objectiveView) : [];
 	$: selectedEvidenceUnit =
 		(selectedEvidenceUnitId
-			? evidenceUnits.find((unit) => unit.evidence_unit_id === selectedEvidenceUnitId)
+			? filteredEvidenceUnits.find((unit) => unit.evidence_unit_id === selectedEvidenceUnitId)
 			: null) ??
-		evidenceUnits[0] ??
+		filteredEvidenceUnits[0] ??
 		null;
 	$: if (collectionId && objectiveId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
@@ -196,6 +223,69 @@
 			labelKey: evidenceKindLabelKey(kind),
 			units: grouped[kind] ?? []
 		}));
+	}
+
+	function buildEvidenceKindOptions(units: ObjectiveEvidenceUnit[]): FilterOption[] {
+		const counts: Record<string, number> = {};
+		for (const unit of units) {
+			counts[unit.unit_kind] = (counts[unit.unit_kind] ?? 0) + 1;
+		}
+		const kinds = [
+			...evidenceKindOrder.filter((kind) => kind in counts),
+			...Object.keys(counts).filter((kind) => !evidenceKindOrder.includes(kind)).sort()
+		];
+		return [
+			{
+				value: 'all',
+				label: $t('research.objectiveWorkspace.allEvidenceKinds'),
+				count: units.length
+			},
+			...kinds.map((kind) => ({
+				value: kind,
+				label: $t(evidenceKindLabelKey(kind)),
+				count: counts[kind] ?? 0
+			}))
+		];
+	}
+
+	function buildEvidenceDocumentOptions(
+		paperFrames: ObjectivePaperFrame[],
+		units: ObjectiveEvidenceUnit[]
+	): FilterOption[] {
+		const counts: Record<string, number> = {};
+		for (const unit of units) {
+			if (unit.document_id) counts[unit.document_id] = (counts[unit.document_id] ?? 0) + 1;
+		}
+		const frameByDocumentId = new Map(paperFrames.map((frame) => [frame.document_id, frame]));
+		return [
+			{
+				value: 'all',
+				label: $t('research.objectiveWorkspace.allPapers'),
+				count: units.length
+			},
+			...Object.keys(counts)
+				.sort()
+				.map((documentId) => {
+					const frame = frameByDocumentId.get(documentId);
+					return {
+						value: documentId,
+						label: frame ? frameTitle(frame) : documentId,
+						count: counts[documentId] ?? 0
+					};
+				})
+		];
+	}
+
+	function filterEvidenceUnits(
+		units: ObjectiveEvidenceUnit[],
+		kind: string,
+		documentId: string
+	): ObjectiveEvidenceUnit[] {
+		return units.filter((unit) => {
+			if (kind !== 'all' && unit.unit_kind !== kind) return false;
+			if (documentId !== 'all' && unit.document_id !== documentId) return false;
+			return true;
+		});
 	}
 
 	function objectiveHref() {
@@ -559,6 +649,33 @@
 						</div>
 						<span>{boolState(objectiveView.readiness.evidence_units_ready)}</span>
 					</div>
+					{#if evidenceUnits.length}
+						<div
+							class="evidence-toolbar"
+							aria-label={$t('research.objectiveWorkspace.evidenceFilters')}
+						>
+							<label>
+								<span>{$t('research.objectiveWorkspace.evidenceKindFilter')}</span>
+								<select bind:value={selectedEvidenceKind}>
+									{#each evidenceKindOptions as option (option.value)}
+										<option value={option.value}>
+											{option.label} ({option.count})
+										</option>
+									{/each}
+								</select>
+							</label>
+							<label>
+								<span>{$t('research.objectiveWorkspace.paperFilter')}</span>
+								<select bind:value={selectedEvidenceDocumentId}>
+									{#each evidenceDocumentOptions as option (option.value)}
+										<option value={option.value}>
+											{option.label} ({option.count})
+										</option>
+									{/each}
+								</select>
+							</label>
+						</div>
+					{/if}
 					{#if evidenceGroups.length}
 						<div class="evidence-group-list">
 							{#each evidenceGroups as group (group.kind)}
@@ -1095,6 +1212,35 @@
 		gap: 10px;
 	}
 
+	.evidence-toolbar {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 12px;
+	}
+
+	.evidence-toolbar label {
+		display: grid;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.evidence-toolbar span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.evidence-toolbar select {
+		width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 9px 11px;
+		color: var(--text-primary);
+		background: var(--surface-card);
+		font: inherit;
+	}
+
 	.evidence-unit-card {
 		display: grid;
 		gap: 5px;
@@ -1264,6 +1410,7 @@
 			justify-items: start;
 		}
 
+		.evidence-toolbar,
 		.evidence-unit-list,
 		.paper-coverage-card dl,
 		.evidence-detail dl {

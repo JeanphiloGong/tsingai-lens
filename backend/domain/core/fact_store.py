@@ -56,6 +56,54 @@ class CoreFactSet:
     pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = ()
     comparison_rows: tuple[ComparisonRowRecord, ...] = ()
 
+    @property
+    def paper_facts_generated(self) -> bool:
+        return bool(self.paper_facts_ready)
+
+    @property
+    def objective_evidence_units_ready(self) -> bool:
+        return bool(self.objective_evidence_units)
+
+    @property
+    def evidence_cards_generated(self) -> bool:
+        return bool(
+            self.paper_facts_generated
+            or self.objective_evidence_units_ready
+        )
+
+    @property
+    def evidence_cards_ready(self) -> bool:
+        return bool(
+            self.evidence_anchors
+            or self.method_facts
+            or self.measurement_results
+            or self.objective_evidence_units_ready
+        )
+
+    @property
+    def comparison_artifacts_generated(self) -> bool:
+        return bool(self.comparison_artifacts_ready)
+
+    @property
+    def graph_generated(self) -> bool:
+        return bool(
+            self.document_profiles
+            and self.evidence_cards_generated
+            and self.comparison_artifacts_generated
+        )
+
+    @property
+    def graph_ready(self) -> bool:
+        return bool(
+            self.document_profiles
+            and self.evidence_cards_ready
+            and (
+                self.comparable_results
+                or self.collection_comparable_results
+                or self.comparison_rows
+            )
+        )
+
     def has_paper_facts(self) -> bool:
         return any(
             (

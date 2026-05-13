@@ -6,8 +6,6 @@ from typing import Any
 from urllib.parse import urlencode
 
 from domain.core.comparison_assembly import (
-    ComparableResultAssembler,
-    ComparisonInputRecords,
     ComparisonSemanticRecords,
 )
 from domain.core.comparison_projection import (
@@ -22,10 +20,6 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfilesNotReadyError,
 )
 from application.source.collection_service import CollectionService
-from application.core.semantic_build.paper_facts_service import (
-    PaperFactsNotReadyError,
-    PaperFactsService,
-)
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
@@ -116,17 +110,11 @@ class ComparisonService:
     def __init__(
         self,
         collection_service: CollectionService | None = None,
-        paper_facts_service: PaperFactsService | None = None,
         document_profile_service: DocumentProfileService | None = None,
         core_fact_repository: CoreFactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
-        self.paper_facts_service = paper_facts_service or PaperFactsService(
-            collection_service=self.collection_service,
-            core_fact_repository=core_fact_repository,
-            source_artifact_repository=source_artifact_repository,
-        )
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
             core_fact_repository=core_fact_repository,
@@ -134,12 +122,10 @@ class ComparisonService:
         )
         self.core_fact_repository = (
             core_fact_repository
-            or getattr(self.paper_facts_service, "core_fact_repository", None)
             or build_core_fact_repository(
                 self.collection_service.root_dir.parent / "lens.sqlite"
             )
         )
-        self.comparable_result_assembler = ComparableResultAssembler()
         self.comparison_row_projector = ComparisonRowProjector()
 
     def list_comparison_rows(
@@ -572,55 +558,7 @@ class ComparisonService:
             )
             return row_records
 
-        records = self._load_comparison_inputs(collection_id)
-        logger.info(
-            "Comparison assembly started collection_id=%s measurement_results=%s sample_variants=%s test_conditions=%s baselines=%s",
-            collection_id,
-            len(records.measurement_results),
-            len(records.sample_variants),
-            len(records.test_conditions),
-            len(records.baseline_references),
-        )
-        if not records.measurement_results:
-            logger.warning(
-                "Comparison assembly skipped due to empty measurement_results collection_id=%s",
-                collection_id,
-            )
-
-        semantic_records = self.comparable_result_assembler.assemble_semantic_records(
-            collection_id=collection_id,
-            records=records,
-        )
-        row_records = self.comparison_row_projector.project_rows_from_semantic_artifacts(
-            collection_id=collection_id,
-            comparable_results=semantic_records.comparable_results,
-            scoped_results=semantic_records.collection_comparable_results,
-        )
-        if not records.measurement_results:
-            logger.warning(
-                "Comparison assembly produced zero rows because upstream measurement_results were empty collection_id=%s",
-                collection_id,
-            )
-        elif not row_records:
-            logger.warning(
-                "Comparison assembly produced zero rows after filtering collection_id=%s measurement_results=%s",
-                collection_id,
-                len(records.measurement_results),
-            )
-        self._store_comparison_artifacts(
-            collection_id=collection_id,
-            semantic_records=semantic_records,
-            row_records=row_records,
-        )
-        logger.info(
-            "Comparison assembly finished collection_id=%s comparable_results=%s collection_comparable_results=%s pairwise_comparison_relations=%s comparison_rows=%s",
-            collection_id,
-            len(semantic_records.comparable_results),
-            len(semantic_records.collection_comparable_results),
-            len(semantic_records.pairwise_comparison_relations),
-            len(row_records),
-        )
-        return row_records
+        raise ComparisonRowsNotReadyError(collection_id)
 
     def _build_objective_comparison_semantics(
         self,
@@ -637,54 +575,13 @@ class ComparisonService:
             raise ComparisonRowsNotReadyError(collection_id)
         return semantic_records
 
-    def _load_comparison_inputs(
-        self,
-        collection_id: str,
-    ) -> ComparisonInputRecords:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if not self._paper_facts_available_for_comparison(facts):
-            try:
-                self.paper_facts_service.build_paper_facts(collection_id)
-            except PaperFactsNotReadyError as exc:
-                raise ComparisonRowsNotReadyError(collection_id) from exc
-            facts = self.core_fact_repository.read_collection_facts(collection_id)
-
-        return ComparisonInputRecords(
-            sample_variants=facts.sample_variants,
-            measurement_results=facts.measurement_results,
-            test_conditions=facts.test_conditions,
-            baseline_references=facts.baseline_references,
-        )
-
-    def _paper_facts_available_for_comparison(self, facts: Any) -> bool:
-        return any(
-            (
-                facts.evidence_anchors,
-                facts.method_facts,
-                facts.sample_variants,
-                facts.test_conditions,
-                facts.baseline_references,
-                facts.measurement_results,
-                facts.characterization_observations,
-                facts.structure_features,
-            )
-        )
-
     def _semantic_records_from_facts(
         self,
         facts: CoreFactSet,
     ) -> ComparisonSemanticRecords:
         return ComparisonSemanticRecords(
-            comparable_results=(
-                self.comparable_result_assembler.normalize_comparable_results(
-                    facts.comparable_results
-                )
-            ),
-            collection_comparable_results=(
-                self.comparable_result_assembler.normalize_collection_comparable_results(
-                    facts.collection_comparable_results
-                )
-            ),
+            comparable_results=facts.comparable_results,
+            collection_comparable_results=facts.collection_comparable_results,
             pairwise_comparison_relations=facts.pairwise_comparison_relations,
         )
 

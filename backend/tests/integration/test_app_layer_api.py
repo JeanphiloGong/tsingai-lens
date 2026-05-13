@@ -16,7 +16,6 @@ from domain.core.comparison_projection import ComparisonRowProjector
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
-    ComparisonRowRecord,
     build_collection_assessment_input_fingerprint,
     build_comparison_row_id,
 )
@@ -577,7 +576,6 @@ def app_client(monkeypatch, tmp_path):
     from controllers.core import results as results_controller
     from controllers.goal import intake as goals_controller
     from controllers.derived import graph as graph_controller
-    from controllers.derived import reports as reports_controller
     from controllers.source import tasks as tasks_controller
     from controllers.core import workspace as workspace_controller
     from controllers.schemas.derived.report import (
@@ -624,7 +622,6 @@ def app_client(monkeypatch, tmp_path):
     )
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        paper_facts_service=paper_facts_service,
         document_profile_service=document_profile_service,
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
@@ -793,27 +790,27 @@ def test_collection_task_flow(app_client):
     assert body["evidence_cards_generated"] is True
     assert body["evidence_cards_ready"] is True
     assert body["characterization_observations_generated"] is True
-    assert body["characterization_observations_ready"] is True
+    assert body["characterization_observations_ready"] is False
     assert body["structure_features_generated"] is True
     assert body["structure_features_ready"] is False
     assert body["test_conditions_generated"] is True
     assert body["test_conditions_ready"] is True
     assert body["baseline_references_generated"] is True
-    assert body["baseline_references_ready"] is True
+    assert body["baseline_references_ready"] is False
     assert body["sample_variants_generated"] is True
-    assert body["sample_variants_ready"] is True
+    assert body["sample_variants_ready"] is False
     assert body["measurement_results_generated"] is True
-    assert body["measurement_results_ready"] is True
-    assert body["comparable_results_generated"] is True
-    assert body["comparable_results_ready"] is True
-    assert body["collection_comparable_results_generated"] is True
-    assert body["collection_comparable_results_ready"] is True
+    assert body["measurement_results_ready"] is False
+    assert body["comparable_results_generated"] is False
+    assert body["comparable_results_ready"] is False
+    assert body["collection_comparable_results_generated"] is False
+    assert body["collection_comparable_results_ready"] is False
     assert body["collection_comparable_results_stale"] is False
-    assert body["comparison_rows_generated"] is True
-    assert body["comparison_rows_ready"] is True
+    assert body["comparison_rows_generated"] is False
+    assert body["comparison_rows_ready"] is False
     assert body["comparison_rows_stale"] is False
-    assert body["graph_generated"] is True
-    assert body["graph_ready"] is True
+    assert body["graph_generated"] is False
+    assert body["graph_ready"] is False
     assert body["graph_stale"] is False
     assert body["blocks_generated"] is True
     assert body["blocks_ready"] is True
@@ -825,20 +822,10 @@ def test_collection_task_flow(app_client):
     assert body["table_cells_ready"] is False
 
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
-    assert graph.status_code == 200
-    graph_body = graph.json()
-    assert graph_body["collection_id"] == collection_id
-    assert len(graph_body["nodes"]) >= 3
-    assert len(graph_body["edges"]) >= 2
-    assert {item["type"] for item in graph_body["nodes"]} >= {
-        "document",
-        "evidence",
-        "comparison",
-    }
+    assert graph.status_code == 409
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
-    assert graphml.status_code == 200
-    assert graphml.headers["content-type"].startswith("application/graphml+xml")
+    assert graphml.status_code == 409
 
     profiles = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/documents/profiles")
     assert profiles.status_code == 200
@@ -851,29 +838,11 @@ def test_collection_task_flow(app_client):
     evidence = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/evidence/cards")
     assert evidence.status_code == 200
     evidence_body = evidence.json()
-    assert evidence_body["count"] >= 2
-    assert evidence_body["items"][0]["traceability_status"] in {"direct", "partial"}
+    assert evidence_body["count"] == 0
+    assert evidence_body["items"] == []
 
     comparisons = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/comparisons")
-    assert comparisons.status_code == 200
-    comparisons_body = comparisons.json()
-    assert comparisons_body["count"] >= 1
-    assert comparisons_body["items"][0]["assessment"]["comparability_status"] in {
-        "comparable",
-        "limited",
-        "not_comparable",
-        "insufficient",
-    }
-    assert "display" in comparisons_body["items"][0]
-    assert "evidence_bundle" in comparisons_body["items"][0]
-    assert "assessment" in comparisons_body["items"][0]
-    assert "uncertainty" in comparisons_body["items"][0]
-    assert "variant_id" in comparisons_body["items"][0]["display"]
-    assert "variant_label" in comparisons_body["items"][0]["display"]
-    assert "variable_axis" in comparisons_body["items"][0]["display"]
-    assert "variable_value" in comparisons_body["items"][0]["display"]
-    assert "baseline_reference" in comparisons_body["items"][0]["display"]
-    assert "result_source_type" in comparisons_body["items"][0]["evidence_bundle"]
+    assert comparisons.status_code == 409
 
     document_id = profiles_body["items"][0]["document_id"]
     profile = app_client.get(
@@ -885,39 +854,7 @@ def test_collection_task_flow(app_client):
     document_comparison_semantics = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents/{document_id}/comparison-semantics"
     )
-    assert document_comparison_semantics.status_code == 200
-    document_comparison_semantics_body = document_comparison_semantics.json()
-    assert document_comparison_semantics_body["document_id"] == document_id
-    assert document_comparison_semantics_body["count"] >= 1
-    assert document_comparison_semantics_body["items"][0]["source_document_id"] == document_id
-    assert "collection_overlays" in document_comparison_semantics_body["items"][0]
-    assert (
-        document_comparison_semantics_body["items"][0]["collection_overlays"][0]["policy_version"]
-        == "comparison_policy_v1"
-    )
-    assert document_comparison_semantics_body["items"][0]["collection_overlays"][0][
-        "reassessment_triggers"
-    ] == [
-        "policy_family_changed",
-        "policy_version_changed",
-        "comparable_result_normalization_version_changed",
-        "assessment_input_fingerprint_changed",
-    ]
-    assert document_comparison_semantics_body["items"][0]["projected_rows"] is None
-
-    evidence_id = evidence_body["items"][0]["evidence_id"]
-    evidence_detail = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/evidence/{evidence_id}"
-    )
-    assert evidence_detail.status_code == 200
-    assert evidence_detail.json()["evidence_id"] == evidence_id
-
-    row_id = comparisons_body["items"][0]["row_id"]
-    comparison_detail = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/comparisons/{row_id}"
-    )
-    assert comparison_detail.status_code == 200
-    assert comparison_detail.json()["row_id"] == row_id
+    assert document_comparison_semantics.status_code == 409
 
 
 def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):

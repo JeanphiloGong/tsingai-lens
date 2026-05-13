@@ -53,22 +53,6 @@ class ArtifactRegistryService:
         )
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
         source_artifacts_generated = not source_artifacts.is_empty()
-        objective_evidence_units_ready = bool(core_facts.objective_evidence_units)
-        evidence_cards_generated = bool(
-            core_facts.paper_facts_ready
-            or objective_evidence_units_ready
-        )
-        evidence_cards_ready = bool(
-            core_facts.evidence_anchors
-            or core_facts.method_facts
-            or core_facts.measurement_results
-            or objective_evidence_units_ready
-        )
-        comparable_results_generated = bool(core_facts.comparison_artifacts_ready)
-        collection_comparable_results_generated = bool(
-            core_facts.comparison_artifacts_ready
-        )
-        comparison_rows_generated = bool(core_facts.comparison_artifacts_ready)
         payload = ArtifactStatusRecord.build(
             collection_id=collection_id,
             output_path=str(base_dir),
@@ -76,34 +60,36 @@ class ArtifactRegistryService:
             documents_ready=bool(source_artifacts.documents),
             document_profiles_generated=bool(core_facts.document_profiles),
             document_profiles_ready=bool(core_facts.document_profiles),
-            evidence_anchors_generated=bool(core_facts.paper_facts_ready),
+            evidence_anchors_generated=core_facts.paper_facts_generated,
             evidence_anchors_ready=bool(core_facts.evidence_anchors),
-            method_facts_generated=bool(core_facts.paper_facts_ready),
+            method_facts_generated=core_facts.paper_facts_generated,
             method_facts_ready=bool(core_facts.method_facts),
-            evidence_cards_generated=evidence_cards_generated,
-            evidence_cards_ready=evidence_cards_ready,
-            characterization_observations_generated=bool(core_facts.paper_facts_ready),
+            evidence_cards_generated=core_facts.evidence_cards_generated,
+            evidence_cards_ready=core_facts.evidence_cards_ready,
+            characterization_observations_generated=core_facts.paper_facts_generated,
             characterization_observations_ready=bool(
                 core_facts.characterization_observations
             ),
-            structure_features_generated=bool(core_facts.paper_facts_ready),
+            structure_features_generated=core_facts.paper_facts_generated,
             structure_features_ready=bool(core_facts.structure_features),
-            test_conditions_generated=bool(core_facts.paper_facts_ready),
+            test_conditions_generated=core_facts.paper_facts_generated,
             test_conditions_ready=bool(core_facts.test_conditions),
-            baseline_references_generated=bool(core_facts.paper_facts_ready),
+            baseline_references_generated=core_facts.paper_facts_generated,
             baseline_references_ready=bool(core_facts.baseline_references),
-            sample_variants_generated=bool(core_facts.paper_facts_ready),
+            sample_variants_generated=core_facts.paper_facts_generated,
             sample_variants_ready=bool(core_facts.sample_variants),
-            measurement_results_generated=bool(core_facts.paper_facts_ready),
+            measurement_results_generated=core_facts.paper_facts_generated,
             measurement_results_ready=bool(core_facts.measurement_results),
-            comparable_results_generated=comparable_results_generated,
+            comparable_results_generated=core_facts.comparison_artifacts_generated,
             comparable_results_ready=bool(core_facts.comparable_results),
-            collection_comparable_results_generated=collection_comparable_results_generated,
+            collection_comparable_results_generated=(
+                core_facts.comparison_artifacts_generated
+            ),
             collection_comparable_results_ready=bool(
                 core_facts.collection_comparable_results
             ),
             collection_comparable_results_stale=False,
-            comparison_rows_generated=comparison_rows_generated,
+            comparison_rows_generated=core_facts.comparison_artifacts_generated,
             comparison_rows_ready=bool(core_facts.comparison_rows),
             comparison_rows_stale=False,
             graph_stale=False,

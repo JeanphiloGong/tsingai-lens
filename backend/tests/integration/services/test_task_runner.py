@@ -167,25 +167,25 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["evidence_cards_generated"] is True
     assert artifacts["evidence_cards_ready"] is True
     assert artifacts["characterization_observations_generated"] is True
-    assert artifacts["characterization_observations_ready"] is True
+    assert artifacts["characterization_observations_ready"] is False
     assert artifacts["structure_features_generated"] is True
     assert artifacts["structure_features_ready"] is False
     assert artifacts["test_conditions_generated"] is True
     assert artifacts["test_conditions_ready"] is True
     assert artifacts["baseline_references_generated"] is True
-    assert artifacts["baseline_references_ready"] is True
+    assert artifacts["baseline_references_ready"] is False
     assert artifacts["sample_variants_generated"] is True
-    assert artifacts["sample_variants_ready"] is True
+    assert artifacts["sample_variants_ready"] is False
     assert artifacts["measurement_results_generated"] is True
-    assert artifacts["measurement_results_ready"] is True
-    assert artifacts["comparable_results_generated"] is True
-    assert artifacts["comparable_results_ready"] is True
-    assert artifacts["collection_comparable_results_generated"] is True
-    assert artifacts["collection_comparable_results_ready"] is True
-    assert artifacts["comparison_rows_generated"] is True
-    assert artifacts["comparison_rows_ready"] is True
-    assert artifacts["graph_generated"] is True
-    assert artifacts["graph_ready"] is True
+    assert artifacts["measurement_results_ready"] is False
+    assert artifacts["comparable_results_generated"] is False
+    assert artifacts["comparable_results_ready"] is False
+    assert artifacts["collection_comparable_results_generated"] is False
+    assert artifacts["collection_comparable_results_ready"] is False
+    assert artifacts["comparison_rows_generated"] is False
+    assert artifacts["comparison_rows_ready"] is False
+    assert artifacts["graph_generated"] is False
+    assert artifacts["graph_ready"] is False
     assert artifacts["blocks_generated"] is True
     assert artifacts["blocks_ready"] is True
     assert artifacts["figures_generated"] is True

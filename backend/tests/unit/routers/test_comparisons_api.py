@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pandas as pd
 import pytest
 
 try:
@@ -14,12 +13,10 @@ from application.source.collection_service import CollectionService
 from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
-from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import comparisons as comparisons_controller
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
-    ComparisonRowRecord,
     build_comparison_row_id,
 )
 
@@ -150,13 +147,9 @@ def _store_core_comparison_artifacts(
 def comparison_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service)
-    paper_facts_service = PaperFactsService(
-        collection_service=collection_service,
-        document_profile_service=document_profile_service,
-    )
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        paper_facts_service=paper_facts_service,
+        document_profile_service=document_profile_service,
     )
 
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)

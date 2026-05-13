@@ -8,7 +8,10 @@ from typing import Any
 from config import CONFIG_DIR
 from infra.source.config.pipeline_mode import IndexingMethod
 
-from application.core.comparison_service import ComparisonService
+from application.core.comparison_service import (
+    ComparisonRowsNotReadyError,
+    ComparisonService,
+)
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
@@ -68,7 +71,6 @@ class CollectionBuildTaskRunner:
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
-            paper_facts_service=self.paper_facts_service,
         )
 
     def _resolve_load_config(self):
@@ -240,7 +242,12 @@ class CollectionBuildTaskRunner:
                     current_stage="comparison_rows_started",
                     progress_percent=82,
                 )
-                comparison_rows = self.comparison_service.build_comparison_rows(collection_id)
+                try:
+                    comparison_rows = self.comparison_service.build_comparison_rows(
+                        collection_id
+                    )
+                except ComparisonRowsNotReadyError:
+                    comparison_rows = ()
                 if not comparison_rows:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))

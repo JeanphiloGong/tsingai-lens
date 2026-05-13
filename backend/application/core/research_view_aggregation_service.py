@@ -135,7 +135,6 @@ class ResearchViewAggregationService:
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
-            paper_facts_service=self.paper_facts_service,
             document_profile_service=self.document_profile_service,
             core_fact_repository=self.core_fact_repository,
         )

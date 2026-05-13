@@ -50,10 +50,16 @@ async function capture(page, name, viewport, options = {}) {
 		const hasLoading = bodyText.includes('Loading graph...');
 		const hasLoaded = bodyText.includes('Graph loaded');
 		const hasNaN = /\bNaN\b/.test(bodyText);
+		const canvasTop =
+			document.querySelector('.graph-canvas-panel')?.getBoundingClientRect().top ?? null;
+		const controlsTop =
+			document.querySelector('.graph-controls-panel')?.getBoundingClientRect().top ?? null;
 		return {
 			hasNaN,
 			loadingLoadedConflict: hasLoading && hasLoaded,
 			horizontalOverflow,
+			canvasAfterControls:
+				canvasTop !== null && controlsTop !== null ? canvasTop > controlsTop : false,
 			scrollWidth: documentElement.scrollWidth,
 			viewportWidth: window.innerWidth,
 			hasGraphCanvas: Boolean(document.querySelector('.graph-canvas-shell')),
@@ -93,6 +99,9 @@ async function main() {
 		loadingLoadedConflict: captures.some((entry) => entry.metrics.loadingLoadedConflict),
 		mobileHorizontalOverflow: captures.some(
 			(entry) => entry.name === 'mobile' && entry.metrics.horizontalOverflow
+		),
+		mobileCanvasAfterControls: captures.some(
+			(entry) => entry.name === 'mobile' && entry.metrics.canvasAfterControls
 		),
 		consoleWarnings: consoleMessages.length,
 		pageErrors: pageErrors.length

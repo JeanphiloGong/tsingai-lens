@@ -2904,6 +2904,18 @@
 			grid-template-columns: 1fr;
 		}
 
+		.graph-canvas-panel {
+			order: 1;
+		}
+
+		.graph-controls-panel {
+			order: 2;
+		}
+
+		.graph-detail-panel {
+			order: 3;
+		}
+
 		.graph-overview-header {
 			display: grid;
 		}

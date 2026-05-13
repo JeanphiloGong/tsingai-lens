@@ -450,6 +450,21 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
 	});
 
+	it('uses parsed source text when the PDF cannot be rendered', async () => {
+		getDocumentMock.mockImplementationOnce(() => ({
+			promise: Promise.reject(new Error('connection reset')),
+			destroy: vi.fn()
+		}));
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Parsed source fallback')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Conductivity improved to 12 mS/cm under EIS.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Source preview unavailable')).not.toBeInTheDocument();
+	});
+
 	it('renders paper research sample matrix when research view is ready', async () => {
 		render(Page);
 

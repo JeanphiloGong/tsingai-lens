@@ -69,6 +69,8 @@
 	$: hasPdfSource = Boolean(
 		sourceFileUrl && (!sourceFilename || sourceFilename.toLowerCase().endsWith('.pdf'))
 	);
+	$: hasParsedSource = pages.some((page) => page.paragraphs.length > 0);
+	$: showParsedSourceFallback = hasParsedSource && (!hasPdfSource || Boolean(pdfError));
 	$: totalPages = pdfPageStates.length || pages.length || 1;
 	$: thumbnailPageNumbers = pageNumbersForReader(totalPages);
 	$: sourceSearchMatches = sourceSearchResults(pages, sourceSearchQuery);
@@ -501,6 +503,11 @@
 		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
 	}
 
+	function selectParsedSource(pageNumber: number, sourceSpanId: string | null) {
+		currentPage = pageNumber;
+		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
+	}
+
 	function rectStyle(rect: SourceAnchorRect) {
 		return `left: ${rect.left}%; top: ${rect.top}%; width: ${rect.width}%; height: ${rect.height}%;`;
 	}
@@ -753,6 +760,33 @@
 					<div class="skeleton skeleton--wide"></div>
 					<div class="skeleton"></div>
 					<p>{$t('workbench.pdfLoading')}</p>
+				</div>
+			{:else if showParsedSourceFallback}
+				<div class="parsed-source-fallback" data-testid="parsed-source-fallback">
+					<header>
+						<h3>{$t('workbench.parsedSourceFallback')}</h3>
+						<p>{pdfError ? $t('workbench.pdfLoadFailed') : $t('workbench.sourceUnavailableBody')}</p>
+					</header>
+					{#each pages as page}
+						<section
+							class="parsed-source-page"
+							id={`pdf-page-${page.page_number}`}
+							aria-label={page.label}
+						>
+							<div class="parsed-source-page__label">{page.label}</div>
+							{#each page.paragraphs as paragraph}
+								<button
+									type="button"
+									class="parsed-source-paragraph"
+									class:active={paragraph.source_span_id === activeSourceSpanId}
+									on:click={() => selectParsedSource(page.page_number, paragraph.source_span_id)}
+								>
+									<span>{paragraph.section || $t('workbench.sectionFallback')}</span>
+									<p>{paragraph.text}</p>
+								</button>
+							{/each}
+						</section>
+					{/each}
 				</div>
 			{:else}
 				<div class="empty-state empty-state--reader">
@@ -1364,6 +1398,89 @@
 
 	.empty-state--reader {
 		min-height: 320px;
+	}
+
+	.parsed-source-fallback {
+		display: grid;
+		max-width: 760px;
+		margin: 0 auto;
+		gap: 16px;
+	}
+
+	.parsed-source-fallback > header {
+		display: grid;
+		gap: 4px;
+		padding: 14px 16px;
+		border: 1px solid #dbeafe;
+		border-radius: 12px;
+		background: #ffffff;
+	}
+
+	.parsed-source-fallback h3,
+	.parsed-source-fallback p {
+		margin: 0;
+	}
+
+	.parsed-source-fallback h3 {
+		color: #0f172a;
+		font-size: 15px;
+		line-height: 22px;
+	}
+
+	.parsed-source-fallback > header p {
+		color: #64748b;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.parsed-source-page {
+		display: grid;
+		gap: 10px;
+		padding: 16px;
+		border: 1px solid #e2e8f0;
+		border-radius: 12px;
+		background: #ffffff;
+		box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+	}
+
+	.parsed-source-page__label {
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.parsed-source-paragraph {
+		display: grid;
+		width: 100%;
+		gap: 4px;
+		padding: 10px 12px;
+		border: 1px solid transparent;
+		border-radius: 10px;
+		background: #f8fafc;
+		color: #334155;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.parsed-source-paragraph.active {
+		border-color: #60a5fa;
+		background: #eff6ff;
+	}
+
+	.parsed-source-paragraph span {
+		color: #2563eb;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 18px;
+	}
+
+	.parsed-source-paragraph p {
+		margin: 0;
+		color: #334155;
+		font-size: 14px;
+		line-height: 22px;
 	}
 
 	.skeleton {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 from hashlib import sha1
+import json
 import logging
 import re
 from typing import Any
@@ -2042,6 +2043,12 @@ class ResearchObjectiveService:
         )
         if not record.get("confidence"):
             record["confidence"] = route.confidence
+        record = self._normalize_text_evidence_unit_record(
+            route=route,
+            record=record,
+        )
+        if route.source_kind == "text_window" and record.get("unit_kind") != "measurement":
+            return (record,)
 
         if route.role != "current_experimental_evidence":
             return (record,)
@@ -2093,6 +2100,30 @@ class ResearchObjectiveService:
             )
             normalized_records.append(normalized)
         return tuple(normalized_records)
+
+    def _normalize_text_evidence_unit_record(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        record: dict[str, Any],
+    ) -> dict[str, Any]:
+        if route.source_kind != "text_window" or record.get("unit_kind") != "measurement":
+            return record
+        value_payload = (
+            record.get("value_payload")
+            if isinstance(record.get("value_payload"), dict)
+            else {}
+        )
+        if self._value_payload_numeric_value(value_payload) is not None:
+            return record
+        normalized = dict(record)
+        if route.role == "characterization":
+            normalized["unit_kind"] = "characterization"
+        else:
+            normalized["unit_kind"] = "interpretation"
+        if not normalized.get("interpretation"):
+            normalized["interpretation"] = self._value_payload_text(value_payload)
+        return normalized
 
     def _objective_result_value_items(
         self,
@@ -2221,6 +2252,29 @@ class ResearchObjectiveService:
         if match is None:
             return None
         return float(match.group(0))
+
+    def _value_payload_numeric_value(
+        self,
+        value_payload: dict[str, Any],
+    ) -> float | None:
+        value = value_payload.get("value")
+        if isinstance(value, (int, float)):
+            return float(value)
+        if value not in (None, ""):
+            return self._coerce_number(value)
+        return self._coerce_number(value_payload.get("source_value_text"))
+
+    def _value_payload_text(
+        self,
+        value_payload: dict[str, Any],
+    ) -> str | None:
+        for key in ("statement", "summary", "source_value_text", "result", "value"):
+            value = value_payload.get(key)
+            if value not in (None, "", [], {}):
+                return str(value)
+        if value_payload:
+            return json.dumps(value_payload, ensure_ascii=False, sort_keys=True)
+        return None
 
     def _objective_route_source_refs(
         self,

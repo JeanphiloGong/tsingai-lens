@@ -1024,6 +1024,89 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
     )
 
 
+def test_research_objective_service_does_not_keep_text_trends_as_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 5},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "measurement",
+            "property_normalized": "microstructure",
+            "value_payload": {"result": "refined microstructure"},
+            "resolution_status": "partial",
+        },
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["unit_kind"] == "characterization"
+    assert record["interpretation"] == "refined microstructure"
+    assert record["source_refs"] == (
+        {
+            "route_id": route.route_id,
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "role": "characterization",
+            "page": 5,
+        },
+    )
+
+
+def test_research_objective_service_does_not_expand_text_trends_into_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-2",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 6},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "value_payload": {"yield strength": "better mechanical properties"},
+            "interpretation": "Strategy A performed better than B and C.",
+            "resolution_status": "partial",
+        },
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["unit_kind"] == "interpretation"
+    assert record["interpretation"] == "Strategy A performed better than B and C."
+    assert record["value_payload"] == {"yield strength": "better mechanical properties"}
+
+
 def test_research_objective_service_expands_result_table_matrix_measurements(
     tmp_path,
 ):

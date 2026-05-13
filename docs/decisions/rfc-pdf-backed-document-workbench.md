@@ -35,6 +35,378 @@ frontend route behavior still belongs under
 - [`../../frontend/src/routes/collections/document-evidence-review-split-view-plan.md`](../../frontend/src/routes/collections/document-evidence-review-split-view-plan.md)
 - [`../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)
 
+## Product Spec: Document Evidence Verification Workbench
+
+This section is the phase-one specification for redesigning the document detail
+page as the source verification surface for Lens. It is the shared source of
+truth for the next implementation wave; code changes should be planned against
+this target before implementation starts.
+
+### Assumptions
+
+1. The user is a researcher reviewing one paper inside a built collection.
+2. The document page is read-only in this wave. Evidence correction,
+   adjudication, and rebuild controls are later workflows.
+3. The page must preserve the existing same-origin `/api/v1/*` browser
+   contract.
+4. The final source reader should be a controlled PDF.js reader when the
+   original PDF/source is available. Parsed text is a fallback and source
+   search aid, not the primary reading surface.
+5. The local graph is scoped to the selected claim, result, evidence item, or
+   source anchor. It is not the collection graph.
+6. The research-objective workspace can deep link into this page with
+   `result_id`, `evidence_id`, `anchor_id`, `page`, and `return_to` query
+   parameters.
+
+### Objective
+
+The document detail page should answer one product question:
+
+```text
+What did this paper actually say, and can every material, process, test,
+result, comparison, interpretation, and extracted claim from Lens be verified
+against the original source?
+```
+
+The target layout is a three-region evidence verification workbench:
+
+```text
+left:   original paper reader
+middle: structured understanding / extracted evidence
+right:  selected local evidence graph
+```
+
+The page is not a generic document metadata screen and not a standalone PDF
+viewer. It exists to connect Lens extraction back to the source paper.
+
+### Tech Stack
+
+- Frontend: SvelteKit 2, Svelte 5, TypeScript, Vite, Playwright, `pdfjs-dist`.
+- Backend: Python API controllers, Core document content/read models, Source
+  collection file metadata, evidence traceback services.
+- Browser contract: same-origin `/api/v1/*` through the existing shared
+  frontend API helpers.
+- Route:
+  `frontend/src/routes/collections/[id]/documents/[document_id]/+page.svelte`.
+
+### Commands
+
+Frontend verification:
+
+```bash
+cd frontend
+npm run check
+npm run test:unit -- --run src/routes/collections/[id]/documents/[document_id]/document-detail-page.svelte.spec.ts
+npm run test:e2e -- --reporter=line
+npm run build
+```
+
+Backend verification when document/source contracts change:
+
+```bash
+cd backend
+./.venv/bin/python -m pytest tests/unit/routers/test_documents_api.py -q
+./.venv/bin/python -m ruff check controllers application tests/unit/routers/test_documents_api.py
+```
+
+Docs governance check when this RFC changes:
+
+```bash
+python3 scripts/check_docs_governance.py
+```
+
+### Project Structure
+
+```text
+docs/decisions/rfc-pdf-backed-document-workbench.md
+  Shared product, contract, and interaction target for the document workbench.
+
+backend/controllers/core/documents.py
+backend/controllers/schemas/core/documents.py
+  Document content, source file, and document read-model API surfaces.
+
+backend/application/source/collection_service.py
+  Safe original source-file resolution from collection metadata.
+
+backend/application/core/
+  Paper-level structured extraction, evidence, comparison, and traceback
+  read-model assembly.
+
+frontend/src/routes/_shared/documents.ts
+  Browser-side document workbench model, source target normalization, and
+  document API helpers.
+
+frontend/src/routes/_shared/traceback.ts
+frontend/src/routes/_shared/researchView.ts
+frontend/src/routes/_shared/results.ts
+  Shared evidence traceback, paper research-view, and result helpers.
+
+frontend/src/routes/collections/[id]/documents/[document_id]/_components/
+  PaperReader, structured extraction panel, result/evidence cards, and local
+  graph components.
+
+frontend/e2e/
+  Browser-level workbench checks and screenshot verification.
+```
+
+### Code Style
+
+The frontend should keep one selected workbench object and derive the reader
+target and graph focus from that state:
+
+```ts
+let selectedItemId = '';
+
+$: selectedItem = findWorkbenchItem(model, selectedItemId);
+$: selectedSourceTarget = selectedItem
+	? sourceTargetForItem(model, selectedItem)
+	: null;
+$: selectedGraph = selectedItem
+	? localGraphForItem(model, selectedItem)
+	: null;
+```
+
+The reader should receive product-shaped source targets, not backend artifact
+IDs as UI primitives:
+
+```svelte
+<PaperReader
+	sourceFileUrl={model.sourceFileUrl}
+	pages={model.pages}
+	activeSourceTarget={selectedSourceTarget}
+/>
+```
+
+Backend responses should expose stable locator and traceback fields directly
+instead of making the browser reconstruct file paths or source coordinates:
+
+```python
+return {
+    "page": normalized_page,
+    "bbox": normalized_bbox,
+    "char_range": normalized_char_range,
+    "quote": source_quote,
+}
+```
+
+### User-Facing Information Architecture
+
+#### Left: Original Paper Reader
+
+Purpose:
+
+- show the original source PDF when available
+- let any selected result, claim, evidence item, or graph node jump to the
+  source page or region
+- keep parsed text as fallback/search, not as the primary paper representation
+
+Required behavior:
+
+- use PDF.js for the controlled reader surface
+- show page navigation, zoom, and source search without crowding the paper
+- if `bbox` is available, draw a highlight on the PDF page
+- if only `page` is available, jump to that page and show that precise region
+  is unavailable
+- if PDF/source is unavailable, fall back to coherent parsed text grouped by
+  real sections
+- never expose `block_id`, `source_span_id`, or backend artifact IDs in the
+  default UI
+
+#### Middle: Structured Understanding Panel
+
+Purpose:
+
+- show what Lens understood from this one paper
+- organize extraction according to scientific reading order
+- make every row actionable for source verification
+
+The default order should be:
+
+```text
+paper scope
+-> experimental objects
+-> preparation / processing / treatment conditions
+-> test and characterization methods
+-> measured results
+-> comparisons
+-> author interpretations
+-> missing context and warnings
+-> evidence anchors
+```
+
+The middle panel should include:
+
+- paper summary
+- material system
+- samples / variants
+- process context
+- test conditions
+- measurements
+- comparisons
+- characterization observations
+- interpretations
+- missing context / warnings
+- evidence anchors
+
+It should not render raw JSON as the primary experience. Tables, compact cards,
+and grouped rows are appropriate when they preserve source links and selection
+state.
+
+#### Right: Local Evidence Graph
+
+Purpose:
+
+- show how the selected value or claim is connected to sample, process, test
+  condition, comparison, interpretation, and source anchor
+- help the user understand dependency context before trusting an extracted
+  result
+- remain secondary to source verification
+
+Required behavior:
+
+- center on the selected claim/result/evidence item
+- show only the selected object's local neighborhood
+- connect to sample, process, test condition, comparison, and source anchor
+  where available
+- collapse or move below the main flow on narrow screens
+- avoid becoming the collection graph or replacing the structured panel
+
+### Backend / Frontend Coordination
+
+Backend responsibilities:
+
+- serve document content/profile metadata
+- stream the original source file through a safe document source endpoint
+- provide source locators: `page`, `bbox`, `char_range`, `quote`, and section
+  context
+- provide paper-level structured extraction grouped by scientific role
+- provide evidence traceback for result/evidence/source-anchor verification
+- expose result/evidence/source-anchor relationships
+- expose reverse links from objective evidence units to document source
+  locations
+- return explicit missing-context, warning, and traceability states
+
+Frontend responsibilities:
+
+- render the PDF.js source reader and parsed-text fallback
+- synchronize selected structured evidence with PDF page/region highlight
+- render the middle structured panel with tabs, cards, tables, and selection
+  state
+- render the selected local graph without stealing the main workflow
+- support durable URL parameters:
+  `result_id`, `evidence_id`, `anchor_id`, `page`, and `return_to`
+- preserve the return path to the research-objective workspace
+- hide internal locator IDs in the default UI
+
+### Relationship To Research Objectives
+
+The research-objective workspace uses the document detail page as its source
+verification target.
+
+Expected navigation:
+
+```text
+objective evidence unit
+-> document detail
+-> selected result/evidence/anchor
+-> PDF jumps to the source page or region
+-> user verifies the claim
+-> return_to navigates back to the objective workspace
+```
+
+The document page should therefore accept objective-origin deep links even when
+the selected item is not a legacy material result. If the objective evidence
+unit cannot be mapped to a result row yet, the page should still select the
+best available evidence anchor and source location.
+
+### Testing Strategy
+
+Backend tests should verify:
+
+- document content blocks expose valid `page`, `bbox`, and `char_range`
+- invalid locator payloads normalize to `null` instead of crashing
+- source endpoint streams an existing original PDF/source file
+- missing or ambiguous source files return explicit structured errors
+- unsafe file paths cannot be requested or leaked
+- evidence traceback returns anchors usable by the document page
+
+Frontend unit/browser tests should verify:
+
+- the document detail route renders source reader, structured panel, and local
+  graph regions
+- PDF source mode is preferred when the source file endpoint works
+- parsed text fallback is coherent and does not repeat section titles per
+  parser block
+- selecting a structured row updates selected state, PDF/source target, and
+  local graph focus
+- `result_id`, `evidence_id`, `anchor_id`, `page`, and `return_to` are honored
+- page-only anchors show a readable precision fallback
+- mobile layout intentionally prioritizes structured verification and source
+  access without horizontal overflow
+
+Playwright screenshot checks should cover at least:
+
+- desktop document workbench
+- mobile document workbench
+- PDF unavailable fallback
+- selected result/evidence with source highlight or page fallback
+
+### Boundaries
+
+- Always:
+  keep source verification visible, use same-origin API helpers, preserve
+  source traceback, show explicit missing/partial states, and verify with
+  focused backend, frontend, and browser checks.
+- Ask first:
+  changing public API shapes, adding new dependencies beyond existing
+  `pdfjs-dist`, changing database tables, adding evidence-edit/approval
+  workflows, deleting old material/result routes, or changing release/build
+  configuration.
+- Never:
+  expose filesystem paths, expose raw `block_id`/`source_span_id` as normal UI
+  labels, treat parsed blocks as the primary paper reader, make the local graph
+  the main route, make browser code infer scientific conclusions from raw JSON,
+  or add a parallel browser API contract.
+
+### Success Criteria
+
+The redesigned document detail page is acceptable when:
+
+- the page visibly answers what the paper says and whether Lens extraction can
+  be verified against the source
+- the desktop layout has a clear source reader, structured understanding
+  panel, and selected local graph
+- the left reader displays the original PDF/source when available
+- source fallback is compact and useful; it does not leave a giant empty reader
+  when only parsed text is available
+- selecting any result, evidence card, comparison, characterization, or graph
+  node drives the source reader to the best available page, region, section, or
+  quote
+- internal backend IDs and artifact codes are hidden from ordinary users
+- the middle panel follows scientific reading order instead of dumping JSON or
+  unrelated diagnostic sections
+- the local graph changes with the selected item and stays auxiliary
+- objective workspace links can open this page, select the corresponding
+  evidence/source anchor, and return to the objective workspace
+- mobile screenshots show no horizontal overflow, clipped toolbar, or first
+  viewport dominated by an empty source preview
+- `npm run check`, targeted frontend tests, relevant backend tests, docs
+  governance, and Playwright screenshots pass for the touched surface
+
+### Open Questions
+
+- Should the first optimized mobile view default to structured understanding
+  first, with source reader opened by a segmented control, or should it show
+  source first when a deep link contains a source anchor?
+- Should objective evidence units get a dedicated query parameter such as
+  `evidence_unit_id`, or should they always map through `evidence_id` /
+  `anchor_id`?
+- Should source-unavailable pages automatically show parsed text fallback in
+  the left region, or switch the middle panel into a source-first verification
+  mode?
+- Should the local graph be visible by default on desktop, or collapsed until a
+  structured item is selected?
+
 ## Current State
 
 The frontend document detail page has already moved toward a three-column

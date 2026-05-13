@@ -1868,7 +1868,7 @@ def test_research_objective_service_skips_table_matrix_continuation_header_rows(
             "page": 8,
             "column_headers": ["Sample", "R film (Ω cm 2 )"],
             "table_matrix": [
-                ["Sample", "R film (Ω cm 2 )"],
+                ["Sample", "R film"],
                 ["", ""],
                 ["", "film resistance"],
                 ["375 W-2100 mm·s -1", "5.03×10 4"],

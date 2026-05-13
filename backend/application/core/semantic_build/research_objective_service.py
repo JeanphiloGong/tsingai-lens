@@ -3234,6 +3234,8 @@ class ResearchObjectiveService:
         if first_header_key not in {"sample", "sample_id", "sample_number"}:
             return False
         first_cell = str(row[0] if row else "").strip()
+        if self._objective_column_key(first_cell) == first_header_key:
+            return True
         return not first_cell and any(str(cell).strip() for cell in row[1:])
 
     def _objective_row_matches_headers(

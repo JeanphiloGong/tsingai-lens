@@ -27,6 +27,7 @@ from domain.core import (
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
     ObjectivePaperFrame,
+    ResearchObjective,
 )
 from domain.source import SourceArtifactSet
 
@@ -948,6 +949,129 @@ def test_research_objective_service_forces_extractable_objective_route_roles(
     )
     assert not service._normalize_route_extractable(
         {"role": "literature_comparison", "extractable": False}
+    )
+
+
+def test_research_objective_service_skips_failed_objective_unit_route(
+    tmp_path,
+    caplog,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power"],
+            "property_axes": ["relative density"],
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": objective.question,
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["laser power"],
+            "process_context_axes": ["SLM"],
+            "target_property_axes": ["relative density"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_tables": ["table-1"],
+        }
+    )
+    table_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Sample": "sample_id",
+                "Relative density (%)": "target_property",
+            },
+            "confidence": 0.85,
+        }
+    )
+    failing_text_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "confidence": 0.75,
+        }
+    )
+
+    class FailingUnitExtractor:
+        def __init__(self) -> None:
+            self.unit_payloads: list[dict[str, Any]] = []
+
+        def extract_objective_evidence_units(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredObjectiveEvidenceUnits:
+            self.unit_payloads.append(payload)
+            raise RuntimeError("malformed objective evidence JSON")
+
+    extractor = FailingUnitExtractor()
+    table = SimpleNamespace(
+        table_id="table-1",
+        document_id="paper-1",
+        page=1,
+        caption_text="Relative density results",
+        heading_path="Results",
+        column_headers=["Sample", "Relative density (%)"],
+        table_matrix=[
+            ["Sample", "Relative density (%)"],
+            ["S1", "99.5"],
+        ],
+    )
+    block = SimpleNamespace(
+        block_id="block-1",
+        document_id="paper-1",
+        page=1,
+        block_type="paragraph",
+        heading_path="Results",
+        text="The model response for this text window is malformed.",
+    )
+
+    with caplog.at_level("ERROR"):
+        units = service._build_objective_evidence_units(
+            collection_id="col-test",
+            extractor=extractor,
+            objectives=(objective,),
+            objective_contexts=(objective_context,),
+            objective_paper_frames=(frame,),
+            objective_evidence_routes=(table_route, failing_text_route),
+            blocks_by_document_id={"paper-1": [block]},
+            tables_by_document_id={"paper-1": [table]},
+        )
+
+    measurements = [unit for unit in units if unit.unit_kind == "measurement"]
+    assert len(measurements) == 1
+    assert measurements[0].property_normalized == "relative density"
+    assert measurements[0].value_payload["value"] == 99.5
+    assert [payload["evidence_route"]["source_ref"] for payload in extractor.unit_payloads] == [
+        "block-1"
+    ]
+    assert any(
+        "Research objective evidence-unit extraction route failed" in record.message
+        and failing_text_route.route_id in record.message
+        for record in caplog.records
     )
 
 
@@ -2777,17 +2901,9 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
         facts.objective_logic_chains[0].summary
     )
     assert len(extractor.route_payloads) == 1
-    assert len(extractor.unit_payloads) == 2
-    table_unit_payload = next(
-        payload
-        for payload in extractor.unit_payloads
-        if payload["evidence_route"]["source_kind"] == "table"
-    )
-    assert table_unit_payload["source"]["table_matrix"] == [
-        ["sample", "corrosion current"],
-        ["as-built", "1.2 uA/cm2"],
-        ["heat-treated", "0.4 uA/cm2"],
-    ]
+    assert len(extractor.unit_payloads) == 1
+    assert extractor.unit_payloads[0]["evidence_route"]["source_kind"] == "text_window"
+    assert extractor.unit_payloads[0]["evidence_route"]["source_ref"] == "b2"
     assert extractor.route_payloads[0]["paper_frame"]["frame_id"] == active_frame.frame_id
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"

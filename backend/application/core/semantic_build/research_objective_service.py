@@ -1327,7 +1327,6 @@ class ResearchObjectiveService:
                 "evidence_route": route.to_record(),
                 "source": source,
             }
-            parsed = extractor.extract_objective_evidence_units(payload)
             route_unit_start = len(units)
             route_records = self._objective_table_matrix_evidence_unit_records(
                 route=route,
@@ -1338,6 +1337,23 @@ class ResearchObjectiveService:
                 not route_records
                 and not self._objective_table_route_should_skip_llm_fallback(route)
             ):
+                try:
+                    parsed = extractor.extract_objective_evidence_units(payload)
+                except Exception:
+                    logger.exception(
+                        "Research objective evidence-unit extraction route failed collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s",
+                        collection_id,
+                        route.route_id,
+                        route.objective_id,
+                        route.document_id,
+                        route.source_kind,
+                        route.source_ref,
+                        route_position,
+                        len(extractable_routes),
+                        route_position - 1,
+                        max(len(extractable_routes) - route_position, 0),
+                    )
+                    continue
                 route_records = tuple(
                     record
                     for item in parsed.evidence_units

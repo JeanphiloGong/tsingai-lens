@@ -103,6 +103,163 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(tmp_path):
     assert output_dir_bundle["comparisons"][0]["comparison_id"] == "rel-1"
 
 
+def test_export_prediction_bundle_projects_objective_first_units(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+            "metadata": {"doi": "10.1000/objective"},
+        }
+    ]
+    records_by_artifact["document_profiles"] = [
+        {
+            "document_id": "paper-1",
+            "title": "Objective Paper",
+            "doc_type": "experimental",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-process-1",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {"sample_number": 1},
+            "process_context": {"laser_power_w": 200},
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-test-1",
+            "document_id": "paper-1",
+            "unit_kind": "test_condition",
+            "property_normalized": "yield strength",
+            "test_condition": {
+                "test_method": "tensile test",
+                "test_temperature_c": 25,
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-1",
+                    "page": 2,
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        },
+        {
+            "evidence_unit_id": "oeu-measure-1",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {"sample_number": 1},
+            "process_context": {"laser_power_w": 200},
+            "value_payload": {"value": 940, "source_value_text": "940"},
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.91,
+        },
+        {
+            "evidence_unit_id": "oeu-comparison-1",
+            "document_id": "paper-1",
+            "unit_kind": "comparison",
+            "property_normalized": "yield strength",
+            "sample_context": {"sample_number": 1},
+            "baseline_context": {
+                "sample_context": {"sample_number": 0},
+                "value": 880,
+            },
+            "value_payload": {
+                "value": 940,
+                "direction": "increase",
+                "comparison_axis": "laser_power_w",
+            },
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+        },
+        {
+            "evidence_unit_id": "oeu-characterization-1",
+            "document_id": "paper-1",
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample_context": {"sample_number": 1},
+            "value_payload": {"summary": "fine grains"},
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-2",
+                    "page": 5,
+                }
+            ],
+            "resolution_status": "resolved",
+        },
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert bundle["metadata"]["fact_source"] == "objective_first"
+    assert bundle["metadata"]["artifact_rows"]["objective_evidence_units"] == 5
+    assert bundle["papers"][0]["paper_id"] == "paper-1"
+    assert bundle["samples"][0]["label_in_paper"] == "Sample 1"
+    assert bundle["process_parameters"][0]["original_parameter_name"] == (
+        "laser_power_w"
+    )
+    assert bundle["test_conditions"][0]["test_type"] == "yield strength"
+    assert bundle["test_conditions"][0]["test_temperature"] == "25"
+    assert bundle["measurement_results"][0]["result_id"] == "oeu-measure-1"
+    assert bundle["measurement_results"][0]["value_or_trend"] == "940"
+    assert bundle["measurement_results"][0]["sample_id"] == (
+        "obj-sample-paper-1-sample-1"
+    )
+    assert bundle["comparisons"][0]["current_value"] == 940
+    assert bundle["comparisons"][0]["baseline_value"] == 880
+    assert bundle["comparisons"][0]["baseline_sample_ids"] == [
+        "obj-sample-paper-1-sample-0"
+    ]
+    assert bundle["observations"][0]["value_or_description"] == "fine grains"
+    assert {
+        evidence["evidence_id"]
+        for evidence in bundle["evidence"]
+    } == {
+        "objective-source:table:table-1",
+        "objective-source:text_window:block-1",
+        "objective-source:text_window:block-2",
+    }
+    assert bundle["objective_evidence_units"][0]["source"] == {
+        "artifact": "objective_evidence_units",
+        "row": 1,
+    }
+
+
 def test_export_prediction_bundle_allows_missing_artifacts(tmp_path):
     exporter = _load_exporter_module()
     backend_root = tmp_path / "backend"

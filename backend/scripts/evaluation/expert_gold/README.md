@@ -149,3 +149,34 @@ pairwise comparison matching is active when the prediction bundle contains
 pairwise comparison relations. A pairwise comparison match requires compatible
 current sample, baseline sample, metric, unit, and numeric values within the
 configured tolerance.
+
+## Run Objective-First Benchmark
+
+After a collection has been built with objective evidence units, run the
+objective-first benchmark:
+
+```bash
+python3 scripts/evaluation/expert_gold/run_objective_gold_benchmark.py \
+  --collection-id <collection_id>
+```
+
+For a single paper gate such as P001:
+
+```bash
+python3 scripts/evaluation/expert_gold/run_objective_gold_benchmark.py \
+  --collection-id <collection_id> \
+  --gold-paper-id P001
+```
+
+The runner converts the expert CSVs, exports an objective-first prediction
+bundle with `--fact-source objective_first`, evaluates it, and prints a compact
+summary. It reads an already-built collection; it does not rebuild PDFs or call
+the extraction pipeline.
+
+Default outputs are written under:
+
+```text
+tests/fixtures/local_expert_gold/generated/objective_first/
+```
+
+Do not commit generated benchmark bundles or reports.

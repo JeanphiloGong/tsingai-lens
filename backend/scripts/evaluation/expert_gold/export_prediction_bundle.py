@@ -33,6 +33,8 @@ DEFAULT_OUTPUT_PATH = (
 ARTIFACT_NAMES = (
     "documents",
     "document_profiles",
+    "objective_evidence_units",
+    "objective_logic_chains",
     "evidence_anchors",
     "method_facts",
     "sample_variants",
@@ -93,6 +95,15 @@ def parse_args() -> argparse.Namespace:
             "tests/fixtures/local_expert_gold/generated/prediction_bundle.json."
         ),
     )
+    parser.add_argument(
+        "--fact-source",
+        choices=("paper_facts", "objective_first"),
+        default="paper_facts",
+        help=(
+            "Semantic fact family to export. Use objective_first to project "
+            "ObjectiveEvidenceUnit records into the gold-aligned bundle."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -103,6 +114,7 @@ def main() -> None:
         collection_id=args.collection_id,
         source_output_dir=args.output_dir,
         output_path=args.output,
+        fact_source=args.fact_source,
     )
     print(output_path)
 
@@ -113,6 +125,7 @@ def export_prediction_bundle(
     collection_id: str | None = None,
     source_output_dir: str | Path | None = None,
     output_path: str | Path = DEFAULT_OUTPUT_PATH,
+    fact_source: str = "paper_facts",
 ) -> Path:
     root = Path(backend_root).expanduser().resolve()
     output_dir = _resolve_source_output_dir(
@@ -135,6 +148,7 @@ def export_prediction_bundle(
         source_output_dir=output_dir,
         records_by_artifact=records_by_artifact,
         missing_artifacts=missing_artifacts,
+        fact_source=fact_source,
     )
     destination = Path(output_path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -151,6 +165,7 @@ def build_prediction_bundle(
     source_output_dir: Path,
     records_by_artifact: dict[str, list[dict[str, Any]]],
     missing_artifacts: list[str],
+    fact_source: str = "paper_facts",
 ) -> dict[str, Any]:
     resolved_collection_id = collection_id or _infer_collection_id(records_by_artifact)
     papers = _convert_papers(
@@ -158,12 +173,43 @@ def build_prediction_bundle(
         records_by_artifact["document_profiles"],
         records_by_artifact=records_by_artifact,
     )
+    if fact_source == "objective_first":
+        objective_units = records_by_artifact["objective_evidence_units"]
+        samples = _convert_objective_samples(objective_units)
+        process_parameters = _convert_objective_process_parameters(objective_units)
+        test_conditions = _convert_objective_test_conditions(objective_units)
+        measurement_results = _convert_objective_measurement_results(objective_units)
+        comparisons = _convert_objective_comparisons(objective_units)
+        observations = _convert_objective_observations(objective_units)
+        evidence = _convert_objective_evidence(objective_units)
+    else:
+        samples = _convert_samples(records_by_artifact["sample_variants"])
+        process_parameters = _convert_process_parameters(
+            records_by_artifact["method_facts"],
+            records_by_artifact["sample_variants"],
+        )
+        test_conditions = _convert_test_conditions(
+            records_by_artifact["test_conditions"]
+        )
+        measurement_results = _convert_measurement_results(
+            records_by_artifact["measurement_results"]
+        )
+        comparisons = _convert_comparisons(
+            records_by_artifact["pairwise_comparison_relations"],
+            records_by_artifact["comparison_rows"],
+            records_by_artifact["baseline_references"],
+        )
+        observations = _convert_observations(
+            records_by_artifact["characterization_observations"]
+        )
+        evidence = _convert_evidence(records_by_artifact["evidence_anchors"])
     bundle: dict[str, Any] = {
         "metadata": {
             "schema_version": SCHEMA_VERSION,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "collection_id": resolved_collection_id,
             "source_output_dir": str(source_output_dir),
+            "fact_source": fact_source,
             "artifact_rows": {
                 name: len(records)
                 for name, records in records_by_artifact.items()
@@ -171,28 +217,23 @@ def build_prediction_bundle(
             "missing_artifacts": missing_artifacts,
         },
         "papers": papers,
-        "samples": _convert_samples(records_by_artifact["sample_variants"]),
-        "process_parameters": _convert_process_parameters(
-            records_by_artifact["method_facts"],
-            records_by_artifact["sample_variants"],
-        ),
-        "test_conditions": _convert_test_conditions(
-            records_by_artifact["test_conditions"]
-        ),
-        "measurement_results": _convert_measurement_results(
-            records_by_artifact["measurement_results"]
-        ),
-        "comparisons": _convert_comparisons(
-            records_by_artifact["pairwise_comparison_relations"],
-            records_by_artifact["comparison_rows"],
-            records_by_artifact["baseline_references"],
-        ),
-        "observations": _convert_observations(
-            records_by_artifact["characterization_observations"]
-        ),
-        "evidence": _convert_evidence(records_by_artifact["evidence_anchors"]),
+        "samples": samples,
+        "process_parameters": process_parameters,
+        "test_conditions": test_conditions,
+        "measurement_results": measurement_results,
+        "comparisons": comparisons,
+        "observations": observations,
+        "evidence": evidence,
         "uncertainties": [],
         "global_notes": [],
+        "objective_evidence_units": _raw_records(
+            records_by_artifact["objective_evidence_units"],
+            "objective_evidence_units",
+        ),
+        "objective_logic_chains": _raw_records(
+            records_by_artifact["objective_logic_chains"],
+            "objective_logic_chains",
+        ),
         "baseline_references": _raw_records(
             records_by_artifact["baseline_references"],
             "baseline_references",
@@ -249,6 +290,12 @@ def _load_artifacts(
         "documents": [record.to_record() for record in source_artifacts.documents],
         "document_profiles": [
             record.to_record() for record in core_facts.document_profiles
+        ],
+        "objective_evidence_units": [
+            record.to_record() for record in core_facts.objective_evidence_units
+        ],
+        "objective_logic_chains": [
+            record.to_record() for record in core_facts.objective_logic_chains
         ],
         "evidence_anchors": [
             record.to_record() for record in core_facts.evidence_anchors
@@ -671,6 +718,298 @@ def _convert_observations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return records
 
 
+def _convert_objective_samples(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    samples: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        sample_context = _dict_value(row.get("sample_context"))
+        if not sample_context:
+            continue
+        document_id = _text(row, "document_id")
+        sample_id = _objective_sample_id(document_id, sample_context)
+        if not sample_id or sample_id in samples:
+            continue
+        samples[sample_id] = {
+            "paper_id": document_id,
+            "sample_id": sample_id,
+            "label_in_paper": _objective_sample_label(sample_context),
+            "sample_description": _objective_sample_description(sample_context),
+            "material_system": _payload_text(
+                _dict_value(row.get("material_system")),
+                "material",
+                "normalized",
+                "composition",
+            ),
+            "host_material_system": _first_value(row, "material_system"),
+            "difference_type": "",
+            "difference_value": "",
+            "is_control_sample": "",
+            "evidence_ids": _objective_evidence_ids(row),
+            "structure_feature_ids": [],
+            "confidence": _first_value(row, "confidence"),
+            "epistemic_status": _text(row, "resolution_status"),
+            "source": _source("objective_evidence_units", None),
+        }
+    return list(samples.values())
+
+
+def _convert_objective_process_parameters(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for row_number, row in _rows_with_numbers(rows):
+        process_context = _dict_value(row.get("process_context"))
+        sample_context = _dict_value(row.get("sample_context"))
+        sample_id = _objective_sample_id(_text(row, "document_id"), sample_context)
+        for key, value in process_context.items():
+            if not _present(value):
+                continue
+            records.append(
+                {
+                    "paper_id": _text(row, "document_id"),
+                    "sample_reference": sample_id,
+                    "sample_ids": [sample_id] if sample_id else [],
+                    "sample_scope": "single_sample" if sample_id else "",
+                    "parameter_category": "objective_process_context",
+                    "original_parameter_name": key,
+                    "parameter_description": key,
+                    "value": value,
+                    "unit": _infer_process_unit(key),
+                    "applies_to": _objective_sample_label(sample_context),
+                    "evidence_ids": _objective_evidence_ids(row),
+                    "confidence": _first_value(row, "confidence"),
+                    "epistemic_status": _text(row, "resolution_status"),
+                    "source": _source("objective_evidence_units", row_number),
+                }
+            )
+    return records
+
+
+def _convert_objective_test_conditions(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for row_number, row in _rows_with_numbers(rows):
+        if _text(row, "unit_kind") != "test_condition":
+            continue
+        payload = _dict_value(row.get("test_condition")) or _dict_value(
+            row.get("resolved_condition")
+        )
+        records.append(
+            {
+                "paper_id": _text(row, "document_id"),
+                "test_condition_id": _text(row, "evidence_unit_id"),
+                "sample_reference": "",
+                "sample_ids": [],
+                "sample_scope": "",
+                "test_type": _text(row, "property_normalized")
+                or _payload_text(payload, "test_type", "test_method", "method"),
+                "test_temperature": _payload_text(payload, "test_temperature_c"),
+                "strain_rate_or_frequency": _payload_text(
+                    payload,
+                    "strain_rate_s-1",
+                    "strain_rate",
+                    "frequency_hz",
+                    "frequency",
+                ),
+                "build_orientation": _payload_text(payload, "build_orientation"),
+                "sampling_orientation": _payload_text(
+                    payload,
+                    "sample_orientation",
+                    "loading_direction",
+                ),
+                "surface_condition": _payload_text(payload, "surface_condition"),
+                "test_standard": _payload_text(payload, "test_standard", "standard"),
+                "other_conditions": _remaining_payload(
+                    payload,
+                    excluded={
+                        "test_type",
+                        "test_method",
+                        "method",
+                        "test_temperature_c",
+                        "strain_rate_s-1",
+                        "strain_rate",
+                        "frequency_hz",
+                        "frequency",
+                        "build_orientation",
+                        "sample_orientation",
+                        "loading_direction",
+                        "surface_condition",
+                        "test_standard",
+                        "standard",
+                    },
+                ),
+                "condition_payload": payload,
+                "condition_completeness": _text(row, "resolution_status"),
+                "missing_fields": [],
+                "evidence_ids": _objective_evidence_ids(row),
+                "confidence": _first_value(row, "confidence"),
+                "epistemic_status": _text(row, "resolution_status"),
+                "source": _source("objective_evidence_units", row_number),
+            }
+        )
+    return records
+
+
+def _convert_objective_measurement_results(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for row_number, row in _rows_with_numbers(rows):
+        if _text(row, "unit_kind") != "measurement":
+            continue
+        sample_context = _dict_value(row.get("sample_context"))
+        value_payload = _first_value(row, "value_payload")
+        records.append(
+            {
+                "paper_id": _text(row, "document_id"),
+                "result_id": _text(row, "evidence_unit_id"),
+                "sample_id": _objective_sample_id(_text(row, "document_id"), sample_context),
+                "sample_ids": [
+                    _objective_sample_id(_text(row, "document_id"), sample_context)
+                ]
+                if _objective_sample_id(_text(row, "document_id"), sample_context)
+                else [],
+                "test_condition_id": _objective_test_condition_reference(row),
+                "metric_name": _text(row, "property_normalized"),
+                "value_or_trend": _summarize_value_payload(value_payload),
+                "unit": _text(row, "unit"),
+                "claim_scope": "objective",
+                "data_source": "objective_evidence_unit",
+                "baseline_id": _objective_baseline_reference(row),
+                "value_payload": value_payload,
+                "result_type": "scalar" if _objective_numeric_value(row) is not None else "",
+                "evidence_ids": _objective_evidence_ids(row),
+                "structure_feature_ids": [],
+                "characterization_observation_ids": [],
+                "traceability_status": _text(row, "resolution_status"),
+                "epistemic_status": _text(row, "resolution_status"),
+                "source": _source("objective_evidence_units", row_number),
+            }
+        )
+    return records
+
+
+def _convert_objective_comparisons(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for row_number, row in _rows_with_numbers(rows):
+        if _text(row, "unit_kind") != "comparison":
+            continue
+        sample_context = _dict_value(row.get("sample_context"))
+        baseline_context = _dict_value(row.get("baseline_context"))
+        value_payload = _dict_value(row.get("value_payload"))
+        current_sample_id = _objective_sample_id(_text(row, "document_id"), sample_context)
+        baseline_sample_id = _objective_sample_id(
+            _text(row, "document_id"),
+            _objective_baseline_sample_context(baseline_context),
+        )
+        records.append(
+            {
+                "paper_id": _text(row, "document_id"),
+                "comparison_id": _text(row, "evidence_unit_id"),
+                "current_sample_id": current_sample_id,
+                "baseline_reference": baseline_sample_id
+                or _payload_text(baseline_context, "label", "sample", "sample_id"),
+                "baseline_sample_ids": [baseline_sample_id]
+                if baseline_sample_id
+                else [],
+                "comparison_type": "objective_evidence_unit",
+                "comparison_axis": _payload_text(
+                    value_payload,
+                    "comparison_axis",
+                    "changed_process_axis",
+                    "axis",
+                ),
+                "comparison_metric": _text(row, "property_normalized"),
+                "metric_name": _text(row, "property_normalized"),
+                "current_value": _first_present_value(
+                    value_payload,
+                    "current_value",
+                    "value",
+                ),
+                "baseline_value": _first_present_value(
+                    baseline_context,
+                    "baseline_value",
+                    "reference_value",
+                    "value",
+                ),
+                "unit": _text(row, "unit"),
+                "change_direction": _payload_text(value_payload, "direction"),
+                "direction": _payload_text(value_payload, "direction"),
+                "result_summary": _text(row, "interpretation"),
+                "comparability_status": _text(row, "resolution_status"),
+                "comparability_warnings": [],
+                "evidence_ids": _objective_evidence_ids(row),
+                "anchor_ids": _objective_evidence_ids(row),
+                "relation_payload": value_payload,
+                "source": _source("objective_evidence_units", row_number),
+            }
+        )
+    return records
+
+
+def _convert_objective_observations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for row_number, row in _rows_with_numbers(rows):
+        if _text(row, "unit_kind") != "characterization":
+            continue
+        sample_context = _dict_value(row.get("sample_context"))
+        value_payload = _dict_value(row.get("value_payload"))
+        records.append(
+            {
+                "paper_id": _text(row, "document_id"),
+                "observation_id": _text(row, "evidence_unit_id"),
+                "sample_id": _objective_sample_id(_text(row, "document_id"), sample_context),
+                "sample_ids": [
+                    _objective_sample_id(_text(row, "document_id"), sample_context)
+                ]
+                if _objective_sample_id(_text(row, "document_id"), sample_context)
+                else [],
+                "characterization_method": _text(row, "property_normalized"),
+                "observed_object": _text(row, "property_normalized"),
+                "value_or_description": _summarize_value_payload(value_payload)
+                or _text(row, "interpretation"),
+                "unit": _text(row, "unit"),
+                "author_interpretation": _text(row, "interpretation"),
+                "condition_context": _first_value(row, "resolved_condition"),
+                "evidence_ids": _objective_evidence_ids(row),
+                "confidence": _first_value(row, "confidence"),
+                "epistemic_status": _text(row, "resolution_status"),
+                "source": _source("objective_evidence_units", row_number),
+            }
+        )
+    return records
+
+
+def _convert_objective_evidence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records_by_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        for source_ref in _normalize_value(row.get("source_refs")) or []:
+            if not isinstance(source_ref, dict):
+                continue
+            evidence_id = _objective_source_ref_id(source_ref)
+            if not evidence_id or evidence_id in records_by_id:
+                continue
+            records_by_id[evidence_id] = {
+                "paper_id": _text(row, "document_id"),
+                "evidence_id": evidence_id,
+                "evidence_type": _text(source_ref, "source_kind"),
+                "page": _first_value(source_ref, "page"),
+                "section": "",
+                "figure_or_table": _text(source_ref, "source_ref"),
+                "quote_or_cell": "",
+                "supports": _text(row, "evidence_unit_id"),
+                "locator_type": _text(source_ref, "source_kind"),
+                "locator_confidence": _text(row, "resolution_status"),
+                "deep_link": "",
+                "block_id": _text(source_ref, "source_ref")
+                if _text(source_ref, "source_kind") == "text_window"
+                else "",
+                "snippet_id": "",
+                "source": _source("objective_evidence_units", None),
+            }
+    return list(records_by_id.values())
+
+
 def _convert_evidence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for row_number, row in _rows_with_numbers(rows):
@@ -700,6 +1039,145 @@ def _raw_records(rows: list[dict[str, Any]], artifact: str) -> list[dict[str, An
         {**row, "source": _source(artifact, row_number)}
         for row_number, row in _rows_with_numbers(rows)
     ]
+
+
+def _objective_sample_id(document_id: str, sample_context: dict[str, Any]) -> str:
+    label = _objective_sample_label(sample_context)
+    key = _objective_sample_key(sample_context)
+    if not key and not label:
+        return ""
+    suffix = key or label
+    return f"obj-sample-{document_id}-{suffix}"
+
+
+def _objective_sample_label(sample_context: dict[str, Any]) -> str:
+    for key in (
+        "label",
+        "sample_label",
+        "sample",
+        "sample_id",
+        "sample_number",
+        "Sample number",
+        "Sample Number",
+    ):
+        value = sample_context.get(key)
+        if _present(value):
+            text = str(value).strip()
+            if text.isdigit():
+                return f"Sample {int(text)}"
+            return text
+    return ""
+
+
+def _objective_sample_description(sample_context: dict[str, Any]) -> str:
+    label = _objective_sample_label(sample_context)
+    if label:
+        return label
+    return json.dumps(sample_context, ensure_ascii=False, sort_keys=True)
+
+
+def _objective_sample_key(sample_context: dict[str, Any]) -> str:
+    label = _objective_sample_label(sample_context)
+    if label:
+        return label.lower().replace(" ", "-")
+    return ""
+
+
+def _objective_evidence_ids(row: dict[str, Any]) -> list[str]:
+    evidence_ids = _string_list(row.get("evidence_anchor_ids"))
+    if evidence_ids:
+        return evidence_ids
+    source_refs = _normalize_value(row.get("source_refs")) or []
+    if not isinstance(source_refs, list):
+        return []
+    return [
+        evidence_id
+        for source_ref in source_refs
+        if isinstance(source_ref, dict)
+        if (evidence_id := _objective_source_ref_id(source_ref))
+    ]
+
+
+def _objective_source_ref_id(source_ref: dict[str, Any]) -> str:
+    source_kind = _text(source_ref, "source_kind")
+    source_ref_value = _text(source_ref, "source_ref")
+    if not source_kind or not source_ref_value:
+        return ""
+    return f"objective-source:{source_kind}:{source_ref_value}"
+
+
+def _objective_test_condition_reference(row: dict[str, Any]) -> str:
+    test_condition = _dict_value(row.get("test_condition"))
+    resolved_condition = _dict_value(row.get("resolved_condition"))
+    return (
+        _payload_text(test_condition, "test_condition_id", "condition_id")
+        or _payload_text(resolved_condition, "test_condition_id", "condition_id")
+    )
+
+
+def _objective_baseline_reference(row: dict[str, Any]) -> str:
+    baseline_context = _dict_value(row.get("baseline_context"))
+    return _payload_text(
+        baseline_context,
+        "baseline_id",
+        "reference_id",
+        "baseline_sample_id",
+        "reference_sample_id",
+    )
+
+
+def _objective_baseline_sample_context(
+    baseline_context: dict[str, Any],
+) -> dict[str, Any]:
+    for key in (
+        "sample_context",
+        "baseline_sample_context",
+        "reference_sample_context",
+    ):
+        value = baseline_context.get(key)
+        if isinstance(value, dict):
+            return value
+    sample_id = _payload_text(
+        baseline_context,
+        "baseline_sample_id",
+        "reference_sample_id",
+        "sample_id",
+    )
+    sample_label = _payload_text(
+        baseline_context,
+        "baseline_sample_label",
+        "reference_sample_label",
+        "label",
+        "sample",
+    )
+    return {
+        key: value
+        for key, value in {
+            "sample_id": sample_id,
+            "label": sample_label,
+        }.items()
+        if value
+    }
+
+
+def _objective_numeric_value(row: dict[str, Any]) -> float | None:
+    value_payload = _dict_value(row.get("value_payload"))
+    for key in ("value", "numeric_value"):
+        value = value_payload.get(key)
+        if _present(value):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _first_present_value(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if _present(value):
+            return value
+    return ""
 
 
 def _normalize_value(value: Any) -> Any:

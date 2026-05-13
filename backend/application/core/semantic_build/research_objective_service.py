@@ -2344,12 +2344,25 @@ class ResearchObjectiveService:
             _unit,
         ), measurements in measurements_by_key.items():
             objective_context = context_by_objective_id.get(objective_id)
+            allow_multi_axis = False
+            if len(measurements) <= 3:
+                allow_multi_axis = not any(
+                    self._objective_single_changed_axis(
+                        current=current,
+                        baseline=candidate,
+                        objective_context=objective_context,
+                    )
+                    is not None
+                    for current_index, current in enumerate(measurements)
+                    for candidate in measurements[current_index + 1:]
+                )
             for current_index, current in enumerate(measurements):
                 for candidate in measurements[current_index + 1:]:
                     comparison_axis = self._objective_single_changed_axis(
                         current=current,
                         baseline=candidate,
                         objective_context=objective_context,
+                        allow_multi_axis=allow_multi_axis,
                     )
                     if comparison_axis is None:
                         continue
@@ -2843,6 +2856,7 @@ class ResearchObjectiveService:
         current: ObjectiveEvidenceUnit,
         baseline: ObjectiveEvidenceUnit,
         objective_context: ObjectiveContext | None,
+        allow_multi_axis: bool = False,
     ) -> str | None:
         current_axes = self._objective_process_axis_values(
             current,
@@ -2856,10 +2870,12 @@ class ResearchObjectiveService:
             return None
         changed_axes = [
             axis
-            for axis in current_axes.keys() & baseline_axes.keys()
-            if current_axes[axis] != baseline_axes[axis]
+            for axis in current_axes
+            if axis in baseline_axes and current_axes[axis] != baseline_axes[axis]
         ]
         if len(changed_axes) != 1:
+            if allow_multi_axis and len(changed_axes) > 1:
+                return ", ".join(changed_axes)
             return None
         return changed_axes[0]
 

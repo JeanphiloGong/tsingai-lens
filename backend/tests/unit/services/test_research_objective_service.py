@@ -1973,6 +1973,97 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     )
 
 
+def test_research_objective_service_generates_small_set_multi_axis_comparisons(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How do laser power and scan speed affect density?",
+            "variable_process_axes": [
+                "laser power",
+                "scan speed",
+                "energy density",
+            ],
+            "target_property_axes": ["density"],
+        }
+    )
+
+    def density_unit(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        laser_power: str,
+        scan_speed: str,
+        density: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "density",
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {
+                    "Laser power (W)": laser_power,
+                    "Scan speed (mm·s -1)": scan_speed,
+                    "Energy density (J mm -3)": "100",
+                },
+                "value_payload": {
+                    "source_value_text": str(density),
+                    "value": density,
+                },
+                "unit": "%",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            density_unit(
+                "oeu-density-1",
+                sample_number="1",
+                laser_power="375",
+                scan_speed="2100",
+                density=97.83,
+            ),
+            density_unit(
+                "oeu-density-2",
+                sample_number="2",
+                laser_power="255",
+                scan_speed="1400",
+                density=99.5,
+            ),
+            density_unit(
+                "oeu-density-3",
+                sample_number="3",
+                laser_power="135",
+                scan_speed="750",
+                density=99.26,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert {
+        (
+            unit.sample_context["sample_number"],
+            unit.baseline_context["sample_context"]["sample_number"],
+            unit.value_payload["comparison_axis"],
+        )
+        for unit in comparison_units
+    } == {
+        ("2", "1", "laser power, scan speed"),
+        ("3", "1", "laser power, scan speed"),
+        ("2", "3", "laser power, scan speed"),
+    }
+
+
 def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlled_specs(
     tmp_path,
 ):

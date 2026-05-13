@@ -952,6 +952,22 @@ class StructuredObjectiveEvidenceUnits(_StrictModel):
         return _normalize_list_container(value)
 
 
+class StructuredObjectiveComparisonSelection(_StrictModel):
+    selected_evidence_unit_ids: list[str] = Field(default_factory=list)
+    rejected_evidence_unit_ids: list[str] = Field(default_factory=list)
+    reason: str | None = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @field_validator(
+        "selected_evidence_unit_ids",
+        "rejected_evidence_unit_ids",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_ids(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
 class StructuredObjectiveMergePlan(_StrictModel):
     merged_objectives: list[StructuredObjectiveMergeGroup] = Field(default_factory=list)
 

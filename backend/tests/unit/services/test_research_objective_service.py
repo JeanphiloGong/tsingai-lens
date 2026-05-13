@@ -7,6 +7,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
+    StructuredObjectiveComparisonSelection,
     StructuredObjectiveEvidenceRoute,
     StructuredObjectiveEvidenceRoutes,
     StructuredObjectiveEvidenceUnit,
@@ -372,6 +373,18 @@ class _ObjectiveExtractor:
                 ]
             )
         return StructuredObjectiveEvidenceUnits()
+
+    def select_objective_comparisons(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveComparisonSelection:
+        return StructuredObjectiveComparisonSelection(
+            selected_evidence_unit_ids=[
+                candidate["evidence_unit_id"]
+                for candidate in payload.get("candidate_comparisons", [])
+            ],
+            confidence=0.8,
+        )
 
 
 class _BroadObjectiveExtractor(_ObjectiveExtractor):
@@ -1039,13 +1052,13 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
             "role": "current_experimental_evidence",
             "extractable": True,
             "column_roles": {
-                "Condition number": "test_condition",
-                "Sample number": "sample_index",
-                "Yield Strength (MPa)": "result_property",
-                "Ultimate Tensile Strength (MPa)": "result_property",
-                "Elongation (%)": "result_property",
-                "Microhadness (HV)": "result_property",
-                "Standard deviation (HV)": "result_property",
+                "Condition number": "sample_condition",
+                "Sample number": "sample_id",
+                "Yield Strength (MPa)": "yield_strength",
+                "Ultimate Tensile Strength (MPa)": "ultimate_tensile_strength",
+                "Elongation (%)": "elongation",
+                "Microhadness (HV)": "microhardness",
+                "Standard deviation (HV)": "standard_deviation",
             },
             "confidence": 0.8,
         }
@@ -1361,6 +1374,127 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     assert speed_comparison.value_payload["baseline_evidence_unit_id"] == (
         "oeu-s8-yield"
     )
+
+    class Selector:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, Any]] = []
+
+        def select_objective_comparisons(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredObjectiveComparisonSelection:
+            self.payloads.append(payload)
+            return StructuredObjectiveComparisonSelection(
+                selected_evidence_unit_ids=[
+                    strategy_comparison.evidence_unit_id,
+                ],
+                confidence=0.9,
+            )
+
+    selector = Selector()
+    selected_units = service._select_objective_pairwise_comparison_units(
+        extractor=selector,
+        collection_id="col-test",
+        units=(
+            *measurements,
+            ObjectiveEvidenceUnit.from_mapping(
+                {
+                    "evidence_unit_id": "oeu-text-claim",
+                    "objective_id": "obj-mechanical",
+                    "document_id": "paper-1",
+                    "unit_kind": "interpretation",
+                    "interpretation": "Strategy A outperforms strategy B.",
+                    "source_refs": [
+                        {
+                            "source_kind": "text_window",
+                            "source_ref": "block-1",
+                        }
+                    ],
+                    "resolution_status": "resolved",
+                }
+            ),
+        ),
+        comparison_units=comparison_units,
+        objective_contexts=(objective_context,),
+        blocks_by_document_id={
+            "paper-1": [
+                SimpleNamespace(
+                    block_id="block-1",
+                    page=4,
+                    text="Strategy A outperforms strategy B in yield strength.",
+                )
+            ]
+        },
+    )
+
+    assert selected_units == (strategy_comparison,)
+    assert selector.payloads[0]["author_texts"] == [
+        {
+            "source_ref": "block-1",
+            "page": 4,
+            "text": "Strategy A outperforms strategy B in yield strength.",
+        }
+    ]
+
+    class RejectingSelector:
+        def select_objective_comparisons(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredObjectiveComparisonSelection:
+            return StructuredObjectiveComparisonSelection(
+                rejected_evidence_unit_ids=[
+                    candidate["evidence_unit_id"]
+                    for candidate in payload.get("candidate_comparisons", [])
+                ],
+                confidence=0.8,
+            )
+
+    assert service._select_objective_pairwise_comparison_units(
+        extractor=RejectingSelector(),
+        collection_id="col-test",
+        units=measurements,
+        comparison_units=comparison_units,
+        objective_contexts=(objective_context,),
+        blocks_by_document_id={},
+    ) == ()
+
+    class InvalidSelector:
+        def select_objective_comparisons(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredObjectiveComparisonSelection:
+            return StructuredObjectiveComparisonSelection(
+                selected_evidence_unit_ids=["not-a-candidate"],
+                confidence=0.8,
+            )
+
+    assert service._select_objective_pairwise_comparison_units(
+        extractor=InvalidSelector(),
+        collection_id="col-test",
+        units=measurements,
+        comparison_units=comparison_units,
+        objective_contexts=(objective_context,),
+        blocks_by_document_id={},
+    ) == ()
+
+    class CountingSelector(Selector):
+        pass
+
+    many_candidates = []
+    for index in range(181):
+        row = strategy_comparison.to_record()
+        row["evidence_unit_id"] = f"oeu-comparison-{index}"
+        many_candidates.append(ObjectiveEvidenceUnit.from_mapping(row))
+    counting_selector = CountingSelector()
+    assert service._select_objective_pairwise_comparison_units(
+        extractor=counting_selector,
+        collection_id="col-test",
+        units=measurements,
+        comparison_units=tuple(many_candidates),
+        objective_contexts=(objective_context,),
+        blocks_by_document_id={},
+    ) == ()
+    assert counting_selector.payloads == []
 
 
 def test_research_objective_service_adds_context_hint_route_for_condition_table(

@@ -53,11 +53,16 @@ class ArtifactRegistryService:
         )
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
         source_artifacts_generated = not source_artifacts.is_empty()
-        evidence_cards_generated = bool(core_facts.paper_facts_ready)
+        objective_evidence_units_ready = bool(core_facts.objective_evidence_units)
+        evidence_cards_generated = bool(
+            core_facts.paper_facts_ready
+            or objective_evidence_units_ready
+        )
         evidence_cards_ready = bool(
             core_facts.evidence_anchors
             or core_facts.method_facts
             or core_facts.measurement_results
+            or objective_evidence_units_ready
         )
         comparable_results_generated = bool(core_facts.comparison_artifacts_ready)
         collection_comparable_results_generated = bool(

@@ -13,6 +13,7 @@ from domain.core import (
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
+    ObjectiveEvidenceUnit,
 )
 from domain.source import SourceArtifactSet
 from infra.source.runtime.source_evidence import build_blocks
@@ -232,3 +233,75 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
     assert overview["capabilities"]["can_view_graph"] is True
     assert overview["capabilities"]["can_view_results"] is True
     assert overview["capabilities"]["can_view_comparable_results"] is True
+
+
+def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    workspace_service = WorkspaceService(collection_service, task_service)
+    collection = collection_service.create_collection("Objective Workspace")
+    collection_id = collection["collection_id"]
+    collection_service.add_file(
+        collection_id,
+        "paper.txt",
+        b"Experimental Section\nLPBF 316L corrosion current density was reported.",
+    )
+    document_profiles = (
+        DocumentProfile.from_mapping(
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Objective Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "experimental",
+                "confidence": 0.9,
+            }
+        ),
+    )
+    objective_evidence_units = (
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "oeu-1",
+                "objective_id": "obj-corrosion",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {"name": "316L stainless steel"},
+                "sample_context": {"sample": "as-built"},
+                "process_context": {"process": "LPBF"},
+                "test_condition": {"method": "polarization"},
+                "property_normalized": "corrosion current density",
+                "value_payload": {"value": 1.2},
+                "unit": "uA/cm2",
+                "source_refs": [
+                    {"source_kind": "table", "source_ref": "table-1"}
+                ],
+                "resolution_status": "resolved",
+            }
+        ),
+    )
+    workspace_service.core_fact_repository.replace_collection_document_profiles(
+        collection_id,
+        document_profiles,
+    )
+    workspace_service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        paper_skims=(),
+        research_objectives=(),
+        objective_contexts=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(),
+        objective_evidence_units=objective_evidence_units,
+        objective_logic_chains=(),
+    )
+
+    overview = workspace_service.get_workspace_overview(collection_id)
+
+    assert overview["status_summary"] == "comparison_pending"
+    assert overview["workflow"]["evidence"]["status"] == "ready"
+    assert overview["workflow"]["comparisons"]["status"] == "not_started"
+    assert overview["artifacts"]["evidence_cards_generated"] is True
+    assert overview["artifacts"]["evidence_cards_ready"] is True
+    assert overview["artifacts"]["sample_variants_generated"] is False
+    assert overview["artifacts"]["measurement_results_generated"] is False
+    assert overview["capabilities"]["can_view_research_view"] is True
+    assert overview["capabilities"]["can_view_results"] is False

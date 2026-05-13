@@ -56,10 +56,16 @@ class WorkspaceService:
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
         source_artifacts_generated = not source_artifacts.is_empty()
         paper_facts_generated = bool(core_facts.paper_facts_ready)
+        objective_evidence_units_ready = bool(core_facts.objective_evidence_units)
+        evidence_cards_generated = bool(
+            paper_facts_generated
+            or objective_evidence_units_ready
+        )
         evidence_cards_ready = bool(
             core_facts.evidence_anchors
             or core_facts.method_facts
             or core_facts.measurement_results
+            or objective_evidence_units_ready
         )
         comparison_artifacts_generated = bool(core_facts.comparison_artifacts_ready)
         return {
@@ -72,7 +78,7 @@ class WorkspaceService:
             "evidence_anchors_ready": bool(core_facts.evidence_anchors),
             "method_facts_generated": paper_facts_generated,
             "method_facts_ready": bool(core_facts.method_facts),
-            "evidence_cards_generated": paper_facts_generated,
+            "evidence_cards_generated": evidence_cards_generated,
             "evidence_cards_ready": evidence_cards_ready,
             "characterization_observations_generated": paper_facts_generated,
             "characterization_observations_ready": bool(
@@ -100,7 +106,7 @@ class WorkspaceService:
             "comparison_rows_stale": False,
             "graph_generated": bool(
                 core_facts.document_profiles
-                and paper_facts_generated
+                and evidence_cards_generated
                 and comparison_artifacts_generated
             ),
             "graph_ready": bool(
@@ -172,7 +178,10 @@ class WorkspaceService:
     def _build_capabilities(self, artifacts: dict) -> dict:
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
         comparisons_generated = self._comparisons_generated(artifacts)
-        paper_facts_generated = self._artifact_generated(
+        research_view_generated = self._artifact_ready(
+            artifacts,
+            "evidence_cards_ready",
+        ) or self._artifact_generated(
             artifacts,
             "sample_variants_generated",
         ) or self._artifact_generated(
@@ -183,7 +192,7 @@ class WorkspaceService:
             "can_view_graph": graph_ready,
             "can_view_results": comparisons_generated,
             "can_view_comparable_results": comparisons_generated,
-            "can_view_research_view": paper_facts_generated,
+            "can_view_research_view": research_view_generated,
             "can_download_graphml": graph_ready,
         }
 

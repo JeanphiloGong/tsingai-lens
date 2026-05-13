@@ -4,10 +4,12 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from domain.core import (
     CollectionComparableResult,
     ComparableResult,
+    ComparisonRowRecord,
     CoreFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
+    ObjectiveEvidenceUnit,
 )
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
@@ -152,3 +154,114 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
     assert payload["graph_ready"] is True
     assert payload["figures_generated"] is True
     assert payload["figures_ready"] is True
+
+
+def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
+    collection_id = "col_demo"
+    db_path = tmp_path / "lens.sqlite"
+    source_repository = SqliteSourceArtifactRepository(db_path)
+    core_repository = SqliteCoreFactRepository(db_path)
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Objective Paper",
+                    "text": "LPBF 316L corrosion current density was reported.",
+                }
+            ],
+        ),
+    )
+    document_profiles = (
+        DocumentProfile.from_mapping(
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Objective Paper",
+                "source_filename": "paper.txt",
+                "doc_type": "experimental",
+                "confidence": 0.9,
+            }
+        ),
+    )
+    objective_evidence_units = (
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "oeu-1",
+                "objective_id": "obj-corrosion",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {"name": "316L stainless steel"},
+                "sample_context": {"sample": "as-built"},
+                "process_context": {"process": "LPBF"},
+                "test_condition": {"method": "polarization"},
+                "property_normalized": "corrosion current density",
+                "value_payload": {"value": 1.2},
+                "unit": "uA/cm2",
+                "source_refs": [
+                    {"source_kind": "table", "source_ref": "table-1"}
+                ],
+                "resolution_status": "resolved",
+            }
+        ),
+    )
+    comparison_rows = (
+        ComparisonRowRecord.from_mapping(
+            {
+                "row_id": "row-1",
+                "collection_id": collection_id,
+                "comparable_result_id": "objective:oeu-1",
+                "source_document_id": "paper-1",
+                "variant_label": "as-built",
+                "result_type": "scalar",
+                "result_summary": "1.2 uA/cm2",
+                "supporting_evidence_ids": ["oeu-1"],
+                "material_system_normalized": "316L stainless steel",
+                "process_normalized": "LPBF",
+                "property_normalized": "corrosion current density",
+                "baseline_normalized": "unspecified baseline",
+                "test_condition_normalized": "method: polarization",
+                "comparability_status": "comparable",
+                "value": 1.2,
+                "unit": "uA/cm2",
+            }
+        ),
+    )
+    core_repository.replace_collection_document_profiles(
+        collection_id,
+        document_profiles,
+    )
+    core_repository.replace_collection_research_objectives(
+        collection_id,
+        paper_skims=(),
+        research_objectives=(),
+        objective_contexts=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(),
+        objective_evidence_units=objective_evidence_units,
+        objective_logic_chains=(),
+    )
+    core_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        comparable_results=(),
+        collection_comparable_results=(),
+        comparison_rows=comparison_rows,
+    )
+    artifact_registry = ArtifactRegistryService(
+        tmp_path / "collections",
+        source_artifact_repository=source_repository,
+        core_fact_repository=core_repository,
+    )
+
+    payload = artifact_registry.build_registry(collection_id, tmp_path / "output")
+
+    assert payload["evidence_cards_generated"] is True
+    assert payload["evidence_cards_ready"] is True
+    assert payload["evidence_anchors_generated"] is False
+    assert payload["sample_variants_generated"] is False
+    assert payload["measurement_results_generated"] is False
+    assert payload["comparison_rows_generated"] is True
+    assert payload["comparison_rows_ready"] is True
+    assert payload["graph_generated"] is True
+    assert payload["graph_ready"] is True

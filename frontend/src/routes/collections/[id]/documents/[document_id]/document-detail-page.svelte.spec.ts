@@ -418,7 +418,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Method overview' }).first())
+			.element(browserPage.getByRole('heading', { name: 'Preparation / processing / treatment' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
@@ -481,6 +481,26 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('button', { name: '12 mS/cm' }).first())
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('conductivity / temperature')).toBeInTheDocument();
+	});
+
+	it('organizes structured understanding in scientific reading order', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Paper scope' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Experimental objects' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Preparation / processing / treatment' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Test and characterization methods' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Measured results' }))
+			.toBeInTheDocument();
 	});
 
 	it('renders an unavailable state when paper research view is missing', async () => {

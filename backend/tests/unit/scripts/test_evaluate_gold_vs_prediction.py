@@ -105,6 +105,21 @@ def test_evaluate_gold_vs_prediction_prefers_explicit_condition_family():
     assert report["missing_gold_condition_families"] == []
 
 
+def test_evaluate_gold_vs_prediction_normalizes_corrosion_metric_aliases():
+    evaluator = _load_evaluator_module()
+
+    assert evaluator._normalize_metric("E p") == "pitting_potential_ep"
+    assert evaluator._normalize_metric("E p - E d") == (
+        "passivation_interval_ep_ed"
+    )
+    assert evaluator._normalize_metric("R film") == (
+        "passive_film_resistance_rfilm"
+    )
+    assert evaluator._normalize_metric("pitting potential") == (
+        "pitting_potential_ep"
+    )
+
+
 def _gold_bundle() -> dict:
     return {
         "metadata": {"schema_version": "expert-gold-bundle-v0.1"},

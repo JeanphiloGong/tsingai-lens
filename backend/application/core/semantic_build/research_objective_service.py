@@ -126,6 +126,35 @@ _OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES = (
 _OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY = "elongation"
 _OBJECTIVE_PAIRWISE_DENSITY_MIN_DELTA = 2.0
 _OBJECTIVE_PAIRWISE_ELONGATION_MIN_DELTA = 3.4
+_OBJECTIVE_METHOD_FAMILY_PROPERTY_TYPES = (
+    "tensile_mechanics",
+    "microhardness",
+    "density_porosity_microstructure",
+)
+_OBJECTIVE_TENSILE_METHOD_PROPERTIES = frozenset(
+    {
+        "yield strength",
+        "ultimate tensile strength",
+        "tensile strength",
+        "strength",
+        "elongation",
+        "modulus",
+    }
+)
+_OBJECTIVE_MICROHARDNESS_METHOD_PROPERTIES = frozenset(
+    {"hardness", "microhardness"}
+)
+_OBJECTIVE_CHARACTERIZATION_METHOD_PROPERTIES = frozenset(
+    {
+        "density",
+        "relative density",
+        "densification",
+        "porosity",
+        "grain size",
+        "microstructure",
+        "grain size primary dendrite spacing",
+    }
+)
 
 
 class ResearchObjectivesNotReadyError(RuntimeError):
@@ -1305,7 +1334,10 @@ class ResearchObjectiveService:
                 source=source,
                 objective_context=objective_context,
             )
-            if not route_records:
+            if (
+                not route_records
+                and not self._objective_table_route_should_skip_llm_fallback(route)
+            ):
                 route_records = tuple(
                     record
                     for item in parsed.evidence_units
@@ -1338,12 +1370,26 @@ class ResearchObjectiveService:
                 route_position,
                 max(len(extractable_routes) - route_position, 0),
             )
+        for unit in self._build_objective_method_family_test_condition_units(
+            objective_contexts=objective_contexts,
+            objective_paper_frames=objective_paper_frames,
+            blocks_by_document_id=blocks_by_document_id,
+        ):
+            if not self._objective_evidence_unit_has_payload(unit):
+                continue
+            if unit.evidence_unit_id in seen:
+                continue
+            seen.add(unit.evidence_unit_id)
+            units.append(unit)
         logger.info(
             "Research objective evidence-unit extraction finished collection_id=%s objective_evidence_units=%s",
             collection_id,
             len(units),
         )
         resolved_units = self._resolve_objective_evidence_unit_contexts(tuple(units))
+        resolved_units = self._attach_objective_method_test_conditions_to_measurements(
+            resolved_units
+        )
         comparison_units = self._build_objective_pairwise_comparison_units(
             resolved_units,
             objective_contexts=objective_contexts,
@@ -1355,6 +1401,438 @@ class ResearchObjectiveService:
                 len(comparison_units),
             )
         return (*resolved_units, *comparison_units)
+
+    def _objective_table_route_should_skip_llm_fallback(
+        self,
+        route: ObjectiveEvidenceRoute,
+    ) -> bool:
+        if route.source_kind != "table" or route.role != "test_condition":
+            return False
+        role_text = " ".join(
+            str(role or "").replace("_", " ").casefold()
+            for role in route.column_roles.values()
+        )
+        return any(
+            token in role_text
+            for token in (
+                "process",
+                "property",
+                "result",
+                "target",
+                "measurement",
+                "variable",
+            )
+        )
+
+    def _build_objective_method_family_test_condition_units(
+        self,
+        *,
+        objective_contexts: tuple[ObjectiveContext, ...],
+        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
+        blocks_by_document_id: dict[str, list[Any]],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        context_by_objective_id = {
+            context.objective_id: context
+            for context in objective_contexts
+        }
+        records: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for frame in objective_paper_frames:
+            if frame.relevance == "irrelevant":
+                continue
+            objective_context = context_by_objective_id.get(frame.objective_id)
+            families = self._objective_method_families_for_context(objective_context)
+            if not families:
+                continue
+            blocks = blocks_by_document_id.get(frame.document_id, [])
+            for family in families:
+                key = (frame.objective_id, frame.document_id, family)
+                if key in seen:
+                    continue
+                candidate = self._objective_method_family_candidate(
+                    family=family,
+                    blocks=blocks,
+                )
+                if candidate is None:
+                    continue
+                block, quote, payload = candidate
+                seen.add(key)
+                source_ref = str(getattr(block, "block_id", "") or "")
+                source_ref_payload = {
+                    "source_kind": "text_window",
+                    "source_ref": source_ref,
+                    "role": "test_condition",
+                    "page": getattr(block, "page", None),
+                }
+                records.append(
+                    {
+                        "evidence_unit_id": self._objective_method_family_unit_id(
+                            objective_id=frame.objective_id,
+                            document_id=frame.document_id,
+                            family=family,
+                        ),
+                        "objective_id": frame.objective_id,
+                        "document_id": frame.document_id,
+                        "unit_kind": "test_condition",
+                        "property_normalized": family,
+                        "test_condition": {
+                            "method_family": family,
+                            **payload,
+                        },
+                        "value_payload": {
+                            "method_family": family,
+                            "evidence_quote": quote,
+                        },
+                        "source_refs": (
+                            {
+                                key: value
+                                for key, value in source_ref_payload.items()
+                                if value not in (None, "", [], {})
+                            },
+                        ),
+                        "resolution_status": "resolved",
+                        "confidence": 0.86,
+                    }
+                )
+        return tuple(ObjectiveEvidenceUnit.from_mapping(record) for record in records)
+
+    def _objective_method_families_for_context(
+        self,
+        objective_context: ObjectiveContext | None,
+    ) -> tuple[str, ...]:
+        if objective_context is None:
+            return ()
+        families: list[str] = []
+        for axis in objective_context.target_property_axes:
+            normalized = self._normalize_property_label(axis)
+            if not normalized:
+                continue
+            property_candidates = (
+                normalized,
+                *_BROAD_PROPERTY_AXIS_EXPANSIONS.get(normalized, ()),
+            )
+            for property_name in property_candidates:
+                family = self._objective_method_family_for_property(property_name)
+                if family is not None:
+                    families.append(family)
+        return tuple(self._dedupe_preserving_order(families))
+
+    def _objective_method_family_for_property(self, property_name: Any) -> str | None:
+        normalized = self._normalize_property_label(property_name)
+        if not normalized:
+            return None
+        if normalized in _OBJECTIVE_TENSILE_METHOD_PROPERTIES:
+            return "tensile_mechanics"
+        if normalized in _OBJECTIVE_MICROHARDNESS_METHOD_PROPERTIES:
+            return "microhardness"
+        if normalized in _OBJECTIVE_CHARACTERIZATION_METHOD_PROPERTIES:
+            return "density_porosity_microstructure"
+        return None
+
+    def _objective_method_family_candidate(
+        self,
+        *,
+        family: str,
+        blocks: list[Any],
+    ) -> tuple[Any, str, dict[str, Any]] | None:
+        best: tuple[int, int, Any, str, dict[str, Any]] | None = None
+        for position, block in enumerate(blocks):
+            text = str(getattr(block, "text", "") or "").strip()
+            if not text:
+                continue
+            combined_text = " ".join(
+                part
+                for part in (
+                    str(getattr(block, "heading_path", "") or "").strip(),
+                    text,
+                )
+                if part
+            )
+            score = self._score_objective_method_family_window(
+                family=family,
+                text=combined_text,
+            )
+            if score <= 0:
+                continue
+            quote = self._select_objective_method_family_quote(
+                text,
+                family=family,
+            )
+            if not quote:
+                continue
+            payload = self._build_objective_method_family_condition_payload(
+                family=family,
+                text=text,
+            )
+            if not payload:
+                continue
+            candidate = (score, -position, block, quote, payload)
+            if best is None or candidate[:2] > best[:2]:
+                best = candidate
+        if best is None:
+            return None
+        _, _, block, quote, payload = best
+        return block, quote, payload
+
+    def _score_objective_method_family_window(
+        self,
+        *,
+        family: str,
+        text: str,
+    ) -> int:
+        lowered = text.casefold()
+        if family == "tensile_mechanics":
+            terms = (
+                ("tensile", 4),
+                ("stress-strain", 3),
+                ("yield strength", 2),
+                ("ultimate tensile", 2),
+                ("astm e8", 4),
+                ("instron", 4),
+                ("strain rate", 2),
+            )
+        elif family == "microhardness":
+            terms = (
+                ("microhardness", 4),
+                ("vickers", 4),
+                ("hardness", 2),
+                ("wilson", 3),
+                ("holding time", 2),
+                ("readings", 2),
+            )
+        elif family == "density_porosity_microstructure":
+            terms = (
+                ("sem", 3),
+                ("imagej", 4),
+                ("porosity", 3),
+                ("relative density", 3),
+                ("microstructure", 2),
+                ("magnification", 2),
+                ("horizontal", 1),
+                ("vertical", 1),
+            )
+        else:
+            return 0
+        return sum(weight for term, weight in terms if term in lowered)
+
+    def _build_objective_method_family_condition_payload(
+        self,
+        *,
+        family: str,
+        text: str,
+    ) -> dict[str, Any]:
+        if family == "tensile_mechanics":
+            payload: dict[str, Any] = {
+                "method": "tensile testing",
+                "methods": ["tensile testing"],
+                "test_method": "tensile testing",
+                "standard": self._extract_first_pattern(
+                    text,
+                    r"\bASTM\s*E8M?\b",
+                ),
+                "instrument": self._extract_first_pattern(
+                    text,
+                    r"\bINSTRON\b[^.;,\n]*",
+                ),
+                "strain_rate_s-1": self._extract_first_pattern(
+                    text,
+                    r"\b\d+(?:\.\d+)?\s*mm\s*/\s*min\b",
+                ),
+                "specimen_geometry": (
+                    "Fig. 2"
+                    if re.search(r"\bFig\.\s*2\b", text, re.IGNORECASE)
+                    else None
+                ),
+                "sample_orientation": self._extract_orientation_phrase(text),
+                "details": self._compact_condition_details(text),
+            }
+        elif family == "microhardness":
+            payload = {
+                "method": "Vickers microhardness",
+                "methods": ["Vickers microhardness"],
+                "test_method": "Vickers microhardness",
+                "instrument": self._extract_first_pattern(
+                    text,
+                    r"\b(?:Vickers\s+)?microhardness[^.;\n]*",
+                ),
+                "load": self._extract_first_pattern(text, r"\b\d+(?:\.\d+)?\s*N\b"),
+                "holding_time": self._extract_first_pattern(
+                    text,
+                    r"\b\d+(?:\.\d+)?\s*s\b",
+                ),
+                "readings_per_sample": self._extract_first_pattern(
+                    text,
+                    r"\b\d+\s+(?:readings|measurements)\b[^.;\n]*",
+                ),
+                "sample_orientation": self._extract_orientation_phrase(text),
+                "details": self._compact_condition_details(text),
+            }
+        else:
+            payload = {
+                "method": "SEM / ImageJ",
+                "methods": self._dedupe_preserving_order(
+                    [
+                        method
+                        for method in ("SEM", "ImageJ")
+                        if method.casefold() in text.casefold()
+                    ]
+                )
+                or ["SEM / ImageJ"],
+                "test_method": "SEM / ImageJ",
+                "instrument": self._extract_first_pattern(
+                    text,
+                    r"\bFEI[-\s]INSPECT\s*50\s*SEM\b",
+                )
+                or (
+                    "SEM"
+                    if re.search(r"\bSEM\b", text, re.IGNORECASE)
+                    else None
+                ),
+                "section_orientation": self._extract_section_orientation_phrase(text),
+                "surface_state": self._extract_surface_preparation_phrase(text),
+                "magnification": self._extract_first_pattern(
+                    text,
+                    r"\b\d+(?:\.\d+)?\s*[xX]\s*(?:-|to)\s*\d+(?:\.\d+)?\s*[xX]\b",
+                ),
+                "details": self._compact_condition_details(text),
+            }
+        return {
+            key: value
+            for key, value in payload.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _select_objective_method_family_quote(
+        self,
+        text: str,
+        *,
+        family: str,
+    ) -> str | None:
+        terms = {
+            "tensile_mechanics": ("tensile", "astm", "instron", "stress-strain"),
+            "microhardness": ("microhardness", "vickers", "hardness", "wilson"),
+            "density_porosity_microstructure": (
+                "sem",
+                "imagej",
+                "porosity",
+                "relative density",
+                "microstructure",
+            ),
+        }.get(family, ())
+        normalized_text = " ".join(str(text or "").split())
+        if not normalized_text:
+            return None
+        for sentence in re.split(r"(?<=[.!?])\s+", normalized_text):
+            if any(term in sentence.casefold() for term in terms):
+                return sentence[:900].strip()
+        return normalized_text[:900].strip()
+
+    def _extract_first_pattern(
+        self,
+        text: str,
+        pattern: str,
+    ) -> str | None:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match is None:
+            return None
+        return re.sub(r"\s+", " ", match.group(0)).strip()
+
+    def _extract_orientation_phrase(self, text: str) -> str | None:
+        lowered = text.casefold()
+        if "horizontally" in lowered and "substrate" in lowered:
+            return "all blocks built horizontally on substrate"
+        if "horizontal" in lowered and "vertical" in lowered:
+            return "horizontal and vertical sections"
+        if "horizontal" in lowered:
+            return "horizontal"
+        if "vertical" in lowered:
+            return "vertical"
+        return None
+
+    def _extract_section_orientation_phrase(self, text: str) -> str | None:
+        lowered = text.casefold()
+        if "horizontal" in lowered and "vertical" in lowered:
+            return "horizontal and vertical sections"
+        return self._extract_orientation_phrase(text)
+
+    def _extract_surface_preparation_phrase(self, text: str) -> str | None:
+        parts = []
+        grit = self._extract_first_pattern(
+            text,
+            r"\b\d+\s*[-]\s*\d+\s*grit\b",
+        )
+        if grit:
+            parts.append(grit)
+        silica = self._extract_first_pattern(
+            text,
+            r"\bcolloidal\s+silica\b[^.;\n]*",
+        )
+        if silica:
+            parts.append(silica)
+        return "; ".join(parts) if parts else None
+
+    def _compact_condition_details(self, text: str) -> str | None:
+        normalized = " ".join(str(text or "").split())
+        return normalized[:1000].strip() or None
+
+    def _objective_method_family_unit_id(
+        self,
+        *,
+        objective_id: str,
+        document_id: str,
+        family: str,
+    ) -> str:
+        seed = "|".join(("method_family", objective_id, document_id, family))
+        return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+
+    def _attach_objective_method_test_conditions_to_measurements(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        method_conditions = {
+            (
+                unit.objective_id,
+                unit.document_id,
+                str(unit.property_normalized or ""),
+            ): unit
+            for unit in units
+            if unit.unit_kind == "test_condition"
+            and unit.property_normalized in _OBJECTIVE_METHOD_FAMILY_PROPERTY_TYPES
+        }
+        if not method_conditions:
+            return units
+
+        resolved_units: list[ObjectiveEvidenceUnit] = []
+        for unit in units:
+            if unit.unit_kind != "measurement" or unit.test_condition:
+                resolved_units.append(unit)
+                continue
+            family = self._objective_method_family_for_property(
+                unit.property_normalized
+            )
+            if family is None:
+                resolved_units.append(unit)
+                continue
+            condition = method_conditions.get(
+                (unit.objective_id, unit.document_id, family)
+            )
+            if condition is None:
+                resolved_units.append(unit)
+                continue
+            record = unit.to_record()
+            record.update(
+                {
+                    "test_condition": dict(condition.test_condition),
+                    "resolved_condition": {
+                        **unit.resolved_condition,
+                        "test_condition_unit_id": condition.evidence_unit_id,
+                        "test_condition_family": family,
+                    },
+                    "resolution_status": "resolved",
+                }
+            )
+            resolved_units.append(ObjectiveEvidenceUnit.from_mapping(record))
+        return tuple(resolved_units)
 
     def _resolve_objective_evidence_unit_contexts(
         self,
@@ -2591,7 +3069,27 @@ class ResearchObjectiveService:
         route: ObjectiveEvidenceRoute,
         record: dict[str, Any],
     ) -> dict[str, Any]:
-        if route.source_kind != "text_window" or record.get("unit_kind") != "measurement":
+        if route.source_kind != "text_window":
+            return record
+        if record.get("unit_kind") == "comparison":
+            value_payload = (
+                record.get("value_payload")
+                if isinstance(record.get("value_payload"), dict)
+                else {}
+            )
+            baseline_context = (
+                record.get("baseline_context")
+                if isinstance(record.get("baseline_context"), dict)
+                else {}
+            )
+            if not value_payload and not baseline_context:
+                normalized = dict(record)
+                if route.role == "characterization":
+                    normalized["unit_kind"] = "characterization"
+                else:
+                    normalized["unit_kind"] = "interpretation"
+                return normalized
+        if record.get("unit_kind") != "measurement":
             return record
         value_payload = (
             record.get("value_payload")

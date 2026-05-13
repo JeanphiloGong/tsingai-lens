@@ -1080,6 +1080,136 @@ def test_research_objective_service_uses_matching_result_headers_when_role_is_br
     assert records[1]["sample_context"]["Sample number"] == "2"
 
 
+def test_research_objective_service_skips_matrix_test_condition_table_fallback(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "test_condition",
+            "extractable": True,
+            "column_roles": {
+                "Condition number": "condition",
+                "Sample number": "sample",
+                "Scan strategy": "process_variable",
+                "Relative density": "result",
+            },
+        }
+    )
+
+    assert service._objective_table_route_should_skip_llm_fallback(route)
+
+
+def test_research_objective_service_builds_method_conditions_and_binds_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": ["yield strength", "microhardness"],
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="tensile-method",
+            page=5,
+            heading_path="2.2. Mechanical Testing",
+            text=(
+                "Tests were carried out at quasi-static rates (0.02 mm/min) "
+                "in an INSTRON mechanical testing machine. Specimens were "
+                "prepared as per ASTM E8M standard."
+            ),
+        ),
+        SimpleNamespace(
+            block_id="hardness-method",
+            page=5,
+            heading_path="2.3. Microhardness",
+            text=(
+                "The microhardness was measured using a standard Vickers "
+                "microhardness tester (Wilson) under a load of 10 N for 15 s. "
+                "The average of 20 readings were taken into account."
+            ),
+        ),
+    ]
+
+    method_units = service._build_objective_method_family_test_condition_units(
+        objective_contexts=(objective_context,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": blocks},
+    )
+
+    assert [unit.property_normalized for unit in method_units] == [
+        "tensile_mechanics",
+        "microhardness",
+    ]
+    tensile_condition = method_units[0].test_condition
+    hardness_condition = method_units[1].test_condition
+    assert tensile_condition["method"] == "tensile testing"
+    assert tensile_condition["standard"] == "ASTM E8M"
+    assert hardness_condition["method"] == "Vickers microhardness"
+    assert hardness_condition["load"] == "10 N"
+
+    measurements = (
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "yield-measurement",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "value_payload": {"source_value_text": "236.65", "value": 236.65},
+                "resolution_status": "resolved",
+            }
+        ),
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "hardness-measurement",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "microhardness",
+                "value_payload": {"source_value_text": "224.7", "value": 224.7},
+                "resolution_status": "resolved",
+            }
+        ),
+    )
+
+    resolved = service._attach_objective_method_test_conditions_to_measurements(
+        (*method_units, *measurements)
+    )
+    resolved_measurements = [
+        unit for unit in resolved if unit.unit_kind == "measurement"
+    ]
+
+    assert resolved_measurements[0].test_condition["method"] == "tensile testing"
+    assert (
+        resolved_measurements[0].resolved_condition["test_condition_unit_id"]
+        == method_units[0].evidence_unit_id
+    )
+    assert resolved_measurements[1].test_condition["method"] == "Vickers microhardness"
+    assert (
+        resolved_measurements[1].resolved_condition["test_condition_unit_id"]
+        == method_units[1].evidence_unit_id
+    )
+
+
 def test_research_objective_service_does_not_keep_text_trends_as_measurements(
     tmp_path,
 ):
@@ -1123,6 +1253,43 @@ def test_research_objective_service_does_not_keep_text_trends_as_measurements(
             "page": 5,
         },
     )
+
+
+def test_research_objective_service_reclassifies_text_comparison_without_pair_context(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.62,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 12},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "comparison",
+            "interpretation": (
+                "Scanning strategy A exhibited highest densification compared "
+                "to strategies B and C."
+            ),
+            "resolution_status": "resolved",
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["unit_kind"] == "characterization"
+    assert records[0]["interpretation"].startswith("Scanning strategy A")
 
 
 def test_research_objective_service_does_not_expand_text_trends_into_measurements(

@@ -41,8 +41,9 @@ ownership by itself.
   relations, and characterization observations
 - [`objective-evidence-unit-cutover-plan.md`](objective-evidence-unit-cutover-plan.md)
   Implementation plan for cutting the objective-first flow over to objective
-  evidence units and logic chains without keeping a long-term compatibility
-  surface over the old paper-fact families
+  evidence units and logic chains, including material and comparison
+  projections, without keeping a long-term compatibility surface over the old
+  paper-fact families
 
 ## Related Docs
 

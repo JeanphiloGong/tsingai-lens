@@ -231,7 +231,151 @@ Acceptance:
 After the vertical slice is stable, downstream services should read objective
 units and chains directly.
 
-Services to update:
+Current implementation state:
+
+- `ResearchObjectiveService` already builds and persists
+  `ObjectivePaperFrame`, `ObjectiveEvidenceRoute`, `ObjectiveEvidenceUnit`,
+  and `ObjectiveLogicChain`.
+- The old paper-facts-to-objective reverse builders have been removed.
+- `PaperFactsService.build_paper_facts()` still exists because materials,
+  comparison, research-view, evidence cards, and some derived surfaces still
+  consume the old paper-fact families.
+
+The next cutover slice should not delete `PaperFactsService` first. It should
+first make the existing material and comparison surfaces read objective units
+directly while keeping public API response shapes stable.
+
+#### Material Projection
+
+Add a small permanent Core projection from `ObjectiveEvidenceUnit` to the
+material-view rows needed by research-view aggregation. This is a real
+downstream view over objective evidence, not a compatibility adapter that
+pretends objective units are old paper facts.
+
+Projection fields:
+
+- `material_system`
+- `sample_context`
+- `process_context`
+- `resolved_condition`
+- `property_normalized`
+- `value_payload`
+- `source_refs`
+- `objective_id`
+- `document_id`
+- `unit_kind`
+- `resolution_status`
+- `confidence`
+
+Implementation tasks:
+
+1. Define objective material projection records under the Core domain layer.
+   The projection should include resolved units and skip rejected units.
+2. Use the projection to drive
+   `ResearchViewAggregationService.list_collection_materials()` so collection
+   material lists can be built from objective evidence units without old
+   `sample_variants` or `measurement_results`.
+3. Use the same projection for
+   `ResearchViewAggregationService.get_collection_material_research_view()` so
+   material profiles can show sample context, process context, test condition
+   context, measured properties, values, and source references from objective
+   units.
+
+Acceptance:
+
+- A collection with objective units but no old paper-fact rows can return
+  `/collections/{collection_id}/materials`.
+- A collection material research view can show samples such as `as-built` and
+  `heat-treated` from `sample_context`.
+- Measured properties come from measurement units'
+  `property_normalized` fields.
+- Source references and evidence anchor ids remain traceable.
+- The public materials API response shape stays stable for the first slice.
+
+Likely files:
+
+- `backend/domain/core/objective_material_projection.py`
+- `backend/application/core/research_view_aggregation_service.py`
+- `backend/tests/unit/domain/test_objective_material_projection.py`
+- `backend/tests/unit/services/test_research_view_aggregation_service.py`
+
+Verification:
+
+- `./.venv/bin/python -m pytest tests/unit/services/test_research_view_aggregation_service.py tests/unit/domain/test_objective_material_projection.py -q`
+- `./.venv/bin/python -m ruff check application/core/research_view_aggregation_service.py domain/core/objective_material_projection.py tests/unit/services/test_research_view_aggregation_service.py tests/unit/domain/test_objective_material_projection.py`
+
+#### Comparison Projection
+
+After material projection works, generate comparison rows directly from
+`ObjectiveEvidenceUnit(unit_kind="measurement")`.
+
+The comparison projection should map:
+
+- `material_system` to `material_system_normalized`
+- `process_context` to `process_normalized`
+- `property_normalized` to the comparison property
+- `test_condition` or `resolved_condition` to
+  `test_condition_normalized`
+- `baseline_context` to `baseline_normalized`
+- `value_payload` and `unit` to the row value and unit
+- `source_refs` and `evidence_anchor_ids` to supporting evidence
+
+Implementation tasks:
+
+1. Define an objective comparison projector that emits `ComparisonRowRecord`
+   directly from measurement units.
+2. Update `ComparisonService.assemble_comparison_rows()` to use the objective
+   projector when objective units are available.
+3. Stop using `paper_facts_service.build_paper_facts()` as the way to create
+   comparison inputs for objective-first collections.
+
+Acceptance:
+
+- Two resolved measurement units for one objective produce two comparison
+  rows.
+- Missing material, property, condition, or value context is represented in
+  `missing_critical_context` instead of being silently ignored.
+- Existing comparison-row read and filter endpoints keep their current
+  response shape.
+- Comparison artifacts are still stored through the existing Core fact
+  repository comparison artifact path.
+
+Likely files:
+
+- `backend/domain/core/objective_comparison_projection.py`
+- `backend/application/core/comparison_service.py`
+- `backend/tests/unit/domain/test_objective_comparison_projection.py`
+- `backend/tests/unit/services/test_comparison_service.py`
+
+Verification:
+
+- `./.venv/bin/python -m pytest tests/unit/services/test_comparison_service.py tests/unit/domain/test_objective_comparison_projection.py -q`
+- targeted `ruff check` for the changed Core domain and service files
+
+#### Old Paper-Fact Authority Removal
+
+Only after material, comparison, and evidence-card consumers can read objective
+units should the old paper-fact main extraction path be removed as an
+authoritative semantic source.
+
+Removal targets:
+
+- old text-window paper-fact extraction as a primary semantic output
+- old table-batch paper-fact extraction as a primary semantic output
+- old `sample_variants`, `measurement_results`, `test_conditions`, and
+  `baseline_references` as the authority for material and comparison views
+
+Acceptance:
+
+- `ResearchViewAggregationService` no longer requires `facts.has_paper_facts()`
+  for objective-first collections.
+- `ComparisonService` no longer reads old `measurement_results` for
+  objective-first comparison assembly.
+- Remaining references to old paper-fact families are either deleted or clearly
+  retained as historical regression fixtures or explicitly un-migrated
+  downstream consumers.
+
+Services to update through this cutover:
 
 - `backend/application/core/comparison_service.py`
 - `backend/application/core/research_view_aggregation_service.py`

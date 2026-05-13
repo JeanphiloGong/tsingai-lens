@@ -279,6 +279,53 @@ def test_export_prediction_bundle_projects_objective_first_units(tmp_path):
     }
 
 
+def test_export_prediction_bundle_prefers_objective_sample_number(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-measure-1",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "density",
+            "sample_context": {
+                "label": "135 W-750 mm·s -1",
+                "sample_number": 1,
+            },
+            "value_payload": {"value": 99.26, "source_value_text": "99.26"},
+            "unit": "%",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+        },
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert bundle["samples"][0]["label_in_paper"] == "Sample 1"
+    assert bundle["samples"][0]["sample_description"] == "135 W-750 mm·s -1"
+    assert bundle["measurement_results"][0]["sample_id"] == (
+        "obj-sample-paper-1-sample-1"
+    )
+
+
 def test_export_prediction_bundle_allows_missing_artifacts(tmp_path):
     exporter = _load_exporter_module()
     backend_root = tmp_path / "backend"

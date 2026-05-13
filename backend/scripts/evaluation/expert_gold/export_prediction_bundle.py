@@ -1053,13 +1053,13 @@ def _objective_sample_id(document_id: str, sample_context: dict[str, Any]) -> st
 
 def _objective_sample_label(sample_context: dict[str, Any]) -> str:
     for key in (
-        "label",
-        "sample_label",
-        "sample",
-        "sample_id",
         "sample_number",
         "Sample number",
         "Sample Number",
+        "sample_id",
+        "sample",
+        "sample_label",
+        "label",
     ):
         value = sample_context.get(key)
         if _present(value):
@@ -1071,6 +1071,10 @@ def _objective_sample_label(sample_context: dict[str, Any]) -> str:
 
 
 def _objective_sample_description(sample_context: dict[str, Any]) -> str:
+    for key in ("label", "sample_label", "sample"):
+        value = sample_context.get(key)
+        if _present(value):
+            return str(value).strip()
     label = _objective_sample_label(sample_context)
     if label:
         return label

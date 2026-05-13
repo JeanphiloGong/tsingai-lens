@@ -154,6 +154,83 @@ class ResearchViewAggregationService:
         facts = self._load_collection_facts(collection_id)
         frames = self._core_fact_records(facts)
         projection = self._comparison_projection_from_facts(facts)
+        objective_material_rows = self._objective_material_rows_from_facts(facts)
+        if objective_material_rows:
+            overview = self._build_objective_collection_overview(
+                collection_id,
+                facts,
+                objective_material_rows,
+                projection,
+            )
+            paper_coverage = self._build_objective_collection_paper_coverage(
+                collection_id,
+                facts,
+                objective_material_rows,
+            )
+            comparable_groups = self._build_comparable_groups(
+                collection_id,
+                projection,
+                frames,
+            )
+            materials = self._build_objective_material_summaries(
+                collection_id,
+                objective_material_rows,
+            )
+            cross_paper_matrices = [
+                group["matrix"]
+                for group in comparable_groups
+                if group.get("matrix") is not None
+            ]
+            warnings = [
+                warning
+                for row in paper_coverage
+                for warning in row.get("primary_warnings", [])
+            ]
+            if projection is None:
+                warnings.append(
+                    self._warning(
+                        code="comparison_projection_unavailable",
+                        severity="info",
+                        scope="collection",
+                        message=(
+                            "Objective material evidence is available, but "
+                            "comparable groups are not available until "
+                            "comparison artifacts are generated."
+                        ),
+                    )
+                )
+            state = self._derive_collection_state(
+                paper_coverage,
+                comparable_groups,
+                warnings,
+            )
+            return self._clean_value(
+                {
+                    "collection_id": collection_id,
+                    "state": state,
+                    "overview": overview,
+                    "materials": materials,
+                    "paper_coverage": paper_coverage,
+                    "comparable_groups": comparable_groups,
+                    "cross_paper_matrices": cross_paper_matrices,
+                    "trend_series": [],
+                    "evidence_links": {
+                        "evidence_cards": (
+                            f"/api/v1/collections/{collection_id}/evidence/cards"
+                        ),
+                    },
+                    "debug_links": {
+                        "results": f"/api/v1/collections/{collection_id}/results",
+                        "comparisons": (
+                            f"/api/v1/collections/{collection_id}/comparisons"
+                        ),
+                        "comparable_results": (
+                            f"/api/v1/comparable-results?collection_id={collection_id}"
+                        ),
+                    },
+                    "warnings": self._dedupe_warnings(warnings),
+                }
+            )
         overview = self._build_collection_overview(collection_id, frames, projection)
         paper_coverage = self._build_paper_coverage(collection_id, frames)
         comparable_groups = self._build_comparable_groups(
@@ -529,6 +606,181 @@ class ResearchViewAggregationService:
             "measured_properties": measured_properties,
             "condition_families": condition_families,
         }
+
+    def _build_objective_collection_overview(
+        self,
+        collection_id: str,
+        facts: CoreFactSet,
+        rows: list[dict[str, Any]],
+        projection: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        document_ids = {
+            document_id
+            for row in rows
+            if (document_id := self._safe_text(row.get("document_id")))
+        }
+        sample_keys = {
+            sample_key
+            for row in rows
+            if (sample_key := self._objective_sample_key(row))
+        }
+        process_variables = sorted(
+            {
+                key
+                for row in rows
+                for key, value in self._as_mapping(
+                    row.get("process_context")
+                ).items()
+                if self._has_observed_value(value)
+            }
+        )
+        measured_properties = sorted(
+            {
+                property_name
+                for row in rows
+                if (property_name := self._safe_text(row.get("property_normalized")))
+            }
+        )
+        condition_families = sorted(
+            {
+                key
+                for row in rows
+                for condition in (
+                    self._as_mapping(row.get("test_condition")),
+                    self._as_mapping(row.get("resolved_condition")),
+                )
+                for key, value in condition.items()
+                if self._has_observed_value(value)
+            }
+        )
+        comparable_group_count = 0
+        if projection is not None:
+            comparable_group_count = len(self._group_comparison_rows(projection))
+        return {
+            "collection_id": collection_id,
+            "document_count": len(document_ids) or len(facts.document_profiles),
+            "sample_variant_count": len(sample_keys),
+            "measurement_count": sum(
+                1
+                for row in rows
+                if self._safe_text(row.get("unit_kind")) == "measurement"
+            ),
+            "condition_count": len(
+                {
+                    self._objective_condition_text(row)
+                    for row in rows
+                    if self._objective_condition_text(row)
+                }
+            ),
+            "evidence_count": len(self._build_objective_evidence_refs(rows)),
+            "comparable_group_count": comparable_group_count,
+            "material_systems": sorted(
+                {
+                    label
+                    for row in rows
+                    if (label := self._objective_material_label_from_row(row))
+                }
+            ),
+            "process_variables": process_variables,
+            "measured_properties": measured_properties,
+            "condition_families": condition_families,
+        }
+
+    def _build_objective_collection_paper_coverage(
+        self,
+        collection_id: str,
+        facts: CoreFactSet,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        profiles = self._records_list(facts.document_profiles)
+        coverage: list[dict[str, Any]] = []
+        for document_id in sorted(
+            {
+                document_id
+                for row in rows
+                if (document_id := self._safe_text(row.get("document_id")))
+            }
+        ):
+            document_rows = [
+                row
+                for row in rows
+                if self._safe_text(row.get("document_id")) == document_id
+            ]
+            sample_count = len(
+                {
+                    sample_key
+                    for row in document_rows
+                    if (sample_key := self._objective_sample_key(row))
+                }
+            )
+            process_keys = {
+                key
+                for row in document_rows
+                for key, value in self._as_mapping(
+                    row.get("process_context")
+                ).items()
+                if self._has_observed_value(value)
+            }
+            measurement_count = sum(
+                1
+                for row in document_rows
+                if self._safe_text(row.get("unit_kind")) == "measurement"
+            )
+            condition_count = len(
+                {
+                    self._objective_condition_text(row)
+                    for row in document_rows
+                    if self._objective_condition_text(row)
+                }
+            )
+            evidence_count = len(self._build_objective_evidence_refs(document_rows))
+            warnings = self._coverage_warnings(
+                document_id=document_id,
+                sample_count=sample_count,
+                measurement_count=measurement_count,
+                evidence_count=evidence_count,
+            )
+            coverage.append(
+                {
+                    "document_id": document_id,
+                    "title": self._document_title(profiles, document_id),
+                    "source_filename": self._document_source_filename(
+                        profiles,
+                        document_id,
+                    ),
+                    "state": self._derive_paper_state(
+                        sample_count=sample_count,
+                        measurement_count=measurement_count,
+                        evidence_count=evidence_count,
+                    ),
+                    "sample_count": sample_count,
+                    "process_param_count": len(process_keys),
+                    "measurement_count": measurement_count,
+                    "condition_count": condition_count,
+                    "evidence_count": evidence_count,
+                    "issue_count": len(warnings),
+                    "primary_warnings": warnings,
+                    "links": {
+                        "research_view": (
+                            f"/api/v1/collections/{collection_id}/documents/"
+                            f"{document_id}/research-view"
+                        ),
+                        "profile": (
+                            f"/api/v1/collections/{collection_id}/documents/"
+                            f"{document_id}/profile"
+                        ),
+                        "content": (
+                            f"/api/v1/collections/{collection_id}/documents/"
+                            f"{document_id}/content"
+                        ),
+                        "debug_comparison_semantics": (
+                            f"/api/v1/collections/{collection_id}/documents/"
+                            f"{document_id}/comparison-semantics"
+                        ),
+                    },
+                }
+            )
+        return coverage
 
     def _build_paper_coverage(
         self,

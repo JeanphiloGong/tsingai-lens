@@ -18,6 +18,7 @@ from domain.core import (
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
+    project_objective_comparison_rows,
 )
 
 
@@ -601,6 +602,52 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     ]["condition"] == "method: potentiodynamic polarization"
     assert profile["measured_properties"][0]["display_range"] == "0.4-1.2 uA/cm2"
     assert profile["evidence_refs"][0]["fact_ids"] == ["oeu-as-built-icorr"]
+
+
+def test_collection_research_view_uses_objective_units_without_old_facts():
+    profiles, _ = _frames()
+    objective_units = _objective_units()
+    comparison_rows = [
+        row.to_record()
+        for row in project_objective_comparison_rows(
+            collection_id="col-1",
+            evidence_units=(
+                ObjectiveEvidenceUnit.from_mapping(objective_units[0]),
+                ObjectiveEvidenceUnit.from_mapping(objective_units[1]),
+            ),
+        )
+    ]
+    service = _service_from_frames(
+        profiles,
+        {
+            "evidence_anchors": [],
+            "method_facts": [],
+            "sample_variants": [],
+            "test_conditions": [],
+            "baseline_references": [],
+            "measurement_results": [],
+            "characterization_observations": [],
+            "structure_features": [],
+        },
+        comparison_rows=comparison_rows,
+        objective_units=objective_units,
+    )
+
+    payload = service.get_collection_research_view("col-1")
+
+    assert payload["state"] == "ready"
+    assert payload["overview"]["sample_variant_count"] == 2
+    assert payload["overview"]["measurement_count"] == 2
+    assert payload["overview"]["material_systems"] == ["316L stainless steel"]
+    assert payload["overview"]["measured_properties"] == [
+        "corrosion current density"
+    ]
+    assert payload["paper_coverage"][0]["state"] == "ready"
+    assert payload["paper_coverage"][0]["measurement_count"] == 2
+    assert payload["materials"][0]["material_id"] == "mat-316l-stainless-steel"
+    assert payload["comparable_groups"][0]["material_system"] == (
+        "316L stainless steel"
+    )
 
 
 def test_collection_materials_does_not_build_comparison_matrices(monkeypatch):

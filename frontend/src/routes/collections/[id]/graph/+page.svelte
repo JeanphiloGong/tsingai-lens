@@ -534,6 +534,7 @@
 		supportStatus = '';
 		notFound = false;
 		clearSelection(false);
+		let nextStatus = '';
 
 		const [graphResult, workspaceResult] = await Promise.allSettled([
 			fetchCollectionGraph(collectionId, { maxNodes, minWeight }),
@@ -547,7 +548,7 @@
 			graphData = graphResult.value;
 			visibleNodeTypes = ensureVisibleTypes(buildCollectionOverviewGraph(graphData));
 			await renderGraph();
-			status = graphData.truncated ? $t('graph.status.loadedTruncated') : $t('graph.status.loaded');
+			nextStatus = graphData.truncated ? $t('graph.status.loadedTruncated') : '';
 		} catch (err) {
 			const errorCode = getApiErrorCode(err);
 			error = errorMessage(err);
@@ -558,6 +559,7 @@
 			disposeRenderer();
 		} finally {
 			loading = false;
+			if (!error) status = nextStatus;
 			void loadSupportData();
 		}
 	}
@@ -906,6 +908,10 @@
 		if (loading) return 'warning';
 		if (graphMeta.nodeCount > 0) return 'success';
 		return 'neutral';
+	}
+
+	function graphLoadStateLabel() {
+		return statusBadgeLabel(graphMeta);
 	}
 
 	function evidenceSourceHref(item: EvidenceCard) {
@@ -1293,7 +1299,7 @@
 					</div>
 					<div>
 						<span>{$t('graph.controls.loadState')}</span>
-						<strong>{supportLoading ? $t('graph.status.loading') : $t('graph.status.loaded')}</strong>
+						<strong>{graphLoadStateLabel()}</strong>
 					</div>
 				</div>
 			</aside>

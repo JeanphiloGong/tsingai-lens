@@ -3189,6 +3189,10 @@ class ResearchObjectiveService:
                 row_values=row_values,
                 result_columns=result_columns,
             )
+            row_context = self._objective_table_row_context_with_sample_number(
+                row_context=row_context,
+                row_index=row_index,
+            )
             for result_column in result_columns:
                 raw_value = row_values.get(result_column)
                 if raw_value in (None, ""):
@@ -3251,6 +3255,10 @@ class ResearchObjectiveService:
                 route=route,
                 row_values=row_values,
                 result_columns=result_columns,
+            )
+            row_context = self._objective_table_row_context_with_sample_number(
+                row_context=row_context,
+                row_index=row_index,
             )
             if not row_context["process_context"] and not row_context["test_condition"]:
                 continue
@@ -3326,6 +3334,69 @@ class ResearchObjectiveService:
             "process_context": process_context,
             "test_condition": test_condition,
         }
+
+    def _objective_table_row_context_with_sample_number(
+        self,
+        *,
+        row_context: dict[str, dict[str, str]],
+        row_index: int,
+    ) -> dict[str, dict[str, str]]:
+        sample_context = dict(row_context["sample_context"])
+        if self._objective_sample_context_has_explicit_number(sample_context):
+            return row_context
+        if sample_context and not self._objective_sample_context_needs_row_number(
+            sample_context
+        ):
+            return row_context
+        if not sample_context and not (
+            row_context["process_context"] or row_context["test_condition"]
+        ):
+            return row_context
+        sample_context["sample_number"] = str(row_index)
+        return {
+            "sample_context": sample_context,
+            "process_context": row_context["process_context"],
+            "test_condition": row_context["test_condition"],
+        }
+
+    def _objective_sample_context_has_explicit_number(
+        self,
+        sample_context: dict[str, Any],
+    ) -> bool:
+        for key, value in sample_context.items():
+            text = str(value).strip()
+            if not text:
+                continue
+            column_key = self._objective_column_key(str(key))
+            if column_key in {
+                "condition",
+                "condition_no",
+                "condition_number",
+                "sample_no",
+                "sample_number",
+            }:
+                return True
+            if column_key in {"sample", "sample_id"} and (
+                re.fullmatch(r"0*\d+", text)
+                or re.search(r"\bS0*\d+\b", text, flags=re.IGNORECASE)
+                or re.search(r"\bsample\s*#?\s*0*\d+\b", text, flags=re.IGNORECASE)
+            ):
+                return True
+        return False
+
+    def _objective_sample_context_needs_row_number(
+        self,
+        sample_context: dict[str, Any],
+    ) -> bool:
+        for value in sample_context.values():
+            tokens = [
+                token
+                for token in self._objective_numeric_match_tokens(value)
+                if token not in {"1", "-1"}
+            ]
+            if len(set(tokens)) >= 2:
+                return True
+        return False
 
     def _objective_table_join_keys(
         self,

@@ -1558,6 +1558,107 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
     }
 
 
+def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-3",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Sample": "sample_id",
+                "Density (%)": "target_property",
+            },
+            "confidence": 0.8,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "target_property_axes": ["density"],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        objective_context=objective_context,
+        source={
+            "page": 7,
+            "column_headers": ["Sample", "Density (%)"],
+            "table_matrix": [
+                ["Sample", "Density (%)"],
+                ["375 W-2100 mm·s -1", "97.83"],
+                ["255 W-1400 mm·s -1", "99.50"],
+            ],
+        },
+    )
+
+    assert [record["sample_context"] for record in records] == [
+        {"Sample": "375 W-2100 mm·s -1", "sample_number": "1"},
+        {"Sample": "255 W-1400 mm·s -1", "sample_number": "2"},
+    ]
+
+
+def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-process",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "column_roles": {
+                "Laser power (W)": "variable_process_axis",
+                "Scan speed (mm·s -1)": "variable_process_axis",
+                "Energy density (J mm -3)": "variable_process_axis",
+            },
+            "confidence": 0.8,
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        objective_context=None,
+        source={
+            "page": 2,
+            "column_headers": [
+                "Test",
+                "Laser power (W)",
+                "Scan speed (mm·s -1)",
+                "Energy density (J mm -3)",
+            ],
+            "table_matrix": [
+                [
+                    "Test",
+                    "Laser power (W)",
+                    "Scan speed (mm·s -1)",
+                    "Energy density (J mm -3)",
+                ],
+                ["1", "375", "2100", "100"],
+                ["2", "255", "1400", "100"],
+            ],
+        },
+    )
+
+    assert [record["sample_context"] for record in records] == [
+        {"sample_number": "1"},
+        {"sample_number": "2"},
+    ]
+
+
 def test_research_objective_service_resolves_measurements_from_process_units(
     tmp_path,
 ):

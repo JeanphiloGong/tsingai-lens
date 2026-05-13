@@ -474,9 +474,13 @@
 		if (!cy) return;
 		const node = cy.$id(nodeId);
 		if (node.empty()) return;
+		const visibleContext = node
+			.closedNeighborhood()
+			.filter((element) => !element.hasClass('is-hidden'));
+		const target = visibleContext.length > 1 ? visibleContext : node;
 		cy.animate({
-			center: { eles: node },
-			zoom: Math.max(cy.zoom(), 0.88),
+			center: { eles: target },
+			zoom: Math.min(Math.max(cy.zoom(), 0.35), 0.72),
 			duration: graphAnimationDuration,
 			easing: 'ease-out-cubic'
 		});

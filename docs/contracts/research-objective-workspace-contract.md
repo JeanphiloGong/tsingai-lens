@@ -40,6 +40,280 @@ That question owns the workspace context:
 Material names should remain visible as chips, filters, and facets. They should
 not be used as the primary resource identity for the new workspace.
 
+## Product Spec: Research Direction Workspace
+
+This section is the phase-one specification for productizing the research
+objective route into the research-direction workspace. It is intentionally
+written before implementation so backend and frontend changes can be judged
+against the same target.
+
+### Assumptions
+
+1. The user is a researcher reviewing a built paper collection in the existing
+   browser workspace, not a public anonymous visitor.
+2. The primary object is a research objective / research direction. Material is
+   a facet inside that direction.
+3. The backend owns semantic assembly. The frontend may format, filter, and
+   navigate evidence, but it should not infer scientific logic from raw records.
+4. The first optimized target is read-only review and source traceback. Editing
+   objectives, approving evidence, or launching rebuilds can follow later.
+5. The route stays inside the existing same-origin `/api/v1/*` browser
+   contract.
+
+### Objective
+
+Build a research-direction workspace that lets a researcher answer:
+
+```text
+For this research objective, what did the collection actually prove, which
+papers support it, which experimental conditions and measurements are involved,
+and where is every claim grounded in the source PDFs?
+```
+
+The workspace should not be a generic evidence dump. Its primary user-facing
+shape is a research logic chain:
+
+```text
+objective
+-> paper coverage and paper role
+-> material / sample / process context
+-> test or characterization condition
+-> measured result
+-> comparison or observed trend
+-> interpretation, agreement, conflict, and gaps
+-> source traceback
+```
+
+The user should be able to start from the objective, inspect the chain at a
+high level, drill into evidence groups, and jump to the source document without
+losing the objective context.
+
+### Tech Stack
+
+- Frontend: SvelteKit 2, Svelte 5, TypeScript, Vite, Playwright.
+- Backend: FastAPI-style Python backend, Core semantic-build records, SQLite
+  persistence through the Core repository boundary.
+- Browser contract: same-origin `/api/v1/*` requests through shared frontend
+  API helpers.
+- Existing route family:
+  `frontend/src/routes/collections/[id]/objectives/`.
+
+### Commands
+
+Frontend checks:
+
+```bash
+cd frontend
+npm run check
+npm run test:e2e -- --reporter=line
+npm run build
+```
+
+Backend checks for objective read-model changes:
+
+```bash
+cd backend
+./.venv/bin/python -m pytest tests/unit/services/test_research_objective_service.py -q
+./.venv/bin/python -m ruff check application/core/semantic_build tests/unit/services
+```
+
+P001 objective benchmark check when semantic payloads change:
+
+```bash
+cd backend
+./.venv/bin/python scripts/evaluation/expert_gold/run_objective_gold_benchmark.py \
+  --output-dir <objective-run-output-dir> \
+  --gold-paper-id P001
+```
+
+Docs governance check when this contract changes:
+
+```bash
+python3 scripts/check_docs_governance.py
+```
+
+### Project Structure
+
+```text
+docs/contracts/research-objective-workspace-contract.md
+  Shared product/API/interaction contract for the objective workspace.
+
+backend/application/core/semantic_build/
+  Owns objective discovery, evidence-unit assembly, and logic-chain assembly.
+
+backend/controllers/core/ and backend application services
+  Own objective list and objective research-view read models.
+
+frontend/src/routes/_shared/researchView.ts
+  Owns browser-side TypeScript types and same-origin API helpers.
+
+frontend/src/routes/collections/[id]/objectives/+page.svelte
+  Owns the collection objective list.
+
+frontend/src/routes/collections/[id]/objectives/[objective_id]/+page.svelte
+  Owns the objective workspace page.
+
+frontend/e2e/
+  Owns browser-level route checks and screenshot-oriented coverage.
+```
+
+### Code Style
+
+Frontend code should keep semantic decisions in backend payloads and use Svelte
+only for state, grouping, and presentation:
+
+```svelte
+{#if view.readiness.logic_chain_ready && view.logic_chain}
+	<LogicChainSummary chain={view.logic_chain} />
+{:else}
+	<EmptyState message={$t('research.objectiveWorkspace.noLogicChain')} />
+{/if}
+```
+
+Backend read models should return product-shaped fields directly when the UI
+would otherwise have to reconstruct scientific meaning:
+
+```python
+return ObjectiveResearchView(
+    objective=objective_summary,
+    readiness=readiness,
+    logic_chain=assembled_chain,
+    evidence_units=resolved_units,
+    warnings=diagnostics,
+)
+```
+
+### Frontend Interaction Design
+
+The optimized objective page should be organized around review workflow rather
+than raw object type order.
+
+1. Objective header:
+   show the question, material/process/property axes, confidence, and readiness
+   state. This stays compact and scannable.
+2. Logic-chain overview:
+   first primary section. Show the chain as ordered steps with counts,
+   completeness, conflicts, and gaps. This is the answer scaffold.
+3. Evidence matrix / grouped evidence:
+   group resolved evidence units by scientific role: process context,
+   test condition, measurement, comparison, characterization, interpretation.
+   Filters should narrow by paper, property, sample, and evidence kind.
+4. Paper coverage:
+   show which papers are primary, supporting, background, or excluded for this
+   objective. Paper cards or rows should expose changed variables, measured
+   scope, relevant tables, unit count, and route count.
+5. Evidence inspector:
+   selecting any chain step or evidence row opens a side inspector with
+   payload details, source refs, confidence, warnings, and document links.
+6. Source traceback:
+   source links open the document route with `page`, `source`,
+   `evidence_unit_id`, and `return_to` query parameters so the user can jump
+   back to the same objective workspace.
+7. Diagnostics:
+   extraction routes, skipped sources, unresolved joins, and warnings should be
+   available but secondary. They should help debug extraction without becoming
+   the main product surface.
+
+### Backend / Frontend Coordination
+
+Backend responsibilities:
+
+- Persist and expose objective-first records:
+  `ResearchObjective`, `ObjectiveContext`, `ObjectivePaperFrame`,
+  `ObjectiveEvidenceRoute`, `ObjectiveEvidenceUnit`, and `ObjectiveLogicChain`.
+- Return a stable objective research-view read model with readiness flags.
+- Resolve condition IDs and sample IDs into real experimental context before
+  the frontend sees final evidence rows.
+- Provide source refs that can drive document navigation without browser-side
+  guessing.
+- Provide warnings and completeness states for partial, failed, or stale
+  objective builds.
+- Prefer product-shaped logic-chain summaries over requiring the frontend to
+  assemble scientific conclusions from raw evidence units.
+
+Frontend responsibilities:
+
+- Use the existing same-origin API helper path in
+  `frontend/src/routes/_shared/researchView.ts`.
+- Render explicit loading, empty, partial, ready, and failed states.
+- Keep the research logic chain as the primary first-screen object.
+- Provide dense review interactions: filters, selection, side inspection,
+  source navigation, and return navigation.
+- Avoid treating material routes or material ids as objective resources.
+- Avoid inferring scientific semantics that should be provided by backend
+  read models.
+
+### Testing Strategy
+
+Backend tests should verify:
+
+- objective research-view payloads include readiness, paper frames, evidence
+  routes, evidence units, logic chain, warnings, and source refs
+- logic-chain payloads preserve material, process context, test condition,
+  result, comparison, interpretation, and gaps
+- empty and partial objective states are represented explicitly
+- no material endpoint returns objective records as a disguised compatibility
+  path
+
+Frontend tests should verify:
+
+- objective list loads from the objective endpoint
+- objective workspace renders header, logic-chain overview, paper coverage,
+  evidence groups, and source links from a fixture payload
+- loading, empty, partial, failed, and ready states are visible
+- selecting evidence updates the inspector without losing page context
+- source links include `page`, `source`, `evidence_unit_id`, and `return_to`
+- Playwright desktop and mobile screenshots show no overlap, blank primary
+  regions, or unreadable text
+
+### Boundaries
+
+- Always:
+  use `/api/v1/*` same-origin helpers, show source traceback for claims, keep
+  readiness and warning states visible, and verify with focused backend,
+  frontend, and Playwright checks.
+- Ask first:
+  changing public API shapes, adding dependencies, introducing editable
+  evidence approval, adding rebuild controls, deleting material routes, or
+  changing database table shape.
+- Never:
+  make `/materials` return objective records, treat `objective_id` as a fake
+  `material_id`, hide missing evidence behind fluent summary text, run LLM
+  logic in the browser, or add a parallel browser API client.
+
+### Success Criteria
+
+The first optimized version is acceptable when:
+
+- Opening `/collections/:collectionId/objectives/:objectiveId` shows the
+  objective question, axes, readiness, and confidence without needing any
+  material route.
+- The first primary section is a research logic chain, not raw diagnostics.
+- A P001-backed objective can show 3 test-condition families, 80 core
+  measurements, 19 pairwise comparisons, characterization observations, and
+  source links without overwhelming the first viewport.
+- Every visible claim or evidence item can navigate to a document route with a
+  source-aware query string and a return path.
+- Partial or missing objective data is explicit through readiness, empty
+  states, and warnings.
+- The frontend does not derive scientific conclusions from raw payload text;
+  backend read models provide the logic-chain summary or mark it unavailable.
+- `npm run check`, targeted frontend tests, relevant backend tests, docs
+  governance, and Playwright screenshots pass for the touched surface.
+
+### Open Questions
+
+- Should the first optimized page include cross-objective switching in the
+  detail route, or should switching stay on the objective list page?
+- Should evidence approval, rejection, or correction be part of this wave, or
+  remain a later curation workflow?
+- Should backend add a more product-shaped `logic_chain.steps` read model now,
+  or should the first frontend optimization continue using the existing
+  `chain_payload` plus evidence-unit groups?
+- Should comparison rows be shown as a compact result matrix in this page, or
+  only inside the evidence inspector until the comparison projection is fully
+  cut over?
+
 ## API Surfaces
 
 The first shared API slice should add objective-first read surfaces under the

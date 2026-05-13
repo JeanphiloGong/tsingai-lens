@@ -7,7 +7,8 @@ artifacts.
   LLM-structured document typing and collection summaries
 - `research_objective_service.py`
   collection-level paper skim, research objective, objective context, evidence
-  route, evidence-unit, and logic-chain records
+  route, evidence-unit, and logic-chain records; objective logic chains include
+  traceable measurement value ranges assembled from resolved measurement units
 - `paper_facts_service.py`
   objective-aware semantic extraction for evidence anchors, method facts,
   variants, test conditions, baselines, and measurement results

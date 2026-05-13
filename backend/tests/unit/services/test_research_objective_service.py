@@ -975,10 +975,17 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
             "confidence": 0.84,
         }
     )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": ["yield strength"],
+        }
+    )
 
     records = service._objective_evidence_unit_records_from_extracted(
         route=route,
         source={"page": 4},
+        objective_context=objective_context,
         extracted_record={
             "unit_kind": "sample_context",
             "sample_context": {"Sample number": "1"},
@@ -995,7 +1002,7 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
     assert len(records) == 1
     record = records[0]
     assert record["unit_kind"] == "measurement"
-    assert record["property_normalized"] == "Yield Strength"
+    assert record["property_normalized"] == "yield strength"
     assert record["unit"] == "MPa"
     assert record["value_payload"] == {
         "source_value_text": "236.65",
@@ -1043,9 +1050,21 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
             "confidence": 0.8,
         }
     )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+                "microhardness",
+            ],
+        }
+    )
 
     records = service._objective_table_matrix_evidence_unit_records(
         route=route,
+        objective_context=objective_context,
         source={
             "page": 3,
             "column_headers": [
@@ -1075,10 +1094,10 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
 
     assert len(records) == 8
     assert {record["property_normalized"] for record in records} == {
-        "Yield Strength",
-        "Ultimate Tensile Strength",
-        "Elongation",
-        "Microhadness",
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+        "microhardness",
     }
     assert all(record["unit_kind"] == "measurement" for record in records)
     assert all(record["resolution_status"] == "resolved" for record in records)
@@ -1089,7 +1108,7 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
     yield_record = next(
         record
         for record in records
-        if record["property_normalized"] == "Yield Strength"
+        if record["property_normalized"] == "yield strength"
         and record["sample_context"]["Sample number"] == "1"
     )
     assert yield_record["sample_context"] == {
@@ -1155,6 +1174,23 @@ def test_research_objective_service_resolves_measurements_from_process_units(
             "confidence": 0.8,
         }
     )
+    duplicate_test_condition = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-test-condition",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "test_condition",
+            "sample_context": {
+                "Condition number": "1",
+                "Sample number": "2",
+            },
+            "test_condition": {
+                "Test method": "tensile test",
+            },
+            "resolution_status": "partial",
+            "confidence": 0.72,
+        }
+    )
     other_process_context = ObjectiveEvidenceUnit.from_mapping(
         {
             "evidence_unit_id": "oeu-other-process-context",
@@ -1175,7 +1211,12 @@ def test_research_objective_service_resolves_measurements_from_process_units(
     )
 
     resolved_units = service._resolve_objective_evidence_unit_contexts(
-        (measurement, process_context, other_process_context),
+        (
+            measurement,
+            duplicate_test_condition,
+            process_context,
+            other_process_context,
+        ),
     )
 
     resolved_measurement = resolved_units[0]
@@ -1346,6 +1387,60 @@ def test_research_objective_service_ranks_result_text_candidates(
     assert {route.role for route in routes} == {"characterization"}
 
 
+def test_research_objective_service_drops_known_empty_evidence_units(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    empty_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "document_id": "paper-1",
+            "unit_kind": "characterization",
+            "source_refs": [{"source_kind": "text_window", "source_ref": "b1"}],
+        }
+    )
+    useful_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "document_id": "paper-1",
+            "unit_kind": "characterization",
+            "source_refs": [{"source_kind": "text_window", "source_ref": "b1"}],
+            "value_payload": {"microstructure": "refined dendrites"},
+        }
+    )
+    empty_measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {"scanning_strategy": "A"},
+            "process_context": {"process": "Selective Laser Melting"},
+            "source_refs": [{"source_kind": "text_window", "source_ref": "b2"}],
+        }
+    )
+
+    assert not service._objective_evidence_unit_has_payload(empty_unit)
+    assert not service._objective_evidence_unit_has_payload(empty_measurement)
+    assert service._objective_evidence_unit_has_payload(useful_unit)
+
+
+def test_structured_objective_evidence_unit_wraps_scalar_value_payload():
+    unit = StructuredObjectiveEvidenceUnit.model_validate(
+        {
+            "unit_kind": "measurement",
+            "sample_context": "not a mapping",
+            "value_payload": 95.4,
+        }
+    )
+
+    assert unit.sample_context == {}
+    assert unit.value_payload == {
+        "value": 95.4,
+        "source_value_text": "95.4",
+    }
+
+
 def test_research_objective_service_builds_and_persists_db_records(tmp_path, caplog):
     collection_service = CollectionService(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Collection")
@@ -1512,6 +1607,21 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
     assert chain_payload["schema_version"] == "objective_logic_chain.v1"
     assert chain_payload["unit_counts_by_kind"]["measurement"] == 2
     assert chain_payload["cross_paper"]["resolved_measurement_count"] == 2
+    assert chain_payload["cross_paper"]["measurement_range_ready"] is True
+    value_ranges = chain_payload["cross_paper"]["measurement_value_ranges"]
+    assert len(value_ranges) == 1
+    corrosion_range = value_ranges[0]
+    assert corrosion_range["property_normalized"] == "corrosion current"
+    assert corrosion_range["measurement_count"] == 2
+    assert corrosion_range["min"]["value"] == 0.4
+    assert corrosion_range["min"]["source_value_text"] == "0.4 uA/cm2"
+    assert corrosion_range["min"]["sample_context"] == {"sample": "heat-treated"}
+    assert corrosion_range["max"]["value"] == 1.2
+    assert corrosion_range["max"]["source_value_text"] == "1.2 uA/cm2"
+    assert corrosion_range["max"]["sample_context"] == {"sample": "as-built"}
+    assert "corrosion current range 0.4 uA/cm2-1.2 uA/cm2" in str(
+        facts.objective_logic_chains[0].summary
+    )
     assert len(extractor.route_payloads) == 1
     assert len(extractor.unit_payloads) == 2
     table_unit_payload = next(

@@ -1177,14 +1177,14 @@ class ResearchObjectiveService:
         header: str,
         axes: tuple[str, ...],
     ) -> bool:
+        if any(self._axis_values_match(header, axis) for axis in axes):
+            return True
         header_key = self._objective_column_key(header)
         for axis in axes:
             axis_key = self._objective_column_key(axis)
             if not axis_key:
                 continue
             if axis_key in header_key or header_key in axis_key:
-                return True
-            if axis_key == "microhardness" and "microh" in header_key:
                 return True
         return False
 
@@ -1270,13 +1270,13 @@ class ResearchObjectiveService:
                     len(extractable_routes),
                 )
                 continue
+            objective_context = context_by_objective_id.get(route.objective_id)
             payload = {
                 "collection_id": collection_id,
                 "objective": objective.to_record(),
                 "objective_context": (
-                    context_by_objective_id[route.objective_id].to_record()
-                    if route.objective_id in context_by_objective_id
-                    else {}
+                    objective_context.to_record()
+                    if objective_context is not None else {}
                 ),
                 "paper_frame": (
                     frame_by_key[(route.objective_id, route.document_id)].to_record()
@@ -1291,6 +1291,7 @@ class ResearchObjectiveService:
             route_records = self._objective_table_matrix_evidence_unit_records(
                 route=route,
                 source=source,
+                objective_context=objective_context,
             )
             if not route_records:
                 route_records = tuple(
@@ -1299,6 +1300,7 @@ class ResearchObjectiveService:
                     for record in self._objective_evidence_unit_records_from_extracted(
                         route=route,
                         source=source,
+                        objective_context=objective_context,
                         extracted_record=item.model_dump(),
                     )
                 )
@@ -1409,6 +1411,13 @@ class ResearchObjectiveService:
             )
             if len(candidates) == 1:
                 return candidates[0]
+            process_context_candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.unit_kind == "process_context"
+            ]
+            if len(process_context_candidates) == 1:
+                return process_context_candidates[0]
         return None
 
     def _objective_sample_context_match_keys(
@@ -1505,6 +1514,7 @@ class ResearchObjectiveService:
         *,
         route: ObjectiveEvidenceRoute,
         source: dict[str, Any],
+        objective_context: ObjectiveContext | None,
     ) -> tuple[dict[str, Any], ...]:
         if route.source_kind != "table":
             return ()
@@ -1515,6 +1525,7 @@ class ResearchObjectiveService:
             return self._objective_result_table_matrix_records(
                 route=route,
                 source=source,
+                objective_context=objective_context,
                 headers=headers,
                 data_rows=data_rows,
             )
@@ -1567,6 +1578,7 @@ class ResearchObjectiveService:
         *,
         route: ObjectiveEvidenceRoute,
         source: dict[str, Any],
+        objective_context: ObjectiveContext | None,
         headers: tuple[str, ...],
         data_rows: tuple[tuple[int, tuple[str, ...]], ...],
     ) -> tuple[dict[str, Any], ...]:
@@ -1587,6 +1599,13 @@ class ResearchObjectiveService:
                 if raw_value in (None, ""):
                     continue
                 property_normalized, unit = self._split_property_unit(result_column)
+                property_normalized = (
+                    self._normalize_objective_unit_property(
+                        property_normalized,
+                        objective_context=objective_context,
+                    )
+                    or property_normalized
+                )
                 value_payload = {"source_value_text": str(raw_value)}
                 numeric_value = self._coerce_number(raw_value)
                 if numeric_value is not None:
@@ -1744,9 +1763,14 @@ class ResearchObjectiveService:
         *,
         route: ObjectiveEvidenceRoute,
         source: dict[str, Any],
+        objective_context: ObjectiveContext | None,
         extracted_record: dict[str, Any],
     ) -> tuple[dict[str, Any], ...]:
         record = dict(extracted_record)
+        record["property_normalized"] = self._normalize_objective_unit_property(
+            record.get("property_normalized"),
+            objective_context=objective_context,
+        )
         record.update(
             {
                 "objective_id": route.objective_id,
@@ -1779,6 +1803,13 @@ class ResearchObjectiveService:
         normalized_records: list[dict[str, Any]] = []
         for property_name, raw_value in result_items:
             property_normalized, unit = self._split_property_unit(property_name)
+            property_normalized = (
+                self._normalize_objective_unit_property(
+                    property_normalized,
+                    objective_context=objective_context,
+                )
+                or property_normalized
+            )
             value_record = {
                 "source_value_text": str(raw_value),
             }
@@ -1884,6 +1915,27 @@ class ResearchObjectiveService:
             return name.strip() or text, unit or None
         return text, None
 
+    def _normalize_objective_unit_property(
+        self,
+        value: Any,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> str | None:
+        normalized = self._normalize_property_label(value)
+        if not normalized:
+            return None
+        if objective_context is None:
+            return normalized
+        for target_axis in objective_context.target_property_axes:
+            if self._axis_values_match(normalized, target_axis):
+                return self._normalize_property_label(target_axis)
+        return normalized
+
+    def _normalize_property_label(self, value: Any) -> str | None:
+        text = str(value or "").replace("_", " ").replace("-", " ").strip()
+        normalized = " ".join(text.split()).casefold()
+        return normalized or None
+
     def _coerce_number(self, value: Any) -> float | None:
         text = str(value).strip().replace(",", "")
         if not text:
@@ -1918,9 +1970,19 @@ class ResearchObjectiveService:
         self,
         unit: ObjectiveEvidenceUnit,
     ) -> bool:
+        if unit.unit_kind in {
+            "characterization",
+            "comparison",
+            "interpretation",
+            "measurement",
+        }:
+            return bool(
+                unit.value_payload
+                or unit.baseline_context
+                or unit.interpretation
+            )
         return any(
             (
-                unit.unit_kind != "unknown",
                 unit.property_normalized,
                 unit.material_system,
                 unit.sample_context,
@@ -2181,6 +2243,10 @@ class ResearchObjectiveService:
                 "step_role": "measurement_results",
                 "evidence_unit_ids": evidence_unit_ids_by_role.get("measurements", []),
                 "measured_properties": cross_paper.get("measured_properties", []),
+                "measurement_value_ranges": cross_paper.get(
+                    "measurement_value_ranges",
+                    [],
+                ),
             },
             {
                 "step_role": "comparison_and_interpretation",
@@ -2212,6 +2278,9 @@ class ResearchObjectiveService:
             for unit in measurements
         ):
             gaps.append("unresolved_measurements_present")
+        measurement_value_ranges = self._objective_measurement_value_ranges(
+            measurements
+        )
         return {
             "document_count": len(paper_chains),
             "measured_properties": self._dedupe_preserving_order(
@@ -2235,7 +2304,72 @@ class ResearchObjectiveService:
             ),
             "comparison_unit_count": len(comparisons),
             "comparison_ready": bool(comparisons),
+            "measurement_range_ready": bool(measurement_value_ranges),
+            "measurement_value_ranges": measurement_value_ranges,
             "gaps": gaps,
+        }
+
+    def _objective_measurement_value_ranges(
+        self,
+        measurements: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> list[dict[str, Any]]:
+        grouped: dict[str, list[ObjectiveEvidenceUnit]] = {}
+        for unit in measurements:
+            if self._objective_measurement_numeric_value(unit) is None:
+                continue
+            grouped.setdefault(unit.property_normalized or "measurement", []).append(
+                unit
+            )
+
+        ranges: list[dict[str, Any]] = []
+        for property_name, property_units in grouped.items():
+            sorted_units = sorted(
+                property_units,
+                key=lambda unit: (
+                    self._objective_measurement_numeric_value(unit) or 0.0,
+                    unit.evidence_unit_id,
+                ),
+            )
+            min_unit = sorted_units[0]
+            max_unit = sorted_units[-1]
+            ranges.append(
+                {
+                    "property_normalized": property_name,
+                    "measurement_count": len(property_units),
+                    "min": self._objective_measurement_range_point(min_unit),
+                    "max": self._objective_measurement_range_point(max_unit),
+                    "unit": min_unit.unit or max_unit.unit,
+                }
+            )
+        return ranges
+
+    def _objective_measurement_numeric_value(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> float | None:
+        value = unit.value_payload.get("value")
+        if isinstance(value, (int, float)):
+            return float(value)
+        if value not in (None, ""):
+            return self._coerce_number(value)
+        return self._coerce_number(unit.value_payload.get("source_value_text"))
+
+    def _objective_measurement_range_point(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "evidence_unit_id": unit.evidence_unit_id,
+                "value": self._objective_measurement_numeric_value(unit),
+                "source_value_text": unit.value_payload.get("source_value_text"),
+                "sample_context": dict(unit.sample_context),
+                "process_context": dict(unit.process_context),
+                "test_condition": dict(unit.test_condition),
+                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
+            }.items()
+            if value not in (None, "", [], {})
         }
 
     def _objective_paper_logic_gaps(
@@ -2320,10 +2454,62 @@ class ResearchObjectiveService:
         measurement_count = counts.get("measurement", 0) if isinstance(counts, dict) else 0
         document_ids = chain_payload.get("document_ids", [])
         document_count = len(document_ids) if isinstance(document_ids, list) else 0
+        cross_paper = chain_payload.get("cross_paper", {})
+        value_ranges = (
+            cross_paper.get("measurement_value_ranges", [])
+            if isinstance(cross_paper, dict)
+            else []
+        )
+        range_summary = self._objective_logic_chain_range_summary(value_ranges)
+        if range_summary:
+            return (
+                f"{question or 'Objective'}: {measurement_count} measurement "
+                f"unit(s) across {document_count} document(s); {range_summary}."
+            )
         return (
             f"{question or 'Objective'}: assembled {measurement_count} "
             f"measurement unit(s) across {document_count} document(s)."
         )
+
+    def _objective_logic_chain_range_summary(
+        self,
+        value_ranges: Any,
+    ) -> str:
+        if not isinstance(value_ranges, list):
+            return ""
+        pieces: list[str] = []
+        for value_range in value_ranges[:5]:
+            if not isinstance(value_range, dict):
+                continue
+            property_name = str(value_range.get("property_normalized") or "").strip()
+            min_point = value_range.get("min")
+            max_point = value_range.get("max")
+            if (
+                not property_name
+                or not isinstance(min_point, dict)
+                or not isinstance(max_point, dict)
+            ):
+                continue
+            unit = str(value_range.get("unit") or "").strip()
+            min_value = (
+                min_point.get("value")
+                if unit
+                else min_point.get("source_value_text") or min_point.get("value")
+            )
+            max_value = (
+                max_point.get("value")
+                if unit
+                else max_point.get("source_value_text") or max_point.get("value")
+            )
+            if min_value in (None, "") or max_value in (None, ""):
+                continue
+            suffix = (
+                f" {unit}"
+                if unit and unit not in {str(min_value), str(max_value)}
+                else ""
+            )
+            pieces.append(f"{property_name} range {min_value}-{max_value}{suffix}")
+        return "; ".join(pieces)
 
     def _dedupe_chain_items(
         self,
@@ -3826,7 +4012,23 @@ class ResearchObjectiveService:
         if not alias_tokens or not canonical_tokens:
             return False
         overlap = alias_tokens & canonical_tokens
-        return len(overlap) / max(len(alias_tokens), len(canonical_tokens)) >= 0.75
+        if len(overlap) / max(len(alias_tokens), len(canonical_tokens)) >= 0.75:
+            return True
+        if len(alias_tokens) != len(canonical_tokens):
+            return False
+        return all(
+            any(
+                self._axis_token_is_close(alias_token, canonical_token)
+                for canonical_token in canonical_tokens
+            )
+            for alias_token in alias_tokens
+        ) and all(
+            any(
+                self._axis_token_is_close(canonical_token, alias_token)
+                for alias_token in alias_tokens
+            )
+            for canonical_token in canonical_tokens
+        )
 
     def _axis_values_match(self, left: str, right: str) -> bool:
         return self._axis_alias_matches_canonical(left, right)

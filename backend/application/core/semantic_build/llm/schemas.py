@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 
 ClaimScope = Literal[
@@ -918,8 +925,17 @@ class StructuredObjectiveEvidenceUnit(_StrictModel):
         mode="before",
     )
     @classmethod
-    def _normalize_objects(cls, value: object) -> object:
-        return _normalize_object_container(value)
+    def _normalize_objects(cls, value: object, info: ValidationInfo) -> object:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        if info.field_name == "value_payload":
+            return {
+                "value": value,
+                "source_value_text": str(value),
+            }
+        return {}
 
     @field_validator("source_refs", "evidence_anchor_ids", mode="before")
     @classmethod

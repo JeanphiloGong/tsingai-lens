@@ -1414,6 +1414,8 @@ class ResearchObjectiveService:
     ) -> bool:
         if route.source_kind != "table" or route.role != "test_condition":
             return False
+        if not route.column_roles:
+            return True
         role_text = " ".join(
             str(role or "").replace("_", " ").casefold()
             for role in route.column_roles.values()

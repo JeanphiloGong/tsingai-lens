@@ -463,29 +463,13 @@ def _evaluate_test_conditions(
     prediction_conditions: list[dict[str, Any]],
 ) -> dict[str, Any]:
     gold_families = {
-        _condition_family(
-            " ".join(
-                [
-                    _text(row.get("test_type")),
-                    _text(row.get("other_conditions")),
-                    _text(row.get("test_standard")),
-                ]
-            )
-        ): row
+        _gold_condition_family(row): row
         for row in gold_conditions
     }
     gold_families.pop("", None)
     prediction_family_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in prediction_conditions:
-        family = _condition_family(
-            " ".join(
-                [
-                    _text(row.get("test_type")),
-                    _text(row.get("other_conditions")),
-                    _text(row.get("condition_payload")),
-                ]
-            )
-        )
+        family = _prediction_condition_family(row)
         if family:
             prediction_family_rows[family].append(row)
 
@@ -513,6 +497,42 @@ def _evaluate_test_conditions(
         "prediction_condition_completeness": dict(completeness_counts),
         "prediction_unresolved_count": completeness_counts.get("unresolved", 0),
     }
+
+
+def _gold_condition_family(row: dict[str, Any]) -> str:
+    return _first_condition_family(
+        row.get("test_type"),
+        row.get("test_standard"),
+        row.get("other_conditions"),
+    )
+
+
+def _prediction_condition_family(row: dict[str, Any]) -> str:
+    payload = row.get("condition_payload")
+    payload_fields: list[Any] = []
+    if isinstance(payload, dict):
+        payload_fields.extend(
+            [
+                payload.get("method_family"),
+                payload.get("test_method"),
+                payload.get("method"),
+                payload.get("methods"),
+            ]
+        )
+    return _first_condition_family(
+        row.get("test_type"),
+        *payload_fields,
+        row.get("other_conditions"),
+        payload,
+    )
+
+
+def _first_condition_family(*values: Any) -> str:
+    for value in values:
+        family = _condition_family(value)
+        if family:
+            return family
+    return ""
 
 
 def _evaluate_comparisons(

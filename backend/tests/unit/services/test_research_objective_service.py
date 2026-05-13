@@ -1106,6 +1106,26 @@ def test_research_objective_service_skips_matrix_test_condition_table_fallback(
     assert service._objective_table_route_should_skip_llm_fallback(route)
 
 
+def test_research_objective_service_skips_untyped_table_test_condition_fallback(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "test_condition",
+            "extractable": True,
+        }
+    )
+
+    assert service._objective_table_route_should_skip_llm_fallback(route)
+
+
 def test_research_objective_service_builds_method_conditions_and_binds_measurements(
     tmp_path,
 ):

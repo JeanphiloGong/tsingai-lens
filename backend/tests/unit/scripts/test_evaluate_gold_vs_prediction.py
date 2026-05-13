@@ -72,6 +72,39 @@ def test_evaluate_gold_vs_prediction_reports_first_pass_alignment(tmp_path):
     assert paper["evidence"]["prediction_measurements_without_evidence"] == 1
 
 
+def test_evaluate_gold_vs_prediction_prefers_explicit_condition_family():
+    evaluator = _load_evaluator_module()
+    gold_conditions = [
+        {
+            "test_condition_id": "T003",
+            "test_type": "密度/孔隙率与显微组织表征",
+        }
+    ]
+    prediction_conditions = [
+        {
+            "test_condition_id": "oeu-density",
+            "test_type": "density_porosity_microstructure",
+            "condition_payload": {
+                "method_family": "density_porosity_microstructure",
+                "details": (
+                    "Same samples used for microhardness testing were used "
+                    "for SEM characterization."
+                ),
+            },
+            "condition_completeness": "resolved",
+        }
+    ]
+
+    report = evaluator._evaluate_test_conditions(
+        gold_conditions,
+        prediction_conditions,
+    )
+
+    assert report["matched_family_count"] == 1
+    assert report["matched_families"] == ["density_characterization"]
+    assert report["missing_gold_condition_families"] == []
+
+
 def _gold_bundle() -> dict:
     return {
         "metadata": {"schema_version": "expert-gold-bundle-v0.1"},

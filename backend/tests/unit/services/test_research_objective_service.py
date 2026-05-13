@@ -1237,6 +1237,157 @@ def test_research_objective_service_resolves_measurements_from_process_units(
     assert resolved_measurement.resolution_status == "resolved"
 
 
+def test_research_objective_service_generates_pairwise_comparison_units(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "question": "How do process axes affect yield strength?",
+            "variable_process_axes": [
+                "energy density",
+                "scanning strategy",
+                "scanning speed",
+            ],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+    measurements = (
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "oeu-s1-yield",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "sample_context": {
+                    "Condition number": "1",
+                    "Sample number": "1",
+                },
+                "process_context": {
+                    "Energy density (J/mm 3 )": "70",
+                    "Scan strategy": "A",
+                    "Scanning speed (mm/s)": "0.25",
+                },
+                "value_payload": {
+                    "source_value_text": "236.65",
+                    "value": 236.65,
+                },
+                "unit": "MPa",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-2",
+                        "page": 3,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        ),
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "oeu-s2-yield",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "sample_context": {
+                    "Condition number": "1",
+                    "Sample number": "2",
+                },
+                "process_context": {
+                    "Energy density (J/mm 3 )": "70",
+                    "Scan strategy": "B",
+                    "Scanning speed (mm/s)": "0.25",
+                },
+                "value_payload": {
+                    "source_value_text": "159.97",
+                    "value": 159.97,
+                },
+                "unit": "MPa",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-2",
+                        "page": 3,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.7,
+            }
+        ),
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "oeu-s8-yield",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "sample_context": {
+                    "Condition number": "4",
+                    "Sample number": "8",
+                },
+                "process_context": {
+                    "Energy density (J/mm 3 )": "70",
+                    "Scan strategy": "A",
+                    "Scanning speed (mm/s)": "0.239",
+                },
+                "value_payload": {
+                    "source_value_text": "187.82",
+                    "value": 187.82,
+                },
+                "unit": "MPa",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-2",
+                        "page": 3,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.75,
+            }
+        ),
+    )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        measurements,
+        objective_contexts=(objective_context,),
+    )
+
+    assert len(comparison_units) == 2
+    comparisons_by_axis = {
+        unit.value_payload["comparison_axis"]: unit
+        for unit in comparison_units
+    }
+    strategy_comparison = comparisons_by_axis["scanning strategy"]
+    assert strategy_comparison.unit_kind == "comparison"
+    assert strategy_comparison.sample_context["Sample number"] == "1"
+    assert strategy_comparison.baseline_context["sample_context"][
+        "Sample number"
+    ] == "2"
+    assert strategy_comparison.value_payload["value"] == 236.65
+    assert strategy_comparison.baseline_context["value"] == 159.97
+    assert strategy_comparison.value_payload["direction"] == "increase"
+    assert strategy_comparison.source_refs == (
+        {
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "page": 3,
+        },
+    )
+    speed_comparison = comparisons_by_axis["scanning speed"]
+    assert speed_comparison.sample_context["Sample number"] == "1"
+    assert speed_comparison.baseline_context["sample_context"]["Sample number"] == "8"
+    assert speed_comparison.value_payload["baseline_evidence_unit_id"] == (
+        "oeu-s8-yield"
+    )
+
+
 def test_research_objective_service_adds_context_hint_route_for_condition_table(
     tmp_path,
 ):

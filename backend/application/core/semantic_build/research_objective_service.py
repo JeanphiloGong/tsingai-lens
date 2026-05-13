@@ -1331,7 +1331,18 @@ class ResearchObjectiveService:
             collection_id,
             len(units),
         )
-        return self._resolve_objective_evidence_unit_contexts(tuple(units))
+        resolved_units = self._resolve_objective_evidence_unit_contexts(tuple(units))
+        comparison_units = self._build_objective_pairwise_comparison_units(
+            resolved_units,
+            objective_contexts=objective_contexts,
+        )
+        if comparison_units:
+            logger.info(
+                "Research objective pairwise comparison units generated collection_id=%s comparison_unit_count=%s",
+                collection_id,
+                len(comparison_units),
+            )
+        return (*resolved_units, *comparison_units)
 
     def _resolve_objective_evidence_unit_contexts(
         self,
@@ -1419,6 +1430,275 @@ class ResearchObjectiveService:
             if len(process_context_candidates) == 1:
                 return process_context_candidates[0]
         return None
+
+    def _build_objective_pairwise_comparison_units(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+        *,
+        objective_contexts: tuple[ObjectiveContext, ...],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        context_by_objective_id = {
+            context.objective_id: context
+            for context in objective_contexts
+        }
+        existing_keys = {
+            self._objective_comparison_pair_key(unit)
+            for unit in units
+            if unit.unit_kind == "comparison"
+        }
+        measurements_by_key: dict[
+            tuple[str, str, str, str | None],
+            list[ObjectiveEvidenceUnit],
+        ] = {}
+        for unit in units:
+            if unit.unit_kind != "measurement":
+                continue
+            if (
+                not unit.property_normalized
+                or not unit.sample_context
+                or not unit.process_context
+                or self._objective_measurement_numeric_value(unit) is None
+            ):
+                continue
+            measurements_by_key.setdefault(
+                (
+                    unit.objective_id,
+                    unit.document_id,
+                    unit.property_normalized,
+                    unit.unit,
+                ),
+                [],
+            ).append(unit)
+
+        generated: list[ObjectiveEvidenceUnit] = []
+        generated_keys: set[tuple[str, str, str, str, str, str]] = set()
+        for (
+            objective_id,
+            _document_id,
+            _property_normalized,
+            _unit,
+        ), measurements in measurements_by_key.items():
+            objective_context = context_by_objective_id.get(objective_id)
+            for current_index, current in enumerate(measurements):
+                for candidate in measurements[current_index + 1:]:
+                    comparison_axis = self._objective_single_changed_axis(
+                        current=current,
+                        baseline=candidate,
+                        objective_context=objective_context,
+                    )
+                    if comparison_axis is None:
+                        continue
+                    comparison_unit = self._objective_pairwise_comparison_unit(
+                        first=current,
+                        second=candidate,
+                        comparison_axis=comparison_axis,
+                    )
+                    pair_key = self._objective_comparison_pair_key(comparison_unit)
+                    if pair_key in existing_keys or pair_key in generated_keys:
+                        continue
+                    generated_keys.add(pair_key)
+                    generated.append(comparison_unit)
+        return tuple(generated)
+
+    def _objective_single_changed_axis(
+        self,
+        *,
+        current: ObjectiveEvidenceUnit,
+        baseline: ObjectiveEvidenceUnit,
+        objective_context: ObjectiveContext | None,
+    ) -> str | None:
+        current_axes = self._objective_process_axis_values(
+            current,
+            objective_context=objective_context,
+        )
+        baseline_axes = self._objective_process_axis_values(
+            baseline,
+            objective_context=objective_context,
+        )
+        if not current_axes or not baseline_axes:
+            return None
+        changed_axes = [
+            axis
+            for axis in current_axes.keys() & baseline_axes.keys()
+            if current_axes[axis] != baseline_axes[axis]
+        ]
+        if len(changed_axes) != 1:
+            return None
+        shared_axes = current_axes.keys() & baseline_axes.keys()
+        if any(
+            current_axes[axis] != baseline_axes[axis]
+            for axis in shared_axes
+            if axis not in changed_axes
+        ):
+            return None
+        return changed_axes[0]
+
+    def _objective_process_axis_values(
+        self,
+        unit: ObjectiveEvidenceUnit,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> dict[str, str]:
+        if objective_context is None or not objective_context.variable_process_axes:
+            return {
+                self._objective_column_key(key): str(value).strip().casefold()
+                for key, value in unit.process_context.items()
+                if str(value).strip()
+            }
+        axis_values: dict[str, str] = {}
+        for axis in objective_context.variable_process_axes:
+            axis_key = self._normalize_property_label(axis)
+            if axis_key is None:
+                continue
+            for key, value in unit.process_context.items():
+                if not str(value).strip():
+                    continue
+                if self._objective_process_context_key_matches_axis(key, axis):
+                    axis_values[axis_key] = str(value).strip().casefold()
+                    break
+        return axis_values
+
+    def _objective_process_context_key_matches_axis(
+        self,
+        key: str,
+        axis: str,
+    ) -> bool:
+        return self._axis_values_match(key, axis) or self._axis_label_is_mentioned(
+            key,
+            axis,
+        )
+
+    def _objective_pairwise_comparison_unit(
+        self,
+        *,
+        first: ObjectiveEvidenceUnit,
+        second: ObjectiveEvidenceUnit,
+        comparison_axis: str,
+    ) -> ObjectiveEvidenceUnit:
+        first_value = self._objective_measurement_numeric_value(first)
+        second_value = self._objective_measurement_numeric_value(second)
+        if first_value is None or second_value is None:
+            raise ValueError("pairwise comparison requires numeric measurements")
+        current, baseline = (
+            (first, second)
+            if first_value >= second_value
+            else (second, first)
+        )
+        current_value = self._objective_measurement_numeric_value(current)
+        baseline_value = self._objective_measurement_numeric_value(baseline)
+        seed = "|".join(
+            (
+                current.objective_id,
+                current.document_id,
+                str(current.property_normalized or ""),
+                comparison_axis,
+                current.evidence_unit_id,
+                baseline.evidence_unit_id,
+            )
+        )
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": (
+                    f"oeu_cmp_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+                ),
+                "objective_id": current.objective_id,
+                "document_id": current.document_id,
+                "unit_kind": "comparison",
+                "property_normalized": current.property_normalized,
+                "material_system": current.material_system or baseline.material_system,
+                "sample_context": dict(current.sample_context),
+                "process_context": dict(current.process_context),
+                "test_condition": dict(current.test_condition),
+                "value_payload": {
+                    "value": current_value,
+                    "current_value": current_value,
+                    "source_value_text": current.value_payload.get(
+                        "source_value_text"
+                    ),
+                    "direction": (
+                        "increase"
+                        if current_value != baseline_value
+                        else "no_change"
+                    ),
+                    "comparison_axis": comparison_axis,
+                    "current_evidence_unit_id": current.evidence_unit_id,
+                    "baseline_evidence_unit_id": baseline.evidence_unit_id,
+                },
+                "unit": current.unit or baseline.unit,
+                "baseline_context": {
+                    "sample_context": dict(baseline.sample_context),
+                    "process_context": dict(baseline.process_context),
+                    "test_condition": dict(baseline.test_condition),
+                    "value": baseline_value,
+                    "source_value_text": baseline.value_payload.get(
+                        "source_value_text"
+                    ),
+                    "evidence_unit_id": baseline.evidence_unit_id,
+                },
+                "source_refs": self._dedupe_source_refs(
+                    (*current.source_refs, *baseline.source_refs)
+                ),
+                "evidence_anchor_ids": self._dedupe_preserving_order(
+                    [
+                        *current.evidence_anchor_ids,
+                        *baseline.evidence_anchor_ids,
+                    ]
+                ),
+                "join_keys": {
+                    "comparison_axis": comparison_axis,
+                    "current_measurement_id": current.evidence_unit_id,
+                    "baseline_measurement_id": baseline.evidence_unit_id,
+                },
+                "resolution_status": "resolved",
+                "confidence": min(current.confidence, baseline.confidence),
+            }
+        )
+
+    def _objective_comparison_pair_key(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> tuple[str, str, str, str, str, str]:
+        baseline_context = unit.baseline_context
+        baseline_sample_context = baseline_context.get("sample_context")
+        if not isinstance(baseline_sample_context, dict):
+            baseline_sample_context = {}
+        comparison_axis = str(
+            unit.value_payload.get("comparison_axis")
+            or unit.value_payload.get("changed_process_axis")
+            or ""
+        )
+        return (
+            unit.objective_id,
+            unit.document_id,
+            str(unit.property_normalized or ""),
+            self._objective_sample_identity_key(unit.sample_context),
+            self._objective_sample_identity_key(baseline_sample_context),
+            self._normalize_property_label(comparison_axis) or comparison_axis,
+        )
+
+    def _objective_sample_identity_key(
+        self,
+        sample_context: dict[str, Any],
+    ) -> str:
+        return "|".join(
+            f"{self._objective_column_key(key)}={str(value).strip().casefold()}"
+            for key, value in sorted(sample_context.items())
+            if str(value).strip()
+        )
+
+    def _dedupe_source_refs(
+        self,
+        source_refs: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[tuple[str, Any], ...]] = set()
+        for source_ref in source_refs:
+            key = tuple(sorted(source_ref.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(dict(source_ref))
+        return tuple(deduped)
 
     def _objective_sample_context_match_keys(
         self,

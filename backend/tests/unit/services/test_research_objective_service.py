@@ -1470,6 +1470,41 @@ def test_research_objective_service_does_not_keep_text_trends_as_measurements(
     )
 
 
+def test_research_objective_service_keeps_non_numeric_text_characterization(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-characterization",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 3},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "value_payload": {"observation": "irregular pores were observed"},
+            "resolution_status": "partial",
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["unit_kind"] == "characterization"
+    assert records[0]["property_normalized"] == "microstructure"
+
+
 def test_research_objective_service_keeps_numeric_density_text_as_measurement(
     tmp_path,
 ):

@@ -3661,7 +3661,7 @@ class ResearchObjectiveService:
             value_payload=value_payload,
         )
         if value_item is None:
-            return None
+            return ()
         property_normalized, raw_value = value_item
         numeric_value = self._coerce_number(raw_value)
         if numeric_value is None:

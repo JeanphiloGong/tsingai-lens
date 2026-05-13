@@ -1839,6 +1839,57 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
     }
 
 
+def test_research_objective_service_skips_table_matrix_continuation_header_rows(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-eis",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Sample": "sample_id",
+                "R film (Ω cm 2 )": "current_result",
+            },
+            "confidence": 0.8,
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        objective_context=None,
+        source={
+            "page": 8,
+            "column_headers": ["Sample", "R film (Ω cm 2 )"],
+            "table_matrix": [
+                ["Sample", "R film (Ω cm 2 )"],
+                ["", ""],
+                ["", "film resistance"],
+                ["375 W-2100 mm·s -1", "5.03×10 4"],
+                ["255 W-1400 mm·s -1", "5.67×10 4"],
+                ["135 W-750 mm·s -1", "1.90×10 5"],
+            ],
+        },
+    )
+
+    assert [record["sample_context"]["sample_number"] for record in records] == [
+        "1",
+        "2",
+        "3",
+    ]
+    assert [record["sample_context"]["Sample"] for record in records] == [
+        "375 W-2100 mm·s -1",
+        "255 W-1400 mm·s -1",
+        "135 W-750 mm·s -1",
+    ]
+
+
 def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
     tmp_path,
 ):

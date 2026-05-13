@@ -3207,12 +3207,34 @@ class ResearchObjectiveService:
         rows = matrix
         if self._objective_row_matches_headers(matrix[0], headers):
             rows = matrix[1:]
+        rows = tuple(
+            row
+            for row in rows
+            if any(cell for cell in row)
+            and not self._objective_table_matrix_continuation_header_row(
+                headers=headers,
+                row=row,
+            )
+        )
         data_rows = tuple(
             (row_index, row)
             for row_index, row in enumerate(rows, start=1)
-            if any(cell for cell in row)
         )
         return headers, data_rows
+
+    def _objective_table_matrix_continuation_header_row(
+        self,
+        *,
+        headers: tuple[str, ...],
+        row: tuple[str, ...],
+    ) -> bool:
+        if not headers or not row:
+            return False
+        first_header_key = self._objective_column_key(headers[0])
+        if first_header_key not in {"sample", "sample_id", "sample_number"}:
+            return False
+        first_cell = str(row[0] if row else "").strip()
+        return not first_cell and any(str(cell).strip() for cell in row[1:])
 
     def _objective_row_matches_headers(
         self,

@@ -805,6 +805,48 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
         for record in caplog.records
     )
 
+    extractor.text_window_payloads.clear()
+    extractor.table_batch_payloads.clear()
+    caplog.clear()
+    core_repository.replace_collection_research_objectives(
+        collection_id,
+        (),
+        (objective,),
+        (objective_context,),
+        (),
+        (
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "table",
+                    "source_ref": "table-allowed",
+                    "role": "current_experimental_evidence",
+                    "extractable": True,
+                }
+            ),
+        ),
+        (existing_unit,),
+        (existing_chain,),
+    )
+
+    with caplog.at_level("INFO"):
+        service.build_paper_facts(collection_id)
+
+    assert extractor.text_window_payloads == []
+    assert len(extractor.table_batch_payloads) == 1
+    assert any(
+        "Paper facts objective route gate loaded" in record.message
+        and "text_window_routes=0" in record.message
+        and "table_routes=1" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts extraction started" in record.message
+        and "total_extraction_units=1" in record.message
+        for record in caplog.records
+    )
+
 
 def test_paper_facts_rejects_legacy_objective_evidence_unit_replacement(tmp_path):
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")

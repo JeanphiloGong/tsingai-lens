@@ -666,15 +666,7 @@ class PaperFactsService:
             grouped_row_cells = self._group_table_cells_by_row(
                 table_cells_by_doc.get(candidate_document_id, [])
             )
-            route_gated_text_refs = (
-                objective_route_gate.get(candidate_document_id, {}).get(
-                    "text_windows",
-                    set(),
-                )
-                if objective_route_gate is not None
-                else set()
-            )
-            if objective_route_gate is None or not route_gated_text_refs:
+            if objective_route_gate is None:
                 selected_text_windows = self._select_text_windows_for_extraction(
                     text_windows=candidate_text_windows,
                     profile=candidate_profile,

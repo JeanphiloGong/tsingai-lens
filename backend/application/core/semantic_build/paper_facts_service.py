@@ -60,6 +60,7 @@ from domain.core.fact_store import CoreFactSet
 from domain.core.research_objective import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
 )
 from domain.ports import CoreFactRepository, SourceArtifactRepository
 from domain.shared.enums import (
@@ -69,6 +70,7 @@ from domain.shared.enums import (
     EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
     TRACEABILITY_STATUS_DIRECT,
     TRACEABILITY_STATUS_MISSING,
+    TRACEABILITY_STATUS_PARTIAL,
 )
 from domain.shared.record_normalization import normalize_record_value
 from infra.persistence.factory import (
@@ -579,6 +581,14 @@ class PaperFactsService:
         }
 
     def read_evidence_cards(self, collection_id: str) -> tuple[dict[str, Any], ...]:
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if facts.objective_evidence_units:
+            cards = self._derive_objective_evidence_card_records(
+                collection_id=collection_id,
+                objective_evidence_units=facts.objective_evidence_units,
+            )
+            if cards:
+                return cards
         records = self.read_paper_fact_records(collection_id)
         cards = self._derive_evidence_card_records(
             collection_id=collection_id,
@@ -1250,6 +1260,18 @@ class PaperFactsService:
     ) -> tuple[dict[str, Any], ...]:
         self.collection_service.get_collection(collection_id)
         facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if facts.objective_evidence_units:
+            cards_table = self._derive_objective_evidence_card_records(
+                collection_id=collection_id,
+                objective_evidence_units=facts.objective_evidence_units,
+            )
+            if cards_table:
+                logger.info(
+                    "Objective evidence view derivation finished collection_id=%s evidence_cards=%s",
+                    collection_id,
+                    len(cards_table),
+                )
+                return cards_table
         if not self._paper_fact_records_available(facts):
             self.build_paper_facts(collection_id)
         records = self._load_paper_fact_records(collection_id)
@@ -1268,6 +1290,220 @@ class PaperFactsService:
             len(cards_table),
         )
         return cards_table
+
+    def _derive_objective_evidence_card_records(
+        self,
+        *,
+        collection_id: str,
+        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> tuple[dict[str, Any], ...]:
+        rows: list[dict[str, Any]] = []
+        for unit in objective_evidence_units:
+            if unit.resolution_status in {"rejected", "skipped"}:
+                continue
+            claim_text = self._objective_evidence_claim_text(unit)
+            if not claim_text:
+                continue
+            rows.append(
+                {
+                    "evidence_id": f"ev_objective_{unit.evidence_unit_id}",
+                    "document_id": unit.document_id,
+                    "collection_id": collection_id,
+                    "claim_text": claim_text,
+                    "claim_type": self._objective_evidence_claim_type(unit),
+                    "evidence_source_type": self._objective_evidence_source_type(unit),
+                    "evidence_anchors": self._objective_evidence_anchor_payloads(
+                        unit
+                    ),
+                    "material_system": self._normalize_material_system_payload(
+                        self._objective_material_system_payload(unit.material_system)
+                    ),
+                    "condition_context": self._objective_condition_context(unit),
+                    "confidence": unit.confidence,
+                    "traceability_status": self._objective_traceability_status(unit),
+                }
+            )
+        return self._normalize_card_records(rows, collection_id)
+
+    def _objective_evidence_claim_text(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> str:
+        interpretation = self._normalize_scalar_text(unit.interpretation)
+        if interpretation:
+            return interpretation
+        sample_label = self._objective_sample_label(unit.sample_context)
+        property_name = self._normalize_scalar_text(unit.property_normalized)
+        value = self._objective_value_summary(unit.value_payload, unit.unit)
+        if unit.unit_kind in {"measurement", "comparison"}:
+            subject = sample_label or "sample"
+            if value and property_name:
+                return f"{subject} reported {property_name} of {value}."
+            if property_name:
+                return f"{subject} reported {property_name}."
+        if unit.unit_kind == "process_context":
+            process = self._objective_mapping_summary(unit.process_context)
+            subject = sample_label or "sample"
+            return f"{subject} used {process or 'the reported process context'}."
+        if unit.unit_kind == "test_condition":
+            condition = self._objective_mapping_summary(
+                unit.test_condition or unit.resolved_condition
+            )
+            return f"Testing used {condition or 'the reported condition'}."
+        return self._objective_mapping_summary(unit.value_payload) or (
+            f"Objective evidence unit {unit.evidence_unit_id} was reported."
+        )
+
+    def _objective_evidence_claim_type(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> str:
+        if unit.unit_kind in {"measurement", "comparison"}:
+            return "property"
+        if unit.unit_kind == "process_context":
+            return "process"
+        if unit.unit_kind == "test_condition":
+            return "test"
+        return "qualitative"
+
+    def _objective_evidence_source_type(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> str:
+        for source_ref in unit.source_refs:
+            source_kind = self._normalize_scalar_text(source_ref.get("source_kind"))
+            if source_kind in _EVIDENCE_SOURCE_TYPES:
+                return source_kind
+            if source_kind == "text_window":
+                return "text"
+        return "text"
+
+    def _objective_evidence_anchor_payloads(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> list[dict[str, Any]]:
+        anchors: list[dict[str, Any]] = []
+        source_refs = list(unit.source_refs)
+        anchor_ids = list(unit.evidence_anchor_ids)
+        if not source_refs and anchor_ids:
+            source_refs = [{"source_kind": "text", "source_ref": None}]
+        for index, source_ref in enumerate(source_refs):
+            source_kind = self._normalize_scalar_text(source_ref.get("source_kind"))
+            source_ref_id = self._normalize_scalar_text(source_ref.get("source_ref"))
+            source_type = (
+                source_kind
+                if source_kind in _EVIDENCE_SOURCE_TYPES
+                else "text"
+            )
+            anchor_id = (
+                anchor_ids[index]
+                if index < len(anchor_ids)
+                else f"anchor_{unit.evidence_unit_id}_{index + 1}"
+            )
+            anchor = {
+                "anchor_id": anchor_id,
+                "document_id": unit.document_id,
+                "source_type": source_type,
+                "section_id": source_ref_id,
+                "page": source_ref.get("page"),
+            }
+            if source_kind == "text_window":
+                anchor["block_id"] = source_ref_id
+            elif source_kind == "table":
+                anchor["figure_or_table"] = source_ref_id
+            anchors.append(anchor)
+        return anchors
+
+    def _objective_condition_context(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, Any]:
+        condition = unit.test_condition or unit.resolved_condition
+        return self._normalize_condition_context_payload(
+            {
+                "process": unit.process_context,
+                "baseline": {
+                    "control": self._objective_mapping_summary(
+                        unit.baseline_context
+                    ),
+                },
+                "test": {
+                    "method": self._normalize_scalar_text(condition.get("method")),
+                    "methods": [
+                        value
+                        for value in (
+                            self._normalize_scalar_text(value)
+                            for value in condition.values()
+                        )
+                        if value
+                    ],
+                },
+            }
+        )
+
+    def _objective_material_system_payload(
+        self,
+        material_system: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        payload = dict(material_system)
+        if "family" not in payload:
+            payload["family"] = (
+                self._normalize_scalar_text(payload.get("name"))
+                or self._normalize_scalar_text(payload.get("material_system"))
+                or self._normalize_scalar_text(payload.get("material"))
+            )
+        return payload
+
+    def _objective_traceability_status(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> str:
+        if unit.evidence_anchor_ids:
+            return TRACEABILITY_STATUS_DIRECT
+        if unit.source_refs:
+            return TRACEABILITY_STATUS_PARTIAL
+        return TRACEABILITY_STATUS_MISSING
+
+    def _objective_sample_label(
+        self,
+        sample_context: Mapping[str, Any],
+    ) -> str | None:
+        for key in (
+            "sample",
+            "sample_label",
+            "variant_label",
+            "sample_name",
+            "specimen",
+            "condition",
+            "sample_id",
+        ):
+            if value := self._normalize_scalar_text(sample_context.get(key)):
+                return value
+        return None
+
+    def _objective_value_summary(
+        self,
+        value_payload: Mapping[str, Any],
+        unit: str | None,
+    ) -> str | None:
+        display = self._normalize_scalar_text(value_payload.get("source_value_text"))
+        if not display:
+            value = value_payload.get("value")
+            display = self._normalize_scalar_text(value)
+        if display and unit and unit not in display:
+            return f"{display} {unit}"
+        return display
+
+    def _objective_mapping_summary(
+        self,
+        payload: Mapping[str, Any],
+    ) -> str | None:
+        parts = [
+            f"{key}: {value}"
+            for key, value in payload.items()
+            if self._normalize_scalar_text(value)
+        ]
+        return "; ".join(parts) if parts else None
 
     def _load_paper_fact_records(
         self,

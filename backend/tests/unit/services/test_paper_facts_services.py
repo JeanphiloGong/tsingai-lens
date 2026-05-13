@@ -847,6 +847,76 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     )
 
 
+def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Evidence Cards")
+    collection_id = collection["collection_id"]
+    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    service = PaperFactsService(
+        collection_service=collection_service,
+        core_fact_repository=core_repository,
+    )
+    unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-as-built-icorr",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "as-built"},
+            "process_context": {"process": "LPBF"},
+            "test_condition": {"method": "potentiodynamic polarization"},
+            "property_normalized": "corrosion current density",
+            "value_payload": {"value": 1.2, "source_value_text": "1.2 uA/cm2"},
+            "unit": "uA/cm2",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 4,
+                }
+            ],
+            "evidence_anchor_ids": ["anc-as-built"],
+            "resolution_status": "resolved",
+            "confidence": 0.88,
+        }
+    )
+    core_repository.replace_collection_research_objectives(
+        collection_id,
+        (),
+        (),
+        (),
+        (),
+        (),
+        (unit,),
+        (),
+    )
+
+    def fail_build_paper_facts(collection_id: str):  # noqa: ARG001
+        raise AssertionError("objective evidence cards should not build paper facts")
+
+    service.build_paper_facts = fail_build_paper_facts
+
+    cards = service.build_evidence_cards(collection_id)
+    payload = service.list_evidence_cards(collection_id)
+
+    assert len(cards) == 1
+    assert payload["total"] == 1
+    card = payload["items"][0]
+    assert card["evidence_id"] == "ev_objective_oeu-as-built-icorr"
+    assert card["claim_type"] == "property"
+    assert card["claim_text"] == (
+        "as-built reported corrosion current density of 1.2 uA/cm2."
+    )
+    assert card["evidence_source_type"] == "table"
+    assert card["traceability_status"] == "direct"
+    assert card["material_system"]["family"] == "316L stainless steel"
+    assert card["evidence_anchors"][0]["anchor_id"] == "anc-as-built"
+    assert card["evidence_anchors"][0]["figure_or_table"] == "table-1"
+
+
 def test_document_method_family_conditions_bind_table_results():
     service = PaperFactsService()
     text_windows = [

@@ -3492,6 +3492,11 @@ class ResearchObjectiveService:
         )
         if not record.get("confidence"):
             record["confidence"] = route.confidence
+        text_measurement_records = (
+            self._numeric_text_characterization_measurement_records(record)
+        )
+        if text_measurement_records:
+            return text_measurement_records
         record = self._normalize_text_evidence_unit_record(
             route=route,
             record=record,
@@ -3606,6 +3611,30 @@ class ResearchObjectiveService:
         self,
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
+        records = self._numeric_text_characterization_measurement_records(record)
+        if len(records) == 1:
+            return records[0]
+        return None
+
+    def _numeric_text_characterization_measurement_records(
+        self,
+        record: dict[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        if record.get("unit_kind") != "characterization":
+            return ()
+        respective_items = self._respective_density_measurement_items(record)
+        if respective_items:
+            return tuple(
+                self._numeric_text_characterization_measurement_record_from_value(
+                    record=record,
+                    property_normalized="relative density",
+                    raw_value=raw_value,
+                    sample_context={"sample_id": sample_label},
+                    unit="%",
+                    item_index=index,
+                )
+                for index, (sample_label, raw_value) in enumerate(respective_items, start=1)
+            )
         value_payload = (
             record.get("value_payload")
             if isinstance(record.get("value_payload"), dict)
@@ -3620,11 +3649,44 @@ class ResearchObjectiveService:
         property_normalized, raw_value = value_item
         numeric_value = self._coerce_number(raw_value)
         if numeric_value is None:
-            return None
-        unit = str(record.get("unit") or "").strip() or None
-        if unit is None and "%" in str(raw_value):
-            unit = "%"
+            return ()
+        return (
+            self._numeric_text_characterization_measurement_record_from_value(
+                record=record,
+                property_normalized=property_normalized,
+                raw_value=raw_value,
+            ),
+        )
+
+    def _numeric_text_characterization_measurement_record_from_value(
+        self,
+        *,
+        record: dict[str, Any],
+        property_normalized: str,
+        raw_value: Any,
+        sample_context: dict[str, Any] | None = None,
+        unit: str | None = None,
+        item_index: int | None = None,
+    ) -> dict[str, Any]:
+        numeric_value = self._coerce_number(raw_value)
+        resolved_unit = unit or str(record.get("unit") or "").strip() or None
+        if resolved_unit is None and "%" in str(raw_value):
+            resolved_unit = "%"
         normalized = dict(record)
+        if item_index is not None:
+            seed = "|".join(
+                (
+                    str(record.get("evidence_unit_id") or ""),
+                    str(item_index),
+                    str(sample_context or {}),
+                    str(raw_value),
+                )
+            )
+            normalized["evidence_unit_id"] = (
+                f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+            )
+        if sample_context is not None:
+            normalized["sample_context"] = dict(sample_context)
         normalized.update(
             {
                 "unit_kind": "measurement",
@@ -3633,10 +3695,53 @@ class ResearchObjectiveService:
                     "source_value_text": str(raw_value),
                     "value": numeric_value,
                 },
-                "unit": unit,
+                "unit": resolved_unit,
             }
         )
         return normalized
+
+    def _respective_density_measurement_items(
+        self,
+        record: dict[str, Any],
+    ) -> tuple[tuple[str, str], ...]:
+        sample_labels = self._objective_text_sample_labels(record.get("sample_context"))
+        if not sample_labels:
+            return ()
+        value_payload = (
+            record.get("value_payload")
+            if isinstance(record.get("value_payload"), dict)
+            else {}
+        )
+        text = self._value_payload_text(value_payload) or ""
+        if "density" not in text.casefold() or "respectively" not in text.casefold():
+            return ()
+        match = re.search(
+            r"\b(?:was|were|is|are)\s+"
+            r"([0-9][0-9.,\s]*(?:and\s*)?[0-9.]+)\s*%?\s*,?\s*respectively",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return ()
+        value_text = match.group(1)
+        values = tuple(
+            value_match.group(0)
+            for value_match in _NUMBER_PATTERN.finditer(value_text)
+        )
+        if len(values) != len(sample_labels):
+            return ()
+        return tuple(zip(sample_labels, values))
+
+    def _objective_text_sample_labels(self, sample_context: Any) -> tuple[str, ...]:
+        if not isinstance(sample_context, dict):
+            return ()
+        for key in ("sample_ids", "samples", "sample_labels"):
+            value = sample_context.get(key)
+            if isinstance(value, (list, tuple)):
+                labels = tuple(str(item).strip() for item in value if str(item).strip())
+                if labels:
+                    return labels
+        return ()
 
     def _numeric_text_characterization_value_item(
         self,
@@ -3658,12 +3763,18 @@ class ResearchObjectiveService:
             key_normalized = self._objective_column_key(str(key))
             if key_normalized not in {
                 "density",
+                "density_value",
                 "density_percent",
                 "relative_density",
+                "relative_density_value",
                 "relative_density_percent",
             }:
                 continue
-            if key_normalized.startswith("relative_") or "%" in str(value):
+            if (
+                key_normalized.startswith("relative_")
+                or str(record.get("unit") or "").strip() == "%"
+                or "%" in str(value)
+            ):
                 return "relative density", value
             return "density", value
         return None

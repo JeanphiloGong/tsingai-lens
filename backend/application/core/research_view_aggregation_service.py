@@ -175,60 +175,19 @@ class ResearchViewAggregationService:
                 collection_id,
                 objective_material_rows,
             )
-            cross_paper_matrices = [
-                group["matrix"]
-                for group in comparable_groups
-                if group.get("matrix") is not None
-            ]
-            warnings = [
-                warning
-                for row in paper_coverage
-                for warning in row.get("primary_warnings", [])
-            ]
-            if projection is None:
-                warnings.append(
-                    self._warning(
-                        code="comparison_projection_unavailable",
-                        severity="info",
-                        scope="collection",
-                        message=(
-                            "Objective material evidence is available, but "
-                            "comparable groups are not available until "
-                            "comparison artifacts are generated."
-                        ),
-                    )
-                )
-            state = self._derive_collection_state(
-                paper_coverage,
-                comparable_groups,
-                warnings,
-            )
-            return self._clean_value(
-                {
-                    "collection_id": collection_id,
-                    "state": state,
-                    "overview": overview,
-                    "materials": materials,
-                    "paper_coverage": paper_coverage,
-                    "comparable_groups": comparable_groups,
-                    "cross_paper_matrices": cross_paper_matrices,
-                    "trend_series": [],
-                    "evidence_links": {
-                        "evidence_cards": (
-                            f"/api/v1/collections/{collection_id}/evidence/cards"
-                        ),
-                    },
-                    "debug_links": {
-                        "results": f"/api/v1/collections/{collection_id}/results",
-                        "comparisons": (
-                            f"/api/v1/collections/{collection_id}/comparisons"
-                        ),
-                        "comparable_results": (
-                            f"/api/v1/comparable-results?collection_id={collection_id}"
-                        ),
-                    },
-                    "warnings": self._dedupe_warnings(warnings),
-                }
+            return self._build_collection_research_payload(
+                collection_id=collection_id,
+                overview=overview,
+                materials=materials,
+                paper_coverage=paper_coverage,
+                comparable_groups=comparable_groups,
+                comparison_projection_warning=(
+                    "Objective material evidence is available, but "
+                    "comparable groups are not available until "
+                    "comparison artifacts are generated."
+                    if projection is None
+                    else None
+                ),
             )
         overview = self._build_collection_overview(collection_id, frames, projection)
         paper_coverage = self._build_paper_coverage(collection_id, frames)
@@ -242,6 +201,30 @@ class ResearchViewAggregationService:
             frames,
             comparable_groups,
         )
+        return self._build_collection_research_payload(
+            collection_id=collection_id,
+            overview=overview,
+            materials=materials,
+            paper_coverage=paper_coverage,
+            comparable_groups=comparable_groups,
+            comparison_projection_warning=(
+                "Paper coverage is available, but comparable groups are not "
+                "available until comparison artifacts are generated."
+                if projection is None
+                else None
+            ),
+        )
+
+    def _build_collection_research_payload(
+        self,
+        *,
+        collection_id: str,
+        overview: dict[str, Any],
+        materials: list[dict[str, Any]],
+        paper_coverage: list[dict[str, Any]],
+        comparable_groups: list[dict[str, Any]],
+        comparison_projection_warning: str | None,
+    ) -> dict[str, Any]:
         cross_paper_matrices = [
             group["matrix"]
             for group in comparable_groups
@@ -252,19 +235,20 @@ class ResearchViewAggregationService:
             for row in paper_coverage
             for warning in row.get("primary_warnings", [])
         ]
-        if projection is None:
+        if comparison_projection_warning is not None:
             warnings.append(
                 self._warning(
                     code="comparison_projection_unavailable",
                     severity="info",
                     scope="collection",
-                    message=(
-                        "Paper coverage is available, but comparable groups are not "
-                        "available until comparison artifacts are generated."
-                    ),
+                    message=comparison_projection_warning,
                 )
             )
-        state = self._derive_collection_state(paper_coverage, comparable_groups, warnings)
+        state = self._derive_collection_state(
+            paper_coverage,
+            comparable_groups,
+            warnings,
+        )
         return self._clean_value(
             {
                 "collection_id": collection_id,

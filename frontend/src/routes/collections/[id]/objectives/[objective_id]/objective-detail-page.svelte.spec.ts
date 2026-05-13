@@ -250,6 +250,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Extraction diagnostics' }))
 			.toBeInTheDocument();
+		expect(document.body.textContent?.indexOf('Logic chain')).toBeLessThan(
+			document.body.textContent?.indexOf('Relevant papers')
+		);
 
 		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' });
 		await expect

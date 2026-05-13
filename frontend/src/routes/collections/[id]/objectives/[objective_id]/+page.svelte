@@ -424,57 +424,66 @@
 			</div>
 		</header>
 
-		<section class="objective-summary-grid" aria-label={$t('research.objectiveWorkspace.summary')}>
-			<article>
-				<span>{$t('research.objectiveWorkspace.relevantPapers')}</span>
-				<strong>{relevantFrameCount}</strong>
-			</article>
-			<article>
-				<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
-				<strong>{unitsByKind(evidenceUnits, 'measurement').length}</strong>
-			</article>
-			<article>
-				<span>{$t('research.objectiveWorkspace.testConditions')}</span>
-				<strong>{unitsByKind(evidenceUnits, 'test_condition').length}</strong>
-			</article>
-			<article>
-				<span>{$t('research.objectiveWorkspace.characterizationObservations')}</span>
-				<strong>{unitsByKind(evidenceUnits, 'characterization').length}</strong>
-			</article>
-		</section>
-
-		<section class="objective-section objective-section--logic">
-			<div class="section-heading">
-				<div>
-					<h3>{$t('research.objectiveWorkspace.logicChainTitle')}</h3>
-					<p>
-						{objectiveView.logic_chain?.summary || $t('research.objectiveWorkspace.noLogicChain')}
-					</p>
+		<section class="objective-primary-grid">
+			<section class="objective-section objective-section--logic">
+				<div class="section-heading">
+					<div>
+						<h3>{$t('research.objectiveWorkspace.logicChainTitle')}</h3>
+						<p>
+							{objectiveView.logic_chain?.summary ||
+								$t('research.objectiveWorkspace.noLogicChain')}
+						</p>
+					</div>
+					<span>{boolState(objectiveView.readiness.logic_chain_ready)}</span>
 				</div>
-				<span>{boolState(objectiveView.readiness.logic_chain_ready)}</span>
-			</div>
-			<div class="logic-chain" aria-label={$t('research.objectiveWorkspace.logicChainTitle')}>
-				{#each logicSteps as step (step.step_id)}
-					<article class:logic-step--pending={!step.ready} class="logic-step">
-						<div class="logic-step__marker">{step.count}</div>
-						<div class="logic-step__body">
-							<div class="logic-step__header">
-								<h4>{$t(step.titleKey)}</h4>
-								<span>{boolState(step.ready)}</span>
+				<div class="logic-chain" aria-label={$t('research.objectiveWorkspace.logicChainTitle')}>
+					{#each logicSteps as step (step.step_id)}
+						<article class:logic-step--pending={!step.ready} class="logic-step">
+							<div class="logic-step__marker">{step.count}</div>
+							<div class="logic-step__body">
+								<div class="logic-step__header">
+									<h4>{$t(step.titleKey)}</h4>
+									<span>{boolState(step.ready)}</span>
+								</div>
+								{#if step.items.length}
+									<ul>
+										{#each step.items as item}
+											<li>{item}</li>
+										{/each}
+									</ul>
+								{:else}
+									<p>{$t(step.emptyKey)}</p>
+								{/if}
 							</div>
-							{#if step.items.length}
-								<ul>
-									{#each step.items as item}
-										<li>{item}</li>
-									{/each}
-								</ul>
-							{:else}
-								<p>{$t(step.emptyKey)}</p>
-							{/if}
-						</div>
+						</article>
+					{/each}
+				</div>
+			</section>
+
+			<aside class="objective-summary-panel" aria-label={$t('research.objectiveWorkspace.summary')}>
+				<div class="objective-summary-panel__heading">
+					<span>{$t('research.objectiveWorkspace.summary')}</span>
+					<strong>{boolState(objectiveView.readiness.evidence_units_ready)}</strong>
+				</div>
+				<div class="objective-summary-list">
+					<article>
+						<span>{$t('research.objectiveWorkspace.relevantPapers')}</span>
+						<strong>{relevantFrameCount}</strong>
 					</article>
-				{/each}
-			</div>
+					<article>
+						<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'measurement').length}</strong>
+					</article>
+					<article>
+						<span>{$t('research.objectiveWorkspace.testConditions')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'test_condition').length}</strong>
+					</article>
+					<article>
+						<span>{$t('research.objectiveWorkspace.characterizationObservations')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'characterization').length}</strong>
+					</article>
+				</div>
+			</aside>
 		</section>
 
 		<section class="objective-workspace-grid">
@@ -776,7 +785,7 @@
 
 	.objective-hero,
 	.objective-state-card,
-	.objective-summary-grid article,
+	.objective-summary-panel,
 	.objective-section,
 	.objective-side-panel {
 		border: 1px solid var(--border-default);
@@ -883,22 +892,24 @@
 		color: var(--danger-text);
 	}
 
-	.objective-summary-grid {
+	.objective-primary-grid {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 12px;
+		grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+		gap: 16px;
+		align-items: start;
 	}
 
-	.objective-summary-grid article,
 	.objective-section,
+	.objective-summary-panel,
 	.objective-side-panel {
 		padding: 20px;
 	}
 
-	.objective-summary-grid article,
 	.objective-section,
+	.objective-summary-panel,
 	.objective-side-panel,
 	.objective-main-column,
+	.objective-summary-list,
 	.evidence-group-list,
 	.evidence-group,
 	.paper-coverage-list,
@@ -909,7 +920,8 @@
 		gap: 14px;
 	}
 
-	.objective-summary-grid span,
+	.objective-summary-list span,
+	.objective-summary-panel__heading span,
 	.section-heading > span,
 	.paper-coverage-card dt,
 	.evidence-detail dt,
@@ -920,7 +932,42 @@
 		text-transform: uppercase;
 	}
 
-	.objective-summary-grid strong {
+	.objective-summary-panel__heading {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.objective-summary-panel__heading strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.objective-summary-list {
+		gap: 0;
+	}
+
+	.objective-summary-list article {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: baseline;
+		gap: 12px;
+		border-top: 1px solid var(--border-default);
+		padding: 13px 0;
+	}
+
+	.objective-summary-list article:first-child {
+		border-top: 0;
+		padding-top: 0;
+	}
+
+	.objective-summary-list article:last-child {
+		padding-bottom: 0;
+	}
+
+	.objective-summary-list strong {
 		color: var(--text-primary);
 		font-size: 24px;
 		line-height: 30px;
@@ -1194,6 +1241,7 @@
 
 	@media (max-width: 1040px) {
 		.logic-chain,
+		.objective-primary-grid,
 		.objective-workspace-grid {
 			grid-template-columns: 1fr;
 		}
@@ -1216,7 +1264,6 @@
 			justify-items: start;
 		}
 
-		.objective-summary-grid,
 		.evidence-unit-list,
 		.paper-coverage-card dl,
 		.evidence-detail dl {

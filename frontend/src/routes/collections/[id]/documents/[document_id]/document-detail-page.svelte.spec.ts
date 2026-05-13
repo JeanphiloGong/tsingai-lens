@@ -530,4 +530,21 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
 		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
 	});
+
+	it('honors page and return_to query parameters for source review links', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?page=2&return_to=/collections/col_123/objectives/obj_1'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('2');
+		expect(
+			browserPage.getByRole('link', { name: 'Documents' }).element().getAttribute('href')
+		).toBe('/collections/col_123/objectives/obj_1');
+	});
 });

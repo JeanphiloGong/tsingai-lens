@@ -63,8 +63,10 @@
 	$: requestedResultId = $page.url.searchParams.get('result_id')?.trim() ?? '';
 	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
 	$: requestedAnchorId = $page.url.searchParams.get('anchor_id')?.trim() ?? '';
+	$: requestedPageNumber = positivePageParam($page.url.searchParams.get('page'));
+	$: requestedReturnTo = safeReturnTo($page.url.searchParams.get('return_to'));
 	$: documentLoadKey = `${collectionId}:${routeDocumentId}`;
-	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}`;
+	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedPageNumber ?? ''}`;
 	$: selectedGraph = graphForSelection(model, selectedItemId);
 	$: selectedSourceAnchor = sourceAnchorForSelection(model, selectedSourceSpanId);
 	$: paperMaterialRows = paperAggregation?.materials ?? [];
@@ -97,7 +99,7 @@
 	}
 
 	function backHref() {
-		return `/collections/${collectionId}/documents`;
+		return requestedReturnTo || `/collections/${collectionId}/documents`;
 	}
 
 	async function loadWorkbench() {
@@ -171,11 +173,21 @@
 	}
 
 	function selectRequestedAnchor(nextModel: DocumentWorkbenchModel) {
-		if (!requestedAnchorId) return;
+		if (!requestedAnchorId) return false;
 		const sourceSpanId = `source-anchor-${requestedAnchorId}`;
-		if (!nextModel.source_anchors_by_span_id[sourceSpanId]) return;
+		if (!nextModel.source_anchors_by_span_id[sourceSpanId]) return false;
 		selectedSourceSpanId = sourceSpanId;
 		sourceJumpToken += 1;
+		return true;
+	}
+
+	function selectRequestedPage(nextModel: DocumentWorkbenchModel) {
+		if (!requestedPageNumber) return false;
+		const sourceSpan = nextModel.source_spans.find((span) => span.page === requestedPageNumber);
+		if (!sourceSpan) return false;
+		selectedSourceSpanId = sourceSpan.id;
+		sourceJumpToken += 1;
+		return true;
 	}
 
 	function graphForSelection(
@@ -205,7 +217,7 @@
 			model.selectable_items.find((item) => item.id === requestedEvidenceId)?.id ||
 			model.default_item_id;
 		selectItem(requestedItemId);
-		selectRequestedAnchor(model);
+		if (!selectRequestedAnchor(model)) selectRequestedPage(model);
 	}
 
 	function selectItem(itemId: string, tab?: WorkbenchTab, options: SelectItemOptions = {}) {
@@ -267,7 +279,9 @@
 			preserveGraphNodeId: graphNodeId,
 			skipTracebackFetch: true
 		});
-		if (model && requestedEvidenceId === evidenceId) selectRequestedAnchor(model);
+		if (model && requestedEvidenceId === evidenceId && !selectRequestedAnchor(model)) {
+			selectRequestedPage(model);
+		}
 	}
 
 	function jumpToSource(sourceSpanId: string) {
@@ -361,6 +375,18 @@
 		if (value.status === 'conflicted') return 'conflicted';
 		if (value.status === 'inferred') return 'inferred';
 		return 'missing';
+	}
+
+	function positivePageParam(rawValue: string | null) {
+		const value = Number(rawValue ?? NaN);
+		if (!Number.isInteger(value) || value < 1) return null;
+		return value;
+	}
+
+	function safeReturnTo(rawValue: string | null) {
+		const value = rawValue?.trim() ?? '';
+		if (!value || !value.startsWith('/') || value.startsWith('//')) return '';
+		return value;
 	}
 </script>
 

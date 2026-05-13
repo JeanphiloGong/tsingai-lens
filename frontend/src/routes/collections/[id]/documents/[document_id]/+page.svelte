@@ -456,6 +456,15 @@
 			</section>
 
 			<section class="extraction-column">
+				<StructuredExtractionPanel
+					{model}
+					{activeTab}
+					{selectedItemId}
+					onSelectItem={selectItem}
+					onJumpToSource={jumpToSource}
+					onOpenTab={setActiveTab}
+				/>
+
 				{#if paperAggregation}
 					<section class="paper-research-panel" aria-label={$t('research.paper.title')}>
 						<div class="paper-research-panel__header">
@@ -653,15 +662,6 @@
 						{/if}
 					</section>
 				{/if}
-
-				<StructuredExtractionPanel
-					{model}
-					{activeTab}
-					{selectedItemId}
-					onSelectItem={selectItem}
-					onJumpToSource={jumpToSource}
-					onOpenTab={setActiveTab}
-				/>
 			</section>
 
 			<section class:graph-column--collapsed={graphCollapsed} class="graph-column">
@@ -847,7 +847,7 @@
 
 	.extraction-column {
 		display: grid;
-		grid-template-rows: auto minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr) auto;
 		gap: 12px;
 	}
 
@@ -1269,10 +1269,12 @@
 		}
 
 		.reader-column {
+			order: 2;
 			height: 760px;
 		}
 
 		.extraction-column {
+			order: 1;
 			height: 720px;
 		}
 

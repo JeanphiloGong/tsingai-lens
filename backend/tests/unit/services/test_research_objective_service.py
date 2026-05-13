@@ -1346,6 +1346,52 @@ def test_research_objective_service_does_not_keep_text_trends_as_measurements(
     )
 
 
+def test_research_objective_service_keeps_numeric_density_text_as_measurement(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-density",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 3},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "characterization",
+            "sample_context": {"sample_id": "375 W-2100 mm·s -1"},
+            "process_context": {
+                "laser_power": "375 W",
+                "scanning_speed": "2100 mm·s -1",
+            },
+            "value_payload": {"density": "97.83%"},
+            "unit": "%",
+            "resolution_status": "resolved",
+        },
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["unit_kind"] == "measurement"
+    assert record["property_normalized"] == "relative density"
+    assert record["value_payload"] == {
+        "source_value_text": "97.83%",
+        "value": 97.83,
+    }
+    assert record["unit"] == "%"
+
+
 def test_research_objective_service_reclassifies_mechanical_text_trends(
     tmp_path,
 ):
@@ -1801,6 +1847,9 @@ def test_research_objective_service_resolves_measurements_from_process_label(
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
             "unit_kind": "process_context",
+            "sample_context": {
+                "sample_number": "3",
+            },
             "process_context": {
                 "Laser power (W)": "135",
                 "Scan speed (mm·s -1)": "750",
@@ -1840,9 +1889,13 @@ def test_research_objective_service_resolves_measurements_from_process_label(
         "Scan speed (mm·s -1)": "750",
         "Energy density (J mm -3)": "100",
     }
+    assert resolved_measurement.sample_context == {
+        "Sample": "135 W-750 mm·s -1",
+        "sample_number": "3",
+    }
     assert resolved_measurement.resolved_condition == {
         "context_unit_id": "oeu-process-135-750",
-        "matched_sample_context": {},
+        "matched_sample_context": {"sample_number": "3"},
     }
     assert resolved_measurement.resolution_status == "resolved"
 

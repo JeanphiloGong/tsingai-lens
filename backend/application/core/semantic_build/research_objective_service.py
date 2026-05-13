@@ -2159,9 +2159,14 @@ class ResearchObjectiveService:
                 **context_unit.test_condition,
                 **unit.test_condition,
             }
+            merged_sample_context = self._objective_resolved_sample_context(
+                sample_context=unit.sample_context,
+                context_sample_context=context_unit.sample_context,
+            )
             if (
                 merged_process_context == unit.process_context
                 and merged_test_condition == unit.test_condition
+                and merged_sample_context == unit.sample_context
             ):
                 resolved_units.append(unit)
                 continue
@@ -2174,6 +2179,7 @@ class ResearchObjectiveService:
             record.update(
                 {
                     "process_context": merged_process_context,
+                    "sample_context": merged_sample_context,
                     "test_condition": merged_test_condition,
                     "resolved_condition": resolved_condition,
                     "resolution_status": "resolved",
@@ -2216,6 +2222,26 @@ class ResearchObjectiveService:
                 [],
             ),
         )
+
+    def _objective_resolved_sample_context(
+        self,
+        *,
+        sample_context: dict[str, Any],
+        context_sample_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(sample_context)
+        if self._objective_sample_context_has_explicit_number(merged):
+            return merged
+        for key, value in context_sample_context.items():
+            if self._objective_column_key(str(key)) not in {
+                "sample_no",
+                "sample_number",
+            }:
+                continue
+            if str(value).strip():
+                merged[key] = value
+                break
+        return merged
 
     def _matching_objective_process_label_context_unit(
         self,
@@ -3550,6 +3576,12 @@ class ResearchObjectiveService:
                 else:
                     normalized["unit_kind"] = "interpretation"
                 return normalized
+        if record.get("unit_kind") == "characterization":
+            normalized = self._numeric_text_characterization_measurement_record(
+                record,
+            )
+            if normalized is not None:
+                return normalized
         if record.get("unit_kind") != "measurement":
             return record
         value_payload = (
@@ -3569,6 +3601,72 @@ class ResearchObjectiveService:
         if not normalized.get("interpretation"):
             normalized["interpretation"] = self._value_payload_text(value_payload)
         return normalized
+
+    def _numeric_text_characterization_measurement_record(
+        self,
+        record: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        value_payload = (
+            record.get("value_payload")
+            if isinstance(record.get("value_payload"), dict)
+            else {}
+        )
+        value_item = self._numeric_text_characterization_value_item(
+            record=record,
+            value_payload=value_payload,
+        )
+        if value_item is None:
+            return None
+        property_normalized, raw_value = value_item
+        numeric_value = self._coerce_number(raw_value)
+        if numeric_value is None:
+            return None
+        unit = str(record.get("unit") or "").strip() or None
+        if unit is None and "%" in str(raw_value):
+            unit = "%"
+        normalized = dict(record)
+        normalized.update(
+            {
+                "unit_kind": "measurement",
+                "property_normalized": property_normalized,
+                "value_payload": {
+                    "source_value_text": str(raw_value),
+                    "value": numeric_value,
+                },
+                "unit": unit,
+            }
+        )
+        return normalized
+
+    def _numeric_text_characterization_value_item(
+        self,
+        *,
+        record: dict[str, Any],
+        value_payload: dict[str, Any],
+    ) -> tuple[str, Any] | None:
+        property_normalized = self._normalize_property_label(
+            record.get("property_normalized"),
+        )
+        if property_normalized in {"relative density", "density"}:
+            for key in ("value", "source_value_text", "result"):
+                value = value_payload.get(key)
+                if value not in (None, "", [], {}):
+                    return property_normalized, value
+        for key, value in value_payload.items():
+            if value in (None, "", [], {}):
+                continue
+            key_normalized = self._objective_column_key(str(key))
+            if key_normalized not in {
+                "density",
+                "density_percent",
+                "relative_density",
+                "relative_density_percent",
+            }:
+                continue
+            if key_normalized.startswith("relative_") or "%" in str(value):
+                return "relative density", value
+            return "density", value
+        return None
 
     def _objective_result_value_items(
         self,

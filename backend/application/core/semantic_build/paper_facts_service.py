@@ -582,24 +582,14 @@ class PaperFactsService:
 
     def read_evidence_cards(self, collection_id: str) -> tuple[dict[str, Any], ...]:
         facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if facts.objective_evidence_units:
-            cards = self._derive_objective_evidence_card_records(
-                collection_id=collection_id,
-                objective_evidence_units=facts.objective_evidence_units,
-            )
-            if cards:
-                return cards
+        cards = self._objective_evidence_cards_from_facts(collection_id, facts)
+        if cards:
+            return cards
         records = self.read_paper_fact_records(collection_id)
-        cards = self._derive_evidence_card_records(
-            collection_id=collection_id,
-            evidence_anchors=records["evidence_anchors"],
-            method_facts=records["method_facts"],
-            sample_variants=records["sample_variants"],
-            test_conditions=records["test_conditions"],
-            baseline_references=records["baseline_references"],
-            measurement_results=records["measurement_results"],
+        return self._normalize_card_records(
+            self._legacy_evidence_cards_from_records(collection_id, records),
+            collection_id,
         )
-        return self._normalize_card_records(cards, collection_id)
 
     def read_paper_fact_records(
         self,
@@ -1260,22 +1250,43 @@ class PaperFactsService:
     ) -> tuple[dict[str, Any], ...]:
         self.collection_service.get_collection(collection_id)
         facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if facts.objective_evidence_units:
-            cards_table = self._derive_objective_evidence_card_records(
-                collection_id=collection_id,
-                objective_evidence_units=facts.objective_evidence_units,
+        cards_table = self._objective_evidence_cards_from_facts(collection_id, facts)
+        if cards_table:
+            logger.info(
+                "Objective evidence view derivation finished collection_id=%s evidence_cards=%s",
+                collection_id,
+                len(cards_table),
             )
-            if cards_table:
-                logger.info(
-                    "Objective evidence view derivation finished collection_id=%s evidence_cards=%s",
-                    collection_id,
-                    len(cards_table),
-                )
-                return cards_table
+            return cards_table
         if not self._paper_fact_records_available(facts):
             self.build_paper_facts(collection_id)
         records = self._load_paper_fact_records(collection_id)
-        cards_table = self._derive_evidence_card_records(
+        cards_table = self._legacy_evidence_cards_from_records(collection_id, records)
+        logger.info(
+            "Evidence view derivation finished collection_id=%s evidence_cards=%s",
+            collection_id,
+            len(cards_table),
+        )
+        return cards_table
+
+    def _objective_evidence_cards_from_facts(
+        self,
+        collection_id: str,
+        facts: CoreFactSet,
+    ) -> tuple[dict[str, Any], ...]:
+        if not facts.objective_evidence_units:
+            return ()
+        return self._derive_objective_evidence_card_records(
+            collection_id=collection_id,
+            objective_evidence_units=facts.objective_evidence_units,
+        )
+
+    def _legacy_evidence_cards_from_records(
+        self,
+        collection_id: str,
+        records: dict[str, tuple[dict[str, Any], ...]],
+    ) -> tuple[dict[str, Any], ...]:
+        return self._derive_evidence_card_records(
             collection_id=collection_id,
             evidence_anchors=records["evidence_anchors"],
             method_facts=records["method_facts"],
@@ -1284,12 +1295,6 @@ class PaperFactsService:
             baseline_references=records["baseline_references"],
             measurement_results=records["measurement_results"],
         )
-        logger.info(
-            "Evidence view derivation finished collection_id=%s evidence_cards=%s",
-            collection_id,
-            len(cards_table),
-        )
-        return cards_table
 
     def _derive_objective_evidence_card_records(
         self,

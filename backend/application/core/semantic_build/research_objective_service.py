@@ -2622,23 +2622,14 @@ class ResearchObjectiveService:
         }
         for left_index, left in enumerate(samples):
             for right in samples[left_index + 1:]:
-                left_key = self._objective_sample_identity_key(left.sample_context)
-                right_key = self._objective_sample_identity_key(right.sample_context)
                 for property_name in property_names:
-                    if (
-                        self._objective_pairwise_result_value(
-                            sample_key=left_key,
-                            property_name=property_name,
-                            result_lookup=result_lookup,
-                        )
-                        is None
-                        or self._objective_pairwise_result_value(
-                            sample_key=right_key,
-                            property_name=property_name,
-                            result_lookup=result_lookup,
-                        )
-                        is None
-                    ):
+                    left_value, right_value = self._objective_pairwise_result_values(
+                        left=left,
+                        right=right,
+                        property_name=property_name,
+                        result_lookup=result_lookup,
+                    )
+                    if left_value is None or right_value is None:
                         continue
                     specs.add(
                         self._objective_pairwise_relation_spec_key(
@@ -2748,13 +2739,9 @@ class ResearchObjectiveService:
         property_name: str,
         result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
     ) -> None:
-        current_value = self._objective_pairwise_result_value(
-            sample_key=self._objective_sample_identity_key(current.sample_context),
-            property_name=property_name,
-            result_lookup=result_lookup,
-        )
-        reference_value = self._objective_pairwise_result_value(
-            sample_key=self._objective_sample_identity_key(reference.sample_context),
+        current_value, reference_value = self._objective_pairwise_result_values(
+            left=current,
+            right=reference,
             property_name=property_name,
             result_lookup=result_lookup,
         )
@@ -2780,13 +2767,9 @@ class ResearchObjectiveService:
         result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
         min_abs_delta: float = 0.0,
     ) -> None:
-        left_value = self._objective_pairwise_result_value(
-            sample_key=self._objective_sample_identity_key(left.sample_context),
-            property_name=property_name,
-            result_lookup=result_lookup,
-        )
-        right_value = self._objective_pairwise_result_value(
-            sample_key=self._objective_sample_identity_key(right.sample_context),
+        left_value, right_value = self._objective_pairwise_result_values(
+            left=left,
+            right=right,
             property_name=property_name,
             result_lookup=result_lookup,
         )
@@ -2802,6 +2785,27 @@ class ResearchObjectiveService:
                 right,
                 property_name=property_name,
             )
+        )
+
+    def _objective_pairwise_result_values(
+        self,
+        *,
+        left: ObjectiveEvidenceUnit,
+        right: ObjectiveEvidenceUnit,
+        property_name: str,
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+    ) -> tuple[float | None, float | None]:
+        return (
+            self._objective_pairwise_result_value(
+                sample_key=self._objective_sample_identity_key(left.sample_context),
+                property_name=property_name,
+                result_lookup=result_lookup,
+            ),
+            self._objective_pairwise_result_value(
+                sample_key=self._objective_sample_identity_key(right.sample_context),
+                property_name=property_name,
+                result_lookup=result_lookup,
+            ),
         )
 
     def _objective_pairwise_result_value(

@@ -459,6 +459,42 @@ export function getNodeLabel(node: GraphNode | GraphSelectedNode, limit = 34) {
 	return truncateGraphLabel(label, limit);
 }
 
+function getNodeDisplayLabel(node: GraphNode | GraphSelectedNode, limit = 34) {
+	const label = compactGraphKeyValueLabel(formatGraphLabel(node.label || node.id));
+	return truncateGraphLabel(label, limit);
+}
+
+function compactGraphKeyValueLabel(label: string) {
+	const pairs = label
+		.split(';')
+		.map((part) => {
+			const separatorIndex = part.indexOf(':');
+			if (separatorIndex < 0) return null;
+			const key = part.slice(0, separatorIndex).trim();
+			const value = part.slice(separatorIndex + 1).trim();
+			return key && value ? { key, value } : null;
+		})
+		.filter((pair): pair is { key: string; value: string } => Boolean(pair));
+
+	if (pairs.length < 2) return label;
+
+	const concisePairs = pairs.filter((pair) => {
+		const key = pair.key.toLowerCase();
+		return key !== 'details' && key !== 'description' && pair.value.length <= 72;
+	});
+	const methodPair = concisePairs.find((pair) => {
+		const key = pair.key.toLowerCase();
+		return key === 'method' || key === 'test method';
+	});
+	if (methodPair) return methodPair.value;
+
+	const summary = concisePairs
+		.slice(0, 3)
+		.map((pair) => `${pair.key}: ${pair.value}`)
+		.join(' / ');
+	return summary || label;
+}
+
 function truncateGraphLabel(label: string, limit: number) {
 	if (label.length <= limit) return label;
 	return `${label.slice(0, Math.max(1, limit - 1)).trimEnd()}...`;
@@ -598,8 +634,8 @@ export function buildCytoscapeElements(
 		const style = getNodeTypeStyle(node.type);
 		const type = normalizeGraphNodeType(node.type);
 		const fullLabel = formatGraphLabel(node.label || node.id);
-		const label = truncateGraphLabel(
-			fullLabel,
+		const label = getNodeDisplayLabel(
+			node,
 			isAggregateNodeType(type) ? 48 : type === 'comparison' ? 30 : 28
 		);
 		const degree = node.degree ?? 0;
@@ -610,7 +646,7 @@ export function buildCytoscapeElements(
 				id: node.id,
 				label,
 				fullLabel,
-				displayLabel: fullLabel,
+				displayLabel: label,
 				entityType: type,
 				typeColor: style.color,
 				typeBackground: style.background,

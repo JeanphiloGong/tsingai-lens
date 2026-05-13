@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildCollectionOverviewGraph,
 	buildCollectionGraphmlUrl,
+	buildCytoscapeElements,
 	buildGraphMeta,
 	buildNodeTypeCounts,
 	filterGraphElements,
@@ -121,6 +122,24 @@ describe('graph shared helpers', () => {
 				nodes: [{ id: 'weird:1', label: 'Unresolved', type: 'unexpected', degree: 0 }]
 			}).unknown
 		).toBe(1);
+	});
+
+	it('uses short canvas labels while preserving full graph labels', () => {
+		const [element] = buildCytoscapeElements({
+			nodes: [
+				{
+					id: 'tc:tensile',
+					type: 'test_condition',
+					label:
+						'details: tensile specimens were tested to failure with a long protocol description; instrument: INSTRON mechanical testing machine with a 50 N load cell; method: tensile testing; standard: ASTM E8M',
+					degree: 2
+				}
+			],
+			edges: []
+		});
+
+		expect(element.data?.label).toBe('Tensile Testing');
+		expect(element.data?.fullLabel).toContain('Details: Tensile Specimens');
 	});
 
 	it('projects collection graphs into aggregate overview maps', () => {

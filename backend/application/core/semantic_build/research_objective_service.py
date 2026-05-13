@@ -1338,17 +1338,9 @@ class ResearchObjectiveService:
             resolved_units,
             objective_contexts=objective_contexts,
         )
-        comparison_units = self._select_objective_pairwise_comparison_units(
-            extractor=extractor,
-            collection_id=collection_id,
-            units=resolved_units,
-            comparison_units=comparison_units,
-            objective_contexts=objective_contexts,
-            blocks_by_document_id=blocks_by_document_id,
-        )
         if comparison_units:
             logger.info(
-                "Research objective pairwise comparison units selected collection_id=%s comparison_unit_count=%s",
+                "Research objective pairwise comparison units generated collection_id=%s comparison_unit_count=%s",
                 collection_id,
                 len(comparison_units),
             )

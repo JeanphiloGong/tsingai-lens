@@ -2492,6 +2492,7 @@ class ResearchObjectiveService:
                     samples=list(samples_by_key.values()),
                     result_lookup=results_by_scope.get(scope_key, {}),
                     document_density_values=document_density_values,
+                    objective_context=context_by_objective_id.get(scope_key[0]),
                 )
             )
         return allowed_specs_by_scope
@@ -2503,6 +2504,7 @@ class ResearchObjectiveService:
         samples: list[ObjectiveEvidenceUnit],
         result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
         document_density_values: dict[tuple[str, str], float],
+        objective_context: ObjectiveContext | None,
     ) -> set[tuple[str, str, str]]:
         all_specs = self._objective_all_pairwise_relation_specs(
             samples=samples,
@@ -2518,7 +2520,11 @@ class ResearchObjectiveService:
             pbf_context = self._objective_pbf_process_context(sample.process_context)
             density_value = document_density_values.get((document_id, sample_key))
             if not sample_key or pbf_context is None or density_value is None:
-                return all_specs
+                return self._select_objective_adjacent_axis_relation_specs(
+                    samples=samples,
+                    result_lookup=result_lookup,
+                    objective_context=objective_context,
+                )
             density_values[sample_key] = density_value
             pbf_samples.append(
                 {
@@ -2631,6 +2637,76 @@ class ResearchObjectiveService:
                 )
 
         return selected_specs or all_specs
+
+    def _select_objective_adjacent_axis_relation_specs(
+        self,
+        *,
+        samples: list[ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        objective_context: ObjectiveContext | None,
+    ) -> set[tuple[str, str, str]]:
+        if objective_context is None:
+            return set()
+        axes = tuple(
+            self._normalize_property_label(axis)
+            for axis in objective_context.variable_process_axes
+            if self._normalize_property_label(axis)
+        )
+        if not axes:
+            return set()
+        sample_rows: list[tuple[ObjectiveEvidenceUnit, str, dict[str, str]]] = []
+        for sample in samples:
+            sample_key = self._objective_sample_identity_key(sample.sample_context)
+            axis_values = self._objective_process_axis_values(
+                sample,
+                objective_context=objective_context,
+            )
+            if sample_key and axis_values:
+                sample_rows.append((sample, sample_key, axis_values))
+        property_names = {
+            property_name
+            for sample_key, property_name in result_lookup.keys()
+            if sample_key
+        }
+        selected_specs: set[tuple[str, str, str]] = set()
+        for axis in axes:
+            grouped: dict[tuple[tuple[str, str], ...], list[tuple[ObjectiveEvidenceUnit, str, str]]] = {}
+            for sample, sample_key, axis_values in sample_rows:
+                if axis not in axis_values:
+                    continue
+                group_key = tuple(
+                    sorted(
+                        (other_axis, value)
+                        for other_axis, value in axis_values.items()
+                        if other_axis != axis
+                    )
+                )
+                grouped.setdefault(group_key, []).append(
+                    (sample, sample_key, axis_values[axis])
+                )
+            for group in grouped.values():
+                ordered = sorted(
+                    group,
+                    key=lambda item: self._objective_axis_sort_key(item[2]),
+                )
+                for left, right in zip(ordered, ordered[1:]):
+                    if left[2] == right[2]:
+                        continue
+                    for property_name in property_names:
+                        self._add_objective_pairwise_spec_if_numeric_delta(
+                            selected_specs,
+                            left=left[0],
+                            right=right[0],
+                            property_name=property_name,
+                            result_lookup=result_lookup,
+                        )
+        return selected_specs
+
+    def _objective_axis_sort_key(self, value: Any) -> tuple[int, float | str]:
+        numeric_value = self._coerce_number(value)
+        if numeric_value is not None:
+            return (0, numeric_value)
+        return (1, str(value).strip().casefold())
 
     def _objective_all_pairwise_relation_specs(
         self,

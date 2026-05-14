@@ -2484,6 +2484,80 @@ def test_research_objective_service_limits_pairwise_to_target_properties(
     assert comparison_units[0].value_payload["comparison_axis"] == "laser power"
 
 
+def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-grid",
+            "question": "How do laser power and scan speed affect yield strength?",
+            "variable_process_axes": ["laser power", "scan speed"],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+
+    def measurement(
+        sample_number: str,
+        *,
+        laser_power: str,
+        scan_speed: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": f"oeu-grid-{sample_number}",
+                "objective_id": "obj-grid",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {
+                    "Laser power (W)": laser_power,
+                    "Scan speed (mm/s)": scan_speed,
+                },
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement("1", laser_power="100", scan_speed="100", value=100),
+            measurement("2", laser_power="120", scan_speed="100", value=120),
+            measurement("3", laser_power="140", scan_speed="100", value=140),
+            measurement("4", laser_power="100", scan_speed="200", value=110),
+            measurement("5", laser_power="120", scan_speed="200", value=130),
+            measurement("6", laser_power="140", scan_speed="200", value=150),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    comparison_pairs = {
+        (
+            unit.sample_context["sample_number"],
+            unit.baseline_context["sample_context"]["sample_number"],
+        )
+        for unit in comparison_units
+    }
+    assert comparison_pairs == {
+        ("2", "1"),
+        ("3", "2"),
+        ("4", "1"),
+        ("5", "2"),
+        ("5", "4"),
+        ("6", "3"),
+        ("6", "5"),
+    }
+
+
 def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlled_specs(
     tmp_path,
 ):

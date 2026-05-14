@@ -2605,6 +2605,134 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
     }
 
 
+def test_research_objective_service_generates_pairwise_from_sample_condition_axis(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "question": "How does build platform preheating affect tensile properties?",
+            "variable_process_axes": ["build platform preheating"],
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            ],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        platform_condition: str,
+        property_name: str,
+        value: float,
+        unit: str,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-preheat",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": property_name,
+                "sample_context": {
+                    "Build platform conditions": platform_condition,
+                    "sample_number": sample_number,
+                },
+                "process_context": {},
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": unit,
+                "resolution_status": "resolved",
+                "confidence": 0.82,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement(
+                "oeu-np-yield",
+                sample_number="1",
+                platform_condition="Non-preheated",
+                property_name="yield strength",
+                value=448,
+                unit="MPa",
+            ),
+            measurement(
+                "oeu-p-yield",
+                sample_number="2",
+                platform_condition="Preheated",
+                property_name="yield strength",
+                value=465,
+                unit="MPa",
+            ),
+            measurement(
+                "oeu-np-uts",
+                sample_number="1",
+                platform_condition="Non-preheated",
+                property_name="ultimate tensile strength",
+                value=617,
+                unit="MPa",
+            ),
+            measurement(
+                "oeu-p-uts",
+                sample_number="2",
+                platform_condition="Preheated",
+                property_name="ultimate tensile strength",
+                value=618,
+                unit="MPa",
+            ),
+            measurement(
+                "oeu-np-el",
+                sample_number="1",
+                platform_condition="Non-preheated",
+                property_name="elongation",
+                value=72,
+                unit="%",
+            ),
+            measurement(
+                "oeu-p-el",
+                sample_number="2",
+                platform_condition="Preheated",
+                property_name="elongation",
+                value=82,
+                unit="%",
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert {
+        (
+            unit.sample_context["sample_number"],
+            unit.baseline_context["sample_context"]["sample_number"],
+            unit.property_normalized,
+            unit.value_payload["comparison_axis"],
+            unit.value_payload["current_value"],
+            unit.baseline_context["value"],
+        )
+        for unit in comparison_units
+    } == {
+        ("2", "1", "yield strength", "Build platform conditions", 465.0, 448.0),
+        (
+            "2",
+            "1",
+            "ultimate tensile strength",
+            "Build platform conditions",
+            618.0,
+            617.0,
+        ),
+        ("2", "1", "elongation", "Build platform conditions", 82.0, 72.0),
+    }
+
+
 def test_research_objective_service_limits_pairwise_to_target_properties(
     tmp_path,
 ):

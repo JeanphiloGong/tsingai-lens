@@ -2398,7 +2398,7 @@ class ResearchObjectiveService:
             if (
                 not unit.property_normalized
                 or not unit.sample_context
-                or not unit.process_context
+                or not self._objective_unit_has_pairwise_context(unit)
                 or self._objective_measurement_numeric_value(unit) is None
                 or not self._objective_unit_matches_target_property(
                     unit,
@@ -2479,7 +2479,7 @@ class ResearchObjectiveService:
             if unit.unit_kind == "measurement"
             and unit.property_normalized
             and unit.sample_context
-            and unit.process_context
+            and self._objective_unit_has_pairwise_context(unit)
             and self._objective_measurement_numeric_value(unit) is not None
             and self._objective_unit_matches_target_property(
                 unit,
@@ -3041,14 +3041,39 @@ class ResearchObjectiveService:
         objective_context: ObjectiveContext | None,
         allow_multi_axis: bool = False,
     ) -> str | None:
-        current_axes = self._objective_process_axis_values(
-            current,
-            objective_context=objective_context,
+        axis_pairs = (
+            (
+                self._objective_process_axis_values(
+                    current,
+                    objective_context=objective_context,
+                ),
+                self._objective_process_axis_values(
+                    baseline,
+                    objective_context=objective_context,
+                ),
+            ),
+            (
+                self._objective_sample_axis_values(current),
+                self._objective_sample_axis_values(baseline),
+            ),
         )
-        baseline_axes = self._objective_process_axis_values(
-            baseline,
-            objective_context=objective_context,
-        )
+        for current_axes, baseline_axes in axis_pairs:
+            comparison_axis = self._objective_single_changed_axis_from_values(
+                current_axes=current_axes,
+                baseline_axes=baseline_axes,
+                allow_multi_axis=allow_multi_axis,
+            )
+            if comparison_axis is not None:
+                return comparison_axis
+        return None
+
+    def _objective_single_changed_axis_from_values(
+        self,
+        *,
+        current_axes: dict[str, str],
+        baseline_axes: dict[str, str],
+        allow_multi_axis: bool,
+    ) -> str | None:
         if not current_axes or not baseline_axes:
             return None
         changed_axes = [
@@ -3061,6 +3086,38 @@ class ResearchObjectiveService:
                 return ", ".join(changed_axes)
             return None
         return changed_axes[0]
+
+    def _objective_unit_has_pairwise_context(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> bool:
+        return bool(unit.process_context or self._objective_sample_axis_values(unit))
+
+    def _objective_sample_axis_values(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, str]:
+        axis_values: dict[str, str] = {}
+        for key, value in unit.sample_context.items():
+            value_text = str(value).strip()
+            if not value_text:
+                continue
+            column_key = self._objective_column_key(str(key))
+            if column_key in {
+                "condition",
+                "condition_no",
+                "condition_number",
+                "id",
+                "label",
+                "sample",
+                "sample_id",
+                "sample_label",
+                "sample_no",
+                "sample_number",
+            }:
+                continue
+            axis_values[str(key).strip()] = value_text.casefold()
+        return axis_values
 
     def _objective_process_axis_values(
         self,

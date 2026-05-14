@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../_shared/api';
+	import { collections } from '../../_shared/collections';
 	import {
 		listCollectionFiles,
 		uploadCollectionFiles,
@@ -55,16 +56,43 @@
 	let filesError = '';
 
 	$: collectionId = $page.params.id ?? '';
-	$: effectiveFileCount = Math.max(workspace?.file_count ?? 0, collectionFiles.length);
+	$: effectiveFileCount = Math.max(
+		workspace?.file_count ?? 0,
+		collectionFiles.length,
+		uploadResult?.count ?? 0
+	);
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
 	$: readinessState = getOverviewReadinessState(stateWorkspace);
 	$: pipelineSteps = buildOverviewPipelineSteps(stateWorkspace);
-	$: paperCount = stateWorkspace?.document_summary.total_documents ?? effectiveFileCount;
+	$: paperCount = Math.max(stateWorkspace?.document_summary.total_documents ?? 0, effectiveFileCount);
+	$: statusChecklistItems = [
+		{
+			label: $t('overview.cards.currentStatus.uploaded', { count: paperCount }),
+			done: stepStatus('upload') === 'completed'
+		},
+		{
+			label: $t('overview.cards.currentStatus.parsed'),
+			done: stepStatus('parse') === 'completed'
+		},
+		{
+			label: $t('overview.cards.currentStatus.evidence'),
+			done: stepStatus('evidence') === 'completed'
+		},
+		{
+			label: $t('overview.cards.currentStatus.comparison'),
+			done: stepStatus('comparisons') === 'completed'
+		},
+		{
+			label: $t('overview.cards.currentStatus.graph'),
+			done: stepStatus('graph') === 'completed'
+		}
+	];
 	$: showUploadPanel =
 		readinessState === 'empty' ||
 		readinessState === 'ready_to_process' ||
 		selectedFiles.length > 0 ||
 		Boolean(uploadError || uploadResult);
+	$: nextStepItems = buildNextStepItems(readinessState);
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		clearPoll();
@@ -118,7 +146,12 @@
 		error = '';
 		if (showLoading) loading = true;
 		try {
-			workspace = await fetchWorkspaceOverview(collectionId);
+			const nextWorkspace = await fetchWorkspaceOverview(collectionId);
+			workspace = nextWorkspace;
+			collections.update((items) => [
+				nextWorkspace.collection,
+				...items.filter((item) => item.id !== nextWorkspace.collection.id)
+			]);
 			const latestTask = workspace.latest_task;
 			if (latestTask && isTaskActive(latestTask)) {
 				schedulePoll(latestTask.task_id);
@@ -233,14 +266,6 @@
 		}
 	}
 
-	async function handleUploadPrimary() {
-		if (selectedFiles.length) {
-			await submitUpload();
-			return;
-		}
-		browseFiles();
-	}
-
 	function formatPercent(value?: number | null) {
 		if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
 		return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
@@ -343,31 +368,6 @@
 		return pipelineSteps.find((step) => step.key === key)?.status ?? 'pending';
 	}
 
-	function statusChecklist() {
-		return [
-			{
-				label: $t('overview.cards.currentStatus.uploaded', { count: paperCount }),
-				done: stepStatus('upload') === 'completed'
-			},
-			{
-				label: $t('overview.cards.currentStatus.parsed'),
-				done: stepStatus('parse') === 'completed'
-			},
-			{
-				label: $t('overview.cards.currentStatus.evidence'),
-				done: stepStatus('evidence') === 'completed'
-			},
-			{
-				label: $t('overview.cards.currentStatus.comparison'),
-				done: stepStatus('comparisons') === 'completed'
-			},
-			{
-				label: $t('overview.cards.currentStatus.graph'),
-				done: stepStatus('graph') === 'completed'
-			}
-		];
-	}
-
 	function paperMixRows(): PaperMixRow[] {
 		const counts = stateWorkspace?.document_summary.doc_type_counts ?? {
 			experimental: 0,
@@ -398,22 +398,29 @@
 		return paperCount > 0 && review >= Math.max(1, paperCount / 2);
 	}
 
-	function nextStepItems() {
-		if (readinessState === 'empty') {
+	function buildNextStepItems(state: OverviewReadinessState) {
+		if (state === 'empty') {
 			return [
 				$t('overview.cards.next.emptyUpload'),
 				$t('overview.cards.next.emptyDescribe'),
 				$t('overview.cards.next.emptyStart')
 			];
 		}
-		if (readinessState === 'processing' || readinessState === 'ready_to_process') {
+		if (state === 'processing' || state === 'ready_to_process') {
+			if (state === 'ready_to_process') {
+				return [
+					$t('overview.actions.startProcessing'),
+					$t('overview.cards.next.emptyUpload'),
+					$t('overview.cards.next.processingLogs')
+				];
+			}
 			return [
 				$t('overview.cards.next.processingWait'),
 				$t('overview.cards.next.processingLogs'),
 				$t('overview.cards.next.processingRefresh')
 			];
 		}
-		if (readinessState === 'failed') {
+		if (state === 'failed') {
 			return [
 				$t('overview.cards.next.failedErrors'),
 				$t('overview.cards.next.failedRetry'),
@@ -486,9 +493,9 @@
 						class="btn btn--primary"
 						type="button"
 						disabled={uploadLoading}
-						on:click={handleUploadPrimary}
+						on:click={browseFiles}
 					>
-						{selectedFiles.length ? $t('documents.upload') : $t('overview.actions.uploadDocuments')}
+						{$t('overview.actions.uploadDocuments')}
 					</button>
 					<a class="btn btn--ghost" href="/">{$t('collection.backToCollections')}</a>
 				{/if}
@@ -651,6 +658,15 @@
 							{/each}
 						</ul>
 					</div>
+				{:else if collectionFiles.length}
+					<div class="detail-section">
+						<div class="detail-section__title">{$t('documents.listTitle')}</div>
+						<ul class="result-list">
+							{#each collectionFiles as item}
+								<li>{getFileLabel(item)}</li>
+							{/each}
+						</ul>
+					</div>
 				{/if}
 			</section>
 		{/if}
@@ -676,7 +692,7 @@
 			<article id="status-card" class="overview-card overview-info-card">
 				<h3>{$t('overview.cards.currentStatus.title')}</h3>
 				<ul class="check-list">
-					{#each statusChecklist() as item}
+					{#each statusChecklistItems as item}
 						<li class:complete={item.done}>
 							<span aria-hidden="true"></span>
 							{item.label}
@@ -758,7 +774,7 @@
 			<article class="overview-card overview-info-card">
 				<h3>{$t('overview.cards.next.title')}</h3>
 				<ul class="next-list">
-					{#each nextStepItems() as item}
+					{#each nextStepItems as item}
 						<li>{item}</li>
 					{/each}
 				</ul>

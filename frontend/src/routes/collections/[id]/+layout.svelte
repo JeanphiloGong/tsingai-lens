@@ -23,14 +23,18 @@
 	let loadedWorkspaceId = '';
 
 	$: collectionId = $page.params.id ?? '';
-	$: collection = workspace?.collection ?? $collections.find((item) => item.id === collectionId);
+	$: storeCollection = $collections.find((item) => item.id === collectionId);
+	$: collection = workspace?.collection ?? storeCollection;
 	$: collectionName = collection?.name;
-	$: documentCount =
-		workspace?.document_summary.total_documents ??
-		collection?.paper_count ??
-		workspace?.file_count ??
-		0;
-	$: readinessState = workspace ? getOverviewReadinessState(workspace) : null;
+	$: effectiveDocumentCount = Math.max(
+		workspace?.document_summary.total_documents ?? 0,
+		workspace?.file_count ?? 0,
+		collection?.paper_count ?? 0,
+		storeCollection?.paper_count ?? 0
+	);
+	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveDocumentCount } : null;
+	$: documentCount = effectiveDocumentCount;
+	$: readinessState = stateWorkspace ? getOverviewReadinessState(stateWorkspace) : null;
 	$: statusLabel = readinessState
 		? $t(`overview.readinessLabels.${readinessState}`)
 		: formatStatus(collection?.status);

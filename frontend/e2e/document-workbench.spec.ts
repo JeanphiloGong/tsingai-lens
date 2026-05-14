@@ -4,10 +4,11 @@ const collectionId = 'col_123';
 const documentId = 'doc_1';
 
 function json(body: unknown, status = 200) {
-	return new Response(JSON.stringify(body), {
+	return {
 		status,
-		headers: { 'Content-Type': 'application/json' }
-	});
+		contentType: 'application/json',
+		body: JSON.stringify(body)
+	};
 }
 
 function collectionPayload() {
@@ -231,28 +232,32 @@ function comparisonPayload() {
 }
 
 async function mockWorkbenchApis(page: Page) {
-	await page.route('**/api/v1/**', async (route) => {
+	await page.route('**/*', async (route) => {
 		const url = new URL(route.request().url());
 		const path = url.pathname;
 
+		if (!path.startsWith('/api/v1/')) {
+			return route.continue();
+		}
+
 		if (path === '/api/v1/collections') {
-			return route.fulfill({ response: json({ items: [collectionPayload()] }) });
+			return route.fulfill(json({ items: [collectionPayload()] }));
 		}
 		if (path === `/api/v1/collections/${collectionId}`) {
-			return route.fulfill({ response: json(collectionPayload()) });
+			return route.fulfill(json(collectionPayload()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/workspace`) {
-			return route.fulfill({ response: json(workspacePayload()) });
+			return route.fulfill(json(workspacePayload()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/content`) {
-			return route.fulfill({ response: json(documentContentPayload()) });
+			return route.fulfill(json(documentContentPayload()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/research-view`) {
-			return route.fulfill({ response: json(researchPayload()) });
+			return route.fulfill(json(researchPayload()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/results`) {
 			return route.fulfill({
-				response: json({
+				...json({
 					collection_id: collectionId,
 					total: 1,
 					count: 1,
@@ -261,13 +266,13 @@ async function mockWorkbenchApis(page: Page) {
 			});
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/comparison-semantics`) {
-			return route.fulfill({ response: json(comparisonPayload()) });
+			return route.fulfill(json(comparisonPayload()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/source`) {
-			return route.fulfill({ response: json({ detail: 'source unavailable' }, 404) });
+			return route.fulfill(json({ detail: 'source unavailable' }, 404));
 		}
 
-		return route.fulfill({ response: json({ detail: `unhandled test route: ${path}` }, 404) });
+		return route.fulfill(json({ detail: `unhandled test route: ${path}` }, 404));
 	});
 }
 
@@ -284,6 +289,7 @@ async function expectNoHorizontalOverflow(page: Page) {
 test('document workbench renders desktop and mobile verification screenshots', async ({
 	page
 }, testInfo) => {
+	await page.emulateMedia({ reducedMotion: 'reduce' });
 	await mockWorkbenchApis(page);
 
 	await page.setViewportSize({ width: 1440, height: 900 });
@@ -291,6 +297,7 @@ test('document workbench renders desktop and mobile verification screenshots', a
 		`/collections/${collectionId}/documents/${documentId}?page=2&return_to=/collections/${collectionId}/objectives/obj_1`
 	);
 	await expect(page.getByRole('heading', { name: 'Paper scope' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Paper A' })).toBeVisible();
 	await expect(page.getByTestId('parsed-source-fallback')).toBeVisible();
 	await expect(page.getByTestId('pdf-current-page')).toHaveText('2');
 	await expectNoHorizontalOverflow(page);
@@ -304,6 +311,7 @@ test('document workbench renders desktop and mobile verification screenshots', a
 		`/collections/${collectionId}/documents/${documentId}?page=2&return_to=/collections/${collectionId}/objectives/obj_1`
 	);
 	await expect(page.getByRole('heading', { name: 'Paper scope' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Paper A' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Paper scope' })).toBeInViewport();
 	await expect(page.getByTestId('parsed-source-fallback')).toBeVisible();
 	await expectNoHorizontalOverflow(page);

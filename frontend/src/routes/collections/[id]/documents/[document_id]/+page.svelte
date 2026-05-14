@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../../_shared/api';
 	import {
@@ -88,7 +89,7 @@
 	$: if (selectedGraph && !selectedGraph.nodes.some((node) => node.id === selectedGraphNodeId)) {
 		selectedGraphNodeId = selectedGraph.nodes.find((node) => node.position === 'center')?.id ?? '';
 	}
-	$: if (collectionId && routeDocumentId && documentLoadKey !== loadedKey) {
+	$: if (browser && collectionId && routeDocumentId && documentLoadKey !== loadedKey) {
 		loadedKey = documentLoadKey;
 		appliedRequestKey = '';
 		void loadWorkbench();

@@ -185,6 +185,12 @@ function objectivePayload() {
 				document_id: 'doc_1',
 				unit_kind: 'comparison',
 				property_normalized: 'yield strength',
+				sample_context: {
+					sample: 'HT-SLM'
+				},
+				baseline_context: {
+					sample: 'as-built'
+				},
 				value_payload: {
 					statement: 'Heat-treated samples exceeded the as-built baseline.'
 				},
@@ -303,6 +309,29 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 					.getByText('Heat-treated samples exceeded the as-built baseline.')
 			)
 			.toBeInTheDocument();
+	});
+
+	it('presents evidence detail as a research chain record', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence units' }))
+			.toBeInTheDocument();
+		await browserPage.getByLabelText('Evidence kind').selectOptions('comparison');
+
+		const inspector = browserPage.getByRole('complementary', { name: 'Evidence detail' });
+		await expect.element(inspector.getByRole('heading', { name: 'Finding' })).toBeInTheDocument();
+		await expect
+			.element(inspector.getByRole('heading', { name: 'Sample and process' }))
+			.toBeInTheDocument();
+		await expect
+			.element(inspector.getByRole('heading', { name: 'Comparison baseline' }))
+			.toBeInTheDocument();
+		await expect
+			.element(inspector.getByRole('heading', { name: 'Source traceback' }))
+			.toBeInTheDocument();
+		await expect.element(inspector.getByText('sample: HT-SLM')).toBeInTheDocument();
+		await expect.element(inspector.getByText('sample: as-built')).toBeInTheDocument();
 	});
 
 	it('uses logic-chain steps to focus related evidence', async () => {

@@ -753,67 +753,82 @@
 							<h4>{evidenceUnitTitle(selectedEvidenceUnit)}</h4>
 							<span>{selectedEvidenceUnit.resolution_status}</span>
 						</div>
-						<p>{evidenceUnitValue(selectedEvidenceUnit)}</p>
-						<dl>
-							<div>
-								<dt>{$t('research.objectiveWorkspace.kind')}</dt>
-								<dd>{selectedEvidenceUnit.unit_kind}</dd>
-							</div>
-							{#if selectedEvidenceUnit.property_normalized}
+						<section class="evidence-chain-section">
+							<h5>{$t('research.objectiveWorkspace.finding')}</h5>
+							<p>{evidenceUnitValue(selectedEvidenceUnit)}</p>
+							<dl>
 								<div>
-									<dt>{$t('research.objectiveWorkspace.property')}</dt>
-									<dd>{selectedEvidenceUnit.property_normalized}</dd>
+									<dt>{$t('research.objectiveWorkspace.kind')}</dt>
+									<dd>{selectedEvidenceUnit.unit_kind}</dd>
 								</div>
-							{/if}
-							{#if selectedEvidenceUnit.unit}
+								{#if selectedEvidenceUnit.property_normalized}
+									<div>
+										<dt>{$t('research.objectiveWorkspace.property')}</dt>
+										<dd>{selectedEvidenceUnit.property_normalized}</dd>
+									</div>
+								{/if}
+								{#if selectedEvidenceUnit.unit}
+									<div>
+										<dt>{$t('research.objectiveWorkspace.value')}</dt>
+										<dd>{selectedEvidenceUnit.unit}</dd>
+									</div>
+								{/if}
 								<div>
-									<dt>{$t('research.objectiveWorkspace.value')}</dt>
-									<dd>{selectedEvidenceUnit.unit}</dd>
+									<dt>{$t('research.objectiveWorkspace.confidence')}</dt>
+									<dd>{confidenceLabel(selectedEvidenceUnit.confidence)}</dd>
 								</div>
-							{/if}
-							<div>
-								<dt>{$t('research.objectiveWorkspace.confidence')}</dt>
-								<dd>{confidenceLabel(selectedEvidenceUnit.confidence)}</dd>
-							</div>
-						</dl>
+							</dl>
+						</section>
 
-						<div class="evidence-context-list">
-							{#if recordEntries(selectedEvidenceUnit.sample_context).length}
-								<div>
-									<strong>{$t('research.objectiveWorkspace.sampleContext')}</strong>
+						{#if recordEntries(selectedEvidenceUnit.sample_context).length || recordEntries(selectedEvidenceUnit.process_context).length}
+							<section class="evidence-chain-section">
+								<h5>{$t('research.objectiveWorkspace.sampleAndProcess')}</h5>
+								<div class="evidence-context-list">
 									{#each recordEntries(selectedEvidenceUnit.sample_context) as entry (entry.key)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
-								</div>
-							{/if}
-							{#if recordEntries(selectedEvidenceUnit.process_context).length}
-								<div>
-									<strong>{$t('research.objectiveWorkspace.processContext')}</strong>
 									{#each recordEntries(selectedEvidenceUnit.process_context) as entry (entry.key)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
 								</div>
-							{/if}
-							{#if recordEntries(selectedEvidenceUnit.test_condition).length}
-								<div>
-									<strong>{$t('research.objectiveWorkspace.testCondition')}</strong>
+							</section>
+						{/if}
+
+						{#if recordEntries(selectedEvidenceUnit.test_condition).length}
+							<section class="evidence-chain-section">
+								<h5>{$t('research.objectiveWorkspace.testCondition')}</h5>
+								<div class="evidence-context-list">
 									{#each recordEntries(selectedEvidenceUnit.test_condition) as entry (entry.key)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
 								</div>
-							{/if}
-							{#if recordEntries(selectedEvidenceUnit.resolved_condition).length}
-								<div>
-									<strong>{$t('research.objectiveWorkspace.resolvedCondition')}</strong>
+							</section>
+						{/if}
+
+						{#if recordEntries(selectedEvidenceUnit.baseline_context).length}
+							<section class="evidence-chain-section">
+								<h5>{$t('research.objectiveWorkspace.comparisonBaseline')}</h5>
+								<div class="evidence-context-list">
+									{#each recordEntries(selectedEvidenceUnit.baseline_context) as entry (entry.key)}
+										<span>{entry.key}: {entry.value}</span>
+									{/each}
+								</div>
+							</section>
+						{/if}
+
+						{#if recordEntries(selectedEvidenceUnit.resolved_condition).length}
+							<section class="evidence-chain-section">
+								<h5>{$t('research.objectiveWorkspace.resolvedCondition')}</h5>
+								<div class="evidence-context-list">
 									{#each recordEntries(selectedEvidenceUnit.resolved_condition) as entry (entry.key)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
 								</div>
-							{/if}
-						</div>
+							</section>
+						{/if}
 
-						<div class="evidence-source-list">
-							<strong>{$t('research.objectiveWorkspace.sources')}</strong>
+						<section class="evidence-chain-section evidence-source-list">
+							<h5>{$t('research.objectiveWorkspace.sourceTraceback')}</h5>
 							{#each sourceEntries(selectedEvidenceUnit) as source, index (`${source.label}-${index}`)}
 								{#if source.documentId}
 									<!-- eslint-disable svelte/no-navigation-without-resolve -->
@@ -828,7 +843,7 @@
 									<span>{source.label}</span>
 								{/if}
 							{/each}
-						</div>
+						</section>
 					</article>
 				{:else}
 					<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
@@ -958,7 +973,8 @@
 	.objective-section h3,
 	.objective-section h4,
 	.objective-side-panel h3,
-	.objective-side-panel h4 {
+	.objective-side-panel h4,
+	.objective-side-panel h5 {
 		margin: 0;
 		color: var(--text-primary);
 	}
@@ -1052,6 +1068,7 @@
 	.evidence-group,
 	.paper-coverage-list,
 	.evidence-detail,
+	.evidence-chain-section,
 	.evidence-context-list,
 	.evidence-source-list {
 		display: grid;
@@ -1187,6 +1204,12 @@
 		line-height: 21px;
 	}
 
+	.evidence-chain-section h5 {
+		font-size: 13px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
 	.logic-step ul {
 		margin: 0;
 		padding-left: 18px;
@@ -1310,23 +1333,19 @@
 		top: 18px;
 	}
 
-	.evidence-context-list > div,
-	.evidence-source-list {
+	.evidence-chain-section {
 		border-top: 1px solid var(--border-default);
 		padding-top: 12px;
 	}
 
-	.evidence-context-list > div,
-	.evidence-source-list {
-		display: grid;
-		gap: 6px;
+	.evidence-detail .evidence-chain-section:first-of-type {
+		border-top: 0;
+		padding-top: 0;
 	}
 
-	.evidence-context-list strong,
-	.evidence-source-list strong {
-		color: var(--text-primary);
-		font-size: 13px;
-		line-height: 18px;
+	.evidence-context-list,
+	.evidence-source-list {
+		gap: 6px;
 	}
 
 	.evidence-context-list span,

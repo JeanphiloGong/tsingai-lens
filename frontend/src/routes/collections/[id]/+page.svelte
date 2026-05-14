@@ -95,6 +95,8 @@
 		selectedFiles.length > 0 ||
 		Boolean(uploadError || uploadResult);
 	$: nextStepItems = buildNextStepItems(readinessState);
+	$: trustCardTitle = buildTrustCardTitle(readinessState);
+	$: trustCardBody = buildTrustCardBody(readinessState);
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		clearPoll();
@@ -451,6 +453,20 @@
 		];
 	}
 
+	function buildTrustCardTitle(state: OverviewReadinessState) {
+		if (state === 'ready_to_process') return $t('overview.cards.trust.readyToProcessTitle');
+		if (state === 'processing') return $t('overview.cards.trust.processingTitle');
+		if (state === 'failed') return $t('overview.cards.trust.failedTitle');
+		return $t('overview.cards.trust.title');
+	}
+
+	function buildTrustCardBody(state: OverviewReadinessState) {
+		if (state === 'ready_to_process') return $t('overview.cards.trust.readyToProcessBody');
+		if (state === 'processing') return $t('overview.cards.trust.processingBody');
+		if (state === 'failed') return $t('overview.cards.trust.failedBody');
+		return $t('overview.cards.trust.body');
+	}
+
 	function actionStatusTone(value: string) {
 		return value.startsWith('4') || value.startsWith('5') ? 'status--error' : '';
 	}
@@ -750,8 +766,8 @@
 			</article>
 
 			<article class="overview-card overview-info-card">
-				<h3>{$t('overview.cards.trust.title')}</h3>
-				<p>{$t('overview.cards.trust.body')}</p>
+				<h3>{trustCardTitle}</h3>
+				<p>{trustCardBody}</p>
 				<div class="trust-chip-row">
 					<span class={`trust-chip trust-chip--${surfaceTone('comparisons')}`}>
 						{$t('overview.cards.trust.comparison')}: {surfaceLabel('comparisons')}
@@ -764,12 +780,40 @@
 					</span>
 				</div>
 				<div class="split-actions">
-					<a class="btn btn--ghost btn--small" href={evidenceHref()}>
-						{$t('overview.actions.viewEvidence')}
-					</a>
-					<a class="btn btn--primary btn--small" href={readyPrimaryHref()}>
-						{$t('overview.actions.enterComparisonShort')}
-					</a>
+					{#if readinessState === 'ready'}
+						<a class="btn btn--ghost btn--small" href={evidenceHref()}>
+							{$t('overview.actions.viewEvidence')}
+						</a>
+						<a class="btn btn--primary btn--small" href={readyPrimaryHref()}>
+							{$t('overview.actions.enterObjectives')}
+						</a>
+					{:else if readinessState === 'processing'}
+						<a class="btn btn--primary btn--small" href="#pipeline">
+							{$t('overview.actions.viewProgress')}
+						</a>
+						<button class="btn btn--ghost btn--small" type="button" on:click={refreshAll}>
+							{$t('overview.actions.refreshStatus')}
+						</button>
+					{:else if readinessState === 'ready_to_process'}
+						<button class="btn btn--primary btn--small" type="button" on:click={startBuildRun}>
+							{$t('overview.actions.startProcessing')}
+						</button>
+						<button
+							class="btn btn--ghost btn--small"
+							type="button"
+							disabled={uploadControlsDisabled}
+							on:click={browseFiles}
+						>
+							{$t('overview.actions.uploadDocuments')}
+						</button>
+					{:else if readinessState === 'failed'}
+						<a class="btn btn--ghost btn--small" href="#status-card">
+							{$t('overview.actions.viewErrors')}
+						</a>
+						<button class="btn btn--primary btn--small" type="button" on:click={startBuildRun}>
+							{$t('overview.actions.retryProcessing')}
+						</button>
+					{/if}
 				</div>
 			</article>
 

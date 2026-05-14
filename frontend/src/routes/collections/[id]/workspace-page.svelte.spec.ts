@@ -153,7 +153,7 @@ describe('collections/[id]/+page.svelte', () => {
 	it('shows objectives as the primary action when the collection is ready', async () => {
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 
@@ -177,7 +177,7 @@ describe('collections/[id]/+page.svelte', () => {
 
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 
@@ -201,7 +201,7 @@ describe('collections/[id]/+page.svelte', () => {
 
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 });

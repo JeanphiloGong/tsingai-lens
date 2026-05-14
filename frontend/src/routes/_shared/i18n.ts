@@ -836,6 +836,15 @@ const translations: Record<Language, Translations> = {
 				trust: {
 					title: 'Trust reminder',
 					body: 'This collection may be usable, but comparison results still need human review. Check evidence sources, missing conditions, and comparability warnings first.',
+					readyToProcessTitle: 'Processing needed',
+					readyToProcessBody:
+						'Files are uploaded, but evidence, comparisons, and research objectives are not reliable until processing finishes.',
+					processingTitle: 'Processing in progress',
+					processingBody:
+						'Wait for processing to finish before opening evidence or comparisons. Use the progress view while the run is active.',
+					failedTitle: 'Resolve processing errors',
+					failedBody:
+						'The latest run did not finish. Review task errors or retry processing before trusting downstream outputs.',
 					comparison: 'Comparison',
 					evidence: 'Evidence',
 					documents: 'Documents'
@@ -3198,6 +3207,12 @@ const translations: Record<Language, Translations> = {
 				trust: {
 					title: '可信度提醒',
 					body: '该集合已经可用，但比较结果仍需要人工审核。请优先检查证据来源、缺失条件和可比性提示。',
+					readyToProcessTitle: '需要先处理',
+					readyToProcessBody: '文件已上传，但证据、比较和研究目标要等处理完成后才可信。',
+					processingTitle: '处理正在进行',
+					processingBody: '任务运行时先查看进度，等待完成后再进入证据或比较视图。',
+					failedTitle: '先处理错误',
+					failedBody: '最近一次任务没有完成。请先查看错误或重新处理，再信任下游结果。',
 					comparison: '比较',
 					evidence: '证据',
 					documents: '文档'

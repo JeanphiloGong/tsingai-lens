@@ -228,6 +228,7 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 	await expect(page.getByText('1 document(s)').first()).toBeVisible();
 	await expect(page.getByText('1 document(s) uploaded')).toBeVisible();
 	await expect(page.getByText('lpbf-316l-study.pdf')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Processing needed' })).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({
 		path: testInfo.outputPath('collection-upload-ready-to-process-desktop.png'),
@@ -237,6 +238,8 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 	await page.getByRole('button', { name: 'Start processing' }).first().click();
 	await expect(page.getByText('Processing started')).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Collection is processing' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Processing in progress' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
 	await expect(page.locator('.collection-meta-row').getByText('Processing')).toBeVisible();
 	await expect(page.getByText('Current progress')).toBeVisible();
 	await expect(page.getByText('8%')).toBeVisible();
@@ -253,7 +256,7 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`/collections/${collectionId}`);
 	await expect(page.getByRole('heading', { name: 'Collection is processing' })).toBeInViewport();
-	await expect(page.getByRole('link', { name: 'View processing progress' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'View processing progress' }).first()).toBeVisible();
 	await expect(page.getByText('42%')).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({

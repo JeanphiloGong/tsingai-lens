@@ -3956,6 +3956,17 @@ class ResearchObjectiveService:
             route=route,
             record=record,
         )
+        if (
+            route.source_kind == "text_window"
+            and record.get("unit_kind") == "measurement"
+            and not self._objective_text_measurement_matches_context(
+                record.get("property_normalized"),
+                objective_context=objective_context,
+            )
+        ):
+            normalized = dict(record)
+            normalized["unit_kind"] = "interpretation"
+            return (normalized,)
         if route.source_kind == "text_window" and record.get("unit_kind") != "measurement":
             return (record,)
 
@@ -4061,6 +4072,28 @@ class ResearchObjectiveService:
         if not normalized.get("interpretation"):
             normalized["interpretation"] = self._value_payload_text(value_payload)
         return normalized
+
+    def _objective_text_measurement_matches_context(
+        self,
+        property_name: Any,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> bool:
+        if objective_context is None or not objective_context.target_property_axes:
+            return True
+        property_key = self._normalize_property_label(property_name)
+        if not property_key:
+            return True
+        target_axes = self._objective_target_property_axes(objective_context)
+        if self._property_axis_matches_any(property_key, target_axes):
+            return True
+        if property_key in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
+            return any(
+                self._property_axis_matches_any(axis, _STRUCTURAL_PROPERTY_AXES)
+                or self._property_axis_matches_any(axis, _MECHANICAL_PROPERTY_AXES)
+                for axis in target_axes
+            )
+        return False
 
     def _numeric_text_characterization_measurement_record(
         self,

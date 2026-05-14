@@ -2133,6 +2133,64 @@ def test_research_objective_service_reclassifies_mechanical_text_trends(
     assert records[0]["interpretation"] == "higher for strategy A"
 
 
+def test_research_objective_service_reclassifies_off_target_text_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-microstructure",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "conclusion",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+    microstructure_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-microstructure",
+            "target_property_axes": ["microstructure"],
+        }
+    )
+    mechanical_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": ["yield strength", "elongation"],
+        }
+    )
+    extracted_record = {
+        "unit_kind": "measurement",
+        "property_normalized": "elongation",
+        "sample_context": {"sample_number": "3"},
+        "value_payload": {"trend": "increase", "value": "10%"},
+        "unit": "percentage",
+        "resolution_status": "resolved",
+    }
+
+    off_target_records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 8},
+        objective_context=microstructure_context,
+        extracted_record=extracted_record,
+    )
+    on_target_records = service._objective_evidence_unit_records_from_extracted(
+        route=ObjectiveEvidenceRoute.from_mapping(
+            {**route.to_record(), "objective_id": "obj-mechanical"}
+        ),
+        source={"page": 8},
+        objective_context=mechanical_context,
+        extracted_record=extracted_record,
+    )
+
+    assert off_target_records[0]["unit_kind"] == "interpretation"
+    assert off_target_records[0]["property_normalized"] == "elongation"
+    assert on_target_records[0]["unit_kind"] == "measurement"
+
+
 def test_research_objective_service_reclassifies_text_comparison_without_pair_context(
     tmp_path,
 ):

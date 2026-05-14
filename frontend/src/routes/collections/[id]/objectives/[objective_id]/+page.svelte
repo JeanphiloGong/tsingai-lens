@@ -186,6 +186,22 @@
 		);
 	}
 
+	function baselineCardFact(record: Record<string, unknown>) {
+		const [entry] = recordEntries(record, 1);
+		return entry ? `baseline: ${entry.value}` : '';
+	}
+
+	function evidenceCardFacts(unit: ObjectiveEvidenceUnit) {
+		return [
+			...recordEntries(unit.sample_context, 1).map((entry) => `${entry.key}: ${entry.value}`),
+			...recordEntries(unit.process_context, 2).map((entry) => `${entry.key}: ${entry.value}`),
+			...recordEntries(unit.test_condition, 1).map((entry) => `${entry.key}: ${entry.value}`),
+			baselineCardFact(unit.baseline_context)
+		]
+			.filter(Boolean)
+			.slice(0, 4);
+	}
+
 	function sourceRefLabel(sourceRef: Record<string, unknown>) {
 		const sourceKind =
 			displayValue(sourceRef.source_kind) || $t('research.objectiveWorkspace.source');
@@ -720,6 +736,13 @@
 											>
 												<span>{evidenceUnitTitle(unit)}</span>
 												<strong>{evidenceUnitValue(unit)}</strong>
+												{#if evidenceCardFacts(unit).length}
+													<div class="evidence-unit-card__facts">
+														{#each evidenceCardFacts(unit) as fact (fact)}
+															<span>{fact}</span>
+														{/each}
+													</div>
+												{/if}
 												<small>
 													{unit.document_id || $t('research.emptyValue')} · {confidenceLabel(
 														unit.confidence
@@ -1325,6 +1348,21 @@
 		font-size: 14px;
 		line-height: 21px;
 		font-weight: 600;
+		overflow-wrap: anywhere;
+	}
+
+	.evidence-unit-card__facts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 5px;
+	}
+
+	.evidence-unit-card__facts span {
+		max-width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 7px;
+		background: var(--surface-card);
 		overflow-wrap: anywhere;
 	}
 

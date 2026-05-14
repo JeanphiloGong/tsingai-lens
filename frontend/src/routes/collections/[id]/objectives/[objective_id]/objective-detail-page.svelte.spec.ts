@@ -334,6 +334,27 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect.element(inspector.getByText('sample: as-built')).toBeInTheDocument();
 	});
 
+	it('summarizes evidence context on evidence cards', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence units' }))
+			.toBeInTheDocument();
+
+		const measurementCard = browserPage.getByRole('button', {
+			name: /doc_1 · 92%/
+		});
+		await expect.element(measurementCard.getByText('sample: HT-SLM')).toBeInTheDocument();
+		await expect.element(measurementCard.getByText('heat_treatment: annealed')).toBeInTheDocument();
+		await expect.element(measurementCard.getByText('method: tensile test')).toBeInTheDocument();
+
+		await browserPage.getByLabelText('Evidence kind').selectOptions('comparison');
+		const comparisonCard = browserPage.getByRole('button', {
+			name: /doc_1 · 79%/
+		});
+		await expect.element(comparisonCard.getByText('baseline: as-built')).toBeInTheDocument();
+	});
+
 	it('uses logic-chain steps to focus related evidence', async () => {
 		render(Page);
 

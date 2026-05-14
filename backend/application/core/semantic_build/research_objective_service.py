@@ -1366,7 +1366,10 @@ class ResearchObjectiveService:
             )
             if (
                 not route_records
-                and not self._objective_table_route_should_skip_llm_fallback(route)
+                and not self._objective_table_route_should_skip_llm_fallback(
+                    route,
+                    objective_context=objective_context,
+                )
             ):
                 try:
                     parsed = extractor.extract_objective_evidence_units(payload)
@@ -1458,16 +1461,16 @@ class ResearchObjectiveService:
     def _objective_table_route_should_skip_llm_fallback(
         self,
         route: ObjectiveEvidenceRoute,
+        *,
+        objective_context: ObjectiveContext | None = None,
     ) -> bool:
-        if route.source_kind != "table" or route.role != "test_condition":
+        if route.source_kind != "table":
             return False
-        if not route.column_roles:
-            return True
         role_text = " ".join(
             str(role or "").replace("_", " ").casefold()
             for role in route.column_roles.values()
         )
-        return any(
+        has_result_like_role = any(
             token in role_text
             for token in (
                 "process",
@@ -1478,6 +1481,21 @@ class ResearchObjectiveService:
                 "variable",
             )
         )
+        if (
+            route.role == "current_experimental_evidence"
+            and objective_context is not None
+            and has_result_like_role
+            and not self._objective_route_result_columns(
+                route,
+                objective_context=objective_context,
+            )
+        ):
+            return True
+        if route.role != "test_condition":
+            return False
+        if not route.column_roles:
+            return True
+        return has_result_like_role
 
     def _build_objective_method_family_test_condition_units(
         self,

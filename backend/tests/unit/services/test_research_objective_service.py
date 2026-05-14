@@ -1408,6 +1408,72 @@ def test_research_objective_service_skips_untyped_table_test_condition_fallback(
     assert service._objective_table_route_should_skip_llm_fallback(route)
 
 
+def test_research_objective_service_skips_off_target_result_table_fallback(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-corrosion",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Sample": "sample_index",
+                "E corr (mV)": "current_result",
+                "E d (mV)": "current_result",
+                "E p (mV)": "current_result",
+                "E p - E d (mV)": "current_result",
+            },
+        }
+    )
+    mechanical_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            ],
+        }
+    )
+    corrosion_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "target_property_axes": [
+                "corrosion potential",
+                "pitting potential",
+            ],
+        }
+    )
+    corrosion_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            **route.to_record(),
+            "objective_id": "obj-corrosion",
+            "column_roles": {
+                "Sample": "sample_condition",
+                "E corr (mV)": "corrosion_potential",
+                "E d (mV)": "passivation_potential",
+                "E p (mV)": "pitting_potential",
+                "E p - E d (mV)": "passivation_interval",
+            },
+        }
+    )
+
+    assert service._objective_table_route_should_skip_llm_fallback(
+        route,
+        objective_context=mechanical_context,
+    )
+    assert not service._objective_table_route_should_skip_llm_fallback(
+        corrosion_route,
+        objective_context=corrosion_context,
+    )
+
+
 def test_research_objective_service_builds_method_conditions_and_binds_measurements(
     tmp_path,
 ):

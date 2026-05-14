@@ -1424,10 +1424,10 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
             "extractable": True,
             "column_roles": {
                 "Sample": "sample_index",
-                "E corr (mV)": "current_result",
-                "E d (mV)": "current_result",
-                "E p (mV)": "current_result",
-                "E p - E d (mV)": "current_result",
+                "E corr (mV)": "electrochemical_parameter",
+                "E d (mV)": "electrochemical_parameter",
+                "E p (mV)": "electrochemical_parameter",
+                "E p - E d (mV)": "electrochemical_parameter",
             },
         }
     )
@@ -1471,6 +1471,24 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
     assert not service._objective_table_route_should_skip_llm_fallback(
         corrosion_route,
         objective_context=corrosion_context,
+    )
+
+    eis_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            **route.to_record(),
+            "source_ref": "table-eis",
+            "column_roles": {
+                "Sample": "sample_index",
+                "R s (ohm cm2)": "current_experimental_evidence",
+                "Q film > n film": "current_experimental_evidence",
+                "R film (ohm cm2)": "current_experimental_evidence",
+            },
+        }
+    )
+
+    assert service._objective_table_route_should_skip_llm_fallback(
+        eis_route,
+        objective_context=mechanical_context,
     )
 
 

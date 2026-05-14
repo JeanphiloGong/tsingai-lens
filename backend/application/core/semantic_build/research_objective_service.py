@@ -1485,6 +1485,11 @@ class ResearchObjectiveService:
                 "target",
                 "measurement",
                 "variable",
+                "parameter",
+                "resistance",
+                "constant",
+                "exponent",
+                "evidence",
             )
         )
         if (

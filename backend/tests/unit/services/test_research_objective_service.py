@@ -2079,6 +2079,105 @@ def test_research_objective_service_normalizes_compact_tensile_headers(
     }
 
 
+def test_research_objective_service_skips_reference_rows_and_keeps_condition_axis(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-mechanical",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Build platform conditions": "test_condition",
+                "\u0131 y (MPa)": "yield_strength",
+                "\u0131 u (MPa)": "ultimate_tensile_strength",
+                "El%": "elongation",
+            },
+            "confidence": 0.82,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "variable_process_axes": ["build platform preheating"],
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            ],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        objective_context=objective_context,
+        source={
+            "page": 8,
+            "column_headers": [
+                "Build platform conditions",
+                "\u0131 y (MPa)",
+                "\u0131 u (MPa)",
+                "El%",
+            ],
+            "table_matrix": [
+                [
+                    "Build platform conditions",
+                    "\u0131 y (MPa)",
+                    "\u0131 u (MPa)",
+                    "El%",
+                ],
+                ["Non-preheated", "448", "617", "72"],
+                ["Preheated", "465", "618", "82"],
+                ["LB-PBF 316L [20]", "485", "594", "58"],
+                ["Wrought [21][22,23]", "255-310", "535-623", "30-40"],
+            ],
+        },
+    )
+
+    assert len(records) == 6
+    assert {
+        (
+            record["sample_context"]["Build platform conditions"],
+            record["sample_context"]["sample_number"],
+            record["property_normalized"],
+            record["value_payload"]["value"],
+        )
+        for record in records
+    } == {
+        ("Non-preheated", "1", "yield strength", 448.0),
+        ("Non-preheated", "1", "ultimate tensile strength", 617.0),
+        ("Non-preheated", "1", "elongation", 72.0),
+        ("Preheated", "2", "yield strength", 465.0),
+        ("Preheated", "2", "ultimate tensile strength", 618.0),
+        ("Preheated", "2", "elongation", 82.0),
+    }
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        tuple(ObjectiveEvidenceUnit.from_mapping(record) for record in records),
+        objective_contexts=(objective_context,),
+    )
+
+    assert {
+        (
+            unit.sample_context["sample_number"],
+            unit.baseline_context["sample_context"]["sample_number"],
+            unit.property_normalized,
+            unit.value_payload["comparison_axis"],
+        )
+        for unit in comparison_units
+    } == {
+        ("2", "1", "yield strength", "Build platform conditions"),
+        ("2", "1", "ultimate tensile strength", "Build platform conditions"),
+        ("2", "1", "elongation", "Build platform conditions"),
+    }
+
+
 def test_research_objective_service_skips_non_target_result_property_columns(
     tmp_path,
 ):

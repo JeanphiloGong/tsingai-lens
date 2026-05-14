@@ -3476,6 +3476,12 @@ class ResearchObjectiveService:
                 row_values=row_values,
                 result_columns=result_columns,
             )
+            if self._objective_result_table_row_is_reference_context(
+                route=route,
+                row_values=row_values,
+                result_columns=result_columns,
+            ):
+                continue
             row_context = self._objective_table_row_context_with_sample_number(
                 row_context=row_context,
                 row_index=row_index,
@@ -3615,12 +3621,47 @@ class ResearchObjectiveService:
             elif "process" in role or "variable" in role:
                 process_context[column] = value
             elif "test" in role or "condition" in role:
+                if route.role == "current_experimental_evidence":
+                    sample_context[column] = value
                 test_condition[column] = value
         return {
             "sample_context": sample_context,
             "process_context": process_context,
             "test_condition": test_condition,
         }
+
+    def _objective_result_table_row_is_reference_context(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        row_values: dict[str, str],
+        result_columns: set[str],
+    ) -> bool:
+        if route.role != "current_experimental_evidence":
+            return False
+        context_values = tuple(
+            str(value).strip()
+            for column, value in row_values.items()
+            if column not in result_columns
+            and not self._objective_value_column_is_non_result(column)
+            and str(value).strip()
+        )
+        if not context_values:
+            return False
+        context_text = " ".join(context_values)
+        if re.search(r"\[\s*\d+(?:\s*[,;]\s*\d+)*\s*\]", context_text):
+            return True
+        normalized = context_text.casefold()
+        return any(
+            marker in normalized
+            for marker in (
+                "literature",
+                "previous study",
+                "previous work",
+                "reference material",
+                "reference sample",
+            )
+        )
 
     def _objective_table_row_context_with_sample_number(
         self,

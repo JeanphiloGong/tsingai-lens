@@ -1851,6 +1851,98 @@ def test_research_objective_service_expands_respective_density_text_measurements
     ]
 
 
+def test_research_objective_service_expands_mapped_density_text_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-density",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 3},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "characterization",
+            "property_normalized": "relative density",
+            "sample_context": {
+                "samples": [
+                    {
+                        "laser_power": "375 W",
+                        "scanning_speed": "2100 mm/s",
+                    },
+                    {
+                        "laser_power": "255 W",
+                        "scanning_speed": "1400 mm/s",
+                    },
+                    {
+                        "laser_power": "135 W",
+                        "scanning_speed": "750 mm/s",
+                    },
+                ],
+            },
+            "process_context": {"process": "Selective Laser Melting"},
+            "value_payload": {
+                "source_value_text": {
+                    "375 W-2100 mm/s": "97.83%",
+                    "255 W-1400 mm/s": "99.5%",
+                    "135 W-750 mm/s": "99.26%",
+                },
+            },
+            "unit": "%",
+            "resolution_status": "resolved",
+        },
+    )
+
+    assert [
+        (
+            record["unit_kind"],
+            record["property_normalized"],
+            record["sample_context"],
+            record["process_context"],
+            record["value_payload"],
+            record["unit"],
+        )
+        for record in records
+    ] == [
+        (
+            "measurement",
+            "relative density",
+            {"sample_id": "375 W-2100 mm/s"},
+            {"process": "Selective Laser Melting"},
+            {"source_value_text": "97.83%", "value": 97.83},
+            "%",
+        ),
+        (
+            "measurement",
+            "relative density",
+            {"sample_id": "255 W-1400 mm/s"},
+            {"process": "Selective Laser Melting"},
+            {"source_value_text": "99.5%", "value": 99.5},
+            "%",
+        ),
+        (
+            "measurement",
+            "relative density",
+            {"sample_id": "135 W-750 mm/s"},
+            {"process": "Selective Laser Melting"},
+            {"source_value_text": "99.26%", "value": 99.26},
+            "%",
+        ),
+    ]
+
+
 def test_research_objective_service_reclassifies_mechanical_text_trends(
     tmp_path,
 ):
@@ -2637,6 +2729,101 @@ def test_research_objective_service_resolves_measurements_from_process_label(
     assert resolved_measurement.resolved_condition == {
         "context_unit_id": "oeu-process-135-750",
         "matched_sample_context": {"sample_number": "3"},
+    }
+    assert resolved_measurement.resolution_status == "resolved"
+
+
+def test_research_objective_service_resolves_measurements_from_process_context(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-density-255-1400",
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "relative density",
+            "sample_context": {
+                "material": "316L stainless steel",
+                "process": "Selective Laser Melting",
+            },
+            "process_context": {
+                "laser_power": "255 W",
+                "scanning_speed": "1400 mm/s",
+            },
+            "value_payload": {
+                "source_value_text": "99.5%",
+                "value": 99.5,
+            },
+            "unit": "%",
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-255-1400",
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "sample_number": "2",
+            },
+            "process_context": {
+                "Laser power (W)": "255",
+                "Scan speed (mm·s -1)": "1400",
+                "Energy density (J mm -3)": "100",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+    other_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-135-750",
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "sample_number": "3",
+            },
+            "process_context": {
+                "Laser power (W)": "135",
+                "Scan speed (mm·s -1)": "750",
+                "Energy density (J mm -3)": "100",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+
+    resolved_units = service._resolve_objective_evidence_unit_contexts(
+        (
+            measurement,
+            matching_process_context,
+            other_process_context,
+        ),
+    )
+
+    resolved_measurement = resolved_units[0]
+    assert resolved_measurement.process_context == {
+        "Laser power (W)": "255",
+        "Scan speed (mm·s -1)": "1400",
+        "Energy density (J mm -3)": "100",
+        "laser_power": "255 W",
+        "scanning_speed": "1400 mm/s",
+    }
+    assert resolved_measurement.sample_context == {
+        "material": "316L stainless steel",
+        "process": "Selective Laser Melting",
+        "sample_number": "2",
+    }
+    assert resolved_measurement.resolved_condition == {
+        "context_unit_id": "oeu-process-255-1400",
+        "matched_sample_context": {"sample_number": "2"},
     }
     assert resolved_measurement.resolution_status == "resolved"
 

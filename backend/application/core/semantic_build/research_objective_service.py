@@ -2320,23 +2320,28 @@ class ResearchObjectiveService:
         unit: ObjectiveEvidenceUnit,
         candidates: list[ObjectiveEvidenceUnit],
     ) -> ObjectiveEvidenceUnit | None:
-        sample_label = " ".join(
+        match_fragments = [
             str(value).strip()
-            for value in unit.sample_context.values()
+            for value in (
+                tuple(unit.sample_context.values())
+                + tuple(unit.process_context.values())
+            )
             if str(value).strip()
-        )
-        if not sample_label:
+        ]
+        if not match_fragments:
             return None
-        sample_numbers = set(self._objective_numeric_match_tokens(sample_label))
-        sample_text = self._objective_match_text(sample_label)
+        match_numbers: set[str] = set()
+        for fragment in match_fragments:
+            match_numbers.update(self._objective_numeric_match_tokens(fragment))
+        match_text = self._objective_match_text(" ".join(match_fragments))
         scored: list[tuple[int, ObjectiveEvidenceUnit]] = []
         for candidate in candidates:
             if not candidate.process_context:
                 continue
             score = self._objective_process_label_match_score(
                 process_context=candidate.process_context,
-                sample_numbers=sample_numbers,
-                sample_text=sample_text,
+                sample_numbers=match_numbers,
+                sample_text=match_text,
             )
             if score >= 2:
                 scored.append((score, candidate))
@@ -3969,6 +3974,24 @@ class ResearchObjectiveService:
         if value_item is None:
             return ()
         property_normalized, raw_value = value_item
+        mapped_density_items = self._mapped_density_measurement_items(raw_value)
+        if (
+            property_normalized in {"relative density", "density"}
+            and mapped_density_items
+        ):
+            return tuple(
+                self._numeric_text_characterization_measurement_record_from_value(
+                    record=record,
+                    property_normalized=property_normalized,
+                    raw_value=sample_value,
+                    sample_context={"sample_id": sample_label},
+                    item_index=index,
+                )
+                for index, (sample_label, sample_value) in enumerate(
+                    mapped_density_items,
+                    start=1,
+                )
+            )
         numeric_value = self._coerce_number(raw_value)
         if numeric_value is None:
             return ()
@@ -3979,6 +4002,22 @@ class ResearchObjectiveService:
                 raw_value=raw_value,
             ),
         )
+
+    def _mapped_density_measurement_items(
+        self,
+        raw_value: Any,
+    ) -> tuple[tuple[str, Any], ...]:
+        if not isinstance(raw_value, dict):
+            return ()
+        items: list[tuple[str, Any]] = []
+        for sample_label, sample_value in raw_value.items():
+            label_text = str(sample_label).strip()
+            if not label_text or self._coerce_number(sample_value) is None:
+                continue
+            items.append((label_text, sample_value))
+        if len(items) < 2:
+            return ()
+        return tuple(items)
 
     def _numeric_text_characterization_measurement_record_from_value(
         self,

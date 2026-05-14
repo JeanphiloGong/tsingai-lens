@@ -2045,6 +2045,59 @@ def test_research_objective_service_expands_source_text_density_measurements(
     ]
 
 
+def test_research_objective_service_dedupes_shared_density_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    corrosion_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "target_property_axes": ["corrosion potential", "pitting potential"],
+        }
+    )
+    mechanical_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            ],
+        }
+    )
+    corrosion_density = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "density-corrosion",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "relative density",
+            "sample_context": {"sample_number": "1", "sample_id": "sample-a"},
+            "value_payload": {"source_value_text": "97.83", "value": 97.83},
+            "unit": "%",
+        }
+    )
+    mechanical_density = ObjectiveEvidenceUnit.from_mapping(
+        {
+            **corrosion_density.to_record(),
+            "evidence_unit_id": "density-mechanical",
+            "objective_id": "obj-mechanical",
+        }
+    )
+
+    deduped = service._dedupe_shared_density_measurements(
+        (corrosion_density, mechanical_density),
+        context_by_objective_id={
+            corrosion_context.objective_id: corrosion_context,
+            mechanical_context.objective_id: mechanical_context,
+        },
+    )
+
+    assert [unit.evidence_unit_id for unit in deduped] == ["density-mechanical"]
+
+
 def test_research_objective_service_reclassifies_mechanical_text_trends(
     tmp_path,
 ):

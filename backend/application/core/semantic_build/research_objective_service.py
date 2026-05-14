@@ -1443,6 +1443,10 @@ class ResearchObjectiveService:
             len(units),
         )
         resolved_units = self._resolve_objective_evidence_unit_contexts(tuple(units))
+        resolved_units = self._dedupe_shared_density_measurements(
+            resolved_units,
+            context_by_objective_id=context_by_objective_id,
+        )
         resolved_units = self._attach_objective_method_test_conditions_to_measurements(
             resolved_units
         )
@@ -2263,6 +2267,113 @@ class ResearchObjectiveService:
             )
             resolved_units.append(ObjectiveEvidenceUnit.from_mapping(record))
         return tuple(resolved_units)
+
+    def _dedupe_shared_density_measurements(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+        *,
+        context_by_objective_id: dict[str, ObjectiveContext],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        best_by_key: dict[tuple[str, str, str, float, str], tuple[int, int]] = {}
+        duplicate_keys: set[tuple[str, str, str, float, str]] = set()
+        for index, unit in enumerate(units):
+            key = self._shared_density_measurement_key(unit)
+            if key is None:
+                continue
+            score = self._shared_density_measurement_objective_score(
+                unit,
+                objective_context=context_by_objective_id.get(unit.objective_id),
+            )
+            current = best_by_key.get(key)
+            if current is None or score > current[0]:
+                if current is not None:
+                    duplicate_keys.add(key)
+                best_by_key[key] = (score, index)
+            else:
+                duplicate_keys.add(key)
+        if not duplicate_keys:
+            return units
+
+        keep_indexes = {
+            index
+            for key, (_score, index) in best_by_key.items()
+            if key in duplicate_keys
+        }
+        deduped: list[ObjectiveEvidenceUnit] = []
+        for index, unit in enumerate(units):
+            key = self._shared_density_measurement_key(unit)
+            if (
+                key is not None
+                and key in duplicate_keys
+                and index not in keep_indexes
+            ):
+                continue
+            deduped.append(unit)
+        return tuple(deduped)
+
+    def _shared_density_measurement_key(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> tuple[str, str, str, float, str] | None:
+        if unit.unit_kind != "measurement":
+            return None
+        property_key = self._normalize_property_label(unit.property_normalized)
+        if property_key not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
+            return None
+        value = self._value_payload_numeric_value(unit.value_payload)
+        if value is None:
+            return None
+        sample_key = self._objective_sample_identity_key(unit.sample_context)
+        if not sample_key:
+            return None
+        return (
+            unit.document_id,
+            property_key,
+            sample_key,
+            value,
+            str(unit.unit or "").casefold(),
+        )
+
+    def _shared_density_measurement_objective_score(
+        self,
+        unit: ObjectiveEvidenceUnit,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> int:
+        if objective_context is None:
+            return 0
+        property_key = self._normalize_property_label(unit.property_normalized)
+        if not property_key:
+            return 0
+        target_axes = self._objective_target_property_axes(objective_context)
+        if self._property_axis_matches_any(property_key, target_axes):
+            return 30
+        if property_key in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
+            if any(
+                self._property_axis_matches_any(axis, _STRUCTURAL_PROPERTY_AXES)
+                for axis in target_axes
+            ):
+                return 25
+            if any(
+                self._property_axis_matches_any(axis, _MECHANICAL_PROPERTY_AXES)
+                for axis in target_axes
+            ):
+                return 20
+        return 0
+
+    def _objective_sample_identity_key(
+        self,
+        sample_context: dict[str, Any],
+    ) -> str:
+        for key in ("sample_number", "sample_id", "Sample number", "Sample"):
+            value = str(sample_context.get(key) or "").strip()
+            if value:
+                return value.casefold()
+        for key, value in sorted(sample_context.items()):
+            value_text = str(value or "").strip()
+            if value_text:
+                return f"{key}:{value_text}".casefold()
+        return ""
 
     def _matching_objective_context_unit(
         self,

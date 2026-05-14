@@ -2355,6 +2355,15 @@ class ResearchObjectiveService:
         ]
         if len(winners) == 1:
             return winners[0]
+        numbered_winners = [
+            candidate
+            for candidate in winners
+            if self._objective_sample_context_has_explicit_number(
+                candidate.sample_context
+            )
+        ]
+        if len(numbered_winners) == 1:
+            return numbered_winners[0]
         return None
 
     def _objective_process_label_match_score(
@@ -3820,7 +3829,10 @@ class ResearchObjectiveService:
         if not record.get("confidence"):
             record["confidence"] = route.confidence
         text_measurement_records = (
-            self._numeric_text_characterization_measurement_records(record)
+            self._numeric_text_characterization_measurement_records(
+                record,
+                source_text=str(source.get("text") or ""),
+            )
         )
         if text_measurement_records:
             return text_measurement_records
@@ -3946,14 +3958,27 @@ class ResearchObjectiveService:
     def _numeric_text_characterization_measurement_records(
         self,
         record: dict[str, Any],
+        *,
+        source_text: str = "",
     ) -> tuple[dict[str, Any], ...]:
         if record.get("unit_kind") != "characterization":
             return ()
         respective_items = self._respective_density_measurement_items(record)
+        respective_record = record
+        if not respective_items:
+            respective_items = self._source_text_respective_density_measurement_items(
+                source_text
+            )
+            if respective_items:
+                respective_record = dict(record)
+                respective_record["evidence_unit_id"] = (
+                    self._source_text_density_record_base_id(record)
+                )
+                respective_record["process_context"] = {}
         if respective_items:
             return tuple(
                 self._numeric_text_characterization_measurement_record_from_value(
-                    record=record,
+                    record=respective_record,
                     property_normalized="relative density",
                     raw_value=raw_value,
                     sample_context={"sample_id": sample_label},
@@ -4092,6 +4117,70 @@ class ResearchObjectiveService:
         if len(values) != len(sample_labels):
             return ()
         return tuple(zip(sample_labels, values))
+
+    def _source_text_respective_density_measurement_items(
+        self,
+        source_text: str,
+    ) -> tuple[tuple[str, str], ...]:
+        text = " ".join(str(source_text or "").split())
+        if "density" not in text.casefold() or "respectively" not in text.casefold():
+            return ()
+        sample_match = re.search(
+            r"\bdensity\s+of\s+(?:the\s+)?(?:\w+\s+)?samples?\s+of\s+(.+?)\s+"
+            r"(?:was|were)\s+measured\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if sample_match is None:
+            return ()
+        value_match = re.search(
+            r"\b(?:which\s+)?(?:was|were|is|are)\s+"
+            r"([0-9][0-9.,\s]*(?:and\s*)?[0-9.]+)\s*%?\s*,?\s*respectively",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if value_match is None:
+            return ()
+        sample_labels = self._split_respective_density_sample_labels(
+            sample_match.group(1)
+        )
+        values = tuple(
+            item.group(0)
+            for item in _NUMBER_PATTERN.finditer(value_match.group(1))
+        )
+        if len(sample_labels) < 2 or len(values) != len(sample_labels):
+            return ()
+        return tuple(zip(sample_labels, values))
+
+    def _split_respective_density_sample_labels(
+        self,
+        sample_text: str,
+    ) -> tuple[str, ...]:
+        normalized = " ".join(str(sample_text or "").split()).strip(" ,")
+        if not normalized:
+            return ()
+        normalized = re.sub(r",?\s+and\s+", ", ", normalized, flags=re.IGNORECASE)
+        return tuple(
+            label.strip(" ,")
+            for label in normalized.split(",")
+            if label.strip(" ,")
+        )
+
+    def _source_text_density_record_base_id(
+        self,
+        record: dict[str, Any],
+    ) -> str:
+        source_refs = record.get("source_refs") or []
+        source_key = json.dumps(source_refs, ensure_ascii=False, sort_keys=True)
+        seed = "|".join(
+            (
+                str(record.get("objective_id") or ""),
+                str(record.get("document_id") or ""),
+                source_key,
+                "source-text-density",
+            )
+        )
+        return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
 
     def _objective_text_sample_labels(self, sample_context: Any) -> tuple[str, ...]:
         if not isinstance(sample_context, dict):

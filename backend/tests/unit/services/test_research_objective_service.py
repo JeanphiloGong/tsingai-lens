@@ -1943,6 +1943,90 @@ def test_research_objective_service_expands_mapped_density_text_measurements(
     ]
 
 
+def test_research_objective_service_expands_source_text_density_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-density",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={
+            "page": 3,
+            "text": (
+                "The density of the three samples of 375 W-2100 mm·s -1, "
+                "255 W-1400 mm·s -1, and 135 W-750 mm·s -1 was measured, "
+                "which was 97.83, 99.5, and 99.26%, respectively."
+            ),
+        },
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "characterization",
+            "property_normalized": "relative density",
+            "sample_context": {
+                "density": "97.83%",
+                "sample_id": "375 W-2100 mm·s -1",
+            },
+            "process_context": {
+                "laser_power": "375 W",
+                "scanning_speed": "2100 mm·s -1",
+            },
+            "value_payload": {"density_value": "97.83"},
+            "unit": "%",
+            "resolution_status": "resolved",
+        },
+    )
+
+    assert [
+        (
+            record["unit_kind"],
+            record["property_normalized"],
+            record["sample_context"],
+            record["process_context"],
+            record["value_payload"],
+            record["unit"],
+        )
+        for record in records
+    ] == [
+        (
+            "measurement",
+            "relative density",
+            {"sample_id": "375 W-2100 mm·s -1"},
+            {},
+            {"source_value_text": "97.83", "value": 97.83},
+            "%",
+        ),
+        (
+            "measurement",
+            "relative density",
+            {"sample_id": "255 W-1400 mm·s -1"},
+            {},
+            {"source_value_text": "99.5", "value": 99.5},
+            "%",
+        ),
+        (
+            "measurement",
+            "relative density",
+            {"sample_id": "135 W-750 mm·s -1"},
+            {},
+            {"source_value_text": "99.26", "value": 99.26},
+            "%",
+        ),
+    ]
+
+
 def test_research_objective_service_reclassifies_mechanical_text_trends(
     tmp_path,
 ):
@@ -2707,12 +2791,31 @@ def test_research_objective_service_resolves_measurements_from_process_label(
             "confidence": 0.8,
         }
     )
+    matching_text_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-text-135-750",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "porosity": "low",
+                "process": "Selective Laser Melting",
+            },
+            "process_context": {
+                "Laser power": "135 W",
+                "Scanning speed": "750 mm/s",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
 
     resolved_units = service._resolve_objective_evidence_unit_contexts(
         (
             measurement,
             matching_process_context,
             other_process_context,
+            matching_text_context,
         ),
     )
 

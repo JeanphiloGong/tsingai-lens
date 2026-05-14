@@ -463,15 +463,16 @@
 	): SourceEntry {
 		const documentId = displayValue(sourceRef.document_id) || unit.document_id;
 		const pageNumber = displayValue(sourceRef.page);
-		const sourceId =
-			displayValue(sourceRef.source_ref) ||
-			displayValue(sourceRef.table_id) ||
-			displayValue(sourceRef.anchor_id) ||
-			displayValue(sourceRef.block_id);
+		const evidenceId =
+			displayValue(sourceRef.evidence_id) ||
+			displayValue(sourceRef.evidence_ref_id) ||
+			unit.evidence_unit_id;
+		const anchorId = displayValue(sourceRef.anchor_id) || unit.evidence_anchor_ids[0] || '';
 		const params: [string, string][] = [];
 		if (pageNumber) params.push(['page', pageNumber]);
-		if (sourceId) params.push(['source', sourceId]);
-		params.push(['evidence_unit_id', unit.evidence_unit_id], ['return_to', objectiveHref()]);
+		if (evidenceId) params.push(['evidence_id', evidenceId]);
+		if (anchorId) params.push(['anchor_id', anchorId]);
+		params.push(['return_to', objectiveHref()]);
 
 		return {
 			label: sourceRefLabel(sourceRef),

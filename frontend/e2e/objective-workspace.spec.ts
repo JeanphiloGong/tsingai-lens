@@ -139,9 +139,12 @@ function objectivePayload() {
 						document_id: 'doc_1',
 						source_kind: 'table',
 						source_ref: 'table-2',
+						evidence_id: 'ev_1',
+						anchor_id: 'anc_1',
 						page: 5
 					}
 				],
+				evidence_anchor_ids: ['anc_1'],
 				resolution_status: 'resolved',
 				confidence: 0.92
 			},
@@ -250,7 +253,7 @@ test('objective workspace renders logic-chain screenshots and source links', asy
 	await expect(page.getByRole('heading', { name: 'Evidence units' })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'table · table-2 · p. 5' })).toHaveAttribute(
 		'href',
-		'/collections/col_123/documents/doc_1?page=5&source=table-2&evidence_unit_id=unit_measure&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
+		'/collections/col_123/documents/doc_1?page=5&evidence_id=ev_1&anchor_id=anc_1&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
 	);
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({

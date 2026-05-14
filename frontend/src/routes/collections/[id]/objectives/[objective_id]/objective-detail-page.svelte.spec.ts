@@ -143,9 +143,12 @@ function objectivePayload() {
 						document_id: 'doc_1',
 						source_kind: 'table',
 						source_ref: 'table-2',
+						evidence_id: 'ev_1',
+						anchor_id: 'anc_1',
 						page: 5
 					}
 				],
+				evidence_anchor_ids: ['anc_1'],
 				resolution_status: 'resolved',
 				confidence: 0.92
 			},
@@ -281,7 +284,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(sourceLink)
 			.toHaveAttribute(
 				'href',
-				'/collections/col_123/documents/doc_1?page=5&source=table-2&evidence_unit_id=unit_measure&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
+				'/collections/col_123/documents/doc_1?page=5&evidence_id=ev_1&anchor_id=anc_1&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
 			);
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))

@@ -12,6 +12,20 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_GOLD_DIR = DEFAULT_BACKEND_ROOT / "tests" / "fixtures" / "local_expert_gold"
 DEFAULT_OUTPUT_DIR = DEFAULT_GOLD_DIR / "generated" / "objective_first"
+DEFAULT_QUALITY_THRESHOLDS = {
+    "P001": {
+        "measurement_recall": 1.0,
+        "comparison_recall": 0.95,
+        "comparison_precision": 0.8,
+    },
+    "P002": {
+        "measurement_recall": 0.5,
+        "prediction_core_measurement_count": 1,
+    },
+    "P005": {
+        "measurement_recall": 1.0,
+    },
+}
 
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -64,6 +78,14 @@ def parse_args() -> argparse.Namespace:
             "gold paper that can be mapped to the prediction bundle."
         ),
     )
+    parser.add_argument(
+        "--quality-gate",
+        action="store_true",
+        help=(
+            "Evaluate objective-first benchmark thresholds and exit non-zero "
+            "when required P001/P002/P005 checks fail."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -76,8 +98,14 @@ def main() -> None:
         gold_input_dir=args.gold_input_dir,
         benchmark_output_dir=args.benchmark_output_dir,
         gold_paper_ids=args.gold_paper_id,
+        quality_gate=args.quality_gate,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if (
+        args.quality_gate
+        and (summary.get("quality_gate") or {}).get("status") == "fail"
+    ):
+        raise SystemExit(1)
 
 
 def run_objective_gold_benchmark(
@@ -88,6 +116,7 @@ def run_objective_gold_benchmark(
     gold_input_dir: str | Path = DEFAULT_GOLD_DIR,
     benchmark_output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     gold_paper_ids: list[str] | None = None,
+    quality_gate: bool = False,
 ) -> dict[str, Any]:
     destination = Path(benchmark_output_dir).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
@@ -113,13 +142,82 @@ def run_objective_gold_benchmark(
         gold_paper_ids=gold_paper_ids,
     )
     report = json.loads(evaluation_report_path.read_text(encoding="utf-8"))
-    return {
+    summary = {
         "gold_bundle": str(converted_gold_path),
         "prediction_bundle": str(exported_prediction_path),
         "evaluation_report": str(evaluation_report_path),
         "summary": report.get("summary", {}),
         "papers": _paper_summaries(report.get("papers", [])),
     }
+    if quality_gate:
+        summary["quality_gate"] = evaluate_objective_quality_gate(report)
+    return summary
+
+
+def evaluate_objective_quality_gate(
+    report: dict[str, Any],
+    thresholds: dict[str, dict[str, float]] | None = None,
+) -> dict[str, Any]:
+    gates = thresholds or DEFAULT_QUALITY_THRESHOLDS
+    papers = {
+        str(paper.get("gold_paper_id") or ""): paper
+        for paper in report.get("papers", [])
+        if isinstance(paper, dict)
+    }
+    checks: list[dict[str, Any]] = []
+    for paper_id, paper_thresholds in gates.items():
+        paper = papers.get(paper_id)
+        if paper is None:
+            checks.append(
+                {
+                    "status": "fail",
+                    "paper_id": paper_id,
+                    "metric": "paper_present",
+                    "actual": None,
+                    "minimum": 1,
+                }
+            )
+            continue
+        for metric, minimum in paper_thresholds.items():
+            actual = _quality_metric_value(paper, metric)
+            passed = actual is not None and actual >= minimum
+            checks.append(
+                {
+                    "status": "pass" if passed else "fail",
+                    "paper_id": paper_id,
+                    "metric": metric,
+                    "actual": actual,
+                    "minimum": minimum,
+                }
+            )
+    failed_checks = [check for check in checks if check["status"] == "fail"]
+    return {
+        "status": "fail" if failed_checks else "pass",
+        "checks": checks,
+        "failed_checks": failed_checks,
+    }
+
+
+def _quality_metric_value(paper: dict[str, Any], metric: str) -> float | None:
+    if metric in {"measurement_recall", "prediction_core_measurement_count"}:
+        measurements = paper.get("measurements") or {}
+        if metric == "measurement_recall":
+            return _number_or_none(measurements.get("recall"))
+        return _number_or_none(measurements.get("prediction_core_count"))
+    if metric in {"comparison_recall", "comparison_precision"}:
+        comparisons = paper.get("comparisons") or {}
+        if metric == "comparison_recall":
+            return _number_or_none(comparisons.get("recall"))
+        return _number_or_none(comparisons.get("precision"))
+    return None
+
+
+def _number_or_none(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
 
 
 def _paper_summaries(papers: Any) -> list[dict[str, Any]]:

@@ -14,7 +14,8 @@
 		fetchCollectionResearchView,
 		getResearchViewStateTone,
 		type CollectionAggregation,
-		type ResearchViewState
+		type ResearchViewState,
+		type ResearchViewWarning
 	} from '../../_shared/researchView';
 	import { createBuildTask, getTask, isTaskActive, type Task } from '../../_shared/tasks';
 	import {
@@ -33,6 +34,13 @@
 	type PaperMixRow = {
 		key: 'review' | 'experimental' | 'mixed' | 'uncertain' | 'benchmark';
 		label: string;
+		count: number;
+	};
+
+	type WarningSummary = {
+		key: string;
+		message: string;
+		scope: string;
 		count: number;
 	};
 
@@ -345,14 +353,45 @@
 		return $t(`research.state.${state}`);
 	}
 
+	function summarizeWarnings(warnings: ResearchViewWarning[]): WarningSummary[] {
+		const summaries = new Map<string, WarningSummary>();
+		for (const warning of warnings) {
+			const message = warning.message.trim();
+			if (!message) continue;
+			const key = `${warning.scope}:${message}`;
+			const existing = summaries.get(key);
+			if (existing) {
+				existing.count += 1;
+			} else {
+				summaries.set(key, {
+					key,
+					message,
+					scope: warning.scope,
+					count: 1
+				});
+			}
+		}
+		return [...summaries.values()];
+	}
+
 	function overviewWarnings() {
-		return [
-			...(researchView?.warnings ?? []),
-			...(researchView?.paper_coverage ?? []).flatMap((row) => row.primary_warnings)
-		]
-			.map((warning) => warning.message)
-			.filter((message) => message !== '')
-			.slice(0, 5);
+		const collectionWarnings = researchView?.warnings ?? [];
+		const rowWarnings = (researchView?.paper_coverage ?? []).flatMap((row) => row.primary_warnings);
+		return summarizeWarnings(collectionWarnings.length ? collectionWarnings : rowWarnings).slice(0, 5);
+	}
+
+	function warningSummaryLabel(summary: WarningSummary) {
+		if (summary.count <= 1) return summary.message;
+		if (summary.scope === 'paper') {
+			return $t('research.warningPaperCount', {
+				message: summary.message,
+				count: summary.count
+			});
+		}
+		return $t('research.warningOccurrenceCount', {
+			message: summary.message,
+			count: summary.count
+		});
 	}
 
 	function coverageSummary() {
@@ -604,7 +643,7 @@
 						<strong>{$t('research.warnings')}</strong>
 						<ul>
 							{#each overviewWarnings() as warning}
-								<li>{warning}</li>
+								<li>{warningSummaryLabel(warning)}</li>
 							{/each}
 						</ul>
 					</div>

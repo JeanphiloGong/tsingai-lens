@@ -105,11 +105,14 @@ function researchPayload() {
 }
 
 describe('collections/[id]/comparisons/+page.svelte', () => {
+	let researchResponse: Record<string, unknown>;
+
 	beforeEach(() => {
 		setPage({
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123/comparisons')
 		});
+		researchResponse = researchPayload();
 		fetchMock.mockReset();
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
@@ -117,7 +120,7 @@ describe('collections/[id]/comparisons/+page.svelte', () => {
 			const url = new URL(rawUrl, 'http://localhost');
 
 			if (url.pathname === '/api/v1/collections/col_123/research-view') {
-				return jsonResponse(researchPayload());
+				return jsonResponse(researchResponse);
 			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
@@ -137,5 +140,59 @@ describe('collections/[id]/comparisons/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('cell', { name: 'process: annealing' }))
 			.toBeInTheDocument();
+	});
+
+	it('shows a pending comparison artifact state when coverage exists without comparable groups', async () => {
+		researchResponse = {
+			collection_id: 'col_123',
+			state: 'empty',
+			overview: {
+				document_count: 2
+			},
+			paper_coverage: [
+				{
+					document_id: 'doc_1',
+					title: 'Paper A',
+					state: 'empty',
+					sample_count: 0,
+					process_param_count: 0,
+					measurement_count: 0,
+					condition_count: 0,
+					evidence_count: 0,
+					issue_count: 2
+				}
+			],
+			comparable_groups: [],
+			warnings: [
+				{
+					warning_id: 'warning:comparison_projection_unavailable',
+					code: 'comparison_projection_unavailable',
+					severity: 'info',
+					scope: 'collection',
+					message:
+						'Paper coverage is available, but comparable groups are not available until comparison artifacts are generated.',
+					related_object_ids: []
+				}
+			]
+		};
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Comparison artifacts are not ready' }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Paper coverage is available, but comparable groups need generated comparison artifacts before this page can be used.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open collection overview' }))
+			.toHaveAttribute('href', '/collections/col_123');
+		await expect
+			.element(browserPage.getByText(/Paper coverage is available, but comparable groups are not/))
+			.not.toBeInTheDocument();
 	});
 });

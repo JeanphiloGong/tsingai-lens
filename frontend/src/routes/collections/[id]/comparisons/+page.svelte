@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../_shared/api';
 	import { t } from '../../../_shared/i18n';
@@ -21,6 +22,12 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: researchGroups = researchView?.comparable_groups ?? [];
+	$: comparisonArtifactsPending =
+		Boolean(researchView) &&
+		!researchGroups.length &&
+		Boolean(
+			researchView?.warnings.some((warning) => warning.code === 'comparison_projection_unavailable')
+		);
 	$: activeGroup =
 		researchGroups.find((group) => group.group_id === selectedGroupId) ?? researchGroups[0] ?? null;
 	$: if (collectionId && collectionId !== loadedCollectionId) {
@@ -112,6 +119,19 @@
 		<section class="comparison-state-card comparison-state-card--error" role="alert">
 			<h3>{$t('research.comparison.errorTitle')}</h3>
 			<p>{error}</p>
+		</section>
+	{:else if comparisonArtifactsPending}
+		<section class="comparison-state-card comparison-state-card--pending" role="status">
+			<h3>{$t('research.comparison.pendingTitle')}</h3>
+			<p>{$t('research.comparison.pendingBody')}</p>
+			<div class="comparison-state-card__actions">
+				<a class="btn btn--primary btn--small" href={resolve('/collections/[id]', { id: collectionId })}>
+					{$t('research.comparison.openOverview')}
+				</a>
+				<button class="btn btn--ghost btn--small" type="button" on:click={loadResearchComparison}>
+					{$t('research.comparison.refresh')}
+				</button>
+			</div>
 		</section>
 	{:else if !researchView || !researchGroups.length}
 		<section class="comparison-state-card">
@@ -349,6 +369,18 @@
 		border-color: var(--danger-border);
 		background: var(--danger-bg);
 		color: var(--danger-text);
+	}
+
+	.comparison-state-card--pending {
+		border-color: var(--warning-border);
+		background: var(--warning-bg);
+	}
+
+	.comparison-state-card__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+		margin-top: 8px;
 	}
 
 	.research-comparison-layout {

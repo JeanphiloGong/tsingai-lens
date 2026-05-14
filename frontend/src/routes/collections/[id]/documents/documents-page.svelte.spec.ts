@@ -102,4 +102,78 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
 		).toEqual(['/api/v1/collections/col_123/research-view']);
 	});
+
+	it('summarizes repeated collection-level coverage warnings', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/research-view') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					state: 'empty',
+					warnings: [
+						{
+							warning_id: 'warning:no_sample_rows:paper:doc_1',
+							code: 'no_sample_rows',
+							severity: 'warning',
+							scope: 'paper',
+							message: 'No real sample or variant rows were detected for this paper.',
+							related_object_ids: ['doc_1']
+						},
+						{
+							warning_id: 'warning:no_sample_rows:paper:doc_2',
+							code: 'no_sample_rows',
+							severity: 'warning',
+							scope: 'paper',
+							message: 'No real sample or variant rows were detected for this paper.',
+							related_object_ids: ['doc_2']
+						}
+					],
+					paper_coverage: [
+						{
+							document_id: 'doc_1',
+							title: 'Paper A',
+							state: 'empty',
+							sample_count: 0,
+							process_param_count: 0,
+							measurement_count: 0,
+							condition_count: 0,
+							evidence_count: 0,
+							issue_count: 1
+						},
+						{
+							document_id: 'doc_2',
+							title: 'Paper B',
+							state: 'empty',
+							sample_count: 0,
+							process_param_count: 0,
+							measurement_count: 0,
+							condition_count: 0,
+							evidence_count: 0,
+							issue_count: 1
+						}
+					]
+				});
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'No real sample or variant rows were detected for this paper. (2 papers)'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('No real sample or variant rows were detected for this paper.', {
+					exact: true
+				})
+			)
+			.not.toBeInTheDocument();
+	});
 });

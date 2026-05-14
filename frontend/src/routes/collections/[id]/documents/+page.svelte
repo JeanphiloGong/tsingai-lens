@@ -7,8 +7,16 @@
 		fetchCollectionResearchView,
 		getResearchViewStateTone,
 		type CollectionAggregation,
-		type PaperCoverageRow
+		type PaperCoverageRow,
+		type ResearchViewWarning
 	} from '../../../_shared/researchView';
+
+	type WarningSummary = {
+		key: string;
+		message: string;
+		scope: string;
+		count: number;
+	};
 
 	let researchView: CollectionAggregation | null = null;
 	let loading = false;
@@ -24,6 +32,7 @@
 	$: totalMeasurements = paperCoverageRows.reduce((total, row) => total + row.measurement_count, 0);
 	$: totalConditions = paperCoverageRows.reduce((total, row) => total + row.condition_count, 0);
 	$: totalEvidence = paperCoverageRows.reduce((total, row) => total + row.evidence_count, 0);
+	$: collectionWarningSummaries = summarizeWarnings(researchView?.warnings ?? []);
 
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
@@ -62,6 +71,41 @@
 		return row.issue_count > 0
 			? $t('research.documents.issueCount', { count: row.issue_count })
 			: $t('research.documents.noIssues');
+	}
+
+	function summarizeWarnings(warnings: ResearchViewWarning[]): WarningSummary[] {
+		const summaries = new Map<string, WarningSummary>();
+		for (const warning of warnings) {
+			const message = warning.message.trim();
+			if (!message) continue;
+			const key = `${warning.scope}:${message}`;
+			const existing = summaries.get(key);
+			if (existing) {
+				existing.count += 1;
+			} else {
+				summaries.set(key, {
+					key,
+					message,
+					scope: warning.scope,
+					count: 1
+				});
+			}
+		}
+		return [...summaries.values()];
+	}
+
+	function warningSummaryLabel(summary: WarningSummary) {
+		if (summary.count <= 1) return summary.message;
+		if (summary.scope === 'paper') {
+			return $t('research.warningPaperCount', {
+				message: summary.message,
+				count: summary.count
+			});
+		}
+		return $t('research.warningOccurrenceCount', {
+			message: summary.message,
+			count: summary.count
+		});
 	}
 </script>
 
@@ -140,12 +184,12 @@
 			</div>
 		</section>
 
-		{#if researchView.warnings.length}
+		{#if collectionWarningSummaries.length}
 			<section class="coverage-warning-card">
 				<strong>{$t('research.warnings')}</strong>
 				<ul>
-					{#each researchView.warnings as warning (warning.warning_id)}
-						<li>{warning.message}</li>
+					{#each collectionWarningSummaries as warning (warning.key)}
+						<li>{warningSummaryLabel(warning)}</li>
 					{/each}
 				</ul>
 			</section>

@@ -248,6 +248,8 @@ const translations: Record<Language, Translations> = {
 		research: {
 			emptyValue: '--',
 			warnings: 'Warnings',
+			warningPaperCount: '{message} ({count} papers)',
+			warningOccurrenceCount: '{message} ({count} occurrences)',
 			state: {
 				empty: 'Empty',
 				processing: 'Processing',
@@ -717,9 +719,13 @@ const translations: Record<Language, Translations> = {
 					'Advanced browser for comparable groups and cross-paper matrices built by the research-view aggregation layer.',
 				loading: 'Loading research comparison...',
 				errorTitle: 'Research comparison is unavailable',
+				pendingTitle: 'Comparison artifacts are not ready',
+				pendingBody:
+					'Paper coverage is available, but comparable groups need generated comparison artifacts before this page can be used.',
 				emptyTitle: 'No comparable groups',
 				emptyBody: 'The research-view endpoint returned no comparable groups for this collection.',
 				refresh: 'Refresh comparison',
+				openOverview: 'Open collection overview',
 				groupCount: '{count} group(s)',
 				groups: 'Comparable groups',
 				variableAxis: 'Variable axis',
@@ -2635,6 +2641,8 @@ const translations: Record<Language, Translations> = {
 		research: {
 			emptyValue: '--',
 			warnings: '警告',
+			warningPaperCount: '{message}（{count} 篇文献）',
+			warningOccurrenceCount: '{message}（{count} 次）',
 			state: {
 				empty: '为空',
 				processing: '处理中',
@@ -3091,9 +3099,12 @@ const translations: Record<Language, Translations> = {
 				directBody: '高级浏览入口，用于查看 research-view 聚合层生成的可比较组和跨文献矩阵。',
 				loading: '正在加载研究比较...',
 				errorTitle: '研究比较不可用',
+				pendingTitle: '比较产物尚未生成',
+				pendingBody: '文献覆盖已经可用，但该页面需要先生成比较产物，才能查看可比较组。',
 				emptyTitle: '暂无可比较组',
 				emptyBody: 'research-view 接口没有返回该集合的可比较组。',
 				refresh: '刷新比较',
+				openOverview: '打开集合概览',
 				groupCount: '{count} 个比较组',
 				groups: '可比较组',
 				variableAxis: '变化变量',

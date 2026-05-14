@@ -123,6 +123,7 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 
 describe('collections/[id]/+page.svelte', () => {
 	let workspacePayload: Record<string, unknown>;
+	let researchViewPayload: Record<string, unknown> | null;
 
 	beforeEach(() => {
 		setPage({
@@ -130,6 +131,7 @@ describe('collections/[id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123')
 		});
 		workspacePayload = buildWorkspacePayload();
+		researchViewPayload = null;
 		fetchMock.mockReset();
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
@@ -144,6 +146,9 @@ describe('collections/[id]/+page.svelte', () => {
 					count: 0,
 					items: []
 				});
+			}
+			if (url.pathname === '/api/v1/collections/col_123/research-view' && researchViewPayload) {
+				return jsonResponse(researchViewPayload);
 			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
@@ -203,5 +208,50 @@ describe('collections/[id]/+page.svelte', () => {
 
 		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
 		await expect.element(primaryLink).toBeInTheDocument();
+	});
+
+	it('summarizes repeated research-view warnings in the overview', async () => {
+		researchViewPayload = {
+			collection_id: 'col_123',
+			state: 'empty',
+			overview: {
+				document_count: 2,
+				sample_count: 0,
+				measurement_count: 0,
+				evidence_count: 0,
+				material_systems: [],
+				process_families: [],
+				variable_axes: [],
+				measured_properties: []
+			},
+			paper_coverage: [],
+			comparable_groups: [],
+			warnings: [
+				{
+					warning_id: 'warning:no_measurement_results:paper:doc_1',
+					code: 'no_measurement_results',
+					severity: 'warning',
+					scope: 'paper',
+					message: 'No measurement results were detected for this paper.',
+					related_object_ids: ['doc_1']
+				},
+				{
+					warning_id: 'warning:no_measurement_results:paper:doc_2',
+					code: 'no_measurement_results',
+					severity: 'warning',
+					scope: 'paper',
+					message: 'No measurement results were detected for this paper.',
+					related_object_ids: ['doc_2']
+				}
+			]
+		};
+
+		render(Page);
+
+		await expect
+			.element(
+				browserPage.getByText('No measurement results were detected for this paper. (2 papers)')
+			)
+			.toBeInTheDocument();
 	});
 });

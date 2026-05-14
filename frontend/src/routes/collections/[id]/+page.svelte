@@ -63,6 +63,8 @@
 	);
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
 	$: readinessState = getOverviewReadinessState(stateWorkspace);
+	$: hasActiveTask = isTaskActive(stateWorkspace?.latest_task);
+	$: uploadControlsDisabled = uploadLoading || hasActiveTask;
 	$: pipelineSteps = buildOverviewPipelineSteps(stateWorkspace);
 	$: paperCount = Math.max(stateWorkspace?.document_summary.total_documents ?? 0, effectiveFileCount);
 	$: statusChecklistItems = [
@@ -195,6 +197,7 @@
 	}
 
 	function browseFiles() {
+		if (uploadControlsDisabled) return;
 		fileInput?.click();
 	}
 
@@ -205,6 +208,7 @@
 
 	function handleDrop(event: DragEvent) {
 		event.preventDefault();
+		if (uploadControlsDisabled) return;
 		isDragging = false;
 		handleFiles(event.dataTransfer?.files ?? null);
 	}
@@ -220,6 +224,7 @@
 	}
 
 	function handleDropzoneKeydown(event: KeyboardEvent) {
+		if (uploadControlsDisabled) return;
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
 			browseFiles();
@@ -233,9 +238,21 @@
 		}
 
 		actionStatus = '';
+		if (hasActiveTask) {
+			actionStatus = $t('documents.indexing');
+			return;
+		}
+
 		try {
 			const task = await createBuildTask(collectionId);
 			mergeTask(task);
+			collections.update((items) =>
+				items.map((item) =>
+					item.id === collectionId
+						? { ...item, status: 'processing', updated_at: task.updated_at || item.updated_at }
+						: item
+				)
+			);
 			actionStatus = $t('documents.indexing');
 			schedulePoll(task.task_id);
 		} catch (err) {
@@ -603,7 +620,7 @@
 					<p>{$t('overview.uploadFormLead')}</p>
 				</div>
 				<div
-					class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
+					class={`dropzone ${isDragging ? 'dropzone--active' : ''} ${uploadControlsDisabled ? 'dropzone--disabled' : ''}`}
 					on:drop={handleDrop}
 					on:dragover={handleDragOver}
 					on:dragleave={handleDragLeave}
@@ -611,12 +628,14 @@
 					on:keydown={handleDropzoneKeydown}
 					role="button"
 					tabindex="0"
+					aria-disabled={uploadControlsDisabled}
 				>
 					<input
 						class="dropzone-input"
 						bind:this={fileInput}
 						type="file"
 						multiple
+						disabled={uploadControlsDisabled}
 						on:change={(event) => handleFiles((event.currentTarget as HTMLInputElement).files)}
 					/>
 					<div class="dropzone-title">{$t('documents.dropHint')}</div>
@@ -632,12 +651,17 @@
 						class="btn btn--primary"
 						type="button"
 						on:click={submitUpload}
-						disabled={uploadLoading || !selectedFiles.length}
+						disabled={uploadControlsDisabled || !selectedFiles.length}
 					>
 						{uploadLoading ? $t('documents.uploading') : $t('documents.upload')}
 					</button>
 					{#if effectiveFileCount > 0}
-						<button class="btn btn--ghost" type="button" on:click={startBuildRun}>
+						<button
+							class="btn btn--ghost"
+							type="button"
+							disabled={hasActiveTask}
+							on:click={startBuildRun}
+						>
 							{$t('overview.actions.startProcessing')}
 						</button>
 					{/if}

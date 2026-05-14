@@ -14,6 +14,22 @@ type UploadedFile = {
 	created_at: string;
 };
 
+type BuildTask = {
+	task_id: string;
+	collection_id: string;
+	task_type: string;
+	status: 'queued' | 'running' | 'completed' | 'partial_success' | 'failed';
+	current_stage: string;
+	progress_percent: number;
+	output_path: string | null;
+	errors: string[];
+	warnings: string[];
+	created_at: string;
+	updated_at: string;
+	started_at: string | null;
+	finished_at: string | null;
+};
+
 function json(body: unknown, status = 200) {
 	return {
 		status,
@@ -35,17 +51,36 @@ function collectionPayload(fileCount: number) {
 	};
 }
 
-function workspacePayload(uploadedFiles: UploadedFile[]) {
+function taskPayload(status: BuildTask['status'], progressPercent: number): BuildTask {
+	return {
+		task_id: 'task_upload',
+		collection_id: collectionId,
+		task_type: 'build_collection',
+		status,
+		current_stage: status === 'queued' ? 'files_registered' : 'paper_facts_started',
+		progress_percent: progressPercent,
+		output_path: null,
+		errors: [],
+		warnings: [],
+		created_at: '2026-05-14T00:00:00Z',
+		updated_at: '2026-05-14T00:00:03Z',
+		started_at: status === 'queued' ? null : '2026-05-14T00:00:02Z',
+		finished_at: null
+	};
+}
+
+function workspacePayload(uploadedFiles: UploadedFile[], activeTask: BuildTask | null) {
 	const fileCount = uploadedFiles.length;
+	const processing = Boolean(activeTask && activeTask.status !== 'completed');
 	return {
 		collection: collectionPayload(fileCount),
 		file_count: fileCount,
-		status_summary: fileCount > 0 ? 'ready_to_process' : 'empty',
+		status_summary: processing ? 'processing' : fileCount > 0 ? 'ready_to_process' : 'empty',
 		workflow: {
-			documents: 'not_started',
-			results: 'not_started',
-			evidence: 'not_started',
-			comparisons: 'not_started'
+			documents: processing ? 'processing' : 'not_started',
+			results: processing ? 'processing' : 'not_started',
+			evidence: processing ? 'processing' : 'not_started',
+			comparisons: processing ? 'processing' : 'not_started'
 		},
 		document_summary: {
 			total_documents: fileCount,
@@ -64,8 +99,8 @@ function workspacePayload(uploadedFiles: UploadedFile[]) {
 			graph_stale: false,
 			updated_at: '2026-05-14T00:00:00Z'
 		},
-		latest_task: null,
-		recent_tasks: [],
+		latest_task: activeTask,
+		recent_tasks: activeTask ? [activeTask] : [],
 		capabilities: {
 			can_view_documents: false,
 			can_view_results: false,
@@ -87,6 +122,7 @@ function workspacePayload(uploadedFiles: UploadedFile[]) {
 
 async function mockUploadApis(page: Page) {
 	const uploadedFiles: UploadedFile[] = [];
+	let activeTask: BuildTask | null = null;
 
 	await page.route('**/*', async (route) => {
 		const url = new URL(route.request().url());
@@ -106,7 +142,7 @@ async function mockUploadApis(page: Page) {
 			return route.fulfill(json(collectionPayload(uploadedFiles.length)));
 		}
 		if (path === `/api/v1/collections/${collectionId}/workspace`) {
-			return route.fulfill(json(workspacePayload(uploadedFiles)));
+			return route.fulfill(json(workspacePayload(uploadedFiles, activeTask)));
 		}
 		if (path === `/api/v1/collections/${collectionId}/files` && route.request().method() === 'GET') {
 			return route.fulfill(json({ count: uploadedFiles.length, items: uploadedFiles }));
@@ -125,6 +161,17 @@ async function mockUploadApis(page: Page) {
 			};
 			uploadedFiles.push(nextFile);
 			return route.fulfill(json(nextFile, 201));
+		}
+		if (
+			path === `/api/v1/collections/${collectionId}/tasks/build` &&
+			route.request().method() === 'POST'
+		) {
+			activeTask = taskPayload('queued', 8);
+			return route.fulfill(json(activeTask, 201));
+		}
+		if (path === '/api/v1/tasks/task_upload') {
+			activeTask = taskPayload('running', 42);
+			return route.fulfill(json(activeTask));
 		}
 		if (path === `/api/v1/collections/${collectionId}/research-view`) {
 			return route.fulfill(json({ detail: 'research view not generated yet' }, 404));
@@ -187,11 +234,27 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 		fullPage: true
 	});
 
+	await page.getByRole('button', { name: 'Start processing' }).first().click();
+	await expect(page.getByText('Processing started')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Collection is processing' })).toBeVisible();
+	await expect(page.locator('.collection-meta-row').getByText('Processing')).toBeVisible();
+	await expect(page.getByText('Current progress')).toBeVisible();
+	await expect(page.getByText('8%')).toBeVisible();
+	await expect(page.locator('#upload').getByRole('button', { name: 'Upload' })).toBeDisabled();
+	await expect(page.locator('#upload').getByRole('button', { name: 'Start processing' })).toBeDisabled();
+	await expect(page.locator('#upload .dropzone')).toHaveAttribute('aria-disabled', 'true');
+	await page.waitForTimeout(2600);
+	await expect(page.getByText('42%')).toBeVisible();
+	await page.screenshot({
+		path: testInfo.outputPath('collection-upload-processing-desktop.png'),
+		fullPage: true
+	});
+
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`/collections/${collectionId}`);
-	await expect(page.getByRole('heading', { name: 'Collection is waiting for processing' })).toBeInViewport();
-	await expect(page.getByRole('button', { name: 'Start processing' }).first()).toBeVisible();
-	await expect(page.getByText('lpbf-316l-study.pdf')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Collection is processing' })).toBeInViewport();
+	await expect(page.getByRole('link', { name: 'View processing progress' })).toBeVisible();
+	await expect(page.getByText('42%')).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({
 		path: testInfo.outputPath('collection-upload-mobile.png'),

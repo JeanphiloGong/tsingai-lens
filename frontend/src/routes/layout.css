@@ -749,6 +749,11 @@ textarea {
   background: rgba(43, 111, 247, 0.08);
 }
 
+.dropzone--disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .dropzone-input {
   display: none;
 }

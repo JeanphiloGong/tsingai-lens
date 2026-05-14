@@ -24,7 +24,12 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: storeCollection = $collections.find((item) => item.id === collectionId);
-	$: collection = workspace?.collection ?? storeCollection;
+	$: collection = workspace?.collection
+		? {
+				...workspace.collection,
+				status: storeCollection?.status ?? workspace.collection.status
+			}
+		: storeCollection;
 	$: collectionName = collection?.name;
 	$: effectiveDocumentCount = Math.max(
 		workspace?.document_summary.total_documents ?? 0,
@@ -34,7 +39,12 @@
 	);
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveDocumentCount } : null;
 	$: documentCount = effectiveDocumentCount;
-	$: readinessState = stateWorkspace ? getOverviewReadinessState(stateWorkspace) : null;
+	$: storeCollectionProcessing = isProcessingStatus(storeCollection?.status);
+	$: readinessState = storeCollectionProcessing
+		? 'processing'
+		: stateWorkspace
+			? getOverviewReadinessState(stateWorkspace)
+			: null;
 	$: statusLabel = readinessState
 		? $t(`overview.readinessLabels.${readinessState}`)
 		: formatStatus(collection?.status);
@@ -73,6 +83,12 @@
 		const key = `overview.status.${status}`;
 		const translated = $t(key);
 		return translated === key ? status : translated;
+	}
+
+	function isProcessingStatus(status?: string | null) {
+		return ['processing', 'running', 'queued', 'started', 'in_progress'].includes(
+			String(status ?? '').trim()
+		);
 	}
 
 	function formatDate(value?: string | null) {

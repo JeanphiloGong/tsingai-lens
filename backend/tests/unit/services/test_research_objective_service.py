@@ -2403,6 +2403,87 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
     }
 
 
+def test_research_objective_service_limits_pairwise_to_target_properties(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "question": "How do process axes affect corrosion potential?",
+            "variable_process_axes": ["laser power"],
+            "target_property_axes": ["pitting potential"],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        laser_power: str,
+        property_name: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-corrosion",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": property_name,
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {"Laser power (W)": laser_power},
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": "mV",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement(
+                "oeu-ep-1",
+                sample_number="1",
+                laser_power="135",
+                property_name="E p",
+                value=124.7,
+            ),
+            measurement(
+                "oeu-ep-2",
+                sample_number="2",
+                laser_power="255",
+                property_name="E p",
+                value=199.7,
+            ),
+            measurement(
+                "oeu-rfilm-1",
+                sample_number="1",
+                laser_power="135",
+                property_name="R film",
+                value=5.03,
+            ),
+            measurement(
+                "oeu-rfilm-2",
+                sample_number="2",
+                laser_power="255",
+                property_name="R film",
+                value=5.67,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert len(comparison_units) == 1
+    assert comparison_units[0].property_normalized == "E p"
+    assert comparison_units[0].value_payload["comparison_axis"] == "laser power"
+
+
 def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlled_specs(
     tmp_path,
 ):

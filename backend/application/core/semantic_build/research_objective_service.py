@@ -119,6 +119,16 @@ _MECHANICAL_PROPERTY_AXES = _BROAD_PROPERTY_AXIS_EXPANSIONS[
 _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES = frozenset(
     {"density", "relative density"}
 )
+_OBJECTIVE_PROPERTY_ALIASES = {
+    "ductility": "elongation",
+    "e corr": "corrosion potential",
+    "ecorr": "corrosion potential",
+    "e p": "pitting potential",
+    "ep": "pitting potential",
+    "i corr": "corrosion current density",
+    "icorr": "corrosion current density",
+    "current density": "corrosion current density",
+}
 _OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES = (
     "yield strength",
     "ultimate tensile strength",
@@ -2356,8 +2366,12 @@ class ResearchObjectiveService:
             tuple[str, str, str, str | None],
             list[ObjectiveEvidenceUnit],
         ] = {}
-        allowed_pair_specs_by_scope = self._objective_pairwise_allowed_specs(units)
+        allowed_pair_specs_by_scope = self._objective_pairwise_allowed_specs(
+            units,
+            context_by_objective_id=context_by_objective_id,
+        )
         for unit in units:
+            objective_context = context_by_objective_id.get(unit.objective_id)
             if unit.unit_kind != "measurement":
                 continue
             if (
@@ -2365,6 +2379,10 @@ class ResearchObjectiveService:
                 or not unit.sample_context
                 or not unit.process_context
                 or self._objective_measurement_numeric_value(unit) is None
+                or not self._objective_unit_matches_target_property(
+                    unit,
+                    objective_context=objective_context,
+                )
             ):
                 continue
             measurements_by_key.setdefault(
@@ -2431,6 +2449,8 @@ class ResearchObjectiveService:
     def _objective_pairwise_allowed_specs(
         self,
         units: tuple[ObjectiveEvidenceUnit, ...],
+        *,
+        context_by_objective_id: dict[str, ObjectiveContext],
     ) -> dict[tuple[str, str], set[tuple[str, str, str]]]:
         numeric_measurements = tuple(
             unit
@@ -2440,6 +2460,10 @@ class ResearchObjectiveService:
             and unit.sample_context
             and unit.process_context
             and self._objective_measurement_numeric_value(unit) is not None
+            and self._objective_unit_matches_target_property(
+                unit,
+                objective_context=context_by_objective_id.get(unit.objective_id),
+            )
         )
         document_density_values = self._objective_document_density_values(
             numeric_measurements
@@ -2880,6 +2904,22 @@ class ResearchObjectiveService:
 
     def _objective_pairwise_property_key(self, value: Any) -> str | None:
         return self._normalize_property_label(value)
+
+    def _objective_unit_matches_target_property(
+        self,
+        unit: ObjectiveEvidenceUnit,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> bool:
+        if objective_context is None or not objective_context.target_property_axes:
+            return True
+        property_key = self._objective_pairwise_property_key(unit.property_normalized)
+        if not property_key:
+            return False
+        return self._property_axis_matches_any(
+            property_key,
+            objective_context.target_property_axes,
+        )
 
     def _objective_pairwise_relation_spec_key(
         self,
@@ -3963,7 +4003,9 @@ class ResearchObjectiveService:
     def _normalize_property_label(self, value: Any) -> str | None:
         text = str(value or "").replace("_", " ").replace("-", " ").strip()
         normalized = " ".join(text.split()).casefold()
-        return normalized or None
+        if not normalized:
+            return None
+        return _OBJECTIVE_PROPERTY_ALIASES.get(normalized, normalized)
 
     def _coerce_number(self, value: Any) -> float | None:
         text = str(value).strip().replace(",", "")

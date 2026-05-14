@@ -3208,12 +3208,14 @@ class ResearchObjectiveService:
         )
         if not headers or not matrix:
             return (), ()
-        rows = matrix
-        if self._objective_row_matches_headers(matrix[0], headers):
-            rows = matrix[1:]
-        rows = tuple(
+        candidate_rows = (
+            matrix[1:]
+            if self._objective_row_matches_headers(matrix[0], headers)
+            else matrix
+        )
+        filtered_rows = tuple(
             row
-            for row in rows
+            for row in candidate_rows
             if any(cell for cell in row)
             and not self._objective_table_matrix_continuation_header_row(
                 headers=headers,
@@ -3222,7 +3224,7 @@ class ResearchObjectiveService:
         )
         data_rows = tuple(
             (row_index, row)
-            for row_index, row in enumerate(rows, start=1)
+            for row_index, row in enumerate(filtered_rows, start=1)
         )
         return headers, data_rows
 
@@ -3238,9 +3240,9 @@ class ResearchObjectiveService:
         if first_header_key not in {"sample", "sample_id", "sample_number"}:
             return False
         first_cell = str(row[0] if row else "").strip()
-        if self._objective_column_key(first_cell) == first_header_key:
-            return True
-        return not first_cell and any(str(cell).strip() for cell in row[1:])
+        matches_header = self._objective_column_key(first_cell) == first_header_key
+        continues_header = not first_cell and any(str(cell).strip() for cell in row[1:])
+        return matches_header or continues_header
 
     def _objective_row_matches_headers(
         self,

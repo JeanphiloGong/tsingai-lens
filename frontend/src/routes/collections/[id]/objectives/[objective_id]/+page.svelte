@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../../_shared/api';
@@ -92,7 +93,7 @@
 			: null) ??
 		filteredEvidenceUnits[0] ??
 		null;
-	$: if (collectionId && objectiveId && loadKey !== loadedKey) {
+	$: if (browser && collectionId && objectiveId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		void loadObjectiveView();
 	}
@@ -1486,6 +1487,26 @@
 	}
 
 	@media (max-width: 760px) {
+		.objective-workspace {
+			gap: 12px;
+		}
+
+		.objective-primary-grid {
+			order: 1;
+		}
+
+		.objective-hero {
+			order: 2;
+		}
+
+		.objective-workspace-grid {
+			order: 3;
+		}
+
+		.objective-diagnostics {
+			order: 4;
+		}
+
 		.objective-hero,
 		.section-heading,
 		.logic-step__header,

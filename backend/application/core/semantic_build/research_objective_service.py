@@ -5868,14 +5868,57 @@ class ResearchObjectiveService:
         self,
         objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ResearchObjective, ...]:
-        deduped: list[ResearchObjective] = []
+        unique_objectives: list[ResearchObjective] = []
         seen_objective_ids: set[str] = set()
         for objective in objectives:
             if objective.objective_id in seen_objective_ids:
                 continue
             seen_objective_ids.add(objective.objective_id)
+            unique_objectives.append(objective)
+
+        deduped: list[ResearchObjective] = []
+        for objective in unique_objectives:
+            if self._objective_is_redundant_property_subset(
+                objective,
+                objectives=tuple(unique_objectives),
+            ):
+                continue
             deduped.append(objective)
         return tuple(deduped)
+
+    def _objective_is_redundant_property_subset(
+        self,
+        objective: ResearchObjective,
+        *,
+        objectives: tuple[ResearchObjective, ...],
+    ) -> bool:
+        property_keys = self._axis_key_set(*objective.property_axes)
+        if not property_keys:
+            return False
+        material_keys = self._axis_key_set(*objective.material_scope)
+        process_keys = self._axis_key_set(*objective.process_axes)
+        for other in objectives:
+            if other.objective_id == objective.objective_id:
+                continue
+            other_property_keys = self._axis_key_set(*other.property_axes)
+            if not property_keys < other_property_keys:
+                continue
+            other_material_keys = self._axis_key_set(*other.material_scope)
+            if (
+                material_keys
+                and other_material_keys
+                and not material_keys.intersection(other_material_keys)
+            ):
+                continue
+            other_process_keys = self._axis_key_set(*other.process_axes)
+            if (
+                process_keys
+                and other_process_keys
+                and not process_keys.issubset(other_process_keys)
+            ):
+                continue
+            return True
+        return False
 
     def _split_mixed_property_objectives(
         self,

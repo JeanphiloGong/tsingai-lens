@@ -3919,7 +3919,7 @@ def test_research_objective_service_rejects_overbroad_axis_canonicalization(
     assert "scan strategy" in all_process_axes
 
 
-def test_research_objective_service_falls_back_when_merge_plan_drops_objective(
+def test_research_objective_service_dedupes_subset_after_rejected_merge_plan(
     tmp_path,
 ):
     objectives = _build_duplicate_paper_objectives(
@@ -3927,7 +3927,18 @@ def test_research_objective_service_falls_back_when_merge_plan_drops_objective(
         _DroppedObjectiveMergeExtractor(),
     )
 
-    assert len(objectives) == 3
+    assert len(objectives) == 2
+    mechanical_objective = next(
+        objective
+        for objective in objectives
+        if "yield strength" in objective.property_axes
+    )
+    assert mechanical_objective.property_axes == (
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+        "microhardness",
+    )
 
 
 def test_research_objective_service_falls_back_when_merge_plan_invents_axis(
@@ -3938,7 +3949,7 @@ def test_research_objective_service_falls_back_when_merge_plan_invents_axis(
         _InventedAxisMergeExtractor(),
     )
 
-    assert len(objectives) == 3
+    assert len(objectives) == 2
     assert all("laser power" not in objective.process_axes for objective in objectives)
 
 

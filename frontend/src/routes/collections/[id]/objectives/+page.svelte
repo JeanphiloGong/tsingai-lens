@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import { errorMessage } from '../../../_shared/api';
+	import { errorMessage, getApiErrorCode } from '../../../_shared/api';
 	import { t } from '../../../_shared/i18n';
 	import {
 		fetchCollectionObjectives,
@@ -12,6 +12,7 @@
 
 	let objectiveList: ObjectiveList | null = null;
 	let objectivesError = '';
+	let objectivesNotReady = false;
 	let loading = false;
 	let loadedCollectionId = '';
 
@@ -35,11 +36,16 @@
 	async function loadObjectives() {
 		loading = true;
 		objectivesError = '';
+		objectivesNotReady = false;
 		try {
 			objectiveList = await fetchCollectionObjectives(collectionId);
 		} catch (err) {
 			objectiveList = null;
-			objectivesError = errorMessage(err);
+			if (getApiErrorCode(err) === 'research_objectives_not_ready') {
+				objectivesNotReady = true;
+			} else {
+				objectivesError = errorMessage(err);
+			}
 		} finally {
 			loading = false;
 		}
@@ -84,6 +90,19 @@
 	{#if loading}
 		<section class="objectives-state-card" aria-busy="true" aria-live="polite">
 			<div class="status" role="status">{$t('research.objectives.loading')}</div>
+		</section>
+	{:else if objectivesNotReady}
+		<section class="objectives-state-card objectives-state-card--pending" role="status">
+			<h3>{$t('research.objectives.pendingTitle')}</h3>
+			<p>{$t('research.objectives.pendingBody')}</p>
+			<div class="objectives-state-card__actions">
+				<a class="btn btn--primary btn--small" href={resolve('/collections/[id]', { id: collectionId })}>
+					{$t('research.objectives.openOverview')}
+				</a>
+				<button class="btn btn--ghost btn--small" type="button" on:click={loadObjectives}>
+					{$t('research.objectives.refresh')}
+				</button>
+			</div>
 		</section>
 	{:else if objectivesError}
 		<section class="objectives-state-card objectives-state-card--error" role="alert">
@@ -248,6 +267,18 @@
 		border-color: var(--danger-border);
 		background: var(--danger-bg);
 		color: var(--danger-text);
+	}
+
+	.objectives-state-card--pending {
+		border-color: var(--warning-border);
+		background: var(--warning-bg);
+	}
+
+	.objectives-state-card__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+		margin-top: 8px;
 	}
 
 	.objectives-summary-grid {

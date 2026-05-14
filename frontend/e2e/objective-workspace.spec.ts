@@ -228,6 +228,42 @@ async function mockObjectiveApis(page: Page) {
 	});
 }
 
+async function mockObjectivesNotReadyApis(page: Page) {
+	await page.route('**/*', async (route) => {
+		const url = new URL(route.request().url());
+		const path = url.pathname;
+
+		if (!path.startsWith('/api/v1/')) {
+			return route.continue();
+		}
+
+		if (path === '/api/v1/collections') {
+			return route.fulfill(json({ items: [collectionPayload()] }));
+		}
+		if (path === `/api/v1/collections/${collectionId}`) {
+			return route.fulfill(json(collectionPayload()));
+		}
+		if (path === `/api/v1/collections/${collectionId}/workspace`) {
+			return route.fulfill(json(workspacePayload()));
+		}
+		if (path === `/api/v1/collections/${collectionId}/objectives`) {
+			return route.fulfill(
+				json(
+					{
+						code: 'research_objectives_not_ready',
+						message:
+							'The collection does not have research objectives yet. Finish processing first.',
+						collection_id: collectionId
+					},
+					409
+				)
+			);
+		}
+
+		return route.fulfill(json({ detail: `unhandled test route: ${path}` }, 404));
+	});
+}
+
 async function expectNoHorizontalOverflow(page: Page) {
 	const hasOverflow = await page.evaluate(() => {
 		const width = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
@@ -270,4 +306,22 @@ test('objective workspace renders logic-chain screenshots and source links', asy
 		path: testInfo.outputPath('objective-workspace-mobile.png'),
 		fullPage: true
 	});
+});
+
+test('objectives page treats not-ready responses as a pending workflow state', async ({ page }) => {
+	await mockObjectivesNotReadyApis(page);
+
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.goto(`/collections/${collectionId}/objectives`);
+	await expect(page.getByRole('heading', { name: 'Research objectives are pending' })).toBeVisible();
+	await expect(
+		page.getByText('Finish collection processing before reviewing objectives.')
+	).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Open collection overview' })).toHaveAttribute(
+		'href',
+		`/collections/${collectionId}`
+	);
+	await expect(page.getByText(/409 Conflict/)).toHaveCount(0);
+	await expect(page.getByText(/research_objectives_not_ready/)).toHaveCount(0);
+	await expectNoHorizontalOverflow(page);
 });

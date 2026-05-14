@@ -464,9 +464,7 @@
 		const documentId = displayValue(sourceRef.document_id) || unit.document_id;
 		const pageNumber = displayValue(sourceRef.page);
 		const evidenceId =
-			displayValue(sourceRef.evidence_id) ||
-			displayValue(sourceRef.evidence_ref_id) ||
-			unit.evidence_unit_id;
+			displayValue(sourceRef.evidence_id) || displayValue(sourceRef.evidence_ref_id);
 		const anchorId = displayValue(sourceRef.anchor_id) || unit.evidence_anchor_ids[0] || '';
 		const params: [string, string][] = [];
 		if (pageNumber) params.push(['page', pageNumber]);

@@ -4139,6 +4139,17 @@ class ResearchObjectiveService:
         target_axes = self._objective_target_property_axes(objective_context)
         if self._property_axis_matches_any(normalized, target_axes):
             return True
+        if (
+            normalized in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES
+            and any(
+                axis in _STRUCTURAL_PROPERTY_AXES
+                for axis in (
+                    self._normalize_property_label(target_axis)
+                    for target_axis in target_axes
+                )
+            )
+        ):
+            return True
         return any(
             self._axis_label_is_mentioned(normalized, axis)
             or self._axis_label_is_mentioned(column_text, axis)

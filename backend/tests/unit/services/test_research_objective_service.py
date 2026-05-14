@@ -1274,6 +1274,94 @@ def test_research_objective_service_uses_matching_result_headers_when_role_is_br
     assert records[1]["sample_context"]["Sample number"] == "2"
 
 
+def test_research_objective_service_treats_relative_density_as_structural_target(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Condition number": "sample_id",
+                "Sample number": "sample_id",
+                "Hatch space (mm)": "process_variable",
+                "Scan strategy": "process_variable",
+                "Scanning speed (mm/s)": "process_variable",
+                "Energy density (J/mm 3 )": "process_variable",
+                "Relative density": "target_property",
+            },
+            "confidence": 0.84,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "variable_process_axes": [
+                "energy density",
+                "scanning strategy",
+                "scanning speed",
+            ],
+            "target_property_axes": ["densification", "microstructure"],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 2,
+            "column_headers": [
+                "Condition number",
+                "Sample number",
+                "Hatch space (mm)",
+                "Scan strategy",
+                "Scanning speed (mm/s)",
+                "Energy density (J/mm 3 )",
+                "Relative density",
+            ],
+            "table_matrix": [
+                [
+                    "Condition number",
+                    "Sample number",
+                    "Hatch space (mm)",
+                    "Scan strategy",
+                    "Scanning speed (mm/s)",
+                    "Energy density (J/mm 3 )",
+                    "Relative density",
+                ],
+                ["1", "1", "0.114", "A", "0.25", "70", "95.4"],
+                ["1", "2", "0.114", "B", "0.25", "70", "97.7"],
+                ["6", "16", "0.12", "C", "0.111", "150", "98.6"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    assert [record["property_normalized"] for record in records] == [
+        "relative density",
+        "relative density",
+        "relative density",
+    ]
+    assert [record["sample_context"]["Sample number"] for record in records] == [
+        "1",
+        "2",
+        "16",
+    ]
+    assert records[2]["process_context"] == {
+        "Energy density (J/mm 3 )": "150",
+        "Hatch space (mm)": "0.12",
+        "Scan strategy": "C",
+        "Scanning speed (mm/s)": "0.111",
+    }
+    assert records[2]["value_payload"]["value"] == 98.6
+
+
 def test_research_objective_service_skips_matrix_test_condition_table_fallback(
     tmp_path,
 ):

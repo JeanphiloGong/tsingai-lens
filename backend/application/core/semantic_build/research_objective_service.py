@@ -1231,6 +1231,8 @@ class ResearchObjectiveService:
         if any(self._axis_values_match(header, axis) for axis in axes):
             return True
         header_key = self._objective_column_key(header)
+        if not header_key:
+            return False
         for axis in axes:
             axis_key = self._objective_column_key(axis)
             if not axis_key:

@@ -1148,6 +1148,76 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
     )
 
 
+def test_research_objective_service_keeps_non_ascii_process_headers_out_of_results(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-3",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "α ( ◦ )": "process_variable",
+                "β ( ◦ )": "process_variable",
+                "θ ( ◦ )": "process_variable",
+                "Yield Strength Experiment (MPa)": "result_property",
+            },
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "variable_process_axes": [
+                "scan strategy rotation angle",
+                "build orientation",
+            ],
+            "target_property_axes": [
+                "crystallographic texture",
+                "yield strength",
+            ],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 8,
+            "column_headers": [
+                "α ( ◦ )",
+                "β ( ◦ )",
+                "θ ( ◦ )",
+                "Yield Strength Experiment (MPa)",
+            ],
+            "table_matrix": [
+                [
+                    "α ( ◦ )",
+                    "β ( ◦ )",
+                    "θ ( ◦ )",
+                    "Yield Strength Experiment (MPa)",
+                ],
+                ["0", "22.5", "45", "356.9"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    assert len(records) == 1
+    assert records[0]["property_normalized"] == "yield strength experiment"
+    assert records[0]["value_payload"]["value"] == 356.9
+    assert records[0]["sample_context"] == {"sample_number": "1"}
+    assert records[0]["process_context"] == {
+        "α ( ◦ )": "0",
+        "β ( ◦ )": "22.5",
+        "θ ( ◦ )": "45",
+    }
+
+
 def test_research_objective_service_uses_matching_result_headers_when_role_is_broad(
     tmp_path,
 ):

@@ -31,6 +31,7 @@
 		ready: boolean;
 		items: string[];
 		emptyKey: string;
+		evidenceKind: string | null;
 	};
 
 	type SourceEntry = {
@@ -54,6 +55,7 @@
 	let selectedEvidenceUnitId = '';
 	let selectedEvidenceKind = 'all';
 	let selectedEvidenceDocumentId = 'all';
+	let evidenceSection: HTMLElement | null = null;
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
@@ -366,7 +368,8 @@
 				count: scopeItems.length,
 				ready: view.readiness.objectives_ready,
 				items: scopeItems.slice(0, 5),
-				emptyKey: 'research.objectiveWorkspace.noScope'
+				emptyKey: 'research.objectiveWorkspace.noScope',
+				evidenceKind: null
 			},
 			{
 				step_id: 'coverage',
@@ -377,7 +380,8 @@
 					.filter((frame) => frame.relevance !== 'irrelevant')
 					.slice(0, 4)
 					.map((frame) => frameTitle(frame)),
-				emptyKey: 'research.objectiveWorkspace.noCoverage'
+				emptyKey: 'research.objectiveWorkspace.noCoverage',
+				evidenceKind: null
 			},
 			{
 				step_id: 'conditions',
@@ -385,7 +389,8 @@
 				count: conditions.length,
 				ready: view.readiness.evidence_units_ready,
 				items: conditions.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
-				emptyKey: 'research.objectiveWorkspace.noConditions'
+				emptyKey: 'research.objectiveWorkspace.noConditions',
+				evidenceKind: 'test_condition'
 			},
 			{
 				step_id: 'measurements',
@@ -393,7 +398,8 @@
 				count: measurements.length,
 				ready: view.readiness.evidence_units_ready,
 				items: measurements.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
-				emptyKey: 'research.objectiveWorkspace.noMeasurements'
+				emptyKey: 'research.objectiveWorkspace.noMeasurements',
+				evidenceKind: 'measurement'
 			},
 			{
 				step_id: 'observations',
@@ -401,7 +407,8 @@
 				count: observations.length,
 				ready: view.readiness.evidence_units_ready,
 				items: observations.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
-				emptyKey: 'research.objectiveWorkspace.noObservations'
+				emptyKey: 'research.objectiveWorkspace.noObservations',
+				evidenceKind: 'characterization'
 			},
 			{
 				step_id: 'gaps',
@@ -412,9 +419,17 @@
 					0,
 					4
 				),
-				emptyKey: 'research.objectiveWorkspace.noGaps'
+				emptyKey: 'research.objectiveWorkspace.noGaps',
+				evidenceKind: 'comparison'
 			}
 		];
+	}
+
+	function focusLogicStepEvidence(step: LogicStep) {
+		selectedEvidenceKind = step.evidenceKind ?? 'all';
+		selectedEvidenceDocumentId = 'all';
+		selectedEvidenceUnitId = '';
+		evidenceSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 	}
 
 	function queryString(params: [string, string][]) {
@@ -528,7 +543,13 @@
 				</div>
 				<div class="logic-chain" aria-label={$t('research.objectiveWorkspace.logicChainTitle')}>
 					{#each logicSteps as step (step.step_id)}
-						<article class:logic-step--pending={!step.ready} class="logic-step">
+						<button
+							class:logic-step--pending={!step.ready}
+							class:selected={step.evidenceKind !== null && selectedEvidenceKind === step.evidenceKind}
+							class="logic-step"
+							type="button"
+							on:click={() => focusLogicStepEvidence(step)}
+						>
 							<div class="logic-step__marker">{step.count}</div>
 							<div class="logic-step__body">
 								<div class="logic-step__header">
@@ -545,7 +566,7 @@
 									<p>{$t(step.emptyKey)}</p>
 								{/if}
 							</div>
-						</article>
+						</button>
 					{/each}
 				</div>
 			</section>
@@ -578,7 +599,7 @@
 
 		<section class="objective-workspace-grid">
 			<div class="objective-main-column">
-				<section class="objective-section">
+				<section class="objective-section" bind:this={evidenceSection}>
 					<div class="section-heading">
 						<div>
 							<h3>{$t('research.objectiveWorkspace.paperCoverageTitle')}</h3>
@@ -1113,10 +1134,20 @@
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr);
 		gap: 12px;
+		width: 100%;
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
 		padding: 14px;
+		text-align: left;
 		background: var(--bg-subtle);
+		cursor: pointer;
+		font: inherit;
+	}
+
+	.logic-step:hover,
+	.logic-step.selected {
+		border-color: var(--color-accent);
+		background: var(--surface-card);
 	}
 
 	.logic-step--pending {

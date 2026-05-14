@@ -304,4 +304,32 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 	});
+
+	it('uses logic-chain steps to focus related evidence', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Logic chain' }))
+			.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: /Measured results/ }).click();
+		await expect.element(browserPage.getByLabelText('Evidence kind')).toHaveValue('measurement');
+		await expect
+			.element(
+				browserPage
+					.getByRole('complementary', { name: 'Evidence detail' })
+					.getByText('Yield strength reached 560 MPa.')
+			)
+			.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: /Experimental conditions/ }).click();
+		await expect.element(browserPage.getByLabelText('Evidence kind')).toHaveValue('test_condition');
+		await expect
+			.element(
+				browserPage
+					.getByRole('complementary', { name: 'Evidence detail' })
+					.getByText('Tensile testing followed ASTM E8.')
+			)
+			.toBeInTheDocument();
+	});
 });

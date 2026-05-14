@@ -70,23 +70,23 @@
 	$: statusChecklistItems = [
 		{
 			label: $t('overview.cards.currentStatus.uploaded', { count: paperCount }),
-			done: stepStatus('upload') === 'completed'
+			done: stepStatus(pipelineSteps, 'upload') === 'completed'
 		},
 		{
 			label: $t('overview.cards.currentStatus.parsed'),
-			done: stepStatus('parse') === 'completed'
+			done: stepStatus(pipelineSteps, 'parse') === 'completed'
 		},
 		{
 			label: $t('overview.cards.currentStatus.evidence'),
-			done: stepStatus('evidence') === 'completed'
+			done: stepStatus(pipelineSteps, 'evidence') === 'completed'
 		},
 		{
 			label: $t('overview.cards.currentStatus.comparison'),
-			done: stepStatus('comparisons') === 'completed'
+			done: stepStatus(pipelineSteps, 'comparisons') === 'completed'
 		},
 		{
 			label: $t('overview.cards.currentStatus.graph'),
-			done: stepStatus('graph') === 'completed'
+			done: stepStatus(pipelineSteps, 'graph') === 'completed'
 		}
 	];
 	$: showUploadPanel =
@@ -143,6 +143,11 @@
 		} else {
 			clearPoll();
 			await Promise.all([loadWorkspace(false), loadFiles(false), loadResearchView()]);
+			uploadResult = null;
+			actionStatus =
+				task.status === 'failed'
+					? task.errors[0] || $t('overview.actions.viewErrors')
+					: $t('documents.indexDone');
 		}
 	}
 
@@ -383,8 +388,8 @@
 		return 'pending';
 	}
 
-	function stepStatus(key: OverviewPipelineStep['key']) {
-		return pipelineSteps.find((step) => step.key === key)?.status ?? 'pending';
+	function stepStatus(steps: OverviewPipelineStep[], key: OverviewPipelineStep['key']) {
+		return steps.find((step) => step.key === key)?.status ?? 'pending';
 	}
 
 	function paperMixRows(): PaperMixRow[] {

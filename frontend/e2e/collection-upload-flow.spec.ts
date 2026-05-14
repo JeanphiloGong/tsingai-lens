@@ -57,7 +57,12 @@ function taskPayload(status: BuildTask['status'], progressPercent: number): Buil
 		collection_id: collectionId,
 		task_type: 'build_collection',
 		status,
-		current_stage: status === 'queued' ? 'files_registered' : 'paper_facts_started',
+		current_stage:
+			status === 'queued'
+				? 'files_registered'
+				: status === 'completed'
+					? 'artifacts_ready'
+					: 'paper_facts_started',
 		progress_percent: progressPercent,
 		output_path: null,
 		errors: [],
@@ -65,22 +70,26 @@ function taskPayload(status: BuildTask['status'], progressPercent: number): Buil
 		created_at: '2026-05-14T00:00:00Z',
 		updated_at: '2026-05-14T00:00:03Z',
 		started_at: status === 'queued' ? null : '2026-05-14T00:00:02Z',
-		finished_at: null
+		finished_at: status === 'completed' ? '2026-05-14T00:00:08Z' : null
 	};
 }
 
 function workspacePayload(uploadedFiles: UploadedFile[], activeTask: BuildTask | null) {
 	const fileCount = uploadedFiles.length;
 	const processing = Boolean(activeTask && activeTask.status !== 'completed');
+	const ready = activeTask?.status === 'completed';
 	return {
-		collection: collectionPayload(fileCount),
+		collection: {
+			...collectionPayload(fileCount),
+			status: ready ? 'ready' : processing ? 'processing' : collectionPayload(fileCount).status
+		},
 		file_count: fileCount,
-		status_summary: processing ? 'processing' : fileCount > 0 ? 'ready_to_process' : 'empty',
+		status_summary: ready ? 'ready' : processing ? 'processing' : fileCount > 0 ? 'ready_to_process' : 'empty',
 		workflow: {
-			documents: processing ? 'processing' : 'not_started',
-			results: processing ? 'processing' : 'not_started',
-			evidence: processing ? 'processing' : 'not_started',
-			comparisons: processing ? 'processing' : 'not_started'
+			documents: ready ? 'ready' : processing ? 'processing' : 'not_started',
+			results: ready ? 'ready' : processing ? 'processing' : 'not_started',
+			evidence: ready ? 'ready' : processing ? 'processing' : 'not_started',
+			comparisons: ready ? 'ready' : processing ? 'processing' : 'not_started'
 		},
 		document_summary: {
 			total_documents: fileCount,
@@ -89,12 +98,12 @@ function workspacePayload(uploadedFiles: UploadedFile[], activeTask: BuildTask |
 		},
 		warnings: [],
 		artifacts: {
-			documents_ready: false,
-			document_profiles_ready: false,
-			evidence_cards_ready: false,
-			comparable_results_ready: false,
-			collection_comparable_results_ready: false,
-			comparison_rows_ready: false,
+			documents_ready: ready,
+			document_profiles_ready: ready,
+			evidence_cards_ready: ready,
+			comparable_results_ready: ready,
+			collection_comparable_results_ready: ready,
+			comparison_rows_ready: ready,
 			graph_ready: false,
 			graph_stale: false,
 			updated_at: '2026-05-14T00:00:00Z'
@@ -102,10 +111,10 @@ function workspacePayload(uploadedFiles: UploadedFile[], activeTask: BuildTask |
 		latest_task: activeTask,
 		recent_tasks: activeTask ? [activeTask] : [],
 		capabilities: {
-			can_view_documents: false,
-			can_view_results: false,
-			can_view_evidence: false,
-			can_view_comparisons: false,
+			can_view_documents: ready,
+			can_view_results: ready,
+			can_view_evidence: ready,
+			can_view_comparisons: ready,
 			can_view_graph: false,
 			can_download_graphml: false
 		},
@@ -120,9 +129,36 @@ function workspacePayload(uploadedFiles: UploadedFile[], activeTask: BuildTask |
 	};
 }
 
+function researchViewPayload(uploadedFiles: UploadedFile[]) {
+	return {
+		collection_id: collectionId,
+		state: 'ready',
+		overview: {
+			document_count: uploadedFiles.length,
+			sample_count: 1,
+			measurement_count: 1,
+			evidence_count: 1,
+			material_systems: ['316L stainless steel'],
+			process_families: ['LPBF'],
+			variable_axes: ['heat treatment'],
+			measured_properties: ['yield strength'],
+			coverage_quality: 'ready'
+		},
+		materials: [],
+		paper_coverage: [],
+		comparable_groups: [],
+		cross_paper_matrices: [],
+		trend_series: [],
+		evidence_links: {},
+		debug_links: {},
+		warnings: []
+	};
+}
+
 async function mockUploadApis(page: Page) {
 	const uploadedFiles: UploadedFile[] = [];
 	let activeTask: BuildTask | null = null;
+	let taskPollCount = 0;
 
 	await page.route('**/*', async (route) => {
 		const url = new URL(route.request().url());
@@ -170,10 +206,14 @@ async function mockUploadApis(page: Page) {
 			return route.fulfill(json(activeTask, 201));
 		}
 		if (path === '/api/v1/tasks/task_upload') {
-			activeTask = taskPayload('running', 42);
+			taskPollCount += 1;
+			activeTask = taskPollCount >= 2 ? taskPayload('completed', 100) : taskPayload('running', 42);
 			return route.fulfill(json(activeTask));
 		}
 		if (path === `/api/v1/collections/${collectionId}/research-view`) {
+			if (activeTask?.status === 'completed') {
+				return route.fulfill(json(researchViewPayload(uploadedFiles)));
+			}
 			return route.fulfill(json({ detail: 'research view not generated yet' }, 404));
 		}
 
@@ -253,11 +293,28 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 		fullPage: true
 	});
 
+	await page.waitForTimeout(2600);
+	await expect(page.getByText('Processing complete')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Collection is ready' })).toBeVisible();
+	await expect(page.locator('.collection-meta-row').getByText('Complete')).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Enter objectives' }).first()).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Trust reminder' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Research overview' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Add papers to this collection' })).toHaveCount(0);
+	await expect(page.locator('.check-list li.complete').filter({ hasText: 'Document parsing complete' })).toBeVisible();
+	await expect(page.locator('.check-list li.complete').filter({ hasText: 'Evidence extraction complete' })).toBeVisible();
+	await expect(page.locator('.check-list li.complete').filter({ hasText: 'Comparison view available' })).toBeVisible();
+	await expect(page.getByText('100%')).toBeVisible();
+	await expectNoHorizontalOverflow(page);
+	await page.screenshot({
+		path: testInfo.outputPath('collection-upload-ready-desktop.png'),
+		fullPage: true
+	});
+
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`/collections/${collectionId}`);
-	await expect(page.getByRole('heading', { name: 'Collection is processing' })).toBeInViewport();
-	await expect(page.getByRole('link', { name: 'View processing progress' }).first()).toBeVisible();
-	await expect(page.getByText('42%')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Collection is ready' })).toBeInViewport();
+	await expect(page.getByRole('link', { name: 'Enter objectives' }).first()).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({
 		path: testInfo.outputPath('collection-upload-mobile.png'),

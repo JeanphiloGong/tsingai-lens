@@ -39,9 +39,9 @@
 	);
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveDocumentCount } : null;
 	$: documentCount = effectiveDocumentCount;
-	$: storeCollectionProcessing = isProcessingStatus(storeCollection?.status);
-	$: readinessState = storeCollectionProcessing
-		? 'processing'
+	$: storeReadinessState = readinessFromCollectionStatus(storeCollection?.status);
+	$: readinessState = storeReadinessState
+		? storeReadinessState
 		: stateWorkspace
 			? getOverviewReadinessState(stateWorkspace)
 			: null;
@@ -85,10 +85,18 @@
 		return translated === key ? status : translated;
 	}
 
-	function isProcessingStatus(status?: string | null) {
-		return ['processing', 'running', 'queued', 'started', 'in_progress'].includes(
-			String(status ?? '').trim()
-		);
+	function readinessFromCollectionStatus(status?: string | null) {
+		const normalized = String(status ?? '').trim();
+		if (['processing', 'running', 'queued', 'started', 'in_progress'].includes(normalized)) {
+			return 'processing';
+		}
+		if (['ready', 'complete', 'completed', 'document_profiled', 'graph_ready'].includes(normalized)) {
+			return 'ready';
+		}
+		if (['failed', 'error', 'attention_required'].includes(normalized)) {
+			return 'failed';
+		}
+		return null;
 	}
 
 	function formatDate(value?: string | null) {

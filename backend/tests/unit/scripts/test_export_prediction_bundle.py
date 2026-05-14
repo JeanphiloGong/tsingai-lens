@@ -326,6 +326,70 @@ def test_export_prediction_bundle_prefers_objective_sample_number(tmp_path):
     )
 
 
+def test_export_prediction_bundle_infers_objective_sample_labels(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-density-l",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "material density",
+            "sample_context": {"ID": "L-VED"},
+            "value_payload": {"value": 91.9},
+            "unit": "%",
+            "resolution_status": "resolved",
+        },
+        {
+            "evidence_unit_id": "oeu-density-m",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "material density",
+            "sample_context": {"Printed": "M-VED"},
+            "value_payload": {"value": 98.92},
+            "unit": "%",
+            "resolution_status": "resolved",
+        },
+        {
+            "evidence_unit_id": "oeu-density-h",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "material density",
+            "sample_context": {"sample_type": "H-VED structure"},
+            "value_payload": {"value": 99.6},
+            "unit": "%",
+            "resolution_status": "resolved",
+        },
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert [
+        sample["label_in_paper"]
+        for sample in bundle["samples"]
+    ] == ["L-VED", "M-VED", "H-VED"]
+    assert [
+        result["sample_id"]
+        for result in bundle["measurement_results"]
+    ] == [
+        "obj-sample-paper-1-l-ved",
+        "obj-sample-paper-1-m-ved",
+        "obj-sample-paper-1-h-ved",
+    ]
+
+
 def test_export_prediction_bundle_allows_missing_artifacts(tmp_path):
     exporter = _load_exporter_module()
     backend_root = tmp_path / "backend"

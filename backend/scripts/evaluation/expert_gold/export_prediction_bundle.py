@@ -6,6 +6,7 @@ import ast
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -1056,6 +1057,9 @@ def _objective_sample_label(sample_context: dict[str, Any]) -> str:
         "sample_number",
         "Sample number",
         "Sample Number",
+        "ID",
+        "Sample ID",
+        "sample ID",
         "sample_id",
         "sample",
         "sample_label",
@@ -1067,6 +1071,10 @@ def _objective_sample_label(sample_context: dict[str, Any]) -> str:
             if text.isdigit():
                 return f"Sample {int(text)}"
             return text
+    for value in sample_context.values():
+        candidate = _objective_sample_label_candidate(value)
+        if candidate:
+            return candidate
     return ""
 
 
@@ -1085,6 +1093,18 @@ def _objective_sample_key(sample_context: dict[str, Any]) -> str:
     label = _objective_sample_label(sample_context)
     if label:
         return label.lower().replace(" ", "-")
+    return ""
+
+
+def _objective_sample_label_candidate(value: Any) -> str:
+    if not _present(value):
+        return ""
+    text = str(value).strip()
+    match = re.search(r"\b([LMH])\s*-\s*VED\b", text, flags=re.IGNORECASE)
+    if match:
+        return f"{match.group(1).upper()}-VED"
+    if re.fullmatch(r"wrought\s+316l", text, flags=re.IGNORECASE):
+        return "Wrought 316L"
     return ""
 
 

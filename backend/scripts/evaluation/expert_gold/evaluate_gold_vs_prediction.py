@@ -23,6 +23,7 @@ DEFAULT_RELATIVE_TOLERANCE = 1e-3
 METRIC_ALIASES = {
     "relative density": "density",
     "density": "density",
+    "material density": "density",
     "densification": "density",
     "porosity": "density",
     "microhardness": "hardness",
@@ -37,6 +38,7 @@ METRIC_ALIASES = {
     "uts": "tensile_strength",
     "elongation": "elongation",
     "elongation at break": "elongation",
+    "total elongation": "elongation",
     "ductility": "ductility",
     "corrosion potential": "corrosion_potential",
     "corrosion_potential": "corrosion_potential",
@@ -265,6 +267,7 @@ def _evaluate_paper(
     measurement_report = _evaluate_measurements(
         gold_records["measurement_results"],
         prediction_records["measurement_results"],
+        gold_records["samples"],
         prediction_records["samples"],
         absolute_tolerance=absolute_tolerance,
         relative_tolerance=relative_tolerance,
@@ -289,6 +292,7 @@ def _evaluate_paper(
         "comparisons": _evaluate_comparisons(
             gold_records["comparisons"],
             prediction_records["comparisons"],
+            gold_records["samples"],
             prediction_records["samples"],
             absolute_tolerance=absolute_tolerance,
             relative_tolerance=relative_tolerance,
@@ -384,11 +388,13 @@ def _evaluate_samples(
 def _evaluate_measurements(
     gold_results: list[dict[str, Any]],
     prediction_results: list[dict[str, Any]],
+    gold_samples: list[dict[str, Any]],
     prediction_samples: list[dict[str, Any]],
     *,
     absolute_tolerance: float,
     relative_tolerance: float,
 ) -> dict[str, Any]:
+    gold_sample_keys = _sample_keys_by_id(gold_samples, key_fn=_sample_key_from_gold)
     prediction_sample_keys = {
         _text(sample.get("sample_id")): _sample_key_from_prediction(sample)
         for sample in prediction_samples
@@ -396,7 +402,7 @@ def _evaluate_measurements(
     gold_items = [
         item
         for item in (
-            _gold_measurement_item(index, row)
+            _gold_measurement_item(index, row, gold_sample_keys)
             for index, row in enumerate(gold_results)
         )
         if item.metric in CORE_METRICS and item.sample_key
@@ -566,11 +572,13 @@ def _first_condition_family(*values: Any) -> str:
 def _evaluate_comparisons(
     gold_comparisons: list[dict[str, Any]],
     prediction_comparisons: list[dict[str, Any]],
+    gold_samples: list[dict[str, Any]],
     prediction_samples: list[dict[str, Any]],
     *,
     absolute_tolerance: float,
     relative_tolerance: float,
 ) -> dict[str, Any]:
+    gold_sample_keys = _sample_keys_by_id(gold_samples, key_fn=_sample_key_from_gold)
     prediction_sample_keys = {
         _text(sample.get("sample_id")): _sample_key_from_prediction(sample)
         for sample in prediction_samples
@@ -578,7 +586,7 @@ def _evaluate_comparisons(
     gold_items = [
         item
         for item in (
-            _gold_comparison_item(index, row)
+            _gold_comparison_item(index, row, gold_sample_keys)
             for index, row in enumerate(gold_comparisons)
         )
         if item.metric and item.current_sample_key and item.baseline_sample_key
@@ -790,11 +798,16 @@ def _record_paper_id(row: dict[str, Any]) -> str:
     return _text(row.get("paper_id") or row.get("source_document_id") or row.get("document_id"))
 
 
-def _gold_measurement_item(index: int, row: dict[str, Any]) -> MeasurementItem:
+def _gold_measurement_item(
+    index: int,
+    row: dict[str, Any],
+    gold_sample_keys: dict[str, str],
+) -> MeasurementItem:
+    sample_id = _text(row.get("sample_id"))
     return MeasurementItem(
         index=index,
         record=row,
-        sample_key=_sample_key(row.get("sample_id")),
+        sample_key=gold_sample_keys.get(sample_id, _sample_key(sample_id)),
         metric=_normalize_metric(row.get("metric_name")),
         value=_numeric_value(row.get("value_or_trend")),
         unit=_normalize_unit(row.get("unit")),
@@ -819,16 +832,24 @@ def _prediction_measurement_item(
     )
 
 
-def _gold_comparison_item(index: int, row: dict[str, Any]) -> ComparisonItem:
+def _gold_comparison_item(
+    index: int,
+    row: dict[str, Any],
+    gold_sample_keys: dict[str, str],
+) -> ComparisonItem:
     baseline_sample_keys = [
-        _sample_key(item)
+        gold_sample_keys.get(_text(item), _sample_key(item))
         for item in _string_list(row.get("baseline_sample_ids"))
-        if _sample_key(item)
+        if gold_sample_keys.get(_text(item), _sample_key(item))
     ]
+    current_sample_id = _text(row.get("current_sample_id"))
     return ComparisonItem(
         index=index,
         record=row,
-        current_sample_key=_sample_key(row.get("current_sample_id")),
+        current_sample_key=gold_sample_keys.get(
+            current_sample_id,
+            _sample_key(current_sample_id),
+        ),
         baseline_sample_key=(
             baseline_sample_keys[0]
             if baseline_sample_keys
@@ -1057,9 +1078,9 @@ def _list_records(bundle: dict[str, Any], key: str) -> list[dict[str, Any]]:
 
 def _sample_key_from_gold(sample: dict[str, Any]) -> str:
     return (
-        _sample_key(sample.get("sample_id"))
-        or _sample_key(sample.get("label_in_paper"))
+        _sample_key(sample.get("label_in_paper"))
         or _sample_key(sample.get("sample_description"))
+        or _sample_key(sample.get("sample_id"))
     )
 
 
@@ -1075,6 +1096,16 @@ def _sample_key(value: Any) -> str:
     text = _text(value)
     if not text:
         return ""
+    match = re.search(r"\b([LMH])\s*-\s*VED\b", text, flags=re.IGNORECASE)
+    if match:
+        return f"{match.group(1).lower()}-ved"
+    if re.fullmatch(r"wrought\s+316l", text, flags=re.IGNORECASE):
+        return "wrought-316l"
+    if (
+        re.fullmatch(r"[A-Za-z]{1,4}(?:[-_/][A-Za-z0-9]{1,8})+", text)
+        and any(char.isupper() or char.isdigit() for char in text)
+    ):
+        return re.sub(r"[-_/]+", "-", text).lower()
     match = re.search(r"\bS0*(\d+)\b", text, flags=re.IGNORECASE)
     if match:
         return str(int(match.group(1)))
@@ -1084,6 +1115,20 @@ def _sample_key(value: Any) -> str:
     if re.fullmatch(r"0*\d+", text):
         return str(int(text))
     return ""
+
+
+def _sample_keys_by_id(
+    samples: list[dict[str, Any]],
+    *,
+    key_fn: Any,
+) -> dict[str, str]:
+    keys: dict[str, str] = {}
+    for sample in samples:
+        sample_id = _text(sample.get("sample_id"))
+        key = key_fn(sample)
+        if sample_id and key:
+            keys[sample_id] = key
+    return keys
 
 
 def _normalize_metric(value: Any) -> str:

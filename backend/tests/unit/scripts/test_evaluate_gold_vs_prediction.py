@@ -120,6 +120,66 @@ def test_evaluate_gold_vs_prediction_normalizes_corrosion_metric_aliases():
     )
 
 
+def test_evaluate_gold_vs_prediction_maps_ved_sample_labels():
+    evaluator = _load_evaluator_module()
+
+    report = evaluator._evaluate_samples(
+        [
+            {"sample_id": "S001", "label_in_paper": "L-VED"},
+            {"sample_id": "S002", "label_in_paper": "M-VED"},
+            {"sample_id": "S003", "label_in_paper": "H-VED"},
+            {"sample_id": "S004", "label_in_paper": "Wrought 316L"},
+        ],
+        [
+            {
+                "sample_id": "obj-sample-paper-l-ved",
+                "label_in_paper": "L-VED",
+            },
+            {
+                "sample_id": "obj-sample-paper-m-ved",
+                "label_in_paper": "M-VED",
+            },
+            {
+                "sample_id": "obj-sample-paper-h-ved",
+                "label_in_paper": "H-VED",
+            },
+        ],
+    )
+
+    assert report["matched_sample_keys"] == ["h-ved", "l-ved", "m-ved"]
+    assert report["recall"] == 0.75
+    assert evaluator._sample_key("Wrought 316L") == "wrought-316l"
+
+
+def test_evaluate_gold_vs_prediction_uses_gold_sample_labels_for_measurements():
+    evaluator = _load_evaluator_module()
+
+    report = evaluator._evaluate_measurements(
+        [
+            {
+                "sample_id": "S001",
+                "metric_name": "density",
+                "value_or_trend": "91.9",
+                "unit": "%",
+            }
+        ],
+        [
+            {
+                "sample_id": "obj-sample-paper-l-ved",
+                "metric_name": "material density",
+                "value_payload": {"unit": "%", "value": 91.9},
+            }
+        ],
+        [{"sample_id": "S001", "label_in_paper": "L-VED"}],
+        [{"sample_id": "obj-sample-paper-l-ved", "label_in_paper": "L-VED"}],
+        absolute_tolerance=1e-6,
+        relative_tolerance=1e-3,
+    )
+
+    assert report["exact_match_count"] == 1
+    assert report["recall"] == 1.0
+
+
 def _gold_bundle() -> dict:
     return {
         "metadata": {"schema_version": "expert-gold-bundle-v0.1"},

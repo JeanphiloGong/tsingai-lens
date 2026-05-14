@@ -2161,9 +2161,9 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
             "extractable": True,
             "column_roles": {
                 "Build platform conditions": "test_condition",
-                "\u0131 y (MPa)": "yield_strength",
-                "\u0131 u (MPa)": "ultimate_tensile_strength",
-                "El%": "elongation",
+                "\u0131 y (MPa)": "current_experimental_evidence",
+                "\u0131 u (MPa)": "current_experimental_evidence",
+                "El%": "current_experimental_evidence",
             },
             "confidence": 0.82,
         }

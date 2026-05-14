@@ -1247,6 +1247,12 @@ class ResearchObjectiveService:
         header: str,
         axes: tuple[str, ...],
     ) -> bool:
+        property_name, _unit = self._split_property_unit(header)
+        normalized_property = self._normalize_property_label(property_name)
+        if normalized_property and any(
+            self._axis_values_match(normalized_property, axis) for axis in axes
+        ):
+            return True
         if any(self._axis_values_match(header, axis) for axis in axes):
             return True
         header_key = self._objective_column_key(header)

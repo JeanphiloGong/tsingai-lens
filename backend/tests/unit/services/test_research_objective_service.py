@@ -2993,7 +2993,7 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
                 "scanning strategy",
                 "scanning speed",
             ],
-            "target_property_axes": ["relative density"],
+            "target_property_axes": ["densification", "microstructure"],
         }
     )
     mechanical_context = ObjectiveContext.from_mapping(

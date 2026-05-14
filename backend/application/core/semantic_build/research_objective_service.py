@@ -3013,9 +3013,14 @@ class ResearchObjectiveService:
         property_key = self._objective_pairwise_property_key(unit.property_normalized)
         if not property_key:
             return False
-        return self._property_axis_matches_any(
+        if self._property_axis_matches_any(
             property_key,
             objective_context.target_property_axes,
+        ):
+            return True
+        return self._objective_density_property_matches_structural_target(
+            property_key,
+            target_axes=objective_context.target_property_axes,
         )
 
     def _objective_pairwise_relation_spec_key(
@@ -4139,21 +4144,31 @@ class ResearchObjectiveService:
         target_axes = self._objective_target_property_axes(objective_context)
         if self._property_axis_matches_any(normalized, target_axes):
             return True
-        if (
-            normalized in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES
-            and any(
-                axis in _STRUCTURAL_PROPERTY_AXES
-                for axis in (
-                    self._normalize_property_label(target_axis)
-                    for target_axis in target_axes
-                )
-            )
+        if self._objective_density_property_matches_structural_target(
+            normalized,
+            target_axes=target_axes,
         ):
             return True
         return any(
             self._axis_label_is_mentioned(normalized, axis)
             or self._axis_label_is_mentioned(column_text, axis)
             for axis in target_axes
+        )
+
+    def _objective_density_property_matches_structural_target(
+        self,
+        property_name: str,
+        *,
+        target_axes: tuple[str, ...],
+    ) -> bool:
+        if property_name not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
+            return False
+        return any(
+            axis in _STRUCTURAL_PROPERTY_AXES
+            for axis in (
+                self._normalize_property_label(target_axis)
+                for target_axis in target_axes
+            )
         )
 
     def _objective_target_property_axes(

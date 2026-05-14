@@ -120,6 +120,66 @@ def test_evaluate_gold_vs_prediction_normalizes_corrosion_metric_aliases():
     )
 
 
+def test_evaluate_gold_vs_prediction_matches_compact_tensile_aliases():
+    evaluator = _load_evaluator_module()
+
+    report = evaluator._evaluate_measurements(
+        [
+            {
+                "sample_id": "S001",
+                "metric_name": "yield strength",
+                "value_or_trend": "448",
+                "unit": "MPa",
+            },
+            {
+                "sample_id": "S001",
+                "metric_name": "ultimate tensile strength",
+                "value_or_trend": "617",
+                "unit": "MPa",
+            },
+            {
+                "sample_id": "S001",
+                "metric_name": "elongation to failure",
+                "value_or_trend": "72",
+                "unit": "%",
+            },
+        ],
+        [
+            {
+                "sample_id": "obj-sample-paper-1-sample-1",
+                "metric_name": "\u0131 y",
+                "value_payload": {"value": 448},
+                "unit": "MPa",
+            },
+            {
+                "sample_id": "obj-sample-paper-1-sample-1",
+                "metric_name": "\u0131 u",
+                "value_payload": {"value": 617},
+                "unit": "MPa",
+            },
+            {
+                "sample_id": "obj-sample-paper-1-sample-1",
+                "metric_name": "EL%",
+                "value_payload": {"value": 72},
+                "unit": "%",
+            },
+        ],
+        [{"sample_id": "S001", "label_in_paper": "Sample 1"}],
+        [
+            {
+                "sample_id": "obj-sample-paper-1-sample-1",
+                "label_in_paper": "Sample 1",
+            }
+        ],
+        absolute_tolerance=1e-6,
+        relative_tolerance=1e-3,
+    )
+
+    assert report["gold_core_count"] == 3
+    assert report["prediction_core_count"] == 3
+    assert report["exact_match_count"] == 3
+
+
 def test_evaluate_gold_vs_prediction_maps_ved_sample_labels():
     evaluator = _load_evaluator_module()
 

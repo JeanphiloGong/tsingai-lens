@@ -62,6 +62,27 @@ PROCESS_UNIT_SUFFIXES = (
     ("strain_rate_s-1", "s^-1"),
     ("frequency_hz", "Hz"),
 )
+OBJECTIVE_METRIC_ALIASES = {
+    "el": "elongation",
+    "el%": "elongation",
+    "elongation to failure": "elongation",
+    "i u": "ultimate tensile strength",
+    "iu": "ultimate tensile strength",
+    "sigma u": "ultimate tensile strength",
+    "ultimate tensile": "ultimate tensile strength",
+    "uts": "ultimate tensile strength",
+    "\u0131 u": "ultimate tensile strength",
+    "\u0131u": "ultimate tensile strength",
+    "\u03c3 u": "ultimate tensile strength",
+    "\u03c3u": "ultimate tensile strength",
+    "i y": "yield strength",
+    "iy": "yield strength",
+    "sigma y": "yield strength",
+    "\u0131 y": "yield strength",
+    "\u0131y": "yield strength",
+    "\u03c3 y": "yield strength",
+    "\u03c3y": "yield strength",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -872,7 +893,7 @@ def _convert_objective_measurement_results(
                 if _objective_sample_id(_text(row, "document_id"), sample_context)
                 else [],
                 "test_condition_id": _objective_test_condition_reference(row),
-                "metric_name": _text(row, "property_normalized"),
+                "metric_name": _objective_metric_name(row),
                 "value_or_trend": _summarize_value_payload(value_payload),
                 "unit": _text(row, "unit"),
                 "claim_scope": "objective",
@@ -921,8 +942,8 @@ def _convert_objective_comparisons(rows: list[dict[str, Any]]) -> list[dict[str,
                     "changed_process_axis",
                     "axis",
                 ),
-                "comparison_metric": _text(row, "property_normalized"),
-                "metric_name": _text(row, "property_normalized"),
+                "comparison_metric": _objective_metric_name(row),
+                "metric_name": _objective_metric_name(row),
                 "current_value": _first_present_value(
                     value_payload,
                     "current_value",
@@ -1195,6 +1216,14 @@ def _objective_numeric_value(row: dict[str, Any]) -> float | None:
             except (TypeError, ValueError):
                 return None
     return None
+
+
+def _objective_metric_name(row: dict[str, Any]) -> str:
+    text = _text(row, "property_normalized")
+    normalized = " ".join(
+        text.replace("_", " ").replace("-", " ").casefold().split()
+    )
+    return OBJECTIVE_METRIC_ALIASES.get(normalized, text)
 
 
 def _first_present_value(payload: dict[str, Any], *keys: str) -> Any:

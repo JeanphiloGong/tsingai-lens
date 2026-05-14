@@ -121,6 +121,9 @@ _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES = frozenset(
 )
 _OBJECTIVE_PROPERTY_ALIASES = {
     "ductility": "elongation",
+    "el": "elongation",
+    "el%": "elongation",
+    "elongation to failure": "elongation",
     "e corr": "corrosion potential",
     "ecorr": "corrosion potential",
     "e p": "pitting potential",
@@ -128,6 +131,22 @@ _OBJECTIVE_PROPERTY_ALIASES = {
     "i corr": "corrosion current density",
     "icorr": "corrosion current density",
     "current density": "corrosion current density",
+    "i u": "ultimate tensile strength",
+    "iu": "ultimate tensile strength",
+    "sigma u": "ultimate tensile strength",
+    "ultimate tensile": "ultimate tensile strength",
+    "uts": "ultimate tensile strength",
+    "\u0131 u": "ultimate tensile strength",
+    "\u0131u": "ultimate tensile strength",
+    "\u03c3 u": "ultimate tensile strength",
+    "\u03c3u": "ultimate tensile strength",
+    "i y": "yield strength",
+    "iy": "yield strength",
+    "sigma y": "yield strength",
+    "\u0131 y": "yield strength",
+    "\u0131y": "yield strength",
+    "\u03c3 y": "yield strength",
+    "\u03c3y": "yield strength",
 }
 _OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES = (
     "yield strength",
@@ -3552,7 +3571,7 @@ class ResearchObjectiveService:
             return row_context
         if sample_context and not self._objective_sample_context_needs_row_number(
             sample_context
-        ):
+        ) and self._objective_sample_context_has_stable_label(sample_context):
             return row_context
         if not sample_context and not (
             row_context["process_context"] or row_context["test_condition"]
@@ -3601,6 +3620,18 @@ class ResearchObjectiveService:
                 if token not in {"1", "-1"}
             ]
             if len(set(tokens)) >= 2:
+                return True
+        return False
+
+    def _objective_sample_context_has_stable_label(
+        self,
+        sample_context: dict[str, Any],
+    ) -> bool:
+        for key in sample_context:
+            column_key = self._objective_column_key(str(key))
+            if column_key in {"id", "label", "sample", "sample_id", "sample_label"}:
+                return True
+            if "sample" in column_key and "condition" not in column_key:
                 return True
         return False
 
@@ -3998,7 +4029,11 @@ class ResearchObjectiveService:
                 token in role_text
                 for token in ("result", "target", "measurement", "property")
             ):
-                result_columns.add(column_text)
+                if self._objective_result_column_matches_target(
+                    column_text,
+                    objective_context=objective_context,
+                ):
+                    result_columns.add(column_text)
                 continue
             if (
                 route.role == "current_experimental_evidence"
@@ -4033,6 +4068,41 @@ class ResearchObjectiveService:
             ):
                 result_columns.add(column_text)
         return result_columns
+
+    def _objective_result_column_matches_target(
+        self,
+        column_text: str,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> bool:
+        if objective_context is None or not objective_context.target_property_axes:
+            return True
+        property_name, _unit = self._split_property_unit(column_text)
+        normalized = self._normalize_property_label(property_name) or property_name
+        target_axes = self._objective_target_property_axes(objective_context)
+        if self._property_axis_matches_any(normalized, target_axes):
+            return True
+        return any(
+            self._axis_label_is_mentioned(normalized, axis)
+            or self._axis_label_is_mentioned(column_text, axis)
+            for axis in target_axes
+        )
+
+    def _objective_target_property_axes(
+        self,
+        objective_context: ObjectiveContext,
+    ) -> tuple[str, ...]:
+        axes: list[str] = []
+        seen: set[str] = set()
+        for axis in objective_context.target_property_axes:
+            normalized = self._normalize_property_label(axis)
+            if normalized:
+                self._append_unique_axis(axes, seen, normalized)
+                for expanded in _BROAD_PROPERTY_AXIS_EXPANSIONS.get(normalized, ()):
+                    self._append_unique_axis(axes, seen, expanded)
+            else:
+                self._append_unique_axis(axes, seen, axis)
+        return tuple(axes)
 
     def _objective_value_column_is_non_result(self, value: str) -> bool:
         text = " ".join(

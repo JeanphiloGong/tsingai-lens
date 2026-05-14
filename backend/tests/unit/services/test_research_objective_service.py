@@ -1909,6 +1909,138 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
     }
 
 
+def test_research_objective_service_normalizes_compact_tensile_headers(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-mechanical",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Build platform conditions": "sample_condition",
+                "\u0131 y (MPa)": "result_property",
+                "\u0131 u (MPa)": "result_property",
+                "EL%": "result_property",
+            },
+            "confidence": 0.82,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            ],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        objective_context=objective_context,
+        source={
+            "page": 8,
+            "column_headers": [
+                "Build platform conditions",
+                "\u0131 y (MPa)",
+                "\u0131 u (MPa)",
+                "EL%",
+            ],
+            "table_matrix": [
+                [
+                    "Build platform conditions",
+                    "\u0131 y (MPa)",
+                    "\u0131 u (MPa)",
+                    "EL%",
+                ],
+                ["Non-preheated", "448", "617", "72"],
+                ["Preheated", "465", "618", "82"],
+            ],
+        },
+    )
+
+    assert len(records) == 6
+    assert {record["property_normalized"] for record in records} == {
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+    }
+    assert {
+        (
+            record["sample_context"]["Build platform conditions"],
+            record["sample_context"]["sample_number"],
+            record["property_normalized"],
+            record["value_payload"]["value"],
+        )
+        for record in records
+    } == {
+        ("Non-preheated", "1", "yield strength", 448.0),
+        ("Non-preheated", "1", "ultimate tensile strength", 617.0),
+        ("Non-preheated", "1", "elongation", 72.0),
+        ("Preheated", "2", "yield strength", 465.0),
+        ("Preheated", "2", "ultimate tensile strength", 618.0),
+        ("Preheated", "2", "elongation", 82.0),
+    }
+
+
+def test_research_objective_service_skips_non_target_result_property_columns(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-chemistry",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Si": "result_property",
+                "O": "result_property",
+                "N": "result_property",
+                "S": "result_property",
+            },
+            "confidence": 0.76,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            ],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        objective_context=objective_context,
+        source={
+            "page": 3,
+            "column_headers": ["Si", "O", "N", "S"],
+            "table_matrix": [
+                ["Si", "O", "N", "S"],
+                ["0.10", "<0.10", "<0.10", "<0.03"],
+            ],
+        },
+    )
+
+    assert records == ()
+
+
 def test_research_objective_service_skips_table_matrix_continuation_header_rows(
     tmp_path,
 ):

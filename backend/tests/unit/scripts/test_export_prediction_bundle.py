@@ -390,6 +390,66 @@ def test_export_prediction_bundle_infers_objective_sample_labels(tmp_path):
     ]
 
 
+def test_export_prediction_bundle_normalizes_objective_metric_aliases(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-yield",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "\u0131 y",
+            "sample_context": {"sample_number": 1},
+            "value_payload": {"value": 448},
+            "unit": "MPa",
+            "resolution_status": "resolved",
+        },
+        {
+            "evidence_unit_id": "oeu-ultimate",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "\u0131 u",
+            "sample_context": {"sample_number": 1},
+            "value_payload": {"value": 617},
+            "unit": "MPa",
+            "resolution_status": "resolved",
+        },
+        {
+            "evidence_unit_id": "oeu-elongation",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "EL%",
+            "sample_context": {"sample_number": 1},
+            "value_payload": {"value": 72},
+            "unit": "%",
+            "resolution_status": "resolved",
+        },
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert [
+        result["metric_name"]
+        for result in bundle["measurement_results"]
+    ] == [
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+    ]
+
+
 def test_export_prediction_bundle_allows_missing_artifacts(tmp_path):
     exporter = _load_exporter_module()
     backend_root = tmp_path / "backend"

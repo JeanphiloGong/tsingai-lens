@@ -104,6 +104,24 @@ def test_build_cross_table_context_join_check_fails_only_when_required():
     )
 
 
+def test_build_cross_table_context_join_check_warns_when_context_is_resolved():
+    checks = _load_probe_checks_module()
+
+    resolved_context_check = checks.build_cross_table_context_join_check(
+        routes=[
+            _route(role="current_experimental_evidence", source_ref="table-results"),
+            _route(role="test_condition", source_ref="table-conditions"),
+        ],
+        measurement_units_with_context_join=0,
+        measurement_units_with_process_context=3,
+    )
+
+    assert resolved_context_check["status"] == "warn"
+    assert resolved_context_check["detail"] == (
+        "value=0; structural_requirement=required; process_context_value=3"
+    )
+
+
 def _route(
     *,
     role: str,

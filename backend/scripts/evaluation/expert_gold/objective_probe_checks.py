@@ -47,19 +47,33 @@ def build_cross_table_context_join_check(
     *,
     routes: Iterable[Any],
     measurement_units_with_context_join: int,
+    measurement_units_with_process_context: int | None = None,
 ) -> dict[str, str]:
     required = requires_cross_table_context_join(routes)
     value = max(0, int(measurement_units_with_context_join))
+    process_context_value = (
+        None
+        if measurement_units_with_process_context is None
+        else max(0, int(measurement_units_with_process_context))
+    )
     passed = value > 0 or not required
     if passed:
         status = "pass"
+    elif process_context_value:
+        status = "warn"
     else:
         status = "fail"
     suffix = "required" if required else "not_required"
+    details = [
+        f"value={value}",
+        f"structural_requirement={suffix}",
+    ]
+    if process_context_value is not None:
+        details.append(f"process_context_value={process_context_value}")
     return {
         "status": status,
         "name": CROSS_TABLE_CONTEXT_JOIN_CHECK,
-        "detail": f"value={value}; structural_requirement={suffix}",
+        "detail": "; ".join(details),
     }
 
 

@@ -1148,6 +1148,66 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
     )
 
 
+def test_research_objective_service_uses_main_number_after_leading_uncertainty(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-3",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Specimens": "sample_id",
+                "Hardness (HV)": "target_property",
+                "Yield Strength (MPa)": "target_property",
+            },
+            "confidence": 0.84,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": ["hardness", "yield strength"],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 5,
+            "column_headers": [
+                "Specimens",
+                "Hardness (HV)",
+                "Yield Strength (MPa)",
+            ],
+            "table_matrix": [
+                ["Specimens", "Hardness (HV)", "Yield Strength (MPa)"],
+                [
+                    "as-SLM(120/100)",
+                    "( ± 4.5) 176.0",
+                    "( 10.2) 464.8 ( ± 5.8)",
+                ],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    values_by_property = {
+        record["property_normalized"]: record["value_payload"]["value"]
+        for record in records
+    }
+    assert values_by_property == {
+        "hardness": 176.0,
+        "yield strength": 464.8,
+    }
+
+
 def test_research_objective_service_keeps_non_ascii_process_headers_out_of_results(
     tmp_path,
 ):

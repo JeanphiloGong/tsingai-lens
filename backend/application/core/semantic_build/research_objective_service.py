@@ -3977,7 +3977,7 @@ class ResearchObjectiveService:
                     or property_source
                 )
                 value_payload = {"source_value_text": str(raw_value)}
-                numeric_value = self._coerce_number(raw_value)
+                numeric_value = self._coerce_result_cell_number(raw_value)
                 if numeric_value is not None:
                     value_payload["value"] = numeric_value
                 records.append(
@@ -5115,6 +5115,18 @@ class ResearchObjectiveService:
         if match is None:
             return None
         return float(match.group(0))
+
+    def _coerce_result_cell_number(self, value: Any) -> float | None:
+        text = str(value).strip().replace(",", "")
+        if not text:
+            return None
+        matches = list(_NUMBER_PATTERN.finditer(text))
+        if len(matches) >= 2:
+            leading_prefix = text[: matches[0].start()]
+            between_first_and_second = text[matches[0].end() : matches[1].start()]
+            if "(" in leading_prefix and ")" in between_first_and_second:
+                return float(matches[1].group(0))
+        return self._coerce_number(text)
 
     def _value_payload_numeric_value(
         self,

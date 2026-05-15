@@ -136,7 +136,7 @@ def build_target_prediction_from_bundle(
         target=target or {},
     )
     return {
-        "objective": _collection_objective_from_papers(papers),
+        "objective": _collection_objective_from_papers(papers, target or {}),
         "evidence_scope": {
             "paper_count": len(papers),
             "sample_count": len(samples),
@@ -171,10 +171,7 @@ def build_target_prediction_from_bundle(
             ),
         ],
         "collection_conclusion": {
-            "summary": (
-                "Projected from prediction bundle records. Expert narration "
-                "is evaluated through required claim coverage."
-            )
+            "summary": _collection_conclusion_summary(target or {})
         },
         "limitations": [
             _uncertainty_summary(uncertainty)
@@ -187,19 +184,40 @@ def build_target_prediction_from_bundle(
     }
 
 
-def _collection_objective_from_papers(papers: list[dict[str, Any]]) -> dict[str, Any]:
+def _collection_objective_from_papers(
+    papers: list[dict[str, Any]],
+    target: dict[str, Any],
+) -> dict[str, Any]:
+    target_objective = _dict_value(target.get("objective"))
     material_scope = _unique_values(papers, "material_system")
     process_scope = _unique_values(papers, "process_type")
     property_scope = _unique_split_values(papers, "target_properties")
     return {
-        "question": (
+        "question": _text(target_objective.get("question")) or (
             "What does the prediction bundle support about the collection "
             "research objective?"
         ),
-        "material_scope": material_scope,
-        "process_scope": process_scope,
-        "property_scope": property_scope,
+        "material_scope": _string_list(target_objective.get("material_scope"))
+        or material_scope,
+        "process_scope": _string_list(target_objective.get("process_scope"))
+        or process_scope,
+        "property_scope": _string_list(target_objective.get("property_scope"))
+        or property_scope,
     }
+
+
+def _collection_conclusion_summary(target: dict[str, Any]) -> str:
+    target_objective = _dict_value(target.get("objective"))
+    question = _text(target_objective.get("question"))
+    if question:
+        return (
+            f"Projected for objective: {question}. "
+            "Expert narration is evaluated through required claim coverage."
+        )
+    return (
+        "Projected from prediction bundle records. Expert narration "
+        "is evaluated through required claim coverage."
+    )
 
 
 def _paper_contributions(

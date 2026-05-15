@@ -119,6 +119,36 @@ def test_build_target_prediction_aligns_paper_ids_to_target_contributions() -> N
     ]
 
 
+def test_build_target_prediction_uses_target_objective_context() -> None:
+    projection = _load_projection_module()
+
+    prediction = projection.build_target_prediction_from_bundle(
+        _prediction_bundle(),
+        target={
+            "objective": {
+                "question": (
+                    "How do LPBF process parameters and thermal history "
+                    "affect 316L texture?"
+                ),
+                "material_scope": ["316L stainless steel"],
+                "process_scope": ["LPBF"],
+                "property_scope": ["texture"],
+            }
+        },
+    )
+
+    assert prediction["objective"] == {
+        "question": (
+            "How do LPBF process parameters and thermal history "
+            "affect 316L texture?"
+        ),
+        "material_scope": ["316L stainless steel"],
+        "process_scope": ["LPBF"],
+        "property_scope": ["texture"],
+    }
+    assert "thermal history" in prediction["collection_conclusion"]["summary"]
+
+
 def test_build_target_prediction_exposes_measurement_summaries() -> None:
     projection = _load_projection_module()
     bundle = _prediction_bundle()

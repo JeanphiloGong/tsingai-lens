@@ -1462,11 +1462,10 @@ class ResearchObjectiveService:
                             extracted_record=item.model_dump(),
                         )
                     )
-                    if llm_route_records or not route_records:
-                        route_records = self._objective_merge_table_repair_records(
-                            deterministic_records=route_records,
-                            llm_records=llm_route_records,
-                        )
+                    route_records = self._objective_merge_table_repair_records(
+                        deterministic_records=route_records,
+                        llm_records=llm_route_records,
+                    )
             for record in route_records:
                 unit = ObjectiveEvidenceUnit.from_mapping(record)
                 if not self._objective_evidence_unit_has_payload(unit):
@@ -1695,26 +1694,21 @@ class ResearchObjectiveService:
         self,
         record: dict[str, Any],
     ) -> bool:
-        for field in ("sample_context", "process_context", "test_condition", "join_keys"):
-            value = record.get(field)
-            if self._objective_payload_has_fragmented_text(value):
-                return True
-        return False
+        return any(
+            self._objective_payload_has_fragmented_text(record.get(field))
+            for field in ("sample_context", "process_context", "test_condition", "join_keys")
+        )
 
     def _objective_payload_has_fragmented_text(self, value: Any) -> bool:
-        if isinstance(value, Mapping):
-            return any(
-                self._objective_payload_has_fragmented_text(item)
-                for item in value.values()
-            )
-        if isinstance(value, (list, tuple)):
-            return any(
-                self._objective_payload_has_fragmented_text(item)
-                for item in value
-            )
         if isinstance(value, str):
             return self._objective_cell_text_looks_structurally_fragmented(value)
-        return False
+        if isinstance(value, Mapping):
+            values = value.values()
+        elif isinstance(value, (list, tuple)):
+            values = value
+        else:
+            return False
+        return any(self._objective_payload_has_fragmented_text(item) for item in values)
 
     def _build_objective_method_family_test_condition_units(
         self,

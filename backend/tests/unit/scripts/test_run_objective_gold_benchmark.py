@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -95,6 +96,97 @@ def test_objective_quality_gate_reports_failed_thresholds():
         ("P002", "measurement_recall"),
         ("P002", "prediction_core_measurement_count"),
         ("P005", "paper_present"),
+    }
+
+
+def test_objective_benchmark_generates_research_objective_target_report(
+    tmp_path,
+    monkeypatch,
+):
+    benchmark = _load_benchmark_module()
+
+    def fake_convert_expert_gold(*, input_dir, output_path):
+        output_path.write_text('{"papers": []}', encoding="utf-8")
+        return output_path
+
+    def fake_export_prediction_bundle(
+        *,
+        backend_root,
+        collection_id,
+        source_output_dir,
+        output_path,
+        fact_source,
+    ):
+        assert fact_source == "objective_first"
+        output_path.write_text('{"papers": []}', encoding="utf-8")
+        return output_path
+
+    def fake_evaluate_gold_vs_prediction(
+        *,
+        gold_path,
+        prediction_path,
+        output_path,
+        gold_paper_ids,
+    ):
+        output_path.write_text(
+            json.dumps({"summary": {"paper_count": 1}, "papers": []}),
+            encoding="utf-8",
+        )
+        return output_path
+
+    def fake_build_research_objective_target_prediction(
+        *,
+        prediction_bundle_path,
+        output_path,
+        report_path,
+    ):
+        assert prediction_bundle_path == tmp_path / "objective_prediction_bundle.json"
+        output_path.write_text('{"evidence_scope": {}}', encoding="utf-8")
+        report_path.write_text(
+            json.dumps({"quality_gate": {"status": "fail"}}),
+            encoding="utf-8",
+        )
+        return output_path
+
+    monkeypatch.setattr(
+        benchmark.convert_expert_gold,
+        "convert_expert_gold",
+        fake_convert_expert_gold,
+    )
+    monkeypatch.setattr(
+        benchmark.export_prediction_bundle,
+        "export_prediction_bundle",
+        fake_export_prediction_bundle,
+    )
+    monkeypatch.setattr(
+        benchmark.evaluate_gold_vs_prediction,
+        "evaluate_gold_vs_prediction",
+        fake_evaluate_gold_vs_prediction,
+    )
+    monkeypatch.setattr(
+        benchmark.build_research_objective_target_prediction,
+        "build_research_objective_target_prediction",
+        fake_build_research_objective_target_prediction,
+    )
+
+    summary = benchmark.run_objective_gold_benchmark(
+        backend_root=tmp_path,
+        collection_id="col_test",
+        gold_input_dir=tmp_path / "gold",
+        benchmark_output_dir=tmp_path,
+    )
+
+    assert summary["prediction_bundle"] == str(
+        tmp_path / "objective_prediction_bundle.json"
+    )
+    assert summary["research_objective_target_prediction"] == str(
+        tmp_path / "research_objective_target_prediction.json"
+    )
+    assert summary["research_objective_target_report"] == str(
+        tmp_path / "research_objective_target_report.json"
+    )
+    assert summary["research_objective_target"] == {
+        "quality_gate": {"status": "fail"}
     }
 
 

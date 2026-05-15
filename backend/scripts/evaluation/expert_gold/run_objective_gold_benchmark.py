@@ -31,6 +31,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import convert_expert_gold  # noqa: E402
+import build_research_objective_target_prediction  # noqa: E402
 import evaluate_gold_vs_prediction  # noqa: E402
 import export_prediction_bundle  # noqa: E402
 
@@ -123,6 +124,8 @@ def run_objective_gold_benchmark(
     gold_path = destination / "gold_bundle.json"
     prediction_path = destination / "objective_prediction_bundle.json"
     report_path = destination / "objective_evaluation_report.json"
+    target_prediction_path = destination / "research_objective_target_prediction.json"
+    target_report_path = destination / "research_objective_target_report.json"
 
     converted_gold_path = convert_expert_gold.convert_expert_gold(
         input_dir=gold_input_dir,
@@ -141,16 +144,38 @@ def run_objective_gold_benchmark(
         output_path=report_path,
         gold_paper_ids=gold_paper_ids,
     )
+    research_objective_prediction_path = (
+        build_research_objective_target_prediction.build_research_objective_target_prediction(
+            prediction_bundle_path=exported_prediction_path,
+            output_path=target_prediction_path,
+            report_path=target_report_path,
+        )
+    )
     report = json.loads(evaluation_report_path.read_text(encoding="utf-8"))
+    target_report = json.loads(target_report_path.read_text(encoding="utf-8"))
     summary = {
         "gold_bundle": str(converted_gold_path),
         "prediction_bundle": str(exported_prediction_path),
         "evaluation_report": str(evaluation_report_path),
+        "research_objective_target_prediction": str(research_objective_prediction_path),
+        "research_objective_target_report": str(target_report_path),
+        "research_objective_target": _research_objective_target_summary(
+            target_report
+        ),
         "summary": report.get("summary", {}),
         "papers": _paper_summaries(report.get("papers", [])),
     }
     if quality_gate:
         summary["quality_gate"] = evaluate_objective_quality_gate(report)
+    return summary
+
+
+def _research_objective_target_summary(report: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    if "scores" in report:
+        summary["scores"] = report["scores"]
+    if "quality_gate" in report:
+        summary["quality_gate"] = report["quality_gate"]
     return summary
 
 

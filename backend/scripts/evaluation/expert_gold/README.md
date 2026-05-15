@@ -173,10 +173,25 @@ bundle with `--fact-source objective_first`, evaluates it, and prints a compact
 summary. It reads an already-built collection; it does not rebuild PDFs or call
 the extraction pipeline.
 
+The runner also projects the exported objective-first prediction bundle into
+the collection-level research-objective target shape and writes a target report
+so row-level extraction gaps and research-chain coverage can be inspected from
+the same benchmark run.
+
 Default outputs are written under:
 
 ```text
 tests/fixtures/local_expert_gold/generated/objective_first/
+```
+
+The generated files include:
+
+```text
+gold_bundle.json
+objective_prediction_bundle.json
+objective_evaluation_report.json
+research_objective_target_prediction.json
+research_objective_target_report.json
 ```
 
 Do not commit generated benchmark bundles or reports.

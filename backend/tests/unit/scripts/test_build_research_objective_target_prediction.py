@@ -145,6 +145,58 @@ def test_build_target_prediction_exposes_measurement_summaries() -> None:
     ]
 
 
+def test_build_target_prediction_adds_measurement_value_aliases() -> None:
+    projection = _load_projection_module()
+    bundle = _prediction_bundle()
+    bundle["measurement_results"] = [
+        {
+            "paper_id": "P001",
+            "result_id": "R003",
+            "sample_id": "S003",
+            "metric_name": "total elongation [%]",
+            "value_or_trend": "48.3 +/- 3.2",
+            "unit": "",
+        },
+        {
+            "paper_id": "P001",
+            "result_id": "R004",
+            "sample_id": "S004",
+            "metric_name": "passive film resistance",
+            "value_or_trend": "1.90x10 5 ohm cm 2",
+            "unit": "",
+        },
+    ]
+
+    prediction = projection.build_target_prediction_from_bundle(bundle)
+
+    assert prediction["measurement_results"] == [
+        {
+            "paper_id": "P001",
+            "result_id": "R003",
+            "sample_id": "S003",
+            "metric_name": "total elongation [%]",
+            "value": "48.3 +/- 3.2",
+            "summary": (
+                "P001 R003: S003 total elongation [%] = 48.3 +/- 3.2. "
+                "Aliases: 48.3%."
+            ),
+            "value_aliases": ["48.3%"],
+        },
+        {
+            "paper_id": "P001",
+            "result_id": "R004",
+            "sample_id": "S004",
+            "metric_name": "passive film resistance",
+            "value": "1.90x10 5 ohm cm 2",
+            "summary": (
+                "P001 R004: S004 passive film resistance = "
+                "1.90x10 5 ohm cm 2. Aliases: 1.90e5 ohm cm2."
+            ),
+            "value_aliases": ["1.90e5 ohm cm2"],
+        },
+    ]
+
+
 def test_build_research_objective_target_prediction_writes_prediction_and_report(
     tmp_path: Path,
 ) -> None:

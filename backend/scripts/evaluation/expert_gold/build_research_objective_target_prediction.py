@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -302,16 +303,24 @@ def _measurement_summaries(
             measurement.get("value_or_trend"),
             _text(measurement.get("unit")),
         )
-        summaries.append(
-            {
-                "paper_id": paper_id,
-                "result_id": result_id,
-                "sample_id": sample_id,
-                "metric_name": metric,
-                "value": value,
-                "summary": f"{paper_id} {result_id}: {sample_id} {metric} = {value}.",
-            }
+        aliases = _measurement_value_aliases(
+            value=value,
+            unit=_text(measurement.get("unit")),
+            metric=metric,
         )
+        summary = f"{paper_id} {result_id}: {sample_id} {metric} = {value}."
+        record = {
+            "paper_id": paper_id,
+            "result_id": result_id,
+            "sample_id": sample_id,
+            "metric_name": metric,
+            "value": value,
+            "summary": summary,
+        }
+        if aliases:
+            record["summary"] = f"{summary} Aliases: {', '.join(aliases)}."
+            record["value_aliases"] = aliases
+        summaries.append(record)
     return summaries
 
 
@@ -332,6 +341,58 @@ def _measurement_value_with_unit(value: Any, unit: str) -> str:
     if unit == "%":
         return f"{text}%"
     return f"{text} {unit}".strip()
+
+
+def _measurement_value_aliases(*, value: str, unit: str, metric: str) -> list[str]:
+    aliases: list[str] = []
+    if _measurement_is_percent_like(unit=unit, metric=metric):
+        number = _first_number(value)
+        if number and f"{number}%" != value:
+            aliases.append(f"{number}%")
+    scientific_alias = _scientific_notation_alias(value)
+    if scientific_alias:
+        aliases.append(scientific_alias)
+    return _dedupe_strings(aliases)
+
+
+def _measurement_is_percent_like(*, unit: str, metric: str) -> bool:
+    return "%" in unit or "%" in metric
+
+
+def _scientific_notation_alias(value: str) -> str:
+    match = re.search(
+        r"(?P<base>\d+(?:\.\d+)?)\s*[x×]\s*10\s*\^?\s*(?P<exponent>[+-]?\d+)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    unit_text = _scientific_notation_unit_text(value[match.end() :])
+    alias = f"{match.group('base')}e{match.group('exponent')}"
+    return f"{alias} {unit_text}".strip()
+
+
+def _scientific_notation_unit_text(value: str) -> str:
+    text = value.replace("Ω", "ohm").replace("ω", "ohm")
+    text = " ".join(text.split())
+    text = re.sub(r"\bcm\s+2\b", "cm2", text, flags=re.IGNORECASE)
+    return text
+
+
+def _first_number(value: str) -> str:
+    match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", value)
+    return match.group(0) if match else ""
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
 
 
 def _comparison_summary(comparison: dict[str, Any]) -> dict[str, Any]:

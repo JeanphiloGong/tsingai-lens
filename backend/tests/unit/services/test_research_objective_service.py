@@ -1203,6 +1203,7 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
         table_matrix=[
             ["Specimens", "Density (%)"],
             ["as-SLM (140/", "92.19"],
+            ["S2", "99.5"],
         ],
     )
     table_cells = [
@@ -1219,6 +1220,20 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
             col_index=1,
             header_path="Density (%)",
             cell_text="92.19",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=2,
+            col_index=0,
+            header_path="Specimens",
+            cell_text="S2",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=2,
+            col_index=1,
+            header_path="Density (%)",
+            cell_text="99.5",
         ),
     ]
 
@@ -1274,8 +1289,20 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
         "cell_text": "as-SLM (140/",
     }
     measurements = [unit for unit in units if unit.unit_kind == "measurement"]
-    assert len(measurements) == 1
-    assert measurements[0].sample_context == {"label": "repaired row label"}
+    assert len(measurements) == 2
+    assert {unit.value_payload.get("value") for unit in measurements} == {92.19, 99.5}
+    assert any(
+        unit.sample_context == {"label": "repaired row label"}
+        for unit in measurements
+    )
+    assert any(
+        unit.sample_context.get("Specimens") == "S2"
+        for unit in measurements
+    )
+    assert all(
+        unit.sample_context.get("Specimens") != "as-SLM (140/"
+        for unit in measurements
+    )
 
 
 def test_research_objective_service_normalizes_result_table_values_to_measurements(

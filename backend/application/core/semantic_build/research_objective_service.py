@@ -6,7 +6,7 @@ import json
 import logging
 import math
 import re
-from typing import Any
+from typing import Any, Mapping
 
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
@@ -1463,7 +1463,10 @@ class ResearchObjectiveService:
                         )
                     )
                     if llm_route_records or not route_records:
-                        route_records = llm_route_records
+                        route_records = self._objective_merge_table_repair_records(
+                            deterministic_records=route_records,
+                            llm_records=llm_route_records,
+                        )
             for record in route_records:
                 unit = ObjectiveEvidenceUnit.from_mapping(record)
                 if not self._objective_evidence_unit_has_payload(unit):
@@ -1605,6 +1608,112 @@ class ResearchObjectiveService:
             return True
         if value.startswith((")", "]", "}")):
             return True
+        return False
+
+    def _objective_merge_table_repair_records(
+        self,
+        *,
+        deterministic_records: tuple[dict[str, Any], ...],
+        llm_records: tuple[dict[str, Any], ...],
+    ) -> tuple[dict[str, Any], ...]:
+        if not deterministic_records:
+            return llm_records
+        if not llm_records:
+            return deterministic_records
+        preserved_records = tuple(
+            record
+            for record in deterministic_records
+            if not (
+                self._objective_evidence_record_has_fragmented_context(record)
+                and any(
+                    self._objective_evidence_records_have_same_result(record, llm_record)
+                    for llm_record in llm_records
+                )
+            )
+        )
+        return (*preserved_records, *llm_records)
+
+    def _objective_evidence_records_have_same_result(
+        self,
+        left: dict[str, Any],
+        right: dict[str, Any],
+    ) -> bool:
+        left_key = self._objective_evidence_record_result_key(left)
+        right_key = self._objective_evidence_record_result_key(right)
+        if left_key is None or right_key is None:
+            return False
+        left_kind, left_property, left_unit, left_value = left_key
+        right_kind, right_property, right_unit, right_value = right_key
+        return (
+            left_kind == right_kind
+            and left_unit == right_unit
+            and left_value == right_value
+            and self._objective_result_properties_match(left_property, right_property)
+        )
+
+    def _objective_result_properties_match(self, left: str, right: str) -> bool:
+        if not left or not right:
+            return left == right
+        return (
+            left == right
+            or self._axis_values_match(left, right)
+            or left in right
+            or right in left
+        )
+
+    def _objective_evidence_record_result_key(
+        self,
+        record: dict[str, Any],
+    ) -> tuple[str, str, str, str] | None:
+        value_payload = (
+            record.get("value_payload")
+            if isinstance(record.get("value_payload"), dict)
+            else {}
+        )
+        raw_value = next(
+            (
+                candidate
+                for candidate in (
+                    value_payload.get("value"),
+                    value_payload.get("source_value_text"),
+                    value_payload.get("value_text"),
+                )
+                if candidate not in (None, "", [], {})
+            ),
+            None,
+        )
+        if raw_value in (None, "", [], {}):
+            return None
+        return (
+            str(record.get("unit_kind") or "").strip().casefold(),
+            str(record.get("property_normalized") or "").strip().casefold(),
+            str(record.get("unit") or "").strip().casefold(),
+            str(raw_value).strip().casefold(),
+        )
+
+    def _objective_evidence_record_has_fragmented_context(
+        self,
+        record: dict[str, Any],
+    ) -> bool:
+        for field in ("sample_context", "process_context", "test_condition", "join_keys"):
+            value = record.get(field)
+            if self._objective_payload_has_fragmented_text(value):
+                return True
+        return False
+
+    def _objective_payload_has_fragmented_text(self, value: Any) -> bool:
+        if isinstance(value, Mapping):
+            return any(
+                self._objective_payload_has_fragmented_text(item)
+                for item in value.values()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(
+                self._objective_payload_has_fragmented_text(item)
+                for item in value
+            )
+        if isinstance(value, str):
+            return self._objective_cell_text_looks_structurally_fragmented(value)
         return False
 
     def _build_objective_method_family_test_condition_units(

@@ -433,6 +433,7 @@ def _normalize_text(value: str) -> str:
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
+    text = re.sub(r"(?<=\d)\s*-\s*(?=\d)", "-", text)
     text = re.sub(r"[^a-z0-9.%/+-]+", " ", text)
     return _SPACE_RE.sub(" ", text).strip()
 

@@ -117,6 +117,45 @@ def test_evaluate_target_prediction_reports_missing_claims_and_overclaims() -> N
     ]
 
 
+def test_evaluate_target_prediction_matches_spaced_numeric_ranges() -> None:
+    evaluator = _load_evaluator_module()
+
+    target = _target()
+    target["required_claims"] = [
+        {
+            "claim_id": "fatigue_range",
+            "text": "Printed fatigue limit is 80-100 MPa vs wrought at 256 MPa.",
+            "required_numbers": ["80-100 MPa", "256 MPa"],
+        }
+    ]
+
+    report = evaluator.evaluate_target_prediction(
+        target=target,
+        prediction={
+            "evidence_scope": {"paper_count": 1, "sample_count": 2},
+            "paper_contributions": [
+                {
+                    "paper_id": "P001",
+                    "summary": "energy input porosity strength",
+                }
+            ],
+            "mechanism_chains": [
+                {
+                    "path": (
+                        "fatigue limit range: 80 - 100 MPa; "
+                        "wrought 316L: 256 MPa"
+                    )
+                }
+            ],
+            "limitations": [
+                "Density method is not directly equivalent to micro-CT."
+            ],
+        },
+    )
+
+    assert report["required_claims"]["checks"][0]["status"] == "pass"
+
+
 def test_evaluate_research_objective_target_writes_report(tmp_path: Path) -> None:
     evaluator = _load_evaluator_module()
     target_path = tmp_path / "target.json"

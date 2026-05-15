@@ -161,6 +161,16 @@ def build_target_prediction_from_bundle(
             for comparison in comparisons
         ],
         "mechanism_chains": [
+            *_evidence_derived_mechanism_summaries(
+                papers=papers,
+                samples=samples,
+                test_conditions=test_conditions,
+                measurements=measurements,
+                comparisons=comparisons,
+                observations=observations,
+                evidence=evidence,
+                paper_id_aliases=paper_id_aliases,
+            ),
             *[
                 _observation_mechanism_summary(observation)
                 for observation in observations
@@ -699,6 +709,68 @@ def _evidence_derived_limitation_summaries(
     return _dedupe_strings(limitations)
 
 
+def _evidence_derived_mechanism_summaries(
+    *,
+    papers: list[dict[str, Any]],
+    samples: list[dict[str, Any]],
+    test_conditions: list[dict[str, Any]],
+    measurements: list[dict[str, Any]],
+    comparisons: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    paper_id_aliases: dict[str, str],
+) -> list[dict[str, str]]:
+    text_by_paper = _evidence_text_by_paper(
+        papers=papers,
+        samples=samples,
+        test_conditions=test_conditions,
+        measurements=measurements,
+        comparisons=comparisons,
+        observations=observations,
+        evidence=evidence,
+        paper_id_aliases=paper_id_aliases,
+    )
+    combined_text = " ".join(text_by_paper.values())
+    summaries: list[dict[str, str]] = []
+    if _has_energy_input_defect_mechanical_chain(combined_text):
+        summaries.append(
+            {
+                "chain_id": "energy_input_defect_mechanical",
+                "path": (
+                    "energy input and scan strategy -> "
+                    "melt-pool stability and thermal accumulation -> "
+                    "porosity, LoF defects, balling, cellular or dendritic "
+                    "structure -> density, strength, ductility, hardness, fatigue"
+                ),
+            }
+        )
+    if _has_porosity_passive_film_corrosion_chain(combined_text):
+        summaries.append(
+            {
+                "chain_id": "porosity_passive_film_corrosion",
+                "path": (
+                    "power and scan speed combination -> "
+                    "porosity level and pore type -> "
+                    "pitting initiation and passive-film stability -> "
+                    "pitting potential, passivation interval, Rfilm"
+                ),
+            }
+        )
+    if _has_texture_yield_strength_chain(combined_text):
+        summaries.append(
+            {
+                "chain_id": "texture_yield_strength",
+                "path": (
+                    "scan rotation angle and build orientation -> "
+                    "crystallographic texture -> "
+                    "Taylor factor or Bishop-Hill response -> "
+                    "yield strength prediction"
+                ),
+            }
+        )
+    return summaries
+
+
 def _evidence_text_by_paper(
     *,
     papers: list[dict[str, Any]],
@@ -763,6 +835,44 @@ def _has_corrosion_environment_boundary(text: str) -> bool:
 def _has_texture_prediction_boundary(text: str) -> bool:
     return _detects_all(text, ["texture", "yield strength prediction"]) and not (
         _detects_any(text, ["porosity", "defect"])
+    )
+
+
+def _has_energy_input_defect_mechanical_chain(text: str) -> bool:
+    return (
+        _detects_any(text, ["energy input", "energy density"])
+        and _detects_any(text, ["scan strategy", "scanning strategy"])
+        and _detects_any(text, ["porosity", "lof", "lack of fusion", "balling"])
+        and _detects_any(
+            text,
+            ["density", "strength", "ductility", "hardness", "fatigue"],
+        )
+    )
+
+
+def _has_porosity_passive_film_corrosion_chain(text: str) -> bool:
+    return (
+        _detects_any(text, ["power", "scan speed", "scanning speed"])
+        and _detects_all(text, ["porosity", "pitting potential"])
+        and _detects_any(text, ["passive film", "passive-film", "rfilm"])
+    )
+
+
+def _has_texture_yield_strength_chain(text: str) -> bool:
+    return (
+        _detects_any(
+            text,
+            [
+                "scan rotation angle",
+                "scan strategy rotation",
+                "rotation angles",
+            ],
+        )
+        and _detects_all(
+            text,
+            ["build orientation", "crystallographic texture", "yield strength"],
+        )
+        and _detects_any(text, ["taylor", "bishop-hill", "bishop hill"])
     )
 
 

@@ -426,6 +426,107 @@ def test_build_target_prediction_derives_evidence_limitations() -> None:
     ]
 
 
+def test_build_target_prediction_derives_evidence_mechanism_chains() -> None:
+    projection = _load_projection_module()
+    bundle = {
+        "papers": [
+            {
+                "paper_id": "P001",
+                "title": "Energy input and scan strategy for SLM 316L",
+                "target_properties": "density; strength; ductility; hardness",
+            },
+            {
+                "paper_id": "P005",
+                "title": "Power and scan speed combination controls corrosion",
+                "target_properties": "pitting potential; Rfilm",
+            },
+            {
+                "paper_id": "P006",
+                "title": "Scan rotation angle and build orientation",
+                "target_properties": "texture; yield strength prediction",
+            },
+        ],
+        "samples": [],
+        "test_conditions": [],
+        "measurement_results": [
+            {
+                "paper_id": "P001",
+                "metric_name": "hardness",
+                "value_or_trend": "higher with density",
+            },
+            {
+                "paper_id": "P005",
+                "metric_name": "pitting potential",
+                "value_or_trend": "depends on porosity",
+            },
+            {
+                "paper_id": "P006",
+                "metric_name": "yield strength prediction",
+                "value_or_trend": "Bishop-Hill response",
+            },
+        ],
+        "comparisons": [],
+        "observations": [
+            {
+                "paper_id": "P001",
+                "value_or_description": (
+                    "Melt-pool stability and thermal accumulation change "
+                    "porosity, LoF defects, balling, and cellular or "
+                    "dendritic structure."
+                ),
+            },
+            {
+                "paper_id": "P005",
+                "value_or_description": (
+                    "Porosity level and pore type affect pitting initiation "
+                    "and passive-film stability in 3.5 wt.% NaCl."
+                ),
+            },
+            {
+                "paper_id": "P006",
+                "value_or_description": (
+                    "Crystallographic texture links scan strategy rotation "
+                    "angles and build orientations to Taylor factor."
+                ),
+            },
+        ],
+        "uncertainties": [],
+        "evidence": [],
+    }
+
+    prediction = projection.build_target_prediction_from_bundle(bundle)
+
+    assert prediction["mechanism_chains"][:3] == [
+        {
+            "chain_id": "energy_input_defect_mechanical",
+            "path": (
+                "energy input and scan strategy -> "
+                "melt-pool stability and thermal accumulation -> "
+                "porosity, LoF defects, balling, cellular or dendritic "
+                "structure -> density, strength, ductility, hardness, fatigue"
+            ),
+        },
+        {
+            "chain_id": "porosity_passive_film_corrosion",
+            "path": (
+                "power and scan speed combination -> "
+                "porosity level and pore type -> "
+                "pitting initiation and passive-film stability -> "
+                "pitting potential, passivation interval, Rfilm"
+            ),
+        },
+        {
+            "chain_id": "texture_yield_strength",
+            "path": (
+                "scan rotation angle and build orientation -> "
+                "crystallographic texture -> "
+                "Taylor factor or Bishop-Hill response -> "
+                "yield strength prediction"
+            ),
+        },
+    ]
+
+
 def test_build_research_objective_target_prediction_writes_prediction_and_report(
     tmp_path: Path,
 ) -> None:

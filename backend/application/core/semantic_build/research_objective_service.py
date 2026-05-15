@@ -175,6 +175,15 @@ _OBJECTIVE_GENERIC_RESULT_ROLE_TOKENS = frozenset(
         "target",
     }
 )
+_OBJECTIVE_GENERIC_PROCESS_ROLE_TOKENS = frozenset(
+    {
+        "axis",
+        "context",
+        "parameter",
+        "process",
+        "variable",
+    }
+)
 _OBJECTIVE_PRESERVED_PROPERTY_QUALIFIERS = frozenset(
     {
         "experiment",
@@ -4076,12 +4085,46 @@ class ResearchObjectiveService:
                 role=role,
                 objective_context=objective_context,
             ):
-                process_context[column] = value
+                process_context[
+                    self._objective_process_context_column_label(
+                        column=column,
+                        role=role,
+                        objective_context=objective_context,
+                    )
+                ] = value
         return {
             "sample_context": sample_context,
             "process_context": process_context,
             "test_condition": test_condition,
         }
+
+    def _objective_process_context_column_label(
+        self,
+        *,
+        column: str,
+        role: str,
+        objective_context: ObjectiveContext | None,
+    ) -> str:
+        role_label = self._normalize_property_label(role)
+        if (
+            role_label
+            and self._objective_process_role_is_specific(role_label)
+            and (
+                objective_context is None
+                or self._objective_label_matches_process_axes(
+                    role_label,
+                    objective_context=objective_context,
+                )
+            )
+        ):
+            return role_label
+        return column
+
+    def _objective_process_role_is_specific(self, role_label: str) -> bool:
+        role_tokens = self._axis_token_set(role_label)
+        return bool(role_tokens) and not role_tokens.issubset(
+            _OBJECTIVE_GENERIC_PROCESS_ROLE_TOKENS
+        )
 
     def _objective_table_column_is_process_context(
         self,

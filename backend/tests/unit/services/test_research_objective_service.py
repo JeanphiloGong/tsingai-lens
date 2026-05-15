@@ -1278,9 +1278,9 @@ def test_research_objective_service_uses_role_aliases_for_result_process_context
     assert records[0]["property_normalized"] == "experimental yield strength"
     assert records[0]["sample_context"] == {"sample_number": "1"}
     assert records[0]["process_context"] == {
-        "α ( ◦ )": "0",
-        "β ( ◦ )": "22.5",
-        "θ ( ◦ )": "45",
+        "rotation angle x": "0",
+        "rotation angle y": "22.5",
+        "rotation angle z": "45",
     }
 
 

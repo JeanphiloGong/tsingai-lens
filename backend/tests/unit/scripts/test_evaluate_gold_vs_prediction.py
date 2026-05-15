@@ -196,6 +196,75 @@ def test_evaluate_gold_vs_prediction_normalizes_p003_metric_aliases():
     assert evaluator._normalize_metric("fat50%") == "fatigue_limit"
 
 
+def test_evaluate_gold_vs_prediction_maps_papers_by_best_title_match():
+    evaluator = _load_evaluator_module()
+
+    prediction_papers = [
+        {
+            "paper_id": "pred-p001",
+            "title": (
+                "96f1fd404bbd496aad60b263221b1200_Effect of energy density "
+                "and scanning strategy on densification, microstructure and "
+                "mechanical properties of 316L stainless steel processed via "
+                "selective laser melting.pdf"
+            ),
+        },
+        {
+            "paper_id": "pred-p002",
+            "title": (
+                "aebaa064c283443d85a7d858651aeedb_Effect of Preheating "
+                "Build Platform on Microstructure and Mechanical Properties of "
+                "Additively Manufactured 316L Stainless Steel.pdf"
+            ),
+        },
+        {
+            "paper_id": "pred-p004",
+            "title": (
+                "ee0ce556554c4756acd20279efe95981_Heat treatment effect on "
+                "the microstructure, mechanical properties, and wear behaviors "
+                "of stainless steel 316L prepared via selective laser melting.pdf"
+            ),
+        },
+        {
+            "paper_id": "pred-p005",
+            "title": (
+                "e055fbc3e8094f07a4aaadfd3f29a162_Influence of porosity on "
+                "mechanical and corrosion properties of SLM 316L stainless steel.pdf"
+            ),
+        },
+    ]
+
+    expected_mappings = {
+        "P002": (
+            "Effect of Preheating Build Platform on Microstructure and Mechanical "
+            "Properties of Additively Manufactured 316L Stainless Steel",
+            "pred-p002",
+        ),
+        "P004": (
+            "Heat treatment effect on the microstructure, mechanical properties, "
+            "and wear behaviors of stainless steel 316L prepared via selective "
+            "laser melting",
+            "pred-p004",
+        ),
+        "P005": (
+            "Influence of porosity on mechanical and corrosion properties of SLM "
+            "316L stainless steel",
+            "pred-p005",
+        ),
+    }
+
+    for gold_paper_id, (gold_title, expected_prediction_id) in (
+        expected_mappings.items()
+    ):
+        mapping = evaluator._map_prediction_paper(
+            {"paper_id": gold_paper_id, "title": gold_title},
+            prediction_papers,
+        )
+
+        assert mapping["status"] == "mapped"
+        assert mapping["prediction_paper"]["paper_id"] == expected_prediction_id
+
+
 def test_evaluate_gold_vs_prediction_maps_ved_sample_labels():
     evaluator = _load_evaluator_module()
 

@@ -781,13 +781,13 @@ def _map_prediction_paper(
                 "prediction_paper": paper,
             }
 
-    for paper in prediction_papers:
-        if _title_match(gold_title, _text(paper.get("title"))):
-            return {
-                "status": "mapped",
-                "reason": "title token match",
-                "prediction_paper": paper,
-            }
+    best_title_match = _best_title_match(gold_title, prediction_papers)
+    if best_title_match:
+        return {
+            "status": "mapped",
+            "reason": "best title token match",
+            "prediction_paper": best_title_match,
+        }
     if len(prediction_papers) == 1:
         return {
             "status": "mapped_with_low_confidence",
@@ -1274,12 +1274,32 @@ def _units_compatible(gold_unit: str, prediction_unit: str) -> bool:
 
 
 def _title_match(gold_title: str, prediction_title: str) -> bool:
+    return _title_match_score(gold_title, prediction_title) >= 0.6
+
+
+def _best_title_match(
+    gold_title: str,
+    prediction_papers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    scored_matches = [
+        (_title_match_score(gold_title, _text(paper.get("title"))), paper)
+        for paper in prediction_papers
+    ]
+    if not scored_matches:
+        return {}
+    score, paper = max(scored_matches, key=lambda item: item[0])
+    if score < 0.6:
+        return {}
+    return paper
+
+
+def _title_match_score(gold_title: str, prediction_title: str) -> float:
     gold_tokens = _title_tokens(gold_title)
     prediction_tokens = _title_tokens(prediction_title)
     if not gold_tokens or not prediction_tokens:
-        return False
+        return 0.0
     overlap = gold_tokens.intersection(prediction_tokens)
-    return _ratio(len(overlap), len(gold_tokens)) >= 0.6
+    return _ratio(len(overlap), len(gold_tokens)) or 0.0
 
 
 def _title_tokens(value: str) -> set[str]:

@@ -620,6 +620,115 @@ def test_export_prediction_bundle_ignores_uncertainty_only_pair_candidates(tmp_p
     } == {33.2, 37.3, 48.3, 54.0}
 
 
+def test_export_prediction_bundle_projects_structural_context_pairs(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": f"density-{sample_label.lower()}",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "material density",
+            "sample_context": {
+                "sample_id": sample_label,
+                "grain_size_eq_diameter": grain_size,
+                "melt_pool_width": melt_pool_width,
+            },
+            "process_context": {"volumetric_energy_density": sample_label},
+            "value_payload": {
+                "value": density,
+                "source_value_text": str(density),
+            },
+            "unit": "%",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-structure",
+                    "page": 5,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+        for sample_label, density, grain_size, melt_pool_width in (
+            ("L-VED", 91.9, 81, 148),
+            ("M-VED", 98.92, 108, 166),
+            ("H-VED", 99.6, 115, 190),
+        )
+    ]
+    records_by_artifact["objective_evidence_units"].append(
+        {
+            "evidence_unit_id": "defect-map",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "defect size",
+            "sample_context": {"defect_structure": "complex defects"},
+            "value_payload": {
+                "maximum_defect_diameter": {
+                    "H-VED": 50,
+                    "L-VED": 76,
+                    "M-VED": 54,
+                }
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-defects",
+                    "page": 5,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+    )
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    comparison_index = {
+        (
+            comparison["comparison_metric"],
+            comparison["current_sample_id"].rsplit("-", 2)[-2],
+            comparison["baseline_reference"].rsplit("-", 2)[-2],
+            comparison["current_value"],
+            comparison["baseline_value"],
+        )
+        for comparison in bundle["comparisons"]
+    }
+
+    assert (
+        "equivalent_grain_diameter",
+        "h",
+        "l",
+        115.0,
+        81.0,
+    ) in comparison_index
+    assert ("melt_pool_width", "h", "l", 190.0, 148.0) in comparison_index
+    assert (
+        "maximum_defect_diameter",
+        "h",
+        "l",
+        50.0,
+        76.0,
+    ) in comparison_index
+    assert (
+        "maximum_defect_diameter",
+        "h",
+        "m",
+        50.0,
+        54.0,
+    ) in comparison_index
+
+
 def test_export_prediction_bundle_projects_objective_interpretations(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

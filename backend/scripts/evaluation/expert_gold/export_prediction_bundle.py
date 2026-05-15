@@ -86,6 +86,13 @@ OBJECTIVE_METRIC_ALIASES = {
     "\u03c3 y": "yield strength",
     "\u03c3y": "yield strength",
 }
+OBJECTIVE_SAMPLE_CONTEXT_METRICS = {
+    "grain size eq diameter": "equivalent_grain_diameter",
+    "melt pool width": "melt_pool_width",
+}
+OBJECTIVE_VALUE_MAP_METRICS = {
+    "maximum defect diameter": "maximum_defect_diameter",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -995,40 +1002,18 @@ def _convert_objective_measurement_pair_comparisons(
     for row_number, row in _rows_with_numbers(rows):
         if _text(row, "unit_kind") != "measurement":
             continue
-        document_id = _text(row, "document_id")
-        sample_context = _dict_value(row.get("sample_context"))
-        sample_id = _objective_sample_id(document_id, sample_context)
-        metric = _objective_metric_name(row)
-        unit = _objective_unit(row)
-        value = _objective_numeric_value(row)
-        if not document_id or not sample_id or not metric or value is None:
-            continue
-        if _objective_value_is_uncertainty_only(row):
-            continue
-        group_key = (
-            document_id,
-            metric,
-            unit,
-            _objective_measurement_pair_source(row),
-        )
-        candidate_key = f"{sample_id}:{value}"
-        grouped_candidates.setdefault(group_key, {}).setdefault(
-            candidate_key,
-            {
-                "row": row,
-                "row_number": row_number,
-                "document_id": document_id,
-                "evidence_unit_id": _text(row, "evidence_unit_id")
-                or f"row-{row_number}",
-                "sample_context": sample_context,
-                "sample_id": sample_id,
-                "sample_label": _objective_sample_label(sample_context),
-                "metric": metric,
-                "value": value,
-                "unit": unit,
-                "evidence_ids": _objective_evidence_ids(row),
-            },
-        )
+        for candidate in _objective_measurement_pair_row_candidates(row, row_number):
+            group_key = (
+                candidate["document_id"],
+                candidate["metric"],
+                candidate["unit"],
+                _objective_measurement_pair_source(row),
+            )
+            candidate_key = f"{candidate['sample_id']}:{candidate['value']}"
+            grouped_candidates.setdefault(group_key, {}).setdefault(
+                candidate_key,
+                candidate,
+            )
 
     records: list[dict[str, Any]] = []
     for candidates_by_sample in grouped_candidates.values():
@@ -1046,6 +1031,150 @@ def _convert_objective_measurement_pair_comparisons(
                 )
             )
     return records
+
+
+def _objective_measurement_pair_row_candidates(
+    row: dict[str, Any],
+    row_number: int,
+) -> list[dict[str, Any]]:
+    if _text(row, "unit_kind") != "measurement":
+        return []
+    if _objective_value_is_uncertainty_only(row):
+        return []
+    document_id = _text(row, "document_id")
+    sample_context = _dict_value(row.get("sample_context"))
+    candidates: list[dict[str, Any]] = []
+    if not document_id:
+        return candidates
+    sample_id = _objective_sample_id(document_id, sample_context)
+    metric = _objective_metric_name(row)
+    unit = _objective_unit(row)
+    value = _objective_numeric_value(row)
+    if sample_id and metric and value is not None:
+        candidates.append(
+            _objective_measurement_pair_candidate(
+                row=row,
+                row_number=row_number,
+                document_id=document_id,
+                evidence_unit_id=_text(row, "evidence_unit_id") or f"row-{row_number}",
+                sample_context=sample_context,
+                metric=metric,
+                value=value,
+                unit=unit,
+            )
+        )
+    candidates.extend(
+        _objective_sample_context_pair_candidates(
+            row=row,
+            row_number=row_number,
+            document_id=document_id,
+            sample_context=sample_context,
+        )
+    )
+    candidates.extend(
+        _objective_value_map_pair_candidates(
+            row=row,
+            row_number=row_number,
+            document_id=document_id,
+        )
+    )
+    return candidates
+
+
+def _objective_measurement_pair_candidate(
+    *,
+    row: dict[str, Any],
+    row_number: int,
+    document_id: str,
+    evidence_unit_id: str,
+    sample_context: dict[str, Any],
+    metric: str,
+    value: float,
+    unit: str,
+) -> dict[str, Any]:
+    sample_id = _objective_sample_id(document_id, sample_context)
+    return {
+        "row": row,
+        "row_number": row_number,
+        "document_id": document_id,
+        "evidence_unit_id": evidence_unit_id,
+        "sample_context": sample_context,
+        "sample_id": sample_id,
+        "sample_label": _objective_sample_label(sample_context),
+        "metric": metric,
+        "value": value,
+        "unit": unit,
+        "evidence_ids": _objective_evidence_ids(row),
+    }
+
+
+def _objective_sample_context_pair_candidates(
+    *,
+    row: dict[str, Any],
+    row_number: int,
+    document_id: str,
+    sample_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not _objective_sample_id(document_id, sample_context):
+        return []
+    candidates: list[dict[str, Any]] = []
+    evidence_unit_id = _text(row, "evidence_unit_id") or f"row-{row_number}"
+    for key, raw_value in sample_context.items():
+        metric = OBJECTIVE_SAMPLE_CONTEXT_METRICS.get(_objective_metric_alias_key(str(key)))
+        if not metric:
+            continue
+        value = _objective_numeric_scalar(raw_value)
+        if value is None:
+            continue
+        candidates.append(
+            _objective_measurement_pair_candidate(
+                row=row,
+                row_number=row_number,
+                document_id=document_id,
+                evidence_unit_id=f"{evidence_unit_id}-{_issue_token(metric)}",
+                sample_context=sample_context,
+                metric=metric,
+                value=value,
+                unit="",
+            )
+        )
+    return candidates
+
+
+def _objective_value_map_pair_candidates(
+    *,
+    row: dict[str, Any],
+    row_number: int,
+    document_id: str,
+) -> list[dict[str, Any]]:
+    value_payload = _dict_value(row.get("value_payload"))
+    evidence_unit_id = _text(row, "evidence_unit_id") or f"row-{row_number}"
+    candidates: list[dict[str, Any]] = []
+    for key, raw_map in value_payload.items():
+        metric = OBJECTIVE_VALUE_MAP_METRICS.get(_objective_metric_alias_key(str(key)))
+        if not metric or not isinstance(raw_map, dict):
+            continue
+        for sample_label, raw_value in raw_map.items():
+            value = _objective_numeric_scalar(raw_value)
+            if value is None:
+                continue
+            sample_context = {"sample_id": str(sample_label)}
+            candidates.append(
+                _objective_measurement_pair_candidate(
+                    row=row,
+                    row_number=row_number,
+                    document_id=document_id,
+                    evidence_unit_id=(
+                        f"{evidence_unit_id}-{_issue_token(metric)}-"
+                        f"{_issue_token(str(sample_label))}"
+                    ),
+                    sample_context=sample_context,
+                    metric=metric,
+                    value=value,
+                    unit="",
+                )
+            )
+    return candidates
 
 
 def _objective_measurement_pair_candidates(
@@ -1620,12 +1749,22 @@ def _objective_numeric_value(row: dict[str, Any]) -> float | None:
     value_payload = _dict_value(row.get("value_payload"))
     for key in ("value", "numeric_value"):
         value = value_payload.get(key)
-        if _present(value):
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return None
+        scalar = _objective_numeric_scalar(value)
+        if scalar is not None:
+            return scalar
     return None
+
+
+def _objective_numeric_scalar(value: Any) -> float | None:
+    if not _present(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        match = re.search(r"[-+]?\d+(?:\.\d+)?", str(value))
+        if not match:
+            return None
+        return float(match.group(0))
 
 
 def _objective_value_is_uncertainty_only(row: dict[str, Any]) -> bool:

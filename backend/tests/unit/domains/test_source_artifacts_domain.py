@@ -107,6 +107,47 @@ def test_source_table_rows_bind_heading_by_same_page_bbox():
     }
 
 
+def test_source_table_rows_keep_raw_cell_text_without_domain_specific_rewrite():
+    header_paths = (
+        None,
+        "Table 2 > Type of heat treatment",
+        "Table 2 > Laser power (W)",
+        "Table 2 > Scan speed (mm/s)",
+        "Table 2 > Laser energy density (J/ mm 3 )",
+        "Table 2 > Density (%)",
+    )
+    raw_rows = (
+        ("as-SLM (140/", "-", "140", "280", "139", "92.19"),
+        ("280) HT-SLM (140/ 280)", "Furnace HT", "140", "280", "139", "93.14"),
+        ("(140/ 200)", "HIP", "140", "200", "194", "98.75"),
+    )
+    cells = [
+        SourceTableCell(
+            cell_id=f"cell-{row_index}-{col_index}",
+            document_id="doc-p004",
+            table_id="tbl-p004-table-2",
+            row_index=row_index,
+            col_index=col_index,
+            cell_text=cell_text,
+            header_path=header_paths[col_index],
+        )
+        for row_index, row in enumerate(raw_rows, start=1)
+        for col_index, cell_text in enumerate(row)
+    ]
+
+    rows = build_source_table_rows_from_cells(
+        document_id="doc-p004",
+        cells=cells,
+        heading_blocks=[],
+    )
+
+    assert [row.row_text for row in rows] == [
+        "as-SLM (140/ | - | 140 | 280 | 139 | 92.19",
+        "280) HT-SLM (140/ 280) | Furnace HT | 140 | 280 | 139 | 93.14",
+        "(140/ 200) | HIP | 140 | 200 | 194 | 98.75",
+    ]
+
+
 def test_source_table_cell_record_keeps_document_id_alias():
     record = SourceTableCell(
         cell_id="cell-1",

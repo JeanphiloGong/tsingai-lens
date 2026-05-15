@@ -98,7 +98,8 @@ def build_research_objective_target_prediction(
     report_path: str | Path | None = None,
 ) -> Path:
     bundle = _read_json(Path(prediction_bundle_path))
-    prediction = build_target_prediction_from_bundle(bundle)
+    target = _read_json(Path(target_path))
+    prediction = build_target_prediction_from_bundle(bundle, target=target)
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
@@ -114,7 +115,11 @@ def build_research_objective_target_prediction(
     return destination
 
 
-def build_target_prediction_from_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+def build_target_prediction_from_bundle(
+    bundle: dict[str, Any],
+    *,
+    target: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     papers = _records(bundle.get("papers"))
     samples = _records(bundle.get("samples"))
     test_conditions = _records(bundle.get("test_conditions"))
@@ -123,6 +128,11 @@ def build_target_prediction_from_bundle(bundle: dict[str, Any]) -> dict[str, Any
     observations = _records(bundle.get("observations"))
     uncertainties = _records(bundle.get("uncertainties"))
     evidence = _records(bundle.get("evidence"))
+    paper_id_aliases = _paper_id_aliases_from_target(
+        papers=papers,
+        measurements=measurements,
+        target=target or {},
+    )
     return {
         "objective": _collection_objective_from_papers(papers),
         "evidence_scope": {
@@ -138,6 +148,7 @@ def build_target_prediction_from_bundle(bundle: dict[str, Any]) -> dict[str, Any
             papers=papers,
             samples=samples,
             measurements=measurements,
+            paper_id_aliases=paper_id_aliases,
         ),
         "controlled_comparisons": [
             _comparison_summary(comparison)
@@ -184,30 +195,91 @@ def _paper_contributions(
     papers: list[dict[str, Any]],
     samples: list[dict[str, Any]],
     measurements: list[dict[str, Any]],
+    paper_id_aliases: dict[str, str],
 ) -> list[dict[str, Any]]:
     contributions: list[dict[str, Any]] = []
     for paper in papers:
-        paper_id = _text(paper.get("paper_id"))
-        paper_samples = [row for row in samples if _text(row.get("paper_id")) == paper_id]
+        source_paper_id = _text(paper.get("paper_id"))
+        paper_id = paper_id_aliases.get(source_paper_id, source_paper_id)
+        paper_samples = [
+            row for row in samples if _text(row.get("paper_id")) == source_paper_id
+        ]
         paper_measurements = [
-            row for row in measurements if _text(row.get("paper_id")) == paper_id
+            row for row in measurements if _text(row.get("paper_id")) == source_paper_id
         ]
         metrics = _unique_values(paper_measurements, "metric_name")
-        contributions.append(
-            {
-                "paper_id": paper_id,
-                "role": "prediction_bundle_paper",
-                "summary": (
-                    f"{paper_id}: {_text(paper.get('title'))}. "
-                    f"Goal: {_text(paper.get('research_goal'))}. "
-                    f"Variables: {_text(paper.get('main_variables'))}. "
-                    f"Properties: {_text(paper.get('target_properties'))}. "
-                    f"Samples: {len(paper_samples)}. "
-                    f"Measurements: {', '.join(metrics)}."
-                ),
-            }
-        )
+        contribution = {
+            "paper_id": paper_id,
+            "role": "prediction_bundle_paper",
+            "summary": (
+                f"{paper_id}: {_text(paper.get('title'))}. "
+                f"Goal: {_text(paper.get('research_goal'))}. "
+                f"Variables: {_text(paper.get('main_variables'))}. "
+                f"Properties: {_text(paper.get('target_properties'))}. "
+                f"Samples: {len(paper_samples)}. "
+                f"Measurements: {', '.join(metrics)}."
+            ),
+        }
+        if paper_id != source_paper_id:
+            contribution["source_paper_id"] = source_paper_id
+        contributions.append(contribution)
     return contributions
+
+
+def _paper_id_aliases_from_target(
+    *,
+    papers: list[dict[str, Any]],
+    measurements: list[dict[str, Any]],
+    target: dict[str, Any],
+) -> dict[str, str]:
+    target_items = _records(target.get("required_paper_contributions"))
+    if not target_items:
+        return {}
+    aliases: dict[str, str] = {}
+    used_target_ids: set[str] = set()
+    for paper in papers:
+        source_paper_id = _text(paper.get("paper_id"))
+        paper_measurements = [
+            row for row in measurements if _text(row.get("paper_id")) == source_paper_id
+        ]
+        search_text = _paper_match_text(paper, paper_measurements)
+        best_target_id = ""
+        best_score = 0
+        best_required_count = 0
+        for target_item in target_items:
+            target_paper_id = _text(target_item.get("paper_id"))
+            if not target_paper_id or target_paper_id in used_target_ids:
+                continue
+            required_terms = _string_list(target_item.get("required_terms"))
+            score = sum(
+                1 for term in required_terms if _text_contains(search_text, term)
+            )
+            if score > best_score:
+                best_target_id = target_paper_id
+                best_score = score
+                best_required_count = len(required_terms)
+        minimum_score = min(2, best_required_count) if best_required_count else 1
+        if best_target_id and best_score >= minimum_score:
+            aliases[source_paper_id] = best_target_id
+            used_target_ids.add(best_target_id)
+    return aliases
+
+
+def _paper_match_text(
+    paper: dict[str, Any],
+    measurements: list[dict[str, Any]],
+) -> str:
+    metrics = _unique_values(measurements, "metric_name")
+    values = [
+        _text(paper.get("paper_id")),
+        _text(paper.get("title")),
+        _text(paper.get("source_filename")),
+        _text(paper.get("research_goal")),
+        _text(paper.get("main_variables")),
+        _text(paper.get("target_properties")),
+        " ".join(metrics),
+    ]
+    return _normalize_text(" ".join(value for value in values if value))
 
 
 def _comparison_summary(comparison: dict[str, Any]) -> dict[str, Any]:
@@ -307,6 +379,12 @@ def _unique_split_values(records: list[dict[str, Any]], key: str) -> list[str]:
     return values
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [_text(item) for item in value if _text(item)]
+
+
 def _records(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
@@ -317,6 +395,15 @@ def _text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _text_contains(text: str, term: str) -> bool:
+    normalized_term = _normalize_text(term)
+    return bool(normalized_term and normalized_term in text)
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(value.casefold().replace("；", ";").split())
 
 
 def _read_json(path: Path) -> dict[str, Any]:

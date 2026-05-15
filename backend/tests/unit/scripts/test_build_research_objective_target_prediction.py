@@ -85,6 +85,40 @@ def test_build_target_prediction_preserves_comparisons_and_limits() -> None:
     ]
 
 
+def test_build_target_prediction_aligns_paper_ids_to_target_contributions() -> None:
+    projection = _load_projection_module()
+    bundle = _prediction_bundle()
+    bundle["papers"][0]["paper_id"] = "doc-energy"
+    for family in ("samples", "measurement_results"):
+        for row in bundle[family]:
+            row["paper_id"] = "doc-energy"
+
+    prediction = projection.build_target_prediction_from_bundle(
+        bundle,
+        target={
+            "required_paper_contributions": [
+                {
+                    "paper_id": "P777",
+                    "required_terms": ["energy density", "yield strength"],
+                }
+            ]
+        },
+    )
+
+    assert prediction["paper_contributions"] == [
+        {
+            "paper_id": "P777",
+            "source_paper_id": "doc-energy",
+            "role": "prediction_bundle_paper",
+            "summary": (
+                "P777: Energy input study. Goal: Study energy input. "
+                "Variables: energy density. Properties: density; strength. "
+                "Samples: 2. Measurements: density, yield strength."
+            ),
+        }
+    ]
+
+
 def test_build_research_objective_target_prediction_writes_prediction_and_report(
     tmp_path: Path,
 ) -> None:

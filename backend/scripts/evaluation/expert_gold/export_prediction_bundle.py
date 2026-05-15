@@ -91,6 +91,7 @@ OBJECTIVE_SAMPLE_CONTEXT_METRICS = {
     "melt pool width": "melt_pool_width",
 }
 OBJECTIVE_VALUE_MAP_METRICS = {
+    "fatigue limit": "fatigue_limit",
     "maximum defect diameter": "maximum_defect_diameter",
     "maximum defect size": "maximum_defect_diameter",
 }
@@ -1156,11 +1157,17 @@ def _objective_value_map_pair_candidates(
         metric = OBJECTIVE_VALUE_MAP_METRICS.get(_objective_metric_alias_key(str(key)))
         if not metric or not isinstance(raw_map, dict):
             continue
-        for sample_label, raw_value in raw_map.items():
+        for sample_label, raw_value in _objective_value_map_items(
+            row=row,
+            metric=metric,
+            raw_map=raw_map,
+        ):
             value = _objective_numeric_scalar(raw_value)
             if value is None:
                 continue
-            sample_context = {"sample_id": str(sample_label)}
+            sample_context = {
+                "sample_id": _objective_value_map_sample_label(sample_label)
+            }
             candidates.append(
                 _objective_measurement_pair_candidate(
                     row=row,
@@ -1177,6 +1184,65 @@ def _objective_value_map_pair_candidates(
                 )
             )
     return candidates
+
+
+def _objective_value_map_items(
+    *,
+    row: dict[str, Any],
+    metric: str,
+    raw_map: dict[Any, Any],
+) -> list[tuple[Any, Any]]:
+    items = list(raw_map.items())
+    if metric != "fatigue_limit":
+        return items
+    return items + _objective_fatigue_limit_context_items(row, raw_map)
+
+
+def _objective_fatigue_limit_context_items(
+    row: dict[str, Any],
+    raw_map: dict[Any, Any],
+) -> list[tuple[str, Any]]:
+    current_items = [
+        (sample_label, raw_value)
+        for sample_label, raw_value in raw_map.items()
+        if not _objective_is_reference_sample_label(sample_label)
+    ]
+    if len(current_items) != 1:
+        return []
+    existing_labels = {
+        _objective_metric_alias_key(str(sample_label)) for sample_label in raw_map
+    }
+    _, raw_value = current_items[0]
+    context = _dict_value(row.get("sample_context"))
+    labels: list[tuple[str, Any]] = []
+    for label in _objective_sample_context_labels(context):
+        normalized_label = _objective_metric_alias_key(label)
+        if normalized_label in existing_labels:
+            continue
+        if _objective_is_reference_sample_label(label):
+            continue
+        labels.append((label, raw_value))
+    return labels
+
+
+def _objective_sample_context_labels(sample_context: dict[str, Any]) -> list[str]:
+    labels: list[str] = []
+    for value in sample_context.values():
+        candidate = _objective_sample_label_candidate(value)
+        if candidate and candidate not in labels:
+            labels.append(candidate)
+    return labels
+
+
+def _objective_is_reference_sample_label(sample_label: Any) -> bool:
+    text = str(sample_label).replace("_", " ").casefold()
+    return "wrought" in text or "baseline" in text or "reference" in text
+
+
+def _objective_value_map_sample_label(sample_label: Any) -> str:
+    text = str(sample_label).strip()
+    normalized = _objective_sample_label_candidate(text.replace("_", " "))
+    return normalized or text
 
 
 def _objective_measurement_pair_candidates(

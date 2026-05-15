@@ -798,6 +798,71 @@ def test_export_prediction_bundle_projects_characterization_value_map_pairs(tmp_
     ) in comparison_index
 
 
+def test_export_prediction_bundle_projects_fatigue_limit_interpretation_pairs(
+    tmp_path,
+):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "fatigue-limit-map",
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "fatigue strength",
+            "sample_context": {"sample_type": "H-VED"},
+            "value_payload": {
+                "fatigue_limit": {
+                    "L-VED": "80 - 100 MPa",
+                    "wrought_316L": "256 MPa",
+                }
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-fatigue",
+                    "page": 7,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    def sample_key(sample_id: str) -> str:
+        return sample_id.removeprefix("obj-sample-paper-1-")
+
+    comparison_index = {
+        (
+            comparison["comparison_metric"],
+            sample_key(comparison["current_sample_id"]),
+            sample_key(comparison["baseline_reference"]),
+            comparison["current_value"],
+            comparison["baseline_value"],
+        )
+        for comparison in bundle["comparisons"]
+    }
+
+    assert ("fatigue_limit", "l-ved", "wrought-316l", 80.0, 256.0) in (
+        comparison_index
+    )
+    assert ("fatigue_limit", "h-ved", "wrought-316l", 80.0, 256.0) in (
+        comparison_index
+    )
+
+
 def test_export_prediction_bundle_projects_objective_interpretations(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

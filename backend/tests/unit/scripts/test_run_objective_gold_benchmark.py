@@ -190,6 +190,43 @@ def test_objective_benchmark_generates_research_objective_target_report(
     }
 
 
+def test_objective_benchmark_reports_duplicate_prediction_mappings():
+    benchmark = _load_benchmark_module()
+
+    quality = benchmark.evaluate_paper_mapping_quality(
+        [
+            {
+                "gold_paper_id": "P001",
+                "prediction_paper_id": "prediction-a",
+                "paper_mapping": {"status": "mapped"},
+            },
+            {
+                "gold_paper_id": "P002",
+                "prediction_paper_id": "prediction-a",
+                "paper_mapping": {"status": "mapped"},
+            },
+            {
+                "gold_paper_id": "P003",
+                "prediction_paper_id": "prediction-b",
+                "paper_mapping": {"status": "mapped"},
+            },
+        ]
+    )
+
+    assert quality == {
+        "status": "fail",
+        "mapped_paper_count": 3,
+        "unique_prediction_paper_count": 2,
+        "duplicate_prediction_mappings": [
+            {
+                "prediction_paper_id": "prediction-a",
+                "gold_paper_ids": ["P001", "P002"],
+            }
+        ],
+        "unmapped_gold_paper_ids": [],
+    }
+
+
 def _paper(
     paper_id: str,
     *,

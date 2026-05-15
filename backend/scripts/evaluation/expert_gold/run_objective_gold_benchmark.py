@@ -163,6 +163,9 @@ def run_objective_gold_benchmark(
             target_report
         ),
         "summary": report.get("summary", {}),
+        "paper_mapping_quality": evaluate_paper_mapping_quality(
+            report.get("papers", [])
+        ),
         "papers": _paper_summaries(report.get("papers", [])),
     }
     if quality_gate:
@@ -220,6 +223,40 @@ def evaluate_objective_quality_gate(
         "status": "fail" if failed_checks else "pass",
         "checks": checks,
         "failed_checks": failed_checks,
+    }
+
+
+def evaluate_paper_mapping_quality(papers: list[dict[str, Any]]) -> dict[str, Any]:
+    mapped_prediction_ids: dict[str, list[str]] = {}
+    unmapped_gold_paper_ids: list[str] = []
+    for paper in papers:
+        gold_paper_id = str(paper.get("gold_paper_id") or "")
+        mapping_status = str((paper.get("paper_mapping") or {}).get("status") or "")
+        prediction_paper_id = str(paper.get("prediction_paper_id") or "")
+        if not mapping_status.startswith("mapped") or not prediction_paper_id:
+            if gold_paper_id:
+                unmapped_gold_paper_ids.append(gold_paper_id)
+            continue
+        mapped_prediction_ids.setdefault(prediction_paper_id, []).append(gold_paper_id)
+    duplicate_prediction_mappings = [
+        {
+            "prediction_paper_id": prediction_paper_id,
+            "gold_paper_ids": gold_paper_ids,
+        }
+        for prediction_paper_id, gold_paper_ids in sorted(mapped_prediction_ids.items())
+        if len(gold_paper_ids) > 1
+    ]
+    status = (
+        "fail"
+        if duplicate_prediction_mappings or unmapped_gold_paper_ids
+        else "pass"
+    )
+    return {
+        "status": status,
+        "mapped_paper_count": sum(len(ids) for ids in mapped_prediction_ids.values()),
+        "unique_prediction_paper_count": len(mapped_prediction_ids),
+        "duplicate_prediction_mappings": duplicate_prediction_mappings,
+        "unmapped_gold_paper_ids": unmapped_gold_paper_ids,
     }
 
 

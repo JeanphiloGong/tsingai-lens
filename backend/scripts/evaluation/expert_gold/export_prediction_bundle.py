@@ -204,6 +204,11 @@ def build_prediction_bundle(
         comparisons = _convert_objective_comparisons(objective_units)
         observations = _convert_objective_observations(objective_units)
         evidence = _convert_objective_evidence(objective_units)
+        uncertainties = _convert_objective_uncertainties(
+            objective_units,
+            records_by_artifact["objective_logic_chains"],
+            missing_artifacts,
+        )
     else:
         samples = _convert_samples(records_by_artifact["sample_variants"])
         process_parameters = _convert_process_parameters(
@@ -225,6 +230,7 @@ def build_prediction_bundle(
             records_by_artifact["characterization_observations"]
         )
         evidence = _convert_evidence(records_by_artifact["evidence_anchors"])
+        uncertainties = []
     bundle: dict[str, Any] = {
         "metadata": {
             "schema_version": SCHEMA_VERSION,
@@ -246,7 +252,7 @@ def build_prediction_bundle(
         "comparisons": comparisons,
         "observations": observations,
         "evidence": evidence,
-        "uncertainties": [],
+        "uncertainties": uncertainties,
         "global_notes": [],
         "objective_evidence_units": _raw_records(
             records_by_artifact["objective_evidence_units"],
@@ -1033,6 +1039,111 @@ def _convert_objective_evidence(rows: list[dict[str, Any]]) -> list[dict[str, An
     return list(records_by_id.values())
 
 
+def _convert_objective_uncertainties(
+    objective_rows: list[dict[str, Any]],
+    logic_chain_rows: list[dict[str, Any]],
+    missing_artifacts: list[str],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for row_number, row in _rows_with_numbers(objective_rows):
+        resolution_status = _text(row, "resolution_status")
+        if not resolution_status or resolution_status == "resolved":
+            continue
+        evidence_unit_id = _text(row, "evidence_unit_id") or f"row-{row_number}"
+        records.append(
+            {
+                "paper_id": _text(row, "document_id"),
+                "issue_id": (
+                    f"objective-unit-{_issue_token(resolution_status)}-"
+                    f"{_issue_token(evidence_unit_id)}"
+                ),
+                "description": (
+                    f"Objective evidence unit {evidence_unit_id} has "
+                    f"resolution_status={resolution_status}."
+                ),
+                "impact": (
+                    "The related sample, condition, measurement, or comparison "
+                    "context may be incomplete."
+                ),
+                "source": _source("objective_evidence_units", row_number),
+            }
+        )
+    for row_number, row in _rows_with_numbers(logic_chain_rows):
+        records.extend(_objective_logic_chain_uncertainties(row, row_number))
+    for artifact in missing_artifacts:
+        records.append(
+            {
+                "paper_id": "",
+                "issue_id": f"missing-artifact-{_issue_token(artifact)}",
+                "description": f"Repository artifact {artifact} is missing.",
+                "impact": (
+                    "The related evidence family cannot be evaluated from this "
+                    "prediction bundle."
+                ),
+                "source": _source("metadata.missing_artifacts", None),
+            }
+        )
+    return records
+
+
+def _objective_logic_chain_uncertainties(
+    row: dict[str, Any],
+    row_number: int,
+) -> list[dict[str, Any]]:
+    logic_chain_id = _text(row, "logic_chain_id") or f"row-{row_number}"
+    objective_id = _text(row, "objective_id")
+    paper_id = _text(row, "document_id")
+    payload = _dict_value(row.get("chain_payload"))
+    records = [
+        _objective_logic_gap_record(
+            row_number=row_number,
+            paper_id=paper_id,
+            logic_chain_id=logic_chain_id,
+            objective_id=objective_id,
+            gap=gap,
+        )
+        for gap in _string_list(_dict_value(payload.get("cross_paper")).get("gaps"))
+    ]
+    paper_chains = _normalize_value(payload.get("paper_chains"))
+    if isinstance(paper_chains, list):
+        for paper_chain in paper_chains:
+            if not isinstance(paper_chain, dict):
+                continue
+            chain_paper_id = _text(paper_chain, "document_id", "paper_id") or paper_id
+            resolution = _dict_value(paper_chain.get("resolution"))
+            for gap in _string_list(resolution.get("gaps")):
+                records.append(
+                    _objective_logic_gap_record(
+                        row_number=row_number,
+                        paper_id=chain_paper_id,
+                        logic_chain_id=logic_chain_id,
+                        objective_id=objective_id,
+                        gap=gap,
+                    )
+                )
+    return records
+
+
+def _objective_logic_gap_record(
+    *,
+    row_number: int,
+    paper_id: str,
+    logic_chain_id: str,
+    objective_id: str,
+    gap: str,
+) -> dict[str, Any]:
+    return {
+        "paper_id": paper_id,
+        "issue_id": (
+            f"objective-logic-gap-{_issue_token(logic_chain_id)}-"
+            f"{_issue_token(gap)}"
+        ),
+        "description": f"Objective logic chain {logic_chain_id} reports gap {gap}.",
+        "impact": f"The assembled research chain is incomplete for objective {objective_id}.",
+        "source": _source("objective_logic_chains", row_number),
+    }
+
+
 def _convert_evidence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for row_number, row in _rows_with_numbers(rows):
@@ -1365,6 +1476,11 @@ def _dict_value(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {}
+
+
+def _issue_token(value: Any) -> str:
+    text = str(value).strip()
+    return re.sub(r"[^0-9A-Za-z_.-]+", "-", text).strip("-") or "unknown"
 
 
 def _payload_text(payload: dict[str, Any], *keys: str) -> str:

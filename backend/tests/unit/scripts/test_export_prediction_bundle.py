@@ -279,6 +279,85 @@ def test_export_prediction_bundle_projects_objective_first_units(tmp_path):
     }
 
 
+def test_export_prediction_bundle_projects_objective_uncertainties(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-unresolved-1",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "resolution_status": "unresolved",
+            "confidence": 0.3,
+        }
+    ]
+    records_by_artifact["objective_logic_chains"] = [
+        {
+            "logic_chain_id": "olc-1",
+            "objective_id": "obj-1",
+            "document_id": "paper-1",
+            "chain_payload": {
+                "cross_paper": {
+                    "gaps": [
+                        "comparison_units_missing",
+                    ]
+                }
+            },
+        }
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=["baseline_references"],
+        fact_source="objective_first",
+    )
+
+    assert bundle["uncertainties"] == [
+        {
+            "paper_id": "paper-1",
+            "issue_id": "objective-unit-unresolved-oeu-unresolved-1",
+            "description": (
+                "Objective evidence unit oeu-unresolved-1 has "
+                "resolution_status=unresolved."
+            ),
+            "impact": (
+                "The related sample, condition, measurement, or comparison "
+                "context may be incomplete."
+            ),
+            "source": {"artifact": "objective_evidence_units", "row": 1},
+        },
+        {
+            "paper_id": "paper-1",
+            "issue_id": "objective-logic-gap-olc-1-comparison_units_missing",
+            "description": (
+                "Objective logic chain olc-1 reports gap "
+                "comparison_units_missing."
+            ),
+            "impact": "The assembled research chain is incomplete for objective obj-1.",
+            "source": {"artifact": "objective_logic_chains", "row": 1},
+        },
+        {
+            "paper_id": "",
+            "issue_id": "missing-artifact-baseline_references",
+            "description": "Repository artifact baseline_references is missing.",
+            "impact": (
+                "The related evidence family cannot be evaluated from this "
+                "prediction bundle."
+            ),
+            "source": {"artifact": "metadata.missing_artifacts", "row": None},
+        },
+    ]
+
+
 def test_export_prediction_bundle_prefers_objective_sample_number(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

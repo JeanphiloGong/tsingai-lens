@@ -1148,6 +1148,136 @@ def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
     ]
 
 
+def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How do process settings affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["process settings"],
+            "property_axes": ["relative density"],
+            "source_objective_ids": ["paper-1:obj"],
+            "confidence": 0.88,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "target_property_axes": ["relative density"],
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_tables": ["table-1"],
+        }
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Specimens": "sample_id",
+                "Density (%)": "target_property",
+            },
+            "confidence": 0.84,
+        }
+    )
+    table = SimpleNamespace(
+        table_id="table-1",
+        document_id="paper-1",
+        page=1,
+        caption_text="Density results",
+        heading_path="Results",
+        column_headers=["Specimens", "Density (%)"],
+        table_matrix=[
+            ["Specimens", "Density (%)"],
+            ["as-SLM (140/", "92.19"],
+        ],
+    )
+    table_cells = [
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=1,
+            col_index=0,
+            header_path="Specimens",
+            cell_text="as-SLM (140/",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=1,
+            col_index=1,
+            header_path="Density (%)",
+            cell_text="92.19",
+        ),
+    ]
+
+    class RepairExtractor:
+        def __init__(self) -> None:
+            self.unit_payloads: list[dict[str, Any]] = []
+
+        def extract_objective_evidence_units(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredObjectiveEvidenceUnits:
+            self.unit_payloads.append(payload)
+            return StructuredObjectiveEvidenceUnits(
+                evidence_units=[
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="measurement",
+                        property_normalized="relative density",
+                        material_system={},
+                        sample_context={"label": "repaired row label"},
+                        process_context={},
+                        test_condition={},
+                        value_payload={
+                            "value": 92.19,
+                            "source_value_text": "92.19",
+                        },
+                        unit="%",
+                        join_keys={"sample_key": "repaired row label"},
+                        resolution_status="resolved",
+                        confidence=0.86,
+                    )
+                ]
+            )
+
+    extractor = RepairExtractor()
+
+    units = service._build_objective_evidence_units(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(objective_context,),
+        objective_paper_frames=(frame,),
+        objective_evidence_routes=(route,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": [table]},
+        table_cells_by_document_id={"paper-1": table_cells},
+    )
+
+    assert len(extractor.unit_payloads) == 1
+    assert extractor.unit_payloads[0]["source"]["table_cells"][0] == {
+        "row_index": 1,
+        "col_index": 0,
+        "header_path": "Specimens",
+        "cell_text": "as-SLM (140/",
+    }
+    measurements = [unit for unit in units if unit.unit_kind == "measurement"]
+    assert len(measurements) == 1
+    assert measurements[0].sample_context == {"label": "repaired row label"}
+
+
 def test_research_objective_service_normalizes_result_table_values_to_measurements(
     tmp_path,
 ):

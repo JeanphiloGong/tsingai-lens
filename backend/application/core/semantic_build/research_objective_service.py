@@ -1420,8 +1420,14 @@ class ResearchObjectiveService:
                 source=source,
                 objective_context=objective_context,
             )
+            needs_structural_repair = (
+                self._objective_table_source_needs_llm_structural_repair(
+                    route=route,
+                    source=source,
+                )
+            )
             if (
-                not route_records
+                (not route_records or needs_structural_repair)
                 and not self._objective_table_route_should_skip_llm_fallback(
                     route,
                     objective_context=objective_context,
@@ -1443,17 +1449,21 @@ class ResearchObjectiveService:
                         route_position - 1,
                         max(len(extractable_routes) - route_position, 0),
                     )
-                    continue
-                route_records = tuple(
-                    record
-                    for item in parsed.evidence_units
-                    for record in self._objective_evidence_unit_records_from_extracted(
-                        route=route,
-                        source=source,
-                        objective_context=objective_context,
-                        extracted_record=item.model_dump(),
+                    if not route_records:
+                        continue
+                else:
+                    llm_route_records = tuple(
+                        record
+                        for item in parsed.evidence_units
+                        for record in self._objective_evidence_unit_records_from_extracted(
+                            route=route,
+                            source=source,
+                            objective_context=objective_context,
+                            extracted_record=item.model_dump(),
+                        )
                     )
-                )
+                    if llm_route_records or not route_records:
+                        route_records = llm_route_records
             for record in route_records:
                 unit = ObjectiveEvidenceUnit.from_mapping(record)
                 if not self._objective_evidence_unit_has_payload(unit):
@@ -1561,6 +1571,41 @@ class ResearchObjectiveService:
         if not route.column_roles:
             return True
         return has_result_like_role
+
+    def _objective_table_source_needs_llm_structural_repair(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+    ) -> bool:
+        if route.source_kind != "table":
+            return False
+        if route.role not in {"current_experimental_evidence", "process_or_treatment"}:
+            return False
+        cells = source.get("table_cells")
+        if not isinstance(cells, list):
+            return False
+        return any(
+            self._objective_cell_text_looks_structurally_fragmented(
+                str(cell.get("cell_text") or "")
+            )
+            for cell in cells
+            if isinstance(cell, dict)
+        )
+
+    def _objective_cell_text_looks_structurally_fragmented(self, text: str) -> bool:
+        value = " ".join(str(text or "").split())
+        if not value:
+            return False
+        if value.count("(") != value.count(")"):
+            return True
+        if value.count("[") != value.count("]"):
+            return True
+        if value.endswith(("/", "(", "[", "{")):
+            return True
+        if value.startswith((")", "]", "}")):
+            return True
+        return False
 
     def _build_objective_method_family_test_condition_units(
         self,

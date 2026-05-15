@@ -92,6 +92,7 @@ OBJECTIVE_SAMPLE_CONTEXT_METRICS = {
 }
 OBJECTIVE_VALUE_MAP_METRICS = {
     "maximum defect diameter": "maximum_defect_diameter",
+    "maximum defect size": "maximum_defect_diameter",
 }
 
 
@@ -1000,8 +1001,6 @@ def _convert_objective_measurement_pair_comparisons(
 ) -> list[dict[str, Any]]:
     grouped_candidates: dict[tuple[str, str, str, str], dict[str, dict[str, Any]]] = {}
     for row_number, row in _rows_with_numbers(rows):
-        if _text(row, "unit_kind") != "measurement":
-            continue
         for candidate in _objective_measurement_pair_row_candidates(row, row_number):
             group_key = (
                 candidate["document_id"],
@@ -1037,40 +1036,43 @@ def _objective_measurement_pair_row_candidates(
     row: dict[str, Any],
     row_number: int,
 ) -> list[dict[str, Any]]:
-    if _text(row, "unit_kind") != "measurement":
+    unit_kind = _text(row, "unit_kind")
+    if unit_kind not in {"measurement", "characterization", "interpretation"}:
         return []
-    if _objective_value_is_uncertainty_only(row):
+    if unit_kind == "measurement" and _objective_value_is_uncertainty_only(row):
         return []
     document_id = _text(row, "document_id")
     sample_context = _dict_value(row.get("sample_context"))
     candidates: list[dict[str, Any]] = []
     if not document_id:
         return candidates
-    sample_id = _objective_sample_id(document_id, sample_context)
-    metric = _objective_metric_name(row)
-    unit = _objective_unit(row)
-    value = _objective_numeric_value(row)
-    if sample_id and metric and value is not None:
-        candidates.append(
-            _objective_measurement_pair_candidate(
+    if unit_kind == "measurement":
+        sample_id = _objective_sample_id(document_id, sample_context)
+        metric = _objective_metric_name(row)
+        unit = _objective_unit(row)
+        value = _objective_numeric_value(row)
+        if sample_id and metric and value is not None:
+            candidates.append(
+                _objective_measurement_pair_candidate(
+                    row=row,
+                    row_number=row_number,
+                    document_id=document_id,
+                    evidence_unit_id=_text(row, "evidence_unit_id")
+                    or f"row-{row_number}",
+                    sample_context=sample_context,
+                    metric=metric,
+                    value=value,
+                    unit=unit,
+                )
+            )
+        candidates.extend(
+            _objective_sample_context_pair_candidates(
                 row=row,
                 row_number=row_number,
                 document_id=document_id,
-                evidence_unit_id=_text(row, "evidence_unit_id") or f"row-{row_number}",
                 sample_context=sample_context,
-                metric=metric,
-                value=value,
-                unit=unit,
             )
         )
-    candidates.extend(
-        _objective_sample_context_pair_candidates(
-            row=row,
-            row_number=row_number,
-            document_id=document_id,
-            sample_context=sample_context,
-        )
-    )
     candidates.extend(
         _objective_value_map_pair_candidates(
             row=row,

@@ -729,6 +729,75 @@ def test_export_prediction_bundle_projects_structural_context_pairs(tmp_path):
     ) in comparison_index
 
 
+def test_export_prediction_bundle_projects_characterization_value_map_pairs(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "defect-map",
+            "document_id": "paper-1",
+            "unit_kind": "characterization",
+            "property_normalized": "defect size",
+            "sample_context": {"defect_structure": "complex defects"},
+            "value_payload": {
+                "maximum_defect_diameter": {
+                    "H-VED": "50 μm",
+                    "L-VED": "76 μm",
+                    "M-VED": "54 μm",
+                }
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-defects",
+                    "page": 5,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    comparison_index = {
+        (
+            comparison["comparison_metric"],
+            comparison["current_sample_id"].rsplit("-", 2)[-2],
+            comparison["baseline_reference"].rsplit("-", 2)[-2],
+            comparison["current_value"],
+            comparison["baseline_value"],
+        )
+        for comparison in bundle["comparisons"]
+    }
+
+    assert (
+        "maximum_defect_diameter",
+        "h",
+        "l",
+        50.0,
+        76.0,
+    ) in comparison_index
+    assert (
+        "maximum_defect_diameter",
+        "h",
+        "m",
+        50.0,
+        54.0,
+    ) in comparison_index
+
+
 def test_export_prediction_bundle_projects_objective_interpretations(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

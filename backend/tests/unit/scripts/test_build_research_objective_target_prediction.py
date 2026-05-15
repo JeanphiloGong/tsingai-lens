@@ -108,14 +108,40 @@ def test_build_target_prediction_aligns_paper_ids_to_target_contributions() -> N
     assert prediction["paper_contributions"] == [
         {
             "paper_id": "P777",
-            "source_paper_id": "doc-energy",
             "role": "prediction_bundle_paper",
             "summary": (
                 "P777: Energy input study. Goal: Study energy input. "
                 "Variables: energy density. Properties: density; strength. "
                 "Samples: 2. Measurements: density, yield strength."
             ),
+            "source_paper_id": "doc-energy",
         }
+    ]
+
+
+def test_build_target_prediction_exposes_measurement_summaries() -> None:
+    projection = _load_projection_module()
+    bundle = _prediction_bundle()
+
+    prediction = projection.build_target_prediction_from_bundle(bundle)
+
+    assert prediction["measurement_results"] == [
+        {
+            "paper_id": "P001",
+            "result_id": "R001",
+            "sample_id": "S001",
+            "metric_name": "density",
+            "value": "95%",
+            "summary": "P001 R001: S001 density = 95%.",
+        },
+        {
+            "paper_id": "P001",
+            "result_id": "R002",
+            "sample_id": "S002",
+            "metric_name": "yield strength",
+            "value": "450 MPa",
+            "summary": "P001 R002: S002 yield strength = 450 MPa.",
+        },
     ]
 
 

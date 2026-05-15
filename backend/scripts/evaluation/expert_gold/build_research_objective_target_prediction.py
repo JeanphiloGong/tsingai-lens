@@ -150,6 +150,10 @@ def build_target_prediction_from_bundle(
             measurements=measurements,
             paper_id_aliases=paper_id_aliases,
         ),
+        "measurement_results": _measurement_summaries(
+            measurements,
+            paper_id_aliases=paper_id_aliases,
+        ),
         "controlled_comparisons": [
             _comparison_summary(comparison)
             for comparison in comparisons
@@ -280,6 +284,54 @@ def _paper_match_text(
         " ".join(metrics),
     ]
     return _normalize_text(" ".join(value for value in values if value))
+
+
+def _measurement_summaries(
+    measurements: list[dict[str, Any]],
+    *,
+    paper_id_aliases: dict[str, str],
+) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for measurement in measurements:
+        source_paper_id = _text(measurement.get("paper_id"))
+        paper_id = paper_id_aliases.get(source_paper_id, source_paper_id)
+        result_id = _text(measurement.get("result_id"))
+        sample_id = _measurement_sample_id(measurement)
+        metric = _text(measurement.get("metric_name"))
+        value = _measurement_value_with_unit(
+            measurement.get("value_or_trend"),
+            _text(measurement.get("unit")),
+        )
+        summaries.append(
+            {
+                "paper_id": paper_id,
+                "result_id": result_id,
+                "sample_id": sample_id,
+                "metric_name": metric,
+                "value": value,
+                "summary": f"{paper_id} {result_id}: {sample_id} {metric} = {value}.",
+            }
+        )
+    return summaries
+
+
+def _measurement_sample_id(measurement: dict[str, Any]) -> str:
+    sample_id = _text(measurement.get("sample_id"))
+    if sample_id:
+        return sample_id
+    sample_ids = measurement.get("sample_ids")
+    if not isinstance(sample_ids, list):
+        return ""
+    return ", ".join(_text(item) for item in sample_ids if _text(item))
+
+
+def _measurement_value_with_unit(value: Any, unit: str) -> str:
+    text = _text(value)
+    if not unit or unit in text:
+        return text
+    if unit == "%":
+        return f"{text}%"
+    return f"{text} {unit}".strip()
 
 
 def _comparison_summary(comparison: dict[str, Any]) -> dict[str, Any]:

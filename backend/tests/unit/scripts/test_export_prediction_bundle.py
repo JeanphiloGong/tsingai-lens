@@ -614,6 +614,95 @@ def test_export_prediction_bundle_pairs_numbered_treatment_series(tmp_path):
     assert len(bundle["comparisons"]) == 4
 
 
+def test_export_prediction_bundle_uses_main_value_from_uncertainty_first_text(
+    tmp_path,
+):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": evidence_unit_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {
+                "Specimens": specimen,
+                "sample_number": sample_number,
+            },
+            "value_payload": {
+                "value": extracted_value,
+                "source_value_text": source_value_text,
+            },
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+        for evidence_unit_id, sample_number, specimen, extracted_value, source_value_text in (
+            (
+                "measure-11",
+                11,
+                "as-SLM (120/100)",
+                10.2,
+                "( 10.2) 464.8 ( +/- 5.8)",
+            ),
+            (
+                "measure-12",
+                12,
+                "HT-SLM (120/100)",
+                570.2,
+                "570.2 ( +/- 9.1)",
+            ),
+            (
+                "measure-13",
+                13,
+                "HIP-SLM (120/100)",
+                2.1,
+                "( +/- 2.1) 180.5",
+            ),
+        )
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    measurement_values = {
+        measurement["result_id"]: measurement["value_payload"]["value"]
+        for measurement in bundle["measurement_results"]
+    }
+    comparison_index = {
+        (
+            comparison["current_sample_id"].rsplit("-", 1)[-1],
+            comparison["baseline_reference"].rsplit("-", 1)[-1],
+            comparison["current_value"],
+            comparison["baseline_value"],
+        )
+        for comparison in bundle["comparisons"]
+    }
+
+    assert measurement_values["measure-11"] == 464.8
+    assert measurement_values["measure-12"] == 570.2
+    assert measurement_values["measure-13"] == 180.5
+    assert ("12", "11", 570.2, 464.8) in comparison_index
+    assert ("13", "11", 180.5, 464.8) in comparison_index
+
+
 def test_export_prediction_bundle_ignores_uncertainty_only_pair_candidates(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

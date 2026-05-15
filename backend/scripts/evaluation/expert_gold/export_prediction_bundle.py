@@ -899,7 +899,7 @@ def _convert_objective_measurement_results(
         if _text(row, "unit_kind") != "measurement":
             continue
         sample_context = _dict_value(row.get("sample_context"))
-        value_payload = _first_value(row, "value_payload")
+        value_payload = _objective_value_payload(row)
         unit = _objective_unit(row)
         records.append(
             {
@@ -1868,12 +1868,31 @@ def _objective_baseline_sample_context(
 
 def _objective_numeric_value(row: dict[str, Any]) -> float | None:
     value_payload = _dict_value(row.get("value_payload"))
+    extracted_scalar: float | None = None
     for key in ("value", "numeric_value"):
         value = value_payload.get(key)
         scalar = _objective_numeric_scalar(value)
         if scalar is not None:
-            return scalar
-    return None
+            extracted_scalar = scalar
+            break
+    source_scalar = _objective_source_main_numeric_value(
+        _payload_text(value_payload, "source_value_text", "summary"),
+        extracted_scalar,
+    )
+    if source_scalar is not None:
+        return source_scalar
+    return extracted_scalar
+
+
+def _objective_value_payload(row: dict[str, Any]) -> dict[str, Any]:
+    value_payload = _dict_value(row.get("value_payload"))
+    scalar = _objective_numeric_value(row)
+    if scalar is None:
+        return value_payload
+    for key in ("value", "numeric_value"):
+        if key in value_payload and _objective_numeric_scalar(value_payload[key]) != scalar:
+            return {**value_payload, key: scalar}
+    return value_payload
 
 
 def _objective_numeric_scalar(value: Any) -> float | None:
@@ -1886,6 +1905,34 @@ def _objective_numeric_scalar(value: Any) -> float | None:
         if not match:
             return None
         return float(match.group(0))
+
+
+def _objective_source_main_numeric_value(
+    source_value: str,
+    extracted_scalar: float | None,
+) -> float | None:
+    if not source_value.strip():
+        return None
+    numeric_pattern = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
+    match = re.match(
+        rf"^\s*\(\s*(?:±|\+/-|\+\s*/\s*-)?\s*({numeric_pattern})\s*\)"
+        rf"\s*({numeric_pattern})\b",
+        source_value,
+    )
+    if not match:
+        return None
+    uncertainty_value = float(match.group(1))
+    if extracted_scalar is not None and not _numeric_values_equal(
+        extracted_scalar,
+        uncertainty_value,
+    ):
+        return None
+    return float(match.group(2))
+
+
+def _numeric_values_equal(left: float, right: float) -> bool:
+    tolerance = max(abs(left), abs(right), 1.0) * 1e-9
+    return abs(left - right) <= tolerance
 
 
 def _objective_value_is_uncertainty_only(row: dict[str, Any]) -> bool:

@@ -2549,8 +2549,9 @@ class ResearchObjectiveService:
             "sample_no",
             "sample_number",
         }
-        labeled_winners = []
+        labeled_winners: list[tuple[ObjectiveEvidenceUnit, set[str]]] = []
         for candidate in winners:
+            candidate_label_tokens: set[str] = set()
             for key, value in candidate.sample_context.items():
                 column_key = self._objective_column_key(str(key))
                 if column_key in sample_number_keys:
@@ -2571,10 +2572,36 @@ class ResearchObjectiveService:
                 ):
                     continue
                 if re.search(r"[A-Za-z]", str(value or "")):
-                    labeled_winners.append(candidate)
-                    break
+                    candidate_label_tokens.update(
+                        token
+                        for token in self._objective_match_text(value).split()
+                        if len(token) > 1 and not token.isdigit()
+                    )
+            if candidate_label_tokens:
+                labeled_winners.append((candidate, candidate_label_tokens))
         if len(labeled_winners) == 1:
-            return labeled_winners[0]
+            return labeled_winners[0][0]
+        match_label_tokens = {
+            token
+            for token in match_text.split()
+            if len(token) > 1 and not token.isdigit()
+        }
+        if match_label_tokens:
+            scored_labeled_winners = [
+                (len(candidate_label_tokens & match_label_tokens), candidate)
+                for candidate, candidate_label_tokens in labeled_winners
+            ]
+            best_label_score = max(
+                (score for score, _candidate in scored_labeled_winners),
+                default=0,
+            )
+            best_labeled_winners = [
+                candidate
+                for score, candidate in scored_labeled_winners
+                if score == best_label_score and score > 0
+            ]
+            if len(best_labeled_winners) == 1:
+                return best_labeled_winners[0]
         numbered_winners = [
             candidate
             for candidate in winners

@@ -3136,6 +3136,93 @@ def test_research_objective_service_resolves_measurements_from_process_label(
     assert resolved_measurement.resolution_status == "resolved"
 
 
+def test_research_objective_service_prefers_sample_label_over_row_number_context(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-yield-as-slm",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {
+                "Specimens": "as-SLM(120/100)",
+                "sample_number": "11",
+            },
+            "value_payload": {
+                "source_value_text": "464.8",
+                "value": 464.8,
+            },
+            "unit": "MPa",
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-as-slm",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "Specimens": "as-SLM (120/100)",
+                "sample_number": "10",
+            },
+            "process_context": {
+                "Specimens": "as-SLM (120/100)",
+                "laser power": "120",
+                "scan speed": "100",
+                "treatment type": "-",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+    row_number_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-row-11",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "Specimens": "HT-SLM (120/100)",
+                "sample_number": "11",
+            },
+            "process_context": {
+                "Specimens": "HT-SLM (120/100)",
+                "laser power": "120",
+                "scan speed": "100",
+                "treatment type": "Furnace HT",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+
+    resolved_units = service._resolve_objective_evidence_unit_contexts(
+        (
+            measurement,
+            row_number_process_context,
+            matching_process_context,
+        ),
+    )
+
+    resolved_measurement = resolved_units[0]
+    assert resolved_measurement.process_context["treatment type"] == "-"
+    assert resolved_measurement.resolved_condition == {
+        "context_unit_id": "oeu-process-as-slm",
+        "matched_sample_context": {
+            "Specimens": "as-SLM (120/100)",
+            "sample_number": "10",
+        },
+    }
+    assert resolved_measurement.sample_context["sample_number"] == "11"
+
+
 def test_research_objective_service_resolves_measurements_from_process_context(
     tmp_path,
 ):

@@ -2431,6 +2431,17 @@ class ResearchObjectiveService:
             list[ObjectiveEvidenceUnit],
         ],
     ) -> ObjectiveEvidenceUnit | None:
+        scope_candidates = context_units_by_scope.get(
+            (unit.objective_id, unit.document_id),
+            [],
+        )
+        if self._objective_sample_context_has_process_label(unit.sample_context):
+            label_context_unit = self._matching_objective_process_label_context_unit(
+                unit=unit,
+                candidates=scope_candidates,
+            )
+            if label_context_unit is not None:
+                return label_context_unit
         for key in self._objective_sample_context_match_keys(unit.sample_context):
             candidates = context_units_by_key.get(
                 (unit.objective_id, unit.document_id, key),
@@ -2447,11 +2458,28 @@ class ResearchObjectiveService:
                 return process_context_candidates[0]
         return self._matching_objective_process_label_context_unit(
             unit=unit,
-            candidates=context_units_by_scope.get(
-                (unit.objective_id, unit.document_id),
-                [],
-            ),
+            candidates=scope_candidates,
         )
+
+    def _objective_sample_context_has_process_label(
+        self,
+        sample_context: dict[str, Any],
+    ) -> bool:
+        if self._objective_sample_context_has_stable_label(sample_context):
+            return True
+        sample_number_keys = {
+            "condition",
+            "condition_no",
+            "condition_number",
+            "sample_no",
+            "sample_number",
+        }
+        for key, value in sample_context.items():
+            if self._objective_column_key(str(key)) in sample_number_keys:
+                continue
+            if re.search(r"[A-Za-z]", str(value or "")):
+                return True
+        return False
 
     def _objective_resolved_sample_context(
         self,

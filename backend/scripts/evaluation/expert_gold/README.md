@@ -180,3 +180,31 @@ tests/fixtures/local_expert_gold/generated/objective_first/
 ```
 
 Do not commit generated benchmark bundles or reports.
+
+## Evaluate Research Objective Target
+
+The objective-first benchmark checks extracted rows against expert tables. The
+research-objective target evaluator checks whether a collection-level
+research-chain prediction covers the expert target claims, paper
+contributions, limitations, and forbidden overclaims.
+
+The committed target and reference prediction are:
+
+```text
+tests/fixtures/research_objective_targets/lpbf_slm_316l_collection_target.json
+tests/fixtures/research_objective_targets/lpbf_slm_316l_reference_prediction.json
+```
+
+Run from the backend directory:
+
+```bash
+python3 scripts/evaluation/expert_gold/evaluate_research_objective_target.py \
+  --prediction tests/fixtures/research_objective_targets/lpbf_slm_316l_reference_prediction.json \
+  --report /tmp/research_objective_target_report.json \
+  --quality-gate
+```
+
+The evaluator is offline and read-only. It does not call LLMs, rebuild PDFs, or
+change collection state. Natural language is scored through required claims,
+numbers, paper ids, mechanism-chain phrases, limitations, and forbidden
+overclaim checks rather than exact paragraph matching.

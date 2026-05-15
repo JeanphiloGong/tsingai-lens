@@ -157,6 +157,50 @@ def test_evaluate_research_objective_target_writes_report(tmp_path: Path) -> Non
     )
 
 
+def test_lpbf_slm_316l_reference_prediction_passes_target_gate() -> None:
+    evaluator = _load_evaluator_module()
+    backend_root = Path(__file__).resolve().parents[3]
+    fixture_dir = backend_root / "tests" / "fixtures" / "research_objective_targets"
+    target = json.loads(
+        (fixture_dir / "lpbf_slm_316l_collection_target.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    prediction = json.loads(
+        (fixture_dir / "lpbf_slm_316l_reference_prediction.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    report = evaluator.evaluate_target_prediction(
+        target=target,
+        prediction=prediction,
+    )
+
+    assert report["quality_gate"]["status"] == "pass"
+    assert report["scores"]["forbidden_overclaim_violations"] == 0
+
+
+def test_lpbf_slm_316l_target_gate_fails_empty_prediction() -> None:
+    evaluator = _load_evaluator_module()
+    backend_root = Path(__file__).resolve().parents[3]
+    fixture_dir = backend_root / "tests" / "fixtures" / "research_objective_targets"
+    target = json.loads(
+        (fixture_dir / "lpbf_slm_316l_collection_target.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    report = evaluator.evaluate_target_prediction(
+        target=target,
+        prediction={},
+    )
+
+    assert report["quality_gate"]["status"] == "fail"
+    assert report["required_claims"]["matched_count"] == 0
+    assert report["paper_contributions"]["matched_count"] == 0
+
+
 def _target() -> dict:
     return {
         "target_id": "test_target",

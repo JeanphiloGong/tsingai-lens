@@ -3389,6 +3389,91 @@ def test_research_objective_service_prefers_descriptive_label_over_row_number_co
     }
 
 
+def test_research_objective_service_uses_process_context_label_tokens(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-yield-as-slm-140-200",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {
+                "Specimens": "as-SLM(140/ 200)",
+                "sample_number": "23",
+            },
+            "value_payload": {
+                "source_value_text": "426.7",
+                "value": 426.7,
+            },
+            "unit": "MPa",
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-as-slm-140-200",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "sample_number": "22",
+            },
+            "process_context": {
+                "Laser energy density (J/ mm 3 )": "194",
+                "Laser power (W)": "140",
+                "Scan speed (mm/s)": "200",
+                "Specimens": "(140/ 100) as-SLM",
+                "Type of heat treatment": "-",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+    row_number_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-hip-slm-140-200",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "sample_number": "24",
+            },
+            "process_context": {
+                "Laser energy density (J/ mm 3 )": "194",
+                "Laser power (W)": "140",
+                "Scan speed (mm/s)": "200",
+                "Specimens": "(140/ 200)",
+                "Type of heat treatment": "HIP",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+
+    resolved_units = service._resolve_objective_evidence_unit_contexts(
+        (
+            measurement,
+            row_number_process_context,
+            matching_process_context,
+        ),
+    )
+
+    resolved_measurement = resolved_units[0]
+    assert resolved_measurement.process_context["Type of heat treatment"] == "-"
+    assert resolved_measurement.resolved_condition == {
+        "context_unit_id": "oeu-process-as-slm-140-200",
+        "matched_sample_context": {
+            "sample_number": "22",
+        },
+    }
+
+
 def test_research_objective_service_resolves_measurements_from_process_context(
     tmp_path,
 ):

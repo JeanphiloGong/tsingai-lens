@@ -2551,32 +2551,10 @@ class ResearchObjectiveService:
         }
         labeled_winners: list[tuple[ObjectiveEvidenceUnit, set[str]]] = []
         for candidate in winners:
-            candidate_label_tokens: set[str] = set()
-            for key, value in candidate.sample_context.items():
-                column_key = self._objective_column_key(str(key))
-                if column_key in sample_number_keys:
-                    continue
-                if (
-                    column_key
-                    not in {
-                        "id",
-                        "label",
-                        "sample",
-                        "sample_id",
-                        "sample_label",
-                        "specimen",
-                        "specimens",
-                    }
-                    and "sample" not in column_key
-                    and "specimen" not in column_key
-                ):
-                    continue
-                if re.search(r"[A-Za-z]", str(value or "")):
-                    candidate_label_tokens.update(
-                        token
-                        for token in self._objective_match_text(value).split()
-                        if len(token) > 1 and not token.isdigit()
-                    )
+            candidate_label_tokens = self._objective_context_label_tokens(
+                candidate.sample_context,
+                skip_keys=sample_number_keys,
+            ) | self._objective_context_label_tokens(candidate.process_context)
             if candidate_label_tokens:
                 labeled_winners.append((candidate, candidate_label_tokens))
         if len(labeled_winners) == 1:
@@ -2602,6 +2580,16 @@ class ResearchObjectiveService:
             ]
             if len(best_labeled_winners) == 1:
                 return best_labeled_winners[0]
+            sample_labeled_winners = [
+                candidate
+                for candidate in best_labeled_winners
+                if self._objective_context_label_tokens(
+                    candidate.sample_context,
+                    skip_keys=sample_number_keys,
+                )
+            ]
+            if len(sample_labeled_winners) == 1:
+                return sample_labeled_winners[0]
         numbered_winners = [
             candidate
             for candidate in winners
@@ -2613,6 +2601,48 @@ class ResearchObjectiveService:
             return numbered_winners[0]
         return None
 
+    def _objective_context_label_tokens(
+        self,
+        context: dict[str, Any],
+        *,
+        skip_keys: set[str] | None = None,
+    ) -> set[str]:
+        tokens: set[str] = set()
+        for key, value in context.items():
+            column_key = self._objective_column_key(str(key))
+            if skip_keys is not None and column_key in skip_keys:
+                continue
+            if not self._objective_context_key_carries_label(column_key):
+                continue
+            if not re.search(r"[A-Za-z]", str(value or "")):
+                continue
+            tokens.update(self._objective_text_label_tokens(value))
+        return tokens
+
+    def _objective_context_key_carries_label(self, column_key: str) -> bool:
+        return (
+            column_key
+            in {
+                "id",
+                "label",
+                "sample",
+                "sample_id",
+                "sample_label",
+                "specimen",
+                "specimens",
+            }
+            or "sample" in column_key
+            or "specimen" in column_key
+            or "treatment" in column_key
+        )
+
+    def _objective_text_label_tokens(self, value: Any) -> set[str]:
+        return {
+            token
+            for token in self._objective_match_text(value).split()
+            if len(token) > 1 and not token.isdigit()
+        }
+
     def _objective_process_label_match_score(
         self,
         *,
@@ -2621,7 +2651,8 @@ class ResearchObjectiveService:
         sample_text: str,
     ) -> int:
         score = 0
-        for value in process_context.values():
+        sample_tokens = self._objective_text_label_tokens(sample_text)
+        for key, value in process_context.items():
             value_text = str(value).strip()
             if not value_text:
                 continue
@@ -2633,6 +2664,13 @@ class ResearchObjectiveService:
             normalized_value = self._objective_match_text(value_text)
             if len(normalized_value) >= 3 and normalized_value in sample_text:
                 score += 1
+            column_key = self._objective_column_key(str(key))
+            if sample_tokens and self._objective_context_key_carries_label(
+                column_key
+            ):
+                score += len(
+                    self._objective_text_label_tokens(value_text) & sample_tokens
+                )
         return score
 
     def _objective_numeric_match_tokens(self, value: Any) -> tuple[str, ...]:

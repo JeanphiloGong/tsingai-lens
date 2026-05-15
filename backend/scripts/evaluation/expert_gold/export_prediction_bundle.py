@@ -973,7 +973,168 @@ def _convert_objective_comparisons(rows: list[dict[str, Any]]) -> list[dict[str,
                 "source": _source("objective_evidence_units", row_number),
             }
         )
+    existing_keys = {_comparison_record_key(record) for record in records}
+    for record in _convert_objective_measurement_pair_comparisons(rows):
+        record_key = _comparison_record_key(record)
+        if record_key in existing_keys:
+            continue
+        existing_keys.add(record_key)
+        records.append(record)
     return records
+
+
+def _convert_objective_measurement_pair_comparisons(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped_candidates: dict[tuple[str, str, str, str], dict[str, dict[str, Any]]] = {}
+    for row_number, row in _rows_with_numbers(rows):
+        if _text(row, "unit_kind") != "measurement":
+            continue
+        document_id = _text(row, "document_id")
+        sample_context = _dict_value(row.get("sample_context"))
+        sample_id = _objective_sample_id(document_id, sample_context)
+        metric = _objective_metric_name(row)
+        value = _objective_numeric_value(row)
+        if not document_id or not sample_id or not metric or value is None:
+            continue
+        group_key = (
+            document_id,
+            metric,
+            _text(row, "unit"),
+            _objective_measurement_pair_source(row),
+        )
+        candidate_key = f"{sample_id}:{value}"
+        grouped_candidates.setdefault(group_key, {}).setdefault(
+            candidate_key,
+            {
+                "row": row,
+                "row_number": row_number,
+                "document_id": document_id,
+                "evidence_unit_id": _text(row, "evidence_unit_id")
+                or f"row-{row_number}",
+                "sample_context": sample_context,
+                "sample_id": sample_id,
+                "sample_label": _objective_sample_label(sample_context),
+                "metric": metric,
+                "value": value,
+                "unit": _text(row, "unit"),
+                "evidence_ids": _objective_evidence_ids(row),
+            },
+        )
+
+    records: list[dict[str, Any]] = []
+    for candidates_by_sample in grouped_candidates.values():
+        candidates = sorted(
+            candidates_by_sample.values(),
+            key=lambda candidate: candidate["row_number"],
+        )
+        if len(candidates) < 2:
+            continue
+        for current in candidates:
+            for baseline in candidates:
+                if current["sample_id"] == baseline["sample_id"]:
+                    continue
+                records.append(
+                    _objective_measurement_pair_record(
+                        current=current,
+                        baseline=baseline,
+                    )
+                )
+    return records
+
+
+def _objective_measurement_pair_record(
+    *,
+    current: dict[str, Any],
+    baseline: dict[str, Any],
+) -> dict[str, Any]:
+    evidence_ids = list(current["evidence_ids"])
+    evidence_ids.extend(
+        evidence_id
+        for evidence_id in baseline["evidence_ids"]
+        if evidence_id not in evidence_ids
+    )
+    return {
+        "paper_id": current["document_id"],
+        "comparison_id": (
+            "objective-measurement-pair-"
+            f"{_issue_token(current['evidence_unit_id'])}-"
+            f"{_issue_token(baseline['evidence_unit_id'])}"
+        ),
+        "current_sample_id": current["sample_id"],
+        "baseline_reference": baseline["sample_id"],
+        "baseline_sample_ids": [baseline["sample_id"]],
+        "comparison_type": "objective_measurement_pair",
+        "comparison_axis": _objective_measurement_pair_axis(
+            current["row"],
+            baseline["row"],
+        ),
+        "comparison_metric": current["metric"],
+        "metric_name": current["metric"],
+        "current_value": current["value"],
+        "baseline_value": baseline["value"],
+        "unit": current["unit"],
+        "change_direction": _numeric_direction(current["value"], baseline["value"]),
+        "direction": _numeric_direction(current["value"], baseline["value"]),
+        "result_summary": (
+            f"{current['sample_label']} vs {baseline['sample_label']} "
+            f"for {current['metric']}"
+        ),
+        "comparability_status": "projected",
+        "comparability_warnings": [],
+        "evidence_ids": evidence_ids,
+        "anchor_ids": evidence_ids,
+        "relation_payload": {
+            "current_evidence_unit_id": current["evidence_unit_id"],
+            "baseline_evidence_unit_id": baseline["evidence_unit_id"],
+            "projection_source": "objective_measurement_pair",
+        },
+        "source": _source("objective_evidence_units", current["row_number"]),
+    }
+
+
+def _objective_measurement_pair_source(row: dict[str, Any]) -> str:
+    evidence_ids = _objective_evidence_ids(row)
+    if evidence_ids:
+        return evidence_ids[0]
+    return _objective_test_condition_reference(row)
+
+
+def _objective_measurement_pair_axis(
+    current_row: dict[str, Any],
+    baseline_row: dict[str, Any],
+) -> str:
+    current_process = _dict_value(current_row.get("process_context"))
+    baseline_process = _dict_value(baseline_row.get("process_context"))
+    changed_keys = [
+        key
+        for key in sorted(set(current_process) | set(baseline_process))
+        if _text(current_process, key) != _text(baseline_process, key)
+    ]
+    if changed_keys:
+        return ", ".join(changed_keys)
+    return "sample_context"
+
+
+def _numeric_direction(current_value: float, baseline_value: float) -> str:
+    if current_value > baseline_value:
+        return "increase"
+    if current_value < baseline_value:
+        return "decrease"
+    return "no_change"
+
+
+def _comparison_record_key(record: dict[str, Any]) -> tuple[Any, ...]:
+    baseline_sample_ids = _string_list(record.get("baseline_sample_ids"))
+    return (
+        _text(record, "paper_id"),
+        _text(record, "current_sample_id"),
+        baseline_sample_ids[0] if baseline_sample_ids else "",
+        _text(record, "metric_name", "comparison_metric"),
+        _first_value(record, "current_value"),
+        _first_value(record, "baseline_value"),
+        _text(record, "unit"),
+    )
 
 
 def _convert_objective_observations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

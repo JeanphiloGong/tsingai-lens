@@ -358,6 +358,90 @@ def test_export_prediction_bundle_projects_objective_uncertainties(tmp_path):
     ]
 
 
+def test_export_prediction_bundle_projects_objective_measurement_pairs(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "measure-1",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {"sample_number": 1},
+            "value_payload": {"value": 200.0, "source_value_text": "200"},
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+        },
+        {
+            "evidence_unit_id": "measure-2",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {"sample_number": 2},
+            "value_payload": {"value": 220.0, "source_value_text": "220"},
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+        },
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert len(bundle["comparisons"]) == 2
+    assert bundle["comparisons"][0] == {
+        "paper_id": "paper-1",
+        "comparison_id": "objective-measurement-pair-measure-1-measure-2",
+        "current_sample_id": "obj-sample-paper-1-sample-1",
+        "baseline_reference": "obj-sample-paper-1-sample-2",
+        "baseline_sample_ids": ["obj-sample-paper-1-sample-2"],
+        "comparison_type": "objective_measurement_pair",
+        "comparison_axis": "sample_context",
+        "comparison_metric": "yield strength",
+        "metric_name": "yield strength",
+        "current_value": 200.0,
+        "baseline_value": 220.0,
+        "unit": "MPa",
+        "change_direction": "decrease",
+        "direction": "decrease",
+        "result_summary": "Sample 1 vs Sample 2 for yield strength",
+        "comparability_status": "projected",
+        "comparability_warnings": [],
+        "evidence_ids": ["objective-source:table:table-1"],
+        "anchor_ids": ["objective-source:table:table-1"],
+        "relation_payload": {
+            "current_evidence_unit_id": "measure-1",
+            "baseline_evidence_unit_id": "measure-2",
+            "projection_source": "objective_measurement_pair",
+        },
+        "source": {"artifact": "objective_evidence_units", "row": 1},
+    }
+
+
 def test_export_prediction_bundle_prefers_objective_sample_number(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

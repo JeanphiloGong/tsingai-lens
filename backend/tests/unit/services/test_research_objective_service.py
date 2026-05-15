@@ -1075,6 +1075,79 @@ def test_research_objective_service_skips_failed_objective_unit_route(
     )
 
 
+def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    table = SimpleNamespace(
+        table_id="table-1",
+        document_id="paper-1",
+        page=1,
+        caption_text="Density results",
+        heading_path="Results",
+        column_headers=["Specimens", "Density (%)"],
+        table_matrix=[
+            ["Specimens", "Density (%)"],
+            ["as-SLM (140/", "92.19"],
+        ],
+    )
+    cells = [
+        SimpleNamespace(
+            table_id="other-table",
+            row_index=1,
+            col_index=0,
+            header_path="Specimens",
+            cell_text="other",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=1,
+            col_index=1,
+            header_path="Density (%)",
+            cell_text="92.19",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=1,
+            col_index=0,
+            header_path="Specimens",
+            cell_text="as-SLM (140/",
+        ),
+    ]
+
+    payload = service._build_objective_route_source_payload(
+        route=route,
+        blocks=[],
+        tables=[table],
+        table_cells=cells,
+    )
+
+    assert payload["table_cells"] == [
+        {
+            "row_index": 1,
+            "col_index": 0,
+            "header_path": "Specimens",
+            "cell_text": "as-SLM (140/",
+        },
+        {
+            "row_index": 1,
+            "col_index": 1,
+            "header_path": "Density (%)",
+            "cell_text": "92.19",
+        },
+    ]
+
+
 def test_research_objective_service_normalizes_result_table_values_to_measurements(
     tmp_path,
 ):

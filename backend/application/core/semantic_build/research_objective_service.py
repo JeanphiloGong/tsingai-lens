@@ -411,6 +411,7 @@ class ResearchObjectiveService:
         }
         blocks_by_document_id = self._group_by_document_id(artifacts.blocks)
         tables_by_document_id = self._group_by_document_id(artifacts.tables)
+        table_cells_by_document_id = self._group_by_document_id(artifacts.table_cells)
         figures_by_document_id = self._group_by_document_id(artifacts.figures)
         extractor = self._get_structured_extractor()
 
@@ -560,6 +561,7 @@ class ResearchObjectiveService:
             objective_evidence_routes=objective_evidence_routes,
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
+            table_cells_by_document_id=table_cells_by_document_id,
         )
         objective_logic_chains = self._build_objective_logic_chains(
             collection_id=collection_id,
@@ -1336,6 +1338,7 @@ class ResearchObjectiveService:
         objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
+        table_cells_by_document_id: dict[str, list[Any]] | None = None,
     ) -> tuple[ObjectiveEvidenceUnit, ...]:
         objective_by_id = {
             objective.objective_id: objective
@@ -1377,6 +1380,10 @@ class ResearchObjectiveService:
                 route=route,
                 blocks=blocks_by_document_id.get(route.document_id, []),
                 tables=tables_by_document_id.get(route.document_id, []),
+                table_cells=(
+                    table_cells_by_document_id.get(route.document_id, [])
+                    if table_cells_by_document_id is not None else []
+                ),
             )
             if not source:
                 logger.info(
@@ -3879,6 +3886,7 @@ class ResearchObjectiveService:
         route: ObjectiveEvidenceRoute,
         blocks: list[Any],
         tables: list[Any],
+        table_cells: list[Any] | None = None,
     ) -> dict[str, Any]:
         if route.source_kind == "table":
             table = next(
@@ -3891,6 +3899,11 @@ class ResearchObjectiveService:
             )
             if table is None:
                 return {}
+            cells = tuple(
+                cell
+                for cell in table_cells or []
+                if str(getattr(cell, "table_id", "") or "") == route.source_ref
+            )
             return {
                 "source_kind": "table",
                 "source_ref": route.source_ref,
@@ -3906,6 +3919,21 @@ class ResearchObjectiveService:
                     [str(cell) for cell in row]
                     for row in getattr(table, "table_matrix", ()) or ()
                     if isinstance(row, (list, tuple))
+                ],
+                "table_cells": [
+                    {
+                        "row_index": getattr(cell, "row_index", None),
+                        "col_index": getattr(cell, "col_index", None),
+                        "header_path": getattr(cell, "header_path", None),
+                        "cell_text": str(getattr(cell, "cell_text", "") or ""),
+                    }
+                    for cell in sorted(
+                        cells,
+                        key=lambda item: (
+                            getattr(item, "row_index", 0),
+                            getattr(item, "col_index", 0),
+                        ),
+                    )
                 ],
             }
         if route.source_kind == "text_window":

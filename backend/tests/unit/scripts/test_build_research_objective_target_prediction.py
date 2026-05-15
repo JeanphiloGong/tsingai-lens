@@ -197,6 +197,94 @@ def test_build_target_prediction_adds_measurement_value_aliases() -> None:
     ]
 
 
+def test_build_target_prediction_projects_logic_chain_mechanisms() -> None:
+    projection = _load_projection_module()
+    bundle = _prediction_bundle()
+    bundle["observations"] = []
+    bundle["objective_logic_chains"] = [
+        {
+            "logic_chain_id": "LC001",
+            "objective_id": "OBJ001",
+            "question": "How does energy input affect pores and strength?",
+            "evidence_unit_ids": ["U001", "U002", "U003"],
+            "chain_payload": {
+                "paper_chains": [
+                    {
+                        "document_id": "P001",
+                        "sample_and_process_contexts": [
+                            {
+                                "evidence_unit_id": "U001",
+                                "sample_context": {"sample": "S014"},
+                                "process_context": {
+                                    "process": "SLM",
+                                    "energy input": "high",
+                                },
+                            }
+                        ],
+                        "characterization_observations": [
+                            {
+                                "evidence_unit_id": "U002",
+                                "property_normalized": "porosity",
+                                "value_payload": {"description": "fewer pores"},
+                                "interpretation": "energy input reduces pores",
+                            }
+                        ],
+                        "measurement_results": [
+                            {
+                                "evidence_unit_id": "U003",
+                                "property_normalized": "yield strength",
+                                "value_payload": {"value": 462.02},
+                                "unit": "MPa",
+                            }
+                        ],
+                        "comparisons": [
+                            {
+                                "evidence_unit_id": "U004",
+                                "property_normalized": "yield strength",
+                                "interpretation": (
+                                    "lower porosity increases yield strength"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "cross_paper": {
+                    "measured_properties": ["porosity", "yield strength"],
+                    "measurement_value_ranges": [
+                        {
+                            "property_normalized": "yield strength",
+                            "min": {"value": 236.65},
+                            "max": {"value": 462.02},
+                            "unit": "MPa",
+                        }
+                    ],
+                },
+            },
+        }
+    ]
+
+    prediction = projection.build_target_prediction_from_bundle(bundle)
+
+    assert prediction["mechanism_chains"] == [
+        {
+            "logic_chain_id": "LC001",
+            "objective_id": "OBJ001",
+            "paper_id": "P001",
+            "evidence_unit_ids": ["U001", "U002", "U003"],
+            "path": (
+                "How does energy input affect pores and strength? -> "
+                "sample: S014; process: SLM; energy input: high -> "
+                "porosity: description: fewer pores; "
+                "interpretation: energy input reduces pores -> "
+                "yield strength: value: 462.02 MPa -> "
+                "yield strength: lower porosity increases yield strength -> "
+                "measured properties: porosity, yield strength; "
+                "yield strength range 236.65 to 462.02 MPa"
+            ),
+        }
+    ]
+
+
 def test_build_research_objective_target_prediction_writes_prediction_and_report(
     tmp_path: Path,
 ) -> None:

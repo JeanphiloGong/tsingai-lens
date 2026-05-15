@@ -129,6 +129,7 @@ def build_target_prediction_from_bundle(
     observations = _records(bundle.get("observations"))
     uncertainties = _records(bundle.get("uncertainties"))
     evidence = _records(bundle.get("evidence"))
+    logic_chains = _records(bundle.get("objective_logic_chains"))
     paper_id_aliases = _paper_id_aliases_from_target(
         papers=papers,
         measurements=measurements,
@@ -160,8 +161,14 @@ def build_target_prediction_from_bundle(
             for comparison in comparisons
         ],
         "mechanism_chains": [
-            _observation_mechanism_summary(observation)
-            for observation in observations
+            *[
+                _observation_mechanism_summary(observation)
+                for observation in observations
+            ],
+            *_logic_chain_mechanism_summaries(
+                logic_chains,
+                paper_id_aliases=paper_id_aliases,
+            ),
         ],
         "collection_conclusion": {
             "summary": (
@@ -435,6 +442,166 @@ def _observation_mechanism_summary(observation: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _logic_chain_mechanism_summaries(
+    logic_chains: list[dict[str, Any]],
+    *,
+    paper_id_aliases: dict[str, str],
+) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for chain in logic_chains:
+        payload = _dict_value(chain.get("chain_payload"))
+        for paper_chain in _records(payload.get("paper_chains")):
+            source_paper_id = _text(paper_chain.get("document_id"))
+            path_parts = _logic_chain_path_parts(
+                chain=chain,
+                payload=payload,
+                paper_chain=paper_chain,
+            )
+            if not path_parts:
+                continue
+            summaries.append(
+                {
+                    "logic_chain_id": _text(chain.get("logic_chain_id")),
+                    "objective_id": _text(chain.get("objective_id")),
+                    "paper_id": paper_id_aliases.get(source_paper_id, source_paper_id),
+                    "evidence_unit_ids": _logic_chain_evidence_unit_ids(
+                        chain,
+                        paper_chain,
+                    ),
+                    "path": " -> ".join(path_parts),
+                }
+            )
+    return summaries
+
+
+def _logic_chain_path_parts(
+    *,
+    chain: dict[str, Any],
+    payload: dict[str, Any],
+    paper_chain: dict[str, Any],
+) -> list[str]:
+    parts = [_text(chain.get("question"))]
+    parts.extend(
+        _sample_process_chain_part(item)
+        for item in _records(paper_chain.get("sample_and_process_contexts"))[:1]
+    )
+    parts.extend(
+        _logic_unit_part(item)
+        for item in _records(paper_chain.get("characterization_observations"))[:2]
+    )
+    parts.extend(
+        _logic_unit_part(item)
+        for item in _records(paper_chain.get("measurement_results"))[:2]
+    )
+    parts.extend(
+        _logic_unit_part(item)
+        for item in _records(paper_chain.get("comparisons"))[:2]
+    )
+    cross_paper = _dict_value(payload.get("cross_paper"))
+    cross_paper_part = _cross_paper_logic_part(cross_paper)
+    if cross_paper_part:
+        parts.append(cross_paper_part)
+    return [part for part in parts if part]
+
+
+def _sample_process_chain_part(item: dict[str, Any]) -> str:
+    fragments = [
+        *_context_fragments(_dict_value(item.get("sample_context"))),
+        *_context_fragments(_dict_value(item.get("process_context"))),
+    ]
+    return "; ".join(fragments)
+
+
+def _logic_unit_part(item: dict[str, Any]) -> str:
+    property_name = _text(item.get("property_normalized")) or _text(
+        item.get("unit_kind")
+    )
+    value_part = _value_payload_part(_dict_value(item.get("value_payload")))
+    interpretation = _text(item.get("interpretation"))
+    unit = _text(item.get("unit"))
+    if value_part and unit:
+        value_part = f"{value_part} {unit}"
+    interpretation_part = (
+        f"interpretation: {interpretation}"
+        if value_part and interpretation
+        else interpretation
+    )
+    fragments = [
+        fragment for fragment in (value_part, interpretation_part) if fragment
+    ]
+    if not fragments:
+        return property_name
+    if not property_name:
+        return "; ".join(fragments)
+    return f"{property_name}: {'; '.join(fragments)}"
+
+
+def _cross_paper_logic_part(cross_paper: dict[str, Any]) -> str:
+    fragments: list[str] = []
+    measured_properties = _string_list(cross_paper.get("measured_properties"))
+    if measured_properties:
+        fragments.append(f"measured properties: {', '.join(measured_properties)}")
+    for item in _records(cross_paper.get("measurement_value_ranges"))[:3]:
+        range_part = _measurement_range_part(item)
+        if range_part:
+            fragments.append(range_part)
+    return "; ".join(fragments)
+
+
+def _measurement_range_part(item: dict[str, Any]) -> str:
+    property_name = _text(item.get("property_normalized"))
+    min_value = _range_point_value(_dict_value(item.get("min")))
+    max_value = _range_point_value(_dict_value(item.get("max")))
+    unit = _text(item.get("unit"))
+    if not property_name or not min_value or not max_value:
+        return ""
+    return f"{property_name} range {min_value} to {max_value} {unit}".strip()
+
+
+def _range_point_value(point: dict[str, Any]) -> str:
+    return _text(point.get("value")) or _text(point.get("source_value_text"))
+
+
+def _value_payload_part(payload: dict[str, Any]) -> str:
+    if not payload:
+        return ""
+    return "; ".join(
+        f"{key}: {_text(value)}"
+        for key, value in payload.items()
+        if _text(value)
+    )
+
+
+def _context_fragments(context: dict[str, Any]) -> list[str]:
+    return [
+        f"{key}: {_text(value)}"
+        for key, value in context.items()
+        if _text(value)
+    ]
+
+
+def _logic_chain_evidence_unit_ids(
+    chain: dict[str, Any],
+    paper_chain: dict[str, Any],
+) -> list[str]:
+    ids = _string_list(chain.get("evidence_unit_ids"))
+    if ids:
+        return ids
+    collected: list[str] = []
+    for family in (
+        "sample_and_process_contexts",
+        "characterization_observations",
+        "measurement_results",
+        "comparisons",
+        "author_interpretations",
+    ):
+        for item in _records(paper_chain.get(family)):
+            evidence_unit_id = _text(item.get("evidence_unit_id"))
+            if evidence_unit_id:
+                collected.append(evidence_unit_id)
+    return _dedupe_strings(collected)
+
+
 def _uncertainty_summary(uncertainty: dict[str, Any]) -> str:
     paper_id = _text(uncertainty.get("paper_id"))
     issue_id = _text(uncertainty.get("issue_id"))
@@ -502,6 +669,10 @@ def _records(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _text(value: Any) -> str:

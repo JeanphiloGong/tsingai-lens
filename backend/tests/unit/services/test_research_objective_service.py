@@ -3967,6 +3967,123 @@ def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
     }
 
 
+def test_research_objective_service_caps_large_multiaxis_table_comparisons(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-large-table",
+            "question": (
+                "How do laser power, scan speed, and heat treatment affect "
+                "mechanical properties?"
+            ),
+            "variable_process_axes": [
+                "laser power",
+                "scan speed",
+                "heat treatment type",
+            ],
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+                "hardness",
+            ],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        laser_power: str,
+        scan_speed: str,
+        heat_treatment: str,
+        property_name: str,
+        value: float,
+        unit: str,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-large-table",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": property_name,
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {
+                    "Laser power (W)": laser_power,
+                    "Scan speed (mm/s)": scan_speed,
+                    "Heat treatment type": heat_treatment,
+                },
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": unit,
+                "resolution_status": "resolved",
+                "confidence": 0.84,
+            }
+        )
+
+    units: list[ObjectiveEvidenceUnit] = []
+    properties = (
+        ("yield strength", "MPa", 300.0),
+        ("ultimate tensile strength", "MPa", 500.0),
+        ("elongation", "%", 8.0),
+        ("hardness", "HV", 180.0),
+    )
+    sample_index = 0
+    for heat_index, heat_treatment in enumerate(("as-built", "stress-relieved")):
+        for speed_index, scan_speed in enumerate(("700", "900", "1100")):
+            for power_index, laser_power in enumerate(("150", "200", "250")):
+                sample_index += 1
+                for property_index, (property_name, unit, base_value) in enumerate(
+                    properties
+                ):
+                    value = (
+                        base_value
+                        + power_index * 11
+                        + speed_index * 17
+                        + heat_index * 23
+                        + property_index
+                    )
+                    units.append(
+                        measurement(
+                            f"oeu-large-{sample_index}-{property_index}",
+                            sample_number=str(sample_index),
+                            laser_power=laser_power,
+                            scan_speed=scan_speed,
+                            heat_treatment=heat_treatment,
+                            property_name=property_name,
+                            value=value,
+                            unit=unit,
+                        )
+                    )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        tuple(units),
+        objective_contexts=(objective_context,),
+    )
+
+    comparison_counts: dict[tuple[str | None, str], int] = {}
+    for unit in comparison_units:
+        key = (
+            unit.property_normalized,
+            unit.value_payload["comparison_axis"],
+        )
+        comparison_counts[key] = comparison_counts.get(key, 0) + 1
+
+    assert len(comparison_units) == 36
+    assert set(comparison_counts.values()) == {3}
+    assert all(
+        len(unit.value_payload.get("controlled_axes") or []) >= 2
+        for unit in comparison_units
+    )
+
+
 def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlled_specs(
     tmp_path,
 ):

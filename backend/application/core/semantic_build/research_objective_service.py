@@ -155,6 +155,8 @@ _OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES = (
 _OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY = "elongation"
 _OBJECTIVE_PAIRWISE_DENSITY_MIN_DELTA = 2.0
 _OBJECTIVE_PAIRWISE_ELONGATION_MIN_DELTA = 3.4
+_OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT = 48
+_OBJECTIVE_PAIRWISE_GROUP_LIMIT = 3
 _OBJECTIVE_METHOD_FAMILY_PROPERTY_TYPES = (
     "tensile_mechanics",
     "microhardness",
@@ -2652,7 +2654,87 @@ class ResearchObjectiveService:
                         continue
                     generated_keys.add(pair_key)
                     generated.append(comparison_unit)
-        return tuple(generated)
+        return self._select_objective_comparison_units(tuple(generated))
+
+    def _select_objective_comparison_units(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        if not units:
+            return ()
+        scope_counts: dict[tuple[str, str], int] = {}
+        for unit in units:
+            scope_key = (unit.objective_id, unit.document_id)
+            scope_counts[scope_key] = scope_counts.get(scope_key, 0) + 1
+        if all(
+            count <= _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT
+            for count in scope_counts.values()
+        ):
+            return units
+
+        grouped_units: dict[tuple[str, str, str, str], list[ObjectiveEvidenceUnit]] = {}
+        for unit in units:
+            scope_key = (unit.objective_id, unit.document_id)
+            if scope_counts.get(scope_key, 0) <= _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT:
+                continue
+            comparison_axis = str(unit.value_payload.get("comparison_axis") or "")
+            axis_key = self._normalize_property_label(comparison_axis) or comparison_axis
+            grouped_units.setdefault(
+                (
+                    unit.objective_id,
+                    unit.document_id,
+                    str(unit.property_normalized or ""),
+                    axis_key,
+                ),
+                [],
+            ).append(unit)
+
+        selected_ids: set[str] = set()
+        for group in grouped_units.values():
+            selected_ids.update(
+                unit.evidence_unit_id
+                for unit in sorted(
+                    group,
+                    key=self._objective_comparison_unit_selection_key,
+                )[:_OBJECTIVE_PAIRWISE_GROUP_LIMIT]
+            )
+
+        return tuple(
+            unit
+            for unit in units
+            if scope_counts.get((unit.objective_id, unit.document_id), 0)
+            <= _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT
+            or unit.evidence_unit_id in selected_ids
+        )
+
+    def _objective_comparison_unit_selection_key(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> tuple[int, float, str, str, str]:
+        controlled_axes = unit.value_payload.get("controlled_axes")
+        controlled_axis_count = (
+            len(controlled_axes) if isinstance(controlled_axes, list) else 0
+        )
+        current_value = self._coerce_number(
+            unit.value_payload.get("current_value")
+            or unit.value_payload.get("value")
+        )
+        baseline_value = self._coerce_number(unit.baseline_context.get("value"))
+        delta = (
+            abs(current_value - baseline_value)
+            if current_value is not None and baseline_value is not None
+            else 0.0
+        )
+        baseline_sample_context = unit.baseline_context.get("sample_context")
+        if not isinstance(baseline_sample_context, dict):
+            baseline_sample_context = {}
+        return (
+            -controlled_axis_count,
+            -delta,
+            self._objective_sample_identity_key(unit.sample_context),
+            self._objective_sample_identity_key(baseline_sample_context),
+            unit.evidence_unit_id,
+        )
 
     def _objective_pairwise_allowed_specs(
         self,
@@ -3387,6 +3469,12 @@ class ResearchObjectiveService:
         baseline_value = self._objective_measurement_numeric_value(baseline)
         if current_value is None or baseline_value is None:
             raise ValueError("pairwise comparison requires numeric measurements")
+        controlled_axes = self._objective_comparison_controlled_axes(
+            current=current,
+            baseline=baseline,
+            comparison_axis=comparison_axis,
+            objective_context=objective_context,
+        )
         seed = "|".join(
             (
                 current.objective_id,
@@ -3424,6 +3512,7 @@ class ResearchObjectiveService:
                         else "no_change"
                     ),
                     "comparison_axis": comparison_axis,
+                    "controlled_axes": controlled_axes,
                     "current_evidence_unit_id": current.evidence_unit_id,
                     "baseline_evidence_unit_id": baseline.evidence_unit_id,
                 },
@@ -3452,6 +3541,7 @@ class ResearchObjectiveService:
                 ),
                 "join_keys": {
                     "comparison_axis": comparison_axis,
+                    "controlled_axes": controlled_axes,
                     "current_measurement_id": current.evidence_unit_id,
                     "baseline_measurement_id": baseline.evidence_unit_id,
                 },
@@ -3459,6 +3549,68 @@ class ResearchObjectiveService:
                 "confidence": min(current.confidence, baseline.confidence),
             }
         )
+
+    def _objective_comparison_controlled_axes(
+        self,
+        *,
+        current: ObjectiveEvidenceUnit,
+        baseline: ObjectiveEvidenceUnit,
+        comparison_axis: str,
+        objective_context: ObjectiveContext | None,
+    ) -> list[dict[str, str]]:
+        current_axes = self._objective_comparison_axis_value_map(
+            current,
+            objective_context=objective_context,
+        )
+        baseline_axes = self._objective_comparison_axis_value_map(
+            baseline,
+            objective_context=objective_context,
+        )
+        comparison_axis_key = (
+            self._normalize_property_label(comparison_axis)
+            or self._axis_key(comparison_axis)
+        )
+        controlled_axes: list[dict[str, str]] = []
+        for axis_key, current_axis in sorted(current_axes.items()):
+            if axis_key == comparison_axis_key:
+                continue
+            baseline_axis = baseline_axes.get(axis_key)
+            if baseline_axis is None:
+                continue
+            if current_axis["value"] != baseline_axis["value"]:
+                continue
+            controlled_axes.append(
+                {
+                    "axis": current_axis["axis"],
+                    "value": current_axis["value"],
+                }
+            )
+        return controlled_axes
+
+    def _objective_comparison_axis_value_map(
+        self,
+        unit: ObjectiveEvidenceUnit,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> dict[str, dict[str, str]]:
+        axis_values: dict[str, dict[str, str]] = {}
+        for source in (
+            self._objective_process_axis_values(
+                unit,
+                objective_context=objective_context,
+            ),
+            self._objective_sample_axis_values(unit),
+            self._objective_raw_process_axis_values(unit),
+        ):
+            for axis, value in source.items():
+                axis_key = self._normalize_property_label(axis) or self._axis_key(axis)
+                if not axis_key:
+                    continue
+                axis_values[axis_key] = {
+                    "axis": axis,
+                    "value": str(value).strip().casefold(),
+                }
+        return axis_values
 
     def _ordered_objective_comparison_pair(
         self,

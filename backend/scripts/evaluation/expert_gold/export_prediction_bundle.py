@@ -1252,6 +1252,9 @@ def _objective_measurement_pair_candidates(
         return _ordered_candidate_pairs(candidates)
     condition_slots = _condition_matrix_slots(candidates)
     if not condition_slots:
+        treatment_pairs = _treatment_series_candidate_pairs(candidates)
+        if treatment_pairs:
+            return treatment_pairs
         process_pairs = _controlled_process_candidate_pairs(candidates)
         return process_pairs
     pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -1287,6 +1290,56 @@ def _controlled_process_candidate_pairs(
             if _has_controlled_process_difference(current["row"], baseline["row"]):
                 pairs.append((current, baseline))
     return pairs
+
+
+def _treatment_series_candidate_pairs(
+    candidates: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    series: dict[str, dict[str, dict[str, Any]]] = {}
+    for candidate in candidates:
+        sample_number = _objective_sample_number(candidate["sample_context"])
+        treatment_key = _objective_treatment_key(candidate["sample_context"])
+        parameter_key = _objective_parameter_key(candidate["sample_context"])
+        if sample_number is None or not treatment_key or not parameter_key:
+            return []
+        series.setdefault(parameter_key, {}).setdefault(treatment_key, candidate)
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for treatment_candidates in series.values():
+        baseline = treatment_candidates.get("as-slm")
+        if not baseline:
+            continue
+        for treatment_key in ("ht-slm", "hip-slm"):
+            current = treatment_candidates.get(treatment_key)
+            if current:
+                pairs.append((current, baseline))
+    return pairs
+
+
+def _objective_treatment_key(sample_context: dict[str, Any]) -> str:
+    text = _objective_specimen_text(sample_context).casefold()
+    if re.search(r"\bhip\s*-\s*slm\b", text):
+        return "hip-slm"
+    if re.search(r"\bht\s*-\s*slm\b", text):
+        return "ht-slm"
+    if re.search(r"\bas\s*-\s*slm\b", text):
+        return "as-slm"
+    return ""
+
+
+def _objective_parameter_key(sample_context: dict[str, Any]) -> str:
+    text = _objective_specimen_text(sample_context)
+    match = re.search(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)", text)
+    if not match:
+        return ""
+    return f"{int(match.group(1))}/{int(match.group(2))}"
+
+
+def _objective_specimen_text(sample_context: dict[str, Any]) -> str:
+    for key, value in sample_context.items():
+        normalized_key = " ".join(str(key).casefold().replace("_", " ").split())
+        if normalized_key in {"specimen", "specimens", "sample", "sample label"}:
+            return str(value)
+    return " ".join(str(value) for value in sample_context.values())
 
 
 def _has_controlled_process_difference(

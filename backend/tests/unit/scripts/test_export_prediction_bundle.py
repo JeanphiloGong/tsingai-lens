@@ -545,6 +545,75 @@ def test_export_prediction_bundle_skips_uncontrolled_large_pair_groups(tmp_path)
     assert bundle["comparisons"] == []
 
 
+def test_export_prediction_bundle_pairs_numbered_treatment_series(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": f"measure-{sample_number}",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "tensile strength",
+            "sample_context": {
+                "Specimens": specimen,
+                "sample_number": sample_number,
+            },
+            "value_payload": {
+                "value": value,
+                "source_value_text": str(value),
+            },
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+        for sample_number, specimen, value in (
+            (11, "as-SLM (120/100)", 593.0),
+            (12, "HT-SLM (120/100)", 570.2),
+            (13, "HIP-SLM (120/100)", 573.9),
+            (17, "as-SLM (120/200)", 251.8),
+            (18, "HT-SLM (120/200)", 497.0),
+            (19, "HIP-SLM (120/200)", 506.5),
+        )
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    comparison_index = {
+        (
+            comparison["current_sample_id"].rsplit("-", 1)[-1],
+            comparison["baseline_reference"].rsplit("-", 1)[-1],
+            comparison["current_value"],
+            comparison["baseline_value"],
+        )
+        for comparison in bundle["comparisons"]
+    }
+
+    assert ("12", "11", 570.2, 593.0) in comparison_index
+    assert ("13", "11", 573.9, 593.0) in comparison_index
+    assert ("18", "17", 497.0, 251.8) in comparison_index
+    assert ("19", "17", 506.5, 251.8) in comparison_index
+    assert ("17", "11", 251.8, 593.0) not in comparison_index
+    assert len(bundle["comparisons"]) == 4
+
+
 def test_export_prediction_bundle_ignores_uncertainty_only_pair_candidates(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

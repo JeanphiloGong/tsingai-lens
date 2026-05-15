@@ -195,6 +195,18 @@ def test_build_target_prediction_adds_measurement_value_aliases() -> None:
             "value_or_trend": "1.90x10 5 ohm cm 2",
             "unit": "",
         },
+        {
+            "paper_id": "P001",
+            "result_id": "R005",
+            "sample_id": "S005",
+            "metric_name": "passive film resistance",
+            "value_or_trend": 1.9,
+            "unit": "\u03a9 cm 2",
+            "value_payload": {
+                "pitting_potential": "1.90\u00d710 5 \u03a9 cm 2",
+                "value": 1.9,
+            },
+        },
     ]
 
     prediction = projection.build_target_prediction_from_bundle(bundle)
@@ -221,6 +233,18 @@ def test_build_target_prediction_adds_measurement_value_aliases() -> None:
             "summary": (
                 "P001 R004: S004 passive film resistance = "
                 "1.90x10 5 ohm cm 2. Aliases: 1.90e5 ohm cm2."
+            ),
+            "value_aliases": ["1.90e5 ohm cm2"],
+        },
+        {
+            "paper_id": "P001",
+            "result_id": "R005",
+            "sample_id": "S005",
+            "metric_name": "passive film resistance",
+            "value": "1.9 \u03a9 cm 2",
+            "summary": (
+                "P001 R005: S005 passive film resistance = "
+                "1.9 \u03a9 cm 2. Aliases: 1.90e5 ohm cm2."
             ),
             "value_aliases": ["1.90e5 ohm cm2"],
         },

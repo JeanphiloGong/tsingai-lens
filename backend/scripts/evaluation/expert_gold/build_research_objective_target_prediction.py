@@ -353,6 +353,7 @@ def _measurement_summaries(
             _text(measurement.get("unit")),
         )
         aliases = _measurement_value_aliases(
+            measurement=measurement,
             value=value,
             unit=_text(measurement.get("unit")),
             metric=metric,
@@ -392,15 +393,25 @@ def _measurement_value_with_unit(value: Any, unit: str) -> str:
     return f"{text} {unit}".strip()
 
 
-def _measurement_value_aliases(*, value: str, unit: str, metric: str) -> list[str]:
+def _measurement_value_aliases(
+    *,
+    measurement: dict[str, Any],
+    value: str,
+    unit: str,
+    metric: str,
+) -> list[str]:
     aliases: list[str] = []
     if _measurement_is_percent_like(unit=unit, metric=metric):
         number = _first_number(value)
         if number and f"{number}%" != value:
             aliases.append(f"{number}%")
-    scientific_alias = _scientific_notation_alias(value)
-    if scientific_alias:
-        aliases.append(scientific_alias)
+    for source_value in [
+        value,
+        *_payload_leaf_texts(measurement.get("value_payload")),
+    ]:
+        scientific_alias = _scientific_notation_alias(source_value)
+        if scientific_alias:
+            aliases.append(scientific_alias)
     return _dedupe_strings(aliases)
 
 
@@ -431,6 +442,21 @@ def _scientific_notation_unit_text(value: str) -> str:
 def _first_number(value: str) -> str:
     match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", value)
     return match.group(0) if match else ""
+
+
+def _payload_leaf_texts(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        texts: list[str] = []
+        for item in value.values():
+            texts.extend(_payload_leaf_texts(item))
+        return texts
+    if isinstance(value, list):
+        texts = []
+        for item in value:
+            texts.extend(_payload_leaf_texts(item))
+        return texts
+    text = _text(value)
+    return [text] if text else []
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:

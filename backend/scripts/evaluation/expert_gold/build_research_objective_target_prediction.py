@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+from typing import Any
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_TARGET_PATH = (
+    DEFAULT_BACKEND_ROOT
+    / "tests"
+    / "fixtures"
+    / "research_objective_targets"
+    / "lpbf_slm_316l_collection_target.json"
+)
+DEFAULT_OUTPUT_PATH = (
+    DEFAULT_BACKEND_ROOT
+    / "tests"
+    / "fixtures"
+    / "research_objective_targets"
+    / "generated_prediction_from_bundle.json"
+)
+
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import evaluate_research_objective_target  # noqa: E402
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Project an expert-gold prediction bundle into the "
+            "research-objective target-prediction shape."
+        )
+    )
+    parser.add_argument(
+        "--prediction-bundle",
+        type=Path,
+        required=True,
+        help="Prediction bundle from export_prediction_bundle.py.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT_PATH,
+        help="Destination target-prediction JSON.",
+    )
+    parser.add_argument(
+        "--target",
+        type=Path,
+        default=DEFAULT_TARGET_PATH,
+        help="Optional target JSON used when --report is provided.",
+    )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Optional destination target evaluation report.",
+    )
+    parser.add_argument(
+        "--quality-gate",
+        action="store_true",
+        help="Exit non-zero when --report is provided and the gate fails.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    prediction_path = build_research_objective_target_prediction(
+        prediction_bundle_path=args.prediction_bundle,
+        output_path=args.output,
+        target_path=args.target,
+        report_path=args.report,
+    )
+    result: dict[str, Any] = {"prediction": str(prediction_path)}
+    if args.report:
+        report = json.loads(args.report.read_text(encoding="utf-8"))
+        result["report"] = str(args.report)
+        result["quality_gate"] = report.get("quality_gate")
+        if args.quality_gate and (report.get("quality_gate") or {}).get(
+            "status"
+        ) == "fail":
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            raise SystemExit(1)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def build_research_objective_target_prediction(
+    *,
+    prediction_bundle_path: str | Path,
+    output_path: str | Path = DEFAULT_OUTPUT_PATH,
+    target_path: str | Path = DEFAULT_TARGET_PATH,
+    report_path: str | Path | None = None,
+) -> Path:
+    bundle = _read_json(Path(prediction_bundle_path))
+    prediction = build_target_prediction_from_bundle(bundle)
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(prediction, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    if report_path is not None:
+        evaluate_research_objective_target.evaluate_research_objective_target(
+            target_path=target_path,
+            prediction_path=destination,
+            output_path=report_path,
+        )
+    return destination
+
+
+def build_target_prediction_from_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    papers = _records(bundle.get("papers"))
+    samples = _records(bundle.get("samples"))
+    test_conditions = _records(bundle.get("test_conditions"))
+    measurements = _records(bundle.get("measurement_results"))
+    comparisons = _records(bundle.get("comparisons"))
+    observations = _records(bundle.get("observations"))
+    uncertainties = _records(bundle.get("uncertainties"))
+    evidence = _records(bundle.get("evidence"))
+    return {
+        "objective": _collection_objective_from_papers(papers),
+        "evidence_scope": {
+            "paper_count": len(papers),
+            "sample_count": len(samples),
+            "test_condition_count": len(test_conditions),
+            "measurement_count": len(measurements),
+            "comparison_count": len(comparisons),
+            "observation_count": len(observations),
+            "uncertainty_count": len(uncertainties),
+        },
+        "paper_contributions": _paper_contributions(
+            papers=papers,
+            samples=samples,
+            measurements=measurements,
+        ),
+        "controlled_comparisons": [
+            _comparison_summary(comparison)
+            for comparison in comparisons
+        ],
+        "mechanism_chains": [
+            _observation_mechanism_summary(observation)
+            for observation in observations
+        ],
+        "collection_conclusion": {
+            "summary": (
+                "Projected from prediction bundle records. Expert narration "
+                "is evaluated through required claim coverage."
+            )
+        },
+        "limitations": [
+            _uncertainty_summary(uncertainty)
+            for uncertainty in uncertainties
+        ],
+        "source_traceback": [
+            _evidence_summary(evidence_record)
+            for evidence_record in evidence
+        ],
+    }
+
+
+def _collection_objective_from_papers(papers: list[dict[str, Any]]) -> dict[str, Any]:
+    material_scope = _unique_values(papers, "material_system")
+    process_scope = _unique_values(papers, "process_type")
+    property_scope = _unique_split_values(papers, "target_properties")
+    return {
+        "question": (
+            "What does the prediction bundle support about the collection "
+            "research objective?"
+        ),
+        "material_scope": material_scope,
+        "process_scope": process_scope,
+        "property_scope": property_scope,
+    }
+
+
+def _paper_contributions(
+    *,
+    papers: list[dict[str, Any]],
+    samples: list[dict[str, Any]],
+    measurements: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    contributions: list[dict[str, Any]] = []
+    for paper in papers:
+        paper_id = _text(paper.get("paper_id"))
+        paper_samples = [row for row in samples if _text(row.get("paper_id")) == paper_id]
+        paper_measurements = [
+            row for row in measurements if _text(row.get("paper_id")) == paper_id
+        ]
+        metrics = _unique_values(paper_measurements, "metric_name")
+        contributions.append(
+            {
+                "paper_id": paper_id,
+                "role": "prediction_bundle_paper",
+                "summary": (
+                    f"{paper_id}: {_text(paper.get('title'))}. "
+                    f"Goal: {_text(paper.get('research_goal'))}. "
+                    f"Variables: {_text(paper.get('main_variables'))}. "
+                    f"Properties: {_text(paper.get('target_properties'))}. "
+                    f"Samples: {len(paper_samples)}. "
+                    f"Measurements: {', '.join(metrics)}."
+                ),
+            }
+        )
+    return contributions
+
+
+def _comparison_summary(comparison: dict[str, Any]) -> dict[str, Any]:
+    paper_id = _text(comparison.get("paper_id"))
+    comparison_id = _text(comparison.get("comparison_id"))
+    current_sample = _text(comparison.get("current_sample_id"))
+    baseline = _text(comparison.get("baseline_reference"))
+    metric = _text(comparison.get("metric_name"))
+    unit = _text(comparison.get("unit"))
+    current_value = _value_with_unit(comparison.get("current_value"), unit)
+    baseline_value = _value_with_unit(comparison.get("baseline_value"), unit)
+    direction = _text(comparison.get("direction"))
+    notes = _text(comparison.get("notes"))
+    return {
+        "paper_id": paper_id,
+        "comparison_id": comparison_id,
+        "summary": (
+            f"{paper_id} {comparison_id}: {current_sample} vs {baseline} "
+            f"for {metric}. {current_value} vs {baseline_value}. "
+            f"Direction: {direction}. Notes: {_without_trailing_period(notes)}."
+        ),
+    }
+
+
+def _observation_mechanism_summary(observation: dict[str, Any]) -> dict[str, Any]:
+    paper_id = _text(observation.get("paper_id"))
+    observation_id = _text(observation.get("observation_id"))
+    method = _text(observation.get("characterization_method"))
+    observed_object = _text(observation.get("observed_object"))
+    description = _text(observation.get("value_or_description"))
+    interpretation = _text(observation.get("author_interpretation"))
+    return {
+        "paper_id": paper_id,
+        "observation_id": observation_id,
+        "path": (
+            f"{method} observes {observed_object}: "
+            f"{_without_trailing_period(description)}. "
+            f"Interpretation: {_without_trailing_period(interpretation)}."
+        ),
+    }
+
+
+def _uncertainty_summary(uncertainty: dict[str, Any]) -> str:
+    paper_id = _text(uncertainty.get("paper_id"))
+    issue_id = _text(uncertainty.get("issue_id"))
+    description = _text(uncertainty.get("description"))
+    impact = _text(uncertainty.get("impact"))
+    return (
+        f"{paper_id} {issue_id}: {_without_trailing_period(description)}. "
+        f"Impact: {_without_trailing_period(impact)}."
+    )
+
+
+def _evidence_summary(evidence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "paper_id": _text(evidence.get("paper_id")),
+        "evidence_id": _text(evidence.get("evidence_id")),
+        "source": _text(evidence.get("figure_or_table")),
+        "section": _text(evidence.get("section")),
+        "supports": _text(evidence.get("supports")),
+    }
+
+
+def _value_with_unit(value: Any, unit: str) -> str:
+    text = _text(value)
+    if unit and unit not in text:
+        return f"{text} {unit}".strip()
+    return text
+
+
+def _without_trailing_period(value: str) -> str:
+    return value.rstrip().rstrip(".")
+
+
+def _unique_values(records: list[dict[str, Any]], key: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for record in records:
+        value = _text(record.get(key))
+        if not value or value.casefold() in seen:
+            continue
+        seen.add(value.casefold())
+        values.append(value)
+    return values
+
+
+def _unique_split_values(records: list[dict[str, Any]], key: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for record in records:
+        for raw_value in _text(record.get(key)).replace("；", ";").split(";"):
+            value = raw_value.strip()
+            if not value or value.casefold() in seen:
+                continue
+            seen.add(value.casefold())
+            values.append(value)
+    return values
+
+
+def _records(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.expanduser().resolve().read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"JSON root must be an object: {path}")
+    return value
+
+
+if __name__ == "__main__":
+    main()

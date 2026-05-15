@@ -703,6 +703,111 @@ def test_export_prediction_bundle_uses_main_value_from_uncertainty_first_text(
     assert ("13", "11", 180.5, 464.8) in comparison_index
 
 
+def test_export_prediction_bundle_projects_passive_film_resistance_from_impedance_table(
+    tmp_path,
+):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": f"rfilm-{sample_number}",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "pitting potential",
+            "sample_context": {"sample_number": sample_number},
+            "value_payload": {
+                "pitting_potential": value,
+            },
+            "unit": "\u03a9 cm 2",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-impedance",
+                    "page": 8,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+        for sample_number, value in (
+            (1, "5.03\u00d710 4 \u03a9 cm 2"),
+            (2, "5.67\u00d710 4 \u03a9 cm 2"),
+            (3, "1.90\u00d710 5 \u03a9 cm 2"),
+        )
+    ]
+    records_by_artifact["objective_evidence_units"].append(
+        {
+            "evidence_unit_id": "rs-1",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "corrosion potential",
+            "sample_context": {"sample_number": 1},
+            "value_payload": {
+                "corrosion_potential": "5.90 \u03a9 cm 2",
+            },
+            "unit": "\u03a9 cm 2",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-impedance",
+                    "page": 8,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+    )
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    measurement_index = {
+        measurement["result_id"]: (
+            measurement["metric_name"],
+            measurement["value_payload"].get("value"),
+        )
+        for measurement in bundle["measurement_results"]
+    }
+    comparison_index = {
+        (
+            comparison["comparison_metric"],
+            comparison["current_sample_id"].rsplit("-", 1)[-1],
+            comparison["baseline_reference"].rsplit("-", 1)[-1],
+            comparison["current_value"],
+            comparison["baseline_value"],
+        )
+        for comparison in bundle["comparisons"]
+    }
+
+    assert measurement_index["rfilm-1"] == ("passive film resistance", 5.03)
+    assert measurement_index["rfilm-2"] == ("passive film resistance", 5.67)
+    assert measurement_index["rfilm-3"] == ("passive film resistance", 1.90)
+    assert measurement_index["rs-1"][0] == "corrosion potential"
+    assert (
+        "passive film resistance",
+        "3",
+        "1",
+        1.90,
+        5.03,
+    ) in comparison_index
+    assert (
+        "passive film resistance",
+        "3",
+        "2",
+        1.90,
+        5.67,
+    ) in comparison_index
+
+
 def test_export_prediction_bundle_ignores_uncertainty_only_pair_candidates(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

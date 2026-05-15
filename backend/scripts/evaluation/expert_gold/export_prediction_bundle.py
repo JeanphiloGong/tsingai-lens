@@ -1881,6 +1881,9 @@ def _objective_numeric_value(row: dict[str, Any]) -> float | None:
     )
     if source_scalar is not None:
         return source_scalar
+    impedance_scalar = _objective_impedance_scientific_scalar(row)
+    if impedance_scalar is not None:
+        return impedance_scalar
     return extracted_scalar
 
 
@@ -1892,6 +1895,8 @@ def _objective_value_payload(row: dict[str, Any]) -> dict[str, Any]:
     for key in ("value", "numeric_value"):
         if key in value_payload and _objective_numeric_scalar(value_payload[key]) != scalar:
             return {**value_payload, key: scalar}
+    if _objective_impedance_scientific_scalar(row) is not None:
+        return {**value_payload, "value": scalar}
     return value_payload
 
 
@@ -1942,9 +1947,47 @@ def _objective_value_is_uncertainty_only(row: dict[str, Any]) -> bool:
 
 
 def _objective_metric_name(row: dict[str, Any]) -> str:
+    if _objective_impedance_scientific_scalar(row) is not None:
+        return "passive film resistance"
     text = _text(row, "property_normalized")
     normalized = _objective_metric_alias_key(text)
     return OBJECTIVE_METRIC_ALIASES.get(normalized, text)
+
+
+def _objective_impedance_scientific_scalar(row: dict[str, Any]) -> float | None:
+    if not _objective_has_area_resistance_unit(row):
+        return None
+    value_payload = _dict_value(row.get("value_payload"))
+    for text in _objective_payload_leaf_texts(value_payload):
+        if _has_base_ten_marker(text):
+            return _objective_numeric_scalar(text)
+    return None
+
+
+def _objective_has_area_resistance_unit(row: dict[str, Any]) -> bool:
+    unit = _objective_unit(row)
+    normalized = unit.casefold().replace("*", " ").replace("^", " ")
+    has_resistance = "\u03a9" in unit or "ohm" in normalized or "omega" in normalized
+    has_area = bool(re.search(r"\bcm\s*(?:2|\u00b2)\b", normalized))
+    return has_resistance and has_area
+
+
+def _objective_payload_leaf_texts(payload: Any):
+    payload = _normalize_value(payload)
+    if isinstance(payload, dict):
+        for value in payload.values():
+            yield from _objective_payload_leaf_texts(value)
+        return
+    if isinstance(payload, list):
+        for value in payload:
+            yield from _objective_payload_leaf_texts(value)
+        return
+    if _present(payload):
+        yield str(payload)
+
+
+def _has_base_ten_marker(text: str) -> bool:
+    return bool(re.search(r"(?:\u00d7|x)\s*10|10\s*\^", text, flags=re.IGNORECASE))
 
 
 def _objective_unit(row: dict[str, Any]) -> str:

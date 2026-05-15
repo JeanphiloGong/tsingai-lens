@@ -3242,6 +3242,25 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
             "confidence": 0.8,
         }
     )
+    duplicate_matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-as-slm-row-only",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {
+                "sample_number": "10",
+            },
+            "process_context": {
+                "Specimens": "as-SLM (120/100)",
+                "laser power": "120",
+                "scan speed": "100",
+                "treatment type": "-",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
     row_number_process_context = ObjectiveEvidenceUnit.from_mapping(
         {
             "evidence_unit_id": "oeu-process-row-11",
@@ -3267,6 +3286,7 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
         (
             measurement,
             row_number_process_context,
+            duplicate_matching_process_context,
             matching_process_context,
         ),
     )

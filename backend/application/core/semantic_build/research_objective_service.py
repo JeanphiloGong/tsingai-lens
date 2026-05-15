@@ -2542,6 +2542,39 @@ class ResearchObjectiveService:
         ]
         if len(winners) == 1:
             return winners[0]
+        sample_number_keys = {
+            "condition",
+            "condition_no",
+            "condition_number",
+            "sample_no",
+            "sample_number",
+        }
+        labeled_winners = []
+        for candidate in winners:
+            for key, value in candidate.sample_context.items():
+                column_key = self._objective_column_key(str(key))
+                if column_key in sample_number_keys:
+                    continue
+                if (
+                    column_key
+                    not in {
+                        "id",
+                        "label",
+                        "sample",
+                        "sample_id",
+                        "sample_label",
+                        "specimen",
+                        "specimens",
+                    }
+                    and "sample" not in column_key
+                    and "specimen" not in column_key
+                ):
+                    continue
+                if re.search(r"[A-Za-z]", str(value or "")):
+                    labeled_winners.append(candidate)
+                    break
+        if len(labeled_winners) == 1:
+            return labeled_winners[0]
         numbered_winners = [
             candidate
             for candidate in winners

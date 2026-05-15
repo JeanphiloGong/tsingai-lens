@@ -132,9 +132,7 @@ def build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
             col_index = int(getattr(cell, "start_col_offset_idx", 0))
             cell_text = str(getattr(cell, "text", "") or "").strip()
             header_path = None
-            if not bool(getattr(cell, "column_header", False)) and not bool(
-                getattr(cell, "row_header", False)
-            ):
+            if not bool(getattr(cell, "column_header", False)):
                 header_path = header_paths.get(col_index)
             rows.append(
                 SourceTableCell(

@@ -810,13 +810,23 @@ export function buildCytoscapeStyles(theme: CytoscapeThemeName = 'light') {
 }
 
 export async function runGraphLayout(cy: Core, layoutName = 'fcose') {
-	if (cy.nodes().length < 2) return;
-	const name =
+	const nodeCount = cy.nodes().length;
+	if (nodeCount < 2) return;
+	const requestedName =
 		layoutName === 'grid' || layoutName === 'circle' || layoutName === 'cose'
 			? layoutName
 			: 'fcose';
+	const name = requestedName === 'fcose' && nodeCount <= 2 ? 'grid' : requestedName;
 
 	await new Promise<void>((resolve) => {
+		let settled = false;
+		let timeoutId: ReturnType<typeof setTimeout>;
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeoutId);
+			resolve();
+		};
 		const options =
 			name === 'fcose'
 				? ({
@@ -846,7 +856,8 @@ export async function runGraphLayout(cy: Core, layoutName = 'fcose') {
 						padding: 72
 					} as LayoutOptions);
 		const layout = cy.layout(options);
-		layout.on('layoutstop', () => resolve());
+		layout.on('layoutstop', finish);
+		timeoutId = setTimeout(finish, 1600);
 		layout.run();
 	});
 }

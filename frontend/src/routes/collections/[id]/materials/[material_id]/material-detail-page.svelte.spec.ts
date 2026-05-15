@@ -402,7 +402,11 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('S002 · Island strategy B').first())
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Highest density does not align with highest strength'))
+			.element(
+				browserPage.getByRole('heading', {
+					name: 'Highest density does not align with highest strength'
+				})
+			)
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: '95.4%' }).first())

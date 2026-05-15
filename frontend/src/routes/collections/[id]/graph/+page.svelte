@@ -146,6 +146,7 @@
 	$: collectionId = $page.params.id ?? '';
 	$: overviewGraphData = buildCollectionOverviewGraph(graphData);
 	$: graphMeta = buildGraphMeta(overviewGraphData);
+	$: graphLoading = loading && !graphData;
 	$: nodeTypeCounts = buildNodeTypeCounts(overviewGraphData);
 	$: availableNodeTypes = graphNodeTypeOrder.filter((type) => nodeTypeCounts[type] > 0);
 	$: overviewStats = buildOverviewStats(graphData, overviewGraphData);
@@ -177,7 +178,7 @@
 	};
 	$: commonRelations = buildCommonRelations();
 	$: showEmptyGraph =
-		!loading && (!graphData || !overviewGraphData.nodes.length || (notFound && !visibleNodes));
+		!graphLoading && (!graphData || !overviewGraphData.nodes.length || (notFound && !visibleNodes));
 	$: if (cy) {
 		searchQuery;
 		visibleNodeTypes;
@@ -298,6 +299,10 @@
 		});
 
 		attachRendererEvents();
+		applyVisibilityAndSearch();
+		fitGraph(false);
+		loading = false;
+		await tick();
 		await runGraphLayout(cy, layoutName);
 		applyVisibilityAndSearch();
 		fitGraph(false);
@@ -902,13 +907,13 @@
 	}
 
 	function statusBadgeLabel(meta: GraphMeta) {
-		if (loading) return $t('graph.status.loading');
+		if (graphLoading) return $t('graph.status.loading');
 		if (meta.nodeCount > 0) return $t('graph.status.built');
 		return $t('graph.status.pending');
 	}
 
 	function statusBadgeTone() {
-		if (loading) return 'warning';
+		if (graphLoading) return 'warning';
 		if (graphMeta.nodeCount > 0) return 'success';
 		return 'neutral';
 	}
@@ -1200,7 +1205,7 @@
 							class="graph-input"
 							bind:value={searchQuery}
 							placeholder={$t('graph.controls.searchPlaceholder')}
-							disabled={loading}
+							disabled={graphLoading}
 							on:keydown={(event) => {
 								if (event.key === 'Enter') focusFirstSearchMatch();
 							}}
@@ -1231,7 +1236,7 @@
 								<input
 									type="checkbox"
 									checked={visibleNodeTypes[type] ?? true}
-									disabled={loading}
+									disabled={graphLoading}
 									on:change={(event) =>
 										toggleNodeType(type, (event.currentTarget as HTMLInputElement).checked)}
 								/>
@@ -1252,7 +1257,7 @@
 								min="1"
 								max="2000"
 								bind:value={maxNodes}
-								disabled={loading}
+								disabled={graphLoading}
 								on:change={handleControlRender}
 							/>
 						</label>
@@ -1265,7 +1270,7 @@
 								min="0"
 								step="0.01"
 								bind:value={minWeight}
-								disabled={loading}
+								disabled={graphLoading}
 								on:change={handleControlRender}
 							/>
 						</label>
@@ -1275,7 +1280,7 @@
 								id="graph-layout"
 								class="graph-input"
 								bind:value={layoutName}
-								disabled={loading}
+								disabled={graphLoading}
 								on:change={handleLayout}
 							>
 								<option value="fcose">{$t('graph.layout.fcose')}</option>
@@ -1346,7 +1351,7 @@
 
 				<div class="graph-canvas-stage">
 					<div class="graph-cytoscape" bind:this={graphContainer} aria-label={$t('graph.canvas.ariaLabel')}></div>
-					{#if loading}
+					{#if graphLoading}
 						<div class="graph-canvas-state graph-canvas-state--loading">
 							<div class="graph-spinner" aria-hidden="true"></div>
 							<span>{$t('graph.status.loading')}</span>

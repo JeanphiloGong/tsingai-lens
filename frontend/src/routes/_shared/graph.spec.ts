@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildCollectionOverviewGraph,
 	buildCollectionGraphmlUrl,
@@ -11,11 +11,17 @@ import {
 	getLinkedComparisons,
 	getNodeTypeStyle,
 	parseGraphNodeId,
+	runGraphLayout,
 	type GraphResponse
 } from './graph';
 import type { ComparisonRow } from './comparisons';
+import type { Core } from 'cytoscape';
 
 describe('graph shared helpers', () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it('builds graphml urls with only lean graph query parameters', () => {
 		const url = buildCollectionGraphmlUrl('col_123', { maxNodes: 50, minWeight: 0.75 });
 
@@ -150,6 +156,45 @@ describe('graph shared helpers', () => {
 
 		expect(styleKeys).not.toEqual(expect.arrayContaining(['shadow-blur', 'shadow-color']));
 		expect(styleKeys).toEqual(expect.arrayContaining(['underlay-color', 'underlay-opacity']));
+	});
+
+	it('finishes graph layout if the renderer omits layoutstop', async () => {
+		vi.useFakeTimers();
+		const run = vi.fn();
+		const cy = {
+			nodes: () => ({ length: 2 }),
+			layout: () => ({
+				on: vi.fn(),
+				run
+			})
+		} as unknown as Core;
+
+		const layout = runGraphLayout(cy, 'grid');
+		await vi.advanceTimersByTimeAsync(1600);
+
+		await expect(layout).resolves.toBeUndefined();
+		expect(run).toHaveBeenCalledOnce();
+	});
+
+	it('uses a simple layout for tiny default graphs', async () => {
+		vi.useFakeTimers();
+		let layoutName = '';
+		const cy = {
+			nodes: () => ({ length: 2 }),
+			layout: (options: { name?: string }) => {
+				layoutName = options.name ?? '';
+				return {
+					on: vi.fn(),
+					run: vi.fn()
+				};
+			}
+		} as unknown as Core;
+
+		const layout = runGraphLayout(cy, 'fcose');
+		await vi.advanceTimersByTimeAsync(1600);
+
+		await expect(layout).resolves.toBeUndefined();
+		expect(layoutName).toBe('grid');
 	});
 
 	it('projects collection graphs into aggregate overview maps', () => {

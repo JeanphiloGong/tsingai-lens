@@ -315,6 +315,117 @@ def test_build_target_prediction_projects_logic_chain_mechanisms() -> None:
     ]
 
 
+def test_build_target_prediction_derives_evidence_limitations() -> None:
+    projection = _load_projection_module()
+    bundle = {
+        "papers": [
+            {
+                "paper_id": "P001",
+                "title": "SLM process parameters and relative density",
+                "target_properties": "relative density; mechanical properties",
+            },
+            {
+                "paper_id": "P003",
+                "title": "Volumetric energy density and fatigue",
+                "target_properties": "fatigue; defect structure",
+            },
+            {
+                "paper_id": "P005",
+                "title": "Porosity and corrosion in SLM 316L",
+                "target_properties": "corrosion",
+            },
+            {
+                "paper_id": "P006",
+                "title": "Texture and yield strength prediction",
+                "target_properties": "texture; yield strength prediction",
+            },
+        ],
+        "samples": [
+            {"paper_id": "P003", "sample_id": "L-VED"},
+            {"paper_id": "P003", "sample_id": "wrought-316L"},
+        ],
+        "test_conditions": [],
+        "measurement_results": [
+            {
+                "paper_id": "P001",
+                "result_id": "R001",
+                "sample_id": "scan speed 2100 mm·s -1",
+                "metric_name": "relative density",
+                "value_or_trend": "99.5",
+                "unit": "%",
+            },
+            {
+                "paper_id": "P003",
+                "result_id": "R002",
+                "sample_id": "wrought-316L",
+                "metric_name": "fatigue limit",
+                "value_or_trend": "256",
+                "unit": "MPa",
+            },
+            {
+                "paper_id": "P005",
+                "result_id": "R003",
+                "sample_id": "SLM 316L",
+                "metric_name": "pitting potential",
+                "value_or_trend": "improved",
+                "unit": "",
+            },
+            {
+                "paper_id": "P006",
+                "result_id": "R004",
+                "sample_id": "case 7",
+                "metric_name": "yield strength prediction",
+                "value_or_trend": "347.14",
+                "unit": "MPa",
+            },
+        ],
+        "comparisons": [],
+        "observations": [
+            {
+                "paper_id": "P001",
+                "observation_id": "O001",
+                "characterization_method": "SEM / ImageJ",
+                "observed_object": "relative density",
+                "value_or_description": "relative density measured from images",
+            },
+            {
+                "paper_id": "P005",
+                "observation_id": "O002",
+                "characterization_method": "electrochemical test",
+                "observed_object": "corrosion",
+                "value_or_description": "room-temperature 3.5 wt.% NaCl testing",
+            },
+        ],
+        "uncertainties": [],
+        "evidence": [],
+    }
+
+    prediction = projection.build_target_prediction_from_bundle(bundle)
+
+    assert prediction["limitations"] == [
+        (
+            "P001 scan-speed units may be uncertain and should be rechecked "
+            "before recalculation."
+        ),
+        (
+            "P001 relative density is SEM/ImageJ based and should not be "
+            "treated as equivalent to Archimedes or micro-CT density."
+        ),
+        (
+            "P003 printed-vs-wrought comparisons have different processing "
+            "histories and cannot be attributed only to VED."
+        ),
+        (
+            "P005 corrosion conclusions are limited to room-temperature "
+            "3.5 wt.% NaCl testing."
+        ),
+        (
+            "P006 is primarily a texture and yield-strength prediction paper, "
+            "not a porosity-defect paper."
+        ),
+    ]
+
+
 def test_build_research_objective_target_prediction_writes_prediction_and_report(
     tmp_path: Path,
 ) -> None:

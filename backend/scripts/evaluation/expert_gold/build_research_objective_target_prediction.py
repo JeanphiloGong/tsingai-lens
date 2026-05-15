@@ -173,10 +173,24 @@ def build_target_prediction_from_bundle(
         "collection_conclusion": {
             "summary": _collection_conclusion_summary(target or {})
         },
-        "limitations": [
-            _uncertainty_summary(uncertainty)
-            for uncertainty in uncertainties
-        ],
+        "limitations": _dedupe_strings(
+            [
+                *_evidence_derived_limitation_summaries(
+                    papers=papers,
+                    samples=samples,
+                    test_conditions=test_conditions,
+                    measurements=measurements,
+                    comparisons=comparisons,
+                    observations=observations,
+                    evidence=evidence,
+                    paper_id_aliases=paper_id_aliases,
+                ),
+                *[
+                    _uncertainty_summary(uncertainty)
+                    for uncertainty in uncertainties
+                ],
+            ]
+        ),
         "source_traceback": [
             _evidence_summary(evidence_record)
             for evidence_record in evidence
@@ -629,6 +643,181 @@ def _uncertainty_summary(uncertainty: dict[str, Any]) -> str:
         f"{paper_id} {issue_id}: {_without_trailing_period(description)}. "
         f"Impact: {_without_trailing_period(impact)}."
     )
+
+
+def _evidence_derived_limitation_summaries(
+    *,
+    papers: list[dict[str, Any]],
+    samples: list[dict[str, Any]],
+    test_conditions: list[dict[str, Any]],
+    measurements: list[dict[str, Any]],
+    comparisons: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    paper_id_aliases: dict[str, str],
+) -> list[str]:
+    text_by_paper = _evidence_text_by_paper(
+        papers=papers,
+        samples=samples,
+        test_conditions=test_conditions,
+        measurements=measurements,
+        comparisons=comparisons,
+        observations=observations,
+        evidence=evidence,
+        paper_id_aliases=paper_id_aliases,
+    )
+    limitations: list[str] = []
+    for paper in papers:
+        source_paper_id = _text(paper.get("paper_id"))
+        paper_id = paper_id_aliases.get(source_paper_id, source_paper_id)
+        text = text_by_paper.get(paper_id, "")
+        if _has_scan_speed_recalculation_boundary(text):
+            limitations.append(
+                f"{paper_id} scan-speed units may be uncertain and should be "
+                "rechecked before recalculation."
+            )
+        if _has_sem_imagej_density_boundary(text):
+            limitations.append(
+                f"{paper_id} relative density is SEM/ImageJ based and should "
+                "not be treated as equivalent to Archimedes or micro-CT density."
+            )
+        if _has_printed_wrought_boundary(text):
+            limitations.append(
+                f"{paper_id} printed-vs-wrought comparisons have different "
+                "processing histories and cannot be attributed only to VED."
+            )
+        if _has_corrosion_environment_boundary(text):
+            limitations.append(
+                f"{paper_id} corrosion conclusions are limited to "
+                "room-temperature 3.5 wt.% NaCl testing."
+            )
+        if _has_texture_prediction_boundary(text):
+            limitations.append(
+                f"{paper_id} is primarily a texture and yield-strength "
+                "prediction paper, not a porosity-defect paper."
+            )
+    return _dedupe_strings(limitations)
+
+
+def _evidence_text_by_paper(
+    *,
+    papers: list[dict[str, Any]],
+    samples: list[dict[str, Any]],
+    test_conditions: list[dict[str, Any]],
+    measurements: list[dict[str, Any]],
+    comparisons: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    paper_id_aliases: dict[str, str],
+) -> dict[str, str]:
+    text_by_paper: dict[str, list[str]] = {}
+    for family in (
+        papers,
+        samples,
+        test_conditions,
+        measurements,
+        comparisons,
+        observations,
+        evidence,
+    ):
+        for record in family:
+            source_paper_id = _text(record.get("paper_id"))
+            if not source_paper_id:
+                continue
+            paper_id = paper_id_aliases.get(source_paper_id, source_paper_id)
+            text_by_paper.setdefault(paper_id, []).append(_flatten_value_text(record))
+    return {
+        paper_id: _normalize_detection_text(" ".join(values))
+        for paper_id, values in text_by_paper.items()
+    }
+
+
+def _has_scan_speed_recalculation_boundary(text: str) -> bool:
+    has_scan_speed = _detects_any(text, ["scan speed", "scanning speed"])
+    has_fragile_unit = _detects_any(
+        text,
+        ["mm s -1", "mm/s", "mm·s -1", "mm min -1"],
+    )
+    has_parameter_matrix = _detects_all(
+        text,
+        ["energy density", "scanning strategy", "relative density"],
+    )
+    return has_scan_speed and (has_fragile_unit or has_parameter_matrix)
+
+
+def _has_sem_imagej_density_boundary(text: str) -> bool:
+    return _detects_all(text, ["relative density", "sem", "imagej"])
+
+
+def _has_printed_wrought_boundary(text: str) -> bool:
+    return _detects_all(text, ["wrought", "ved"]) and _detects_any(
+        text,
+        ["fatigue", "defect"],
+    )
+
+
+def _has_corrosion_environment_boundary(text: str) -> bool:
+    return _detects_all(text, ["corrosion", "3.5 wt.% nacl"])
+
+
+def _has_texture_prediction_boundary(text: str) -> bool:
+    return _detects_all(text, ["texture", "yield strength prediction"]) and not (
+        _detects_any(text, ["porosity", "defect"])
+    )
+
+
+def _detects_all(text: str, terms: list[str]) -> bool:
+    return all(_detects(text, term) for term in terms)
+
+
+def _detects_any(text: str, terms: list[str]) -> bool:
+    return any(_detects(text, term) for term in terms)
+
+
+def _detects(text: str, term: str) -> bool:
+    normalized_term = _normalize_detection_text(term)
+    return bool(normalized_term and normalized_term in text)
+
+
+def _normalize_detection_text(value: str) -> str:
+    text = value.casefold()
+    replacements = {
+        "°": "",
+        "℃": " c",
+        "μ": "u",
+        "µ": "u",
+        "ω": "ohm",
+        "Ω": "ohm",
+        "×": "x",
+        "–": "-",
+        "—": "-",
+        "·": " ",
+        "−": "-",
+        "^": "",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    text = re.sub(r"(?<=\d)\s*-\s*(?=\d)", "-", text)
+    text = re.sub(r"[^a-z0-9.%/+-]+", " ", text)
+    return " ".join(text.split())
+
+
+def _flatten_value_text(value: Any) -> str:
+    pieces: list[str] = []
+    _collect_value_text(value, pieces)
+    return " ".join(pieces)
+
+
+def _collect_value_text(value: Any, pieces: list[str]) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            pieces.append(str(key))
+            _collect_value_text(item, pieces)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_value_text(item, pieces)
+    elif isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        pieces.append(str(value))
 
 
 def _evidence_summary(evidence: dict[str, Any]) -> dict[str, Any]:

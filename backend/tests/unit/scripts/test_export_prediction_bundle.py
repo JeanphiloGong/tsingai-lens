@@ -442,6 +442,184 @@ def test_export_prediction_bundle_projects_objective_measurement_pairs(tmp_path)
     }
 
 
+def test_export_prediction_bundle_limits_condition_matrix_pairs(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": f"measure-{sample_number}",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {
+                "Condition number": condition_number,
+                "Sample number": sample_number,
+            },
+            "value_payload": {
+                "value": 200 + sample_number,
+                "source_value_text": str(200 + sample_number),
+            },
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+        for condition_number, sample_numbers in ((1, (1, 2, 3)), (2, (4, 5, 6)))
+        for sample_number in sample_numbers
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert len(bundle["comparisons"]) == 18
+    comparison_pairs = {
+        (
+            comparison["current_sample_id"].rsplit("-", 1)[-1],
+            comparison["baseline_reference"].rsplit("-", 1)[-1],
+        )
+        for comparison in bundle["comparisons"]
+    }
+    assert ("1", "4") in comparison_pairs
+    assert ("4", "1") in comparison_pairs
+    assert ("1", "5") not in comparison_pairs
+    assert ("5", "1") not in comparison_pairs
+
+
+def test_export_prediction_bundle_skips_uncontrolled_large_pair_groups(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": f"measure-{sample_number}",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {"sample_number": sample_number},
+            "value_payload": {
+                "value": 200 + sample_number,
+                "source_value_text": str(200 + sample_number),
+            },
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 3,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+        for sample_number in range(1, 7)
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert bundle["comparisons"] == []
+
+
+def test_export_prediction_bundle_ignores_uncertainty_only_pair_candidates(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": f"measure-{sample_label.lower()}",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "TE [%]",
+            "sample_context": {"Printed > 316L": sample_label},
+            "value_payload": {
+                "value": value,
+                "source_value_text": f"{value} +/- 1.1",
+            },
+            "unit": None,
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 7,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+        for sample_label, value in (
+            ("L-VED", 33.2),
+            ("M-VED", 37.3),
+            ("H-VED", 48.3),
+            ("Wrought 316L", 54.0),
+        )
+    ]
+    records_by_artifact["objective_evidence_units"].append(
+        {
+            "evidence_unit_id": "measure-l-uncertainty",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "total elongation",
+            "sample_context": {"Printed > 316L": "L-VED"},
+            "value_payload": {
+                "value": 1.1,
+                "source_value_text": "+/- 1.1",
+            },
+            "unit": "%",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 7,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+    )
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert len(bundle["comparisons"]) == 12
+    assert {
+        comparison["current_value"]
+        for comparison in bundle["comparisons"]
+    } == {33.2, 37.3, 48.3, 54.0}
+
+
 def test_export_prediction_bundle_projects_objective_interpretations(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
@@ -667,6 +845,36 @@ def test_export_prediction_bundle_normalizes_objective_metric_aliases(tmp_path):
             "unit": "%",
             "resolution_status": "resolved",
         },
+        {
+            "evidence_unit_id": "oeu-compact-yield",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "YS > [MPa]",
+            "sample_context": {"sample_number": 2},
+            "value_payload": {"value": 437},
+            "unit": None,
+            "resolution_status": "resolved",
+        },
+        {
+            "evidence_unit_id": "oeu-compact-ultimate",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "UTS > [MPa]",
+            "sample_context": {"sample_number": 2},
+            "value_payload": {"value": 560},
+            "unit": None,
+            "resolution_status": "resolved",
+        },
+        {
+            "evidence_unit_id": "oeu-compact-elongation",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "TE [%]",
+            "sample_context": {"sample_number": 2},
+            "value_payload": {"value": 48.3},
+            "unit": None,
+            "resolution_status": "resolved",
+        },
     ]
 
     bundle = exporter.build_prediction_bundle(
@@ -684,7 +892,14 @@ def test_export_prediction_bundle_normalizes_objective_metric_aliases(tmp_path):
         "yield strength",
         "ultimate tensile strength",
         "elongation",
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
     ]
+    assert [
+        result["unit"]
+        for result in bundle["measurement_results"]
+    ] == ["MPa", "MPa", "%", "MPa", "MPa", "%"]
 
 
 def test_export_prediction_bundle_allows_missing_artifacts(tmp_path):

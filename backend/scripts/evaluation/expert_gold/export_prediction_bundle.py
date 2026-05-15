@@ -66,6 +66,8 @@ OBJECTIVE_METRIC_ALIASES = {
     "el": "elongation",
     "el%": "elongation",
     "elongation to failure": "elongation",
+    "te": "elongation",
+    "total elongation": "elongation",
     "i u": "ultimate tensile strength",
     "iu": "ultimate tensile strength",
     "sigma u": "ultimate tensile strength",
@@ -78,6 +80,7 @@ OBJECTIVE_METRIC_ALIASES = {
     "i y": "yield strength",
     "iy": "yield strength",
     "sigma y": "yield strength",
+    "ys": "yield strength",
     "\u0131 y": "yield strength",
     "\u0131y": "yield strength",
     "\u03c3 y": "yield strength",
@@ -888,6 +891,7 @@ def _convert_objective_measurement_results(
             continue
         sample_context = _dict_value(row.get("sample_context"))
         value_payload = _first_value(row, "value_payload")
+        unit = _objective_unit(row)
         records.append(
             {
                 "paper_id": _text(row, "document_id"),
@@ -901,7 +905,7 @@ def _convert_objective_measurement_results(
                 "test_condition_id": _objective_test_condition_reference(row),
                 "metric_name": _objective_metric_name(row),
                 "value_or_trend": _summarize_value_payload(value_payload),
-                "unit": _text(row, "unit"),
+                "unit": unit,
                 "claim_scope": "objective",
                 "data_source": "objective_evidence_unit",
                 "baseline_id": _objective_baseline_reference(row),
@@ -926,6 +930,7 @@ def _convert_objective_comparisons(rows: list[dict[str, Any]]) -> list[dict[str,
         sample_context = _dict_value(row.get("sample_context"))
         baseline_context = _dict_value(row.get("baseline_context"))
         value_payload = _dict_value(row.get("value_payload"))
+        unit = _objective_unit(row)
         current_sample_id = _objective_sample_id(_text(row, "document_id"), sample_context)
         baseline_sample_id = _objective_sample_id(
             _text(row, "document_id"),
@@ -961,7 +966,7 @@ def _convert_objective_comparisons(rows: list[dict[str, Any]]) -> list[dict[str,
                     "reference_value",
                     "value",
                 ),
-                "unit": _text(row, "unit"),
+                "unit": unit,
                 "change_direction": _payload_text(value_payload, "direction"),
                 "direction": _payload_text(value_payload, "direction"),
                 "result_summary": _text(row, "interpretation"),
@@ -994,13 +999,16 @@ def _convert_objective_measurement_pair_comparisons(
         sample_context = _dict_value(row.get("sample_context"))
         sample_id = _objective_sample_id(document_id, sample_context)
         metric = _objective_metric_name(row)
+        unit = _objective_unit(row)
         value = _objective_numeric_value(row)
         if not document_id or not sample_id or not metric or value is None:
+            continue
+        if _objective_value_is_uncertainty_only(row):
             continue
         group_key = (
             document_id,
             metric,
-            _text(row, "unit"),
+            unit,
             _objective_measurement_pair_source(row),
         )
         candidate_key = f"{sample_id}:{value}"
@@ -1017,7 +1025,7 @@ def _convert_objective_measurement_pair_comparisons(
                 "sample_label": _objective_sample_label(sample_context),
                 "metric": metric,
                 "value": value,
-                "unit": _text(row, "unit"),
+                "unit": unit,
                 "evidence_ids": _objective_evidence_ids(row),
             },
         )
@@ -1030,17 +1038,147 @@ def _convert_objective_measurement_pair_comparisons(
         )
         if len(candidates) < 2:
             continue
-        for current in candidates:
-            for baseline in candidates:
-                if current["sample_id"] == baseline["sample_id"]:
-                    continue
-                records.append(
-                    _objective_measurement_pair_record(
-                        current=current,
-                        baseline=baseline,
-                    )
+        for current, baseline in _objective_measurement_pair_candidates(candidates):
+            records.append(
+                _objective_measurement_pair_record(
+                    current=current,
+                    baseline=baseline,
                 )
+            )
     return records
+
+
+def _objective_measurement_pair_candidates(
+    candidates: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    if len(candidates) <= 4:
+        return _ordered_candidate_pairs(candidates)
+    condition_slots = _condition_matrix_slots(candidates)
+    if not condition_slots:
+        process_pairs = _controlled_process_candidate_pairs(candidates)
+        return process_pairs
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    seen: set[tuple[str, str]] = set()
+    for current in candidates:
+        for baseline in candidates:
+            if current["sample_id"] == baseline["sample_id"]:
+                continue
+            current_slot = condition_slots.get(current["sample_id"])
+            baseline_slot = condition_slots.get(baseline["sample_id"])
+            if not current_slot or not baseline_slot:
+                continue
+            same_condition = current_slot[0] == baseline_slot[0]
+            same_condition_slot = current_slot[1] == baseline_slot[1]
+            if not (same_condition or same_condition_slot):
+                continue
+            key = (current["sample_id"], baseline["sample_id"])
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append((current, baseline))
+    return pairs
+
+
+def _controlled_process_candidate_pairs(
+    candidates: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for current in candidates:
+        for baseline in candidates:
+            if current["sample_id"] == baseline["sample_id"]:
+                continue
+            if _has_controlled_process_difference(current["row"], baseline["row"]):
+                pairs.append((current, baseline))
+    return pairs
+
+
+def _has_controlled_process_difference(
+    current_row: dict[str, Any],
+    baseline_row: dict[str, Any],
+) -> bool:
+    current_process = _dict_value(current_row.get("process_context"))
+    baseline_process = _dict_value(baseline_row.get("process_context"))
+    current_values = _normalized_process_values(current_process)
+    baseline_values = _normalized_process_values(baseline_process)
+    if not current_values or not baseline_values:
+        return False
+    common_keys = sorted(set(current_values) & set(baseline_values))
+    equal_keys = [
+        key for key in common_keys if current_values[key] == baseline_values[key]
+    ]
+    changed_keys = [
+        key for key in common_keys if current_values[key] != baseline_values[key]
+    ]
+    return bool(equal_keys) and bool(changed_keys) and len(changed_keys) <= 2
+
+
+def _normalized_process_values(context: dict[str, Any]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for key, value in context.items():
+        text = str(value).strip()
+        if not text or text.casefold() == "unknown":
+            continue
+        normalized_key = " ".join(str(key).casefold().replace("_", " ").split())
+        values[normalized_key] = " ".join(text.casefold().split())
+    return values
+
+
+def _ordered_candidate_pairs(
+    candidates: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    return [
+        (current, baseline)
+        for current in candidates
+        for baseline in candidates
+        if current["sample_id"] != baseline["sample_id"]
+    ]
+
+
+def _condition_matrix_slots(
+    candidates: list[dict[str, Any]],
+) -> dict[str, tuple[str, int]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        condition_key = _objective_condition_key(candidate["sample_context"])
+        sample_number = _objective_sample_number(candidate["sample_context"])
+        if not condition_key or sample_number is None:
+            return {}
+        grouped.setdefault(condition_key, []).append(
+            {**candidate, "sample_number": sample_number}
+        )
+    if len(grouped) < 2:
+        return {}
+    slots: dict[str, tuple[str, int]] = {}
+    for condition_key, condition_candidates in grouped.items():
+        sorted_candidates = sorted(
+            condition_candidates,
+            key=lambda candidate: (
+                candidate["sample_number"],
+                candidate["row_number"],
+            ),
+        )
+        for slot, candidate in enumerate(sorted_candidates, start=1):
+            slots[candidate["sample_id"]] = (condition_key, slot)
+    return slots
+
+
+def _objective_condition_key(sample_context: dict[str, Any]) -> str:
+    for key, value in sample_context.items():
+        normalized_key = " ".join(str(key).casefold().replace("_", " ").split())
+        if normalized_key in {"condition number", "condition"}:
+            return str(value).strip()
+    return ""
+
+
+def _objective_sample_number(sample_context: dict[str, Any]) -> int | None:
+    for key, value in sample_context.items():
+        normalized_key = " ".join(str(key).casefold().replace("_", " ").split())
+        if normalized_key != "sample number":
+            continue
+        match = re.search(r"\d+", str(value))
+        if match:
+            return int(match.group(0))
+    return None
 
 
 def _objective_measurement_pair_record(
@@ -1490,12 +1628,33 @@ def _objective_numeric_value(row: dict[str, Any]) -> float | None:
     return None
 
 
+def _objective_value_is_uncertainty_only(row: dict[str, Any]) -> bool:
+    value_payload = _dict_value(row.get("value_payload"))
+    source_value = _payload_text(value_payload, "source_value_text", "summary")
+    return bool(re.match(r"^(?:±|\+/-|\+\s*/\s*-)\s*\d", source_value.strip()))
+
+
 def _objective_metric_name(row: dict[str, Any]) -> str:
     text = _text(row, "property_normalized")
-    normalized = " ".join(
-        text.replace("_", " ").replace("-", " ").casefold().split()
-    )
+    normalized = _objective_metric_alias_key(text)
     return OBJECTIVE_METRIC_ALIASES.get(normalized, text)
+
+
+def _objective_unit(row: dict[str, Any]) -> str:
+    unit = _text(row, "unit")
+    if unit:
+        return unit
+    match = re.search(r"\[([^\]]+)\]", _text(row, "property_normalized"))
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def _objective_metric_alias_key(text: str) -> str:
+    normalized = text.replace("_", " ").replace("-", " ").casefold()
+    normalized = re.sub(r"\[[^\]]*\]", " ", normalized)
+    normalized = re.sub(r"[<>:=]+", " ", normalized)
+    return " ".join(normalized.split())
 
 
 def _first_present_value(payload: dict[str, Any], *keys: str) -> Any:

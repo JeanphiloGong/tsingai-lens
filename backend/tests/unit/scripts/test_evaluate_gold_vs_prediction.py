@@ -180,6 +180,22 @@ def test_evaluate_gold_vs_prediction_matches_compact_tensile_aliases():
     assert report["exact_match_count"] == 3
 
 
+def test_evaluate_gold_vs_prediction_normalizes_p003_metric_aliases():
+    evaluator = _load_evaluator_module()
+
+    assert evaluator._normalize_metric("max. defect length") == (
+        "maximum_defect_diameter"
+    )
+    assert evaluator._normalize_metric("grain_size_eq_diameter") == (
+        "equivalent_grain_diameter"
+    )
+    assert evaluator._normalize_metric("melt pool width") == "melt_pool_width"
+    assert evaluator._normalize_metric("fat at 10^4 cycles") == (
+        "fatigue_strength_at_10^4_cycles"
+    )
+    assert evaluator._normalize_metric("fat50%") == "fatigue_limit"
+
+
 def test_evaluate_gold_vs_prediction_maps_ved_sample_labels():
     evaluator = _load_evaluator_module()
 

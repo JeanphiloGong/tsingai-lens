@@ -85,6 +85,17 @@ METRIC_ALIASES = {
     "yield_strength_trend": "yield_strength_trend",
     "corrosion resistance": "corrosion_resistance",
     "corrosion_resistance": "corrosion_resistance",
+    "max. defect length": "maximum_defect_diameter",
+    "max._defect_length": "maximum_defect_diameter",
+    "max defect length": "maximum_defect_diameter",
+    "maximum defect length": "maximum_defect_diameter",
+    "maximum defect diameter": "maximum_defect_diameter",
+    "grain size eq diameter": "equivalent_grain_diameter",
+    "equivalent grain diameter": "equivalent_grain_diameter",
+    "fat at 10^4 cycles": "fatigue_strength_at_10^4_cycles",
+    "fatigue strength at 10^4 cycles": "fatigue_strength_at_10^4_cycles",
+    "fat50%": "fatigue_limit",
+    "fatigue limit": "fatigue_limit",
 }
 CORE_METRICS = {
     "density",

@@ -442,6 +442,80 @@ def test_export_prediction_bundle_projects_objective_measurement_pairs(tmp_path)
     }
 
 
+def test_export_prediction_bundle_projects_objective_interpretations(tmp_path):
+    exporter = _load_exporter_module()
+    records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records_by_artifact["documents"] = [
+        {
+            "id": "paper-1",
+            "title": "Objective Paper",
+        }
+    ]
+    records_by_artifact["objective_evidence_units"] = [
+        {
+            "evidence_unit_id": "interpret-1",
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "fatigue strength",
+            "value_payload": {
+                "fatigue_limit": {
+                    "printed": "80 - 100 MPa",
+                    "wrought_316L": "256 MPa",
+                }
+            },
+            "interpretation": {
+                "fatigue_limit": {
+                    "printed": "80 - 100 MPa",
+                    "wrought_316L": "256 MPa",
+                }
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-1",
+                    "page": 7,
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-objective",
+        source_output_dir=tmp_path / "output",
+        records_by_artifact=records_by_artifact,
+        missing_artifacts=[],
+        fact_source="objective_first",
+    )
+
+    assert bundle["observations"] == [
+        {
+            "paper_id": "paper-1",
+            "observation_id": "interpret-1",
+            "sample_id": "",
+            "sample_ids": [],
+            "characterization_method": "fatigue strength",
+            "observed_object": "fatigue strength",
+            "value_or_description": {
+                "fatigue_limit": {
+                    "printed": "80 - 100 MPa",
+                    "wrought_316L": "256 MPa",
+                }
+            },
+            "unit": "",
+            "author_interpretation": (
+                '{"fatigue_limit": {"printed": "80 - 100 MPa", '
+                '"wrought_316L": "256 MPa"}}'
+            ),
+            "condition_context": None,
+            "evidence_ids": ["objective-source:text_window:block-1"],
+            "confidence": None,
+            "epistemic_status": "resolved",
+            "source": {"artifact": "objective_evidence_units", "row": 1},
+        }
+    ]
+
+
 def test_export_prediction_bundle_prefers_objective_sample_number(tmp_path):
     exporter = _load_exporter_module()
     records_by_artifact = {name: [] for name in exporter.ARTIFACT_NAMES}

@@ -1140,7 +1140,7 @@ def _comparison_record_key(record: dict[str, Any]) -> tuple[Any, ...]:
 def _convert_objective_observations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for row_number, row in _rows_with_numbers(rows):
-        if _text(row, "unit_kind") != "characterization":
+        if _text(row, "unit_kind") not in {"characterization", "interpretation"}:
             continue
         sample_context = _dict_value(row.get("sample_context"))
         value_payload = _dict_value(row.get("value_payload"))

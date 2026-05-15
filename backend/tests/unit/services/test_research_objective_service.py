@@ -1218,6 +1218,118 @@ def test_research_objective_service_keeps_non_ascii_process_headers_out_of_resul
     }
 
 
+def test_research_objective_service_uses_role_aliases_for_result_process_context(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-3",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "α ( ◦ )": "rotation_angle_x",
+                "β ( ◦ )": "rotation_angle_y",
+                "θ ( ◦ )": "rotation_angle_z",
+                "Yield Strength Experiment (MPa)": "experimental_yield_strength",
+            },
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "variable_process_axes": [
+                "scan strategy rotation angle",
+                "build orientation",
+            ],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 8,
+            "column_headers": [
+                "α ( ◦ )",
+                "β ( ◦ )",
+                "θ ( ◦ )",
+                "Yield Strength Experiment (MPa)",
+            ],
+            "table_matrix": [
+                [
+                    "α ( ◦ )",
+                    "β ( ◦ )",
+                    "θ ( ◦ )",
+                    "Yield Strength Experiment (MPa)",
+                ],
+                ["0", "22.5", "45", "356.9"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    assert len(records) == 1
+    assert records[0]["property_normalized"] == "experimental yield strength"
+    assert records[0]["sample_context"] == {"sample_number": "1"}
+    assert records[0]["process_context"] == {
+        "α ( ◦ )": "0",
+        "β ( ◦ )": "22.5",
+        "θ ( ◦ )": "45",
+    }
+
+
+def test_research_objective_service_uses_specific_role_label_for_abbreviated_result_header(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-4",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Printed": "sample",
+                "TE [%]": "total elongation",
+            },
+            "confidence": 0.82,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": ["elongation"],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        objective_context=objective_context,
+        source={
+            "page": 7,
+            "column_headers": ["Printed", "TE [%]"],
+            "table_matrix": [
+                ["Printed", "TE [%]"],
+                ["H-VED", "48.3 ± 3.2"],
+            ],
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["property_normalized"] == "elongation"
+    assert records[0]["value_payload"]["value"] == 48.3
+
+
 def test_research_objective_service_uses_matching_result_headers_when_role_is_broad(
     tmp_path,
 ):
@@ -2751,6 +2863,65 @@ def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
     ]
 
 
+def test_research_objective_service_keeps_unlabeled_process_table_columns_as_context(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-process",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "column_roles": {
+                "Sample #": "sample_id",
+            },
+            "confidence": 0.8,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-process",
+            "variable_process_axes": [
+                "scan strategy rotation angle",
+                "build orientation",
+            ],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        objective_context=objective_context,
+        source={
+            "page": 2,
+            "column_headers": ["Sample #", "ɵ ( ◦ )", "α ( ◦ )", "β ( ◦ )"],
+            "table_matrix": [
+                ["Sample #", "ɵ ( ◦ )", "α ( ◦ )", "β ( ◦ )"],
+                ["1", "0", "0", "0"],
+                ["2", "45", "0", "45"],
+            ],
+        },
+    )
+
+    assert len(records) == 2
+    assert records[0]["sample_context"] == {"Sample #": "1"}
+    assert records[0]["process_context"] == {
+        "ɵ ( ◦ )": "0",
+        "α ( ◦ )": "0",
+        "β ( ◦ )": "0",
+    }
+    assert records[1]["sample_context"] == {"Sample #": "2"}
+    assert records[1]["process_context"] == {
+        "ɵ ( ◦ )": "45",
+        "α ( ◦ )": "0",
+        "β ( ◦ )": "45",
+    }
+
+
 def test_research_objective_service_resolves_measurements_from_process_units(
     tmp_path,
 ):
@@ -3184,6 +3355,242 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     assert speed_comparison.value_payload["baseline_evidence_unit_id"] == (
         "oeu-s8-yield"
     )
+
+
+def test_research_objective_service_matches_contextual_property_variants_for_pairwise(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-yield",
+            "variable_process_axes": ["scan strategy rotation angle"],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        rotation_angle: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-yield",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength experiment",
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {"θ ( ◦ )": rotation_angle},
+                "value_payload": {"source_value_text": str(value), "value": value},
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.84,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement(
+                "oeu-yield-1",
+                sample_number="1",
+                rotation_angle="0",
+                value=334.2,
+            ),
+            measurement(
+                "oeu-yield-4",
+                sample_number="4",
+                rotation_angle="45",
+                value=351.9,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert len(comparison_units) == 1
+    assert comparison_units[0].property_normalized == "yield strength experiment"
+    assert comparison_units[0].sample_context["sample_number"] == "4"
+    assert comparison_units[0].baseline_context["sample_context"]["sample_number"] == "1"
+
+
+def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-yield",
+            "variable_process_axes": ["scan strategy rotation angle"],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        theta: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-yield",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength experiment",
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {"θ ( ◦ )": theta},
+                "value_payload": {"source_value_text": str(value), "value": value},
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.84,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement("oeu-yield-1", sample_number="1", theta="0", value=334.2),
+            measurement("oeu-yield-2", sample_number="2", theta="30", value=342.5),
+            measurement("oeu-yield-3", sample_number="3", theta="45", value=351.9),
+            measurement("oeu-yield-4", sample_number="4", theta="90", value=365.6),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    comparison_pairs = {
+        (
+            unit.sample_context["sample_number"],
+            unit.baseline_context["sample_context"]["sample_number"],
+            unit.value_payload["comparison_axis"],
+        )
+        for unit in comparison_units
+    }
+
+    assert comparison_pairs == {
+        ("2", "1", "θ"),
+        ("3", "2", "θ"),
+        ("4", "3", "θ"),
+    }
+
+
+def test_research_objective_service_orders_numeric_axis_comparison_before_value_direction(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-ved",
+            "variable_process_axes": ["volumetric energy density"],
+            "target_property_axes": ["ultimate tensile strength"],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_label: str,
+        ved: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-ved",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "ultimate tensile strength",
+                "sample_context": {"sample_id": sample_label},
+                "process_context": {"VED [J/mm 3]": ved},
+                "value_payload": {"source_value_text": str(value), "value": value},
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.84,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement("oeu-l-uts", sample_label="L-VED", ved="50", value=610),
+            measurement("oeu-h-uts", sample_label="H-VED", ved="150", value=560),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert len(comparison_units) == 1
+    comparison = comparison_units[0]
+    assert comparison.sample_context["sample_id"] == "H-VED"
+    assert comparison.baseline_context["sample_context"]["sample_id"] == "L-VED"
+    assert comparison.value_payload["current_value"] == 560.0
+    assert comparison.baseline_context["value"] == 610.0
+    assert comparison.value_payload["direction"] == "decrease"
+
+
+def test_research_objective_service_does_not_use_ascii_raw_process_fallback(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-yield",
+            "variable_process_axes": ["scan strategy rotation angle"],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        operator_note: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-yield",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {"Operator note": operator_note},
+                "value_payload": {"source_value_text": str(value), "value": value},
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.84,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement(
+                "oeu-yield-1",
+                sample_number="1",
+                operator_note="batch A",
+                value=334.2,
+            ),
+            measurement(
+                "oeu-yield-2",
+                sample_number="2",
+                operator_note="batch B",
+                value=351.9,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert comparison_units == ()
 
 
 def test_research_objective_service_generates_small_set_multi_axis_comparisons(
@@ -3738,8 +4145,8 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
     assert comparison_keys == {
         (density_objective_id, "1", "3", "relative density"),
         (density_objective_id, "2", "1", "relative density"),
-        (density_objective_id, "11", "4", "relative density"),
-        (density_objective_id, "14", "5", "relative density"),
+        (density_objective_id, "4", "11", "relative density"),
+        (density_objective_id, "5", "14", "relative density"),
         (mechanical_objective_id, "1", "2", "yield strength"),
         (mechanical_objective_id, "1", "2", "ultimate tensile strength"),
         (mechanical_objective_id, "1", "2", "elongation"),
@@ -3748,9 +4155,9 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
         (mechanical_objective_id, "1", "8", "elongation"),
         (mechanical_objective_id, "4", "11", "yield strength"),
         (mechanical_objective_id, "4", "11", "ultimate tensile strength"),
-        (mechanical_objective_id, "14", "5", "yield strength"),
-        (mechanical_objective_id, "14", "5", "ultimate tensile strength"),
-        (mechanical_objective_id, "14", "5", "elongation"),
+        (mechanical_objective_id, "5", "14", "yield strength"),
+        (mechanical_objective_id, "5", "14", "ultimate tensile strength"),
+        (mechanical_objective_id, "5", "14", "elongation"),
         (mechanical_objective_id, "14", "15", "yield strength"),
         (mechanical_objective_id, "14", "16", "yield strength"),
         (mechanical_objective_id, "14", "15", "elongation"),

@@ -160,6 +160,38 @@ _OBJECTIVE_METHOD_FAMILY_PROPERTY_TYPES = (
     "microhardness",
     "density_porosity_microstructure",
 )
+_OBJECTIVE_GENERIC_RESULT_ROLE_TOKENS = frozenset(
+    {
+        "current",
+        "evidence",
+        "experimental",
+        "measurement",
+        "predicted",
+        "prediction",
+        "property",
+        "result",
+        "target",
+    }
+)
+_OBJECTIVE_PRESERVED_PROPERTY_QUALIFIERS = frozenset(
+    {
+        "experiment",
+        "experimental",
+        "model",
+        "predicted",
+        "prediction",
+    }
+)
+_OBJECTIVE_SINGLE_TOKEN_PROPERTY_QUALIFIERS = frozenset(
+    {
+        "average",
+        "material",
+        "relative",
+        "surface",
+        "total",
+        "uniform",
+    }
+)
 _OBJECTIVE_TENSILE_METHOD_PROPERTIES = frozenset(
     {
         "yield strength",
@@ -2613,6 +2645,7 @@ class ResearchObjectiveService:
                         first=current,
                         second=candidate,
                         comparison_axis=comparison_axis,
+                        objective_context=objective_context,
                     )
                     pair_key = self._objective_comparison_pair_key(comparison_unit)
                     if pair_key in existing_keys or pair_key in generated_keys:
@@ -2830,14 +2863,20 @@ class ResearchObjectiveService:
         if not axes:
             return set()
         sample_rows: list[tuple[ObjectiveEvidenceUnit, str, dict[str, str]]] = []
+        observed_raw_axes: set[str] = set()
         for sample in samples:
             sample_key = self._objective_sample_identity_key(sample.sample_context)
             axis_values = self._objective_process_axis_values(
                 sample,
                 objective_context=objective_context,
             )
+            raw_axis_values = self._objective_raw_process_axis_values(sample)
+            if raw_axis_values:
+                observed_raw_axes.update(raw_axis_values)
+                axis_values = {**axis_values, **raw_axis_values}
             if sample_key and axis_values:
                 sample_rows.append((sample, sample_key, axis_values))
+        axes = (*axes, *tuple(sorted(observed_raw_axes - set(axes))))
         property_names = {
             property_name
             for sample_key, property_name in result_lookup.keys()
@@ -3167,14 +3206,15 @@ class ResearchObjectiveService:
         property_key = self._objective_pairwise_property_key(unit.property_normalized)
         if not property_key:
             return False
-        if self._property_axis_matches_any(
+        target_axes = self._objective_target_property_axes(objective_context)
+        if self._objective_property_label_matches_target(
             property_key,
-            objective_context.target_property_axes,
+            target_axes=target_axes,
         ):
             return True
         return self._objective_density_property_matches_structural_target(
             property_key,
-            target_axes=objective_context.target_property_axes,
+            target_axes=target_axes,
         )
 
     def _objective_pairwise_relation_spec_key(
@@ -3214,6 +3254,10 @@ class ResearchObjectiveService:
             (
                 self._objective_sample_axis_values(current),
                 self._objective_sample_axis_values(baseline),
+            ),
+            (
+                self._objective_raw_process_axis_values(current),
+                self._objective_raw_process_axis_values(baseline),
             ),
         )
         for current_axes, baseline_axes in axis_pairs:
@@ -3306,24 +3350,43 @@ class ResearchObjectiveService:
                     break
         return axis_values
 
+    def _objective_raw_process_axis_values(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, str]:
+        axis_values: dict[str, str] = {}
+        for key, value in unit.process_context.items():
+            if not str(key).strip() or not str(value).strip():
+                continue
+            if self._objective_column_key(str(key)):
+                continue
+            axis_key = self._axis_key(key) or str(key).strip().casefold()
+            if axis_key:
+                axis_values[axis_key] = str(value).strip().casefold()
+        return axis_values
+
     def _objective_pairwise_comparison_unit(
         self,
         *,
         first: ObjectiveEvidenceUnit,
         second: ObjectiveEvidenceUnit,
         comparison_axis: str,
+        objective_context: ObjectiveContext | None,
     ) -> ObjectiveEvidenceUnit:
         first_value = self._objective_measurement_numeric_value(first)
         second_value = self._objective_measurement_numeric_value(second)
         if first_value is None or second_value is None:
             raise ValueError("pairwise comparison requires numeric measurements")
-        current, baseline = (
-            (first, second)
-            if first_value >= second_value
-            else (second, first)
+        current, baseline = self._ordered_objective_comparison_pair(
+            first=first,
+            second=second,
+            comparison_axis=comparison_axis,
+            objective_context=objective_context,
         )
         current_value = self._objective_measurement_numeric_value(current)
         baseline_value = self._objective_measurement_numeric_value(baseline)
+        if current_value is None or baseline_value is None:
+            raise ValueError("pairwise comparison requires numeric measurements")
         seed = "|".join(
             (
                 current.objective_id,
@@ -3355,7 +3418,9 @@ class ResearchObjectiveService:
                     ),
                     "direction": (
                         "increase"
-                        if current_value != baseline_value
+                        if current_value > baseline_value
+                        else "decrease"
+                        if current_value < baseline_value
                         else "no_change"
                     ),
                     "comparison_axis": comparison_axis,
@@ -3394,6 +3459,69 @@ class ResearchObjectiveService:
                 "confidence": min(current.confidence, baseline.confidence),
             }
         )
+
+    def _ordered_objective_comparison_pair(
+        self,
+        *,
+        first: ObjectiveEvidenceUnit,
+        second: ObjectiveEvidenceUnit,
+        comparison_axis: str,
+        objective_context: ObjectiveContext | None,
+    ) -> tuple[ObjectiveEvidenceUnit, ObjectiveEvidenceUnit]:
+        first_axis_value = self._objective_comparison_axis_value(
+            first,
+            comparison_axis=comparison_axis,
+            objective_context=objective_context,
+        )
+        second_axis_value = self._objective_comparison_axis_value(
+            second,
+            comparison_axis=comparison_axis,
+            objective_context=objective_context,
+        )
+        first_axis_number = self._coerce_number(first_axis_value)
+        second_axis_number = self._coerce_number(second_axis_value)
+        if (
+            first_axis_number is not None
+            and second_axis_number is not None
+            and not math.isclose(first_axis_number, second_axis_number)
+        ):
+            return (
+                (first, second)
+                if first_axis_number > second_axis_number
+                else (second, first)
+            )
+
+        first_value = self._objective_measurement_numeric_value(first)
+        second_value = self._objective_measurement_numeric_value(second)
+        if first_value is None or second_value is None:
+            return first, second
+        return (first, second) if first_value >= second_value else (second, first)
+
+    def _objective_comparison_axis_value(
+        self,
+        unit: ObjectiveEvidenceUnit,
+        *,
+        comparison_axis: str,
+        objective_context: ObjectiveContext | None,
+    ) -> str | None:
+        process_axis_values = self._objective_process_axis_values(
+            unit,
+            objective_context=objective_context,
+        )
+        comparison_axis_key = self._normalize_property_label(comparison_axis)
+        if comparison_axis_key and comparison_axis_key in process_axis_values:
+            return process_axis_values[comparison_axis_key]
+        for key, value in unit.process_context.items():
+            if self._axis_values_match(key, comparison_axis):
+                return str(value).strip()
+
+        sample_axis_values = self._objective_sample_axis_values(unit)
+        if comparison_axis_key and comparison_axis_key in sample_axis_values:
+            return sample_axis_values[comparison_axis_key]
+        for key, value in unit.sample_context.items():
+            if self._axis_values_match(key, comparison_axis):
+                return str(value).strip()
+        return None
 
     def _objective_comparison_pair_key(
         self,
@@ -3540,6 +3668,7 @@ class ResearchObjectiveService:
             return self._objective_process_table_matrix_records(
                 route=route,
                 source=source,
+                objective_context=objective_context,
                 headers=headers,
                 data_rows=data_rows,
             )
@@ -3629,6 +3758,7 @@ class ResearchObjectiveService:
                 route=route,
                 row_values=row_values,
                 result_columns=result_columns,
+                objective_context=objective_context,
             )
             if self._objective_result_table_row_is_reference_context(
                 route=route,
@@ -3644,13 +3774,18 @@ class ResearchObjectiveService:
                 raw_value = row_values.get(result_column)
                 if raw_value in (None, ""):
                     continue
-                property_normalized, unit = self._split_property_unit(result_column)
+                property_source = self._objective_result_column_property_label(
+                    route=route,
+                    result_column=result_column,
+                    objective_context=objective_context,
+                )
+                _column_property, unit = self._split_property_unit(result_column)
                 property_normalized = (
                     self._normalize_objective_unit_property(
-                        property_normalized,
+                        property_source,
                         objective_context=objective_context,
                     )
-                    or property_normalized
+                    or property_source
                 )
                 value_payload = {"source_value_text": str(raw_value)}
                 numeric_value = self._coerce_number(raw_value)
@@ -3691,6 +3826,7 @@ class ResearchObjectiveService:
         *,
         route: ObjectiveEvidenceRoute,
         source: dict[str, Any],
+        objective_context: ObjectiveContext | None,
         headers: tuple[str, ...],
         data_rows: tuple[tuple[int, tuple[str, ...]], ...],
     ) -> tuple[dict[str, Any], ...]:
@@ -3702,6 +3838,7 @@ class ResearchObjectiveService:
                 route=route,
                 row_values=row_values,
                 result_columns=result_columns,
+                objective_context=objective_context,
             )
             row_context = self._objective_table_row_context_with_sample_number(
                 row_context=row_context,
@@ -3754,6 +3891,7 @@ class ResearchObjectiveService:
         route: ObjectiveEvidenceRoute,
         row_values: dict[str, str],
         result_columns: set[str],
+        objective_context: ObjectiveContext | None,
     ) -> dict[str, dict[str, str]]:
         sample_context: dict[str, str] = {}
         process_context: dict[str, str] = {}
@@ -3772,17 +3910,71 @@ class ResearchObjectiveService:
                 or self._objective_value_column_is_non_result(column)
             ):
                 continue
-            elif "process" in role or "variable" in role:
-                process_context[column] = value
-            elif "test" in role or "condition" in role:
+            elif (
+                "test" in role
+                or "condition" in role
+                or column_key in {"test", "test_no", "test_number"}
+            ):
                 if route.role == "current_experimental_evidence":
                     sample_context[column] = value
                 test_condition[column] = value
+            elif self._objective_table_column_is_process_context(
+                route=route,
+                column=column,
+                role=role,
+                objective_context=objective_context,
+            ):
+                process_context[column] = value
         return {
             "sample_context": sample_context,
             "process_context": process_context,
             "test_condition": test_condition,
         }
+
+    def _objective_table_column_is_process_context(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        column: str,
+        role: str,
+        objective_context: ObjectiveContext | None,
+    ) -> bool:
+        role_text = str(role or "").strip()
+        if "process" in role_text or "variable" in role_text:
+            return True
+        if objective_context is not None:
+            for label in (column, role_text):
+                if self._objective_label_matches_process_axes(
+                    label,
+                    objective_context=objective_context,
+                ):
+                    return True
+        return route.role == "process_or_treatment"
+
+    def _objective_label_matches_process_axes(
+        self,
+        label: Any,
+        *,
+        objective_context: ObjectiveContext,
+    ) -> bool:
+        label_text = str(label or "").strip()
+        if not label_text:
+            return False
+        label_tokens = self._axis_token_set(self._axis_key(label_text))
+        for axis in objective_context.variable_process_axes:
+            axis_text = str(axis or "").strip()
+            if not axis_text:
+                continue
+            if (
+                self._axis_values_match(label_text, axis_text)
+                or self._axis_label_is_mentioned(label_text, axis_text)
+                or self._axis_label_is_mentioned(axis_text, label_text)
+            ):
+                return True
+            axis_tokens = self._axis_token_set(self._axis_key(axis_text))
+            if len(label_tokens & axis_tokens) >= 2:
+                return True
+        return False
 
     def _objective_result_table_row_is_reference_context(
         self,
@@ -4085,7 +4277,10 @@ class ResearchObjectiveService:
         if not property_key:
             return True
         target_axes = self._objective_target_property_axes(objective_context)
-        if self._property_axis_matches_any(property_key, target_axes):
+        if self._objective_property_label_matches_target(
+            property_key,
+            target_axes=target_axes,
+        ):
             return True
         if property_key in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
             return any(
@@ -4465,13 +4660,47 @@ class ResearchObjectiveService:
                 route.role == "current_experimental_evidence"
                 and objective_context is not None
                 and role_label
-                and self._property_axis_matches_any(
+                and self._objective_property_label_matches_target(
                     role_label,
-                    objective_context.target_property_axes,
+                    target_axes=self._objective_target_property_axes(
+                        objective_context
+                    ),
                 )
             ):
                 result_columns.add(column_text)
         return result_columns
+
+    def _objective_result_column_property_label(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        result_column: str,
+        objective_context: ObjectiveContext | None,
+    ) -> str:
+        role_label = self._normalize_property_label(
+            route.column_roles.get(result_column)
+        )
+        if (
+            role_label
+            and objective_context is not None
+            and self._objective_result_role_is_specific_property(role_label)
+            and self._objective_property_label_matches_target(
+                role_label,
+                target_axes=self._objective_target_property_axes(objective_context),
+            )
+        ):
+            return role_label
+        property_name, _unit = self._split_property_unit(result_column)
+        return (
+            self._normalize_property_label(property_name)
+            or str(property_name or result_column).strip()
+        )
+
+    def _objective_result_role_is_specific_property(self, role_label: str) -> bool:
+        role_tokens = self._axis_token_set(role_label)
+        if not role_tokens:
+            return False
+        return not role_tokens.issubset(_OBJECTIVE_GENERIC_RESULT_ROLE_TOKENS)
 
     def _objective_result_column_matches_target(
         self,
@@ -4484,7 +4713,10 @@ class ResearchObjectiveService:
         property_name, _unit = self._split_property_unit(column_text)
         normalized = self._normalize_property_label(property_name) or property_name
         target_axes = self._objective_target_property_axes(objective_context)
-        if self._property_axis_matches_any(normalized, target_axes):
+        if self._objective_property_label_matches_target(
+            normalized,
+            target_axes=target_axes,
+        ):
             return True
         if self._objective_density_property_matches_structural_target(
             normalized,
@@ -4512,6 +4744,55 @@ class ResearchObjectiveService:
                 for target_axis in target_axes
             )
         )
+
+    def _objective_property_label_matches_target(
+        self,
+        property_name: Any,
+        *,
+        target_axes: tuple[str, ...],
+    ) -> bool:
+        normalized = self._normalize_property_label(property_name)
+        if not normalized:
+            return False
+        if self._property_axis_matches_any(normalized, target_axes):
+            return True
+        return self._objective_contextual_property_variant_match(
+            normalized,
+            target_axes=target_axes,
+        ) is not None
+
+    def _objective_contextual_property_variant_match(
+        self,
+        property_name: str,
+        *,
+        target_axes: tuple[str, ...],
+    ) -> tuple[str, set[str]] | None:
+        property_tokens = self._axis_token_set(self._axis_key(property_name))
+        if not property_tokens:
+            return None
+        for target_axis in target_axes:
+            target_key = self._normalize_property_label(target_axis)
+            if not target_key:
+                continue
+            target_tokens = self._axis_token_set(self._axis_key(target_key))
+            if (
+                not target_tokens
+                or target_tokens == property_tokens
+                or not target_tokens.issubset(property_tokens)
+            ):
+                continue
+            extra_tokens = property_tokens - target_tokens
+            if len(target_tokens) >= 2:
+                return target_key, extra_tokens
+            if target_tokens == {"density"}:
+                if extra_tokens.issubset({"material", "relative"}):
+                    return target_key, extra_tokens
+                continue
+            if extra_tokens and extra_tokens.issubset(
+                _OBJECTIVE_SINGLE_TOKEN_PROPERTY_QUALIFIERS
+            ):
+                return target_key, extra_tokens
+        return None
 
     def _objective_target_property_axes(
         self,
@@ -4551,6 +4832,11 @@ class ResearchObjectiveService:
 
     def _split_property_unit(self, value: str) -> tuple[str, str | None]:
         text = str(value or "").strip()
+        text = re.sub(r"\s*>\s*(?=[\[(])", " ", text).strip()
+        if text.endswith("]") and "[" in text:
+            name, _, suffix = text.rpartition("[")
+            unit = suffix[:-1].strip()
+            return name.strip() or text, unit or None
         if text.endswith(")") and "(" in text:
             name, _, suffix = text.rpartition("(")
             unit = suffix[:-1].strip()
@@ -4571,14 +4857,32 @@ class ResearchObjectiveService:
         for target_axis in objective_context.target_property_axes:
             if self._axis_values_match(normalized, target_axis):
                 return self._normalize_property_label(target_axis)
+        variant_match = self._objective_contextual_property_variant_match(
+            normalized,
+            target_axes=self._objective_target_property_axes(objective_context),
+        )
+        if variant_match is not None:
+            target_axis, extra_tokens = variant_match
+            if extra_tokens & _OBJECTIVE_PRESERVED_PROPERTY_QUALIFIERS:
+                return normalized
+            return self._normalize_property_label(target_axis) or normalized
         return normalized
 
     def _normalize_property_label(self, value: Any) -> str | None:
-        text = str(value or "").replace("_", " ").replace("-", " ").strip()
+        text = self._label_without_unit_suffix(value)
+        text = text.replace("_", " ").replace("-", " ").strip()
         normalized = " ".join(text.split()).casefold()
         if not normalized:
             return None
         return _OBJECTIVE_PROPERTY_ALIASES.get(normalized, normalized)
+
+    def _label_without_unit_suffix(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        text = re.sub(r"\s*>\s*(?=[\[(])", " ", text).strip()
+        text = re.sub(r"\s*(?:\[[^\]]*\]|\([^)]*\))\s*$", "", text).strip()
+        return text
 
     def _coerce_number(self, value: Any) -> float | None:
         text = str(value).strip().replace(",", "")
@@ -6702,7 +7006,7 @@ class ResearchObjectiveService:
         target.append(text)
 
     def _axis_key(self, value: Any) -> str:
-        text = str(value or "").strip().casefold()
+        text = self._label_without_unit_suffix(value).casefold()
         if text.endswith(")") and "(" in text:
             base, _, suffix = text.rpartition("(")
             acronym = suffix[:-1].strip()
@@ -6767,7 +7071,9 @@ class ResearchObjectiveService:
     def _axis_token_set(self, value: str) -> set[str]:
         return {
             self._normalize_axis_token(token)
-            for token in value.replace("-", " ").replace("/", " ").split()
+            for token in (
+                value.replace("_", " ").replace("-", " ").replace("/", " ").split()
+            )
             if self._normalize_axis_token(token)
         }
 

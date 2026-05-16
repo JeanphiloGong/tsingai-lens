@@ -4858,6 +4858,27 @@ class ResearchObjectiveService:
             if isinstance(record.get("value_payload"), dict)
             else {}
         )
+        record_property_normalized = self._normalize_property_label(
+            record.get("property_normalized"),
+        )
+        mapped_numeric_items = self._mapped_text_numeric_measurement_items(
+            value_payload
+        )
+        if record_property_normalized and mapped_numeric_items:
+            return tuple(
+                self._numeric_text_characterization_measurement_record_from_value(
+                    record=record,
+                    property_normalized=record_property_normalized,
+                    raw_value=sample_value,
+                    sample_context={"sample_id": sample_label},
+                    unit=self._unit_from_value_text(sample_value),
+                    item_index=index,
+                )
+                for index, (sample_label, sample_value) in enumerate(
+                    mapped_numeric_items,
+                    start=1,
+                )
+            )
         value_item = self._numeric_text_characterization_value_item(
             record=record,
             value_payload=value_payload,
@@ -4910,6 +4931,26 @@ class ResearchObjectiveService:
             return ()
         return tuple(items)
 
+    def _mapped_text_numeric_measurement_items(
+        self,
+        value_payload: dict[str, Any],
+    ) -> tuple[tuple[str, Any], ...]:
+        items: list[tuple[str, Any]] = []
+        for sample_label, sample_value in value_payload.items():
+            label_text = str(sample_label).strip()
+            if (
+                not label_text
+                or sample_value in (None, "", [], {})
+                or label_text.lower() in _OBJECTIVE_RESULT_VALUE_METADATA_KEYS
+            ):
+                continue
+            if self._coerce_number(sample_value) is None:
+                continue
+            items.append((label_text, sample_value))
+        if len(items) < 2:
+            return ()
+        return tuple(items)
+
     def _numeric_text_characterization_measurement_record_from_value(
         self,
         *,
@@ -4924,6 +4965,8 @@ class ResearchObjectiveService:
         resolved_unit = unit or str(record.get("unit") or "").strip() or None
         if resolved_unit is None and "%" in str(raw_value):
             resolved_unit = "%"
+        if resolved_unit is None:
+            resolved_unit = self._unit_from_value_text(raw_value)
         normalized = dict(record)
         if item_index is not None:
             seed = "|".join(
@@ -4951,6 +4994,18 @@ class ResearchObjectiveService:
             }
         )
         return normalized
+
+    def _unit_from_value_text(self, value: Any) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if "%" in text:
+            return "%"
+        if re.search(r"\bMPa\b", text, flags=re.IGNORECASE):
+            return "MPa"
+        if re.search(r"(?:deg\s*)?C\s*/\s*s", text, flags=re.IGNORECASE):
+            return "C/s"
+        return None
 
     def _respective_density_measurement_items(
         self,
@@ -5426,6 +5481,12 @@ class ResearchObjectiveService:
         text = str(value).strip().replace(",", "")
         if not text:
             return None
+        scientific_match = re.search(
+            r"([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*(?:[xX\u00d7]\s*10)\s*\^?\s*([-+]?\d+)",
+            text,
+        )
+        if scientific_match is not None:
+            return float(scientific_match.group(1)) * (10 ** int(scientific_match.group(2)))
         match = _NUMBER_PATTERN.search(text)
         if match is None:
             return None

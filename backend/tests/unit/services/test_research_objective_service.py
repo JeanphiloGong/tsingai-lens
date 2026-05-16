@@ -2438,6 +2438,139 @@ def test_research_objective_service_expands_mapped_density_text_measurements(
     ]
 
 
+def test_research_objective_service_expands_mapped_numeric_text_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "thermal-simulation",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 5},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "characterization",
+            "property_normalized": "cooling rate",
+            "process_context": {"process": "laser beam powder bed fusion"},
+            "value_payload": {
+                "P150": "1.43x10^6 C/s",
+                "NP": "1.65x10^6 C/s",
+            },
+            "resolution_status": "resolved",
+        },
+    )
+
+    assert [
+        (
+            record["unit_kind"],
+            record["property_normalized"],
+            record["sample_context"],
+            record["process_context"],
+            record["value_payload"],
+            record["unit"],
+        )
+        for record in records
+    ] == [
+        (
+            "measurement",
+            "cooling rate",
+            {"sample_id": "P150"},
+            {"process": "laser beam powder bed fusion"},
+            {"source_value_text": "1.43x10^6 C/s", "value": 1.43e6},
+            "C/s",
+        ),
+        (
+            "measurement",
+            "cooling rate",
+            {"sample_id": "NP"},
+            {"process": "laser beam powder bed fusion"},
+            {"source_value_text": "1.65x10^6 C/s", "value": 1.65e6},
+            "C/s",
+        ),
+    ]
+
+
+def test_research_objective_service_expands_mapped_residual_stress_text_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-heat-treatment",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "residual-stress",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 4},
+        objective_context=None,
+        extracted_record={
+            "unit_kind": "characterization",
+            "property_normalized": "residual stress",
+            "process_context": {"laser_power": "120 W", "scan_speed": "100 mm/s"},
+            "value_payload": {
+                "HT-SLM": "17.8 MPa",
+                "HIP-SLM": "27.5 MPa",
+                "as-SLM": "99.5 MPa",
+            },
+            "resolution_status": "resolved",
+        },
+    )
+
+    assert [
+        (
+            record["unit_kind"],
+            record["property_normalized"],
+            record["sample_context"],
+            record["value_payload"],
+            record["unit"],
+        )
+        for record in records
+    ] == [
+        (
+            "measurement",
+            "residual stress",
+            {"sample_id": "HT-SLM"},
+            {"source_value_text": "17.8 MPa", "value": 17.8},
+            "MPa",
+        ),
+        (
+            "measurement",
+            "residual stress",
+            {"sample_id": "HIP-SLM"},
+            {"source_value_text": "27.5 MPa", "value": 27.5},
+            "MPa",
+        ),
+        (
+            "measurement",
+            "residual stress",
+            {"sample_id": "as-SLM"},
+            {"source_value_text": "99.5 MPa", "value": 99.5},
+            "MPa",
+        ),
+    ]
+
+
 def test_research_objective_service_expands_source_text_density_measurements(
     tmp_path,
 ):

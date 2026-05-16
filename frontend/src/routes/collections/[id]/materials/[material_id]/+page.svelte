@@ -217,6 +217,13 @@
 	$: processSummary = buildProcessSummary(sampleRows, $t);
 	$: comparisonRows = buildComparisonRows(sampleRows, propertyColumns, processSummary, $t);
 	$: trendRows = trendComparisonRows(comparisonRows);
+	$: summaryTrendValues = summarySupportedValues(
+		propertySummaries,
+		propertyColumns,
+		evidenceCodeMap,
+		materialProfile?.canonical_name ?? materialId,
+		$t
+	).slice(0, 4);
 	$: keyFindings = buildKeyFindings(
 		sampleRows,
 		propertyColumns,
@@ -694,6 +701,12 @@
 	function trendComparisonRows(rows: ComparisonRow[]) {
 		const hardness = rows.find((row) => normalizeForMatch(row.property).includes('hardness'));
 		return hardness ? [hardness] : rows.slice(0, 1);
+	}
+
+	function summaryTrendText(values: SupportedValue[]) {
+		return values
+			.map((value) => `${value.property}: ${value.displayValue} (${value.evidenceCode})`)
+			.join('; ');
 	}
 
 	function propertyRole(column: PropertyColumn) {
@@ -1854,7 +1867,13 @@
 										{:else}
 											<tr>
 												<td colspan="4" class="empty-cell">
-													{$t('research.materialDossier.comparison.empty')}
+													{#if summaryTrendValues.length}
+														{$t('research.materialDossier.comparison.summaryOnly', {
+															values: summaryTrendText(summaryTrendValues)
+														})}
+													{:else}
+														{$t('research.materialDossier.comparison.empty')}
+													{/if}
 												</td>
 											</tr>
 										{/each}
@@ -1899,7 +1918,15 @@
 									{$t('research.materialDossier.chart.caption')}
 								</p>
 							{:else}
-								<p class="empty-copy">{$t('research.materialDossier.chart.empty')}</p>
+								<p class="empty-copy">
+									{#if summaryTrendValues.length}
+										{$t('research.materialDossier.chart.summaryOnly', {
+											values: summaryTrendText(summaryTrendValues)
+										})}
+									{:else}
+										{$t('research.materialDossier.chart.empty')}
+									{/if}
+								</p>
 							{/if}
 						</div>
 					</div>

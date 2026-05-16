@@ -583,13 +583,17 @@ const translations: Record<Language, Translations> = {
 					noClearWinner: 'No clear difference',
 					needsEvidence: 'Needs more evidence',
 					higherConclusion: '{sample} is higher for {property}',
-					empty: 'No comparable numeric values were returned for this material yet.'
+					empty: 'No comparable numeric values were returned for this material yet.',
+					summaryOnly:
+						'Collection-level values are available, but sample-level paired values are not comparable yet: {values}.'
 				},
 				chart: {
 					title: 'Trend chart: key property comparison',
 					caption:
 						'Under comparable process context, the changed variable can shift performance values.',
-					empty: 'No numeric trend is available yet.'
+					empty: 'No numeric trend is available yet.',
+					summaryOnly:
+						'Available collection summary values: {values}. A trend chart needs paired sample values.'
 				},
 				graph: {
 					label: 'Material-scoped relationship graph',
@@ -2999,12 +3003,14 @@ const translations: Record<Language, Translations> = {
 					noClearWinner: '差异不明显',
 					needsEvidence: '需要更多证据',
 					higherConclusion: '{sample} 的{property}更高',
-					empty: '该材料暂未返回可比较的数值结果。'
+					empty: '该材料暂未返回可比较的数值结果。',
+					summaryOnly: '已有集合级数值，但还没有可比较的样品级成对数值：{values}。'
 				},
 				chart: {
 					title: '趋势图：关键性能对比',
 					caption: '在可比工艺上下文下，变化变量会影响性能数值。',
-					empty: '暂无可绘制的数值趋势。'
+					empty: '暂无可绘制的数值趋势。',
+					summaryOnly: '可用集合汇总值：{values}。趋势图需要成对样品数值。'
 				},
 				graph: {
 					label: '材料范围关系图',

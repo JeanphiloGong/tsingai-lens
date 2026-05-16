@@ -526,6 +526,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await browserPage.getByRole('button', { name: 'Collection summary Elongation' }).click();
 		await expect.element(browserPage.getByText('Elongation = 33 %').first()).toBeInTheDocument();
 		await expect
+			.element(
+				browserPage.getByText(
+					'Collection-level values are available, but sample-level paired values are not comparable yet:'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Available collection summary values:').first())
+			.toBeInTheDocument();
+		await expect
 			.element(browserPage.getByText('3 sample(s), 2 measured property column(s).'))
 			.toBeInTheDocument();
 		expect(

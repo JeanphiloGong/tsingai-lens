@@ -6,6 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
+from application.core.semantic_build.llm.prompts import (
+    build_objective_evidence_unit_prompt,
+)
 from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredExtractionBundle,
@@ -418,6 +421,35 @@ def test_core_llm_extractor_validates_objective_evidence_units_response():
     assert isinstance(units, StructuredObjectiveEvidenceUnits)
     assert units.evidence_units[0].unit_kind == "measurement"
     assert units.evidence_units[0].resolution_status == "resolved"
+
+
+def test_objective_evidence_unit_prompt_requires_text_multi_value_splitting():
+    _, prompt = build_objective_evidence_unit_prompt(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does preheating affect 316L?"},
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": (
+                    "The cooling rate values were 1.43x10^6 C/s for P150, "
+                    "and 1.65x10^6 C/s for NP."
+                ),
+            },
+        }
+    )
+
+    assert "one evidence unit per binding" in prompt
+    assert "Do not merge those bindings into one `interpretation`" in prompt
+    assert "1.43x10^6 C/s for P150" in prompt
+    assert "1.65x10^6 C/s for NP" in prompt
+    assert "17.8 MPa" in prompt
+    assert "99.5 MPa" in prompt
+    assert "Bad text example" in prompt
 
 
 def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():

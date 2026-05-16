@@ -293,7 +293,32 @@ function materialProfilePayload() {
 				property: 'density',
 				display_range: '98-99.1%',
 				sample_count: 2,
-				document_count: 1
+				document_count: 1,
+				evidence_refs: [
+					{
+						evidence_ref_id: 'ev_density_summary',
+						document_id: 'doc_1',
+						source_kind: 'text_window',
+						locator: 'Section 3.1',
+						confidence: 0.86
+					}
+				]
+			},
+			{
+				property: 'ultimate tensile strength',
+				display_range: '610 MPa',
+				unit: 'MPa',
+				sample_count: 0,
+				document_count: 1,
+				evidence_refs: [
+					{
+						evidence_ref_id: 'ev_uts_summary',
+						document_id: 'doc_1',
+						source_kind: 'text_window',
+						locator: 'Section 3.2',
+						confidence: 0.9
+					}
+				]
 			}
 		],
 		comparison_groups: [
@@ -418,10 +443,83 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Unit: HV')).toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
-		).toEqual([
-			'/api/v1/collections/col_123/materials/mat_316l/research-view',
-			'/api/v1/collections/col_123/materials/mat_316l/review-report'
-		]);
+			).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
+	});
+
+	it('renders top-level measured property evidence when sample rows have no value cells', async () => {
+		const payload: any = materialProfilePayload();
+		payload.overview.measured_properties = ['elongation', 'ultimate tensile strength'];
+		payload.sample_matrix.columns = [];
+		payload.sample_matrix.rows = payload.sample_matrix.rows.map((row: Record<string, unknown>) => ({
+			...row,
+			values: {}
+		}));
+		payload.measured_properties = [
+			{
+				property: 'elongation',
+				display_range: '33 %',
+				unit: '%',
+				sample_count: 0,
+				document_count: 1,
+				evidence_refs: [
+					{
+						evidence_ref_id: 'ev_elongation_summary',
+						document_id: 'doc_1',
+						source_kind: 'text_window',
+						locator: 'Section 3.1',
+						confidence: 0.9
+					}
+				]
+			},
+			{
+				property: 'ultimate tensile strength',
+				display_range: '610 MPa',
+				unit: 'MPa',
+				sample_count: 0,
+				document_count: 1,
+				evidence_refs: [
+					{
+						evidence_ref_id: 'ev_uts_summary',
+						document_id: 'doc_1',
+						source_kind: 'text_window',
+						locator: 'Section 3.2',
+						confidence: 0.9
+					}
+				]
+			}
+		];
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('610 MPa').first()).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByRole('heading', {
+					name: 'Tensile strength is available as an evidence-backed property'
+				})
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('316L stainless steel Tensile strength 610 MPa'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('2 sample(s), 2 measured property column(s).'))
+			.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
+		).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
 	});
 
 	it('generates a material review report and exposes Markdown and PDF artifacts', async () => {

@@ -494,6 +494,7 @@ const translations: Record<Language, Translations> = {
 					sampleCondition: 'Sample / condition',
 					primaryVariable: 'Primary variable',
 					processSummary: 'Process summary',
+					collectionSummary: 'Collection summary',
 					sampleFallback: 'Sample {index}',
 					scanStrategy: 'Scan strategy',
 					laserPower: 'Laser power (W)',
@@ -551,6 +552,8 @@ const translations: Record<Language, Translations> = {
 					splitStrengthTitle: 'Strength maxima are split across samples',
 					highestElongationTitle: '{sample} shows the highest elongation',
 					highestPropertyTitle: '{sample} shows the highest {property}',
+					summaryPropertyTitle: '{property} is available as an evidence-backed property',
+					summaryPropertyBody: '{property} is reported as {value}. Evidence: {evidence}.',
 					densityMismatchTitle: 'Highest density does not align with highest strength',
 					densityMismatchBody:
 						'{densitySample} has the highest density ({densityValue}), while {strengthSample} leads strength ({strengthValues}). Evidence: {evidence}.',
@@ -2908,6 +2911,7 @@ const translations: Record<Language, Translations> = {
 					sampleCondition: '样品 / 条件',
 					primaryVariable: '主要变量',
 					processSummary: '工艺摘要',
+					collectionSummary: '集合汇总',
 					sampleFallback: '样品 {index}',
 					scanStrategy: '扫描策略',
 					laserPower: '激光功率 (W)',
@@ -2964,6 +2968,8 @@ const translations: Record<Language, Translations> = {
 					splitStrengthTitle: '强度最高项分布在不同样品',
 					highestElongationTitle: '{sample} 表现出最高延伸率',
 					highestPropertyTitle: '{sample} 表现出最高{property}',
+					summaryPropertyTitle: '{property} 已作为可追溯性能指标返回',
+					summaryPropertyBody: '{property} 报告值为 {value}。证据：{evidence}。',
 					densityMismatchTitle: '最高密度并不对应最高强度',
 					densityMismatchBody:
 						'{densitySample} 的密度最高（{densityValue}），但 {strengthSample} 的强度领先（{strengthValues}）。证据：{evidence}。',

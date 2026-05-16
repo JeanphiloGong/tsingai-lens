@@ -20,6 +20,7 @@
 		type EvidenceReference,
 		type MaterialPaperCoverage,
 		type MaterialProfile,
+		type PropertySummary,
 		type SampleMatrixColumn,
 		type SampleMatrixRow
 	} from '../../../../_shared/researchView';
@@ -194,14 +195,17 @@
 	$: loadKey = `${collectionId}:${materialId}`;
 	$: sampleRows = materialProfile?.sample_matrix.rows ?? [];
 	$: sampleColumns = sampleMatrixColumns(materialProfile, sampleRows);
-	$: propertyColumns = materialPropertyColumns(sampleRows, sampleColumns, $t);
-	$: evidenceCodeMap = buildEvidenceCodeMap(sampleRows, propertyColumns);
+	$: propertySummaries = materialProfile?.measured_properties ?? [];
+	$: propertyColumns = materialPropertyColumns(materialProfile, sampleRows, sampleColumns, $t);
+	$: evidenceCodeMap = buildEvidenceCodeMap(sampleRows, propertyColumns, propertySummaries);
 	$: evidenceRows = buildEvidenceRows(
 		sampleRows,
 		propertyColumns,
 		evidenceCodeMap,
 		collectionId,
-		$t
+		$t,
+		propertySummaries,
+		materialProfile?.canonical_name ?? materialId
 	);
 	$: processSummary = buildProcessSummary(sampleRows, $t);
 	$: comparisonRows = buildComparisonRows(sampleRows, propertyColumns, processSummary, $t);
@@ -211,13 +215,17 @@
 		propertyColumns,
 		processSummary,
 		evidenceCodeMap,
-		$t
+		$t,
+		propertySummaries,
+		materialProfile?.canonical_name ?? materialId
 	);
 	$: bestPropertyValues = buildBestPropertyValues(
 		sampleRows,
 		propertyColumns,
 		evidenceCodeMap,
-		$t
+		$t,
+		propertySummaries,
+		materialProfile?.canonical_name ?? materialId
 	);
 	$: materialGraph = buildMaterialGraph(
 		materialProfile,
@@ -234,9 +242,14 @@
 	$: materialTags = buildMaterialTags(materialProfile, $t);
 	$: paperCount = materialProfile?.overview.paper_count || materialPapers().length;
 	$: sampleCount = materialProfile?.overview.sample_count || sampleRows.length;
-	$: evidenceCount = materialProfile?.overview.evidence_count || evidenceRows.length;
+	$: evidenceCount =
+		materialProfile?.overview.evidence_count ||
+		materialProfile?.evidence_refs.length ||
+		evidenceRows.length;
 	$: measuredPropertyCount =
-		materialProfile?.overview.measured_properties.length || propertyColumns.length;
+		materialProfile?.overview.measured_properties.length ||
+		propertySummaries.length ||
+		propertyColumns.length;
 	$: if (collectionId && materialId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		resetPdfReportState();
@@ -249,7 +262,7 @@
 	onDestroy(clearReportPoll);
 
 	async function loadMaterialPage() {
-		await Promise.all([loadMaterialProfile(), loadPdfReportStatus()]);
+		await loadMaterialProfile();
 	}
 
 	async function loadMaterialProfile() {
@@ -369,7 +382,50 @@
 		return translated.startsWith('research.') ? label.replace(/_/g, ' ') : translated;
 	}
 
+	function propertySummaryColumnKey(property: string) {
+		return `summary:${normalizeForMatch(property) || 'property'}`;
+	}
+
+	function propertyLabelFromName(name: string, translate: Translate) {
+		const translated = translate(`research.materialDossier.properties.${normalizeForMatch(name)}`);
+		return translated.startsWith('research.') ? name.replace(/_/g, ' ') : translated;
+	}
+
+	function propertyColumnFromName(
+		key: string,
+		name: string,
+		unit: string | null,
+		translate: Translate
+	): PropertyColumn {
+		const searchable = normalizeForMatch(name);
+		const group = PREFERRED_PROPERTY_GROUPS.find((item) =>
+			item.aliases.some((alias) => {
+				const normalizedAlias = normalizeForMatch(alias);
+				return searchable.includes(normalizedAlias) || normalizedAlias.includes(searchable);
+			})
+		);
+		return {
+			key,
+			label: group ? translate(group.labelKey) : propertyLabelFromName(name, translate),
+			shortLabel: group ? translate(group.shortLabelKey) : propertyLabelFromName(name, translate),
+			unit
+		};
+	}
+
+	function propertySummaryAlreadySelected(summary: PropertySummary, columns: PropertyColumn[]) {
+		const summaryText = normalizeForMatch(summary.property);
+		return columns.some((column) => {
+			const columnText = normalizeForMatch(`${column.key} ${column.label} ${column.shortLabel}`);
+			return (
+				columnText.includes(summaryText) ||
+				summaryText.includes(normalizeForMatch(column.key)) ||
+				summaryText.includes(normalizeForMatch(column.shortLabel))
+			);
+		});
+	}
+
 	function materialPropertyColumns(
+		profile: MaterialProfile | null,
 		rows: SampleMatrixRow[],
 		columns: SampleMatrixColumn[],
 		translate: Translate
@@ -394,6 +450,18 @@
 					unit: columns.find((item) => item.key === key)?.unit ?? null
 				});
 			}
+		}
+
+		for (const summary of profile?.measured_properties ?? []) {
+			if (propertySummaryAlreadySelected(summary, selected)) continue;
+			selected.push(
+				propertyColumnFromName(
+					propertySummaryColumnKey(summary.property),
+					summary.property,
+					summary.unit,
+					translate
+				)
+			);
 		}
 
 		for (const key of valueKeys) {
@@ -648,13 +716,90 @@
 		rows: SampleMatrixRow[],
 		columns: PropertyColumn[],
 		codeMap: Map<string, string>,
-		translate: Translate
+		translate: Translate,
+		summaries: PropertySummary[],
+		materialName: string
 	) {
-		return columns
+		const rowValues = columns
 			.map((column) => bestValueForColumn(rows, column))
 			.filter((item): item is NonNullable<ReturnType<typeof bestValueForColumn>> => Boolean(item))
 			.map((item) => supportedValue(item.row, item.column, item.value, codeMap, translate))
 			.slice(0, 6);
+		return uniqueSupportedValues([
+			...rowValues,
+			...summarySupportedValues(summaries, columns, codeMap, materialName, translate)
+		]).slice(0, 6);
+	}
+
+	function propertySummaryValue(summary: PropertySummary): EvidenceBackedValue {
+		const value = summary.max_value ?? summary.min_value ?? summary.display_range;
+		return {
+			display_value: summary.display_range,
+			value,
+			unit: summary.unit,
+			normalized_value: summary.max_value ?? summary.min_value,
+			normalized_unit: summary.unit,
+			status: summary.display_range && summary.display_range !== '--' ? 'observed' : 'missing',
+			confidence: summary.evidence_refs[0]?.confidence ?? null,
+			evidence_refs: summary.evidence_refs,
+			duplicate_count: 0,
+			conflict_status: null,
+			warnings: summary.warnings
+		};
+	}
+
+	function summarySampleRow(
+		summary: PropertySummary,
+		column: PropertyColumn,
+		value: EvidenceBackedValue,
+		materialName: string,
+		translate: Translate
+	): SampleMatrixRow {
+		return {
+			row_id: `summary:${summary.property}`,
+			document_id: value.evidence_refs[0]?.document_id ?? null,
+			sample_id: 'collection-summary',
+			sample_label: translate('research.materialDossier.table.collectionSummary'),
+			material: materialName,
+			process_context: {},
+			variable_axis: null,
+			variable_value: null,
+			values: { [column.key]: value },
+			evidence_refs: value.evidence_refs,
+			warnings: summary.warnings
+		};
+	}
+
+	function summaryColumnForProperty(summary: PropertySummary, columns: PropertyColumn[]) {
+		const key = propertySummaryColumnKey(summary.property);
+		return (
+			columns.find((column) => column.key === key) ??
+			columns.find((column) => propertySummaryAlreadySelected(summary, [column]))
+		);
+	}
+
+	function summarySupportedValues(
+		summaries: PropertySummary[],
+		columns: PropertyColumn[],
+		codeMap: Map<string, string>,
+		materialName: string,
+		translate: Translate
+	): SupportedValue[] {
+		return summaries
+			.map((summary) => {
+				const column = summaryColumnForProperty(summary, columns);
+				if (!column) return null;
+				const value = propertySummaryValue(summary);
+				if (!value.evidence_refs.length && !value.display_value) return null;
+				return supportedValue(
+					summarySampleRow(summary, column, value, materialName, translate),
+					column,
+					value,
+					codeMap,
+					translate
+				);
+			})
+			.filter((item): item is SupportedValue => item !== null);
 	}
 
 	function supportedValue(
@@ -729,7 +874,9 @@
 		columns: PropertyColumn[],
 		summary: ProcessSummary,
 		codeMap: Map<string, string>,
-		translate: Translate
+		translate: Translate,
+		summaries: PropertySummary[],
+		materialName: string
 	): KeyFinding[] {
 		const bestByColumn = columns
 			.map((column) => bestValueForColumn(rows, column))
@@ -863,6 +1010,36 @@
 			);
 		}
 
+		for (const value of summarySupportedValues(
+			summaries,
+			columns,
+			codeMap,
+			materialName,
+			translate
+		)) {
+			if (findings.length >= 4) break;
+			const exists = findings.some((existing) =>
+				existing.supportedValues.some((supported) => supported.key === value.key)
+			);
+			if (exists) continue;
+			findings.push(
+				finding(
+					`summary-${value.column.key}`,
+					translate('research.materialDossier.findings.summaryPropertyTitle', {
+						property: value.property
+					}),
+					translate('research.materialDossier.findings.summaryPropertyBody', {
+						property: value.property,
+						value: value.displayValue,
+						evidence: value.evidenceCode
+					}),
+					'research.materialDossier.findings.types.directObservation',
+					[value],
+					translate
+				)
+			);
+		}
+
 		if (findings.length === 0 && summary.changedLabels.length) {
 			return [
 				{
@@ -882,7 +1059,11 @@
 		return findings.slice(0, 4);
 	}
 
-	function buildEvidenceCodeMap(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
+	function buildEvidenceCodeMap(
+		rows: SampleMatrixRow[],
+		columns: PropertyColumn[],
+		summaries: PropertySummary[]
+	) {
 		const ids: string[] = [];
 		for (const row of rows) {
 			for (const column of columns) {
@@ -890,6 +1071,12 @@
 					if (ref.evidence_ref_id && !ids.includes(ref.evidence_ref_id))
 						ids.push(ref.evidence_ref_id);
 				}
+			}
+		}
+		for (const summary of summaries) {
+			for (const ref of summary.evidence_refs) {
+				if (ref.evidence_ref_id && !ids.includes(ref.evidence_ref_id))
+					ids.push(ref.evidence_ref_id);
 			}
 		}
 		return new Map(ids.map((id, index) => [id, `E${String(index + 1).padStart(2, '0')}`]));
@@ -964,7 +1151,9 @@
 		columns: PropertyColumn[],
 		codeMap: Map<string, string>,
 		collection: string,
-		translate: Translate
+		translate: Translate,
+		summaries: PropertySummary[],
+		materialName: string
 	): EvidenceLocatorRow[] {
 		const items: EvidenceLocatorRow[] = [];
 		for (const row of rows) {
@@ -977,6 +1166,25 @@
 					key: `${row.row_id}:${column.key}:${ref.evidence_ref_id}`,
 					code: evidenceCode(ref, codeMap),
 					claim: `${sampleDisplayLabel(row, translate)} ${column.shortLabel} ${formatEvidenceBackedValue(value)}`,
+					type: sourceTypeLabel(ref, translate),
+					location: ref.locator || '--',
+					confidence: confidenceScore(value.confidence ?? ref.confidence),
+					href: detail.href,
+					detail
+				});
+			}
+		}
+		for (const summary of summaries) {
+			const column = summaryColumnForProperty(summary, columns);
+			if (!column) continue;
+			const value = propertySummaryValue(summary);
+			const row = summarySampleRow(summary, column, value, materialName, translate);
+			for (const ref of value.evidence_refs) {
+				const detail = drawerDetailForValue(row, column, value, codeMap, collection, translate);
+				items.push({
+					key: `${row.row_id}:${column.key}:${ref.evidence_ref_id}`,
+					code: evidenceCode(ref, codeMap),
+					claim: `${materialName} ${column.shortLabel} ${formatEvidenceBackedValue(value)}`,
 					type: sourceTypeLabel(ref, translate),
 					location: ref.locator || '--',
 					confidence: confidenceScore(value.confidence ?? ref.confidence),
@@ -1158,6 +1366,10 @@
 
 		graph.property = columns.map((column) => {
 			const best = bestValues.find((value) => value.column.key === column.key);
+			const evidenceCodes = propertyEvidenceCodes(rows, column, codeMap);
+			if (!evidenceCodes.length && best?.evidenceCode && best.evidenceCode !== '--') {
+				evidenceCodes.push(best.evidenceCode);
+			}
 			return {
 				id: `property:${column.key}`,
 				kind: 'property',
@@ -1171,7 +1383,7 @@
 				detail: column.unit
 					? translate('research.materialDossier.graph.propertyUnit', { unit: column.unit })
 					: translate('research.materialDossier.graph.propertyNoUnit'),
-				evidenceCodes: propertyEvidenceCodes(rows, column, codeMap)
+				evidenceCodes
 			};
 		});
 

@@ -12,6 +12,8 @@ from domain.core import (
     DocumentProfile,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
@@ -153,6 +155,198 @@ def test_objective_workspace_detail_returns_frames_and_reserved_fields(tmp_path)
     assert payload["evidence_units"] == []
     assert payload["logic_chain"] is None
     assert payload["existing_comparison_rows"] == []
+
+
+def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
+    collection_id, objective_id, service = _seed_objective_collection(tmp_path)
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    corrosion_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-corrosion",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "corrosion potential",
+            "sample_context": {"sample": "135 W-750 mm/s"},
+            "value_payload": {"source_value_text": "-243.8", "value": -243.8},
+            "unit": "mV",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.91,
+        }
+    )
+    elongation_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-elongation",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "elongation",
+            "sample_context": {"sample": "135 W-750 mm/s"},
+            "value_payload": {
+                "source_value_text": (
+                    "The relatively low porosity levels in the 135 W-750 mm/s "
+                    "sample increase the ductility by about 10%."
+                )
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.71,
+        }
+    )
+    density_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-density",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "relative density",
+            "sample_context": {"sample": "135 W-750 mm/s"},
+            "value_payload": {"source_value_text": "99.26", "value": 99.26},
+            "unit": "%",
+            "resolution_status": "resolved",
+            "confidence": 0.83,
+        }
+    )
+    service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        facts.paper_skims,
+        facts.research_objectives,
+        facts.objective_contexts,
+        facts.objective_paper_frames,
+        facts.objective_evidence_routes,
+        (
+            corrosion_unit,
+            elongation_unit,
+            density_unit,
+        ),
+        (
+            ObjectiveLogicChain.from_mapping(
+                {
+                    "objective_id": objective_id,
+                    "chain_scope": "objective",
+                    "question": facts.research_objectives[0].question,
+                    "evidence_unit_ids": [
+                        corrosion_unit.evidence_unit_id,
+                        elongation_unit.evidence_unit_id,
+                        density_unit.evidence_unit_id,
+                    ],
+                    "chain_payload": {
+                        "measurement_value_ranges": [
+                            {"property_normalized": "elongation"},
+                            {"property_normalized": "relative density"},
+                        ]
+                    },
+                    "summary": "Polluted persisted logic chain.",
+                    "confidence": 0.7,
+                }
+            ),
+        ),
+    )
+
+    payload = service.get_objective_research_view(collection_id, objective_id)
+
+    assert [unit["evidence_unit_id"] for unit in payload["evidence_units"]] == [
+        "oeu-corrosion"
+    ]
+    logic_chain = payload["logic_chain"]
+    assert logic_chain is not None
+    assert logic_chain["evidence_unit_ids"] == ["oeu-corrosion"]
+    assert "corrosion potential range -243.8--243.8 mV" in logic_chain["summary"]
+    assert "elongation" not in str(logic_chain)
+    assert "relative density" not in str(logic_chain)
+    assert "ductility" not in str(logic_chain)
+
+
+def test_objective_workspace_detail_filters_textual_measurement_without_numeric_value(
+    tmp_path,
+):
+    collection_id, objective_id, service = _seed_objective_collection(tmp_path)
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    explicit_elongation_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-elongation-value",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "elongation",
+            "sample_context": {"sample": "S1"},
+            "value_payload": {"source_value_text": "33 %", "value": 33.0},
+            "unit": "%",
+            "resolution_status": "resolved",
+            "confidence": 0.91,
+        }
+    )
+    textual_elongation_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-elongation-text",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "elongation",
+            "sample_context": {"sample": "135 W-750 mm/s"},
+            "value_payload": {
+                "source_value_text": (
+                    "The relatively low porosity levels in the 135 W-750 mm/s "
+                    "sample increase the ductility by about 10%."
+                )
+            },
+            "unit": "%",
+            "resolution_status": "resolved",
+            "confidence": 0.71,
+        }
+    )
+    service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        facts.paper_skims,
+        facts.research_objectives,
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    **facts.objective_contexts[0].to_record(),
+                    "target_property_axes": ["elongation"],
+                }
+            ),
+        ),
+        facts.objective_paper_frames,
+        facts.objective_evidence_routes,
+        (
+            explicit_elongation_unit,
+            textual_elongation_unit,
+        ),
+        (
+            ObjectiveLogicChain.from_mapping(
+                {
+                    "objective_id": objective_id,
+                    "chain_scope": "objective",
+                    "question": facts.research_objectives[0].question,
+                    "evidence_unit_ids": [
+                        explicit_elongation_unit.evidence_unit_id,
+                        textual_elongation_unit.evidence_unit_id,
+                    ],
+                    "chain_payload": {},
+                    "summary": "Polluted persisted logic chain.",
+                    "confidence": 0.7,
+                }
+            ),
+        ),
+    )
+
+    payload = service.get_objective_research_view(collection_id, objective_id)
+
+    assert [unit["evidence_unit_id"] for unit in payload["evidence_units"]] == [
+        "oeu-elongation-value"
+    ]
+    logic_chain = payload["logic_chain"]
+    assert logic_chain is not None
+    assert logic_chain["evidence_unit_ids"] == ["oeu-elongation-value"]
+    assert "elongation range 33.0-33.0 %" in logic_chain["summary"]
+    assert "ductility" not in str(logic_chain)
+    assert "135 W-750" not in str(logic_chain)
 
 
 def test_objective_workspace_detail_raises_for_missing_objective(tmp_path):

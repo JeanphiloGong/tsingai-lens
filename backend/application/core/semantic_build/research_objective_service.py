@@ -109,6 +109,12 @@ _BROAD_PROPERTY_AXIS_EXPANSIONS = {
         "corrosion current density",
         "passivation behavior",
     ),
+    "corrosion resistance": (
+        "corrosion potential",
+        "pitting potential",
+        "corrosion current density",
+        "passivation behavior",
+    ),
 }
 _STRUCTURAL_PROPERTY_AXES = (
     "densification",
@@ -366,17 +372,26 @@ class ResearchObjectiveService:
             for route in facts.objective_evidence_routes
             if route.objective_id == objective_id
         ]
-        evidence_units = [
-            unit.to_record()
+        raw_evidence_units = [
+            unit
             for unit in facts.objective_evidence_units
             if unit.objective_id == objective_id
         ]
+        evidence_units = self._objective_detail_evidence_units(
+            tuple(raw_evidence_units),
+            objective_context=context,
+        )
         logic_chains = [
             chain
             for chain in facts.objective_logic_chains
             if chain.objective_id == objective_id
         ]
-        logic_chain = self._select_objective_logic_chain(logic_chains)
+        logic_chain = self._objective_detail_logic_chain(
+            objective=objective,
+            objective_context=context,
+            source_logic_chain=self._select_objective_logic_chain(logic_chains),
+            evidence_units=evidence_units,
+        )
 
         return {
             "collection_id": collection_id,
@@ -394,7 +409,7 @@ class ResearchObjectiveService:
             ),
             "paper_frames": self._objective_paper_frame_views(frames, facts=facts),
             "evidence_routes": routes,
-            "evidence_units": evidence_units,
+            "evidence_units": [unit.to_record() for unit in evidence_units],
             "logic_chain": logic_chain.to_record() if logic_chain is not None else None,
             "existing_comparison_rows": [],
             "warnings": [],
@@ -684,6 +699,155 @@ class ResearchObjectiveService:
             record
             for record in records
             if getattr(record, "objective_id", None) == objective_id
+        )
+
+    def _objective_detail_evidence_units(
+        self,
+        evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        if (
+            objective_context is None
+            or not objective_context.target_property_axes
+            or not evidence_units
+        ):
+            return evidence_units
+        target_axes = self._objective_target_property_axes(objective_context)
+        if not target_axes:
+            return evidence_units
+
+        target_units = tuple(
+            unit
+            for unit in evidence_units
+            if self._objective_evidence_unit_matches_target_property(
+                unit,
+                target_axes=target_axes,
+            )
+        )
+        if not target_units:
+            return target_units
+
+        target_document_ids = {unit.document_id for unit in target_units}
+        target_source_refs = {
+            (
+                str(source_ref.get("source_kind") or ""),
+                str(source_ref.get("source_ref") or ""),
+            )
+            for unit in target_units
+            for source_ref in unit.source_refs
+            if source_ref.get("source_ref")
+        }
+        selected_ids = {unit.evidence_unit_id for unit in target_units}
+        selected = list(target_units)
+        for unit in evidence_units:
+            if unit.evidence_unit_id in selected_ids or unit.property_normalized:
+                continue
+            if unit.unit_kind not in {
+                "process_context",
+                "sample_context",
+                "test_condition",
+            }:
+                continue
+            source_refs = {
+                (
+                    str(source_ref.get("source_kind") or ""),
+                    str(source_ref.get("source_ref") or ""),
+                )
+                for source_ref in unit.source_refs
+                if source_ref.get("source_ref")
+            }
+            if unit.document_id in target_document_ids and (
+                not source_refs or bool(source_refs & target_source_refs)
+            ):
+                selected.append(unit)
+                selected_ids.add(unit.evidence_unit_id)
+        return tuple(selected)
+
+    def _objective_evidence_unit_matches_target_property(
+        self,
+        unit: ObjectiveEvidenceUnit,
+        *,
+        target_axes: tuple[str, ...],
+    ) -> bool:
+        if (
+            unit.unit_kind == "measurement"
+            and self._objective_measurement_numeric_value(unit) is None
+        ):
+            return False
+        if self._objective_property_matches_target_axes(
+            unit.property_normalized,
+            target_axes=target_axes,
+        ):
+            return True
+        if unit.unit_kind in {"test_condition", "sample_context", "process_context"}:
+            return False
+        text = " ".join(
+            value
+            for value in (
+                self._value_payload_text(unit.value_payload),
+                unit.interpretation,
+            )
+            if value
+        )
+        return any(
+            self._axis_label_is_mentioned(text, axis)
+            for axis in target_axes
+        )
+
+    def _objective_property_matches_target_axes(
+        self,
+        property_name: Any,
+        *,
+        target_axes: tuple[str, ...],
+    ) -> bool:
+        normalized = self._normalize_property_label(property_name)
+        if not normalized:
+            return False
+        if self._objective_property_label_matches_target(
+            normalized,
+            target_axes=target_axes,
+        ):
+            return True
+        expanded_axes = _BROAD_PROPERTY_AXIS_EXPANSIONS.get(normalized, ())
+        return any(
+            self._objective_property_label_matches_target(
+                expanded_axis,
+                target_axes=target_axes,
+            )
+            for expanded_axis in expanded_axes
+        )
+
+    def _objective_detail_logic_chain(
+        self,
+        *,
+        objective: ResearchObjective,
+        objective_context: ObjectiveContext | None,
+        source_logic_chain: ObjectiveLogicChain | None,
+        evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> ObjectiveLogicChain | None:
+        if source_logic_chain is None or not evidence_units:
+            return None
+        chain_payload = self._objective_logic_chain_payload(
+            objective=objective,
+            objective_context=objective_context,
+            units=evidence_units,
+        )
+        return ObjectiveLogicChain.from_mapping(
+            {
+                "logic_chain_id": source_logic_chain.logic_chain_id,
+                "objective_id": objective.objective_id,
+                "chain_scope": source_logic_chain.chain_scope,
+                "document_id": source_logic_chain.document_id,
+                "question": objective.question,
+                "evidence_unit_ids": [
+                    unit.evidence_unit_id
+                    for unit in evidence_units
+                ],
+                "chain_payload": chain_payload,
+                "summary": self._objective_logic_chain_summary(chain_payload),
+                "confidence": source_logic_chain.confidence,
+            }
         )
 
     def _objective_list_item(self, objective: ResearchObjective, *, facts) -> dict[str, Any]:
@@ -4962,7 +5126,7 @@ class ResearchObjectiveService:
         self,
         value_payload: dict[str, Any],
     ) -> bool:
-        for key in ("value", "normalized_value", "current_value"):
+        for key in ("value", "numeric_value", "normalized_value", "current_value"):
             value = value_payload.get(key)
             if value in (None, "", [], {}):
                 continue
@@ -6163,12 +6327,17 @@ class ResearchObjectiveService:
         self,
         unit: ObjectiveEvidenceUnit,
     ) -> float | None:
-        value = unit.value_payload.get("value")
-        if isinstance(value, (int, float)):
-            return float(value)
-        if value not in (None, ""):
-            return self._coerce_number(value)
-        return self._coerce_number(unit.value_payload.get("source_value_text"))
+        for key in ("value", "numeric_value", "normalized_value", "current_value"):
+            value = unit.value_payload.get(key)
+            if value in (None, "", [], {}):
+                continue
+            numeric_value = self._coerce_number(value)
+            if numeric_value is not None:
+                return numeric_value
+        source_value = unit.value_payload.get("source_value_text")
+        if self._source_value_text_is_atomic_numeric(source_value):
+            return self._coerce_number(source_value)
+        return None
 
     def _objective_measurement_range_point(
         self,

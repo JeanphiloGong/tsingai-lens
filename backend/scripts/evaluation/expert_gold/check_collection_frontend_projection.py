@@ -13,6 +13,9 @@ DEFAULT_COLLECTION_ID = "col_c19de13a69c5"
 DEFAULT_MATERIAL_ID = "mat-316l-stainless-steel"
 DEFAULT_MAX_PROCESS_AXES = 6
 DEFAULT_FORBIDDEN_TERMS = ("135 W-750",)
+DEFAULT_FORBIDDEN_OBJECTIVE_DETAIL_TERMS = (
+    "increase the ductility by about 10%",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,6 +47,12 @@ def parse_args() -> argparse.Namespace:
         dest="forbidden_terms",
         help="Forbidden text in the material research-view payload. May repeat.",
     )
+    parser.add_argument(
+        "--forbidden-objective-detail-term",
+        action="append",
+        dest="forbidden_objective_detail_terms",
+        help="Forbidden text in every objective detail payload. May repeat.",
+    )
     return parser.parse_args()
 
 
@@ -54,6 +63,10 @@ def main() -> None:
         material_id=args.material_id,
         max_process_axes=args.max_process_axes,
         forbidden_terms=tuple(args.forbidden_terms or DEFAULT_FORBIDDEN_TERMS),
+        forbidden_objective_detail_terms=tuple(
+            args.forbidden_objective_detail_terms
+            or DEFAULT_FORBIDDEN_OBJECTIVE_DETAIL_TERMS
+        ),
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary["status"] == "fail":
@@ -66,6 +79,9 @@ def check_collection_frontend_projection(
     material_id: str,
     max_process_axes: int = DEFAULT_MAX_PROCESS_AXES,
     forbidden_terms: tuple[str, ...] = DEFAULT_FORBIDDEN_TERMS,
+    forbidden_objective_detail_terms: tuple[str, ...] = (
+        DEFAULT_FORBIDDEN_OBJECTIVE_DETAIL_TERMS
+    ),
 ) -> dict[str, Any]:
     backend_root = str(DEFAULT_BACKEND_ROOT)
     if backend_root not in sys.path:
@@ -78,20 +94,31 @@ def check_collection_frontend_projection(
         ResearchObjectiveService,
     )
 
-    objectives = ResearchObjectiveService().list_objective_workspaces(collection_id)
+    objective_service = ResearchObjectiveService()
+    objectives = objective_service.list_objective_workspaces(collection_id)
     material_profile = (
         ResearchViewAggregationService().get_collection_material_research_view(
             collection_id,
             material_id,
         )
     )
+    objective_details = [
+        objective_service.get_objective_research_view(
+            collection_id,
+            str(row.get("objective_id") or ""),
+        )
+        for row in objectives.get("objectives", [])
+        if isinstance(row, dict) and row.get("objective_id")
+    ]
     return evaluate_frontend_projection_payloads(
         collection_id=collection_id,
         material_id=material_id,
         objectives=objectives,
+        objective_details=objective_details,
         material_profile=material_profile,
         max_process_axes=max_process_axes,
         forbidden_terms=forbidden_terms,
+        forbidden_objective_detail_terms=forbidden_objective_detail_terms,
     )
 
 
@@ -100,13 +127,18 @@ def evaluate_frontend_projection_payloads(
     collection_id: str,
     material_id: str,
     objectives: dict[str, Any],
+    objective_details: list[dict[str, Any]] | None = None,
     material_profile: dict[str, Any],
     max_process_axes: int = DEFAULT_MAX_PROCESS_AXES,
     forbidden_terms: tuple[str, ...] = DEFAULT_FORBIDDEN_TERMS,
+    forbidden_objective_detail_terms: tuple[str, ...] = (
+        DEFAULT_FORBIDDEN_OBJECTIVE_DETAIL_TERMS
+    ),
 ) -> dict[str, Any]:
     objective_rows = [
         row for row in objectives.get("objectives", []) if isinstance(row, dict)
     ]
+    detail_rows = objective_details or []
     material_json = json.dumps(material_profile, ensure_ascii=False, sort_keys=True)
     measured_properties = [
         row
@@ -154,6 +186,11 @@ def evaluate_frontend_projection_payloads(
             bool(sample_rows),
             f"count={len(sample_rows)}",
         ),
+        _check(
+            "objective detail payloads are available",
+            len(detail_rows) == len(objective_rows),
+            f"count={len(detail_rows)}; expected={len(objective_rows)}",
+        ),
     ]
     for term in forbidden_terms:
         checks.append(
@@ -161,6 +198,33 @@ def evaluate_frontend_projection_payloads(
                 f"material profile excludes forbidden term {term!r}",
                 term not in material_json,
                 f"present={term in material_json}",
+            )
+        )
+    detail_json_by_objective_id = {
+        str((detail.get("objective") or {}).get("objective_id") or index): json.dumps(
+            detail,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        for index, detail in enumerate(detail_rows)
+        if isinstance(detail, dict)
+    }
+    for term in forbidden_objective_detail_terms:
+        containing_objectives = [
+            objective_id
+            for objective_id, detail_json in detail_json_by_objective_id.items()
+            if term in detail_json
+        ]
+        checks.append(
+            _check(
+                f"objective details exclude forbidden term {term!r}",
+                not containing_objectives,
+                "present_in="
+                + (
+                    ",".join(containing_objectives[:5])
+                    if containing_objectives
+                    else "none"
+                ),
             )
         )
 
@@ -171,6 +235,7 @@ def evaluate_frontend_projection_payloads(
         "collection_id": collection_id,
         "material_id": material_id,
         "objective_count": len(objective_rows),
+        "objective_detail_count": len(detail_rows),
         "max_process_axis_count": max(
             (len(row.get("process_axes") or []) for row in objective_rows),
             default=0,

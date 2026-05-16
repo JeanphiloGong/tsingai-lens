@@ -40,6 +40,17 @@ def test_evaluate_frontend_projection_payloads_passes_clean_projection():
                 }
             ]
         },
+        objective_details=[
+            {
+                "objective": {"objective_id": "obj-1"},
+                "evidence_units": [
+                    {
+                        "property_normalized": "corrosion potential",
+                        "value_payload": {"source_value_text": "-243.8"},
+                    }
+                ],
+            }
+        ],
         material_profile={
             "state": "ready",
             "measured_properties": [{"property": "elongation"}],
@@ -75,6 +86,23 @@ def test_evaluate_frontend_projection_payloads_fails_polluted_projection():
                 }
             ]
         },
+        objective_details=[
+            {
+                "objective": {"objective_id": "obj-1"},
+                "evidence_units": [
+                    {
+                        "property_normalized": "elongation",
+                        "value_payload": {
+                            "source_value_text": (
+                                "The relatively low porosity levels in the "
+                                "135 W-750 mm/s sample increase the ductility "
+                                "by about 10%."
+                            )
+                        },
+                    }
+                ],
+            }
+        ],
         material_profile={
             "state": "ready",
             "measured_properties": [
@@ -94,3 +122,7 @@ def test_evaluate_frontend_projection_payloads_fails_polluted_projection():
     assert "objective process axes stay display bounded" in failed_names
     assert "material sample matrix rows are available" in failed_names
     assert "material profile excludes forbidden term '135 W-750'" in failed_names
+    assert (
+        "objective details exclude forbidden term "
+        "'increase the ductility by about 10%'"
+    ) in failed_names

@@ -10,7 +10,6 @@
     fetchCollections,
     type Collection
   } from './_shared/collections';
-  import { buildCollectionGraphmlUrl } from './_shared/graph';
   import { language, t } from './_shared/i18n';
   import { createBuildTask } from './_shared/tasks';
 
@@ -241,6 +240,23 @@
     return $t('home.statusDisplay.pending');
   }
 
+  function buildActionLabel(collection: Collection) {
+    const group = getStatusGroup(collection.status);
+    if (group === 'processing') return $t('home.actionProcessing');
+    if (group === 'complete' || group === 'attention') return $t('home.actionRetryProcessing');
+    return $t('home.actionStartProcessing');
+  }
+
+  function isBuildActionDisabled(collection: Collection) {
+    return getStatusGroup(collection.status) === 'processing' || !collection.paper_count;
+  }
+
+  function buildActionTitle(collection: Collection) {
+    if (!collection.paper_count) return $t('home.indexNoFiles');
+    if (getStatusGroup(collection.status) === 'processing') return $t('home.actionProcessing');
+    return buildActionLabel(collection);
+  }
+
   function nextStep(collection: Collection) {
     const group = getStatusGroup(collection.status);
     if (group === 'processing') {
@@ -296,33 +312,6 @@
       const { [id]: _, ...rest } = rowMessages;
       rowMessages = rest;
     }, 3000);
-  }
-
-  async function exportGraph(collectionId: string) {
-    openRowMenuId = '';
-    try {
-      setRowMessage(collectionId, $t('home.exporting'));
-      const response = await fetch(
-        buildCollectionGraphmlUrl(collectionId, { maxNodes: 200, minWeight: 0 })
-      );
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get('content-disposition') ?? '';
-      const matched = disposition.match(/filename="(.+?)"/i);
-      const fileName = matched?.[1] ?? `graph-${collectionId}-${Date.now()}.graphml`;
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = fileName;
-      link.click();
-      URL.revokeObjectURL(objectUrl);
-      setRowMessage(collectionId, $t('home.exported'));
-    } catch (err) {
-      setRowMessage(collectionId, errorMessage(err), 'error');
-    }
   }
 
   async function runBuild(collection: Collection) {
@@ -518,11 +507,13 @@
                     </button>
                     {#if openRowMenuId === collection.id}
                       <div class="row-menu__panel" style={rowMenuPanelStyle}>
-                        <button type="button" on:click={() => runBuild(collection)}>
-                          {$t('home.actionIndex')}
-                        </button>
-                        <button type="button" on:click={() => exportGraph(collection.id)}>
-                          {$t('home.actionExport')}
+                        <button
+                          type="button"
+                          disabled={isBuildActionDisabled(collection)}
+                          title={buildActionTitle(collection)}
+                          on:click={() => runBuild(collection)}
+                        >
+                          {buildActionLabel(collection)}
                         </button>
                         <button
                           type="button"

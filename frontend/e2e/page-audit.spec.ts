@@ -78,8 +78,8 @@ test.describe('page interaction audit', () => {
 
 		const menu = page.locator('.row-menu__panel');
 		await expect(menu).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Process' })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Export' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Retry processing' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Export' })).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
 		expect(await isElementBottomExposed(page, '.row-menu__panel')).toBe(true);
 

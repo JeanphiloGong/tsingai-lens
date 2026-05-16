@@ -358,6 +358,50 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect.element(comparisonCard.getByText('baseline: as-built')).toBeInTheDocument();
 	});
 
+	it('renders duplicate evidence fact labels without a keyed each failure', async () => {
+		const payload: any = objectivePayload();
+		payload.evidence_units = [
+			{
+				...payload.evidence_units[0],
+				evidence_unit_id: 'unit_duplicate_facts',
+				sample_context: {
+					sample: 'Non-preheated'
+				},
+				process_context: {
+					process: 'Non-preheated',
+					heat_treatment: 'annealed'
+				},
+				test_condition: {
+					method: 'tensile test'
+				}
+			}
+		];
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/objectives/obj_1/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		const duplicateCard = browserPage.getByRole('button', {
+			name: /doc_1 · 92%/
+		});
+		await expect
+			.element(duplicateCard.getByText('sample: Non-preheated'))
+			.toBeInTheDocument();
+		await expect
+			.element(duplicateCard.getByText('process: Non-preheated'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence units' }))
+			.toBeInTheDocument();
+	});
+
 	it('uses logic-chain steps to focus related evidence', async () => {
 		render(Page);
 

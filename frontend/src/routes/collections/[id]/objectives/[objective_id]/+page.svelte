@@ -574,7 +574,7 @@
 								</div>
 								{#if step.items.length}
 									<ul>
-										{#each step.items as item}
+										{#each step.items as item, index (`${item}-${index}`)}
 											<li>{item}</li>
 										{/each}
 									</ul>
@@ -738,7 +738,7 @@
 												<strong>{evidenceUnitValue(unit)}</strong>
 												{#if evidenceCardFacts(unit).length}
 													<div class="evidence-unit-card__facts">
-														{#each evidenceCardFacts(unit) as fact (fact)}
+														{#each evidenceCardFacts(unit) as fact, index (`${fact}-${index}`)}
 															<span>{fact}</span>
 														{/each}
 													</div>
@@ -807,10 +807,10 @@
 							<section class="evidence-chain-section">
 								<h5>{$t('research.objectiveWorkspace.sampleAndProcess')}</h5>
 								<div class="evidence-context-list">
-									{#each recordEntries(selectedEvidenceUnit.sample_context) as entry (entry.key)}
+									{#each recordEntries(selectedEvidenceUnit.sample_context) as entry, index (`sample-${entry.key}-${index}`)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
-									{#each recordEntries(selectedEvidenceUnit.process_context) as entry (entry.key)}
+									{#each recordEntries(selectedEvidenceUnit.process_context) as entry, index (`process-${entry.key}-${index}`)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
 								</div>
@@ -821,7 +821,7 @@
 							<section class="evidence-chain-section">
 								<h5>{$t('research.objectiveWorkspace.testCondition')}</h5>
 								<div class="evidence-context-list">
-									{#each recordEntries(selectedEvidenceUnit.test_condition) as entry (entry.key)}
+									{#each recordEntries(selectedEvidenceUnit.test_condition) as entry, index (`test-${entry.key}-${index}`)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
 								</div>
@@ -832,7 +832,7 @@
 							<section class="evidence-chain-section">
 								<h5>{$t('research.objectiveWorkspace.comparisonBaseline')}</h5>
 								<div class="evidence-context-list">
-									{#each recordEntries(selectedEvidenceUnit.baseline_context) as entry (entry.key)}
+									{#each recordEntries(selectedEvidenceUnit.baseline_context) as entry, index (`baseline-${entry.key}-${index}`)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
 								</div>
@@ -843,7 +843,7 @@
 							<section class="evidence-chain-section">
 								<h5>{$t('research.objectiveWorkspace.resolvedCondition')}</h5>
 								<div class="evidence-context-list">
-									{#each recordEntries(selectedEvidenceUnit.resolved_condition) as entry (entry.key)}
+									{#each recordEntries(selectedEvidenceUnit.resolved_condition) as entry, index (`resolved-${entry.key}-${index}`)}
 										<span>{entry.key}: {entry.value}</span>
 									{/each}
 								</div>

@@ -52,8 +52,29 @@ def test_project_objective_material_rows_preserves_unit_contexts():
             "resolution_status": "skipped",
         }
     )
+    contaminated_text_measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-text-ductility",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "135 W-750 mm·s -1"},
+            "property_normalized": "elongation",
+            "value_payload": {
+                "source_value_text": (
+                    "The relatively low porosity levels in the 135 W-750 "
+                    "mm·s -1 sample increase the ductility by about 10%."
+                )
+            },
+            "source_refs": [{"source_kind": "text_window", "source_ref": "blk-1"}],
+            "resolution_status": "partial",
+        }
+    )
 
-    rows = project_objective_material_rows((measurement, process_context, skipped))
+    rows = project_objective_material_rows(
+        (measurement, process_context, skipped, contaminated_text_measurement)
+    )
 
     assert [row.evidence_unit_id for row in rows] == [
         "oeu-measurement-1",

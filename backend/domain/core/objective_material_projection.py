@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from domain.core.research_objective import ObjectiveEvidenceUnit
@@ -91,6 +92,8 @@ def project_objective_material_rows(
 
 
 def _has_material_projection_payload(unit: ObjectiveEvidenceUnit) -> bool:
+    if unit.unit_kind == "measurement" and not _has_explicit_measurement_value(unit):
+        return False
     return any(
         (
             unit.material_system,
@@ -102,3 +105,42 @@ def _has_material_projection_payload(unit: ObjectiveEvidenceUnit) -> bool:
             unit.value_payload,
         )
     )
+
+
+def _has_explicit_measurement_value(unit: ObjectiveEvidenceUnit) -> bool:
+    for key in ("value", "numeric_value", "normalized_value", "current_value"):
+        if _coerce_number(unit.value_payload.get(key)) is not None:
+            return True
+    return _source_value_text_is_atomic_numeric(
+        unit.value_payload.get("source_value_text")
+    )
+
+
+def _source_value_text_is_atomic_numeric(value: Any) -> bool:
+    if value in (None, "", [], {}) or isinstance(value, (dict, list, tuple, set)):
+        return False
+    text = str(value).strip()
+    if not text:
+        return False
+    unit_pattern = r"(?:%|MPa|GPa|HV|mV|V|A/cm2|uA/cm2|µA/cm2|C/s|°C/s|deg\s*C/s)"
+    return bool(
+        re.fullmatch(
+            rf"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*(?:{unit_pattern})?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.fullmatch(
+            rf"[-+]?(?:\d+(?:\.\d*)?|\.\d+)\s*(?:x|×)\s*10\s*\^?\s*[-+]?\d+\s*(?:{unit_pattern})?",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _coerce_number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

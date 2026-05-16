@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import re
 from typing import Any
 
 from domain.core.comparison import (
@@ -90,6 +91,16 @@ def _is_projectable_measurement(unit: ObjectiveEvidenceUnit) -> bool:
     return (
         unit.unit_kind == "measurement"
         and unit.resolution_status not in _SKIPPED_RESOLUTION_STATUSES
+        and _has_explicit_measurement_value(unit)
+    )
+
+
+def _has_explicit_measurement_value(unit: ObjectiveEvidenceUnit) -> bool:
+    for key in ("value", "numeric_value", "normalized_value", "current_value"):
+        if _coerce_number(unit.value_payload.get(key)) is not None:
+            return True
+    return _source_value_text_is_atomic_numeric(
+        unit.value_payload.get("source_value_text")
     )
 
 
@@ -338,6 +349,36 @@ def _numeric_value(value_payload: Mapping[str, Any]) -> float | None:
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _source_value_text_is_atomic_numeric(value: Any) -> bool:
+    if value in (None, "", [], {}) or isinstance(value, (dict, list, tuple, set)):
+        return False
+    text = str(value).strip()
+    if not text:
+        return False
+    unit_pattern = r"(?:%|MPa|GPa|HV|mV|V|A/cm2|uA/cm2|µA/cm2|C/s|°C/s|deg\s*C/s)"
+    return bool(
+        re.fullmatch(
+            rf"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*(?:{unit_pattern})?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.fullmatch(
+            rf"[-+]?(?:\d+(?:\.\d*)?|\.\d+)\s*(?:x|×)\s*10\s*\^?\s*[-+]?\d+\s*(?:{unit_pattern})?",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _coerce_number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _value_display(

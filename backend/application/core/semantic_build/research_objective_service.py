@@ -4827,7 +4827,7 @@ class ResearchObjectiveService:
             if isinstance(record.get("value_payload"), dict)
             else {}
         )
-        if self._value_payload_numeric_value(value_payload) is not None:
+        if self._text_measurement_has_explicit_numeric_value(value_payload):
             return record
         normalized = dict(record)
         if route.role == "characterization" and self._objective_property_is_characterization(
@@ -4839,6 +4839,39 @@ class ResearchObjectiveService:
         if not normalized.get("interpretation"):
             normalized["interpretation"] = self._value_payload_text(value_payload)
         return normalized
+
+    def _text_measurement_has_explicit_numeric_value(
+        self,
+        value_payload: dict[str, Any],
+    ) -> bool:
+        for key in ("value", "normalized_value", "current_value"):
+            value = value_payload.get(key)
+            if value in (None, "", [], {}):
+                continue
+            if self._coerce_number(value) is not None:
+                return True
+        source_value = value_payload.get("source_value_text")
+        return self._source_value_text_is_atomic_numeric(source_value)
+
+    def _source_value_text_is_atomic_numeric(self, value: Any) -> bool:
+        if value in (None, "", [], {}) or isinstance(value, (dict, list, tuple, set)):
+            return False
+        text = str(value).strip()
+        if not text:
+            return False
+        unit_pattern = r"(?:%|MPa|GPa|HV|mV|V|A/cm2|uA/cm2|µA/cm2|C/s|°C/s|deg\s*C/s)"
+        return bool(
+            re.fullmatch(
+                rf"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*(?:{unit_pattern})?",
+                text,
+                flags=re.IGNORECASE,
+            )
+            or re.fullmatch(
+                rf"[-+]?(?:\d+(?:\.\d*)?|\.\d+)\s*(?:x|×)\s*10\s*\^?\s*[-+]?\d+\s*(?:{unit_pattern})?",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
 
     def _objective_text_measurement_matches_context(
         self,

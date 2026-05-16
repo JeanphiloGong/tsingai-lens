@@ -1378,6 +1378,56 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
     )
 
 
+def test_research_objective_service_keeps_process_label_numbers_out_of_text_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "blk-elongation",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": ["elongation"],
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 8, "text": "Ductility increased for the low-porosity sample."},
+        objective_context=objective_context,
+        extracted_record={
+            "unit_kind": "measurement",
+            "property_normalized": "elongation",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "135 W-750 mm·s -1"},
+            "value_payload": {
+                "source_value_text": (
+                    "The relatively low porosity levels in the 135 W-750 "
+                    "mm·s -1 sample increase the ductility by about 10%."
+                )
+            },
+            "unit": "%",
+            "resolution_status": "partial",
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["unit_kind"] == "interpretation"
+    assert records[0]["property_normalized"] == "elongation"
+    assert "value" not in records[0]["value_payload"]
+
+
 def test_research_objective_service_uses_main_number_after_leading_uncertainty(
     tmp_path,
 ):

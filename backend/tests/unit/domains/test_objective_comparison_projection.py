@@ -112,7 +112,7 @@ def test_project_objective_comparison_rows_marks_missing_context():
                     "objective_id": "obj-corrosion",
                     "document_id": "paper-1",
                     "unit_kind": "measurement",
-                    "value_payload": {},
+                    "value_payload": {"value": 1.2},
                     "resolution_status": "partial",
                 }
             ),
@@ -126,6 +126,36 @@ def test_project_objective_comparison_rows_marks_missing_context():
         "sample_context",
         "property",
         "test_condition",
-        "value",
     }
     assert row.requires_expert_review is True
+
+
+def test_project_objective_comparison_rows_skips_text_measurement_without_explicit_value():
+    rows = project_objective_comparison_rows(
+        collection_id="col-1",
+        evidence_units=(
+            ObjectiveEvidenceUnit.from_mapping(
+                {
+                    "evidence_unit_id": "oeu-text-ductility",
+                    "objective_id": "obj-mechanical",
+                    "document_id": "paper-1",
+                    "unit_kind": "measurement",
+                    "material_system": {"name": "316L stainless steel"},
+                    "sample_context": {"sample": "135 W-750 mm·s -1"},
+                    "property_normalized": "elongation",
+                    "value_payload": {
+                        "source_value_text": (
+                            "The relatively low porosity levels in the 135 W-750 "
+                            "mm·s -1 sample increase the ductility by about 10%."
+                        )
+                    },
+                    "source_refs": [
+                        {"source_kind": "text_window", "source_ref": "blk-1"}
+                    ],
+                    "resolution_status": "partial",
+                }
+            ),
+        ),
+    )
+
+    assert rows == ()

@@ -112,6 +112,26 @@ test.describe('page interaction audit', () => {
 		);
 		await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
 	});
+
+	test('unprocessed collections lock direct research route access', async ({ page }) => {
+		const objectiveRequests: string[] = [];
+		page.on('request', (request) => {
+			const url = new URL(request.url());
+			if (url.pathname === `/api/v1/collections/${collectionId}/objectives`) {
+				objectiveRequests.push(url.pathname);
+			}
+		});
+
+		await page.goto(`/collections/${collectionId}/objectives?audit_state=uploaded`);
+
+		await expect(page.getByRole('heading', { name: 'Processing required' })).toBeVisible();
+		await expect(page.getByText('Process this collection before opening research objectives')).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Back to workspace' })).toHaveAttribute(
+			'href',
+			`/collections/${collectionId}`
+		);
+		expect(objectiveRequests).toEqual([]);
+	});
 });
 
 async function checkMaterialsMoreNavigation(
@@ -253,16 +273,19 @@ async function mockApis(page: Page) {
 		const url = new URL(route.request().url());
 		const path = url.pathname;
 		const method = route.request().method();
+		const referer = route.request().headers().referer;
+		const auditState = readAuditState(url, referer);
 
 		if (!path.startsWith('/api/v1/')) return route.continue();
 
 		if (path === '/api/v1/collections') {
-			if (method === 'POST') return route.fulfill(json(collection()));
-			return route.fulfill(json({ items: [collection()] }));
+			if (method === 'POST') return route.fulfill(json(collection(auditState)));
+			return route.fulfill(json({ items: [collection(auditState)] }));
 		}
-		if (path === `/api/v1/collections/${collectionId}`) return route.fulfill(json(collection()));
+		if (path === `/api/v1/collections/${collectionId}`)
+			return route.fulfill(json(collection(auditState)));
 		if (path === `/api/v1/collections/${collectionId}/workspace`)
-			return route.fulfill(json(workspace()));
+			return route.fulfill(json(workspace(auditState)));
 		if (path === `/api/v1/collections/${collectionId}/files`) {
 			return route.fulfill(json({ count: 1, items: [uploadedFile()] }));
 		}
@@ -376,25 +399,43 @@ function now() {
 	return '2026-05-14T00:00:00Z';
 }
 
-function collection() {
+function readAuditState(url: URL, referer?: string) {
+	if (url.searchParams.has('audit_state')) return url.searchParams.get('audit_state');
+	if (!referer) return null;
+	try {
+		return new URL(referer).searchParams.get('audit_state');
+	} catch {
+		return null;
+	}
+}
+
+function collection(auditState?: string | null) {
 	return {
 		collection_id: collectionId,
 		id: collectionId,
 		name: '316L LPBF evidence set',
 		description: 'Interaction audit fixture',
-		status: 'ready',
+		status: auditState === 'uploaded' ? 'uploaded' : 'ready',
 		paper_count: 2,
 		created_at: now(),
 		updated_at: now()
 	};
 }
 
-function workspace() {
+function workspace(auditState?: string | null) {
+	const unprocessed = auditState === 'uploaded';
 	return {
-		collection: collection(),
+		collection: collection(auditState),
 		file_count: 2,
-		status_summary: 'ready',
-		workflow: { documents: 'ready', results: 'ready', evidence: 'ready', comparisons: 'ready' },
+		status_summary: unprocessed ? 'ready_to_process' : 'ready',
+		workflow: unprocessed
+			? {
+					documents: 'not_started',
+					results: 'not_started',
+					evidence: 'not_started',
+					comparisons: 'not_started'
+				}
+			: { documents: 'ready', results: 'ready', evidence: 'ready', comparisons: 'ready' },
 		document_summary: {
 			total_documents: 2,
 			doc_type_counts: { experimental: 2, review: 0, mixed: 0, uncertain: 0 },
@@ -402,25 +443,25 @@ function workspace() {
 		},
 		warnings: [],
 		artifacts: {
-			documents_ready: true,
-			document_profiles_ready: true,
-			evidence_cards_ready: true,
-			comparable_results_ready: true,
-			collection_comparable_results_ready: true,
-			comparison_rows_ready: true,
-			graph_ready: true,
+			documents_ready: !unprocessed,
+			document_profiles_ready: !unprocessed,
+			evidence_cards_ready: !unprocessed,
+			comparable_results_ready: !unprocessed,
+			collection_comparable_results_ready: !unprocessed,
+			comparison_rows_ready: !unprocessed,
+			graph_ready: !unprocessed,
 			graph_stale: false,
 			updated_at: now()
 		},
 		latest_task: null,
 		recent_tasks: [],
 		capabilities: {
-			can_view_documents: true,
-			can_view_results: true,
-			can_view_evidence: true,
-			can_view_comparisons: true,
-			can_view_graph: true,
-			can_download_graphml: true
+			can_view_documents: !unprocessed,
+			can_view_results: !unprocessed,
+			can_view_evidence: !unprocessed,
+			can_view_comparisons: !unprocessed,
+			can_view_graph: !unprocessed,
+			can_download_graphml: !unprocessed
 		},
 		links: {
 			workspace: `/collections/${collectionId}`,

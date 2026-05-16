@@ -23,7 +23,8 @@ This node owns the collection workspace route family in the frontend.
   workspaces with paper coverage, evidence units, source links, and extraction
   diagnostics
 - render collection-level document profile screening signals
-- render canonical collection materials and collection-scoped material profiles
+- render canonical collection materials and collection-scoped material profiles as a More /
+  material dossier surface
 - render collection-level evidence cards and source-anchor entry points
 - render global comparison review as a More / All Comparisons surface
 - render the collection-bound AI research copilot as a top-level collection tab

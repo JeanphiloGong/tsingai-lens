@@ -52,6 +52,7 @@
 	$: updatedAt = collection?.updated_at || workspace?.artifacts.updated_at || '';
 	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/evidence`;
 	$: moreActive =
+		$page.url.pathname.startsWith(`/collections/${collectionId}/materials`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/results`);
@@ -186,12 +187,6 @@
 		{$t('collection.tabs.objectives')}
 	</a>
 	<a
-		href={`/collections/${collectionId}/materials`}
-		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/materials`)}
-	>
-		{$t('collection.tabs.materials')}
-	</a>
-	<a
 		href={`/collections/${collectionId}/documents`}
 		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/documents`)}
 	>
@@ -212,6 +207,12 @@
 	<details class="collection-tabs__more" class:active={moreActive}>
 		<summary>{$t('collection.moreLabel')}</summary>
 		<div class="collection-tabs__menu">
+			<a
+				href={`/collections/${collectionId}/materials`}
+				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/materials`)}
+			>
+				{$t('collection.tabs.materials')}
+			</a>
 			<a
 				href={`/collections/${collectionId}/comparisons`}
 				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`)}

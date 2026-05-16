@@ -32,7 +32,7 @@ const routes = [
 	[`/collections/${collectionId}`, 'Research overview'],
 	[`/collections/${collectionId}/documents`, 'Paper coverage table'],
 	[`/collections/${collectionId}/documents/${documentId}?page=2`, 'Paper scope'],
-	[`/collections/${collectionId}/materials`, 'Materials'],
+	[`/collections/${collectionId}/materials`, 'Canonical materials detected'],
 	[`/collections/${collectionId}/materials/${materialId}`, '316L stainless steel'],
 	[`/collections/${collectionId}/objectives`, 'Research objectives'],
 	[`/collections/${collectionId}/objectives/${objectiveId}`, 'Logic chain'],
@@ -64,7 +64,61 @@ test.describe('page interaction audit', () => {
 			expect(consoleErrors, `console errors on ${path}`).toEqual([]);
 		});
 	}
+
+	test('collection navigation keeps Materials under More', async ({ page }) => {
+		await checkMaterialsMoreNavigation(page, { width: 1440, height: 900 }, 'desktop');
+		await checkMaterialsMoreNavigation(page, { width: 390, height: 844 }, 'mobile');
+	});
 });
+
+async function checkMaterialsMoreNavigation(
+	page: Page,
+	viewport: { width: number; height: number },
+	label: string
+) {
+	await page.setViewportSize(viewport);
+	await page.goto(`/collections/${collectionId}`);
+
+	const nav = page.getByRole('navigation', { name: 'Collection navigation' });
+
+	await expect(nav.getByRole('link', { name: 'Materials' })).toBeHidden();
+	await nav.getByText('More').click();
+	await expect(nav.getByRole('link', { name: 'Materials' })).toBeVisible();
+	await expect(nav.locator('.collection-tabs__menu')).toBeVisible();
+	expect(await isElementCenterExposed(page, '.collection-tabs__menu')).toBe(true);
+	expect(await isElementBottomExposed(page, '.collection-tabs__menu')).toBe(true);
+
+	if (screenshotDir) {
+		await page.screenshot({
+			path: join(screenshotDir, `collection-navigation-more-materials-open-${label}.png`),
+			fullPage: true
+		});
+	}
+}
+
+async function isElementCenterExposed(page: Page, selector: string) {
+	return page.evaluate((targetSelector) => {
+		const target = document.querySelector(targetSelector);
+		if (!(target instanceof HTMLElement)) return false;
+		const rect = target.getBoundingClientRect();
+		const x = rect.left + rect.width / 2;
+		const y = rect.top + Math.min(24, rect.height / 2);
+		const hit = document.elementFromPoint(x, y);
+		return Boolean(hit && target.contains(hit));
+	}, selector);
+}
+
+async function isElementBottomExposed(page: Page, selector: string) {
+	return page.evaluate((targetSelector) => {
+		const target = document.querySelector(targetSelector);
+		if (!(target instanceof HTMLElement)) return false;
+		const rect = target.getBoundingClientRect();
+		const x = rect.left + rect.width / 2;
+		const y = rect.bottom - Math.min(12, rect.height / 3);
+		const hit = document.elementFromPoint(x, y);
+		return Boolean(hit && target.contains(hit));
+	}, selector);
+}
 
 async function checkViewport(
 	page: Page,

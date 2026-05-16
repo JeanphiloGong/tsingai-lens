@@ -1857,8 +1857,9 @@ textarea {
   min-height: 52px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
+  overflow: visible;
   padding: 6px 10px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);

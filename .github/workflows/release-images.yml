@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "!v*-*"
 
 concurrency:
   group: release-images-${{ github.ref }}

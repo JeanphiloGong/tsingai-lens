@@ -8,7 +8,26 @@ published Docker images instead of building from the source tree.
 - Docker Engine
 - Docker Compose plugin (`docker compose`)
 
-## Configure
+## One-Line Install
+
+Install the deploy bundle with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JeanphiloGong/tsingai-lens/main/deploy/install.sh | sh -s -- --version v0.4.0
+```
+
+Use `--ref <git-ref>` when you want the deploy files themselves to come from a
+specific branch or tag.
+
+Then run:
+
+```bash
+cd lens-deploy
+./scripts/lens doctor
+./scripts/lens up
+```
+
+## Manual Configure
 
 ```bash
 cp .env.example .env
@@ -21,7 +40,7 @@ embedding endpoint.
 ## Run
 
 ```bash
-docker compose --env-file .env -f compose.yml up -d
+./scripts/lens up
 ```
 
 Open:
@@ -33,7 +52,17 @@ http://localhost:8080
 ## Stop
 
 ```bash
-docker compose --env-file .env -f compose.yml down
+./scripts/lens down
+```
+
+## Useful Commands
+
+```bash
+./scripts/lens doctor
+./scripts/lens logs
+./scripts/lens ps
+./scripts/lens pull
+./scripts/lens upgrade v0.4.0
 ```
 
 ## Data

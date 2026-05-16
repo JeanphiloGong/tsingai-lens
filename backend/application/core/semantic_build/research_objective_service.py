@@ -4654,7 +4654,13 @@ class ResearchObjectiveService:
             )
         ):
             normalized = dict(record)
-            normalized["unit_kind"] = "interpretation"
+            normalized["unit_kind"] = (
+                "characterization"
+                if self._objective_text_numeric_mechanism_property(
+                    record.get("property_normalized")
+                )
+                else "interpretation"
+            )
             return (normalized,)
         if route.source_kind == "text_window" and record.get("unit_kind") != "measurement":
             return (record,)
@@ -4786,6 +4792,25 @@ class ResearchObjectiveService:
                 for axis in target_axes
             )
         return False
+
+    def _objective_text_numeric_mechanism_property(self, property_name: Any) -> bool:
+        property_key = self._normalize_property_label(property_name)
+        if not property_key:
+            return False
+        property_tokens = self._axis_token_set(property_key)
+        if not property_tokens:
+            return False
+        return any(
+            mechanism_tokens.issubset(property_tokens)
+            for mechanism_tokens in (
+                {"cool", "rate"},
+                {"thermal", "gradient"},
+                {"melt", "pool"},
+                {"width", "depth"},
+                self._axis_token_set("residual stress"),
+                {"recrystallization"},
+            )
+        )
 
     def _numeric_text_characterization_measurement_record(
         self,

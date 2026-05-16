@@ -2593,6 +2593,91 @@ def test_research_objective_service_reclassifies_off_target_text_measurements(
     assert on_target_records[0]["unit_kind"] == "measurement"
 
 
+def test_research_objective_service_preserves_numeric_text_mechanisms(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "thermal-simulation",
+            "role": "characterization",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+                "porosity",
+            ],
+        }
+    )
+
+    extracted_records = [
+        {
+            "unit_kind": "measurement",
+            "property_normalized": "cooling rate",
+            "sample_context": {"condition": "P150"},
+            "value_payload": {
+                "source_value_text": "1.43x10 6 C/s",
+                "value": 1.43e6,
+            },
+            "unit": "C/s",
+            "resolution_status": "resolved",
+        },
+        {
+            "unit_kind": "measurement",
+            "property_normalized": "melt pool width/depth ratio",
+            "sample_context": {"condition": "P150"},
+            "value_payload": {"source_value_text": "1.7", "value": 1.7},
+            "resolution_status": "resolved",
+        },
+        {
+            "unit_kind": "measurement",
+            "property_normalized": "residual stress",
+            "sample_context": {"condition": "as-SLM"},
+            "value_payload": {"source_value_text": "99.5 MPa", "value": 99.5},
+            "unit": "MPa",
+            "resolution_status": "resolved",
+        },
+    ]
+
+    records = tuple(
+        service._objective_evidence_unit_records_from_extracted(
+            route=route,
+            source={"page": 5},
+            objective_context=objective_context,
+            extracted_record=record,
+        )[0]
+        for record in extracted_records
+    )
+
+    assert [record["unit_kind"] for record in records] == [
+        "characterization",
+        "characterization",
+        "characterization",
+    ]
+    assert [record["property_normalized"] for record in records] == [
+        "cooling rate",
+        "melt pool width/depth ratio",
+        "residual stress",
+    ]
+    assert [record["value_payload"]["value"] for record in records] == [
+        1.43e6,
+        1.7,
+        99.5,
+    ]
+
+
 def test_research_objective_service_reclassifies_text_comparison_without_pair_context(
     tmp_path,
 ):

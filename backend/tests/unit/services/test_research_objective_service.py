@@ -758,6 +758,181 @@ class _InventedAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
         )
 
 
+class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        self.discovery_payloads.append(payload)
+        return StructuredResearchObjectives(
+            objectives=[
+                StructuredResearchObjective(
+                    question=(
+                        "How do laser power and scanning speed affect yield "
+                        "strength and elongation of SLM 316L stainless steel?"
+                    ),
+                    material_scope=["316L stainless steel"],
+                    process_axes=[
+                        "Selective Laser Melting",
+                        "laser power",
+                        "scanning speed",
+                    ],
+                    property_axes=["yield strength", "elongation"],
+                    comparison_intent=(
+                        "Compare laser power and scanning speed effects on "
+                        "mechanical properties."
+                    ),
+                    seed_document_ids=["paper-1"],
+                    excluded_document_ids=[],
+                    confidence=0.9,
+                    reason="mechanical objective",
+                ),
+                StructuredResearchObjective(
+                    question=(
+                        "How does porosity influence corrosion potential and "
+                        "pitting potential of SLM 316L stainless steel?"
+                    ),
+                    material_scope=["316L stainless steel"],
+                    process_axes=["Selective Laser Melting", "porosity"],
+                    property_axes=["corrosion potential", "pitting potential"],
+                    comparison_intent=(
+                        "Compare corrosion response across porosity conditions."
+                    ),
+                    seed_document_ids=["paper-1"],
+                    excluded_document_ids=[],
+                    confidence=0.9,
+                    reason="corrosion objective",
+                ),
+            ]
+        )
+
+    def merge_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveMergePlan:
+        self.merge_payloads.append(payload)
+        groups: list[StructuredObjectiveMergeGroup] = []
+        for candidate in payload["candidate_objectives"]:
+            process_axes = list(candidate["process_axes"])
+            if "yield strength" in candidate["property_axes"]:
+                process_axes.append("porosity")
+            groups.append(
+                StructuredObjectiveMergeGroup(
+                    source_objective_ids=[candidate["objective_id"]],
+                    question=candidate["question"],
+                    material_scope=candidate["material_scope"],
+                    process_axes=process_axes,
+                    property_axes=candidate["property_axes"],
+                    comparison_intent=candidate["comparison_intent"],
+                    confidence=candidate["confidence"],
+                    reason="invalid plan leaks axes between objectives",
+                )
+            )
+        return StructuredObjectiveMergePlan(merged_objectives=groups)
+
+
+class _UnmatchedSeedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        self.discovery_payloads.append(payload)
+        return StructuredResearchObjectives(
+            objectives=[
+                StructuredResearchObjective(
+                    question=(
+                        "How does heat treatment affect yield strength of "
+                        "SLM 316L stainless steel?"
+                    ),
+                    material_scope=["316L stainless steel"],
+                    process_axes=["Selective Laser Melting"],
+                    property_axes=["mechanical properties"],
+                    comparison_intent="Compare heat-treatment effects on strength.",
+                    seed_document_ids=["P002-heat-treatment.pdf"],
+                    excluded_document_ids=[],
+                    confidence=0.9,
+                    reason="model returned a source filename instead of document id",
+                )
+            ]
+        )
+
+
+class _OverbroadPersistedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        self.discovery_payloads.append(payload)
+        return StructuredResearchObjectives(
+            objectives=[
+                StructuredResearchObjective(
+                    question=(
+                        "How do energy density, scanning speed, porosity, heat "
+                        "treatment, and scan strategy affect yield strength of "
+                        "SLM 316L stainless steel?"
+                    ),
+                    material_scope=["316L stainless steel"],
+                    process_axes=[
+                        "Selective Laser Melting",
+                        "energy density",
+                        "scanning speed",
+                        "porosity",
+                        "heat treatment",
+                        "scan strategy",
+                    ],
+                    property_axes=["yield strength"],
+                    comparison_intent=(
+                        "Compare reported yield strength across all process axes."
+                    ),
+                    seed_document_ids=["paper-1"],
+                    excluded_document_ids=[],
+                    confidence=0.9,
+                    reason="persisted objective contains unrelated process axes",
+                )
+            ]
+        )
+
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        self.skim_payloads.append(payload)
+        return StructuredPaperSkim(
+            doc_role="experimental",
+            candidate_materials=["316L stainless steel"],
+            candidate_processes=["Selective Laser Melting"],
+            candidate_properties=["yield strength"],
+            changed_variables=["energy density", "scanning speed"],
+            possible_objectives=[
+                "How do energy density and scanning speed affect yield strength?"
+            ],
+            evidence_density="high",
+            confidence=0.91,
+            warnings=[],
+        )
+
+    def extract_objective_evidence_units(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceUnits:
+        self.unit_payloads.append(payload)
+        return StructuredObjectiveEvidenceUnits(
+            evidence_units=[
+                StructuredObjectiveEvidenceUnit(
+                    unit_kind="measurement",
+                    property_normalized="yield strength",
+                    material_system={"family": "316L stainless steel"},
+                    sample_context={"label": "S1"},
+                    process_context={
+                        "energy density": "100 J/mm3",
+                        "scanning speed": "1200 mm/s",
+                    },
+                    value_payload={"value": 450, "source_value_text": "450 MPa"},
+                    unit="MPa",
+                    resolution_status="resolved",
+                    confidence=0.86,
+                )
+            ]
+        )
+
+
 class _DisjointPropertyMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
     def merge_research_objectives(
         self,
@@ -6043,6 +6218,89 @@ def test_research_objective_service_falls_back_when_merge_plan_invents_axis(
 
     assert len(objectives) == 2
     assert all("laser power" not in objective.process_axes for objective in objectives)
+
+
+def test_research_objective_service_rejects_merge_plan_with_cross_objective_axis(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _CrossObjectiveAxisMergeExtractor(),
+    )
+
+    assert len(objectives) == 2
+    mechanical_objective = next(
+        objective
+        for objective in objectives
+        if "yield strength" in objective.property_axes
+    )
+    corrosion_objective = next(
+        objective
+        for objective in objectives
+        if "corrosion potential" in objective.property_axes
+    )
+    assert "porosity" not in mechanical_objective.process_axes
+    assert "porosity" in corrosion_objective.process_axes
+
+
+def test_research_objective_service_does_not_global_fill_unmatched_seed_axes(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _UnmatchedSeedObjectiveExtractor(),
+    )
+
+    assert len(objectives) == 1
+    objective = objectives[0]
+    assert objective.process_axes == ("Selective Laser Melting",)
+    assert objective.property_axes == ("mechanical properties",)
+
+
+def test_research_objective_service_list_prunes_overbroad_display_axes(
+    tmp_path,
+):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Display")
+    collection_id = collection["collection_id"]
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        structured_extractor=_OverbroadPersistedObjectiveExtractor(),
+    )
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "SLM 316L Mechanical Properties",
+                    "text": (
+                        "Energy density and scanning speed changed yield strength."
+                    ),
+                    "metadata": {"source_filename": "paper-1.pdf"},
+                }
+            ],
+            blocks=[
+                {
+                    "block_id": "b1",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": (
+                        "Energy density and scanning speed changed yield strength."
+                    ),
+                    "block_order": 1,
+                }
+            ],
+        ),
+    )
+
+    service.build_research_objectives(collection_id)
+    workspace = service.list_objective_workspaces(collection_id)
+
+    objective = workspace["objectives"][0]
+    assert objective["process_axes"] == ["energy density", "scanning speed"]
+    assert "porosity" not in objective["question"]
+    assert "heat treatment" not in objective["question"]
 
 
 def test_research_objective_service_splits_merge_plan_with_disjoint_properties(

@@ -316,7 +316,10 @@ class ResearchObjectiveService:
     def list_objective_workspaces(self, collection_id: str) -> dict[str, Any]:
         facts = self._read_objective_workspace_facts(collection_id)
         objectives = [
-            self._objective_list_item(objective, facts=facts)
+            self._objective_list_item(
+                self._display_objective_from_facts(objective, facts=facts),
+                facts=facts,
+            )
             for objective in facts.research_objectives
         ]
         return {
@@ -343,6 +346,7 @@ class ResearchObjectiveService:
         )
         if objective is None:
             raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        objective = self._display_objective_from_facts(objective, facts=facts)
 
         context = next(
             (
@@ -715,6 +719,120 @@ class ResearchObjectiveService:
             }
         )
         return record
+
+    def _display_objective_from_facts(
+        self,
+        objective: ResearchObjective,
+        *,
+        facts,
+    ) -> ResearchObjective:
+        evidence_units = self._filter_objective_records(
+            facts.objective_evidence_units,
+            objective_id=objective.objective_id,
+        )
+        context = next(
+            (
+                candidate
+                for candidate in facts.objective_contexts
+                if candidate.objective_id == objective.objective_id
+            ),
+            None,
+        )
+        process_axes = self._display_process_axes(
+            objective,
+            context=context,
+            evidence_units=evidence_units,
+        )
+        property_axes = (
+            list(context.target_property_axes)
+            if context is not None and context.target_property_axes
+            else list(objective.property_axes)
+        )
+        if (
+            tuple(process_axes) == objective.process_axes
+            and tuple(property_axes) == objective.property_axes
+        ):
+            return objective
+        payload = objective.to_record()
+        payload["process_axes"] = process_axes
+        payload["property_axes"] = property_axes
+        payload["question"] = self._build_research_objective_question(payload)
+        payload["comparison_intent"] = self._build_comparison_intent(payload)
+        return ResearchObjective.from_mapping(payload)
+
+    def _display_process_axes(
+        self,
+        objective: ResearchObjective,
+        *,
+        context: ObjectiveContext | None,
+        evidence_units,
+    ) -> list[str]:
+        candidate_axes: list[str] = []
+        if context is not None:
+            candidate_axes.extend(context.variable_process_axes)
+            candidate_axes.extend(context.process_context_axes)
+        if not candidate_axes:
+            candidate_axes.extend(objective.process_axes)
+        observed_keys = self._objective_observed_process_axis_keys(evidence_units)
+        selected: list[str] = []
+        seen: set[str] = set()
+        for axis in candidate_axes:
+            key = self._axis_key(axis)
+            if not key:
+                continue
+            if observed_keys and not self._process_axis_matches_observed_key(
+                key,
+                observed_keys,
+            ):
+                continue
+            self._append_unique_axis(selected, seen, axis)
+        if selected:
+            return selected[:6]
+        return list(objective.process_axes[:6])
+
+    def _objective_observed_process_axis_keys(self, evidence_units) -> set[str]:
+        keys: set[str] = set()
+        for unit in evidence_units:
+            for mapping in (unit.process_context, unit.resolved_condition):
+                for key, value in mapping.items():
+                    if self._has_observed_evidence_value(value):
+                        keys.add(self._axis_key(key))
+                    if isinstance(value, str):
+                        keys.add(self._axis_key(value))
+        return {key for key in keys if key}
+
+    def _process_axis_matches_observed_key(
+        self,
+        axis_key: str,
+        observed_keys: set[str],
+    ) -> bool:
+        axis_tokens = self._axis_token_set(axis_key)
+        if not axis_tokens:
+            return False
+        for observed_key in observed_keys:
+            if axis_key == observed_key:
+                return True
+            observed_tokens = self._axis_token_set(observed_key)
+            if axis_tokens.issubset(observed_tokens) or observed_tokens.issubset(
+                axis_tokens
+            ):
+                return True
+        return False
+
+    def _has_observed_evidence_value(self, value: Any) -> bool:
+        if value in (None, "", [], {}):
+            return False
+        if isinstance(value, str) and value.strip().lower() in {
+            "unknown",
+            "unspecified",
+            "not specified",
+            "n/a",
+            "na",
+            "none",
+            "null",
+        }:
+            return False
+        return True
 
     def _objective_collection_state(
         self,
@@ -6642,6 +6760,8 @@ class ResearchObjectiveService:
         )
         if seeded:
             return seeded
+        if objective.seed_document_ids:
+            return ()
         excluded = set(objective.excluded_document_ids)
         selected = tuple(skim for skim in paper_skims if skim.document_id not in excluded)
         return selected or paper_skims
@@ -6916,7 +7036,7 @@ class ResearchObjectiveService:
             if document_id in skim_by_document_id
         ]
         if not candidate_skims:
-            candidate_skims = list(paper_skims)
+            candidate_skims = list(paper_skims) if not objective.seed_document_ids else []
         for skim in candidate_skims:
             for value in (*skim.candidate_processes, *skim.changed_variables):
                 self._append_unique_axis(merged, seen, value)
@@ -6970,7 +7090,7 @@ class ResearchObjectiveService:
             if document_id in skim_by_document_id
         ]
         if not candidate_skims:
-            candidate_skims = list(paper_skims)
+            candidate_skims = list(paper_skims) if not objective.seed_document_ids else []
         return {
             self._axis_key(value)
             for skim in candidate_skims
@@ -7196,9 +7316,6 @@ class ResearchObjectiveService:
         paper_skims: tuple[PaperSkim, ...],
     ) -> tuple[ResearchObjective, ...] | None:
         objective_by_id = {objective.objective_id: objective for objective in objectives}
-        allowed_material_axes = self._allowed_material_axes(objectives, paper_skims)
-        allowed_process_axes = self._allowed_process_axes(objectives, paper_skims)
-        allowed_property_axes = self._allowed_property_axes(objectives, paper_skims)
         used_source_ids: set[str] = set()
         merged_objectives: list[ResearchObjective] = []
 
@@ -7228,19 +7345,16 @@ class ResearchObjectiveService:
 
             material_scope = self._validated_merge_axes(
                 tuple(group.material_scope),
-                allowed_axes=allowed_material_axes,
                 source_objectives=source_objectives,
                 source_field="material_scope",
             )
             process_axes = self._validated_merge_axes(
                 tuple(group.process_axes),
-                allowed_axes=allowed_process_axes,
                 source_objectives=source_objectives,
                 source_field="process_axes",
             )
             property_axes = self._validated_merge_axes(
                 tuple(group.property_axes),
-                allowed_axes=allowed_property_axes,
                 source_objectives=source_objectives,
                 source_field="property_axes",
             )
@@ -7540,7 +7654,7 @@ class ResearchObjectiveService:
             if skim.document_id in objective.seed_document_ids
         ]
         if not seeded_skims:
-            seeded_skims = list(paper_skims)
+            seeded_skims = list(paper_skims) if not objective.seed_document_ids else []
         return self._unique_axis_values(
             value
             for skim in seeded_skims
@@ -7646,10 +7760,16 @@ class ResearchObjectiveService:
         self,
         values: tuple[str, ...],
         *,
-        allowed_axes: set[str],
         source_objectives: tuple[ResearchObjective, ...],
         source_field: str,
     ) -> list[str] | None:
+        allowed_axes = self._axis_key_set(
+            *(
+                value
+                for objective in source_objectives
+                for value in getattr(objective, source_field)
+            )
+        )
         if not values:
             return self._merge_objective_axes(source_objectives, source_field)
         merged: list[str] = []

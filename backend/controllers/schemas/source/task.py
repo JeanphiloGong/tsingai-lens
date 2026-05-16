@@ -12,6 +12,13 @@ TaskStage = Literal[
     "source_artifacts_started",
     "source_artifacts_completed",
     "document_profiles_started",
+    "research_objectives_started",
+    "objective_paper_skim_started",
+    "objective_discovery_started",
+    "objective_paper_framing_started",
+    "objective_evidence_routing_started",
+    "objective_evidence_units_started",
+    "objective_logic_chains_started",
     "paper_facts_started",
     "comparison_rows_started",
     "artifacts_ready",
@@ -40,6 +47,10 @@ class TaskResponse(BaseModel):
     status: TaskStatus = Field(..., description="任务状态")
     current_stage: TaskStage = Field(..., description="当前阶段")
     progress_percent: int = Field(default=0, description="进度百分比")
+    progress_detail: dict[str, Any] | None = Field(
+        default=None,
+        description="当前阶段的可读子进度，例如 current/total/unit/message",
+    )
     output_path: str | None = Field(default=None, description="输出目录")
     errors: list[str] = Field(default_factory=list, description="错误列表")
     warnings: list[str] = Field(default_factory=list, description="警告列表")

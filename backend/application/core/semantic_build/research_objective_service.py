@@ -6,7 +6,7 @@ import json
 import logging
 import math
 import re
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
@@ -40,6 +40,8 @@ from .llm.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
@@ -397,6 +399,7 @@ class ResearchObjectiveService:
     def build_research_objectives(
         self,
         collection_id: str,
+        progress_callback: ProgressCallback | None = None,
     ) -> tuple[ResearchObjective, ...]:
         self.collection_service.get_collection(collection_id)
         try:
@@ -423,6 +426,15 @@ class ResearchObjectiveService:
         paper_skims: list[PaperSkim] = []
         document_count = len(artifacts.documents)
         for document_position, document in enumerate(artifacts.documents, start=1):
+            self._notify_progress(
+                progress_callback,
+                phase="objective_paper_skim_started",
+                current=document_position,
+                total=document_count,
+                unit="documents",
+                message="Scanning papers for candidate research objectives.",
+                active_document_id=document.document_id,
+            )
             document_blocks = blocks_by_document_id.get(document.document_id, [])
             document_tables = tables_by_document_id.get(document.document_id, [])
             document_figures = figures_by_document_id.get(document.document_id, [])
@@ -474,6 +486,14 @@ class ResearchObjectiveService:
             "collection_id": collection_id,
             "paper_skims": [skim.to_record() for skim in paper_skims],
         }
+        self._notify_progress(
+            progress_callback,
+            phase="objective_discovery_started",
+            current=0,
+            total=1,
+            unit="steps",
+            message="Merging paper skims into collection research objectives.",
+        )
         parsed_objectives = extractor.discover_research_objectives(objective_payload)
         discovered_objective_count = len(parsed_objectives.objectives)
         skim_by_document_id = {
@@ -542,6 +562,7 @@ class ResearchObjectiveService:
             profiles_by_document_id=profiles_by_document_id,
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
+            progress_callback=progress_callback,
         )
         objective_evidence_routes = self._build_objective_evidence_routes(
             collection_id=collection_id,
@@ -551,6 +572,7 @@ class ResearchObjectiveService:
             objective_paper_frames=objective_paper_frames,
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
+            progress_callback=progress_callback,
         )
         objective_evidence_units = self._build_objective_evidence_units(
             collection_id=collection_id,
@@ -562,12 +584,14 @@ class ResearchObjectiveService:
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
             table_cells_by_document_id=table_cells_by_document_id,
+            progress_callback=progress_callback,
         )
         objective_logic_chains = self._build_objective_logic_chains(
             collection_id=collection_id,
             objectives=research_objectives,
             objective_contexts=objective_contexts,
             objective_evidence_units=objective_evidence_units,
+            progress_callback=progress_callback,
         )
 
         self.core_fact_repository.replace_collection_research_objectives(
@@ -589,6 +613,21 @@ class ResearchObjectiveService:
             len(objective_logic_chains),
         )
         return research_objectives
+
+    def _notify_progress(
+        self,
+        progress_callback: ProgressCallback | None,
+        **progress_detail: Any,
+    ) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(progress_detail)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Research objective progress callback failed phase=%s",
+                progress_detail.get("phase"),
+            )
 
     def _read_objective_workspace_facts(self, collection_id: str):
         self.collection_service.get_collection(collection_id)
@@ -764,6 +803,7 @@ class ResearchObjectiveService:
         profiles_by_document_id: dict[str, Any],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
+        progress_callback: ProgressCallback | None = None,
     ) -> tuple[ObjectivePaperFrame, ...]:
         context_by_objective_id = {
             context.objective_id: context
@@ -790,6 +830,16 @@ class ResearchObjectiveService:
             for document_position, document in enumerate(documents, start=1):
                 completed_frame_requests += 1
                 document_id = str(getattr(document, "document_id", "") or "")
+                self._notify_progress(
+                    progress_callback,
+                    phase="objective_paper_framing_started",
+                    current=completed_frame_requests,
+                    total=total_frame_requests,
+                    unit="frames",
+                    message="Checking each paper against each research objective.",
+                    active_document_id=document_id,
+                    active_objective_id=objective.objective_id,
+                )
                 tables = tables_by_document_id.get(document_id, [])
                 known_table_ids = {
                     str(getattr(table, "table_id", "") or "")
@@ -887,6 +937,7 @@ class ResearchObjectiveService:
         objective_paper_frames: tuple[ObjectivePaperFrame, ...],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
+        progress_callback: ProgressCallback | None = None,
     ) -> tuple[ObjectiveEvidenceRoute, ...]:
         objective_by_id = {
             objective.objective_id: objective
@@ -905,6 +956,16 @@ class ResearchObjectiveService:
         )
         frame_count = len(objective_paper_frames)
         for frame_position, frame in enumerate(objective_paper_frames, start=1):
+            self._notify_progress(
+                progress_callback,
+                phase="objective_evidence_routing_started",
+                current=frame_position,
+                total=frame_count,
+                unit="frames",
+                message="Routing source blocks and tables for objective-scoped extraction.",
+                active_document_id=frame.document_id,
+                active_objective_id=frame.objective_id,
+            )
             logger.info(
                 "Research objective evidence routing frame started collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s relevance=%s completed_frames=%s remaining_frames=%s",
                 collection_id,
@@ -1339,6 +1400,7 @@ class ResearchObjectiveService:
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
         table_cells_by_document_id: dict[str, list[Any]] | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> tuple[ObjectiveEvidenceUnit, ...]:
         objective_by_id = {
             objective.objective_id: objective
@@ -1366,6 +1428,16 @@ class ResearchObjectiveService:
         units: list[ObjectiveEvidenceUnit] = []
         seen: set[str] = set()
         for route_position, route in enumerate(extractable_routes, start=1):
+            self._notify_progress(
+                progress_callback,
+                phase="objective_evidence_units_started",
+                current=route_position,
+                total=len(extractable_routes),
+                unit="routes",
+                message="Extracting objective evidence units from routed sources.",
+                active_document_id=route.document_id,
+                active_objective_id=route.objective_id,
+            )
             objective = objective_by_id.get(route.objective_id)
             if objective is None:
                 logger.info(
@@ -5584,6 +5656,7 @@ class ResearchObjectiveService:
         objectives: tuple[ResearchObjective, ...],
         objective_contexts: tuple[ObjectiveContext, ...],
         objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+        progress_callback: ProgressCallback | None = None,
     ) -> tuple[ObjectiveLogicChain, ...]:
         context_by_objective_id = {
             context.objective_id: context
@@ -5599,7 +5672,17 @@ class ResearchObjectiveService:
             len(objective_evidence_units),
         )
         chains: list[ObjectiveLogicChain] = []
-        for objective in objectives:
+        objective_count = len(objectives)
+        for objective_position, objective in enumerate(objectives, start=1):
+            self._notify_progress(
+                progress_callback,
+                phase="objective_logic_chains_started",
+                current=objective_position,
+                total=objective_count,
+                unit="objectives",
+                message="Assembling objective logic chains from extracted evidence.",
+                active_objective_id=objective.objective_id,
+            )
             units = tuple(units_by_objective_id.get(objective.objective_id, ()))
             if not units:
                 continue

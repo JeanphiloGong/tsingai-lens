@@ -28,8 +28,10 @@ def test_task_service_preserves_source_build_stage_values_without_aliases(tmp_pa
     task_service = TaskService(tmp_path / "tasks")
 
     task = task_service.create_task("col_a", "build")
+    assert task["progress_detail"] is None
     stored = task_service.repository.read_task(task["task_id"])
     assert stored is not None
+    assert stored["progress_detail"] is None
 
     task_service.repository.write_task(
         task["task_id"],
@@ -48,9 +50,17 @@ def test_task_service_preserves_source_build_stage_values_without_aliases(tmp_pa
     updated = task_service.update_task(
         task["task_id"],
         current_stage="source_artifacts_completed",
+        progress_detail={
+            "phase": "source_artifacts_completed",
+            "current": 1,
+            "total": 1,
+            "unit": "documents",
+        },
     )
     assert updated["current_stage"] == "source_artifacts_completed"
+    assert updated["progress_detail"]["phase"] == "source_artifacts_completed"
 
     persisted = task_service.repository.read_task(task["task_id"])
     assert persisted is not None
     assert persisted["current_stage"] == "source_artifacts_completed"
+    assert persisted["progress_detail"]["unit"] == "documents"

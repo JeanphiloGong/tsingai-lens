@@ -157,6 +157,7 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     assert result["status"] == "completed"
     assert result["current_stage"] == "artifacts_ready"
+    assert result["progress_detail"]["phase"] == "artifacts_ready"
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
     assert "is_update_run" not in captured
     artifacts = artifact_registry.get(collection["collection_id"])
@@ -240,8 +241,14 @@ def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
     )
     assert any(
         "Build task progress" in record.message
+        and "stage=objective_evidence_routing_started" in record.message
+        and "progress_percent=75" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Build task progress" in record.message
         and "stage=paper_facts_started" in record.message
-        and "progress_percent=76" in record.message
+        and "progress_percent=80" in record.message
         for record in caplog.records
     )
     assert any(
@@ -250,3 +257,5 @@ def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
         and "progress_percent=100" in record.message
         for record in caplog.records
     )
+    final_task = task_service.get_task(task["task_id"])
+    assert final_task["progress_detail"]["phase"] == "artifacts_ready"

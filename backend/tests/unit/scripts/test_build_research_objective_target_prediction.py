@@ -207,6 +207,22 @@ def test_build_target_prediction_adds_measurement_value_aliases() -> None:
                 "value": 1.9,
             },
         },
+        {
+            "paper_id": "P001",
+            "result_id": "R006",
+            "sample_id": "S006",
+            "metric_name": "el%",
+            "value_or_trend": "72",
+            "unit": "",
+        },
+        {
+            "paper_id": "P001",
+            "result_id": "R007",
+            "sample_id": "S007",
+            "metric_name": "yield strength",
+            "value_or_trend": "321.7 ( ± 3.3)",
+            "unit": "MPa",
+        },
     ]
 
     prediction = projection.build_target_prediction_from_bundle(bundle)
@@ -247,6 +263,27 @@ def test_build_target_prediction_adds_measurement_value_aliases() -> None:
                 "1.9 \u03a9 cm 2. Aliases: 1.90e5 ohm cm2."
             ),
             "value_aliases": ["1.90e5 ohm cm2"],
+        },
+        {
+            "paper_id": "P001",
+            "result_id": "R006",
+            "sample_id": "S006",
+            "metric_name": "el%",
+            "value": "72",
+            "summary": "P001 R006: S006 el% = 72. Aliases: 72%.",
+            "value_aliases": ["72%"],
+        },
+        {
+            "paper_id": "P001",
+            "result_id": "R007",
+            "sample_id": "S007",
+            "metric_name": "yield strength",
+            "value": "321.7 ( ± 3.3) MPa",
+            "summary": (
+                "P001 R007: S007 yield strength = 321.7 ( ± 3.3) MPa. "
+                "Aliases: 321.7 MPa."
+            ),
+            "value_aliases": ["321.7 MPa"],
         },
     ]
 

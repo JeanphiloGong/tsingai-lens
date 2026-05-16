@@ -405,6 +405,9 @@ def _measurement_value_aliases(
         number = _first_number(value)
         if number and f"{number}%" != value:
             aliases.append(f"{number}%")
+    uncertainty_stripped = _uncertainty_stripped_value_alias(value, unit=unit)
+    if uncertainty_stripped and uncertainty_stripped != value:
+        aliases.append(uncertainty_stripped)
     for source_value in [
         value,
         *_payload_leaf_texts(measurement.get("value_payload")),
@@ -417,6 +420,20 @@ def _measurement_value_aliases(
 
 def _measurement_is_percent_like(*, unit: str, metric: str) -> bool:
     return "%" in unit or "%" in metric
+
+
+def _uncertainty_stripped_value_alias(value: str, *, unit: str) -> str:
+    if not unit:
+        return ""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    without_parenthetical = re.sub(r"\s*\([^)]*[±+/-][^)]*\)", "", text).strip()
+    if without_parenthetical == text:
+        return ""
+    if unit in without_parenthetical:
+        return without_parenthetical
+    return f"{without_parenthetical} {unit}".strip()
 
 
 def _scientific_notation_alias(value: str) -> str:

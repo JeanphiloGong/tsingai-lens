@@ -14,6 +14,11 @@ from domain.source import (
     SourceBlock,
     SourceDocument,
     SourceFigure,
+    SourceReferenceCandidate,
+    SourceReferenceEntry,
+    SourceReferenceMention,
+    SourceReferenceResolution,
+    SourceReferenceSet,
     SourceTable,
     SourceTableCell,
     SourceTableRow,
@@ -69,6 +74,45 @@ class SqliteSourceArtifactRepository:
             table_cells=tuple(self.list_table_cells(collection_id)),
             figures=tuple(self.list_figures(collection_id)),
         )
+
+    def replace_collection_references(
+        self,
+        collection_id: str,
+        references: SourceReferenceSet,
+    ) -> None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            self._delete_collection_references(connection, collection_id)
+            self._insert_reference_entries(connection, collection_id, references.entries)
+            self._insert_reference_mentions(
+                connection,
+                collection_id,
+                references.mentions,
+            )
+            self._insert_reference_resolutions(
+                connection,
+                collection_id,
+                references.resolutions,
+            )
+            self._insert_reference_candidates(
+                connection,
+                collection_id,
+                references.candidates,
+            )
+
+    def read_collection_references(self, collection_id: str) -> SourceReferenceSet:
+        self._ensure_schema()
+        with self._connection() as connection:
+            return SourceReferenceSet(
+                entries=tuple(self._list_reference_entries(connection, collection_id)),
+                mentions=tuple(self._list_reference_mentions(connection, collection_id)),
+                resolutions=tuple(
+                    self._list_reference_resolutions(connection, collection_id)
+                ),
+                candidates=tuple(
+                    self._list_reference_candidates(connection, collection_id)
+                ),
+            )
 
     def list_documents(self, collection_id: str) -> list[SourceDocument]:
         self._ensure_schema()
@@ -584,6 +628,86 @@ class SqliteSourceArtifactRepository:
             )
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS source_reference_entries (
+                    collection_id TEXT NOT NULL,
+                    reference_id TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    raw_reference TEXT NOT NULL,
+                    reference_index TEXT,
+                    title TEXT,
+                    authors_text TEXT,
+                    year INTEGER,
+                    doi TEXT,
+                    source_block_id TEXT,
+                    page INTEGER,
+                    confidence REAL NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    PRIMARY KEY (collection_id, reference_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_reference_mentions (
+                    collection_id TEXT NOT NULL,
+                    mention_id TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    reference_id TEXT,
+                    citation_marker TEXT NOT NULL,
+                    context_text TEXT NOT NULL,
+                    source_block_id TEXT,
+                    page INTEGER,
+                    char_start INTEGER,
+                    char_end INTEGER,
+                    confidence REAL NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    PRIMARY KEY (collection_id, mention_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_reference_resolutions (
+                    collection_id TEXT NOT NULL,
+                    resolution_id TEXT NOT NULL,
+                    reference_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    resolved_title TEXT,
+                    resolved_authors_text TEXT,
+                    resolved_year INTEGER,
+                    resolved_venue TEXT,
+                    resolved_doi TEXT,
+                    resolved_url TEXT,
+                    open_access_url TEXT,
+                    confidence REAL NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    PRIMARY KEY (collection_id, resolution_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_reference_candidates (
+                    collection_id TEXT NOT NULL,
+                    candidate_id TEXT NOT NULL,
+                    reference_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    relevance_score REAL NOT NULL,
+                    relevance_reason TEXT,
+                    cited_by_document_id TEXT,
+                    mention_count INTEGER NOT NULL,
+                    representative_context TEXT,
+                    resolved_doi TEXT,
+                    resolved_url TEXT,
+                    open_access_url TEXT,
+                    metadata_json TEXT NOT NULL,
+                    PRIMARY KEY (collection_id, candidate_id)
+                )
+                """
+            )
+            connection.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_source_blocks_doc_order
                 ON source_blocks(collection_id, document_id, block_order)
                 """
@@ -612,6 +736,28 @@ class SqliteSourceArtifactRepository:
                 ON source_figures(collection_id, document_id, figure_order)
                 """
             )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_source_reference_entries_doc
+                ON source_reference_entries(collection_id, document_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_source_reference_mentions_doc_ref
+                ON source_reference_mentions(collection_id, document_id, reference_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_source_reference_candidates_status
+                ON source_reference_candidates(
+                    collection_id,
+                    status,
+                    relevance_score DESC
+                )
+                """
+            )
 
     def _delete_collection_artifacts(
         self,
@@ -629,6 +775,22 @@ class SqliteSourceArtifactRepository:
             "source_text_unit_documents",
             "source_text_units",
             "source_documents",
+        ):
+            connection.execute(
+                f"DELETE FROM {table_name} WHERE collection_id = ?",
+                (collection_id,),
+            )
+
+    def _delete_collection_references(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+    ) -> None:
+        for table_name in (
+            "source_reference_candidates",
+            "source_reference_resolutions",
+            "source_reference_mentions",
+            "source_reference_entries",
         ):
             connection.execute(
                 f"DELETE FROM {table_name} WHERE collection_id = ?",
@@ -944,6 +1106,182 @@ class SqliteSourceArtifactRepository:
             ],
         )
 
+    def _insert_reference_entries(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+        entries: tuple[SourceReferenceEntry, ...],
+    ) -> None:
+        connection.executemany(
+            """
+            INSERT INTO source_reference_entries (
+                collection_id,
+                reference_id,
+                document_id,
+                raw_reference,
+                reference_index,
+                title,
+                authors_text,
+                year,
+                doi,
+                source_block_id,
+                page,
+                confidence,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    collection_id,
+                    entry.reference_id,
+                    entry.document_id,
+                    entry.raw_reference,
+                    entry.reference_index,
+                    entry.title,
+                    entry.authors_text,
+                    entry.year,
+                    entry.doi,
+                    entry.source_block_id,
+                    entry.page,
+                    entry.confidence,
+                    _dump_json_object(entry.metadata),
+                )
+                for entry in entries
+            ],
+        )
+
+    def _insert_reference_mentions(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+        mentions: tuple[SourceReferenceMention, ...],
+    ) -> None:
+        connection.executemany(
+            """
+            INSERT INTO source_reference_mentions (
+                collection_id,
+                mention_id,
+                document_id,
+                reference_id,
+                citation_marker,
+                context_text,
+                source_block_id,
+                page,
+                char_start,
+                char_end,
+                confidence,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    collection_id,
+                    mention.mention_id,
+                    mention.document_id,
+                    mention.reference_id,
+                    mention.citation_marker,
+                    mention.context_text,
+                    mention.source_block_id,
+                    mention.page,
+                    mention.char_start,
+                    mention.char_end,
+                    mention.confidence,
+                    _dump_json_object(mention.metadata),
+                )
+                for mention in mentions
+            ],
+        )
+
+    def _insert_reference_resolutions(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+        resolutions: tuple[SourceReferenceResolution, ...],
+    ) -> None:
+        connection.executemany(
+            """
+            INSERT INTO source_reference_resolutions (
+                collection_id,
+                resolution_id,
+                reference_id,
+                provider,
+                status,
+                resolved_title,
+                resolved_authors_text,
+                resolved_year,
+                resolved_venue,
+                resolved_doi,
+                resolved_url,
+                open_access_url,
+                confidence,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    collection_id,
+                    resolution.resolution_id,
+                    resolution.reference_id,
+                    resolution.provider,
+                    resolution.status,
+                    resolution.resolved_title,
+                    resolution.resolved_authors_text,
+                    resolution.resolved_year,
+                    resolution.resolved_venue,
+                    resolution.resolved_doi,
+                    resolution.resolved_url,
+                    resolution.open_access_url,
+                    resolution.confidence,
+                    _dump_json_object(resolution.metadata),
+                )
+                for resolution in resolutions
+            ],
+        )
+
+    def _insert_reference_candidates(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+        candidates: tuple[SourceReferenceCandidate, ...],
+    ) -> None:
+        connection.executemany(
+            """
+            INSERT INTO source_reference_candidates (
+                collection_id,
+                candidate_id,
+                reference_id,
+                status,
+                relevance_score,
+                relevance_reason,
+                cited_by_document_id,
+                mention_count,
+                representative_context,
+                resolved_doi,
+                resolved_url,
+                open_access_url,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    collection_id,
+                    candidate.candidate_id,
+                    candidate.reference_id,
+                    candidate.status,
+                    candidate.relevance_score,
+                    candidate.relevance_reason,
+                    candidate.cited_by_document_id,
+                    candidate.mention_count,
+                    candidate.representative_context,
+                    candidate.resolved_doi,
+                    candidate.resolved_url,
+                    candidate.open_access_url,
+                    _dump_json_object(candidate.metadata),
+                )
+                for candidate in candidates
+            ],
+        )
+
     def _table_values(
         self,
         collection_id: str,
@@ -1025,6 +1363,190 @@ class SqliteSourceArtifactRepository:
         for row in rows:
             grouped.setdefault(row["block_id"], []).append(row["text_unit_id"])
         return grouped
+
+    def _list_reference_entries(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+    ) -> list[SourceReferenceEntry]:
+        rows = connection.execute(
+            """
+            SELECT
+                reference_id,
+                document_id,
+                raw_reference,
+                reference_index,
+                title,
+                authors_text,
+                year,
+                doi,
+                source_block_id,
+                page,
+                confidence,
+                metadata_json
+            FROM source_reference_entries
+            WHERE collection_id = ?
+            ORDER BY document_id ASC, reference_index ASC, reference_id ASC
+            """,
+            (collection_id,),
+        ).fetchall()
+        return [
+            SourceReferenceEntry.from_record(
+                {
+                    "reference_id": row["reference_id"],
+                    "document_id": row["document_id"],
+                    "raw_reference": row["raw_reference"],
+                    "reference_index": row["reference_index"],
+                    "title": row["title"],
+                    "authors_text": row["authors_text"],
+                    "year": row["year"],
+                    "doi": row["doi"],
+                    "source_block_id": row["source_block_id"],
+                    "page": row["page"],
+                    "confidence": row["confidence"],
+                    "metadata": _load_json_object(row["metadata_json"]),
+                }
+            )
+            for row in rows
+        ]
+
+    def _list_reference_mentions(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+    ) -> list[SourceReferenceMention]:
+        rows = connection.execute(
+            """
+            SELECT
+                mention_id,
+                document_id,
+                reference_id,
+                citation_marker,
+                context_text,
+                source_block_id,
+                page,
+                char_start,
+                char_end,
+                confidence,
+                metadata_json
+            FROM source_reference_mentions
+            WHERE collection_id = ?
+            ORDER BY document_id ASC, source_block_id ASC, char_start ASC, mention_id ASC
+            """,
+            (collection_id,),
+        ).fetchall()
+        return [
+            SourceReferenceMention.from_record(
+                {
+                    "mention_id": row["mention_id"],
+                    "document_id": row["document_id"],
+                    "reference_id": row["reference_id"],
+                    "citation_marker": row["citation_marker"],
+                    "context_text": row["context_text"],
+                    "source_block_id": row["source_block_id"],
+                    "page": row["page"],
+                    "char_start": row["char_start"],
+                    "char_end": row["char_end"],
+                    "confidence": row["confidence"],
+                    "metadata": _load_json_object(row["metadata_json"]),
+                }
+            )
+            for row in rows
+        ]
+
+    def _list_reference_resolutions(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+    ) -> list[SourceReferenceResolution]:
+        rows = connection.execute(
+            """
+            SELECT
+                resolution_id,
+                reference_id,
+                provider,
+                status,
+                resolved_title,
+                resolved_authors_text,
+                resolved_year,
+                resolved_venue,
+                resolved_doi,
+                resolved_url,
+                open_access_url,
+                confidence,
+                metadata_json
+            FROM source_reference_resolutions
+            WHERE collection_id = ?
+            ORDER BY reference_id ASC, provider ASC, resolution_id ASC
+            """,
+            (collection_id,),
+        ).fetchall()
+        return [
+            SourceReferenceResolution.from_record(
+                {
+                    "resolution_id": row["resolution_id"],
+                    "reference_id": row["reference_id"],
+                    "provider": row["provider"],
+                    "status": row["status"],
+                    "resolved_title": row["resolved_title"],
+                    "resolved_authors_text": row["resolved_authors_text"],
+                    "resolved_year": row["resolved_year"],
+                    "resolved_venue": row["resolved_venue"],
+                    "resolved_doi": row["resolved_doi"],
+                    "resolved_url": row["resolved_url"],
+                    "open_access_url": row["open_access_url"],
+                    "confidence": row["confidence"],
+                    "metadata": _load_json_object(row["metadata_json"]),
+                }
+            )
+            for row in rows
+        ]
+
+    def _list_reference_candidates(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+    ) -> list[SourceReferenceCandidate]:
+        rows = connection.execute(
+            """
+            SELECT
+                candidate_id,
+                reference_id,
+                status,
+                relevance_score,
+                relevance_reason,
+                cited_by_document_id,
+                mention_count,
+                representative_context,
+                resolved_doi,
+                resolved_url,
+                open_access_url,
+                metadata_json
+            FROM source_reference_candidates
+            WHERE collection_id = ?
+            ORDER BY relevance_score DESC, candidate_id ASC
+            """,
+            (collection_id,),
+        ).fetchall()
+        return [
+            SourceReferenceCandidate.from_record(
+                {
+                    "candidate_id": row["candidate_id"],
+                    "reference_id": row["reference_id"],
+                    "status": row["status"],
+                    "relevance_score": row["relevance_score"],
+                    "relevance_reason": row["relevance_reason"],
+                    "cited_by_document_id": row["cited_by_document_id"],
+                    "mention_count": row["mention_count"],
+                    "representative_context": row["representative_context"],
+                    "resolved_doi": row["resolved_doi"],
+                    "resolved_url": row["resolved_url"],
+                    "open_access_url": row["open_access_url"],
+                    "metadata": _load_json_object(row["metadata_json"]),
+                }
+            )
+            for row in rows
+        ]
 
 
 def _now_iso() -> str:

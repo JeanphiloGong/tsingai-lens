@@ -6,6 +6,11 @@ from domain.source import (
     SourceBoundingBox,
     SourceDocument,
     SourceFigure,
+    SourceReferenceCandidate,
+    SourceReferenceEntry,
+    SourceReferenceMention,
+    SourceReferenceResolution,
+    SourceReferenceSet,
     SourceTable,
     SourceTableCell,
     SourceTableRow,
@@ -149,3 +154,105 @@ def test_sqlite_source_artifact_repository_round_trips_artifact_set(tmp_path):
     replaced = repository.read_collection_artifacts("col_test")
     assert [document.document_id for document in replaced.documents] == ["doc-2"]
     assert replaced.tables == ()
+
+
+def test_sqlite_source_artifact_repository_keeps_reference_state_separate(tmp_path):
+    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    repository.replace_collection_references(
+        "col_refs",
+        SourceReferenceSet(
+            entries=(
+                SourceReferenceEntry(
+                    reference_id="ref-doc-1-001",
+                    document_id="doc-1",
+                    raw_reference=(
+                        "[1] Smith A. Additive manufacturing of 316L stainless "
+                        "steel. Acta Mater. 2024."
+                    ),
+                    reference_index="1",
+                    title="Additive manufacturing of 316L stainless steel",
+                    authors_text="Smith A.",
+                    year=2024,
+                    doi="10.1000/example",
+                    source_block_id="blk-ref",
+                    page=12,
+                    confidence=0.91,
+                    metadata={"section": "references"},
+                ),
+            ),
+            mentions=(
+                SourceReferenceMention(
+                    mention_id="mention-doc-1-001",
+                    document_id="doc-1",
+                    reference_id="ref-doc-1-001",
+                    citation_marker="[1]",
+                    context_text="Prior LPBF 316L work [1] studied porosity.",
+                    source_block_id="blk-body",
+                    page=2,
+                    char_start=22,
+                    char_end=25,
+                    confidence=0.88,
+                    metadata={"source": "body"},
+                ),
+            ),
+            resolutions=(
+                SourceReferenceResolution(
+                    resolution_id="res-ref-doc-1-001",
+                    reference_id="ref-doc-1-001",
+                    provider="crossref",
+                    status="resolved",
+                    resolved_title="Additive manufacturing of 316L stainless steel",
+                    resolved_authors_text="Smith, A.",
+                    resolved_year=2024,
+                    resolved_venue="Acta Materialia",
+                    resolved_doi="10.1000/example",
+                    resolved_url="https://doi.org/10.1000/example",
+                    open_access_url="https://example.test/paper.pdf",
+                    confidence=0.83,
+                    metadata={"match": "doi"},
+                ),
+            ),
+            candidates=(
+                SourceReferenceCandidate(
+                    candidate_id="cand-ref-doc-1-001",
+                    reference_id="ref-doc-1-001",
+                    status="metadata_only",
+                    relevance_score=0.75,
+                    relevance_reason="Cited in the LPBF process context.",
+                    cited_by_document_id="doc-1",
+                    mention_count=1,
+                    representative_context="Prior LPBF 316L work [1] studied porosity.",
+                    resolved_doi="10.1000/example",
+                    resolved_url="https://doi.org/10.1000/example",
+                    open_access_url="https://example.test/paper.pdf",
+                    metadata={"rank": 1},
+                ),
+            ),
+        ),
+    )
+
+    restored = repository.read_collection_references("col_refs")
+    assert restored.entries[0].reference_id == "ref-doc-1-001"
+    assert restored.entries[0].metadata == {"section": "references"}
+    assert restored.mentions[0].reference_id == "ref-doc-1-001"
+    assert restored.resolutions[0].resolved_venue == "Acta Materialia"
+    assert restored.candidates[0].mention_count == 1
+
+    repository.replace_collection_artifacts(
+        "col_refs",
+        SourceArtifactSet(
+            documents=(
+                SourceDocument(
+                    document_id="doc-1",
+                    human_readable_id=0,
+                    title="Paper",
+                    text="Prior LPBF 316L work [1] studied porosity.",
+                ),
+            ),
+        ),
+    )
+    assert repository.read_collection_references("col_refs").entries
+
+    repository.replace_collection_references("col_refs", SourceReferenceSet())
+    assert repository.read_collection_references("col_refs") == SourceReferenceSet()
+    assert repository.read_collection_artifacts("col_refs").documents[0].document_id == "doc-1"

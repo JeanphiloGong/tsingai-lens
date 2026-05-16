@@ -503,6 +503,216 @@ class SourceArtifactSet:
         )
 
 
+@dataclass(frozen=True)
+class SourceReferenceEntry:
+    reference_id: str
+    document_id: str
+    raw_reference: str
+    reference_index: str | None = None
+    title: str | None = None
+    authors_text: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    source_block_id: str | None = None
+    page: int | None = None
+    confidence: float = 0.0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceEntry":
+        return cls(
+            reference_id=str(value.get("reference_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            raw_reference=str(value.get("raw_reference") or ""),
+            reference_index=normalize_optional_text(value.get("reference_index")),
+            title=normalize_optional_text(value.get("title")),
+            authors_text=normalize_optional_text(value.get("authors_text")),
+            year=safe_int(value.get("year")),
+            doi=normalize_optional_text(value.get("doi")),
+            source_block_id=normalize_optional_text(value.get("source_block_id")),
+            page=safe_int(value.get("page")),
+            confidence=float(value.get("confidence") or 0.0),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "reference_id": self.reference_id,
+            "document_id": self.document_id,
+            "raw_reference": self.raw_reference,
+            "reference_index": self.reference_index,
+            "title": self.title,
+            "authors_text": self.authors_text,
+            "year": self.year,
+            "doi": self.doi,
+            "source_block_id": self.source_block_id,
+            "page": self.page,
+            "confidence": self.confidence,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceReferenceMention:
+    mention_id: str
+    document_id: str
+    reference_id: str | None
+    citation_marker: str
+    context_text: str
+    source_block_id: str | None = None
+    page: int | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    confidence: float = 0.0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceMention":
+        return cls(
+            mention_id=str(value.get("mention_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            reference_id=normalize_optional_text(value.get("reference_id")),
+            citation_marker=str(value.get("citation_marker") or ""),
+            context_text=str(value.get("context_text") or ""),
+            source_block_id=normalize_optional_text(value.get("source_block_id")),
+            page=safe_int(value.get("page")),
+            char_start=safe_int(value.get("char_start")),
+            char_end=safe_int(value.get("char_end")),
+            confidence=float(value.get("confidence") or 0.0),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "mention_id": self.mention_id,
+            "document_id": self.document_id,
+            "reference_id": self.reference_id,
+            "citation_marker": self.citation_marker,
+            "context_text": self.context_text,
+            "source_block_id": self.source_block_id,
+            "page": self.page,
+            "char_start": self.char_start,
+            "char_end": self.char_end,
+            "confidence": self.confidence,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceReferenceResolution:
+    resolution_id: str
+    reference_id: str
+    provider: str
+    status: str
+    resolved_title: str | None = None
+    resolved_authors_text: str | None = None
+    resolved_year: int | None = None
+    resolved_venue: str | None = None
+    resolved_doi: str | None = None
+    resolved_url: str | None = None
+    open_access_url: str | None = None
+    confidence: float = 0.0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceResolution":
+        return cls(
+            resolution_id=str(value.get("resolution_id") or ""),
+            reference_id=str(value.get("reference_id") or ""),
+            provider=str(value.get("provider") or ""),
+            status=str(value.get("status") or "unresolved"),
+            resolved_title=normalize_optional_text(value.get("resolved_title")),
+            resolved_authors_text=normalize_optional_text(
+                value.get("resolved_authors_text")
+            ),
+            resolved_year=safe_int(value.get("resolved_year")),
+            resolved_venue=normalize_optional_text(value.get("resolved_venue")),
+            resolved_doi=normalize_optional_text(value.get("resolved_doi")),
+            resolved_url=normalize_optional_text(value.get("resolved_url")),
+            open_access_url=normalize_optional_text(value.get("open_access_url")),
+            confidence=float(value.get("confidence") or 0.0),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "resolution_id": self.resolution_id,
+            "reference_id": self.reference_id,
+            "provider": self.provider,
+            "status": self.status,
+            "resolved_title": self.resolved_title,
+            "resolved_authors_text": self.resolved_authors_text,
+            "resolved_year": self.resolved_year,
+            "resolved_venue": self.resolved_venue,
+            "resolved_doi": self.resolved_doi,
+            "resolved_url": self.resolved_url,
+            "open_access_url": self.open_access_url,
+            "confidence": self.confidence,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceReferenceCandidate:
+    candidate_id: str
+    reference_id: str
+    status: str
+    relevance_score: float = 0.0
+    relevance_reason: str | None = None
+    cited_by_document_id: str | None = None
+    mention_count: int = 0
+    representative_context: str | None = None
+    resolved_doi: str | None = None
+    resolved_url: str | None = None
+    open_access_url: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceCandidate":
+        return cls(
+            candidate_id=str(value.get("candidate_id") or ""),
+            reference_id=str(value.get("reference_id") or ""),
+            status=str(value.get("status") or "metadata_only"),
+            relevance_score=float(value.get("relevance_score") or 0.0),
+            relevance_reason=normalize_optional_text(value.get("relevance_reason")),
+            cited_by_document_id=normalize_optional_text(
+                value.get("cited_by_document_id")
+            ),
+            mention_count=safe_int(value.get("mention_count")) or 0,
+            representative_context=normalize_optional_text(
+                value.get("representative_context")
+            ),
+            resolved_doi=normalize_optional_text(value.get("resolved_doi")),
+            resolved_url=normalize_optional_text(value.get("resolved_url")),
+            open_access_url=normalize_optional_text(value.get("open_access_url")),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "reference_id": self.reference_id,
+            "status": self.status,
+            "relevance_score": self.relevance_score,
+            "relevance_reason": self.relevance_reason,
+            "cited_by_document_id": self.cited_by_document_id,
+            "mention_count": self.mention_count,
+            "representative_context": self.representative_context,
+            "resolved_doi": self.resolved_doi,
+            "resolved_url": self.resolved_url,
+            "open_access_url": self.open_access_url,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceReferenceSet:
+    entries: tuple[SourceReferenceEntry, ...] = ()
+    mentions: tuple[SourceReferenceMention, ...] = ()
+    resolutions: tuple[SourceReferenceResolution, ...] = ()
+    candidates: tuple[SourceReferenceCandidate, ...] = ()
+
+
 def build_heading_blocks(
     blocks: Iterable[SourceBlock | Mapping[str, Any]],
 ) -> list[SourceLayoutBlock]:
@@ -900,6 +1110,11 @@ __all__ = [
     "SourceCharRange",
     "SourceDocument",
     "SourceFigure",
+    "SourceReferenceCandidate",
+    "SourceReferenceEntry",
+    "SourceReferenceMention",
+    "SourceReferenceResolution",
+    "SourceReferenceSet",
     "SourceArtifactSet",
     "SourceLayoutBlock",
     "SourceTable",

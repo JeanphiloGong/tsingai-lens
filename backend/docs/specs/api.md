@@ -187,6 +187,8 @@ message 返回必须包含：
 - `GET /api/v1/collections/{collection_id}/tasks`
 - `GET /api/v1/tasks/{task_id}`
 - `GET /api/v1/tasks/{task_id}/artifacts`
+- `POST /api/v1/collections/{collection_id}/references/build`
+- `GET /api/v1/collections/{collection_id}/references`
 
 约束：
 
@@ -202,6 +204,16 @@ message 返回必须包含：
   `documents`、`text_units`、`blocks`、
   `figures`、`tables`、`table_rows`、
   `table_cells` 以及 `image_assets/`
+- Source 引用文献扩展是独立流程，不属于 collection build 主链路：
+  - `POST /api/v1/collections/{collection_id}/references/build`
+    从已生成的 Source `blocks` 中抽取 References/Bibliography 条目、正文 citation
+    mention 和 metadata-only candidate pool
+  - `GET /api/v1/collections/{collection_id}/references`
+    读取 `entries`、`mentions`、`resolutions`、`candidates`
+  - 当前版本不自动下载引用 PDF，不自动把引用文献导入 collection input，不把引用
+    条目提升为 Core research facts
+  - 如果 Source artifacts 尚未生成，build 接口返回 `409`，错误码为
+    `source_artifacts_not_ready`
 - `GET /api/v1/tasks/{task_id}/artifacts`
   与 workspace 内的 `artifacts` 都应对 comparison semantic 相关产物额外暴露
   `*_stale` 字段，用来表达：

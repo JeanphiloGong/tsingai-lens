@@ -9,7 +9,14 @@ type CollectionLayoutPageState = {
 	url: URL;
 };
 
-const { pageStore, setPage, collectionStore, fetchCollectionMock, fetchCollectionsMock } =
+const {
+	pageStore,
+	setPage,
+	collectionStore,
+	setCollectionStatus,
+	fetchCollectionMock,
+	fetchCollectionsMock
+} =
 	vi.hoisted(() => {
 		const pageSubscribers = new Set<(value: CollectionLayoutPageState) => void>();
 		const collectionSubscribers = new Set<(value: unknown[]) => void>();
@@ -27,6 +34,9 @@ const { pageStore, setPage, collectionStore, fetchCollectionMock, fetchCollectio
 				updated_at: '2026-01-02T00:00:00Z'
 			}
 		];
+		function emitCollections() {
+			for (const run of collectionSubscribers) run(collectionItems);
+		}
 
 		return {
 			pageStore: {
@@ -46,6 +56,10 @@ const { pageStore, setPage, collectionStore, fetchCollectionMock, fetchCollectio
 					collectionSubscribers.add(run);
 					return () => collectionSubscribers.delete(run);
 				}
+			},
+			setCollectionStatus(status: string) {
+				collectionItems[0].status = status;
+				emitCollections();
 			},
 			fetchCollectionMock: vi.fn(),
 			fetchCollectionsMock: vi.fn()
@@ -86,6 +100,7 @@ describe('collections/[id]/+layout.svelte', () => {
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123')
 		});
+		setCollectionStatus('ready');
 		fetchCollectionMock.mockReset();
 		fetchCollectionsMock.mockReset();
 		fetchCollectionMock.mockResolvedValue(null);
@@ -110,6 +125,42 @@ describe('collections/[id]/+layout.svelte', () => {
 		await nav.getByText('More').click();
 
 		await expect.element(nav.getByRole('link', { name: 'Materials' })).toBeVisible();
+	});
+
+	it('locks downstream navigation until the collection is processed', async () => {
+		setCollectionStatus('uploaded');
+
+		render(Layout);
+
+		const nav = browserPage.getByRole('navigation', { name: 'Collection navigation' });
+		const objectives = nav.getByRole('link', { name: 'Objectives' });
+
+		await expect.element(objectives).toHaveAttribute('aria-disabled', 'true');
+		expect(document.querySelector('a[href="/collections/col_123/objectives"]')?.className).toContain(
+			'locked'
+		);
+
+		await nav.getByText('More').click();
+		await expect.element(nav.getByRole('link', { name: 'Materials' })).toHaveAttribute(
+			'aria-disabled',
+			'true'
+		);
+	});
+
+	it('shows a locked surface for direct downstream routes before processing', async () => {
+		setCollectionStatus('uploaded');
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL('http://localhost/collections/col_123/objectives')
+		});
+
+		render(Layout);
+
+		await expect.element(browserPage.getByText('Processing required')).toBeVisible();
+		await expect.element(browserPage.getByRole('link', { name: 'Back to workspace' })).toHaveAttribute(
+			'href',
+			'/collections/col_123'
+		);
 	});
 
 	it('marks More active on material routes', async () => {

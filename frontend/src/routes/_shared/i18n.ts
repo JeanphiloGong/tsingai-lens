@@ -170,7 +170,19 @@ const translations: Record<Language, Translations> = {
 			metaDocuments: '{count} document(s)',
 			metaUpdated: 'Updated: {time}',
 			deleteConfirm:
-				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.'
+				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.',
+			lock: {
+				eyebrow: 'Locked view',
+				title: 'Processing required',
+				readyToProcess:
+					'Process this collection before opening research objectives, evidence, comparisons, materials, graph, or copilot views.',
+				processing:
+					'This collection is still processing. Research views unlock after the current run completes.',
+				failed:
+					'The latest processing run failed. Review the workspace status or rerun processing before trusting downstream views.',
+				empty: 'Upload documents and process the collection before opening research views.',
+				backToWorkspace: 'Back to workspace'
+			}
 		},
 		goalCopilot: {
 			eyebrow: 'Collection Copilot',
@@ -2581,7 +2593,16 @@ const translations: Record<Language, Translations> = {
 			moreActions: '更多集合操作',
 			metaDocuments: '{count} 篇文档',
 			metaUpdated: '最近更新：{time}',
-			deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。'
+			deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。',
+			lock: {
+				eyebrow: '页面已锁定',
+				title: '需要先完成处理',
+				readyToProcess: '请先处理该集合，再打开研究目标、证据、比较、材料、图谱或助手页面。',
+				processing: '集合仍在处理中。当前任务完成后，研究页面会自动解锁。',
+				failed: '最近一次处理失败。请先在工作区查看状态或重新处理，再信任下游页面。',
+				empty: '请先上传文档并处理集合，再打开研究页面。',
+				backToWorkspace: '返回工作区'
+			}
 		},
 		goalCopilot: {
 			eyebrow: '集合助手',

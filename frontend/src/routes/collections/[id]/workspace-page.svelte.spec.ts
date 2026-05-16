@@ -210,6 +210,54 @@ describe('collections/[id]/+page.svelte', () => {
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 
+	it('shows build subprogress when the latest task includes progress detail', async () => {
+		workspacePayload = buildWorkspacePayload({
+			collection: {
+				collection_id: 'col_123',
+				name: 'Flow coverage collection',
+				description: null,
+				status: 'running',
+				updated_at: '2026-04-22T00:00:00Z'
+			},
+			workflow: {
+				documents: 'processing',
+				results: 'processing',
+				evidence: 'processing',
+				comparisons: 'processing'
+			},
+			latest_task: {
+				task_id: 'task_123',
+				collection_id: 'col_123',
+				task_type: 'build',
+				status: 'running',
+				current_stage: 'objective_evidence_units_started',
+				progress_percent: 76,
+				progress_detail: {
+					phase: 'objective_evidence_units_started',
+					current: 18,
+					total: 1036,
+					unit: 'routes',
+					message: 'Extracting objective evidence units from routed sources.'
+				},
+				output_path: null,
+				errors: [],
+				warnings: [],
+				created_at: '2026-04-22T00:00:00Z',
+				updated_at: '2026-04-22T00:00:01Z',
+				started_at: '2026-04-22T00:00:00Z',
+				finished_at: null
+			}
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Extracting objective evidence units from routed sources.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('18 / 1036 routes')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Estimated progress')).toBeInTheDocument();
+	});
+
 	it('summarizes repeated research-view warnings in the overview', async () => {
 		researchViewPayload = {
 			collection_id: 'col_123',

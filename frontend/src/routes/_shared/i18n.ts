@@ -1012,8 +1012,10 @@ const translations: Record<Language, Translations> = {
 				'This section tells you what state the collection is in and what the next useful action is.',
 			statusFiles: 'Uploaded files',
 			statusLatestTask: 'Latest task',
-			statusStage: 'Current stage',
-			statusProgress: 'Current progress',
+			statusStage: 'Now',
+			statusSubProgress: 'Step progress',
+			statusStageName: 'Stage',
+			statusProgress: 'Estimated progress',
 			statusUpdated: 'Last updated',
 			statusWorkflowTitle: 'Workflow stages',
 			statusWorkflowLead:
@@ -2014,10 +2016,25 @@ const translations: Record<Language, Translations> = {
 				source_artifacts_started: 'Source Artifacts Started',
 				source_artifacts_completed: 'Source Artifacts Completed',
 				document_profiles_started: 'Document Profiles Started',
+				research_objectives_started: 'Research Objectives Started',
+				objective_paper_skim_started: 'Scanning Papers',
+				objective_discovery_started: 'Discovering Objectives',
+				objective_paper_framing_started: 'Framing Objective Papers',
+				objective_evidence_routing_started: 'Routing Objective Evidence',
+				objective_evidence_units_started: 'Extracting Objective Evidence',
+				objective_logic_chains_started: 'Assembling Logic Chains',
 				paper_facts_started: 'Paper Facts Started',
 				comparison_rows_started: 'Comparison Rows Started',
 				artifacts_ready: 'Artifacts Ready',
 				failed: 'Failed'
+			},
+			progressUnit: {
+				documents: 'documents',
+				objectives: 'objectives',
+				frames: 'frames',
+				routes: 'routes',
+				tables: 'tables',
+				steps: 'steps'
 			}
 		},
 		graph: {
@@ -3366,8 +3383,10 @@ const translations: Record<Language, Translations> = {
 			statusLead: '这里告诉你这个集合现在到了哪一步，以及下一步最值得做什么。',
 			statusFiles: '已上传文件',
 			statusLatestTask: '最近任务',
-			statusStage: '当前阶段',
-			statusProgress: '当前进度',
+			statusStage: '正在处理',
+			statusSubProgress: '子进度',
+			statusStageName: '阶段',
+			statusProgress: '估算进度',
 			statusUpdated: '最近更新时间',
 			statusWorkflowTitle: '工作流阶段',
 			statusWorkflowLead: '这里展示的是这个集合已经可以支持什么工作，不只是后台生成了哪些文件。',
@@ -4337,10 +4356,25 @@ const translations: Record<Language, Translations> = {
 				source_artifacts_started: '源产物生成中',
 				source_artifacts_completed: '源产物已完成',
 				document_profiles_started: '文档画像生成中',
+				research_objectives_started: '研究目标抽取开始',
+				objective_paper_skim_started: '扫描文献目标',
+				objective_discovery_started: '合并研究目标',
+				objective_paper_framing_started: '判断文献与目标关系',
+				objective_evidence_routing_started: '路由目标证据',
+				objective_evidence_units_started: '抽取目标证据',
+				objective_logic_chains_started: '组装科研链路',
 				paper_facts_started: '论文事实生成中',
 				comparison_rows_started: '比较行生成中',
 				artifacts_ready: '产物已就绪',
 				failed: '失败'
+			},
+			progressUnit: {
+				documents: '篇文档',
+				objectives: '个目标',
+				frames: '个文献-目标判断',
+				routes: '条证据路由',
+				tables: '张表格',
+				steps: '个步骤'
 			}
 		},
 		graph: {

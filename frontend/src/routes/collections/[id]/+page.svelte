@@ -17,7 +17,13 @@
 		type ResearchViewState,
 		type ResearchViewWarning
 	} from '../../_shared/researchView';
-	import { createBuildTask, getTask, isTaskActive, type Task } from '../../_shared/tasks';
+	import {
+		createBuildTask,
+		getTask,
+		isTaskActive,
+		type Task,
+		type TaskProgressDetail
+	} from '../../_shared/tasks';
 	import {
 		buildOverviewPipelineSteps,
 		fetchWorkspaceOverview,
@@ -301,6 +307,31 @@
 	function formatPercent(value?: number | null) {
 		if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
 		return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
+	}
+
+	function formatProgressDetail(detail?: TaskProgressDetail | null) {
+		if (!detail) return '';
+		if (
+			typeof detail.current === 'number' &&
+			Number.isFinite(detail.current) &&
+			typeof detail.total === 'number' &&
+			Number.isFinite(detail.total) &&
+			detail.total > 0
+		) {
+			const unit = detail.unit ? ` ${formatProgressUnit(detail.unit)}` : '';
+			return `${Math.max(0, Math.round(detail.current))} / ${Math.round(detail.total)}${unit}`;
+		}
+		return detail.message ?? '';
+	}
+
+	function formatProgressUnit(unit: string) {
+		const key = `tasks.progressUnit.${unit}`;
+		const translated = $t(key);
+		return translated === key ? unit : translated;
+	}
+
+	function taskStageMessage(task: Task) {
+		return task.progress_detail?.message || formatTaskStage(task.current_stage);
 	}
 
 	function formatTaskStatus(status?: string | null) {
@@ -794,6 +825,16 @@
 						</div>
 						<div>
 							<span>{$t('overview.statusStage')}</span>
+							<strong>{taskStageMessage(stateWorkspace.latest_task)}</strong>
+						</div>
+						{#if formatProgressDetail(stateWorkspace.latest_task.progress_detail)}
+							<div>
+								<span>{$t('overview.statusSubProgress')}</span>
+								<strong>{formatProgressDetail(stateWorkspace.latest_task.progress_detail)}</strong>
+							</div>
+						{/if}
+						<div>
+							<span>{$t('overview.statusStageName')}</span>
 							<strong>{formatTaskStage(stateWorkspace.latest_task.current_stage)}</strong>
 						</div>
 						<div>

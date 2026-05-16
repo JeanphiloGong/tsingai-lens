@@ -8,10 +8,27 @@ export type TaskStage =
   | 'source_artifacts_started'
   | 'source_artifacts_completed'
   | 'document_profiles_started'
+  | 'research_objectives_started'
+  | 'objective_paper_skim_started'
+  | 'objective_discovery_started'
+  | 'objective_paper_framing_started'
+  | 'objective_evidence_routing_started'
+  | 'objective_evidence_units_started'
+  | 'objective_logic_chains_started'
   | 'paper_facts_started'
   | 'comparison_rows_started'
   | 'artifacts_ready'
   | 'failed';
+
+export type TaskProgressDetail = {
+  phase: string;
+  current?: number | null;
+  total?: number | null;
+  unit?: string | null;
+  message?: string | null;
+  active_document_id?: string | null;
+  active_objective_id?: string | null;
+};
 
 export type Task = {
   task_id: string;
@@ -20,6 +37,7 @@ export type Task = {
   status: TaskStatus;
   current_stage: TaskStage;
   progress_percent: number;
+  progress_detail?: TaskProgressDetail | null;
   output_path?: string | null;
   errors: string[];
   warnings: string[];
@@ -56,6 +74,7 @@ function normalizeTask(item: unknown): Task | null {
       typeof record.progress_percent === 'number'
         ? record.progress_percent
         : Number(record.progress_percent ?? 0),
+    progress_detail: normalizeProgressDetail(record.progress_detail),
     output_path: typeof record.output_path === 'string' ? record.output_path : null,
     errors: Array.isArray(record.errors) ? record.errors.map((item) => String(item)) : [],
     warnings: Array.isArray(record.warnings) ? record.warnings.map((item) => String(item)) : [],
@@ -64,6 +83,31 @@ function normalizeTask(item: unknown): Task | null {
     started_at: typeof record.started_at === 'string' ? record.started_at : null,
     finished_at: typeof record.finished_at === 'string' ? record.finished_at : null
   };
+}
+
+function normalizeProgressDetail(value: unknown): TaskProgressDetail | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const phase = String(record.phase ?? '').trim();
+  if (!phase) return null;
+  return {
+    phase,
+    current: normalizeOptionalNumber(record.current),
+    total: normalizeOptionalNumber(record.total),
+    unit: typeof record.unit === 'string' ? record.unit : null,
+    message: typeof record.message === 'string' ? record.message : null,
+    active_document_id:
+      typeof record.active_document_id === 'string' ? record.active_document_id : null,
+    active_objective_id:
+      typeof record.active_objective_id === 'string' ? record.active_objective_id : null
+  };
+}
+
+function normalizeOptionalNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function isTaskActive(task: Task | null | undefined) {

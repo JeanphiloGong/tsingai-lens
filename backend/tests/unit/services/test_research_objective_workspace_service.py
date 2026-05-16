@@ -190,8 +190,8 @@ def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
             "sample_context": {"sample": "135 W-750 mm/s"},
             "value_payload": {
                 "source_value_text": (
-                    "The relatively low porosity levels in the 135 W-750 mm/s "
-                    "sample increase the ductility by about 10%."
+                    "The ductility of the 135 W-750 mm/s sample increased "
+                    "by about 10%."
                 )
             },
             "resolution_status": "resolved",
@@ -327,6 +327,94 @@ def test_objective_workspace_detail_filters_textual_measurement_without_numeric_
                     "evidence_unit_ids": [
                         explicit_elongation_unit.evidence_unit_id,
                         textual_elongation_unit.evidence_unit_id,
+                    ],
+                    "chain_payload": {},
+                    "summary": "Polluted persisted logic chain.",
+                    "confidence": 0.7,
+                }
+            ),
+        ),
+    )
+
+    payload = service.get_objective_research_view(collection_id, objective_id)
+
+    assert [unit["evidence_unit_id"] for unit in payload["evidence_units"]] == [
+        "oeu-elongation-value"
+    ]
+    logic_chain = payload["logic_chain"]
+    assert logic_chain is not None
+    assert logic_chain["evidence_unit_ids"] == ["oeu-elongation-value"]
+    assert "elongation range 33.0-33.0 %" in logic_chain["summary"]
+    assert "ductility" not in str(logic_chain)
+    assert "135 W-750" not in str(logic_chain)
+
+
+def test_objective_workspace_detail_filters_relative_change_interpretation(
+    tmp_path,
+):
+    collection_id, objective_id, service = _seed_objective_collection(tmp_path)
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    explicit_elongation_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-elongation-value",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "elongation",
+            "sample_context": {"sample": "S1"},
+            "value_payload": {"source_value_text": "33 %", "value": 33.0},
+            "unit": "%",
+            "resolution_status": "resolved",
+            "confidence": 0.91,
+        }
+    )
+    relative_change_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-ductility-relative-change",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "elongation",
+            "sample_context": {"laser_power": "135 W", "scan_speed": "750 mm/s"},
+            "value_payload": {
+                "source_value_numeric": 10,
+                "source_value_text": (
+                    "The ductility of the 135 W-750 mm/s sample increased "
+                    "by about 10%."
+                ),
+            },
+            "unit": "%",
+            "resolution_status": "resolved",
+            "confidence": 0.62,
+        }
+    )
+    service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        facts.paper_skims,
+        facts.research_objectives,
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    **facts.objective_contexts[0].to_record(),
+                    "target_property_axes": ["elongation"],
+                }
+            ),
+        ),
+        facts.objective_paper_frames,
+        facts.objective_evidence_routes,
+        (
+            explicit_elongation_unit,
+            relative_change_unit,
+        ),
+        (
+            ObjectiveLogicChain.from_mapping(
+                {
+                    "objective_id": objective_id,
+                    "chain_scope": "objective",
+                    "question": facts.research_objectives[0].question,
+                    "evidence_unit_ids": [
+                        explicit_elongation_unit.evidence_unit_id,
+                        relative_change_unit.evidence_unit_id,
                     ],
                     "chain_payload": {},
                     "summary": "Polluted persisted logic chain.",

@@ -94,9 +94,8 @@ def test_evaluate_frontend_projection_payloads_fails_polluted_projection():
                         "property_normalized": "elongation",
                         "value_payload": {
                             "source_value_text": (
-                                "The relatively low porosity levels in the "
-                                "135 W-750 mm/s sample increase the ductility "
-                                "by about 10%."
+                                "The ductility of the 135 W-750 mm/s sample "
+                                "increased by about 10%."
                             )
                         },
                     }
@@ -123,6 +122,8 @@ def test_evaluate_frontend_projection_payloads_fails_polluted_projection():
     assert "material sample matrix rows are available" in failed_names
     assert "material profile excludes forbidden term '135 W-750'" in failed_names
     assert (
-        "objective details exclude forbidden term "
-        "'increase the ductility by about 10%'"
+        "objective details exclude forbidden term 'ductility of the 135 W-750'"
+    ) in failed_names
+    assert (
+        "objective details exclude forbidden term 'increased by about 10%'"
     ) in failed_names

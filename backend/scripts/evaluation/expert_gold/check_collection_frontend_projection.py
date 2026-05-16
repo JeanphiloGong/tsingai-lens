@@ -14,7 +14,9 @@ DEFAULT_MATERIAL_ID = "mat-316l-stainless-steel"
 DEFAULT_MAX_PROCESS_AXES = 6
 DEFAULT_FORBIDDEN_TERMS = ("135 W-750",)
 DEFAULT_FORBIDDEN_OBJECTIVE_DETAIL_TERMS = (
+    "ductility of the 135 W-750",
     "increase the ductility by about 10%",
+    "increased by about 10%",
 )
 
 

@@ -770,6 +770,8 @@ class ResearchObjectiveService:
         *,
         target_axes: tuple[str, ...],
     ) -> bool:
+        if self._objective_evidence_unit_is_relative_change_interpretation(unit):
+            return False
         if (
             unit.unit_kind == "measurement"
             and self._objective_measurement_numeric_value(unit) is None
@@ -793,6 +795,43 @@ class ResearchObjectiveService:
         return any(
             self._axis_label_is_mentioned(text, axis)
             for axis in target_axes
+        )
+
+    def _objective_evidence_unit_is_relative_change_interpretation(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> bool:
+        if unit.unit_kind != "interpretation" or unit.baseline_context:
+            return False
+        text = " ".join(
+            value
+            for value in (
+                self._value_payload_text(unit.value_payload),
+                unit.interpretation,
+            )
+            if value
+        )
+        if not text:
+            return False
+        property_name = self._normalize_property_label(unit.property_normalized)
+        if property_name != "elongation" and not re.search(
+            r"\b(?:ductility|elongation)\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return False
+        return bool(
+            re.search(
+                r"\b(?:increase[sd]?|decrease[sd]?|improve[sd]?|reduce[sd]?)\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"\bby\s+(?:about\s+|approximately\s+|approx\.?\s+|~\s*)?"
+                r"\d+(?:\.\d+)?\s*%",
+                text,
+                flags=re.IGNORECASE,
+            )
         )
 
     def _objective_property_matches_target_axes(

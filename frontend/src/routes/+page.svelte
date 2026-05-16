@@ -253,7 +253,7 @@
     if (group === 'complete') {
       return {
         label: $t('home.nextCompare'),
-        href: `/collections/${collection.id}/comparisons`
+        href: `/collections/${collection.id}/objectives`
       };
     }
 

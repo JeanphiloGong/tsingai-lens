@@ -90,6 +90,17 @@ test.describe('page interaction audit', () => {
 			});
 		}
 	});
+
+	test('home ready collection next step opens research objectives', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto('/');
+
+		await expect(page.getByRole('link', { name: 'Enter objectives' })).toHaveAttribute(
+			'href',
+			`/collections/${collectionId}/objectives`
+		);
+		await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
+	});
 });
 
 async function checkMaterialsMoreNavigation(

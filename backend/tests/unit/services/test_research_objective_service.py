@@ -5000,6 +5000,79 @@ def test_research_objective_service_ranks_result_text_candidates(
     assert {route.role for route in routes} == {"characterization"}
 
 
+def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-preheating",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["build platform temperature"],
+            "measured_property_scope": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+                "porosity",
+            ],
+            "test_environment_scope": ["preheating"],
+            "relevant_sections": ["Abstract"],
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="cooling-rate",
+            block_order=86,
+            block_type="paragraph",
+            heading_path="Thermal Simulation and Microstructure",
+            text=(
+                "The cooling rate values were obtained from the simulation "
+                "to be 1.43x10 6 C/s for P150, and 1.65x10 6 C/s for "
+                "the NP condition."
+            ),
+        ),
+        SimpleNamespace(
+            block_id="melt-pool-ratio",
+            block_order=87,
+            block_type="paragraph",
+            heading_path="Thermal Simulation and Microstructure",
+            text=(
+                "The average width to depth ratios of the melt pool are "
+                "calculated for NP and P150 conditions to be 1.38 and 1.7, "
+                "respectively."
+            ),
+        ),
+        SimpleNamespace(
+            block_id="residual-stress",
+            block_order=88,
+            block_type="paragraph",
+            heading_path="3.1. X-ray diffraction and residual stress",
+            text=(
+                "The HT-SLM (i.e., 17.8 MPa) and HIP-SLM (i.e., 27.5 MPa) "
+                "showed comparable residual stress values, whereas the "
+                "as-SLM residual stress was found to be 99.5 MPa."
+            ),
+        ),
+    ]
+
+    candidates = service._build_route_source_candidates(
+        frame=frame,
+        blocks=blocks,
+        tables=[],
+    )
+
+    assert {candidate["source_ref"] for candidate in candidates} == {
+        "cooling-rate",
+        "melt-pool-ratio",
+        "residual-stress",
+    }
+
+
 def test_research_objective_service_drops_known_empty_evidence_units(tmp_path):
     service = ResearchObjectiveService(
         collection_service=CollectionService(tmp_path / "collections"),

@@ -6138,6 +6138,10 @@ class ResearchObjectiveService:
             term_text = str(term or "").strip().casefold()
             if term_text and term_text in text_haystack:
                 score += 2
+        score += self._route_text_numeric_mechanism_score(
+            section_label=section_label,
+            text=text,
+        )
         section_key = self._objective_column_key(section_label)
         if section_key.startswith(("3_", "4_")) or "conclusion" in section_key:
             score += 3
@@ -6167,6 +6171,41 @@ class ResearchObjectiveService:
         ):
             score += 2
         return score if score >= 4 else 0
+
+    def _route_text_numeric_mechanism_score(
+        self,
+        *,
+        section_label: str,
+        text: str,
+    ) -> int:
+        if not _NUMBER_PATTERN.search(text):
+            return 0
+        haystack = " ".join(
+            part
+            for part in (
+                str(section_label or "").casefold(),
+                str(text or "").casefold(),
+            )
+            if part
+        )
+        if not any(
+            token in haystack
+            for token in (
+                "cooling rate",
+                "thermal gradient",
+                "thermal simulation",
+                "melt pool",
+                "width to depth",
+                "width/depth",
+                "residual stress",
+                "recrystallization",
+            )
+        ):
+            return 0
+        score = 4
+        if any(token in haystack for token in ("microstructure", "thermal", "stress")):
+            score += 1
+        return score
 
     def _build_route_table_schema(self, table: Any) -> dict[str, Any]:
         matrix = tuple(getattr(table, "table_matrix", ()) or ())

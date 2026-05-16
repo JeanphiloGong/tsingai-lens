@@ -48,6 +48,7 @@
 	};
 
 	const evidenceKindOrder = ['measurement', 'test_condition', 'characterization', 'comparison'];
+	const EVIDENCE_GROUP_PREVIEW_LIMIT = 6;
 
 	let objectiveView: ObjectiveResearchView | null = null;
 	let loading = false;
@@ -242,6 +243,14 @@
 			labelKey: evidenceKindLabelKey(kind),
 			units: grouped[kind] ?? []
 		}));
+	}
+
+	function evidenceGroupPreview(units: ObjectiveEvidenceUnit[]) {
+		return units.slice(0, EVIDENCE_GROUP_PREVIEW_LIMIT);
+	}
+
+	function evidenceGroupHiddenCount(units: ObjectiveEvidenceUnit[]) {
+		return Math.max(0, units.length - EVIDENCE_GROUP_PREVIEW_LIMIT);
 	}
 
 	function buildEvidenceKindOptions(units: ObjectiveEvidenceUnit[]): FilterOption[] {
@@ -724,12 +733,12 @@
 												count: group.units.length
 											})}</span
 										>
-									</div>
-									<div class="evidence-unit-list">
-										{#each group.units as unit (unit.evidence_unit_id)}
-											<button
-												class:selected={selectedEvidenceUnit?.evidence_unit_id ===
-													unit.evidence_unit_id}
+										</div>
+										<div class="evidence-unit-list">
+											{#each evidenceGroupPreview(group.units) as unit (unit.evidence_unit_id)}
+												<button
+													class:selected={selectedEvidenceUnit?.evidence_unit_id ===
+														unit.evidence_unit_id}
 												class="evidence-unit-card"
 												type="button"
 												on:click={() => (selectedEvidenceUnitId = unit.evidence_unit_id)}
@@ -747,13 +756,21 @@
 													{unit.document_id || $t('research.emptyValue')} · {confidenceLabel(
 														unit.confidence
 													)}
-												</small>
-											</button>
-										{/each}
-									</div>
-								</section>
-							{/each}
-						</div>
+													</small>
+												</button>
+											{/each}
+										</div>
+										{#if evidenceGroupHiddenCount(group.units)}
+											<p class="evidence-group__limit-note">
+												{$t('research.objectiveWorkspace.evidencePreviewLimit', {
+													shown: EVIDENCE_GROUP_PREVIEW_LIMIT,
+													total: group.units.length
+												})}
+											</p>
+										{/if}
+									</section>
+								{/each}
+							</div>
 					{:else}
 						<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
 					{/if}
@@ -1364,6 +1381,17 @@
 		padding: 3px 7px;
 		background: var(--surface-card);
 		overflow-wrap: anywhere;
+	}
+
+	.evidence-group__limit-note {
+		margin: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 9px 11px;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+		background: var(--surface-card);
 	}
 
 	.objective-side-panel {

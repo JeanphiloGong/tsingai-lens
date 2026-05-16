@@ -402,6 +402,42 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 	});
 
+	it('previews large evidence groups without rendering every unit at once', async () => {
+		const payload: any = objectivePayload();
+		payload.evidence_units = Array.from({ length: 8 }, (_, index) => ({
+			...payload.evidence_units[0],
+			evidence_unit_id: `unit_measure_${index + 1}`,
+			value_payload: {
+				statement: `Measurement preview ${index + 1}`
+			}
+		}));
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/objectives/obj_1/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Measurement preview 6'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Measurement preview 7'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Showing the first 6 of 8 units for this group. Use filters or the detail panel for focused review.'
+				)
+			)
+			.toBeInTheDocument();
+	});
+
 	it('uses logic-chain steps to focus related evidence', async () => {
 		render(Page);
 

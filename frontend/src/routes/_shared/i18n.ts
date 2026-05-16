@@ -396,6 +396,8 @@ const translations: Record<Language, Translations> = {
 				paperFilter: 'Paper',
 				allEvidenceKinds: 'All evidence kinds',
 				allPapers: 'All papers',
+				evidencePreviewLimit:
+					'Showing the first {shown} of {total} units for this group. Use filters or the detail panel for focused review.',
 				noEvidenceUnits: 'No resolved evidence units are available yet.',
 				evidenceDetail: 'Evidence detail',
 				evidenceDetailBody: 'Inspect the selected unit and jump back to its source paper.',
@@ -2815,6 +2817,7 @@ const translations: Record<Language, Translations> = {
 				paperFilter: '文献',
 				allEvidenceKinds: '全部证据类型',
 				allPapers: '全部文献',
+				evidencePreviewLimit: '当前分组显示前 {shown} / {total} 条证据。可用筛选器或右侧详情聚焦查看。',
 				noEvidenceUnits: '暂未生成已解析证据单元。',
 				evidenceDetail: '证据详情',
 				evidenceDetailBody: '查看当前证据单元，并跳回它的来源文献。',

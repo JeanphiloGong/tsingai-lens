@@ -2168,7 +2168,7 @@ const translations: Record<Language, Translations> = {
 			actions: {
 				refresh: 'Refresh graph',
 				resetView: 'Reset view',
-				export: 'Export',
+				export: 'Export graph',
 				exportPng: 'Export PNG',
 				downloadGraphml: 'Download GraphML',
 				copyView: 'Copy current view',
@@ -4500,7 +4500,7 @@ const translations: Record<Language, Translations> = {
 			actions: {
 				refresh: '刷新图谱',
 				resetView: '重置视图',
-				export: '导出',
+				export: '导出图谱',
 				exportPng: '导出 PNG',
 				downloadGraphml: '下载 GraphML',
 				copyView: '复制当前视图',

@@ -91,6 +91,17 @@ test.describe('page interaction audit', () => {
 		}
 	});
 
+	test('graph page keeps GraphML download under graph export', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`/collections/${collectionId}/graph`);
+
+		await page.getByRole('button', { name: 'Export graph' }).click();
+
+		await expect(page.getByRole('menuitem', { name: 'Export PNG' })).toBeVisible();
+		await expect(page.getByRole('menuitem', { name: 'Download GraphML' })).toBeVisible();
+		await expect(page.getByRole('menuitem', { name: 'Copy current view' })).toBeVisible();
+	});
+
 	test('home ready collection next step opens research objectives', async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto('/');

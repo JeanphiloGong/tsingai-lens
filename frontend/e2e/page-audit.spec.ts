@@ -69,6 +69,27 @@ test.describe('page interaction audit', () => {
 		await checkMaterialsMoreNavigation(page, { width: 1440, height: 900 }, 'desktop');
 		await checkMaterialsMoreNavigation(page, { width: 390, height: 844 }, 'mobile');
 	});
+
+	test('home collection row More menu stays fully visible', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto('/');
+
+		await page.getByRole('button', { name: 'More actions for 316L LPBF evidence set' }).click();
+
+		const menu = page.locator('.row-menu__panel');
+		await expect(menu).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Process' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Export' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
+		expect(await isElementBottomExposed(page, '.row-menu__panel')).toBe(true);
+
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'home-row-more-menu-open-desktop.png'),
+				fullPage: true
+			});
+		}
+	});
 });
 
 async function checkMaterialsMoreNavigation(

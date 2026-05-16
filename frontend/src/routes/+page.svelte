@@ -49,6 +49,7 @@
   let searchTerm = '';
   let statusFilter: StatusFilter = 'all';
   let openRowMenuId = '';
+  let rowMenuPanelStyle = '';
   let collectionPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   $: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
@@ -262,8 +263,31 @@
     };
   }
 
-  function toggleRowMenu(collectionId: string) {
-    openRowMenuId = openRowMenuId === collectionId ? '' : collectionId;
+  function toggleRowMenu(collectionId: string, event: MouseEvent) {
+    if (openRowMenuId === collectionId) {
+      openRowMenuId = '';
+      rowMenuPanelStyle = '';
+      return;
+    }
+
+    const button = event.currentTarget;
+    if (button instanceof HTMLElement) {
+      const rect = button.getBoundingClientRect();
+      const margin = 12;
+      const menuWidth = 164;
+      const menuHeight = 132;
+      const top = Math.max(
+        margin,
+        Math.min(rect.bottom + 8, window.innerHeight - menuHeight - margin)
+      );
+      const left = Math.max(
+        margin,
+        Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - margin)
+      );
+      rowMenuPanelStyle = `--row-menu-top: ${Math.round(top)}px; --row-menu-left: ${Math.round(left)}px;`;
+    }
+
+    openRowMenuId = collectionId;
   }
 
   function setRowMessage(id: string, message: string, type: 'info' | 'error' = 'info') {
@@ -488,12 +512,12 @@
                         name: collection.name || $t('collection.unknownName')
                       })}
                       aria-expanded={openRowMenuId === collection.id}
-                      on:click={() => toggleRowMenu(collection.id)}
+                      on:click={(event) => toggleRowMenu(collection.id, event)}
                     >
                       ...
                     </button>
                     {#if openRowMenuId === collection.id}
-                      <div class="row-menu__panel">
+                      <div class="row-menu__panel" style={rowMenuPanelStyle}>
                         <button type="button" on:click={() => runBuild(collection)}>
                           {$t('home.actionIndex')}
                         </button>
@@ -1070,10 +1094,10 @@
   }
 
   .row-menu__panel {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    z-index: 5;
+    position: fixed;
+    top: var(--row-menu-top, 0);
+    left: var(--row-menu-left, 0);
+    z-index: 30;
     display: grid;
     min-width: 148px;
     gap: 4px;

@@ -515,7 +515,18 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('316L stainless steel Tensile strength 610 MPa'))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('2 sample(s), 2 measured property column(s).'))
+			.element(browserPage.getByText('Collection summary').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Collection summary Elongation' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Collection summary Tensile strength' }))
+			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Collection summary Elongation' }).click();
+		await expect.element(browserPage.getByText('Elongation = 33 %').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('3 sample(s), 2 measured property column(s).'))
 			.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))

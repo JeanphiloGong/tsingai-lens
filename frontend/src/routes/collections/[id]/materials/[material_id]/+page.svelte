@@ -197,6 +197,13 @@
 	$: sampleColumns = sampleMatrixColumns(materialProfile, sampleRows);
 	$: propertySummaries = materialProfile?.measured_properties ?? [];
 	$: propertyColumns = materialPropertyColumns(materialProfile, sampleRows, sampleColumns, $t);
+	$: performanceRows = materialPerformanceRows(
+		sampleRows,
+		propertyColumns,
+		propertySummaries,
+		materialProfile?.canonical_name ?? materialId,
+		$t
+	);
 	$: evidenceCodeMap = buildEvidenceCodeMap(sampleRows, propertyColumns, propertySummaries);
 	$: evidenceRows = buildEvidenceRows(
 		sampleRows,
@@ -776,6 +783,46 @@
 			columns.find((column) => column.key === key) ??
 			columns.find((column) => propertySummaryAlreadySelected(summary, [column]))
 		);
+	}
+
+	function materialPerformanceRows(
+		rows: SampleMatrixRow[],
+		columns: PropertyColumn[],
+		summaries: PropertySummary[],
+		materialName: string,
+		translate: Translate
+	): SampleMatrixRow[] {
+		const summaryValues = summaries
+			.map((summary) => {
+				const column = summaryColumnForProperty(summary, columns);
+				if (!column) return null;
+				const value = propertySummaryValue(summary);
+				if (!value.display_value || value.display_value === '--') return null;
+				return { column, summary, value };
+			})
+			.filter((item): item is NonNullable<typeof item> => item !== null);
+		if (!summaryValues.length) return rows;
+		const values = Object.fromEntries(
+			summaryValues.map((item) => [item.column.key, item.value])
+		);
+		const evidenceRefs = summaryValues.flatMap((item) => item.value.evidence_refs);
+		const warnings = summaryValues.flatMap((item) => item.summary.warnings);
+		return [
+			...rows,
+			{
+				row_id: 'collection-summary',
+				document_id: evidenceRefs[0]?.document_id ?? null,
+				sample_id: 'collection-summary',
+				sample_label: translate('research.materialDossier.table.collectionSummary'),
+				material: materialName,
+				process_context: {},
+				variable_axis: null,
+				variable_value: null,
+				values,
+				evidence_refs: evidenceRefs,
+				warnings
+			}
+		];
 	}
 
 	function summarySupportedValues(
@@ -1879,7 +1926,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each sampleRows as row, rowIndex (row.row_id)}
+								{#each performanceRows as row, rowIndex (row.row_id)}
 									<tr>
 										<td>
 											<div class="sample-condition">
@@ -1913,7 +1960,7 @@
 					</div>
 					<p class="dossier-table-note">
 						{$t('research.materialDossier.performance.summary', {
-							samples: sampleRows.length,
+							samples: performanceRows.length,
 							properties: propertyColumns.length
 						})}
 					</p>

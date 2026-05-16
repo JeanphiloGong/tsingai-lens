@@ -5159,6 +5159,15 @@ class ResearchObjectiveService:
             if (
                 route.role == "current_experimental_evidence"
                 and objective_context is not None
+                and self._objective_column_key(role_text)
+                == "current_experimental_evidence"
+                and self._objective_result_column_is_specific_metric(column_text)
+            ):
+                result_columns.add(column_text)
+                continue
+            if (
+                route.role == "current_experimental_evidence"
+                and objective_context is not None
                 and self._objective_header_matches_any_axis(
                     column_text,
                     objective_context.target_property_axes,
@@ -5223,6 +5232,13 @@ class ResearchObjectiveService:
         if not role_tokens:
             return False
         return not role_tokens.issubset(_OBJECTIVE_GENERIC_RESULT_ROLE_TOKENS)
+
+    def _objective_result_column_is_specific_metric(self, column_text: str) -> bool:
+        property_name, _unit = self._split_property_unit(column_text)
+        tokens = self._axis_token_set(property_name)
+        if not tokens:
+            return False
+        return bool(tokens & {"coefficient", "distance", "index", "score"})
 
     def _objective_result_column_matches_target(
         self,

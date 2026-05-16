@@ -1676,6 +1676,81 @@ def test_research_objective_service_uses_matching_result_headers_when_role_is_br
     assert records[1]["sample_context"]["Sample number"] == "2"
 
 
+def test_research_objective_service_keeps_routed_model_metric_columns(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Case": "test_condition",
+                "ODF Correlation Coefficient (Experiment vs. Prediction)": (
+                    "current_experimental_evidence"
+                ),
+                "Jeffrey ' s distance": "current_experimental_evidence",
+            },
+            "confidence": 0.82,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+                "microhardness",
+            ],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 7,
+            "column_headers": [
+                "Case",
+                "ODF Correlation Coefficient (Experiment vs. Prediction)",
+                "Jeffrey ' s distance",
+            ],
+            "table_matrix": [
+                [
+                    "Case",
+                    "ODF Correlation Coefficient (Experiment vs. Prediction)",
+                    "Jeffrey ' s distance",
+                ],
+                ["11", "0.1842", "1.7093"],
+                ["12", "0.1195", "2.2264"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    values_by_case_and_property = {
+        (
+            record["sample_context"]["Case"],
+            record["property_normalized"],
+        ): record["value_payload"]["value"]
+        for record in records
+    }
+    assert values_by_case_and_property[
+        ("12", "odf correlation coefficient")
+    ] == 0.1195
+    assert values_by_case_and_property[("12", "jeffrey ' s distance")] == 2.2264
+    assert "yield strength" not in {
+        record["property_normalized"]
+        for record in records
+    }
+
+
 def test_research_objective_service_treats_relative_density_as_structural_target(
     tmp_path,
 ):

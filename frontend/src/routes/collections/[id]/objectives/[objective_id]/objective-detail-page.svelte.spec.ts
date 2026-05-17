@@ -202,6 +202,25 @@ function objectivePayload() {
 				confidence: 0.79
 			},
 			{
+				evidence_unit_id: 'unit_compare_secondary',
+				objective_id: 'obj_1',
+				document_id: 'doc_1',
+				unit_kind: 'comparison',
+				property_normalized: 'yield strength',
+				sample_context: {
+					sample: 'HT-SLM-2'
+				},
+				baseline_context: {
+					sample: 'as-built'
+				},
+				value_payload: {
+					statement: 'A second heat-treated condition also exceeded the as-built baseline.'
+				},
+				source_refs: [],
+				resolution_status: 'resolved',
+				confidence: 0.71
+			},
+			{
 				evidence_unit_id: 'unit_interpretation',
 				objective_id: 'obj_1',
 				document_id: 'doc_1',
@@ -296,7 +315,13 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		const judgementCards = document.querySelector('.scientific-judgement-grid');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Heat-treated samples exceeded the as-built baseline.');
+			.toContain('Synthesizes 2 comparison evidence units for yield strength.');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.toContain('Evidence units: 2; papers: 1');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.not.toContain('A second heat-treated condition also exceeded the as-built baseline.');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
 			.toContain(
@@ -309,7 +334,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Representative evidence' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: '1 Comparison evidence' }))
+			.element(browserPage.getByRole('button', { name: '2 Comparison evidence', exact: true }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Some measurement evidence is unresolved.').first())
@@ -344,7 +369,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(contributionMap.getByText('5')).toBeInTheDocument();
+		await expect.element(contributionMap.getByText('6', { exact: true })).toBeInTheDocument();
 
 		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' });
 		await expect

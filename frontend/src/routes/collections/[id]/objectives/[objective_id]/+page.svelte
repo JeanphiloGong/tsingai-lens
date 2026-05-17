@@ -564,17 +564,46 @@
 	}
 
 	function buildControlledComparisonItems(units: ObjectiveEvidenceUnit[]): ScientificJudgementItem[] {
-		return units
-			.filter((unit) => unit.unit_kind === 'comparison')
+		const grouped = new Map<string, ObjectiveEvidenceUnit[]>();
+		for (const unit of units.filter((item) => item.unit_kind === 'comparison')) {
+			const property = unit.property_normalized || $t('research.objectiveWorkspace.comparisonEvidence');
+			grouped.set(property, [...(grouped.get(property) ?? []), unit]);
+		}
+
+		return [...grouped.entries()]
+			.map(([property, propertyUnits]) => {
+				const sortedUnits = [...propertyUnits].sort((left, right) => right.confidence - left.confidence);
+				const representative = sortedUnits[0];
+				const documentCount = new Set(sortedUnits.map((unit) => unit.document_id).filter(Boolean)).size;
+				const representativeBody = comparisonBody(representative);
+				const body =
+					sortedUnits.length > 1
+						? $t('research.objectiveWorkspace.comparisonGroupBody', {
+								count: String(sortedUnits.length),
+								property,
+								summary: representativeBody
+							})
+						: representativeBody;
+				const meta = judgementMeta(representative, [
+					$t('research.objectiveWorkspace.comparisonGroupMeta', {
+						count: String(sortedUnits.length),
+						documents: String(documentCount || 1)
+					}),
+					controlledAxesSummary(representative)
+				]);
+
+				return {
+					id: `comparison-${property}`,
+					title: property,
+					body,
+					meta,
+					unit: representative,
+					confidence: representative.confidence
+				};
+			})
 			.sort((left, right) => right.confidence - left.confidence)
 			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT)
-			.map((unit) => ({
-				id: unit.evidence_unit_id,
-				title: unit.property_normalized || $t('research.objectiveWorkspace.comparisonEvidence'),
-				body: comparisonBody(unit),
-				meta: judgementMeta(unit, [controlledAxesSummary(unit)]),
-				unit
-			}));
+			.map(({ confidence: _confidence, ...item }) => item);
 	}
 
 	function buildMechanismInterpretationItems(

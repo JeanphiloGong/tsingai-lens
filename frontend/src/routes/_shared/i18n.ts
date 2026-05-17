@@ -386,6 +386,9 @@ const translations: Record<Language, Translations> = {
 				controlledAxes: 'Controlled: {axes}',
 				comparisonGeneratedBody:
 					'{property}: {current} versus baseline {baseline}; reported direction is {direction}.',
+				comparisonGroupBody:
+					'Synthesizes {count} comparison evidence units for {property}. Representative finding: {summary}',
+				comparisonGroupMeta: 'Evidence units: {count}; papers: {documents}',
 				directionIncrease: 'increase',
 				directionDecrease: 'decrease',
 				directionNoChange: 'no change',
@@ -2889,6 +2892,9 @@ const translations: Record<Language, Translations> = {
 				unresolvedEvidenceBody: '解析状态：{status}。证据：{value}',
 				controlledAxes: '已控制：{axes}',
 				comparisonGeneratedBody: '{property}：{current} 对比基线 {baseline}；报告方向为 {direction}。',
+				comparisonGroupBody:
+					'汇总 {count} 条关于 {property} 的比较证据。代表性发现：{summary}',
+				comparisonGroupMeta: '证据单元：{count}；文献：{documents}',
 				directionIncrease: '升高',
 				directionDecrease: '降低',
 				directionNoChange: '无明显变化',

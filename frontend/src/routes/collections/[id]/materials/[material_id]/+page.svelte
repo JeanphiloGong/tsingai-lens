@@ -205,6 +205,18 @@
 		'medium',
 		'ph'
 	];
+	const RESULT_CONTEXT_HINTS = [
+		'density',
+		'hardness',
+		'strength',
+		'elongation',
+		'potential',
+		'current',
+		'resistance',
+		'defect',
+		'grain',
+		'melt pool'
+	];
 
 	const PREFERRED_PROPERTY_GROUPS = [
 		{
@@ -990,7 +1002,14 @@
 		return TEST_CONDITION_HINTS.some((hint) => normalized.includes(hint));
 	}
 
+	function isLikelyResultContextKey(key: string) {
+		const normalized = key.toLowerCase().replace(/_/g, ' ');
+		if (normalized.includes('energy density')) return false;
+		return RESULT_CONTEXT_HINTS.some((hint) => normalized.includes(hint));
+	}
+
 	function testConditionEntries(row: SampleMatrixRow, translate: Translate): ChainEntry[] {
+		const processAliases = new Set(processChainEntries(row, translate).map(chainEntryAlias));
 		const fromTestConditions = Object.entries(row.test_condition ?? {})
 			.filter(([, value]) => hasDisplayValue(value))
 			.filter(([key, value]) => isDisplayableConditionEntry(key, value))
@@ -998,7 +1017,8 @@
 				key: `test:${key}`,
 				label: processEntryLabel(key, translate),
 				value: String(value)
-			}));
+			}))
+			.filter((entry) => !processAliases.has(chainEntryAlias(entry)));
 		const fromProcessContext = Object.entries(row.process_context)
 			.filter(([, value]) => hasDisplayValue(value))
 			.filter(([key]) => isLikelyTestConditionKey(key))
@@ -1031,7 +1051,9 @@
 	}
 
 	function chainBackgroundProcessText(row: SampleMatrixRow, translate: Translate) {
-		const entries = processChainEntries(row, translate);
+		const entries = processChainEntries(row, translate).filter(
+			(entry) => !isLikelyResultContextKey(entry.label)
+		);
 		if (entries.length) {
 			return joinedList(
 				entries.slice(0, 3).map((entry) => `${entry.label} ${entry.value}`),

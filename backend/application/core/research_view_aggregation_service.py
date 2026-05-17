@@ -1973,6 +1973,8 @@ class ResearchViewAggregationService:
     ) -> dict[str, Any]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
+            if self._safe_text(row.get("unit_kind")) != "measurement":
+                continue
             if sample_key := self._objective_sample_key(row):
                 grouped[sample_key].append(row)
         matrix_rows = [
@@ -2045,19 +2047,20 @@ class ResearchViewAggregationService:
             for row in rows
             if self._safe_text(row.get("unit_kind")) == "measurement"
         ]
-        values: dict[str, dict[str, Any]] = {}
+        grouped_measurements: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in measurement_rows:
             property_name = (
                 self._safe_text(row.get("property_normalized")) or "measurement"
             )
-            key = property_name
-            if key in values:
-                key = f"{property_name}@{self._slug(self._safe_text(row.get('evidence_unit_id')) or key)}"
-            values[key] = {
-                **self._objective_value_from_row(row),
+            grouped_measurements[property_name].append(row)
+        values = {
+            property_name: {
+                **self._objective_value_from_rows(records),
                 "label": property_name,
-                "condition": self._objective_condition_text(row),
+                "condition": self._objective_condition_text(records[0]),
             }
+            for property_name, records in sorted(grouped_measurements.items())
+        }
         first = rows[0]
         return {
             "row_id": f"sample-row:{sample_key}",
@@ -2072,6 +2075,74 @@ class ResearchViewAggregationService:
             "evidence_refs": self._build_objective_evidence_refs(rows),
             "warnings": [],
         }
+
+    def _objective_value_from_rows(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        values = [self._objective_value_from_row(row) for row in rows]
+        unique_value_keys = {
+            (
+                value.get("value"),
+                self._safe_text(value.get("unit")),
+                self._safe_text(value.get("display_value")),
+            )
+            for value in values
+        }
+        conflicted = len(unique_value_keys) > 1
+        first_value = values[0]
+        fact_ids = [
+            self._safe_text(row.get("evidence_unit_id")) or ""
+            for row in rows
+            if self._safe_text(row.get("evidence_unit_id"))
+        ]
+        merged = {
+            **first_value,
+            "evidence_refs": self._build_objective_evidence_refs(rows),
+            "duplicate_count": max(0, len(rows) - 1),
+            "warnings": [],
+        }
+        if conflicted:
+            merged.update(
+                {
+                    "display_value": "; ".join(
+                        value["display_value"] for value in values
+                    ),
+                    "value": None,
+                    "unit": None,
+                    "normalized_value": None,
+                    "normalized_unit": None,
+                    "status": "conflicted",
+                    "conflict_status": "conflicted",
+                    "warnings": [
+                        self._warning(
+                            code="conflicting_objective_measurement_values",
+                            severity="warning",
+                            scope="value",
+                            message=(
+                                "Multiple distinct objective evidence values "
+                                "were found for this matrix cell."
+                            ),
+                            related_object_ids=fact_ids,
+                        )
+                    ],
+                }
+            )
+        elif len(rows) > 1:
+            merged["conflict_status"] = "duplicate_only"
+            merged["warnings"] = [
+                self._warning(
+                    code="duplicate_objective_measurements_collapsed",
+                    severity="info",
+                    scope="value",
+                    message=(
+                        "Duplicate objective evidence values were collapsed "
+                        "in this cell."
+                    ),
+                    related_object_ids=fact_ids,
+                )
+            ]
+        return merged
 
     def _build_objective_property_summaries(
         self,

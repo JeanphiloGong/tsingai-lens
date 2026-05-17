@@ -1015,3 +1015,74 @@ def test_objective_material_profile_uses_informative_sample_context_keys():
     assert row["values"]["ultimate_tensile_strength"]["display_value"] == (
         "610 ± 6 MPa"
     )
+
+
+def test_objective_material_profile_collapses_duplicate_property_columns():
+    profiles, frames = _frames()
+    frames["sample_variants"] = []
+    frames["measurement_results"] = []
+    service = _service_from_frames(
+        profiles,
+        frames,
+        objective_units=[
+            {
+                "evidence_unit_id": "oeu-lved-yield-1",
+                "objective_id": "obj-ved",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {"material": "316L stainless steel"},
+                "sample_context": {"Printed": "L-VED"},
+                "property_normalized": "yield strength",
+                "value_payload": {
+                    "source_value_numeric": 560,
+                    "source_value_text": "560",
+                },
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.88,
+            },
+            {
+                "evidence_unit_id": "oeu-lved-yield-2",
+                "objective_id": "obj-ved",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {"material": "316L stainless steel"},
+                "sample_context": {"Printed": "L-VED"},
+                "property_normalized": "yield strength",
+                "value_payload": {
+                    "source_value_numeric": 560,
+                    "source_value_text": "560",
+                },
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.88,
+            },
+            {
+                "evidence_unit_id": "oeu-lved-process",
+                "objective_id": "obj-ved",
+                "document_id": "paper-1",
+                "unit_kind": "process_context",
+                "material_system": {"material": "316L stainless steel"},
+                "sample_context": {"Printed": "heat input"},
+                "process_context": {"process": "LPBF"},
+                "resolution_status": "resolved",
+                "confidence": 0.7,
+            },
+        ],
+    )
+
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    rows = profile["sample_matrix"]["rows"]
+    property_columns = [
+        column
+        for column in profile["sample_matrix"]["columns"]
+        if column["role"] == "property"
+    ]
+    assert [row["sample_label"] for row in rows] == ["L-VED"]
+    assert [column["column_id"] for column in property_columns] == ["yield strength"]
+    assert rows[0]["values"]["yield strength"]["value"] == 560
+    assert rows[0]["values"]["yield strength"]["duplicate_count"] == 1

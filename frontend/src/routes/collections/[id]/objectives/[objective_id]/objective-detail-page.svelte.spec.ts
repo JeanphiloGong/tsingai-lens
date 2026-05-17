@@ -286,6 +286,13 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Limitations and uncertainties' }))
 			.toBeInTheDocument();
+		const pageText = document.body.textContent ?? '';
+		expect(pageText.indexOf('Controlled comparisons')).toBeLessThan(
+			pageText.indexOf('Research focus')
+		);
+		expect(pageText.indexOf('Controlled comparisons')).toBeLessThan(
+			pageText.indexOf('Controlled comparison is ready')
+		);
 		const judgementCards = document.querySelector('.scientific-judgement-grid');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
@@ -319,11 +326,11 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Measurement results' }))
 			.not.toBeInTheDocument();
-		expect(document.body.textContent?.indexOf('Research conclusion package')).toBeLessThan(
-			document.body.textContent?.indexOf('Logic chain')
+		expect(pageText.indexOf('Research conclusion package')).toBeLessThan(
+			pageText.indexOf('Logic chain')
 		);
-		expect(document.body.textContent?.indexOf('Research conclusion package')).toBeLessThan(
-			document.body.textContent?.indexOf('Relevant papers')
+		expect(pageText.indexOf('Research conclusion package')).toBeLessThan(
+			pageText.indexOf('Relevant papers')
 		);
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Paper contribution map' }))

@@ -894,40 +894,6 @@
 					<strong>{collectionConclusionText(objectiveView)}</strong>
 				</div>
 
-				{#if researchFocusGroups.length}
-					<div class="research-focus">
-						<h4>{$t('research.objectiveWorkspace.researchFocus')}</h4>
-						<div class="research-focus__grid">
-							{#each researchFocusGroups as group (group.labelKey)}
-								<div>
-									<span>{$t(group.labelKey)}</span>
-									<p>{listLabel(group.items)}</p>
-								</div>
-							{/each}
-						</div>
-					</div>
-				{/if}
-
-				<div class="evidence-readiness" aria-label={$t('research.objectiveWorkspace.evidenceReadiness')}>
-					{#each evidenceReadinessItems as item (item.id)}
-						<button
-							class:ready={item.ready}
-							type="button"
-							on:click={() => focusEvidenceKind(item.evidenceKind)}
-						>
-							<strong>{item.count}</strong>
-							<span>{$t(item.labelKey)}</span>
-						</button>
-					{/each}
-				</div>
-
-				{#if comparisonReadiness}
-					<div class={`comparison-readiness comparison-readiness--${comparisonReadiness.tone}`}>
-						<h4>{$t(comparisonReadiness.titleKey)}</h4>
-						<p>{$t(comparisonReadiness.bodyKey)}</p>
-					</div>
-				{/if}
-
 				<div
 					class="scientific-judgement-grid"
 					aria-label={$t('research.objectiveWorkspace.scientificJudgements')}
@@ -1012,6 +978,40 @@
 						{/if}
 					</section>
 				</div>
+
+				{#if researchFocusGroups.length}
+					<div class="research-focus">
+						<h4>{$t('research.objectiveWorkspace.researchFocus')}</h4>
+						<div class="research-focus__grid">
+							{#each researchFocusGroups as group (group.labelKey)}
+								<div>
+									<span>{$t(group.labelKey)}</span>
+									<p>{listLabel(group.items)}</p>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				<div class="evidence-readiness" aria-label={$t('research.objectiveWorkspace.evidenceReadiness')}>
+					{#each evidenceReadinessItems as item (item.id)}
+						<button
+							class:ready={item.ready}
+							type="button"
+							on:click={() => focusEvidenceKind(item.evidenceKind)}
+						>
+							<strong>{item.count}</strong>
+							<span>{$t(item.labelKey)}</span>
+						</button>
+					{/each}
+				</div>
+
+				{#if comparisonReadiness}
+					<div class={`comparison-readiness comparison-readiness--${comparisonReadiness.tone}`}>
+						<h4>{$t(comparisonReadiness.titleKey)}</h4>
+						<p>{$t(comparisonReadiness.bodyKey)}</p>
+					</div>
+				{/if}
 
 				{#if representativeEvidenceUnits.length}
 					<div class="representative-evidence">

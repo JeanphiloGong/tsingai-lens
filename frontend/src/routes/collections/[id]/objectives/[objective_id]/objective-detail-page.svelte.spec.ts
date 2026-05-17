@@ -208,7 +208,8 @@ function objectivePayload() {
 			chain_scope: 'objective',
 			question: 'How does heat treatment affect LPBF 316L tensile strength?',
 			evidence_unit_ids: ['unit_measure', 'unit_condition', 'unit_obs'],
-			summary: 'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.',
+			summary:
+				'How does heat treatment affect LPBF 316L tensile strength?: Heat-treated LPBF 316L is supported by tensile and microstructure evidence.',
 			chain_payload: {
 				cross_paper: {
 					gaps: ['No cross-paper comparison unit yet.']
@@ -401,7 +402,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 					heat_treatment: 'annealed'
 				},
 				test_condition: {
-					method: 'tensile test'
+					method: 'tensile test',
+					details:
+						'Very long tensile testing condition text that belongs in the inspector rather than compact evidence chips.'
 				}
 			}
 		];
@@ -426,6 +429,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(duplicateCard.getByText('process: Non-preheated'))
 			.toBeInTheDocument();
+		await expect
+			.element(duplicateCard.getByText(/Very long tensile testing condition text/))
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();

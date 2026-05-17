@@ -144,6 +144,16 @@
 		return frame.title || frame.source_filename || frame.document_id;
 	}
 
+	function collectionConclusionText(view: ObjectiveResearchView) {
+		const summary = view.logic_chain?.summary || view.objective.comparison_intent || '';
+		const prefix = `${view.objective.question}:`;
+		const normalizedSummary = summary.trim();
+		if (normalizedSummary.startsWith(prefix)) {
+			return normalizedSummary.slice(prefix.length).trim();
+		}
+		return normalizedSummary || $t('research.objectiveWorkspace.noLogicChain');
+	}
+
 	function paperContributionSummary(paper: PaperCoverage) {
 		if (paper.frame.background) return paper.frame.background;
 		if (paper.frame.changed_variables.length && paper.frame.measured_property_scope.length) {
@@ -228,11 +238,16 @@
 		return entry ? `baseline: ${entry.value}` : '';
 	}
 
+	function evidenceCardEntries(record: Record<string, unknown>, limit = 5) {
+		const verboseKeys = new Set(['detail', 'details', 'source_text', 'raw_text', 'statement']);
+		return recordEntries(record, limit).filter((entry) => !verboseKeys.has(entry.key.toLowerCase()));
+	}
+
 	function evidenceCardFacts(unit: ObjectiveEvidenceUnit) {
 		return [
-			...recordEntries(unit.sample_context, 1).map((entry) => `${entry.key}: ${entry.value}`),
-			...recordEntries(unit.process_context, 2).map((entry) => `${entry.key}: ${entry.value}`),
-			...recordEntries(unit.test_condition, 1).map((entry) => `${entry.key}: ${entry.value}`),
+			...evidenceCardEntries(unit.sample_context, 1).map((entry) => `${entry.key}: ${entry.value}`),
+			...evidenceCardEntries(unit.process_context, 2).map((entry) => `${entry.key}: ${entry.value}`),
+			...evidenceCardEntries(unit.test_condition, 1).map((entry) => `${entry.key}: ${entry.value}`),
 			baselineCardFact(unit.baseline_context)
 		]
 			.filter(Boolean)
@@ -725,11 +740,7 @@
 
 				<div class="collection-conclusion">
 					<span>{$t('research.objectiveWorkspace.collectionConclusion')}</span>
-					<strong>
-						{objectiveView.logic_chain?.summary ||
-							objectiveView.objective.comparison_intent ||
-							$t('research.objectiveWorkspace.noLogicChain')}
-					</strong>
+					<strong>{collectionConclusionText(objectiveView)}</strong>
 				</div>
 
 				{#if researchFocusGroups.length}
@@ -878,11 +889,11 @@
 									<div class="paper-contribution-card__metrics">
 										<div>
 											<strong>{paper.units.length}</strong>
-											<span>{$t('research.objectiveWorkspace.evidenceUnits')}</span>
+											<span>{$t('research.objectives.evidenceUnits')}</span>
 										</div>
 										<div>
 											<strong>{paper.routeCount}</strong>
-											<span>{$t('research.objectiveWorkspace.routes')}</span>
+											<span>{$t('research.objectives.routes')}</span>
 										</div>
 										<div>
 											<strong>{paper.frame.relevant_tables.length}</strong>
@@ -1854,11 +1865,15 @@
 
 	.evidence-unit-card__facts span {
 		max-width: 100%;
+		min-width: 0;
 		border: 1px solid var(--border-default);
 		border-radius: 999px;
 		padding: 3px 7px;
 		background: var(--surface-card);
+		overflow: hidden;
 		overflow-wrap: anywhere;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.evidence-group__limit-note {

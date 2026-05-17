@@ -261,6 +261,7 @@ export type WorkbenchSummaryCard = {
 	body: string;
 	source_label: string;
 	source_span_id: string;
+	status: 'supported' | 'review';
 };
 
 export type WorkbenchMethodRow = {
@@ -276,6 +277,7 @@ export type WorkbenchKeyResultCard = {
 	trend: string;
 	source_label: string;
 	source_span_id: string;
+	status: 'supported' | 'review';
 };
 
 export type WorkbenchResultRow = {
@@ -1405,6 +1407,35 @@ function readableTraceabilityStatus(status: string) {
 	return 'Source support is not yet available';
 }
 
+function textNeedsDocumentReview(value: string | null | undefined) {
+	const normalized = (value ?? '').trim().toLowerCase();
+	if (!normalized || normalized === '--') return true;
+	return (
+		normalized.includes('not clearly') ||
+		normalized.includes('not reported') ||
+		normalized.includes('unspecified') ||
+		normalized.includes('pending') ||
+		normalized.includes('insufficient')
+	);
+}
+
+function resultNeedsDocumentReview(row: WorkbenchResultRow | null | undefined) {
+	if (!row) return true;
+	return (
+		row.warnings_count > 0 ||
+		textNeedsDocumentReview(row.material_system) ||
+		textNeedsDocumentReview(row.process) ||
+		textNeedsDocumentReview(row.baseline) ||
+		textNeedsDocumentReview(row.test_condition) ||
+		row.comparability_status.toLowerCase().includes('limited') ||
+		row.comparability_status.toLowerCase().includes('insufficient')
+	);
+}
+
+function documentReviewStatus(needsReview: boolean): 'review' | 'supported' {
+	return needsReview ? 'review' : 'supported';
+}
+
 function readableWarning(raw: string) {
 	const value = raw.trim().toLowerCase();
 	if (!value) return '';
@@ -1453,6 +1484,17 @@ function workbenchMaterialLabel(
 		relatedResults.find((item) => item.material_label)?.material_label ??
 		'Material system not clearly specified'
 	);
+}
+
+function displayMaterialLabel(
+	contexts: WorkbenchChainContext[],
+	relatedResults: ResultListItem[],
+	resultRows: WorkbenchResultRow[]
+) {
+	const material = workbenchMaterialLabel(contexts, relatedResults);
+	if (!textNeedsDocumentReview(material)) return material;
+	const reviewed = resultRows.find((row) => !textNeedsDocumentReview(row.material_system));
+	return reviewed?.material_system ?? 'Material system needs source review';
 }
 
 function buildWorkbenchResultRows(
@@ -1524,56 +1566,66 @@ function buildWorkbenchSummaryCards(
 	resultRows: WorkbenchResultRow[],
 	sourceSpans: WorkbenchSourceSpan[]
 ): WorkbenchSummaryCard[] {
-	const material = workbenchMaterialLabel(contexts, []);
+	const material = displayMaterialLabel(contexts, [], resultRows);
 	const firstContext = contexts[0];
 	const firstResult = resultRows[0];
+	const firstNeedsReview = resultNeedsDocumentReview(firstResult);
+	const materialNeedsReview = textNeedsDocumentReview(material);
+	const processNeedsReview = textNeedsDocumentReview(firstResult?.process);
+	const comparableResult = resultRows.find((row) => !resultNeedsDocumentReview(row));
 	return [
 		{
 			id: 'summary-question',
 			title: 'Research question',
 			body:
-				firstContext?.series.test_family && firstContext.series.property_family
+				firstContext?.series.test_family && firstContext.series.property_family && !firstNeedsReview
 					? `How does the reported ${firstContext.series.test_family} setup affect ${firstContext.series.property_family}?`
-					: 'How does the paper connect its method or material design to measurable outcomes?',
+					: 'The extracted research question needs source review before it is used as a paper-level conclusion.',
 			source_label: 'Abstract',
-			source_span_id: spanAt(sourceSpans, 0)
+			source_span_id: spanAt(sourceSpans, 0),
+			status: documentReviewStatus(firstNeedsReview)
 		},
 		{
 			id: 'summary-contribution',
 			title: 'Main contribution',
 			body:
-				firstResult?.property && firstResult.material_system
+				firstResult?.property && firstResult.material_system && !firstNeedsReview
 					? `The paper organizes evidence around ${firstResult.material_system} and reports ${firstResult.property} with source-backed context.`
-					: 'The paper provides a structured method-result chain that can be reviewed next to the original source.',
+					: 'The main contribution is not yet supported by enough structured material, process, and baseline context.',
 			source_label: 'Abstract',
-			source_span_id: spanAt(sourceSpans, 0)
+			source_span_id: spanAt(sourceSpans, 0),
+			status: documentReviewStatus(firstNeedsReview)
 		},
 		{
 			id: 'summary-materials',
 			title: 'Dataset / materials',
 			body: material,
 			source_label: 'Methodology',
-			source_span_id: spanAt(sourceSpans, 2)
+			source_span_id: spanAt(sourceSpans, 2),
+			status: documentReviewStatus(materialNeedsReview)
 		},
 		{
 			id: 'summary-method',
 			title: 'Method',
 			body:
-				firstResult?.process && firstResult.process !== 'Process not clearly reported'
+				firstResult?.process && !processNeedsReview
 					? firstResult.process
-					: 'Method details are represented as a source-linked extraction until the backend provides richer section roles.',
+					: 'Processing and test setup details need source review before they are treated as structured method facts.',
 			source_label: 'Methodology',
-			source_span_id: spanAt(sourceSpans, 2)
+			source_span_id: spanAt(sourceSpans, 2),
+			status: documentReviewStatus(processNeedsReview)
 		},
 		{
 			id: 'summary-key-result',
 			title: 'Key result',
 			body:
-				firstResult?.property && firstResult.comparability_status
-					? `${firstResult.property}: ${firstResult.comparability_status}.`
+				comparableResult?.property && comparableResult.comparability_status
+					? `${comparableResult.property}: ${comparableResult.comparability_status}.`
 					: 'Key results are available as reviewable cards with source jumps.',
 			source_label: 'Results',
-			source_span_id: firstResult?.source_span_id ?? spanAt(sourceSpans, 3)
+			source_span_id:
+				comparableResult?.source_span_id ?? firstResult?.source_span_id ?? spanAt(sourceSpans, 3),
+			status: documentReviewStatus(!comparableResult)
 		}
 	];
 }
@@ -1620,7 +1672,7 @@ function buildWorkbenchKeyResults(
 	resultRows: WorkbenchResultRow[],
 	sourceSpans: WorkbenchSourceSpan[]
 ): WorkbenchKeyResultCard[] {
-	const cards = contexts.slice(0, 3).map((context, index) => ({
+	const cards: WorkbenchKeyResultCard[] = contexts.slice(0, 3).map((context, index) => ({
 		id: `key-${context.chain.result_id}`,
 		label: context.chain.measurement.property,
 		value: workbenchMeasurementValue(
@@ -1632,18 +1684,20 @@ function buildWorkbenchKeyResults(
 				? 'Key Finding'
 				: 'Review Needed',
 		source_label: 'Results',
-		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3)
+		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3),
+		status: documentReviewStatus(resultNeedsDocumentReview(resultRows[index]))
 	}));
 
 	if (cards.length) return cards;
 
-	return relatedResults.slice(0, 3).map((result, index) => ({
+	return relatedResults.slice(0, 3).map((result, index): WorkbenchKeyResultCard => ({
 		id: `key-${result.result_id}`,
 		label: result.property,
 		value: workbenchMeasurementValue(result.value, result.unit),
 		trend: result.comparability_status === 'comparable' ? 'Key Finding' : 'Review Needed',
 		source_label: 'Results',
-		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3)
+		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3),
+		status: documentReviewStatus(resultNeedsDocumentReview(resultRows[index]))
 	}));
 }
 

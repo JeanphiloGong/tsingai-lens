@@ -7,9 +7,9 @@
 		SourceAnchorRect,
 		WorkbenchPdfPage
 	} from '../../../../../_shared/documents';
-	import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+	import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
-	type PdfJsModule = typeof import('pdfjs-dist');
+	type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 	type PdfLoadingTask = {
 		promise: Promise<PDFDocumentProxy>;
 		destroy?: () => Promise<void> | void;
@@ -131,8 +131,8 @@
 
 	async function loadPdfJs(): Promise<PdfJsModule> {
 		const [pdfjs, worker] = await Promise.all([
-			import('pdfjs-dist'),
-			import('pdfjs-dist/build/pdf.worker.mjs?url')
+			import('pdfjs-dist/legacy/build/pdf.mjs'),
+			import('pdfjs-dist/legacy/build/pdf.worker.mjs?url')
 		]);
 		pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
 		return pdfjs;

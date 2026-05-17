@@ -38,12 +38,12 @@ vi.mock('$app/stores', () => ({
 	page: pageStore
 }));
 
-vi.mock('pdfjs-dist', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
 	GlobalWorkerOptions: { workerSrc: '' },
 	getDocument: getDocumentMock
 }));
 
-vi.mock('pdfjs-dist/build/pdf.worker.mjs?url', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.worker.mjs?url', () => ({
 	default: '/mock-pdf-worker.mjs'
 }));
 

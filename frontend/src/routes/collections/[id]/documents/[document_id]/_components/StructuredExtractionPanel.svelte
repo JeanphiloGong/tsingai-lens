@@ -33,6 +33,14 @@
 
 	$: overviewGroups = buildOverviewGroups(model);
 
+	function resultStatusLabel(result: WorkbenchKeyResultCard) {
+		return result.status === 'review' ? $t('workbench.needsSourceReview') : result.trend;
+	}
+
+	function sourceStatusLabel(status: WorkbenchSummaryCard['status']) {
+		return status === 'review' ? $t('workbench.needsSourceReview') : $t('workbench.sourceBacked');
+	}
+
 	function methodRowsAt(currentModel: DocumentWorkbenchModel, ...indexes: number[]): OverviewMethodRow[] {
 		return indexes
 			.map((index) => ({ row: currentModel.method_rows[index], index }))
@@ -111,7 +119,10 @@
 							>
 								<div class="card-title-row">
 									<h3>{card.title}</h3>
-									<span>{card.source_label}</span>
+									<div>
+										<span>{card.source_label}</span>
+										<span class:review={card.status === 'review'}>{sourceStatusLabel(card.status)}</span>
+									</div>
 								</div>
 								<p>{card.body}</p>
 							</button>
@@ -157,11 +168,12 @@
 									<button
 										type="button"
 										class="key-result-card"
+										class:review={result.status === 'review'}
 										on:click={() => onJumpToSource(result.source_span_id)}
 									>
 										<span>{result.label}</span>
 										<strong>{result.value}</strong>
-										<small>{result.trend}</small>
+										<small>{resultStatusLabel(result)}</small>
 									</button>
 								{/each}
 							</div>
@@ -285,11 +297,29 @@
 		line-height: 22px;
 	}
 
+	.card-title-row div {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 6px;
+	}
+
 	.card-title-row span {
+		display: inline-flex;
+		min-height: 20px;
+		align-items: center;
+		padding: 0 7px;
+		border-radius: 999px;
+		background: #f1f5f9;
 		color: #64748b;
 		font-size: 12px;
-		font-weight: 500;
+		font-weight: 700;
 		white-space: nowrap;
+	}
+
+	.card-title-row span.review {
+		background: #fef3c7;
+		color: #b45309;
 	}
 
 	p {
@@ -344,6 +374,11 @@
 		cursor: pointer;
 	}
 
+	.key-result-card.review {
+		border-color: #fde68a;
+		background: #fffbeb;
+	}
+
 	.key-result-card span {
 		color: #334155;
 		font-size: 12px;
@@ -363,6 +398,10 @@
 		color: #15803d;
 		font-size: 11px;
 		font-weight: 700;
+	}
+
+	.key-result-card.review small {
+		color: #b45309;
 	}
 
 	.method-card {

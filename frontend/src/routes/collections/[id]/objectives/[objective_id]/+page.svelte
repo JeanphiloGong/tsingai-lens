@@ -55,7 +55,7 @@
 		title: string;
 		body: string;
 		meta: string[];
-		unit: ObjectiveEvidenceUnit;
+		unit?: ObjectiveEvidenceUnit;
 	};
 
 	type ResearchFocusGroup = {
@@ -129,6 +129,7 @@
 	$: comparisonReadiness = objectiveView ? buildComparisonReadiness(objectiveView) : null;
 	$: controlledComparisonItems = buildControlledComparisonItems(evidenceUnits);
 	$: mechanismInterpretationItems = buildMechanismInterpretationItems(evidenceUnits);
+	$: limitationItems = objectiveView ? buildLimitationItems(objectiveView) : [];
 	$: representativeEvidenceUnits = buildRepresentativeEvidenceUnits(evidenceUnits);
 	$: selectedEvidenceUnit =
 		(selectedEvidenceUnitId
@@ -592,6 +593,47 @@
 			}));
 	}
 
+	function humanizeGapCode(value: string) {
+		const normalized = value.trim();
+		if (!normalized) return '';
+		const labelKey = `research.objectiveWorkspace.gapLabels.${normalized}`;
+		const translated = $t(labelKey);
+		if (translated !== labelKey) return translated;
+		return normalized.replace(/_/g, ' ');
+	}
+
+	function unresolvedEvidenceItems(units: ObjectiveEvidenceUnit[]): ScientificJudgementItem[] {
+		return units
+			.filter((unit) => unit.resolution_status && unit.resolution_status !== 'resolved')
+			.sort((left, right) => right.confidence - left.confidence)
+			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT)
+			.map((unit) => ({
+				id: `unresolved-${unit.evidence_unit_id}`,
+				title: unit.property_normalized || $t(evidenceKindLabelKey(unit.unit_kind)),
+				body: $t('research.objectiveWorkspace.unresolvedEvidenceBody', {
+					status: unit.resolution_status,
+					value: evidenceUnitValue(unit)
+				}),
+				meta: judgementMeta(unit),
+				unit
+			}));
+	}
+
+	function buildLimitationItems(view: ObjectiveResearchView): ScientificJudgementItem[] {
+		const gapItems = chainGaps(view)
+			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT)
+			.map((gap) => ({
+				id: `gap-${gap}`,
+				title: $t('research.objectiveWorkspace.logicGap'),
+				body: humanizeGapCode(gap),
+				meta: [$t('research.objectiveWorkspace.logicChainTitle')]
+			}));
+		return [...gapItems, ...unresolvedEvidenceItems(view.evidence_units)].slice(
+			0,
+			SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT
+		);
+	}
+
 	function buildRepresentativeEvidenceUnits(units: ObjectiveEvidenceUnit[]) {
 		const selected: ObjectiveEvidenceUnit[] = [];
 		const selectedIds = new Set<string>();
@@ -706,10 +748,11 @@
 				titleKey: 'research.objectiveWorkspace.gapsStep',
 				count: gaps.length || comparisons.length,
 				ready: view.readiness.logic_chain_ready,
-				items: (gaps.length ? gaps : comparisons.map((unit) => evidenceUnitValue(unit))).slice(
-					0,
-					4
-				),
+				items: (
+					gaps.length
+						? gaps.map((gap) => humanizeGapCode(gap))
+						: comparisons.map((unit) => evidenceUnitValue(unit))
+				).slice(0, 4),
 				emptyKey: 'research.objectiveWorkspace.noGaps',
 				evidenceKind: 'comparison'
 			}
@@ -734,6 +777,10 @@
 		selectedEvidenceUnitId = unit.evidence_unit_id;
 		evidenceAuditOpen = true;
 		evidenceSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+	}
+
+	function focusJudgementItem(item: ScientificJudgementItem) {
+		if (item.unit) focusEvidenceUnit(item.unit);
 	}
 
 	function queryString(params: [string, string][]) {
@@ -893,7 +940,7 @@
 						{#if controlledComparisonItems.length}
 							<div class="judgement-list">
 								{#each controlledComparisonItems as item (item.id)}
-									<button type="button" on:click={() => focusEvidenceUnit(item.unit)}>
+									<button type="button" on:click={() => focusJudgementItem(item)}>
 										<strong>{item.title}</strong>
 										<p>{item.body}</p>
 										{#if item.meta.length}
@@ -917,7 +964,7 @@
 						{#if mechanismInterpretationItems.length}
 							<div class="judgement-list">
 								{#each mechanismInterpretationItems as item (item.id)}
-									<button type="button" on:click={() => focusEvidenceUnit(item.unit)}>
+									<button type="button" on:click={() => focusJudgementItem(item)}>
 										<strong>{item.title}</strong>
 										<p>{item.body}</p>
 										{#if item.meta.length}
@@ -930,6 +977,38 @@
 							<p class="judgement-empty">
 								{$t('research.objectiveWorkspace.noMechanismInterpretations')}
 							</p>
+						{/if}
+					</section>
+
+					<section>
+						<div class="scientific-judgement-grid__heading">
+							<h4>{$t('research.objectiveWorkspace.limitations')}</h4>
+							<span>{limitationItems.length}</span>
+						</div>
+						{#if limitationItems.length}
+							<div class="judgement-list">
+								{#each limitationItems as item (item.id)}
+									{#if item.unit}
+										<button type="button" on:click={() => focusJudgementItem(item)}>
+											<strong>{item.title}</strong>
+											<p>{item.body}</p>
+											{#if item.meta.length}
+												<small>{item.meta.join(' · ')}</small>
+											{/if}
+										</button>
+									{:else}
+										<article>
+											<strong>{item.title}</strong>
+											<p>{item.body}</p>
+											{#if item.meta.length}
+												<small>{item.meta.join(' · ')}</small>
+											{/if}
+										</article>
+									{/if}
+								{/each}
+							</div>
+						{:else}
+							<p class="judgement-empty">{$t('research.objectiveWorkspace.noLimitations')}</p>
 						{/if}
 					</section>
 				</div>
@@ -1703,7 +1782,8 @@
 		background: var(--surface-card);
 	}
 
-	.judgement-list button {
+	.judgement-list button,
+	.judgement-list article {
 		display: grid;
 		gap: 5px;
 		width: 100%;

@@ -149,7 +149,7 @@ function objectivePayload() {
 					}
 				],
 				evidence_anchor_ids: ['anc_1'],
-				resolution_status: 'resolved',
+				resolution_status: 'unresolved_condition',
 				confidence: 0.92
 			},
 			{
@@ -225,7 +225,7 @@ function objectivePayload() {
 				'How does heat treatment affect LPBF 316L tensile strength?: Heat-treated LPBF 316L is supported by tensile and microstructure evidence.',
 			chain_payload: {
 				cross_paper: {
-					gaps: ['No cross-paper comparison unit yet.']
+					gaps: ['unresolved_measurements_present']
 				}
 			},
 			confidence: 0.83
@@ -283,6 +283,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Mechanism interpretations' }))
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Limitations and uncertainties' }))
+			.toBeInTheDocument();
 		const judgementCards = document.querySelector('.scientific-judgement-grid');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
@@ -293,13 +296,16 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				'Annealing changes the cellular substructure, which the authors link to the tensile response.'
 			);
 		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.toContain('Some measurement evidence is unresolved.');
+		await expect
 			.element(browserPage.getByRole('heading', { name: 'Representative evidence' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: '1 Comparison evidence' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('No cross-paper comparison unit yet.'))
+			.element(browserPage.getByText('Some measurement evidence is unresolved.').first())
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Extraction diagnostics' }))

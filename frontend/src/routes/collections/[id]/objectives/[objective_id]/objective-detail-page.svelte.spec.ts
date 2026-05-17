@@ -269,6 +269,19 @@ function objectivePayload() {
 				source_refs: [],
 				resolution_status: 'resolved',
 				confidence: 0.94
+			},
+			{
+				evidence_unit_id: 'unit_trend_interpretation',
+				objective_id: 'obj_1',
+				document_id: 'doc_1',
+				unit_kind: 'interpretation',
+				property_normalized: 'tensile response',
+				value_payload: {},
+				interpretation:
+					'The heat treatments induced a decrease in the tensile strength, as well as an increase in the elongation.',
+				source_refs: [],
+				resolution_status: 'resolved',
+				confidence: 0.93
 			}
 		],
 		logic_chain: {
@@ -369,6 +382,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.not.toContain('Higher yield strength.');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
+			.not.toContain('The heat treatments induced a decrease in the tensile strength');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
 			.toContain('Some measurement evidence is unresolved.');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
@@ -421,7 +437,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(contributionMap.getByText('8', { exact: true })).toBeInTheDocument();
+		await expect.element(contributionMap.getByText('9', { exact: true })).toBeInTheDocument();
 
 		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' });
 		await expect

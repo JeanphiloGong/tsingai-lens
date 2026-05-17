@@ -631,6 +631,7 @@
 		const normalized = value.trim().replace(/\s+/g, ' ');
 		if (!normalized) return false;
 		const lower = normalized.toLowerCase();
+		if (isResultOnlyTrend(lower)) return false;
 		const hasExplanationSignal =
 			/\b(attribute|attributed|because|cause|caused|driven|due to|explain|explains|explained|govern|governs|lead|leads|led|link|linked|mechanism|promote|promotes|result in|results in|suppress|suppresses)\b/.test(
 				lower
@@ -639,6 +640,19 @@
 		return !/^(higher|lower|increased|decreased|improved|reduced|prediction results? of)\b/.test(
 			lower
 		);
+	}
+
+	function isResultOnlyTrend(lower: string) {
+		const hasTrend = /\b(increase|increases|increased|decrease|decreases|decreased|higher|lower|improved|reduced)\b/.test(
+			lower
+		);
+		if (!hasTrend) return false;
+		const hasMechanismSubject =
+			/\b(cellular|corrosion|defect|defects|film|grain|melt pool|microstructure|passive|phase|porosity|precipitate|texture)\b/.test(
+				lower
+			);
+		if (hasMechanismSubject) return false;
+		return /\b(elongation|hardness|strength|tensile|yield)\b/.test(lower);
 	}
 
 	function humanizeCode(value: string) {

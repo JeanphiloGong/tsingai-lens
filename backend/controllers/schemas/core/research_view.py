@@ -87,6 +87,7 @@ class SampleMatrixRowResponse(BaseModel):
     sample_label: str | None = Field(default=None, description="样品展示名")
     material: str | None = Field(default=None, description="材料体系")
     process_context: dict[str, Any] = Field(default_factory=dict, description="工艺上下文")
+    test_condition: dict[str, Any] = Field(default_factory=dict, description="测试条件上下文")
     variable_axis: str | None = Field(default=None, description="变量轴")
     variable_value: Any = Field(default=None, description="变量取值")
     values: dict[str, EvidenceBackedValueResponse] = Field(

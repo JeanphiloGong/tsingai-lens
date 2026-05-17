@@ -970,6 +970,94 @@ def test_objective_material_profile_inherits_material_scope_for_sample_measureme
     assert row["values"]["elongation"]["unit"] == "%"
 
 
+def test_objective_material_profile_projects_sample_context_and_test_conditions():
+    profiles, frames = _frames()
+    frames["sample_variants"] = []
+    frames["measurement_results"] = []
+    service = _service_from_frames(
+        profiles,
+        frames,
+        objective_units=[
+            {
+                "evidence_unit_id": "oeu-preheated-yield",
+                "objective_id": "obj-preheat",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {},
+                "sample_context": {
+                    "Build platform conditions": "Preheated",
+                    "sample_number": "2",
+                },
+                "test_condition": {
+                    "Build platform conditions": "Preheated",
+                    "standard": "ASTM E8",
+                },
+                "property_normalized": "yield_strength",
+                "value_payload": {
+                    "source_value_numeric": 465,
+                    "source_value_text": "465",
+                },
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.85,
+            },
+            {
+                "evidence_unit_id": "oeu-preheated-process",
+                "objective_id": "obj-preheat",
+                "document_id": "paper-1",
+                "unit_kind": "process_context",
+                "material_system": {"material": "316L stainless steel"},
+                "sample_context": {
+                    "Build platform conditions": "Preheated",
+                    "sample_number": "2",
+                },
+                "process_context": {"platform_temperature": "150 C"},
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            },
+            {
+                "evidence_unit_id": "oeu-other-process",
+                "objective_id": "obj-preheat",
+                "document_id": "paper-1",
+                "unit_kind": "process_context",
+                "material_system": {"material": "316L stainless steel"},
+                "sample_context": {"Build platform conditions": "Non-preheated"},
+                "process_context": {"platform_temperature": "room temperature"},
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            },
+        ],
+        research_objectives=[
+            {
+                "objective_id": "obj-preheat",
+                "question": "How does build-platform preheating affect LPBF 316L?",
+                "material_scope": ["316L stainless steel"],
+                "process_axes": ["preheating"],
+                "property_axes": ["yield strength"],
+                "confidence": 0.9,
+            }
+        ],
+    )
+
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    rows = profile["sample_matrix"]["rows"]
+    assert [row["sample_label"] for row in rows] == ["Preheated"]
+    row = rows[0]
+    assert row["process_context"] == {
+        "Build platform conditions": "Preheated",
+        "platform_temperature": "150 C",
+    }
+    assert row["test_condition"] == {
+        "Build platform conditions": "Preheated",
+        "standard": "ASTM E8",
+    }
+    assert row["values"]["yield_strength"]["value"] == 465
+
+
 def test_objective_material_profile_uses_informative_sample_context_keys():
     profiles, frames = _frames()
     frames["sample_variants"] = []

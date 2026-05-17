@@ -97,6 +97,12 @@ _SAMPLE_CONTEXT_EXCLUDED_KEYS = {
     "composition",
     "alloy",
 }
+_SAMPLE_CONTEXT_PROCESS_KEYS = {
+    "build platform conditions",
+    "build platform condition",
+    "condition",
+    "condition label",
+}
 _FactRows = dict[str, list[dict[str, Any]]]
 _ComparisonGroups = dict[tuple[str, str, str, str, str], list[dict[str, Any]]]
 
@@ -1967,13 +1973,15 @@ class ResearchViewAggregationService:
     ) -> dict[str, Any]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
-            if self._safe_text(row.get("unit_kind")) != "measurement":
-                continue
             if sample_key := self._objective_sample_key(row):
                 grouped[sample_key].append(row)
         matrix_rows = [
             self._build_objective_sample_matrix_row(material_key, sample_key, records)
             for sample_key, records in sorted(grouped.items())
+            if any(
+                self._safe_text(record.get("unit_kind")) == "measurement"
+                for record in records
+            )
         ]
         process_keys = [
             key
@@ -2034,8 +2042,24 @@ class ResearchViewAggregationService:
         rows: list[dict[str, Any]],
     ) -> dict[str, Any]:
         process_context: dict[str, Any] = {}
+        test_condition: dict[str, Any] = {}
         for row in rows:
-            process_context.update(self._as_mapping(row.get("process_context")))
+            self._merge_observed_context(
+                process_context,
+                self._objective_sample_process_context(row),
+            )
+            self._merge_observed_context(
+                process_context,
+                self._as_mapping(row.get("process_context")),
+            )
+            self._merge_observed_context(
+                test_condition,
+                self._as_mapping(row.get("test_condition")),
+            )
+            self._merge_observed_context(
+                test_condition,
+                self._objective_resolved_condition_context(row),
+            )
         measurement_rows = [
             row
             for row in rows
@@ -2055,7 +2079,7 @@ class ResearchViewAggregationService:
             }
             for property_name, records in sorted(grouped_measurements.items())
         }
-        first = rows[0]
+        first = measurement_rows[0] if measurement_rows else rows[0]
         return {
             "row_id": f"sample-row:{sample_key}",
             "document_id": self._safe_text(first.get("document_id")),
@@ -2063,12 +2087,45 @@ class ResearchViewAggregationService:
             "sample_label": self._objective_sample_label(first) or sample_key,
             "material": self._canonical_material_label(material_key) or material_key,
             "process_context": process_context,
+            "test_condition": test_condition,
             "variable_axis": None,
             "variable_value": None,
             "values": values,
             "evidence_refs": self._build_objective_evidence_refs(rows),
             "warnings": [],
         }
+
+    def _objective_sample_process_context(self, row: dict[str, Any]) -> dict[str, Any]:
+        context: dict[str, Any] = {}
+        for key, value in self._as_mapping(row.get("sample_context")).items():
+            if self._sample_context_key(key) not in _SAMPLE_CONTEXT_PROCESS_KEYS:
+                continue
+            if self._has_observed_value(value):
+                context[str(key)] = self._clean_value(value)
+        return context
+
+    def _objective_resolved_condition_context(
+        self,
+        row: dict[str, Any],
+    ) -> dict[str, Any]:
+        context: dict[str, Any] = {}
+        for key, value in self._as_mapping(row.get("resolved_condition")).items():
+            normalized = self._sample_context_key(key)
+            if normalized.endswith(" id") or normalized.endswith("_id"):
+                continue
+            if self._has_observed_value(value):
+                context[str(key)] = self._clean_value(value)
+        return context
+
+    def _merge_observed_context(
+        self,
+        target: dict[str, Any],
+        source: dict[str, Any],
+    ) -> None:
+        for key, value in source.items():
+            if not self._has_observed_value(value):
+                continue
+            target.setdefault(str(key), self._clean_value(value))
 
     def _objective_value_from_rows(
         self,

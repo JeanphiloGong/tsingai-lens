@@ -118,6 +118,10 @@ function materialProfilePayload() {
 						hatch_spacing_um: '0.12',
 						oxygen_level_ppm: '100 ppm'
 					},
+					test_condition: {
+						method: 'Tensile testing',
+						standard: 'ASTM E8'
+					},
 					values: {
 						relative_density: {
 							display_value: '95.4%',
@@ -416,7 +420,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Process background').first())
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('No explicit test condition was attached to this row; verify the source paper before comparing across conditions.').first())
+			.element(browserPage.getByText('ASTM E8').first())
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('best in matrix · E06').first())

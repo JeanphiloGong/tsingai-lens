@@ -954,6 +954,7 @@
 
 	function isLikelyTestConditionKey(key: string) {
 		const normalized = key.toLowerCase().replace(/_/g, ' ');
+		if (normalized.includes('build platform')) return false;
 		return TEST_CONDITION_HINTS.some((hint) => normalized.includes(hint));
 	}
 

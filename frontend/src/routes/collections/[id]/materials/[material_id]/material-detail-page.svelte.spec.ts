@@ -119,6 +119,8 @@ function materialProfilePayload() {
 						oxygen_level_ppm: '100 ppm'
 					},
 					test_condition: {
+						details:
+							'This long method paragraph should stay out of the best-parameter chain because it belongs in source evidence rather than the compact result chain.',
 						method: 'Tensile testing',
 						standard: 'ASTM E8'
 					},
@@ -423,6 +425,9 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('ASTM E8').first())
 			.toBeInTheDocument();
 		await expect
+			.element(browserPage.getByText('This long method paragraph should stay out'))
+			.not.toBeInTheDocument();
+		await expect
 			.element(browserPage.getByText('best in matrix · E06').first())
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Traceback').first()).toBeInTheDocument();
@@ -640,6 +645,48 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Sparse sample 0')).not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('3 sample(s), 4 measured property column(s).'))
+			.toBeInTheDocument();
+	});
+
+	it('caps large performance matrices to high-signal rows', async () => {
+		const payload: any = materialProfilePayload();
+		payload.sample_matrix.rows = [
+			...payload.sample_matrix.rows,
+			...Array.from({ length: 24 }, (_, index) => ({
+				row_id: `row_low_signal_${index}`,
+				sample_id: `low_signal_${index}`,
+				sample_label: `Low signal ${index}`,
+				material: '316L stainless steel',
+				process_context: {},
+				values: {
+					relative_density: {
+						display_value: `${80 + index / 10}%`,
+						status: 'observed',
+						evidence_refs: [{ evidence_ref_id: `ev_low_signal_${index}`, document_id: 'doc_1' }]
+					}
+				},
+				evidence_refs: []
+			}))
+		];
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('S001 · Alternating strategy A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Low signal 0')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('3 sample(s), 5 measured property column(s).'))
 			.toBeInTheDocument();
 	});
 

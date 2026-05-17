@@ -256,6 +256,7 @@
 	$: performanceRows = materialPerformanceRows(
 		focusedSampleRows,
 		propertyColumns,
+		bestParameterChains,
 		propertySummaries,
 		materialProfile?.canonical_name ?? materialId,
 		$t
@@ -570,6 +571,19 @@
 
 	function representativeRowsForGraph(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
 		if (rows.length <= 8) return rows;
+		const bestByColumn = bestValueMap(rows, columns);
+		const leaders = rows
+			.map((row, index) => ({
+				row,
+				index,
+				score: rowPerformanceScore(row, columns, bestByColumn)
+			}))
+			.filter((item) => rowLeaderCount(item.row, columns, bestByColumn) > 0)
+			.sort((first, second) => second.score - first.score || first.index - second.index)
+			.slice(0, 8)
+			.sort((first, second) => first.index - second.index)
+			.map((item) => item.row);
+		if (leaders.length) return leaders;
 		return rows
 			.map((row, index) => ({
 				row,
@@ -925,7 +939,7 @@
 				index,
 				score: rowPerformanceScore(row, columns, bestByColumn)
 			}))
-			.filter((item) => comparableValueCount(item.row, columns) > 0)
+			.filter((item) => rowLeaderCount(item.row, columns, bestByColumn) > 0)
 			.sort((first, second) => second.score - first.score || first.index - second.index)
 			.slice(0, 3);
 	}
@@ -961,6 +975,7 @@
 	function testConditionEntries(row: SampleMatrixRow, translate: Translate): ChainEntry[] {
 		const fromTestConditions = Object.entries(row.test_condition ?? {})
 			.filter(([key, value]) => value !== null && value !== undefined && value !== '')
+			.filter(([key, value]) => isDisplayableConditionEntry(key, value))
 			.map(([key, value]) => ({
 				key: `test:${key}`,
 				label: processEntryLabel(key, translate),
@@ -976,6 +991,15 @@
 			}))
 			.filter((entry) => entry.value !== '--');
 		return uniqueChainEntries([...fromTestConditions, ...fromProcessContext]).slice(0, 4);
+	}
+
+	function isDisplayableConditionEntry(key: string, value: unknown) {
+		const normalized = key.toLowerCase().replace(/_/g, ' ').trim();
+		if (normalized === 'details' || normalized === 'detail' || normalized === 'description') {
+			return false;
+		}
+		if (Array.isArray(value)) return value.length > 0 && value.join(', ').length <= 120;
+		return String(value).length <= 120;
 	}
 
 	function uniqueChainEntries(entries: ChainEntry[]) {
@@ -1178,10 +1202,12 @@
 	function materialPerformanceRows(
 		rows: SampleMatrixRow[],
 		columns: PropertyColumn[],
+		chains: BestParameterChain[],
 		summaries: PropertySummary[],
 		materialName: string,
 		translate: Translate
 	): SampleMatrixRow[] {
+		const selectedRows = highSignalPerformanceRows(rows, columns, chains);
 		const summaryValues = summaries
 			.map((summary) => {
 				const column = summaryColumnForProperty(summary, columns);
@@ -1191,14 +1217,14 @@
 				return { column, summary, value };
 			})
 			.filter((item): item is NonNullable<typeof item> => item !== null);
-		if (!summaryValues.length) return rows;
+		if (!summaryValues.length) return selectedRows;
 		const values = Object.fromEntries(
 			summaryValues.map((item) => [item.column.key, item.value])
 		);
 		const evidenceRefs = summaryValues.flatMap((item) => item.value.evidence_refs);
 		const warnings = summaryValues.flatMap((item) => item.summary.warnings);
 		return [
-			...rows,
+			...selectedRows,
 			{
 				row_id: 'collection-summary',
 				document_id: evidenceRefs[0]?.document_id ?? null,
@@ -1214,6 +1240,25 @@
 				warnings
 			}
 		];
+	}
+
+	function highSignalPerformanceRows(
+		rows: SampleMatrixRow[],
+		columns: PropertyColumn[],
+		chains: BestParameterChain[]
+	) {
+		if (rows.length <= 16) return rows;
+		const selected = new Map<string, SampleMatrixRow>();
+		for (const chain of chains.slice(0, 5)) selected.set(chain.row.row_id, chain.row);
+		for (const column of columns) {
+			const best = bestValueForColumn(rows, column);
+			if (best) selected.set(best.row.row_id, best.row);
+		}
+		for (const row of rows) {
+			if (selected.size >= 16) break;
+			if (comparableValueCount(row, columns) >= 2) selected.set(row.row_id, row);
+		}
+		return rows.filter((row) => selected.has(row.row_id));
 	}
 
 	function summarySupportedValues(

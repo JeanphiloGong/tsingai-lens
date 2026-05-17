@@ -353,7 +353,8 @@ class ResearchViewAggregationService:
 
         facts = self._load_collection_facts(collection_id)
         objective_material_rows = self._objective_material_rows_from_facts(facts)
-        if objective_material_rows:
+        frames = self._core_fact_records(facts)
+        if objective_material_rows and not self._has_core_material_profile_rows(frames):
             profile = self._build_objective_material_profile(
                 collection_id,
                 material_id,
@@ -364,7 +365,6 @@ class ResearchViewAggregationService:
                 raise ResearchViewMaterialNotFoundError(collection_id, material_id)
             return self._clean_value(profile)
 
-        frames = self._core_fact_records(facts)
         projection = self._comparison_projection_from_facts(facts)
         material_index_groups = self._build_comparable_groups(
             collection_id,
@@ -394,6 +394,12 @@ class ResearchViewAggregationService:
         if profile is None:
             raise ResearchViewMaterialNotFoundError(collection_id, material_id)
         return self._clean_value(profile)
+
+    def _has_core_material_profile_rows(self, frames: _FactRows) -> bool:
+        return any(
+            self._is_real_sample_variant(row)
+            for row in frames.get("sample_variants", [])
+        ) and bool(frames.get("measurement_results"))
 
     def get_document_research_view(
         self,

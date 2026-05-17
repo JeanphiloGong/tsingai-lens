@@ -604,6 +604,41 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     assert profile["evidence_refs"][0]["fact_ids"] == ["oeu-as-built-icorr"]
 
 
+def test_collection_material_profile_prefers_core_matrix_when_objective_units_are_sparse():
+    profiles, frames = _frames()
+    service = _service_from_frames(
+        profiles,
+        frames,
+        comparison_rows=_comparison_rows(),
+        objective_units=[
+            {
+                "evidence_unit_id": "oeu-objective-only-note",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {"name": "Ti-6Al-4V"},
+                "sample_context": {"sample": "summary"},
+                "property_normalized": "elongation",
+                "value_payload": {"value": 33, "source_value_text": "33"},
+                "unit": "%",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        ],
+    )
+
+    profile = service.get_collection_material_research_view("col-1", "mat-ti-6al-4v")
+
+    rows = profile["sample_matrix"]["rows"]
+    assert [row["sample_id"] for row in rows] == ["var-s1"]
+    assert any(key.startswith("density") for key in rows[0]["values"])
+    assert any(key.startswith("yield_strength") for key in rows[0]["values"])
+    assert {item["property"] for item in profile["measured_properties"]} == {
+        "density",
+        "yield_strength",
+    }
+
+
 def test_collection_research_view_uses_objective_units_without_old_facts():
     profiles, _ = _frames()
     objective_units = _objective_units()

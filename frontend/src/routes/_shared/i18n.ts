@@ -383,9 +383,11 @@ const translations: Record<Language, Translations> = {
 				noMeasurements: 'No measurement evidence is available yet.',
 				noObservations: 'No characterization evidence is available yet.',
 				noGaps: 'No explicit logic-chain gaps are currently reported.',
-				paperCoverageTitle: 'Paper coverage',
-				paperCoverageBody:
-					'Papers are ranked by objective relevance and show the variables, measurements, tables, and evidence units that support this target.',
+				paperContributionTitle: 'Paper contribution map',
+				paperContributionBody:
+					'Each paper is shown by its role in this objective, the evidence it contributes, and the source areas that support the contribution.',
+				paperContributionFallback:
+					'Contributes variables {variables} and measured properties {properties} to this objective.',
 				unitCount: '{count} unit(s)',
 				routeCount: '{count} route(s)',
 				openPaper: 'Open source paper',
@@ -2823,9 +2825,9 @@ const translations: Record<Language, Translations> = {
 				noMeasurements: '暂未得到测量结果证据。',
 				noObservations: '暂未得到表征观察证据。',
 				noGaps: '当前逻辑链暂未报告明确缺口。',
-				paperCoverageTitle: '文献覆盖',
-				paperCoverageBody:
-					'文献按目标相关性排列，并展示支撑该目标的变量、测量范围、表格和证据单元。',
+				paperContributionTitle: '文献贡献地图',
+				paperContributionBody: '按每篇文献在该目标中的角色、贡献证据和来源区域组织。',
+				paperContributionFallback: '为该目标贡献变量 {variables} 和测量性能 {properties}。',
 				unitCount: '{count} 个单元',
 				routeCount: '{count} 条路由',
 				openPaper: '打开来源文献',

@@ -143,6 +143,17 @@
 		return frame.title || frame.source_filename || frame.document_id;
 	}
 
+	function paperContributionSummary(paper: PaperCoverage) {
+		if (paper.frame.background) return paper.frame.background;
+		if (paper.frame.changed_variables.length && paper.frame.measured_property_scope.length) {
+			return $t('research.objectiveWorkspace.paperContributionFallback', {
+				variables: listLabel(paper.frame.changed_variables),
+				properties: listLabel(paper.frame.measured_property_scope)
+			});
+		}
+		return $t('research.objectiveWorkspace.noBackground');
+	}
+
 	function confidenceLabel(value: number) {
 		return value > 0 ? `${Math.round(value * 100)}%` : $t('research.emptyValue');
 	}
@@ -836,37 +847,45 @@
 
 		<section class="objective-workspace-grid">
 			<div class="objective-main-column">
-				<section class="objective-section" bind:this={evidenceSection}>
+				<section
+					class="objective-section"
+					bind:this={evidenceSection}
+					aria-labelledby="paper-contribution-title"
+				>
 					<div class="section-heading">
 						<div>
-							<h3>{$t('research.objectiveWorkspace.paperCoverageTitle')}</h3>
-							<p>{$t('research.objectiveWorkspace.paperCoverageBody')}</p>
+							<h3 id="paper-contribution-title">
+								{$t('research.objectiveWorkspace.paperContributionTitle')}
+							</h3>
+							<p>{$t('research.objectiveWorkspace.paperContributionBody')}</p>
 						</div>
 						<span>{boolState(objectiveView.readiness.frames_ready)}</span>
 					</div>
 					{#if paperCoverage.length}
-						<div class="paper-coverage-list">
+						<div class="paper-contribution-list">
 							{#each paperCoverage as paper (paper.frame.frame_id)}
-								<article class="paper-coverage-card">
-									<div>
-										<h4>{frameTitle(paper.frame)}</h4>
-										<p>
-											{paper.frame.background || $t('research.objectiveWorkspace.noBackground')}
-										</p>
+								<article class="paper-contribution-card">
+									<div class="paper-contribution-card__header">
+										<div>
+											<span>{paper.frame.paper_role}</span>
+											<h4>{frameTitle(paper.frame)}</h4>
+										</div>
+										<strong>{paper.frame.relevance}</strong>
 									</div>
-									<div class="paper-coverage-card__meta">
-										<span>{paper.frame.relevance}</span>
-										<span>{paper.frame.paper_role}</span>
-										<span
-											>{$t('research.objectiveWorkspace.unitCount', {
-												count: paper.units.length
-											})}</span
-										>
-										<span
-											>{$t('research.objectiveWorkspace.routeCount', {
-												count: paper.routeCount
-											})}</span
-										>
+									<p>{paperContributionSummary(paper)}</p>
+									<div class="paper-contribution-card__metrics">
+										<div>
+											<strong>{paper.units.length}</strong>
+											<span>{$t('research.objectiveWorkspace.evidenceUnits')}</span>
+										</div>
+										<div>
+											<strong>{paper.routeCount}</strong>
+											<span>{$t('research.objectiveWorkspace.routes')}</span>
+										</div>
+										<div>
+											<strong>{paper.frame.relevant_tables.length}</strong>
+											<span>{$t('research.objectiveWorkspace.relevantTables')}</span>
+										</div>
 									</div>
 									<dl>
 										<div>
@@ -878,8 +897,8 @@
 											<dd>{listLabel(paper.frame.measured_property_scope)}</dd>
 										</div>
 										<div>
-											<dt>{$t('research.objectiveWorkspace.relevantTables')}</dt>
-											<dd>{listLabel(paper.frame.relevant_tables)}</dd>
+											<dt>{$t('research.objectiveWorkspace.relevantSections')}</dt>
+											<dd>{listLabel(paper.frame.relevant_sections)}</dd>
 										</div>
 									</dl>
 									<a
@@ -1241,7 +1260,7 @@
 	.section-heading p,
 	.logic-step p,
 	.comparison-readiness p,
-	.paper-coverage-card p,
+	.paper-contribution-card p,
 	.evidence-detail p,
 	.diagnostic-list p {
 		margin: 0;
@@ -1265,15 +1284,13 @@
 		line-height: 34px;
 	}
 
-	.objective-chip-row,
-	.paper-coverage-card__meta {
+	.objective-chip-row {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
 	}
 
 	.objective-chip-row span,
-	.paper-coverage-card__meta span,
 	.evidence-detail__header span,
 	.logic-step__header span,
 	.evidence-group__header span,
@@ -1326,7 +1343,7 @@
 	.representative-evidence,
 	.evidence-group-list,
 	.evidence-group,
-	.paper-coverage-list,
+	.paper-contribution-list,
 	.evidence-detail,
 	.evidence-chain-section,
 	.evidence-context-list,
@@ -1338,7 +1355,7 @@
 	.objective-summary-list span,
 	.objective-summary-panel__heading span,
 	.section-heading > span,
-	.paper-coverage-card dt,
+	.paper-contribution-card dt,
 	.evidence-detail dt,
 	.route-table th {
 		color: var(--text-secondary);
@@ -1624,7 +1641,7 @@
 	}
 
 	.logic-step li,
-	.paper-coverage-card dd,
+	.paper-contribution-card dd,
 	.evidence-detail dd,
 	.evidence-context-list span,
 	.evidence-source-list span,
@@ -1640,7 +1657,7 @@
 		align-items: start;
 	}
 
-	.paper-coverage-card {
+	.paper-contribution-card {
 		display: grid;
 		gap: 13px;
 		border: 1px solid var(--border-default);
@@ -1649,7 +1666,56 @@
 		background: var(--bg-subtle);
 	}
 
-	.paper-coverage-card dl,
+	.paper-contribution-card__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 14px;
+	}
+
+	.paper-contribution-card__header div {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.paper-contribution-card__header span,
+	.paper-contribution-card__header strong,
+	.paper-contribution-card__metrics span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.paper-contribution-card__header strong {
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 9px;
+		background: var(--surface-card);
+	}
+
+	.paper-contribution-card__metrics {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	.paper-contribution-card__metrics div {
+		display: grid;
+		gap: 2px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--surface-card);
+	}
+
+	.paper-contribution-card__metrics strong {
+		color: var(--text-primary);
+		font-size: 20px;
+		line-height: 24px;
+	}
+
+	.paper-contribution-card dl,
 	.evidence-detail dl {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1657,7 +1723,7 @@
 		margin: 0;
 	}
 
-	.paper-coverage-card dd,
+	.paper-contribution-card dd,
 	.evidence-detail dd {
 		margin: 4px 0 0;
 		color: var(--text-primary);
@@ -1903,6 +1969,7 @@
 			.section-heading,
 			.logic-step__header,
 			.evidence-group__header,
+			.paper-contribution-card__header,
 			.representative-evidence__heading,
 			.evidence-detail__header {
 				flex-direction: column;
@@ -1917,7 +1984,8 @@
 			.evidence-readiness,
 			.research-focus__grid,
 			.representative-evidence__list,
-			.paper-coverage-card dl,
+			.paper-contribution-card__metrics,
+			.paper-contribution-card dl,
 			.evidence-detail dl {
 				grid-template-columns: 1fr;
 		}

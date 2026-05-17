@@ -293,6 +293,19 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		expect(document.body.textContent?.indexOf('Research conclusion package')).toBeLessThan(
 			document.body.textContent?.indexOf('Relevant papers')
 		);
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Paper contribution map' }))
+			.toBeInTheDocument();
+		const contributionMap = browserPage.getByRole('region', { name: 'Paper contribution map' });
+		await expect.element(contributionMap.getByText('primary_experiment')).toBeInTheDocument();
+		await expect
+			.element(
+				contributionMap.getByText(
+					'Reports tensile testing of as-built and heat-treated LPBF 316L.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(contributionMap.getByText('4')).toBeInTheDocument();
 
 		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' });
 		await expect

@@ -18,6 +18,9 @@ The family keeps multiple live pages because this local subject now needs:
   `ObjectiveEvidenceUnit` and `ObjectiveLogicChain` the authoritative Core
   semantic fact path instead of retaining old paper-fact families as the
   primary downstream contract
+- a hard cutover direction that retires collection-wide comparison rows as a
+  semantic source for graph, material, research-view, workspace, and report
+  projections
 
 This is a Core semantic-build topic family. It does not change public API
 routes, frontend contracts, Source artifact production, or downstream report
@@ -27,8 +30,9 @@ ownership by itself.
 
 - [`target-centric-collection-extraction-plan.md`](target-centric-collection-extraction-plan.md)
   Parent direction for discovering multiple collection research objectives,
-  running independent objective processes, and extracting objective-scoped
-  facts
+  running independent objective processes, extracting objective-scoped facts,
+  and retiring collection-wide comparison rows from downstream semantic
+  projections
 - [`research-objective-domain-model-plan.md`](research-objective-domain-model-plan.md)
   First implementation slice for adding pure Core objective records before
   LLM services, persistence expansion, or public surfaces

@@ -19,6 +19,9 @@ The core judgment is:
 - comparison rows, evidence cards, reports, graph nodes, and workspace panels
   should be projections or support views over resolved evidence units and
   research logic chains, not separate final answers
+- the old collection-wide `ComparisonRowRecord` should be retired as a Core
+  semantic surface; controlled comparisons may still exist, but only as
+  objective-scoped projections over resolved evidence units
 - the durable data goal remains a normalized, reusable, evidence-backed
   material fact substrate
 - Core extraction, comparison assembly, backend APIs, and frontend workspace
@@ -352,9 +355,18 @@ evidence fields. They should not become unstructured objective-local text
 results.
 
 `ObjectiveEvidenceUnit` and `ObjectiveLogicChain` are the authoritative Core
-outputs for the objective-first path. Objective comparison rows, evidence
-cards, and reports should be generated from those records as projections for
-review, navigation, and presentation.
+outputs for the objective-first path. Evidence cards, reports, graph nodes,
+workspace panels, material views, and any comparison matrix should be generated
+from those records as projections for review, navigation, and presentation.
+
+The old collection-wide `ComparisonRowRecord` shape should not be retained as
+an authoritative semantic surface. It is too flat for objective-first
+comparison because it forces each fact into material, property, process, test
+condition, and result columns before the scientific question has defined what
+is comparable. Paper-local row identifiers such as `Case`, `condition number`,
+or `sample number` may be retained as sample keys or traceback keys, but they
+must not become user-facing test-condition semantics merely because the old row
+projection had no better place to store them.
 
 Existing material-first Core records should no longer be the primary source of
 truth after cutover:
@@ -564,15 +576,18 @@ views, not as the route owner.
    whole-table extraction for relevant tables.
 7. Add evidence resolution and research logic-chain assembly from routed text,
    table, and figure evidence.
-8. Add objective-scoped comparison rows as projections over resolved evidence
-   units.
-9. Bump Core semantic version to an objective-facts generation, such as
+8. Add objective-scoped controlled-comparison projections over resolved
+   evidence units and logic chains.
+9. Retire collection-wide `ComparisonRowRecord` usage from graph, material,
+   research-view, workspace, and report semantics instead of keeping it as a
+   compatibility path.
+10. Bump Core semantic version to an objective-facts generation, such as
    `objective_facts_v1`.
-10. Add backend `/objectives/*` routes and tests.
-11. Replace frontend material workspace navigation with objective workspace
+11. Add backend `/objectives/*` routes and tests.
+12. Replace frontend material workspace navigation with objective workspace
    navigation.
-12. Remove material-first route usage from frontend clients.
-13. Remove or disable material-first backend paths once objective-first routes
+13. Remove material-first route usage from frontend clients.
+14. Remove or disable material-first backend paths once objective-first routes
     pass contract tests.
 
 ## Verification
@@ -596,8 +611,8 @@ Backend semantic tests should prove:
 Backend API tests should prove:
 
 - `/objectives` returns stable objective summaries
-- objective detail, comparison rows, evidence, and report routes are
-  collection-scoped
+- objective detail, controlled comparisons, evidence, and report routes are
+  collection-scoped and do not depend on collection-wide comparison rows
 - removed or retired material routes are not still treated as the primary
   contract
 
@@ -605,7 +620,7 @@ Frontend tests should prove:
 
 - the collection workspace opens on objective navigation
 - objective cards and detail pages render from the new routes
-- comparison and evidence drilldown still preserve source traceback
+- controlled-comparison and evidence drilldown still preserve source traceback
 - material appears as a facet, not as the top-level route owner
 
 ## Acceptance Criteria
@@ -614,15 +629,19 @@ The cutover is complete when:
 
 - the collection workspace is research-objective-first
 - material-first pages are no longer the main product entry
-- Core extraction produces objective-scoped facts and comparison rows
+- Core extraction produces objective-scoped facts, controlled comparisons, and
+  logic chains from resolved evidence units
 - Core assembles paper-level and cross-paper research logic chains from
   resolved evidence units
+- graph, material, research-view, workspace, and report surfaces no longer use
+  collection-wide `ComparisonRowRecord` as their semantic source
 - Core facts still normalize into a reusable material fact substrate
 - objective routes are the public backend contract
 - frontend calls objective routes rather than material routes
 - evidence traceability remains available for every surfaced result
-- irrelevant tables no longer pollute comparison rows merely because they share
-  a material label
+- irrelevant tables and paper-local row labels no longer pollute controlled
+  comparisons or test-condition graph nodes merely because they share a
+  material label
 - material database and material benchmark projections remain possible over
   the normalized fact substrate
 

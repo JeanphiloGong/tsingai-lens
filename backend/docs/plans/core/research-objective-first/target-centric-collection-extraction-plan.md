@@ -40,10 +40,11 @@ comparison, report, and workspace projections inside each target
 ```
 
 The final Core product of this flow is the pair of resolved evidence units and
-target logic chains. Comparison rows, evidence cards, reports, and workspace
-payloads are projections over those records. They exist to review, navigate,
-or present the chain; they should not become separate authoritative semantic
-outputs.
+target logic chains. Controlled comparisons, evidence cards, reports, graph
+payloads, material views, and workspace payloads are projections over those
+records. They exist to review, navigate, or present the chain; they should not
+become separate authoritative semantic outputs. The old collection-wide
+comparison-row shape is not a Core semantic target for this flow.
 
 This plan belongs to the Core semantic-build pipeline because it changes the
 order and ownership of Core extraction decisions. It does not change Source
@@ -84,13 +85,16 @@ Completed backend slices:
 
 Remaining work:
 
+- Cut graph, material, research-view, workspace, and report projections off the
+  collection-wide `ComparisonRowRecord` surface.
 - Productize the material database projection if it needs durable
   projection/cache tables beyond service-level projection.
 - Add objective report and workspace product surfaces.
 - Finish frontend objective workspace cutover.
-- Remove or further downgrade old paper-facts authority after material,
-  comparison, evidence-card, report, and workspace projections are all covered
-  by objective evidence units and logic chains.
+- Remove or further downgrade old paper-facts and collection-wide comparison
+  row authority after material, controlled-comparison, evidence-card, graph,
+  report, and workspace projections are all covered by objective evidence
+  units and logic chains.
 
 ## Why The Flow Changes
 
@@ -434,8 +438,56 @@ research target
 -> cross-paper agreement, conflict, and gaps
 ```
 
-Comparison rows, evidence cards, reports, and future API views should be
-projections over these resolved evidence units and target logic chains.
+Controlled comparisons, evidence cards, reports, graph payloads, material
+views, and future API views should be projections over these resolved evidence
+units and target logic chains.
+
+## Comparison Row Retirement
+
+The objective-first pipeline should retire collection-wide
+`ComparisonRowRecord` as a semantic source.
+
+The old row shape was useful while Core tried to aggregate comparable facts
+directly from paper-level extraction. It is now the wrong authority because it
+asks every value to fit a flat shape:
+
+```text
+material + property + process + test condition + result
+```
+
+That shape cannot decide whether a value is comparable without the research
+objective. It also misplaces paper-local identifiers. For example, a table row
+label such as `Case 15` is usually a sample key, design-case key, or join key.
+It should not become a `test_condition` node in graph or research-view output.
+
+The replacement is objective-scoped comparison over resolved evidence:
+
+```text
+ResearchObjective
+-> ObjectiveEvidenceUnit
+-> resolved sample, process, test, measurement, and interpretation context
+-> ObjectiveLogicChain
+-> controlled-comparison projection
+```
+
+After cutover:
+
+- graph construction should read `ObjectiveEvidenceUnit` and
+  `ObjectiveLogicChain`, not `core_comparison_rows`
+- material and research-view summaries should aggregate objective evidence
+  units, not collection-wide comparison rows
+- workspace readiness should be based on objective, evidence-unit, logic-chain,
+  and graph readiness, not `comparison_rows_ready`
+- API surfaces may expose controlled comparisons, but those comparisons should
+  be rebuildable from objective evidence units and logic chains
+- paper-local labels such as `Case`, `condition number`, and `sample number`
+  should remain sample or trace keys unless evidence resolution can expand them
+  into real preparation, process, or test conditions
+
+This is a hard cutover direction, not a compatibility-layer direction. If a
+temporary diagnostic projection is needed during delivery, it should be
+explicitly labeled, time-bounded, and removed once the objective-first
+projection passes the replacement checks.
 
 ## Core Records
 
@@ -449,7 +501,7 @@ The first record families are:
 - `ObjectiveEvidenceRoute`
 - `ObjectiveEvidenceUnit`
 - `ObjectiveLogicChain`
-- target-scoped measurement and comparison records
+- target-scoped measurement and controlled-comparison projections
 
 The SQLite implementation stores the landed record families in Core-owned tables
 such as
@@ -461,9 +513,10 @@ records; the public browser contract exposes read models over them rather than
 the table schema itself.
 
 Resolved evidence units and target logic chains should be the authoritative
-records for later comparison, report, and workspace assembly. Target-scoped
-measurement and comparison records are useful projections, but they should be
-rebuildable from the resolved evidence units and logic chains.
+records for later controlled-comparison, report, graph, material, and workspace
+assembly. Target-scoped measurement and controlled-comparison records are useful
+projections, but they should be rebuildable from the resolved evidence units
+and logic chains.
 
 ## Execution Order
 
@@ -485,8 +538,12 @@ rebuildable from the resolved evidence units and logic chains.
     units.
 12. Assemble paper-level and cross-paper target logic chains from resolved
     evidence units.
-13. Assemble comparison rows, evidence cards, reports, and workspace payloads
-    as projections before any cross-target merge.
+13. Assemble controlled comparisons, evidence cards, reports, graph payloads,
+    material views, and workspace payloads as projections before any
+    cross-target merge.
+14. Remove collection-wide `ComparisonRowRecord` from graph, material,
+    research-view, workspace, and report semantics. Do not keep a long-lived
+    compatibility path from `core_comparison_rows`.
 
 ## Verification
 
@@ -509,8 +566,13 @@ Unit and integration tests should cover:
   target
 - resolved target logic chains preserve material, condition, result,
   interpretation, and source traceback
-- comparison rows are grouped by research target as projections over resolved
-  evidence units
+- controlled comparisons are grouped by research target as projections over
+  resolved evidence units
+- graph, material, research-view, workspace, and report services do not read
+  collection-wide comparison rows as their semantic source
+- paper-local row labels such as `Case 15` do not appear as test-condition
+  graph nodes or user-facing condition summaries unless they have been
+  resolved into real experimental conditions
 
 Collection rebuild checks should confirm:
 
@@ -522,6 +584,11 @@ Collection rebuild checks should confirm:
   target
 - each retained measurement still has document, section/table, row/cell, and
   quote evidence
+- `/api/v1/collections/{collection_id}/graph` can be built from objective
+  records without `comparison` nodes from `core_comparison_rows`
+- material and research-view pages still expose materials, samples, process
+  axes, properties, controlled comparisons, and source traceback from objective
+  evidence units
 
 ## Deferred Work
 

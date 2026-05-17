@@ -237,7 +237,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 	});
 
-	it('renders the objective as a logic-chain workspace with evidence groups and source links', async () => {
+	it('renders the objective as a research conclusion package with evidence groups and source links', async () => {
 		render(Page);
 
 		await expect
@@ -248,14 +248,26 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Logic chain' }))
+			.element(browserPage.getByRole('heading', { name: 'Research conclusion package' }))
 			.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
-					'Papers are ranked by objective relevance and show the variables, measurements, tables, and evidence units that support this target.'
+					'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.'
 				)
 			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Research focus' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Controlled comparison is ready' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Representative evidence' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: '1 Comparison evidence' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Measurement results' }))
@@ -275,7 +287,10 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Extraction diagnostics' }))
 			.toBeInTheDocument();
-		expect(document.body.textContent?.indexOf('Logic chain')).toBeLessThan(
+		expect(document.body.textContent?.indexOf('Research conclusion package')).toBeLessThan(
+			document.body.textContent?.indexOf('Logic chain')
+		);
+		expect(document.body.textContent?.indexOf('Research conclusion package')).toBeLessThan(
 			document.body.textContent?.indexOf('Relevant papers')
 		);
 

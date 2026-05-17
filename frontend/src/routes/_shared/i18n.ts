@@ -355,6 +355,22 @@ const translations: Record<Language, Translations> = {
 				otherEvidence: 'Other evidence',
 				contextTitle: 'Objective context',
 				variableAxes: 'Variable axes',
+				conclusionPackageTitle: 'Research conclusion package',
+				conclusionPackageBody:
+					'Objective-scoped conclusion, scope, readiness, and representative evidence for review.',
+				collectionConclusion: 'Collection-level conclusion',
+				researchFocus: 'Research focus',
+				evidenceReadiness: 'Evidence readiness',
+				representativeEvidence: 'Representative evidence',
+				comparisonReadyTitle: 'Controlled comparison is ready',
+				comparisonReadyBody:
+					'Measurements, test conditions, and direct comparison evidence are present for this objective.',
+				comparisonLimitedTitle: 'Controlled comparison is limited',
+				comparisonLimitedBody:
+					'Values are available, but the extracted condition or comparison evidence is still incomplete.',
+				comparisonPendingTitle: 'Controlled comparison is pending',
+				comparisonPendingBody:
+					'The objective needs measurement, condition, and comparison evidence before a defensible comparison can be made.',
 				scopeStep: 'Research scope',
 				coverageStep: 'Paper coverage',
 				conditionsStep: 'Experimental conditions',
@@ -418,6 +434,8 @@ const translations: Record<Language, Translations> = {
 				page: 'p. {page}',
 				noValue: 'No value payload returned.',
 				logicChainTitle: 'Logic chain',
+				logicChainBody:
+					'Use these steps to jump from the research scope to the supporting evidence groups.',
 				noLogicChain: 'No objective logic chain is available yet.',
 				diagnosticsTitle: 'Extraction diagnostics',
 				diagnosticsBody:
@@ -2781,6 +2799,18 @@ const translations: Record<Language, Translations> = {
 				otherEvidence: '其他证据',
 				contextTitle: '目标上下文',
 				variableAxes: '变化轴',
+				conclusionPackageTitle: '科研结论包',
+				conclusionPackageBody: '面向该研究目标的结论、范围、证据成熟度和代表性证据。',
+				collectionConclusion: '集合级结论',
+				researchFocus: '研究范围',
+				evidenceReadiness: '证据成熟度',
+				representativeEvidence: '代表性证据',
+				comparisonReadyTitle: '受控比较已具备',
+				comparisonReadyBody: '该目标已经具备测量结果、测试条件和直接比较证据。',
+				comparisonLimitedTitle: '受控比较仍受限',
+				comparisonLimitedBody: '已经抽到部分数值，但测试条件或比较证据还不完整。',
+				comparisonPendingTitle: '受控比较待补充',
+				comparisonPendingBody: '需要先补齐测量结果、测试条件和比较证据，才能形成可靠比较。',
 				scopeStep: '研究范围',
 				coverageStep: '文献覆盖',
 				conditionsStep: '实验条件',
@@ -2842,6 +2872,7 @@ const translations: Record<Language, Translations> = {
 				page: '第 {page} 页',
 				noValue: '接口未返回数值载荷。',
 				logicChainTitle: '逻辑链',
+				logicChainBody: '用这些步骤从研究范围跳转到对应的支撑证据分组。',
 				noLogicChain: '暂未生成目标逻辑链。',
 				diagnosticsTitle: '抽取诊断',
 				diagnosticsBody: '文献框架和证据路由保留在这里用于调试抽取路径，但不再作为主要研究视图。'

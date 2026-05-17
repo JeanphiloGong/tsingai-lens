@@ -35,6 +35,25 @@
 		evidenceKind: string | null;
 	};
 
+	type EvidenceReadinessItem = {
+		id: string;
+		labelKey: string;
+		count: number;
+		ready: boolean;
+		evidenceKind: string | null;
+	};
+
+	type ComparisonReadiness = {
+		tone: 'ready' | 'limited' | 'pending';
+		titleKey: string;
+		bodyKey: string;
+	};
+
+	type ResearchFocusGroup = {
+		labelKey: string;
+		items: string[];
+	};
+
 	type SourceEntry = {
 		label: string;
 		documentId: string | null;
@@ -88,6 +107,10 @@
 	$: evidenceGroups = buildEvidenceGroups(filteredEvidenceUnits);
 	$: paperCoverage = buildPaperCoverage(frames, evidenceUnits, evidenceRoutes);
 	$: logicSteps = objectiveView ? buildLogicSteps(objectiveView) : [];
+	$: researchFocusGroups = objectiveView ? buildResearchFocusGroups(objectiveView) : [];
+	$: evidenceReadinessItems = objectiveView ? buildEvidenceReadinessItems(objectiveView) : [];
+	$: comparisonReadiness = objectiveView ? buildComparisonReadiness(objectiveView) : null;
+	$: representativeEvidenceUnits = buildRepresentativeEvidenceUnits(evidenceUnits);
 	$: selectedEvidenceUnit =
 		(selectedEvidenceUnitId
 			? filteredEvidenceUnits.find((unit) => unit.evidence_unit_id === selectedEvidenceUnitId)
@@ -349,6 +372,117 @@
 		return units.filter((unit) => unit.unit_kind === kind);
 	}
 
+	function buildResearchFocusGroups(view: ObjectiveResearchView): ResearchFocusGroup[] {
+		return [
+			{
+				labelKey: 'research.objectives.materialScope',
+				items: view.objective.material_scope
+			},
+			{
+				labelKey: 'research.objectives.processAxes',
+				items: view.objective.process_axes
+			},
+			{
+				labelKey: 'research.objectives.propertyAxes',
+				items: view.objective.property_axes
+			}
+		].filter((group) => group.items.length);
+	}
+
+	function buildEvidenceReadinessItems(view: ObjectiveResearchView): EvidenceReadinessItem[] {
+		const measurements = unitsByKind(view.evidence_units, 'measurement');
+		const conditions = unitsByKind(view.evidence_units, 'test_condition');
+		const observations = unitsByKind(view.evidence_units, 'characterization');
+		const comparisons = unitsByKind(view.evidence_units, 'comparison');
+		const relevantPapers = view.paper_frames.filter((frame) => frame.relevance !== 'irrelevant');
+
+		return [
+			{
+				id: 'papers',
+				labelKey: 'research.objectiveWorkspace.relevantPapers',
+				count: relevantPapers.length,
+				ready: view.readiness.frames_ready && relevantPapers.length > 0,
+				evidenceKind: null
+			},
+			{
+				id: 'measurements',
+				labelKey: 'research.objectiveWorkspace.measurementResults',
+				count: measurements.length,
+				ready: measurements.length > 0,
+				evidenceKind: 'measurement'
+			},
+			{
+				id: 'comparisons',
+				labelKey: 'research.objectiveWorkspace.comparisonEvidence',
+				count: comparisons.length,
+				ready: comparisons.length > 0,
+				evidenceKind: 'comparison'
+			},
+			{
+				id: 'conditions',
+				labelKey: 'research.objectiveWorkspace.testConditions',
+				count: conditions.length,
+				ready: conditions.length > 0,
+				evidenceKind: 'test_condition'
+			},
+			{
+				id: 'observations',
+				labelKey: 'research.objectiveWorkspace.characterizationObservations',
+				count: observations.length,
+				ready: observations.length > 0,
+				evidenceKind: 'characterization'
+			}
+		];
+	}
+
+	function buildComparisonReadiness(view: ObjectiveResearchView): ComparisonReadiness {
+		const measurements = unitsByKind(view.evidence_units, 'measurement');
+		const conditions = unitsByKind(view.evidence_units, 'test_condition');
+		const comparisons = unitsByKind(view.evidence_units, 'comparison');
+
+		if (comparisons.length && conditions.length) {
+			return {
+				tone: 'ready',
+				titleKey: 'research.objectiveWorkspace.comparisonReadyTitle',
+				bodyKey: 'research.objectiveWorkspace.comparisonReadyBody'
+			};
+		}
+		if (measurements.length && (comparisons.length || conditions.length)) {
+			return {
+				tone: 'limited',
+				titleKey: 'research.objectiveWorkspace.comparisonLimitedTitle',
+				bodyKey: 'research.objectiveWorkspace.comparisonLimitedBody'
+			};
+		}
+		return {
+			tone: 'pending',
+			titleKey: 'research.objectiveWorkspace.comparisonPendingTitle',
+			bodyKey: 'research.objectiveWorkspace.comparisonPendingBody'
+		};
+	}
+
+	function buildRepresentativeEvidenceUnits(units: ObjectiveEvidenceUnit[]) {
+		const selected: ObjectiveEvidenceUnit[] = [];
+		const selectedIds = new Set<string>();
+		const byConfidence = (left: ObjectiveEvidenceUnit, right: ObjectiveEvidenceUnit) =>
+			right.confidence - left.confidence;
+
+		for (const kind of ['comparison', 'measurement', 'characterization', 'test_condition']) {
+			const [unit] = units.filter((item) => item.unit_kind === kind).sort(byConfidence);
+			if (unit) {
+				selected.push(unit);
+				selectedIds.add(unit.evidence_unit_id);
+			}
+		}
+
+		for (const unit of [...units].sort(byConfidence)) {
+			if (selected.length >= 4) break;
+			if (!selectedIds.has(unit.evidence_unit_id)) selected.push(unit);
+		}
+
+		return selected;
+	}
+
 	function textList(value: unknown): string[] {
 		if (typeof value === 'string' || typeof value === 'number') {
 			const text = displayValue(value);
@@ -452,9 +586,20 @@
 	}
 
 	function focusLogicStepEvidence(step: LogicStep) {
-		selectedEvidenceKind = step.evidenceKind ?? 'all';
+		focusEvidenceKind(step.evidenceKind);
+	}
+
+	function focusEvidenceKind(kind: string | null) {
+		selectedEvidenceKind = kind ?? 'all';
 		selectedEvidenceDocumentId = 'all';
 		selectedEvidenceUnitId = '';
+		evidenceSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+	}
+
+	function focusEvidenceUnit(unit: ObjectiveEvidenceUnit) {
+		selectedEvidenceKind = unit.unit_kind;
+		selectedEvidenceDocumentId = unit.document_id || 'all';
+		selectedEvidenceUnitId = unit.evidence_unit_id;
 		evidenceSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 	}
 
@@ -555,16 +700,108 @@
 		</header>
 
 		<section class="objective-primary-grid">
-			<section class="objective-section objective-section--logic">
+			<section class="objective-section objective-section--conclusion">
+				<div class="section-heading">
+					<div>
+						<h3>{$t('research.objectiveWorkspace.conclusionPackageTitle')}</h3>
+						<p>{$t('research.objectiveWorkspace.conclusionPackageBody')}</p>
+					</div>
+					<span>{boolState(objectiveView.readiness.logic_chain_ready)}</span>
+				</div>
+
+				<div class="collection-conclusion">
+					<span>{$t('research.objectiveWorkspace.collectionConclusion')}</span>
+					<strong>
+						{objectiveView.logic_chain?.summary ||
+							objectiveView.objective.comparison_intent ||
+							$t('research.objectiveWorkspace.noLogicChain')}
+					</strong>
+				</div>
+
+				{#if researchFocusGroups.length}
+					<div class="research-focus">
+						<h4>{$t('research.objectiveWorkspace.researchFocus')}</h4>
+						<div class="research-focus__grid">
+							{#each researchFocusGroups as group (group.labelKey)}
+								<div>
+									<span>{$t(group.labelKey)}</span>
+									<p>{listLabel(group.items)}</p>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				<div class="evidence-readiness" aria-label={$t('research.objectiveWorkspace.evidenceReadiness')}>
+					{#each evidenceReadinessItems as item (item.id)}
+						<button
+							class:ready={item.ready}
+							type="button"
+							on:click={() => focusEvidenceKind(item.evidenceKind)}
+						>
+							<strong>{item.count}</strong>
+							<span>{$t(item.labelKey)}</span>
+						</button>
+					{/each}
+				</div>
+
+				{#if comparisonReadiness}
+					<div class={`comparison-readiness comparison-readiness--${comparisonReadiness.tone}`}>
+						<h4>{$t(comparisonReadiness.titleKey)}</h4>
+						<p>{$t(comparisonReadiness.bodyKey)}</p>
+					</div>
+				{/if}
+
+				{#if representativeEvidenceUnits.length}
+					<div class="representative-evidence">
+						<div class="representative-evidence__heading">
+							<h4>{$t('research.objectiveWorkspace.representativeEvidence')}</h4>
+							<span>{confidenceLabel(objectiveView.logic_chain?.confidence ?? 0)}</span>
+						</div>
+						<div class="representative-evidence__list">
+							{#each representativeEvidenceUnits as unit (unit.evidence_unit_id)}
+								<button type="button" on:click={() => focusEvidenceUnit(unit)}>
+									<span>{$t(evidenceKindLabelKey(unit.unit_kind))}</span>
+									<strong>{evidenceUnitValue(unit)}</strong>
+									<small>{evidenceUnitTitle(unit)} · {confidenceLabel(unit.confidence)}</small>
+								</button>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</section>
+
+			<aside class="objective-summary-panel" aria-label={$t('research.objectiveWorkspace.summary')}>
+				<div class="objective-summary-panel__heading">
+					<span>{$t('research.objectiveWorkspace.summary')}</span>
+					<strong>{boolState(objectiveView.readiness.evidence_units_ready)}</strong>
+				</div>
+				<div class="objective-summary-list">
+					<article>
+						<span>{$t('research.objectiveWorkspace.relevantPapers')}</span>
+						<strong>{relevantFrameCount}</strong>
+					</article>
+					<article>
+						<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'measurement').length}</strong>
+					</article>
+					<article>
+						<span>{$t('research.objectiveWorkspace.testConditions')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'test_condition').length}</strong>
+					</article>
+					<article>
+						<span>{$t('research.objectiveWorkspace.characterizationObservations')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'characterization').length}</strong>
+					</article>
+				</div>
+			</aside>
+
+			<section class="objective-section objective-section--path">
 				<div class="section-heading">
 					<div>
 						<h3>{$t('research.objectiveWorkspace.logicChainTitle')}</h3>
-						<p>
-							{objectiveView.logic_chain?.summary ||
-								$t('research.objectiveWorkspace.noLogicChain')}
-						</p>
+						<p>{$t('research.objectiveWorkspace.logicChainBody')}</p>
 					</div>
-					<span>{boolState(objectiveView.readiness.logic_chain_ready)}</span>
 				</div>
 				<div class="logic-chain" aria-label={$t('research.objectiveWorkspace.logicChainTitle')}>
 					{#each logicSteps as step (step.step_id)}
@@ -595,31 +832,6 @@
 					{/each}
 				</div>
 			</section>
-
-			<aside class="objective-summary-panel" aria-label={$t('research.objectiveWorkspace.summary')}>
-				<div class="objective-summary-panel__heading">
-					<span>{$t('research.objectiveWorkspace.summary')}</span>
-					<strong>{boolState(objectiveView.readiness.evidence_units_ready)}</strong>
-				</div>
-				<div class="objective-summary-list">
-					<article>
-						<span>{$t('research.objectiveWorkspace.relevantPapers')}</span>
-						<strong>{relevantFrameCount}</strong>
-					</article>
-					<article>
-						<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
-						<strong>{unitsByKind(evidenceUnits, 'measurement').length}</strong>
-					</article>
-					<article>
-						<span>{$t('research.objectiveWorkspace.testConditions')}</span>
-						<strong>{unitsByKind(evidenceUnits, 'test_condition').length}</strong>
-					</article>
-					<article>
-						<span>{$t('research.objectiveWorkspace.characterizationObservations')}</span>
-						<strong>{unitsByKind(evidenceUnits, 'characterization').length}</strong>
-					</article>
-				</div>
-			</aside>
 		</section>
 
 		<section class="objective-workspace-grid">
@@ -1028,6 +1240,7 @@
 	.objective-hero p,
 	.section-heading p,
 	.logic-step p,
+	.comparison-readiness p,
 	.paper-coverage-card p,
 	.evidence-detail p,
 	.diagnostic-list p {
@@ -1093,6 +1306,10 @@
 		align-items: start;
 	}
 
+	.objective-section--path {
+		grid-column: 1 / -1;
+	}
+
 	.objective-section,
 	.objective-summary-panel,
 	.objective-side-panel {
@@ -1104,6 +1321,9 @@
 	.objective-side-panel,
 	.objective-main-column,
 	.objective-summary-list,
+	.collection-conclusion,
+	.research-focus,
+	.representative-evidence,
 	.evidence-group-list,
 	.evidence-group,
 	.paper-coverage-list,
@@ -1179,6 +1399,151 @@
 		display: grid;
 		gap: 5px;
 		min-width: 0;
+	}
+
+	.collection-conclusion {
+		border-left: 3px solid var(--color-accent);
+		padding: 4px 0 4px 14px;
+	}
+
+	.collection-conclusion span,
+	.research-focus span,
+	.representative-evidence__heading span,
+	.representative-evidence button span,
+	.representative-evidence button small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.collection-conclusion strong {
+		color: var(--text-primary);
+		font-size: 18px;
+		line-height: 27px;
+		font-weight: 650;
+	}
+
+	.research-focus h4,
+	.representative-evidence h4,
+	.comparison-readiness h4 {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 15px;
+		line-height: 21px;
+	}
+
+	.research-focus__grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.research-focus__grid div,
+	.comparison-readiness {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--bg-subtle);
+	}
+
+	.research-focus__grid p {
+		margin: 4px 0 0;
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 21px;
+		overflow-wrap: anywhere;
+	}
+
+	.evidence-readiness {
+		display: grid;
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.evidence-readiness button {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		text-align: left;
+		background: var(--bg-subtle);
+		cursor: pointer;
+		font: inherit;
+	}
+
+	.evidence-readiness button:hover,
+	.evidence-readiness button.ready {
+		border-color: var(--color-accent);
+		background: var(--surface-card);
+	}
+
+	.evidence-readiness strong {
+		color: var(--text-primary);
+		font-size: 24px;
+		line-height: 28px;
+	}
+
+	.evidence-readiness span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 17px;
+	}
+
+	.comparison-readiness {
+		display: grid;
+		gap: 4px;
+	}
+
+	.comparison-readiness--ready {
+		border-color: var(--success-border);
+		background: var(--success-bg);
+	}
+
+	.comparison-readiness--limited {
+		border-color: var(--warning-border);
+		background: var(--warning-bg);
+	}
+
+	.representative-evidence__heading {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.representative-evidence__list {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.representative-evidence button {
+		display: grid;
+		gap: 5px;
+		width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		text-align: left;
+		background: var(--surface-card);
+		cursor: pointer;
+		font: inherit;
+	}
+
+	.representative-evidence button:hover {
+		border-color: var(--color-accent);
+	}
+
+	.representative-evidence button strong {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 21px;
+		font-weight: 600;
+		overflow-wrap: anywhere;
+		text-transform: none;
 	}
 
 	.logic-chain {
@@ -1534,23 +1899,27 @@
 			order: 4;
 		}
 
-		.objective-hero,
-		.section-heading,
-		.logic-step__header,
-		.evidence-group__header,
-		.evidence-detail__header {
-			flex-direction: column;
-		}
+			.objective-hero,
+			.section-heading,
+			.logic-step__header,
+			.evidence-group__header,
+			.representative-evidence__heading,
+			.evidence-detail__header {
+				flex-direction: column;
+			}
 
 		.objective-hero__status {
 			justify-items: start;
 		}
 
-		.evidence-toolbar,
-		.evidence-unit-list,
-		.paper-coverage-card dl,
-		.evidence-detail dl {
-			grid-template-columns: 1fr;
+			.evidence-toolbar,
+			.evidence-unit-list,
+			.evidence-readiness,
+			.research-focus__grid,
+			.representative-evidence__list,
+			.paper-coverage-card dl,
+			.evidence-detail dl {
+				grid-template-columns: 1fr;
 		}
 	}
 </style>

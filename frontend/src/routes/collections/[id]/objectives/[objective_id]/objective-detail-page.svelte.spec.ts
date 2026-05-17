@@ -153,6 +153,31 @@ function objectivePayload() {
 				confidence: 0.92
 			},
 			{
+				evidence_unit_id: 'unit_measure_secondary',
+				objective_id: 'obj_1',
+				document_id: 'doc_1',
+				unit_kind: 'measurement',
+				property_normalized: 'yield strength',
+				sample_context: {
+					sample: 'HT-SLM-2'
+				},
+				process_context: {
+					process: 'LPBF',
+					heat_treatment: 'annealed'
+				},
+				test_condition: {
+					method: 'tensile test'
+				},
+				value_payload: {
+					statement: 'Yield strength reached 540 MPa.'
+				},
+				unit: 'MPa',
+				source_refs: [],
+				evidence_anchor_ids: [],
+				resolution_status: 'unresolved_condition',
+				confidence: 0.84
+			},
+			{
 				evidence_unit_id: 'unit_condition',
 				objective_id: 'obj_1',
 				document_id: 'doc_1',
@@ -232,6 +257,18 @@ function objectivePayload() {
 				source_refs: [],
 				resolution_status: 'resolved',
 				confidence: 0.77
+			},
+			{
+				evidence_unit_id: 'unit_pseudo_interpretation',
+				objective_id: 'obj_1',
+				document_id: 'doc_1',
+				unit_kind: 'interpretation',
+				property_normalized: 'yield strength',
+				value_payload: {},
+				interpretation: 'Higher yield strength.',
+				source_refs: [],
+				resolution_status: 'resolved',
+				confidence: 0.94
 			}
 		],
 		logic_chain: {
@@ -329,7 +366,22 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			);
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
+			.not.toContain('Higher yield strength.');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
 			.toContain('Some measurement evidence is unresolved.');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.toContain('Unresolved evidence: unresolved condition');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.toContain('2 unresolved Measurement results units need condition or join cleanup.');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.toContain('Unresolved units: 2; papers: 1');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.not.toContain('Yield strength reached 540 MPa.');
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Representative evidence' }))
 			.toBeInTheDocument();
@@ -337,8 +389,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('button', { name: '2 Comparison evidence', exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Some measurement evidence is unresolved.').first())
-			.toBeInTheDocument();
+			.poll(() => judgementCards?.textContent ?? '')
+			.toContain('Some measurement evidence is unresolved.');
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Extraction diagnostics' }))
 			.toBeInTheDocument();
@@ -369,7 +421,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(contributionMap.getByText('6', { exact: true })).toBeInTheDocument();
+		await expect.element(contributionMap.getByText('8', { exact: true })).toBeInTheDocument();
 
 		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' });
 		await expect

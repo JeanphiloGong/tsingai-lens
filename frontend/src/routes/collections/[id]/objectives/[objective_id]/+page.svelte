@@ -612,14 +612,39 @@
 		return units
 			.filter((unit) => unit.unit_kind === 'interpretation')
 			.sort((left, right) => right.confidence - left.confidence)
-			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT)
 			.map((unit) => ({
 				id: unit.evidence_unit_id,
 				title: unit.property_normalized || $t('research.objectiveWorkspace.authorInterpretations'),
-				body: displayValue(unit.interpretation) || evidenceUnitValue(unit),
+				body: mechanismBody(unit),
 				meta: judgementMeta(unit),
 				unit
-			}));
+			}))
+			.filter((item) => isMechanismInterpretation(item.body))
+			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT);
+	}
+
+	function mechanismBody(unit: ObjectiveEvidenceUnit) {
+		return displayValue(unit.interpretation) || evidenceUnitValue(unit);
+	}
+
+	function isMechanismInterpretation(value: string) {
+		const normalized = value.trim().replace(/\s+/g, ' ');
+		if (!normalized) return false;
+		const lower = normalized.toLowerCase();
+		const hasExplanationSignal =
+			/\b(attribute|attributed|because|cause|caused|driven|due to|explain|explains|explained|govern|governs|lead|leads|led|link|linked|mechanism|promote|promotes|result in|results in|suppress|suppresses)\b/.test(
+				lower
+			);
+		if (hasExplanationSignal) return true;
+		return !/^(higher|lower|increased|decreased|improved|reduced|prediction results? of)\b/.test(
+			lower
+		);
+	}
+
+	function humanizeCode(value: string) {
+		const normalized = value.trim();
+		if (!normalized) return '';
+		return normalized.replace(/_/g, ' ');
 	}
 
 	function humanizeGapCode(value: string) {
@@ -628,24 +653,49 @@
 		const labelKey = `research.objectiveWorkspace.gapLabels.${normalized}`;
 		const translated = $t(labelKey);
 		if (translated !== labelKey) return translated;
-		return normalized.replace(/_/g, ' ');
+		return humanizeCode(normalized);
 	}
 
 	function unresolvedEvidenceItems(units: ObjectiveEvidenceUnit[]): ScientificJudgementItem[] {
-		return units
-			.filter((unit) => unit.resolution_status && unit.resolution_status !== 'resolved')
+		const grouped = new Map<string, ObjectiveEvidenceUnit[]>();
+		for (const unit of units.filter(
+			(item) => item.resolution_status && item.resolution_status !== 'resolved'
+		)) {
+			grouped.set(unit.resolution_status, [...(grouped.get(unit.resolution_status) ?? []), unit]);
+		}
+
+		return [...grouped.entries()]
+			.map(([status, statusUnits]) => {
+				const sortedUnits = [...statusUnits].sort((left, right) => right.confidence - left.confidence);
+				const representative = sortedUnits[0];
+				const kinds = [
+					...new Set(sortedUnits.map((unit) => $t(evidenceKindLabelKey(unit.unit_kind))))
+				].join(', ');
+				const documentCount = new Set(sortedUnits.map((unit) => unit.document_id).filter(Boolean)).size;
+
+				return {
+					id: `unresolved-${status}`,
+					title: $t('research.objectiveWorkspace.unresolvedEvidenceGroupTitle', {
+						status: humanizeCode(status)
+					}),
+					body: $t('research.objectiveWorkspace.unresolvedEvidenceGroupBody', {
+						count: String(sortedUnits.length),
+						kinds,
+						value: evidenceUnitValue(representative)
+					}),
+					meta: judgementMeta(representative, [
+						$t('research.objectiveWorkspace.unresolvedEvidenceGroupMeta', {
+							count: String(sortedUnits.length),
+							documents: String(documentCount || 1)
+						})
+					]),
+					unit: representative,
+					confidence: representative.confidence
+				};
+			})
 			.sort((left, right) => right.confidence - left.confidence)
 			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT)
-			.map((unit) => ({
-				id: `unresolved-${unit.evidence_unit_id}`,
-				title: unit.property_normalized || $t(evidenceKindLabelKey(unit.unit_kind)),
-				body: $t('research.objectiveWorkspace.unresolvedEvidenceBody', {
-					status: unit.resolution_status,
-					value: evidenceUnitValue(unit)
-				}),
-				meta: judgementMeta(unit),
-				unit
-			}));
+			.map(({ confidence: _confidence, ...item }) => item);
 	}
 
 	function buildLimitationItems(view: ObjectiveResearchView): ScientificJudgementItem[] {

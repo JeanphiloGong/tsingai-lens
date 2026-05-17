@@ -382,7 +382,10 @@ const translations: Record<Language, Translations> = {
 					'No author mechanism interpretations are available for this objective yet.',
 				noLimitations: 'No logic-chain gaps or unresolved evidence are currently reported.',
 				logicGap: 'Logic-chain gap',
-				unresolvedEvidenceBody: 'Resolution status: {status}. Evidence: {value}',
+				unresolvedEvidenceGroupTitle: 'Unresolved evidence: {status}',
+				unresolvedEvidenceGroupBody:
+					'{count} unresolved {kinds} units need condition or join cleanup. Representative evidence: {value}',
+				unresolvedEvidenceGroupMeta: 'Unresolved units: {count}; papers: {documents}',
 				controlledAxes: 'Controlled: {axes}',
 				comparisonGeneratedBody:
 					'{property}: {current} versus baseline {baseline}; reported direction is {direction}.',
@@ -2889,7 +2892,10 @@ const translations: Record<Language, Translations> = {
 				noMechanismInterpretations: '该目标暂未生成作者机制解释证据单元。',
 				noLimitations: '当前暂未报告逻辑链缺口或未解析证据。',
 				logicGap: '逻辑链缺口',
-				unresolvedEvidenceBody: '解析状态：{status}。证据：{value}',
+				unresolvedEvidenceGroupTitle: '未解析证据：{status}',
+				unresolvedEvidenceGroupBody:
+					'{count} 条未解析的{kinds}需要补齐条件或 join 关系。代表性证据：{value}',
+				unresolvedEvidenceGroupMeta: '未解析单元：{count}；文献：{documents}',
 				controlledAxes: '已控制：{axes}',
 				comparisonGeneratedBody: '{property}：{current} 对比基线 {baseline}；报告方向为 {direction}。',
 				comparisonGroupBody:

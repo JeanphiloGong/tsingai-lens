@@ -15,6 +15,7 @@ from domain.core import (
     MeasurementResult,
     MethodFact,
     ObjectiveEvidenceUnit,
+    ResearchObjective,
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
@@ -61,8 +62,13 @@ class FakeCoreFactRepository:
         frames: dict[str, list[dict]],
         comparison_rows: list[dict] | None,
         objective_units: list[dict] | None = None,
+        research_objectives: list[dict] | None = None,
     ) -> None:
         self.facts = CoreFactSet(
+            research_objectives=self._records(
+                research_objectives if research_objectives is not None else [],
+                ResearchObjective,
+            ),
             document_profiles=self._records(profiles, DocumentProfile),
             evidence_anchors=self._records(
                 frames.get("evidence_anchors", []),
@@ -406,12 +412,14 @@ def _service_from_frames(
     *,
     comparison_rows: list[dict] | None = None,
     objective_units: list[dict] | None = None,
+    research_objectives: list[dict] | None = None,
 ) -> ResearchViewAggregationService:
     core_fact_repository = FakeCoreFactRepository(
         profiles,
         frames,
         comparison_rows,
         objective_units,
+        research_objectives,
     )
     return ResearchViewAggregationService(
         collection_service=FakeCollectionService(),
@@ -890,3 +898,120 @@ def test_material_profile_inherits_single_document_comparison_material():
     assert profile["canonical_name"] == "316L stainless steel"
     assert profile["overview"]["sample_count"] == 1
     assert profile["sample_matrix"]["rows"][0]["material"] == "316L stainless steel"
+
+
+def test_objective_material_profile_inherits_material_scope_for_sample_measurements():
+    profiles, frames = _frames()
+    frames["sample_variants"] = []
+    frames["measurement_results"] = []
+    service = _service_from_frames(
+        profiles,
+        frames,
+        objective_units=[
+            {
+                "evidence_unit_id": "oeu-preheated-yield",
+                "objective_id": "obj-preheat",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {},
+                "sample_context": {
+                    "Build platform conditions": "Preheated",
+                    "sample_number": "2",
+                },
+                "process_context": {"process": "LPBF"},
+                "property_normalized": "yield_strength",
+                "value_payload": {
+                    "source_value_numeric": 508,
+                    "source_value_text": "508",
+                },
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.85,
+            },
+            {
+                "evidence_unit_id": "oeu-preheated-elongation",
+                "objective_id": "obj-preheat",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {},
+                "sample_context": {
+                    "Build platform conditions": "Preheated",
+                    "sample_number": "2",
+                },
+                "property_normalized": "elongation",
+                "value_payload": {
+                    "source_value_numeric": 82,
+                    "source_value_text": "82",
+                    "unit": "%",
+                },
+                "resolution_status": "resolved",
+                "confidence": 0.85,
+            },
+        ],
+        research_objectives=[
+            {
+                "objective_id": "obj-preheat",
+                "question": "How does build-platform preheating affect LPBF 316L?",
+                "material_scope": ["316L stainless steel"],
+                "process_axes": ["preheating"],
+                "property_axes": ["yield strength", "elongation"],
+                "confidence": 0.9,
+            }
+        ],
+    )
+
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    row = profile["sample_matrix"]["rows"][0]
+    assert row["sample_label"] == "Preheated"
+    assert row["material"] == "316L stainless steel"
+    assert row["values"]["yield_strength"]["value"] == 508
+    assert row["values"]["yield_strength"]["display_value"] == "508 MPa"
+    assert row["values"]["elongation"]["value"] == 82
+    assert row["values"]["elongation"]["unit"] == "%"
+
+
+def test_objective_material_profile_uses_informative_sample_context_keys():
+    profiles, frames = _frames()
+    frames["sample_variants"] = []
+    frames["measurement_results"] = []
+    service = _service_from_frames(
+        profiles,
+        frames,
+        objective_units=[
+            {
+                "evidence_unit_id": "oeu-lved-uts",
+                "objective_id": "obj-ved",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {"material": "316L stainless steel"},
+                "sample_context": {
+                    "Printed > 316L": "L-VED",
+                    "material": "316L stainless steel",
+                },
+                "property_normalized": "ultimate_tensile_strength",
+                "value_payload": {
+                    "source_value_numeric": 610,
+                    "source_value_text": "610 ± 6",
+                    "source_unit_text": "MPa",
+                },
+                "resolution_status": "resolved",
+                "confidence": 0.88,
+            }
+        ],
+    )
+
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    row = profile["sample_matrix"]["rows"][0]
+    assert row["sample_label"] == "L-VED"
+    assert row["values"]["ultimate_tensile_strength"]["value"] == 610
+    assert row["values"]["ultimate_tensile_strength"]["display_value"] == (
+        "610 ± 6 MPa"
+    )

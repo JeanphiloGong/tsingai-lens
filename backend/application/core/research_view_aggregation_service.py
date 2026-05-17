@@ -65,6 +65,38 @@ _NON_MATERIAL_SYSTEM_COMPACT_LABELS = {
     "argon",
     "ar",
 }
+_SAMPLE_CONTEXT_DIRECT_KEYS = (
+    "sample",
+    "sample_label",
+    "variant_label",
+    "sample_name",
+    "specimen",
+    "specimen_label",
+    "condition",
+    "condition_label",
+    "sample_id",
+    "variant_id",
+)
+_SAMPLE_CONTEXT_SECONDARY_KEYS = (
+    "build platform conditions",
+    "build platform condition",
+    "printed",
+    "printed > 316l",
+    "printed 316l",
+    "specimens",
+    "sample number",
+    "condition number",
+    "sample_number",
+    "condition_number",
+)
+_SAMPLE_CONTEXT_EXCLUDED_KEYS = {
+    "material",
+    "materials",
+    "material_system",
+    "host_material_system",
+    "composition",
+    "alloy",
+}
 _FactRows = dict[str, list[dict[str, Any]]]
 _ComparisonGroups = dict[tuple[str, str, str, str, str], list[dict[str, Any]]]
 
@@ -486,10 +518,55 @@ class ResearchViewAggregationService:
         self,
         facts: CoreFactSet,
     ) -> list[dict[str, Any]]:
-        return [
+        rows = [
             row.to_record()
             for row in project_objective_material_rows(facts.objective_evidence_units)
         ]
+        objective_material_scopes = self._objective_material_scopes(facts)
+        if not objective_material_scopes:
+            return rows
+        return [
+            self._row_with_objective_material_scope(row, objective_material_scopes)
+            for row in rows
+        ]
+
+    def _objective_material_scopes(
+        self,
+        facts: CoreFactSet,
+    ) -> dict[str, str]:
+        scopes: dict[str, str] = {}
+        for objective in facts.research_objectives:
+            labels = [
+                label
+                for label in (
+                    self._canonical_material_label(value)
+                    for value in objective.material_scope
+                )
+                if label
+            ]
+            if len(set(labels)) == 1:
+                scopes[objective.objective_id] = labels[0]
+        return scopes
+
+    def _row_with_objective_material_scope(
+        self,
+        row: dict[str, Any],
+        objective_material_scopes: dict[str, str],
+    ) -> dict[str, Any]:
+        if self._objective_material_label_from_row(row) is not None:
+            return row
+        objective_id = self._safe_text(row.get("objective_id"))
+        if objective_id is None:
+            return row
+        material_label = objective_material_scopes.get(objective_id)
+        if material_label is None:
+            return row
+        enriched = dict(row)
+        enriched["material_system"] = {
+            **self._as_mapping(row.get("material_system")),
+            "name": material_label,
+        }
+        return enriched
 
     def _comparison_projection_from_facts(
         self,
@@ -2222,18 +2299,45 @@ class ResearchViewAggregationService:
 
     def _objective_sample_label(self, row: dict[str, Any]) -> str | None:
         sample_context = self._as_mapping(row.get("sample_context"))
-        for key in (
-            "sample",
-            "sample_label",
-            "variant_label",
-            "sample_name",
-            "specimen",
-            "condition",
-            "sample_id",
-        ):
-            if label := self._safe_text(sample_context.get(key)):
+        for key in _SAMPLE_CONTEXT_DIRECT_KEYS:
+            if label := self._informative_sample_label(sample_context.get(key)):
+                return label
+        normalized_context = {
+            self._sample_context_key(key): value
+            for key, value in sample_context.items()
+        }
+        for key in _SAMPLE_CONTEXT_SECONDARY_KEYS:
+            if label := self._informative_sample_label(normalized_context.get(key)):
+                return label
+        for key, value in sample_context.items():
+            if self._sample_context_key(key) in _SAMPLE_CONTEXT_EXCLUDED_KEYS:
+                continue
+            if label := self._informative_sample_label(value):
                 return label
         return None
+
+    def _sample_context_key(self, value: Any) -> str:
+        return re.sub(r"\s+", " ", str(value).strip().lower().replace("_", " "))
+
+    def _informative_sample_label(self, value: Any) -> str | None:
+        label = self._safe_text(value)
+        if label is None:
+            return None
+        if self._looks_like_material_only_sample_label(label):
+            return None
+        if label.lower() in _GENERIC_VARIANT_TERMS:
+            return None
+        return label
+
+    def _looks_like_material_only_sample_label(self, label: str) -> bool:
+        lowered = label.lower()
+        compact = re.sub(r"[^a-z0-9]", "", lowered)
+        return (
+            "stainlesssteel" in compact
+            or compact in {"316l", "ss316l", "aisi316l", "ti6al4v", "ti64"}
+            or compact in {"material", "materials"}
+            or "materialsystem" in compact
+        )
 
     def _objective_process_family(self, row: dict[str, Any]) -> str | None:
         process_context = self._as_mapping(row.get("process_context"))
@@ -2266,8 +2370,10 @@ class ResearchViewAggregationService:
     def _objective_value_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
         value_payload = self._as_mapping(row.get("value_payload"))
         numeric_value = self._numeric_value(value_payload)
-        unit = self._safe_text(row.get("unit")) or self._safe_text(
-            value_payload.get("source_unit_text")
+        unit = (
+            self._safe_text(row.get("unit"))
+            or self._safe_text(value_payload.get("source_unit_text"))
+            or self._safe_text(value_payload.get("unit"))
         )
         source_value = self._safe_text(value_payload.get("source_value_text"))
         display = source_value or (
@@ -4096,7 +4202,7 @@ class ResearchViewAggregationService:
         return []
 
     def _numeric_value(self, value_payload: dict[str, Any]) -> float | int | None:
-        for key in ("value", "numeric_value", "normalized_value"):
+        for key in ("value", "numeric_value", "normalized_value", "source_value_numeric"):
             value = value_payload.get(key)
             numeric = self._numeric_or_none(value)
             if numeric is not None:

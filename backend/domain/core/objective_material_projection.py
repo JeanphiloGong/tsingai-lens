@@ -108,7 +108,13 @@ def _has_material_projection_payload(unit: ObjectiveEvidenceUnit) -> bool:
 
 
 def _has_explicit_measurement_value(unit: ObjectiveEvidenceUnit) -> bool:
-    for key in ("value", "numeric_value", "normalized_value", "current_value"):
+    for key in (
+        "value",
+        "numeric_value",
+        "normalized_value",
+        "current_value",
+        "source_value_numeric",
+    ):
         if _coerce_number(unit.value_payload.get(key)) is not None:
             return True
     return _source_value_text_is_atomic_numeric(

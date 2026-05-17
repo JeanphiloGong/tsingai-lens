@@ -94,13 +94,53 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Paper coverage table' }))
+			.element(browserPage.getByRole('heading', { name: 'Paper review list' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('doc_1')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Short ID: doc_1')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Paper coverage is ready for review.')).toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
 		).toEqual(['/api/v1/collections/col_123/research-view']);
+	});
+
+	it('hides long document hashes behind a short paper identifier', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/research-view') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					state: 'ready',
+					paper_coverage: [
+						{
+							document_id: 'abcdef1234567890abcdef1234567890',
+							title: null,
+							state: 'ready',
+							sample_count: 0,
+							process_param_count: 0,
+							measurement_count: 0,
+							condition_count: 0,
+							evidence_count: 0,
+							issue_count: 0
+						}
+					]
+				});
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper 1')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Short ID: abcdef123456')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('abcdef1234567890abcdef1234567890'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('No extracted evidence is available for this paper yet.'))
+			.toBeInTheDocument();
 	});
 
 	it('summarizes repeated collection-level coverage warnings', async () => {

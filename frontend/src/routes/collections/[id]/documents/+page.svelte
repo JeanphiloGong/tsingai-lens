@@ -73,6 +73,23 @@
 			: $t('research.documents.noIssues');
 	}
 
+	function paperDisplayTitle(row: PaperCoverageRow, index: number) {
+		const title = row.title?.trim();
+		if (title && title !== row.document_id) return title;
+		return $t('research.documents.untitledPaper', { number: index + 1 });
+	}
+
+	function paperShortId(row: PaperCoverageRow) {
+		return row.document_id.length > 12 ? row.document_id.slice(0, 12) : row.document_id;
+	}
+
+	function paperCoverageQuality(row: PaperCoverageRow) {
+		if (row.state === 'failed') return $t('research.documents.coverageFailed');
+		if (!row.evidence_count) return $t('research.documents.coverageNoEvidence');
+		if (!row.condition_count) return $t('research.documents.coverageNeedsConditions');
+		return $t('research.documents.coverageReady');
+	}
+
 	function summarizeWarnings(warnings: ResearchViewWarning[]): WarningSummary[] {
 		const summaries = new Map<string, WarningSummary>();
 		for (const warning of warnings) {
@@ -200,61 +217,60 @@
 				<h3>{$t('research.documents.tableTitle')}</h3>
 				<span>{$t('research.documents.documentCount', { count: paperCoverageRows.length })}</span>
 			</div>
-			<div class="coverage-table-wrapper">
-				<table class="coverage-table">
-					<thead>
-						<tr>
-							<th>{$t('research.documents.document')}</th>
-							<th>{$t('research.documents.state')}</th>
-							<th>{$t('research.overview.samples')}</th>
-							<th>{$t('research.documents.processParams')}</th>
-							<th>{$t('research.overview.measurements')}</th>
-							<th>{$t('research.documents.conditions')}</th>
-							<th>{$t('research.documents.evidence')}</th>
-							<th>{$t('research.documents.issues')}</th>
-							<th>{$t('research.documents.next')}</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each paperCoverageRows as row (row.document_id)}
-							<tr>
-								<td>
-									<div class="document-cell">
-										<span class="pdf-icon" aria-hidden="true">PDF</span>
-										<div>
-											<strong>{row.title}</strong>
-											<span>{row.document_id}</span>
-										</div>
-									</div>
-								</td>
-								<td>
+			<div class="paper-review-list">
+				{#each paperCoverageRows as row, index (row.document_id)}
+					<article class="paper-review-card">
+						<div class="paper-review-card__main">
+							<span class="pdf-icon" aria-hidden="true">PDF</span>
+							<div>
+								<div class="paper-review-card__title-row">
+									<h4>{paperDisplayTitle(row, index)}</h4>
 									<span class={`status-badge status-badge--${coverageStateTone(row)}`}>
 										{$t(`research.state.${row.state}`)}
 									</span>
-								</td>
-								<td>{row.sample_count}</td>
-								<td>{row.process_param_count}</td>
-								<td>{row.measurement_count}</td>
-								<td>{row.condition_count}</td>
-								<td>{row.evidence_count}</td>
-								<td>{issueLabel(row)}</td>
-								<td>
-									<a class="btn btn--ghost btn--small" href={paperDetailHref(row)}>
-										{$t('research.documents.openPaper')}
-									</a>
-								</td>
-							</tr>
+								</div>
+								<p>{paperCoverageQuality(row)}</p>
+								<div class="paper-review-card__meta">
+									<span>{$t('research.documents.shortId')}: {paperShortId(row)}</span>
+									<span>{issueLabel(row)}</span>
+								</div>
+							</div>
+						</div>
+						<div class="paper-review-card__metrics" aria-label={$t('research.documents.factCoverageTitle')}>
+							<div>
+								<span>{$t('research.overview.samples')}</span>
+								<strong>{row.sample_count}</strong>
+							</div>
+							<div>
+								<span>{$t('research.documents.processParams')}</span>
+								<strong>{row.process_param_count}</strong>
+							</div>
+							<div>
+								<span>{$t('research.overview.measurements')}</span>
+								<strong>{row.measurement_count}</strong>
+							</div>
+							<div>
+								<span>{$t('research.documents.conditions')}</span>
+								<strong>{row.condition_count}</strong>
+							</div>
+							<div>
+								<span>{$t('research.documents.evidence')}</span>
+								<strong>{row.evidence_count}</strong>
+							</div>
+						</div>
+						<div class="paper-review-card__footer">
 							{#if row.primary_warnings.length}
-								<tr class="coverage-warning-row">
-									<td colspan="9">
-										<strong>{$t('research.warnings')}:</strong>
-										{row.primary_warnings.map((warning) => warning.message).join(' | ')}
-									</td>
-								</tr>
+								<p>
+									<strong>{$t('research.warnings')}:</strong>
+									{row.primary_warnings.map((warning) => warning.message).join(' | ')}
+								</p>
 							{/if}
-						{/each}
-					</tbody>
-				</table>
+							<a class="btn btn--ghost btn--small" href={paperDetailHref(row)}>
+								{$t('research.documents.openPaper')}
+							</a>
+						</div>
+					</article>
+				{/each}
 			</div>
 		</section>
 	{/if}
@@ -288,6 +304,7 @@
 
 	.paper-coverage-header h2,
 	.coverage-table-header h3,
+	.paper-review-card h4,
 	.coverage-state-card h3 {
 		margin: 0;
 		color: var(--text-primary);
@@ -299,6 +316,7 @@
 	}
 
 	.paper-coverage-header p,
+	.paper-review-card p,
 	.coverage-state-card p {
 		max-width: 760px;
 		margin: 8px 0 0;
@@ -382,7 +400,7 @@
 	}
 
 	.coverage-table-card {
-		overflow: hidden;
+		padding: 18px;
 	}
 
 	.coverage-table-header {
@@ -390,7 +408,7 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		padding: 18px 20px 12px;
+		margin-bottom: 14px;
 	}
 
 	.coverage-table-header span {
@@ -399,56 +417,89 @@
 		line-height: 20px;
 	}
 
-	.coverage-table-wrapper {
-		overflow-x: auto;
+	.paper-review-list {
+		display: grid;
+		gap: 12px;
 	}
 
-	.coverage-table {
-		width: 100%;
-		min-width: 1080px;
-		border-collapse: collapse;
-		font-size: 14px;
-	}
-
-	.coverage-table th,
-	.coverage-table td {
-		padding: 14px 18px;
-		border-top: 1px solid var(--border-default);
-		text-align: left;
-		vertical-align: middle;
-	}
-
-	.coverage-table th {
-		color: var(--text-secondary);
-		font-size: 13px;
-		font-weight: 700;
+	.paper-review-card {
+		display: grid;
+		gap: 14px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 16px;
 		background: var(--bg-subtle);
 	}
 
-	.document-cell {
-		display: flex;
-		align-items: center;
+	.paper-review-card__main {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
 		gap: 12px;
-		min-width: 0;
 	}
 
-	.document-cell div {
+	.paper-review-card__title-row,
+	.paper-review-card__footer {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.paper-review-card h4 {
+		font-size: 16px;
+		line-height: 23px;
+	}
+
+	.paper-review-card__meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 9px;
+	}
+
+	.paper-review-card__meta span {
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 9px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 16px;
+		background: var(--surface-card);
+	}
+
+	.paper-review-card__metrics {
+		display: grid;
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.paper-review-card__metrics div {
 		display: grid;
 		gap: 4px;
-		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--surface-card);
 	}
 
-	.document-cell strong {
-		color: var(--text-primary);
-		font-size: 14px;
-		line-height: 20px;
-		word-break: break-word;
-	}
-
-	.document-cell span:last-child {
+	.paper-review-card__metrics span {
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.paper-review-card__metrics strong {
+		color: var(--text-primary);
+		font-size: 20px;
+		line-height: 25px;
+	}
+
+	.paper-review-card__footer p {
+		margin: 0;
+		color: var(--warning-text);
+		font-size: 13px;
+		line-height: 20px;
 	}
 
 	.pdf-icon {
@@ -466,20 +517,23 @@
 		line-height: 12px;
 	}
 
-	.coverage-warning-row td {
-		background: var(--warning-bg);
-		color: var(--warning-text);
-		font-size: 13px;
-		line-height: 20px;
-	}
-
 	@media (max-width: 860px) {
 		.paper-coverage-header {
 			display: grid;
 		}
 
 		.coverage-summary-grid,
-		.coverage-fact-grid {
+		.coverage-fact-grid,
+		.paper-review-card__metrics {
+			grid-template-columns: 1fr;
+		}
+
+		.paper-review-card__title-row,
+		.paper-review-card__footer {
+			display: grid;
+		}
+
+		.paper-review-card__main {
 			grid-template-columns: 1fr;
 		}
 	}

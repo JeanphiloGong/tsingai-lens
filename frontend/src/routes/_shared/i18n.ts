@@ -382,9 +382,9 @@ const translations: Record<Language, Translations> = {
 					'No author mechanism interpretations are available for this objective yet.',
 				noLimitations: 'No logic-chain gaps or unresolved evidence are currently reported.',
 				logicGap: 'Logic-chain gap',
-				unresolvedEvidenceGroupTitle: 'Unresolved evidence: {status}',
+				unresolvedEvidenceGroupTitle: 'Unresolved sample, process, or test context',
 				unresolvedEvidenceGroupBody:
-					'{count} {kinds} units are not fully comparable because the {status} sample, process, or test-condition context is incomplete. Representative evidence: {value}',
+					'{count} {kinds} cannot support a strict controlled comparison until the {status} context is resolved.',
 				unresolvedEvidenceGroupMeta: 'Unresolved units: {count}; papers: {documents}',
 				controlledAxes: 'Controlled: {axes}',
 				comparisonContext: 'Current: {current}; baseline: {baseline}',
@@ -644,8 +644,7 @@ const translations: Record<Language, Translations> = {
 					backgroundText:
 						'{material} is studied through {processes}; this parameter set is supported by {paper}.',
 					scoreLabel: '{best}/{total} leading properties',
-					comparisonSummary:
-						'This sample leads {count} of {total} tracked properties: {best}.',
+					comparisonSummary: 'This sample leads {count} of {total} tracked properties: {best}.',
 					comparisonNoLeader:
 						'This sample has {count} comparable values, but none is the best among the tracked {total} properties.',
 					notBestFor: 'Not the leader for: {properties}.',
@@ -654,7 +653,8 @@ const translations: Record<Language, Translations> = {
 					noProcessContext: 'No process parameters were attached to this sample row.',
 					noTestConditions:
 						'No explicit test condition was attached to this row; verify the source paper before comparing across conditions.',
-					empty: 'No sample-level performance chain can be built from the current material matrix yet.'
+					empty:
+						'No sample-level performance chain can be built from the current material matrix yet.'
 				},
 				comparison: {
 					topic: 'Comparison topic: process variables and performance',
@@ -2895,17 +2895,17 @@ const translations: Record<Language, Translations> = {
 				noMechanismInterpretations: '该目标暂未生成作者机制解释证据单元。',
 				noLimitations: '当前暂未报告逻辑链缺口或未解析证据。',
 				logicGap: '逻辑链缺口',
-				unresolvedEvidenceGroupTitle: '未解析证据：{status}',
+				unresolvedEvidenceGroupTitle: '样品、工艺或测试上下文未解析',
 				unresolvedEvidenceGroupBody:
-					'{count} 条{kinds}尚不能严格比较，因为 {status} 的样品、工艺或测试条件上下文不完整。代表性证据：{value}',
+					'{count} 条{kinds}在 {status} 上下文解析前，不能支撑严格受控比较。',
 				unresolvedEvidenceGroupMeta: '未解析单元：{count}；文献：{documents}',
 				controlledAxes: '已控制：{axes}',
 				comparisonContext: '当前组：{current}；基线：{baseline}',
 				comparisonCurrentContext: '当前组：{current}；基线尚未解析',
 				comparisonAxisContext: '比较轴：{axis}',
-				comparisonGeneratedBody: '{property}：{current} 对比基线 {baseline}；报告方向为 {direction}。',
-				comparisonGroupBody:
-					'汇总 {count} 条关于 {property} 的比较证据。代表性发现：{summary}',
+				comparisonGeneratedBody:
+					'{property}：{current} 对比基线 {baseline}；报告方向为 {direction}。',
+				comparisonGroupBody: '汇总 {count} 条关于 {property} 的比较证据。代表性发现：{summary}',
 				comparisonGroupMeta: '证据单元：{count}；文献：{documents}',
 				directionIncrease: '升高',
 				directionDecrease: '降低',
@@ -2960,7 +2960,8 @@ const translations: Record<Language, Translations> = {
 				paperFilter: '文献',
 				allEvidenceKinds: '全部证据类型',
 				allPapers: '全部文献',
-				evidencePreviewLimit: '当前分组显示前 {shown} / {total} 条证据。可用筛选器或右侧详情聚焦查看。',
+				evidencePreviewLimit:
+					'当前分组显示前 {shown} / {total} 条证据。可用筛选器或右侧详情聚焦查看。',
 				noEvidenceUnits: '暂未生成已解析证据单元。',
 				evidenceDetail: '证据详情',
 				evidenceDetailBody: '查看当前证据单元，并跳回它的来源文献。',

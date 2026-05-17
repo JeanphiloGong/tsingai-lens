@@ -217,7 +217,10 @@ function objectivePayload() {
 					sample: 'HT-SLM'
 				},
 				baseline_context: {
-					sample: 'as-built'
+					evidence_unit_id: 'oeu_internal_baseline',
+					sample_context: {
+						sample: 'as-built'
+					}
 				},
 				value_payload: {
 					statement: 'Heat-treated samples exceeded the as-built baseline.'
@@ -236,7 +239,9 @@ function objectivePayload() {
 					sample: 'HT-SLM-2'
 				},
 				baseline_context: {
-					sample: 'as-built'
+					sample_context: {
+						sample: 'as-built'
+					}
 				},
 				value_payload: {
 					statement: 'A second heat-treated condition also exceeded the as-built baseline.'
@@ -257,6 +262,31 @@ function objectivePayload() {
 				source_refs: [],
 				resolution_status: 'resolved',
 				confidence: 0.77
+			},
+			{
+				evidence_unit_id: 'unit_numeric_interpretation',
+				objective_id: 'obj_1',
+				document_id: 'doc_1',
+				unit_kind: 'interpretation',
+				property_normalized: 'yield strength',
+				value_payload: {},
+				interpretation: '440 - 475 MPa',
+				source_refs: [],
+				resolution_status: 'resolved',
+				confidence: 0.96
+			},
+			{
+				evidence_unit_id: 'unit_scope_interpretation',
+				objective_id: 'obj_1',
+				document_id: 'doc_1',
+				unit_kind: 'interpretation',
+				property_normalized: 'mechanical behavior',
+				value_payload: {},
+				interpretation:
+					'The combined impact of scan strategy rotation angles and build orientations on microstructure and mechanical behavior was investigated.',
+				source_refs: [],
+				resolution_status: 'resolved',
+				confidence: 0.95
 			},
 			{
 				evidence_unit_id: 'unit_pseudo_interpretation',
@@ -372,6 +402,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
 			.toContain('Current: sample: HT-SLM; baseline: sample: as-built');
+		await expect.poll(() => judgementCards?.textContent ?? '').not.toContain('oeu_');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
 			.not.toContain('A second heat-treated condition also exceeded the as-built baseline.');
@@ -383,6 +414,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
 			.not.toContain('Higher yield strength.');
+		await expect.poll(() => judgementCards?.textContent ?? '').not.toContain('440 - 475 MPa');
+		await expect.poll(() => judgementCards?.textContent ?? '').not.toContain('was investigated');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
 			.not.toContain('The heat treatments induced a decrease in the tensile strength');
@@ -391,11 +424,11 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toContain('Some measurement evidence is unresolved.');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Unresolved evidence: unresolved condition');
+			.toContain('Unresolved sample, process, or test context');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
 			.toContain(
-				'2 Measurement results units are not fully comparable because the unresolved condition sample, process, or test-condition context is incomplete.'
+				'2 measurement results cannot support a strict controlled comparison until the unresolved condition context is resolved.'
 			);
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
@@ -418,9 +451,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('All extracted evidence'))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('All extracted evidence')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Measurement results' }))
 			.not.toBeInTheDocument();
@@ -437,12 +468,10 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect.element(contributionMap.getByText('primary_experiment')).toBeInTheDocument();
 		await expect
 			.element(
-				contributionMap.getByText(
-					'Reports tensile testing of as-built and heat-treated LPBF 316L.'
-				)
+				contributionMap.getByText('Reports tensile testing of as-built and heat-treated LPBF 316L.')
 			)
 			.toBeInTheDocument();
-		await expect.element(contributionMap.getByText('9', { exact: true })).toBeInTheDocument();
+		await expect.element(contributionMap.getByText('11', { exact: true })).toBeInTheDocument();
 
 		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' });
 		await expect
@@ -502,6 +531,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(inspector.getByText('sample: HT-SLM')).toBeInTheDocument();
 		await expect.element(inspector.getByText('sample: as-built')).toBeInTheDocument();
+		await expect.element(inspector.getByText(/oeu_internal_baseline/)).not.toBeInTheDocument();
 	});
 
 	it('summarizes evidence context on evidence cards', async () => {
@@ -525,6 +555,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			name: /doc_1 · 79%/
 		});
 		await expect.element(comparisonCard.getByText('baseline: as-built')).toBeInTheDocument();
+		await expect.element(comparisonCard.getByText(/oeu_internal_baseline/)).not.toBeInTheDocument();
 	});
 
 	it('renders duplicate evidence fact labels without a keyed each failure', async () => {
@@ -562,12 +593,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		const duplicateCard = browserPage.getByRole('button', {
 			name: /doc_1 · 92%/
 		});
-		await expect
-			.element(duplicateCard.getByText('sample: Non-preheated'))
-			.toBeInTheDocument();
-		await expect
-			.element(duplicateCard.getByText('process: Non-preheated'))
-			.toBeInTheDocument();
+		await expect.element(duplicateCard.getByText('sample: Non-preheated')).toBeInTheDocument();
+		await expect.element(duplicateCard.getByText('process: Non-preheated')).toBeInTheDocument();
 		await expect
 			.element(duplicateCard.getByText(/Very long tensile testing condition text/))
 			.not.toBeInTheDocument();
@@ -605,9 +632,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
 		const supportingSection = document.querySelector('.supporting-evidence-list');
-		await expect
-			.poll(() => supportingSection?.textContent ?? '')
-			.toContain('e30598b737...8fa1d8');
+		await expect.poll(() => supportingSection?.textContent ?? '').toContain('e30598b737...8fa1d8');
 		expect(supportingSection?.textContent).not.toContain(longDocumentId);
 	});
 
@@ -633,12 +658,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		render(Page);
 
 		await browserPage.getByText('All extracted evidence').click();
-		await expect
-			.element(browserPage.getByText('Measurement preview 6'))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Measurement preview 7'))
-			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Measurement preview 6')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Measurement preview 7')).not.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(

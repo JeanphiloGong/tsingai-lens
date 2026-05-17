@@ -58,6 +58,11 @@
 		unit?: ObjectiveEvidenceUnit;
 	};
 
+	type JudgementMetaOptions = {
+		includeFacts?: boolean;
+		includeSource?: boolean;
+	};
+
 	type ResearchFocusGroup = {
 		labelKey: string;
 		items: string[];
@@ -82,6 +87,16 @@
 		'comparison',
 		'interpretation'
 	];
+	const compactHiddenRecordKeys = new Set([
+		'evidence_unit_id',
+		'objective_id',
+		'document_id',
+		'route_id',
+		'frame_id',
+		'logic_chain_id',
+		'evidence_id',
+		'anchor_id'
+	]);
 	const EVIDENCE_GROUP_PREVIEW_LIMIT = 6;
 	const SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT = 3;
 
@@ -128,7 +143,9 @@
 	$: evidenceReadinessItems = objectiveView ? buildEvidenceReadinessItems(objectiveView) : [];
 	$: comparisonReadiness = objectiveView ? buildComparisonReadiness(objectiveView) : null;
 	$: controlledComparisonItems = buildControlledComparisonItems(evidenceUnits);
-	$: mechanismInterpretationItems = buildMechanismInterpretationItems(evidenceUnits);
+	$: mechanismInterpretationItems = objectiveView
+		? buildMechanismInterpretationItems(evidenceUnits, objectiveView)
+		: [];
 	$: limitationItems = objectiveView ? buildLimitationItems(objectiveView) : [];
 	$: representativeEvidenceUnits = buildRepresentativeEvidenceUnits(evidenceUnits);
 	$: selectedEvidenceUnit =
@@ -232,8 +249,13 @@
 			.join('; ');
 	}
 
+	function shouldDisplayRecordKey(key: string) {
+		return !compactHiddenRecordKeys.has(key.toLowerCase());
+	}
+
 	function recordEntries(record: Record<string, unknown>, limit = 5) {
 		return Object.entries(record)
+			.filter(([key]) => shouldDisplayRecordKey(key))
 			.filter(([, value]) => hasDisplayValue(value))
 			.slice(0, limit)
 			.map(([key, value]) => ({ key, value: displayValue(value) }));
@@ -257,24 +279,53 @@
 	}
 
 	function baselineCardFact(record: Record<string, unknown>) {
+		const nestedSampleContext = record.sample_context;
+		if (nestedSampleContext && typeof nestedSampleContext === 'object') {
+			const [entry] = recordEntries(nestedSampleContext as Record<string, unknown>, 1);
+			return entry ? `baseline: ${entry.value}` : '';
+		}
 		const [entry] = recordEntries(record, 1);
 		return entry ? `baseline: ${entry.value}` : '';
 	}
 
 	function evidenceCardEntries(record: Record<string, unknown>, limit = 5) {
 		const verboseKeys = new Set(['detail', 'details', 'source_text', 'raw_text', 'statement']);
-		return recordEntries(record, limit).filter((entry) => !verboseKeys.has(entry.key.toLowerCase()));
+		return recordEntries(record, limit).filter(
+			(entry) => !verboseKeys.has(entry.key.toLowerCase())
+		);
 	}
 
 	function evidenceCardFacts(unit: ObjectiveEvidenceUnit) {
 		return [
 			...evidenceCardEntries(unit.sample_context, 1).map((entry) => `${entry.key}: ${entry.value}`),
-			...evidenceCardEntries(unit.process_context, 2).map((entry) => `${entry.key}: ${entry.value}`),
+			...evidenceCardEntries(unit.process_context, 2).map(
+				(entry) => `${entry.key}: ${entry.value}`
+			),
 			...evidenceCardEntries(unit.test_condition, 1).map((entry) => `${entry.key}: ${entry.value}`),
 			baselineCardFact(unit.baseline_context)
 		]
 			.filter(Boolean)
 			.slice(0, 4);
+	}
+
+	function compactRecordValue(value: unknown, limit = 5) {
+		if (!value || typeof value !== 'object') return '';
+		const record = value as Record<string, unknown>;
+		const entries = recordEntries(record, limit);
+		if (!entries.length) return '';
+		return entries.map((entry) => `${entry.key}: ${entry.value}`).join('; ');
+	}
+
+	function uniqueMeta(items: string[]) {
+		const seen = new Set<string>();
+		const result: string[] = [];
+		for (const item of items) {
+			const normalized = item.trim().replace(/\s+/g, ' ').toLowerCase();
+			if (!normalized || seen.has(normalized) || normalized.includes('oeu_')) continue;
+			seen.add(normalized);
+			result.push(item);
+		}
+		return result;
 	}
 
 	function sourceRefLabel(sourceRef: Record<string, unknown>) {
@@ -334,7 +385,9 @@
 		}
 		const kinds = [
 			...evidenceKindOrder.filter((kind) => kind in counts),
-			...Object.keys(counts).filter((kind) => !evidenceKindOrder.includes(kind)).sort()
+			...Object.keys(counts)
+				.filter((kind) => !evidenceKindOrder.includes(kind))
+				.sort()
 		];
 		return [
 			{
@@ -534,9 +587,10 @@
 
 	function comparisonContextLabel(unit: ObjectiveEvidenceUnit) {
 		const axis = displayValue(unit.value_payload.comparison_axis);
-		const currentContext = displayValue(unit.sample_context);
+		const currentContext = compactRecordValue(unit.sample_context);
 		const baselineContext =
-			displayValue(unit.baseline_context.sample_context) || displayValue(unit.baseline_context);
+			compactRecordValue(unit.baseline_context.sample_context) ||
+			compactRecordValue(unit.baseline_context);
 		if (currentContext && baselineContext) {
 			return $t('research.objectiveWorkspace.comparisonContext', {
 				current: currentContext,
@@ -555,9 +609,11 @@
 	}
 
 	function comparisonBody(unit: ObjectiveEvidenceUnit) {
-		const statement = displayValue(unit.value_payload.statement) || displayValue(unit.interpretation);
+		const statement =
+			displayValue(unit.value_payload.statement) || displayValue(unit.interpretation);
 		if (statement) return statement;
-		const property = unit.property_normalized || $t('research.objectiveWorkspace.measurementResults');
+		const property =
+			unit.property_normalized || $t('research.objectiveWorkspace.measurementResults');
 		const current = valueWithUnit(
 			unit.value_payload.current_value ?? unit.value_payload.value,
 			unit.unit
@@ -574,29 +630,41 @@
 		return evidenceUnitValue(unit);
 	}
 
-	function judgementMeta(unit: ObjectiveEvidenceUnit, extra: string[] = []) {
-		return [
-			...extra,
-			...evidenceCardFacts(unit),
-			evidenceCardSourceLabel(unit.document_id),
-			confidenceLabel(unit.confidence)
-		]
-			.filter(Boolean)
-			.slice(0, 5);
+	function judgementMeta(
+		unit: ObjectiveEvidenceUnit,
+		extra: string[] = [],
+		options: JudgementMetaOptions = {}
+	) {
+		const includeFacts = options.includeFacts ?? true;
+		const includeSource = options.includeSource ?? true;
+		return uniqueMeta(
+			[
+				...extra,
+				...(includeFacts ? evidenceCardFacts(unit) : []),
+				...(includeSource ? [evidenceCardSourceLabel(unit.document_id)] : []),
+				unit.confidence > 0 ? confidenceLabel(unit.confidence) : ''
+			].filter(Boolean)
+		).slice(0, 5);
 	}
 
-	function buildControlledComparisonItems(units: ObjectiveEvidenceUnit[]): ScientificJudgementItem[] {
+	function buildControlledComparisonItems(
+		units: ObjectiveEvidenceUnit[]
+	): ScientificJudgementItem[] {
 		const grouped = new Map<string, ObjectiveEvidenceUnit[]>();
 		for (const unit of units.filter((item) => item.unit_kind === 'comparison')) {
-			const property = unit.property_normalized || $t('research.objectiveWorkspace.comparisonEvidence');
+			const property =
+				unit.property_normalized || $t('research.objectiveWorkspace.comparisonEvidence');
 			grouped.set(property, [...(grouped.get(property) ?? []), unit]);
 		}
 
 		return [...grouped.entries()]
 			.map(([property, propertyUnits]) => {
-				const sortedUnits = [...propertyUnits].sort((left, right) => right.confidence - left.confidence);
+				const sortedUnits = [...propertyUnits].sort(
+					(left, right) => right.confidence - left.confidence
+				);
 				const representative = sortedUnits[0];
-				const documentCount = new Set(sortedUnits.map((unit) => unit.document_id).filter(Boolean)).size;
+				const documentCount = new Set(sortedUnits.map((unit) => unit.document_id).filter(Boolean))
+					.size;
 				const representativeBody = comparisonBody(representative);
 				const body =
 					sortedUnits.length > 1
@@ -606,14 +674,18 @@
 								summary: representativeBody
 							})
 						: representativeBody;
-				const meta = judgementMeta(representative, [
-					$t('research.objectiveWorkspace.comparisonGroupMeta', {
-						count: String(sortedUnits.length),
-						documents: String(documentCount || 1)
-					}),
-					comparisonContextLabel(representative),
-					controlledAxesSummary(representative)
-				]);
+				const meta = judgementMeta(
+					representative,
+					[
+						$t('research.objectiveWorkspace.comparisonGroupMeta', {
+							count: String(sortedUnits.length),
+							documents: String(documentCount || 1)
+						}),
+						comparisonContextLabel(representative),
+						controlledAxesSummary(representative)
+					],
+					{ includeFacts: false, includeSource: false }
+				);
 
 				return {
 					id: `comparison-${property}`,
@@ -630,7 +702,8 @@
 	}
 
 	function buildMechanismInterpretationItems(
-		units: ObjectiveEvidenceUnit[]
+		units: ObjectiveEvidenceUnit[],
+		view: ObjectiveResearchView
 	): ScientificJudgementItem[] {
 		return units
 			.filter((unit) => unit.unit_kind === 'interpretation')
@@ -639,10 +712,11 @@
 				id: unit.evidence_unit_id,
 				title: unit.property_normalized || $t('research.objectiveWorkspace.authorInterpretations'),
 				body: mechanismBody(unit),
-				meta: judgementMeta(unit),
+				meta: judgementMeta(unit, [], { includeSource: false }),
 				unit
 			}))
 			.filter((item) => isMechanismInterpretation(item.body))
+			.filter((item) => isMechanismInObjectiveScope(item, view))
 			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT);
 	}
 
@@ -654,21 +728,45 @@
 		const normalized = value.trim().replace(/\s+/g, ' ');
 		if (!normalized) return false;
 		const lower = normalized.toLowerCase();
+		if (isNumericResultOnly(lower)) return false;
+		if (isScopeOnlyStatement(lower)) return false;
 		if (isResultOnlyTrend(lower)) return false;
 		const hasExplanationSignal =
-			/\b(attribute|attributed|because|cause|caused|driven|due to|explain|explains|explained|govern|governs|lead|leads|led|link|linked|mechanism|promote|promotes|result in|results in|suppress|suppresses)\b/.test(
+			/\b(attribute|attributed|based on|because|cause|caused|driven|due to|explain|explains|explained|govern|governs|lead|leads|led|link|linked|mechanism|model|models|predict|promote|promotes|result in|results in|suppress|suppresses)\b/.test(
 				lower
 			);
-		if (hasExplanationSignal) return true;
-		return !/^(higher|lower|increased|decreased|improved|reduced|prediction results? of)\b/.test(
+		return hasExplanationSignal;
+	}
+
+	function isNumericResultOnly(lower: string) {
+		if (
+			/^\s*[\d.,]+(?:\s*[-–]\s*[\d.,]+)?\s*(?:mpa|gpa|hv|%|j\/mm\^?3|j\/mm3|°c|c\/s)?\s*$/.test(
+				lower
+			)
+		) {
+			return true;
+		}
+		const hasMeasuredQuantity = /\b(elongation|hardness|strength|tensile|ultimate|yield)\b/.test(
+			lower
+		);
+		return (
+			hasMeasuredQuantity &&
+			/\d/.test(lower) &&
+			!/\b(because|due to|caused|linked|model|predict)\b/.test(lower)
+		);
+	}
+
+	function isScopeOnlyStatement(lower: string) {
+		return /\b(was|were)\s+(investigated|studied|evaluated|examined|analyzed|analysed)\b/.test(
 			lower
 		);
 	}
 
 	function isResultOnlyTrend(lower: string) {
-		const hasTrend = /\b(increase|increases|increased|decrease|decreases|decreased|higher|lower|improved|reduced)\b/.test(
-			lower
-		);
+		const hasTrend =
+			/\b(increase|increases|increased|decrease|decreases|decreased|higher|lower|improved|reduced)\b/.test(
+				lower
+			);
 		if (!hasTrend) return false;
 		const hasMechanismSubject =
 			/\b(cellular|corrosion|defect|defects|film|grain|melt pool|microstructure|passive|phase|porosity|precipitate|texture)\b/.test(
@@ -676,6 +774,44 @@
 			);
 		if (hasMechanismSubject) return false;
 		return /\b(elongation|hardness|strength|tensile|yield)\b/.test(lower);
+	}
+
+	function objectiveScopeTerms(view: ObjectiveResearchView) {
+		return [
+			...view.objective.property_axes,
+			...(view.objective_context?.target_property_axes ?? [])
+		]
+			.map((item) => item.toLowerCase())
+			.filter(Boolean);
+	}
+
+	function isMechanismInObjectiveScope(item: ScientificJudgementItem, view: ObjectiveResearchView) {
+		const scopeTerms = objectiveScopeTerms(view);
+		if (!scopeTerms.length) return true;
+		const text = `${item.title} ${item.body}`.toLowerCase();
+		const scopeText = scopeTerms.join(' ');
+		const offScopePropertySignals = [
+			'corrosion',
+			'passive film',
+			'electrochemical',
+			'fatigue',
+			'hardness'
+		];
+		if (scopeText.includes('porosity') && text.includes('porosity') && text.includes('preheat')) {
+			return true;
+		}
+		if (
+			offScopePropertySignals.some((signal) => text.includes(signal) && !scopeText.includes(signal))
+		) {
+			return false;
+		}
+		return scopeTerms.some((term) => {
+			if (text.includes(term)) return true;
+			return term
+				.split(/\W+/)
+				.filter((part) => part.length > 4)
+				.some((part) => text.includes(part));
+		});
 	}
 
 	function humanizeCode(value: string) {
@@ -703,30 +839,32 @@
 
 		return [...grouped.entries()]
 			.map(([status, statusUnits]) => {
-				const sortedUnits = [...statusUnits].sort((left, right) => right.confidence - left.confidence);
+				const sortedUnits = [...statusUnits].sort(
+					(left, right) => right.confidence - left.confidence
+				);
 				const representative = sortedUnits[0];
-				const kinds = [
-					...new Set(sortedUnits.map((unit) => $t(evidenceKindLabelKey(unit.unit_kind))))
-				].join(', ');
-				const documentCount = new Set(sortedUnits.map((unit) => unit.document_id).filter(Boolean)).size;
+				const kinds = readableEvidenceKinds(sortedUnits);
+				const documentCount = new Set(sortedUnits.map((unit) => unit.document_id).filter(Boolean))
+					.size;
 
 				return {
 					id: `unresolved-${status}`,
-					title: $t('research.objectiveWorkspace.unresolvedEvidenceGroupTitle', {
-						status: humanizeCode(status)
-					}),
+					title: $t('research.objectiveWorkspace.unresolvedEvidenceGroupTitle'),
 					body: $t('research.objectiveWorkspace.unresolvedEvidenceGroupBody', {
 						count: String(sortedUnits.length),
 						kinds,
-						status: humanizeCode(status),
-						value: evidenceUnitValue(representative)
+						status: humanizeCode(status)
 					}),
-					meta: judgementMeta(representative, [
-						$t('research.objectiveWorkspace.unresolvedEvidenceGroupMeta', {
-							count: String(sortedUnits.length),
-							documents: String(documentCount || 1)
-						})
-					]),
+					meta: judgementMeta(
+						representative,
+						[
+							$t('research.objectiveWorkspace.unresolvedEvidenceGroupMeta', {
+								count: String(sortedUnits.length),
+								documents: String(documentCount || 1)
+							})
+						],
+						{ includeSource: false }
+					),
 					unit: representative,
 					confidence: representative.confidence
 				};
@@ -734,6 +872,15 @@
 			.sort((left, right) => right.confidence - left.confidence)
 			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT)
 			.map(({ confidence: _confidence, ...item }) => item);
+	}
+
+	function readableEvidenceKinds(units: ObjectiveEvidenceUnit[]) {
+		const labels = [
+			...new Set(units.map((unit) => $t(evidenceKindLabelKey(unit.unit_kind)).toLowerCase()))
+		];
+		if (!labels.length) return $t('research.objectiveWorkspace.evidenceUnits').toLowerCase();
+		if (labels.length === 1) return labels[0];
+		return labels.join(', ');
 	}
 
 	function buildLimitationItems(view: ObjectiveResearchView): ScientificJudgementItem[] {
@@ -865,10 +1012,9 @@
 				titleKey: 'research.objectiveWorkspace.gapsStep',
 				count: gaps.length || comparisons.length,
 				ready: view.readiness.logic_chain_ready,
-				items: (
-					gaps.length
-						? gaps.map((gap) => humanizeGapCode(gap))
-						: comparisons.map((unit) => evidenceUnitValue(unit))
+				items: (gaps.length
+					? gaps.map((gap) => humanizeGapCode(gap))
+					: comparisons.map((unit) => evidenceUnitValue(unit))
 				).slice(0, 4),
 				emptyKey: 'research.objectiveWorkspace.noGaps',
 				evidenceKind: 'comparison'
@@ -1110,7 +1256,10 @@
 					</div>
 				{/if}
 
-				<div class="evidence-readiness" aria-label={$t('research.objectiveWorkspace.evidenceReadiness')}>
+				<div
+					class="evidence-readiness"
+					aria-label={$t('research.objectiveWorkspace.evidenceReadiness')}
+				>
 					{#each evidenceReadinessItems as item (item.id)}
 						<button
 							class:ready={item.ready}
@@ -1185,7 +1334,8 @@
 					{#each logicSteps as step (step.step_id)}
 						<button
 							class:logic-step--pending={!step.ready}
-							class:selected={step.evidenceKind !== null && selectedEvidenceKind === step.evidenceKind}
+							class:selected={step.evidenceKind !== null &&
+								selectedEvidenceKind === step.evidenceKind}
 							class="logic-step"
 							type="button"
 							on:click={() => focusLogicStepEvidence(step)}
@@ -1214,10 +1364,7 @@
 
 		<section class="objective-workspace-grid">
 			<div class="objective-main-column">
-				<section
-					class="objective-section"
-					aria-labelledby="paper-contribution-title"
-				>
+				<section class="objective-section" aria-labelledby="paper-contribution-title">
 					<div class="section-heading">
 						<div>
 							<h3 id="paper-contribution-title">
@@ -1311,9 +1458,7 @@
 										</div>
 									{/if}
 									<small>
-										{evidenceCardSourceLabel(unit.document_id)} · {confidenceLabel(
-											unit.confidence
-										)}
+										{evidenceCardSourceLabel(unit.document_id)} · {confidenceLabel(unit.confidence)}
 									</small>
 								</button>
 							{/each}
@@ -2151,11 +2296,16 @@
 		grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
 		gap: 16px;
 		align-items: start;
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	.paper-contribution-card {
 		display: grid;
 		gap: 13px;
+		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
 		padding: 16px;
@@ -2167,12 +2317,18 @@
 		align-items: flex-start;
 		justify-content: space-between;
 		gap: 14px;
+		min-width: 0;
 	}
 
 	.paper-contribution-card__header div {
 		display: grid;
 		gap: 4px;
 		min-width: 0;
+	}
+
+	.paper-contribution-card__header h4 {
+		overflow-wrap: anywhere;
+		word-break: break-word;
 	}
 
 	.paper-contribution-card__header span,
@@ -2265,6 +2421,7 @@
 
 	.supporting-evidence-list button,
 	.evidence-unit-card {
+		overflow: hidden;
 		display: grid;
 		gap: 5px;
 		width: 100%;
@@ -2313,6 +2470,9 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 5px;
+		min-width: 0;
+		max-width: 100%;
+		overflow: hidden;
 	}
 
 	.evidence-unit-card__facts span {
@@ -2326,6 +2486,11 @@
 		overflow-wrap: anywhere;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.evidence-unit-card span,
+	.evidence-unit-card small {
+		max-width: 100%;
 	}
 
 	.evidence-group__limit-note {
@@ -2454,11 +2619,15 @@
 	.route-table-wrap {
 		overflow-x: auto;
 		padding: 0 14px 14px;
+		max-width: 100%;
+		box-sizing: border-box;
 	}
 
 	.route-table {
 		width: 100%;
+		min-width: 0;
 		border-collapse: collapse;
+		table-layout: fixed;
 	}
 
 	.route-table th,
@@ -2467,6 +2636,8 @@
 		padding: 10px 8px;
 		text-align: left;
 		vertical-align: top;
+		overflow-wrap: anywhere;
+		word-break: break-word;
 	}
 
 	.route-table td {

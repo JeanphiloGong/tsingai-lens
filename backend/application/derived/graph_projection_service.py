@@ -6,76 +6,80 @@ from typing import Any, Mapping
 
 
 _NODE_TYPE_PRIORITY = {
-    "comparison": 0,
-    "evidence": 1,
+    "objective": 0,
+    "logic_chain": 1,
     "document": 2,
-    "material": 3,
-    "property": 4,
-    "test_condition": 5,
-    "baseline": 6,
+    "evidence": 3,
+    "controlled_comparison": 4,
+    "measurement": 5,
+    "material": 6,
+    "property": 7,
+    "process": 8,
+    "sample": 9,
+    "test_condition": 10,
+    "baseline": 11,
+    "mechanism": 12,
+    "characterization": 13,
 }
-_BACKBONE_NODE_TYPES = frozenset({"document", "evidence", "comparison"})
-_SEMANTIC_NODE_SPECS = (
-    {
-        "field": "material_system_normalized",
-        "type": "material",
-        "prefix": "mat",
-        "edge_description": "comparison_to_material",
-        "placeholders": {
-            "",
-            "--",
-            "unknown",
-            "unspecified material system",
-        },
-    },
-    {
-        "field": "property_normalized",
-        "type": "property",
-        "prefix": "prop",
-        "edge_description": "comparison_to_property",
-        "placeholders": {
-            "",
-            "--",
-            "unknown",
-        },
-    },
-    {
-        "field": "test_condition_normalized",
-        "type": "test_condition",
-        "prefix": "tc",
-        "edge_description": "comparison_to_test_condition",
-        "placeholders": {
-            "",
-            "--",
-            "unknown",
-            "unspecified test condition",
-        },
-    },
-    {
-        "field": "baseline_normalized",
-        "type": "baseline",
-        "prefix": "base",
-        "edge_description": "comparison_to_baseline",
-        "placeholders": {
-            "",
-            "--",
-            "unknown",
-            "unspecified baseline",
-        },
-    },
+_BACKBONE_NODE_TYPES = frozenset(
+    {"objective", "logic_chain", "document", "evidence", "measurement", "controlled_comparison"}
 )
 _BACKBONE_TRUNCATION_SHARE = 0.6
+_PLACEHOLDER_VALUES = frozenset({"", "--", "unknown", "none", "null", "n/a"})
+_PAPER_LOCAL_CONTEXT_KEYS = frozenset(
+    {
+        "case",
+        "case number",
+        "case no",
+        "case no.",
+        "condition",
+        "condition number",
+        "condition no",
+        "condition no.",
+        "id",
+        "index",
+        "no",
+        "no.",
+        "number",
+        "row",
+        "row id",
+        "sample",
+        "sample id",
+        "sample number",
+        "sample no",
+        "sample no.",
+        "specimen",
+        "specimen id",
+    }
+)
+_TEST_CONDITION_SIGNALS = (
+    "test",
+    "method",
+    "standard",
+    "environment",
+    "medium",
+    "solution",
+    "electrolyte",
+    "strain",
+    "load",
+    "stress ratio",
+    "frequency",
+    "cycle",
+    "ph",
+)
 
 
 def load_core_graph_payload(
     profiles: tuple[dict[str, Any], ...],
-    evidence_cards: tuple[dict[str, Any], ...],
-    comparison_rows: tuple[dict[str, Any], ...],
+    research_objectives: tuple[dict[str, Any], ...],
+    objective_evidence_units: tuple[dict[str, Any], ...],
+    objective_logic_chains: tuple[dict[str, Any], ...],
     max_nodes: int,
     min_weight: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     doc_records: dict[str, dict[str, Any]] = {}
-    evidence_records: dict[str, dict[str, Any]] = {}
+    objective_records: dict[str, dict[str, Any]] = {}
+    evidence_unit_records: dict[str, dict[str, Any]] = {}
 
     node_index: dict[str, dict[str, Any]] = {}
     edge_index: dict[str, dict[str, Any]] = {}
@@ -88,28 +92,41 @@ def load_core_graph_payload(
         doc_records[document_id] = record
         _put_node(node_index, record["node"])
 
-    for row in evidence_cards:
-        evidence_id = _as_text(row.get("evidence_id"))
-        if not evidence_id:
+    for row in research_objectives:
+        objective_id = _as_text(row.get("objective_id"))
+        if not objective_id:
             continue
-        record = _build_evidence_record(row, doc_records)
-        evidence_records[evidence_id] = record
+        record = _build_objective_record(row)
+        objective_records[objective_id] = record
         _put_node(node_index, record["node"])
-        if record["document_edge"] is not None:
-            _put_edge(edge_index, record["document_edge"])
 
-    for row in comparison_rows:
-        comparison_id = _as_text(row.get("row_id"))
-        if not comparison_id:
+    for row in objective_evidence_units:
+        evidence_unit_id = _as_text(row.get("evidence_unit_id"))
+        if not evidence_unit_id:
             continue
-        comparison_node, semantic_nodes, comparison_edges = _build_comparison_projection(
-            row,
-            evidence_records=evidence_records,
+        record = _build_evidence_unit_projection(
+            row=row,
+            doc_records=doc_records,
+            objective_records=objective_records,
         )
-        _put_node(node_index, comparison_node)
-        for semantic_node in semantic_nodes:
+        evidence_unit_records[evidence_unit_id] = record
+        _put_node(node_index, record["node"])
+        for semantic_node in record["semantic_nodes"]:
             _put_node(node_index, semantic_node)
-        for edge in comparison_edges:
+        for edge in record["edges"]:
+            _put_edge(edge_index, edge)
+
+    for row in objective_logic_chains:
+        projection = _build_logic_chain_projection(
+            row=row,
+            objective_records=objective_records,
+            evidence_unit_records=evidence_unit_records,
+            doc_records=doc_records,
+        )
+        if projection is None:
+            continue
+        _put_node(node_index, projection["node"])
+        for edge in projection["edges"]:
             _put_edge(edge_index, edge)
 
     nodes = list(node_index.values())
@@ -142,114 +159,178 @@ def _build_document_record(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_evidence_record(
+def _build_objective_record(row: Mapping[str, Any]) -> dict[str, Any]:
+    objective_id = _as_text(row.get("objective_id")) or ""
+    question = _as_text(row.get("question")) or objective_id
+    return {
+        "objective_id": objective_id,
+        "node": {
+            "id": f"obj:{objective_id}",
+            "label": _shorten_text(question, 120),
+            "type": "objective",
+            "degree": 0,
+        },
+    }
+
+
+def _build_evidence_unit_projection(
+    *,
     row: Mapping[str, Any],
     doc_records: dict[str, dict[str, Any]],
+    objective_records: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    evidence_id = _as_text(row.get("evidence_id")) or ""
+    evidence_id = _as_text(row.get("evidence_unit_id")) or ""
     document_id = _as_text(row.get("document_id"))
-    claim_text = _as_text(row.get("claim_text")) or evidence_id
+    objective_id = _as_text(row.get("objective_id"))
+    node_type = _evidence_unit_node_type(row)
     node = {
         "id": f"evi:{evidence_id}",
-        "label": _shorten_text(claim_text, 96),
-        "type": "evidence",
+        "label": _shorten_text(_evidence_unit_label(row), 96),
+        "type": node_type,
         "degree": 0,
     }
-    document_edge = None
-    if document_id and document_id in doc_records:
-        document_edge = {
-            "id": f"edge:doc:{document_id}:evi:{evidence_id}",
-            "source": f"doc:{document_id}",
-            "target": f"evi:{evidence_id}",
-            "weight": 1.0,
-            "edge_description": "document_to_evidence",
-        }
-    return {
-        "node": node,
-        "document_edge": document_edge,
-    }
-
-
-def _build_comparison_projection(
-    row: Mapping[str, Any],
-    evidence_records: dict[str, dict[str, Any]],
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    comparison_id = _as_text(row.get("row_id")) or ""
-    supporting_evidence_ids = _string_list(row.get("supporting_evidence_ids"))
-    property_name = _clean_graph_text(row.get("property_normalized"))
-    material_name = _clean_graph_text(row.get("material_system_normalized"))
-
-    node = {
-        "id": f"cmp:{comparison_id}",
-        "label": _build_comparison_label(material_name, property_name, comparison_id),
-        "type": "comparison",
-        "degree": 0,
-    }
-
     edges: list[dict[str, Any]] = []
-    for evidence_id in supporting_evidence_ids:
-        if evidence_records.get(evidence_id) is None:
-            continue
+    if document_id and document_id in doc_records:
         edges.append(
             {
-                "id": f"edge:evi:{evidence_id}:cmp:{comparison_id}",
-                "source": f"evi:{evidence_id}",
-                "target": f"cmp:{comparison_id}",
+                "id": f"edge:doc:{document_id}:evi:{evidence_id}",
+                "source": f"doc:{document_id}",
+                "target": f"evi:{evidence_id}",
                 "weight": 1.0,
-                "edge_description": "evidence_to_comparison",
+                "edge_description": "document_to_evidence",
+            }
+        )
+    if objective_id and objective_id in objective_records:
+        edges.append(
+            {
+                "id": f"edge:obj:{objective_id}:evi:{evidence_id}",
+                "source": f"obj:{objective_id}",
+                "target": f"evi:{evidence_id}",
+                "weight": 1.0,
+                "edge_description": "objective_to_evidence",
             }
         )
 
     semantic_nodes: list[dict[str, Any]] = []
-    for spec in _SEMANTIC_NODE_SPECS:
-        semantic_projection = _build_semantic_projection(
-            row=row,
-            comparison_id=comparison_id,
-            field=str(spec["field"]),
-            node_type=str(spec["type"]),
-            node_prefix=str(spec["prefix"]),
-            edge_description=str(spec["edge_description"]),
-            placeholders={str(item) for item in spec["placeholders"]},
-        )
-        if semantic_projection is None:
-            continue
-        semantic_node, semantic_edge = semantic_projection
+    semantic_edges: list[dict[str, Any]] = []
+    for semantic_node, edge_description in _semantic_projections_for_evidence_unit(row):
         semantic_nodes.append(semantic_node)
-        edges.append(semantic_edge)
+        semantic_edges.append(
+            {
+                "id": f"edge:evi:{evidence_id}:{semantic_node['id']}",
+                "source": f"evi:{evidence_id}",
+                "target": semantic_node["id"],
+                "weight": 1.0,
+                "edge_description": edge_description,
+            }
+        )
+    edges.extend(semantic_edges)
+    return {
+        "node": node,
+        "semantic_nodes": semantic_nodes,
+        "edges": edges,
+    }
 
-    return node, semantic_nodes, edges
 
-
-def _build_semantic_projection(
+def _build_logic_chain_projection(
     *,
     row: Mapping[str, Any],
-    comparison_id: str,
-    field: str,
-    node_type: str,
-    node_prefix: str,
-    edge_description: str,
-    placeholders: set[str],
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    display_value, normalized_key = _normalize_semantic_value(row.get(field))
-    if not display_value or not normalized_key or normalized_key in placeholders:
+    objective_records: dict[str, dict[str, Any]],
+    evidence_unit_records: dict[str, dict[str, Any]],
+    doc_records: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    logic_chain_id = _as_text(row.get("logic_chain_id"))
+    if not logic_chain_id:
         return None
+    objective_id = _as_text(row.get("objective_id"))
+    document_id = _as_text(row.get("document_id"))
+    label = _as_text(row.get("summary")) or _as_text(row.get("question")) or logic_chain_id
+    node = {
+        "id": f"chain:{logic_chain_id}",
+        "label": _shorten_text(label, 120),
+        "type": "logic_chain",
+        "degree": 0,
+    }
+    edges: list[dict[str, Any]] = []
+    if objective_id and objective_id in objective_records:
+        edges.append(
+            {
+                "id": f"edge:obj:{objective_id}:chain:{logic_chain_id}",
+                "source": f"obj:{objective_id}",
+                "target": f"chain:{logic_chain_id}",
+                "weight": 1.0,
+                "edge_description": "objective_to_logic_chain",
+            }
+        )
+    if document_id and document_id in doc_records:
+        edges.append(
+            {
+                "id": f"edge:doc:{document_id}:chain:{logic_chain_id}",
+                "source": f"doc:{document_id}",
+                "target": f"chain:{logic_chain_id}",
+                "weight": 1.0,
+                "edge_description": "document_to_logic_chain",
+            }
+        )
+    for evidence_id in _string_list(row.get("evidence_unit_ids")):
+        if evidence_id not in evidence_unit_records:
+            continue
+        edges.append(
+            {
+                "id": f"edge:chain:{logic_chain_id}:evi:{evidence_id}",
+                "source": f"chain:{logic_chain_id}",
+                "target": f"evi:{evidence_id}",
+                "weight": 1.0,
+                "edge_description": "logic_chain_to_evidence",
+            }
+        )
+    return {"node": node, "edges": edges}
 
-    node_id = f"{node_prefix}:{sha1(normalized_key.encode('utf-8')).hexdigest()}"
-    return (
-        {
-            "id": node_id,
-            "label": display_value,
-            "type": node_type,
-            "degree": 0,
-        },
-        {
-            "id": f"edge:cmp:{comparison_id}:{node_id}",
-            "source": f"cmp:{comparison_id}",
-            "target": node_id,
-            "weight": 1.0,
-            "edge_description": edge_description,
-        },
+
+def _semantic_projections_for_evidence_unit(
+    row: Mapping[str, Any],
+) -> list[tuple[dict[str, Any], str]]:
+    projections: list[tuple[dict[str, Any], str]] = []
+    material = _material_label(row.get("material_system"))
+    if material:
+        projections.append(
+            (_semantic_node("mat", "material", material), "evidence_to_material")
+        )
+    property_name = _clean_graph_text(row.get("property_normalized"))
+    if property_name:
+        projections.append(
+            (_semantic_node("prop", "property", property_name), "evidence_to_property")
+        )
+    sample_label = _context_label(
+        _merge_context(row.get("sample_context"), row.get("join_keys")),
+        allow_paper_local_keys=True,
     )
+    if sample_label:
+        projections.append(
+            (_semantic_node("sample", "sample", sample_label), "evidence_to_sample")
+        )
+    process_label = _context_label(
+        _merge_context(row.get("process_context"), row.get("resolved_condition")),
+        allow_paper_local_keys=False,
+    )
+    if process_label:
+        projections.append(
+            (_semantic_node("proc", "process", process_label), "evidence_to_process")
+        )
+    test_condition_label = _test_condition_label(row)
+    if test_condition_label:
+        projections.append(
+            (
+                _semantic_node("tc", "test_condition", test_condition_label),
+                "evidence_to_test_condition",
+            )
+        )
+    baseline_label = _context_label(row.get("baseline_context"), allow_paper_local_keys=True)
+    if baseline_label:
+        projections.append(
+            (_semantic_node("base", "baseline", baseline_label), "evidence_to_baseline")
+        )
+    return projections
 
 
 def _truncate_graph(
@@ -378,6 +459,141 @@ def _semantic_neighbors_of_comparisons(
     return list(neighbor_ids)
 
 
+def _evidence_unit_node_type(row: Mapping[str, Any]) -> str:
+    unit_kind = (_as_text(row.get("unit_kind")) or "evidence").casefold()
+    if unit_kind == "measurement":
+        return "measurement"
+    if unit_kind == "comparison":
+        return "controlled_comparison"
+    if unit_kind == "interpretation":
+        return "mechanism"
+    if unit_kind == "characterization":
+        return "characterization"
+    return "evidence"
+
+
+def _evidence_unit_label(row: Mapping[str, Any]) -> str:
+    unit_kind = _as_text(row.get("unit_kind")) or "evidence"
+    property_name = _clean_graph_text(row.get("property_normalized"))
+    value_text = _value_payload_label(row.get("value_payload"), row.get("unit"))
+    interpretation = _clean_graph_text(row.get("interpretation"))
+    parts = [part for part in (property_name, value_text, interpretation) if part]
+    if parts:
+        return " | ".join(parts)
+    return _as_text(row.get("evidence_unit_id")) or unit_kind
+
+
+def _value_payload_label(value_payload: Any, unit: Any) -> str | None:
+    payload = _as_mapping(value_payload)
+    value = _clean_graph_text(
+        payload.get("source_value_text")
+        or payload.get("value")
+        or payload.get("text")
+        or payload.get("trend")
+    )
+    unit_text = _clean_graph_text(unit)
+    if value and unit_text and unit_text.lower() not in value.lower():
+        return f"{value} {unit_text}"
+    return value
+
+
+def _material_label(value: Any) -> str | None:
+    material = _as_mapping(value)
+    for key in ("family", "name", "material", "material_system", "alloy"):
+        text = _clean_graph_text(material.get(key))
+        if text and text.casefold() not in _PLACEHOLDER_VALUES:
+            return text
+    return _context_label(material, allow_paper_local_keys=False)
+
+
+def _test_condition_label(row: Mapping[str, Any]) -> str | None:
+    test_condition = _as_mapping(row.get("test_condition"))
+    filtered = _filter_context(test_condition, allow_paper_local_keys=False)
+    if not filtered:
+        return None
+    has_test_signal = any(
+        _has_test_condition_signal(key) or _has_test_condition_signal(value)
+        for key, value in filtered.items()
+    )
+    if not has_test_signal:
+        return None
+    return _context_label(filtered, allow_paper_local_keys=False)
+
+
+def _context_label(value: Any, *, allow_paper_local_keys: bool) -> str | None:
+    items = _filter_context(value, allow_paper_local_keys=allow_paper_local_keys)
+    if not items:
+        return None
+    parts = [f"{key}: {val}" for key, val in sorted(items.items())]
+    return "; ".join(parts)
+
+
+def _filter_context(value: Any, *, allow_paper_local_keys: bool) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key, raw_value in _as_mapping(value).items():
+        key_text = _clean_graph_text(key)
+        value_text = _context_value_text(raw_value)
+        if not key_text or not value_text:
+            continue
+        if key_text.casefold() in _PLACEHOLDER_VALUES:
+            continue
+        if value_text.casefold() in _PLACEHOLDER_VALUES:
+            continue
+        if not allow_paper_local_keys and _is_paper_local_context_key(key_text):
+            continue
+        result[key_text] = value_text
+    return result
+
+
+def _context_value_text(value: Any) -> str | None:
+    if isinstance(value, Mapping):
+        return _context_label(value, allow_paper_local_keys=True)
+    if isinstance(value, (list, tuple, set)):
+        parts = [
+            part
+            for item in value
+            if (part := _context_value_text(item))
+        ]
+        return ", ".join(parts) if parts else None
+    return _clean_graph_text(value)
+
+
+def _merge_context(*values: Any) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for value in values:
+        merged.update(_as_mapping(value))
+    return merged
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _is_paper_local_context_key(value: str) -> bool:
+    normalized = value.casefold().replace("_", " ").replace("-", " ")
+    normalized = " ".join(normalized.split())
+    return normalized in _PAPER_LOCAL_CONTEXT_KEYS
+
+
+def _has_test_condition_signal(value: str) -> bool:
+    normalized = value.casefold().replace("_", " ").replace("-", " ")
+    normalized = " ".join(normalized.split())
+    return any(signal in normalized for signal in _TEST_CONDITION_SIGNALS)
+
+
+def _semantic_node(prefix: str, node_type: str, label: str) -> dict[str, Any]:
+    display_value, normalized_key = _normalize_semantic_value(label)
+    node_id = f"{prefix}:{sha1((normalized_key or '').encode('utf-8')).hexdigest()}"
+    return {
+        "id": node_id,
+        "label": display_value or label,
+        "type": node_type,
+        "degree": 0,
+    }
+
+
 def _ordered_nodes(nodes: Any) -> list[dict[str, Any]]:
     return sorted(
         list(nodes),
@@ -395,17 +611,6 @@ def _put_node(index: dict[str, dict[str, Any]], node: dict[str, Any]) -> None:
 
 def _put_edge(index: dict[str, dict[str, Any]], edge: dict[str, Any]) -> None:
     index[str(edge["id"])] = edge
-
-
-def _build_comparison_label(
-    material_name: str | None,
-    property_name: str | None,
-    comparison_id: str,
-) -> str:
-    parts = [part for part in (material_name, property_name) if part]
-    if parts:
-        return " | ".join(parts)
-    return comparison_id
 
 
 def _string_list(value: Any) -> list[str]:

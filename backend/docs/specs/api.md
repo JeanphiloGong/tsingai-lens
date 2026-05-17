@@ -1202,15 +1202,17 @@ comparison 对 traceback 的依赖约定：
 Graph 语义约束：
 
 - `/graph` 与 `/graphml` 只消费
-  `document_profiles`、`evidence_cards`、
-  `comparable_results`、`collection_comparable_results`
-- graph 与 report 派生读路径应通过共享的 in-memory projection substrate
-  从这些 semantic artifacts 投影，不要求 `comparison_rows` 预先存在
+  `document_profiles`、`research_objectives`、
+  `objective_evidence_units`、`objective_logic_chains`
+- graph 派生读路径应从 objective-first semantic records 投影，不要求
+  `comparison_rows` 预先存在
 - 它们当前是 Core-derived graph projection，不再以
   `entities`、`relationships`、`communities`
   作为产品语义前提
-- `comparison_rows` 在这条链路里只是可重建的 projection/cache，
-  graph/report 请求不应把它当成必需输入，也不应为了只读访问而要求先物化它
+- collection-wide `comparison_rows` 不再是这条链路的语义输入；paper-local
+  keys such as `Case`、`condition number`、`sample number` may appear as
+  sample or trace context, but must not be projected as test conditions unless
+  resolved evidence says they are real test conditions
 - `/graph` 返回结构字段：
   `collection_id / nodes / edges / truncated`
 - graph node 只保留：
@@ -1218,16 +1220,22 @@ Graph 语义约束：
 - graph edge 只保留：
   `id / source / target / weight / edge_description`
 - graph node `type` 当前可以是：
-  `document | evidence | comparison | material | property | test_condition | baseline`
+  `objective | logic_chain | document | evidence | measurement |
+  controlled_comparison | material | property | process | sample |
+  test_condition | baseline | mechanism | characterization`
 - graph edge `edge_description` 当前可以是：
-  `document_to_evidence | evidence_to_comparison | comparison_to_material |
-  comparison_to_property | comparison_to_test_condition | comparison_to_baseline`
+  `objective_to_evidence | document_to_evidence | evidence_to_material |
+  evidence_to_property | evidence_to_process | evidence_to_sample |
+  evidence_to_test_condition | evidence_to_baseline |
+  objective_to_logic_chain | document_to_logic_chain | logic_chain_to_evidence`
 - `/graph/nodes/{node_id}/neighbors` 返回中心节点的一跳邻域，字段与 `/graph`
   保持同一精简结构
-- 节点详情不再经由 graph 聚合透出；前端应根据 `doc:` / `evi:` / `cmp:`
-  前缀回到 document / evidence / comparison canonical 资源
-- 聚合节点 `mat:` / `prop:` / `tc:` / `base:` 不提供 graph-owned detail；
-  前端应回到 `/comparisons` 并使用对应过滤参数做 canonical drilldown
+- 节点详情不再经由 graph 聚合透出；前端应根据 `obj:` / `doc:` / `evi:` /
+  `chain:` 前缀回到 objective / document / evidence / logic-chain canonical
+  资源
+- 聚合节点 `mat:` / `prop:` / `proc:` / `sample:` / `tc:` / `base:` 不提供
+  graph-owned detail；前端应回到 objective workspace 并使用对应过滤参数做
+  canonical drilldown
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码
   `graph_not_ready`
 - `graph_not_ready.detail.missing_artifacts` 应返回缺失的 graph 语义输入文件名，

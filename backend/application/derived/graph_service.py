@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from application.derived.core_fact_projection import build_core_fact_projection_records
 from application.source.collection_service import CollectionService
 from application.derived.graph_projection_service import (
     load_core_graph_payload,
@@ -61,7 +60,7 @@ def resolve_collection_output_dir(collection_id: str) -> Path:
         raise GraphNotReadyError(
             collection_id=collection_id,
             output_dir=paths.output_dir.resolve(),
-            missing_artifacts=["core_fact_repository.comparison_artifacts"],
+            missing_artifacts=["core_fact_repository.objective_evidence_units"],
         )
     return paths.output_dir.resolve()
 
@@ -80,18 +79,24 @@ def load_graph_payload(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     collection_service.get_collection(collection_id)
     facts = core_fact_repository.read_collection_facts(collection_id)
-    if not facts.comparison_artifacts_ready:
+    if not facts.objective_evidence_units:
         raise GraphNotReadyError(
             collection_id=collection_id,
             output_dir=_graph_error_output_dir(collection_id),
-            missing_artifacts=["core_fact_repository.comparison_artifacts"],
+            missing_artifacts=["core_fact_repository.objective_evidence_units"],
         )
-    records = build_core_fact_projection_records(facts)
 
     return load_core_graph_payload(
-        profiles=records.document_profiles,
-        evidence_cards=records.evidence_cards,
-        comparison_rows=records.comparison_rows,
+        profiles=tuple(profile.to_record() for profile in facts.document_profiles),
+        research_objectives=tuple(
+            objective.to_record() for objective in facts.research_objectives
+        ),
+        objective_evidence_units=tuple(
+            unit.to_record() for unit in facts.objective_evidence_units
+        ),
+        objective_logic_chains=tuple(
+            chain.to_record() for chain in facts.objective_logic_chains
+        ),
         max_nodes=max_nodes,
         min_weight=min_weight,
     )

@@ -89,7 +89,10 @@ class CoreFactSet:
         return bool(
             self.document_profiles
             and self.evidence_cards_generated
-            and self.comparison_artifacts_generated
+            and (
+                self.objective_evidence_units_ready
+                or self.comparison_artifacts_generated
+            )
         )
 
     @property
@@ -98,7 +101,9 @@ class CoreFactSet:
             self.document_profiles
             and self.evidence_cards_ready
             and (
-                self.comparable_results
+                self.objective_evidence_units_ready
+                or self.objective_logic_chains
+                or self.comparable_results
                 or self.collection_comparable_results
                 or self.comparison_rows
             )

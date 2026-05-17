@@ -296,12 +296,15 @@ def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
-    assert overview["status_summary"] == "comparison_pending"
+    assert overview["status_summary"] == "graph_ready"
     assert overview["workflow"]["evidence"]["status"] == "ready"
     assert overview["workflow"]["comparisons"]["status"] == "not_started"
     assert overview["artifacts"]["evidence_cards_generated"] is True
     assert overview["artifacts"]["evidence_cards_ready"] is True
     assert overview["artifacts"]["sample_variants_generated"] is False
     assert overview["artifacts"]["measurement_results_generated"] is False
+    assert overview["artifacts"]["graph_generated"] is True
+    assert overview["artifacts"]["graph_ready"] is True
+    assert overview["capabilities"]["can_view_graph"] is True
     assert overview["capabilities"]["can_view_research_view"] is True
     assert overview["capabilities"]["can_view_results"] is False

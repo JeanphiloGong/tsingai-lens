@@ -197,16 +197,18 @@
 	$: sampleColumns = sampleMatrixColumns(materialProfile, sampleRows);
 	$: propertySummaries = materialProfile?.measured_properties ?? [];
 	$: propertyColumns = materialPropertyColumns(materialProfile, sampleRows, sampleColumns, $t);
+	$: focusedSampleRows = focusedRowsForColumns(sampleRows, propertyColumns);
+	$: graphSampleRows = representativeRowsForGraph(focusedSampleRows, propertyColumns);
 	$: performanceRows = materialPerformanceRows(
-		sampleRows,
+		focusedSampleRows,
 		propertyColumns,
 		propertySummaries,
 		materialProfile?.canonical_name ?? materialId,
 		$t
 	);
-	$: evidenceCodeMap = buildEvidenceCodeMap(sampleRows, propertyColumns, propertySummaries);
+	$: evidenceCodeMap = buildEvidenceCodeMap(focusedSampleRows, propertyColumns, propertySummaries);
 	$: evidenceRows = buildEvidenceRows(
-		sampleRows,
+		focusedSampleRows,
 		propertyColumns,
 		evidenceCodeMap,
 		collectionId,
@@ -214,8 +216,8 @@
 		propertySummaries,
 		materialProfile?.canonical_name ?? materialId
 	);
-	$: processSummary = buildProcessSummary(sampleRows, $t);
-	$: comparisonRows = buildComparisonRows(sampleRows, propertyColumns, processSummary, $t);
+	$: processSummary = buildProcessSummary(focusedSampleRows, $t);
+	$: comparisonRows = buildComparisonRows(focusedSampleRows, propertyColumns, processSummary, $t);
 	$: trendRows = trendComparisonRows(comparisonRows);
 	$: summaryTrendValues = summarySupportedValues(
 		propertySummaries,
@@ -225,7 +227,7 @@
 		$t
 	).slice(0, 4);
 	$: keyFindings = buildKeyFindings(
-		sampleRows,
+		focusedSampleRows,
 		propertyColumns,
 		processSummary,
 		evidenceCodeMap,
@@ -234,7 +236,7 @@
 		materialProfile?.canonical_name ?? materialId
 	);
 	$: bestPropertyValues = buildBestPropertyValues(
-		sampleRows,
+		focusedSampleRows,
 		propertyColumns,
 		evidenceCodeMap,
 		$t,
@@ -243,7 +245,7 @@
 	);
 	$: materialGraph = buildMaterialGraph(
 		materialProfile,
-		sampleRows,
+		graphSampleRows,
 		propertyColumns,
 		processSummary,
 		keyFindings,
@@ -465,6 +467,7 @@
 				});
 			}
 		}
+		if (selected.length >= 5) return selected.slice(0, 5);
 
 		for (const summary of profile?.measured_properties ?? []) {
 			if (propertySummaryAlreadySelected(summary, selected)) continue;
@@ -476,7 +479,9 @@
 					translate
 				)
 			);
+			if (selected.length >= 5) return selected.slice(0, 5);
 		}
+		if (selected.length) return selected.slice(0, 5);
 
 		for (const key of valueKeys) {
 			if (used.has(key)) continue;
@@ -486,9 +491,35 @@
 				shortLabel: labelFromColumn(key, columns, translate),
 				unit: columns.find((item) => item.key === key)?.unit ?? null
 			});
+			if (selected.length >= 5) return selected.slice(0, 5);
 		}
 
-		return selected.slice(0, 6);
+		return selected.slice(0, 5);
+	}
+
+	function rowHasAnyColumnValue(row: SampleMatrixRow, columns: PropertyColumn[]) {
+		return columns.some((column) => Boolean(row.values[column.key]));
+	}
+
+	function focusedRowsForColumns(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
+		if (!columns.length) return rows;
+		const focused = rows.filter((row) => rowHasAnyColumnValue(row, columns));
+		return focused.length ? focused : rows;
+	}
+
+	function representativeRowsForGraph(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
+		if (rows.length <= 8) return rows;
+		return rows
+			.map((row, index) => ({
+				row,
+				index,
+				score: columns.filter((column) => Boolean(row.values[column.key])).length
+			}))
+			.filter((item) => item.score > 0)
+			.sort((first, second) => second.score - first.score || first.index - second.index)
+			.slice(0, 8)
+			.sort((first, second) => first.index - second.index)
+			.map((item) => item.row);
 	}
 
 	function processLabel(key: string, translate: Translate) {
@@ -1591,7 +1622,7 @@
 	function exportCsv() {
 		if (!browser || !materialProfile) return;
 		const header = ['record_type', 'sample_id', 'property', 'value', 'evidence', 'source_location'];
-		const rows = sampleRows.flatMap((row) =>
+		const rows = focusedSampleRows.flatMap((row) =>
 			propertyColumns.map((column) => {
 				const value = row.values[column.key];
 				const ref = value?.evidence_refs[0];
@@ -2100,7 +2131,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each sampleRows.slice(0, 5) as row, rowIndex (row.row_id)}
+									{#each focusedSampleRows.slice(0, 5) as row, rowIndex (row.row_id)}
 										<tr>
 											<td>{sampleDisplayLabel(row, $t, rowIndex)}</td>
 											<td>{variableSummary(row, processSummary, $t)}</td>

@@ -543,6 +543,88 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
 	});
 
+	it('focuses sparse objective-derived material matrices on populated sample values', async () => {
+		const payload: any = materialProfilePayload();
+		payload.sample_matrix.rows = [
+			{
+				row_id: 'row_non_preheated',
+				sample_id: 'non_preheated',
+				sample_label: 'Non-preheated',
+				material: '316L stainless steel',
+				process_context: {},
+				values: {
+					yield_strength: {
+						display_value: '448 MPa',
+						status: 'observed',
+						evidence_refs: [{ evidence_ref_id: 'ev_np_yield', document_id: 'doc_1' }]
+					},
+					elongation: {
+						display_value: '72%',
+						status: 'observed',
+						evidence_refs: [{ evidence_ref_id: 'ev_np_el', document_id: 'doc_1' }]
+					}
+				},
+				evidence_refs: []
+			},
+			{
+				row_id: 'row_preheated',
+				sample_id: 'preheated',
+				sample_label: 'Preheated',
+				material: '316L stainless steel',
+				process_context: {},
+				values: {
+					yield_strength: {
+						display_value: '465 MPa',
+						status: 'observed',
+						evidence_refs: [{ evidence_ref_id: 'ev_p_yield', document_id: 'doc_1' }]
+					},
+					elongation: {
+						display_value: '82%',
+						status: 'observed',
+						evidence_refs: [{ evidence_ref_id: 'ev_p_el', document_id: 'doc_1' }]
+					}
+				},
+				evidence_refs: []
+			},
+			...Array.from({ length: 12 }, (_, index) => ({
+				row_id: `row_sparse_${index}`,
+				sample_id: `sparse_${index}`,
+				sample_label: `Sparse sample ${index}`,
+				material: '316L stainless steel',
+				process_context: {},
+				values: {
+					[`unselected_property_${index}`]: {
+						display_value: `${index}`,
+						status: 'observed',
+						evidence_refs: [{ evidence_ref_id: `ev_sparse_${index}`, document_id: 'doc_1' }]
+					}
+				},
+				evidence_refs: []
+			}))
+		];
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('448 MPa').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('465 MPa').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Sparse sample 0')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('3 sample(s), 4 measured property column(s).'))
+			.toBeInTheDocument();
+	});
+
 	it('generates a material review report and exposes Markdown and PDF artifacts', async () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

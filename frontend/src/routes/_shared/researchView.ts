@@ -281,6 +281,130 @@ export type ObjectiveLogicChain = {
 	confidence: number;
 };
 
+export type ObjectiveConclusionNarrative = {
+	status: string;
+	sections: Record<string, unknown>[];
+};
+
+export type ObjectiveConclusionContribution = {
+	document_id: string;
+	title: string | null;
+	source_filename: string | null;
+	paper_role: string;
+	relevance: string;
+	background: string | null;
+	changed_variables: string[];
+	measured_property_scope: string[];
+	evidence_unit_count: number;
+	evidence_unit_ids: string[];
+};
+
+export type ObjectiveConclusionMeasurementRow = {
+	evidence_unit_id: string;
+	document_id: string | null;
+	property: string | null;
+	sample_context: Record<string, unknown>;
+	process_context: Record<string, unknown>;
+	test_condition: Record<string, unknown>;
+	value: string | number | null;
+	source_value_text: string | null;
+	unit: string | null;
+	resolution_status: string;
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveConclusionValueRangeEndpoint = {
+	evidence_unit_id: string;
+	value: string | number | null;
+	unit: string | null;
+	sample_context: Record<string, unknown>;
+	process_context: Record<string, unknown>;
+	document_id: string | null;
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveConclusionMeasurementRange = {
+	property_normalized: string;
+	min: ObjectiveConclusionValueRangeEndpoint | null;
+	max: ObjectiveConclusionValueRangeEndpoint | null;
+	unit: string | null;
+	count: number;
+};
+
+export type ObjectiveConclusionEvidenceTable = {
+	table_id: string;
+	title: string;
+	rows: ObjectiveConclusionMeasurementRow[];
+	measurement_value_ranges: ObjectiveConclusionMeasurementRange[];
+};
+
+export type ObjectiveConclusionComparison = {
+	evidence_unit_id: string;
+	document_id: string | null;
+	property: string | null;
+	comparison_axis: string | null;
+	direction: string | null;
+	summary: string | null;
+	sample_context: Record<string, unknown>;
+	process_context: Record<string, unknown>;
+	baseline_context: Record<string, unknown>;
+	source_refs: Record<string, unknown>[];
+	validity: string;
+};
+
+export type ObjectiveConclusionMechanismEvidence = {
+	evidence_unit_id: string;
+	document_id: string | null;
+	unit_kind: string;
+	property: string | null;
+	summary: string | null;
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveConclusionMechanismStep = {
+	step_role: string;
+	label: string;
+};
+
+export type ObjectiveConclusionMechanismChain = {
+	steps: ObjectiveConclusionMechanismStep[];
+	evidence: ObjectiveConclusionMechanismEvidence[];
+	evidence_unit_ids: string[];
+};
+
+export type ObjectiveConclusionStatement = {
+	claim: string;
+	evidence_unit_ids: string[];
+	strength: string;
+};
+
+export type ObjectiveConclusionLimitation = {
+	code: string;
+	message: string;
+	evidence_unit_ids: string[];
+};
+
+export type ObjectiveConclusionPackage = {
+	schema_version: string;
+	title: string;
+	objective: {
+		objective_id: string;
+		question: string;
+		material_scope: string[];
+		process_axes: string[];
+		property_axes: string[];
+	};
+	status: string;
+	narrative: ObjectiveConclusionNarrative;
+	paper_contributions: ObjectiveConclusionContribution[];
+	primary_evidence_tables: ObjectiveConclusionEvidenceTable[];
+	controlled_comparisons: ObjectiveConclusionComparison[];
+	mechanism_chain: ObjectiveConclusionMechanismChain;
+	conclusions: ObjectiveConclusionStatement[];
+	limitations: ObjectiveConclusionLimitation[];
+	source_refs: Record<string, unknown>[];
+};
+
 export type ObjectiveList = {
 	collection_id: string;
 	state: ResearchViewState;
@@ -299,6 +423,7 @@ export type ObjectiveResearchView = {
 	evidence_routes: ObjectiveEvidenceRoute[];
 	evidence_units: ObjectiveEvidenceUnit[];
 	logic_chain: ObjectiveLogicChain | null;
+	conclusion_package: ObjectiveConclusionPackage | null;
 	existing_comparison_rows: Record<string, unknown>[];
 	warnings: ResearchViewWarning[];
 };
@@ -973,6 +1098,248 @@ function normalizeObjectiveLogicChain(value: unknown): ObjectiveLogicChain | nul
 	};
 }
 
+function normalizeConclusionMeasurementRow(
+	value: unknown,
+	index: number
+): ObjectiveConclusionMeasurementRow | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id, `measurement_${index + 1}`);
+	return {
+		evidence_unit_id: evidenceUnitId,
+		document_id: nonEmptyText(record.document_id),
+		property: nonEmptyText(record.property ?? record.property_normalized),
+		sample_context: normalizeUnknownRecord(record.sample_context),
+		process_context: normalizeUnknownRecord(record.process_context),
+		test_condition: normalizeUnknownRecord(record.test_condition),
+		value: toScalar(record.value ?? record.observed_value),
+		source_value_text: nonEmptyText(record.source_value_text ?? record.display_value),
+		unit: nonEmptyText(record.unit),
+		resolution_status: toText(record.resolution_status, 'unknown'),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeConclusionRangeEndpoint(
+	value: unknown
+): ObjectiveConclusionValueRangeEndpoint | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
+	if (!evidenceUnitId && toScalar(record.value) === null) return null;
+
+	return {
+		evidence_unit_id: evidenceUnitId,
+		value: toScalar(record.value),
+		unit: nonEmptyText(record.unit),
+		sample_context: normalizeUnknownRecord(record.sample_context),
+		process_context: normalizeUnknownRecord(record.process_context),
+		document_id: nonEmptyText(record.document_id),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeConclusionMeasurementRange(
+	value: unknown
+): ObjectiveConclusionMeasurementRange | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const property = toText(record.property_normalized ?? record.property);
+	if (!property) return null;
+
+	return {
+		property_normalized: property,
+		min: normalizeConclusionRangeEndpoint(record.min),
+		max: normalizeConclusionRangeEndpoint(record.max),
+		unit: nonEmptyText(record.unit),
+		count: toNumber(record.count)
+	};
+}
+
+function normalizeConclusionEvidenceTable(value: unknown): ObjectiveConclusionEvidenceTable | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const tableId = toText(record.table_id ?? record.id);
+	if (!tableId) return null;
+
+	return {
+		table_id: tableId,
+		title: toText(record.title, tableId),
+		rows: asArray(record.rows)
+			.map((item, index) => normalizeConclusionMeasurementRow(item, index))
+			.filter((item): item is ObjectiveConclusionMeasurementRow => item !== null),
+		measurement_value_ranges: asArray(record.measurement_value_ranges)
+			.map((item) => normalizeConclusionMeasurementRange(item))
+			.filter((item): item is ObjectiveConclusionMeasurementRange => item !== null)
+	};
+}
+
+function normalizeConclusionContribution(
+	value: unknown
+): ObjectiveConclusionContribution | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const documentId = toText(record.document_id ?? record.paper_id);
+	if (!documentId) return null;
+
+	return {
+		document_id: documentId,
+		title: nonEmptyText(record.title ?? record.paper_title),
+		source_filename: nonEmptyText(record.source_filename),
+		paper_role: toText(record.paper_role, 'uncertain'),
+		relevance: toText(record.relevance, 'uncertain'),
+		background: nonEmptyText(record.background),
+		changed_variables: toStringList(record.changed_variables),
+		measured_property_scope: toStringList(record.measured_property_scope),
+		evidence_unit_count: toNumber(record.evidence_unit_count),
+		evidence_unit_ids: toStringList(record.evidence_unit_ids)
+	};
+}
+
+function normalizeConclusionComparison(value: unknown): ObjectiveConclusionComparison | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
+	if (!evidenceUnitId) return null;
+
+	return {
+		evidence_unit_id: evidenceUnitId,
+		document_id: nonEmptyText(record.document_id),
+		property: nonEmptyText(record.property ?? record.property_normalized),
+		comparison_axis: nonEmptyText(record.comparison_axis),
+		direction: nonEmptyText(record.direction),
+		summary: nonEmptyText(record.summary ?? record.statement),
+		sample_context: normalizeUnknownRecord(record.sample_context),
+		process_context: normalizeUnknownRecord(record.process_context),
+		baseline_context: normalizeUnknownRecord(record.baseline_context),
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		validity: toText(record.validity, 'directional')
+	};
+}
+
+function normalizeConclusionMechanismEvidence(
+	value: unknown
+): ObjectiveConclusionMechanismEvidence | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
+	if (!evidenceUnitId) return null;
+
+	return {
+		evidence_unit_id: evidenceUnitId,
+		document_id: nonEmptyText(record.document_id),
+		unit_kind: toText(record.unit_kind, 'interpretation'),
+		property: nonEmptyText(record.property ?? record.property_normalized),
+		summary: nonEmptyText(record.summary ?? record.statement ?? record.interpretation),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeConclusionMechanismStep(value: unknown): ObjectiveConclusionMechanismStep | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const label = toText(record.label ?? record.summary);
+	if (!label) return null;
+
+	return {
+		step_role: toText(record.step_role ?? record.role, 'mechanism_step'),
+		label
+	};
+}
+
+function normalizeConclusionMechanismChain(value: unknown): ObjectiveConclusionMechanismChain {
+	const record = asRecord(value);
+	return {
+		steps: asArray(record?.steps)
+			.map((item) => normalizeConclusionMechanismStep(item))
+			.filter((item): item is ObjectiveConclusionMechanismStep => item !== null),
+		evidence: asArray(record?.evidence)
+			.map((item) => normalizeConclusionMechanismEvidence(item))
+			.filter((item): item is ObjectiveConclusionMechanismEvidence => item !== null),
+		evidence_unit_ids: toStringList(record?.evidence_unit_ids)
+	};
+}
+
+function normalizeConclusionStatement(value: unknown): ObjectiveConclusionStatement | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const claim = toText(record.claim ?? record.message ?? record.summary);
+	if (!claim) return null;
+
+	return {
+		claim,
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		strength: toText(record.strength, 'statement')
+	};
+}
+
+function normalizeConclusionLimitation(value: unknown): ObjectiveConclusionLimitation | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const message = toText(record.message ?? record.detail ?? record.code);
+	if (!message) return null;
+
+	return {
+		code: toText(record.code, 'limitation'),
+		message,
+		evidence_unit_ids: toStringList(record.evidence_unit_ids)
+	};
+}
+
+function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusionPackage | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const objectiveRecord = asRecord(record.objective);
+	const title = toText(record.title ?? objectiveRecord?.question);
+	if (!title) return null;
+	const narrativeRecord = asRecord(record.narrative);
+
+	return {
+		schema_version: toText(record.schema_version, 'objective_conclusion_package.v1'),
+		title,
+		objective: {
+			objective_id: toText(objectiveRecord?.objective_id ?? objectiveRecord?.id),
+			question: toText(objectiveRecord?.question, title),
+			material_scope: toStringList(objectiveRecord?.material_scope),
+			process_axes: toStringList(objectiveRecord?.process_axes),
+			property_axes: toStringList(objectiveRecord?.property_axes)
+		},
+		status: toText(record.status, 'empty'),
+		narrative: {
+			status: toText(narrativeRecord?.status, 'not_generated'),
+			sections: normalizeUnknownRecordList(narrativeRecord?.sections)
+		},
+		paper_contributions: asArray(record.paper_contributions)
+			.map((item) => normalizeConclusionContribution(item))
+			.filter((item): item is ObjectiveConclusionContribution => item !== null),
+		primary_evidence_tables: asArray(record.primary_evidence_tables)
+			.map((item) => normalizeConclusionEvidenceTable(item))
+			.filter((item): item is ObjectiveConclusionEvidenceTable => item !== null),
+		controlled_comparisons: asArray(record.controlled_comparisons)
+			.map((item) => normalizeConclusionComparison(item))
+			.filter((item): item is ObjectiveConclusionComparison => item !== null),
+		mechanism_chain: normalizeConclusionMechanismChain(record.mechanism_chain),
+		conclusions: asArray(record.conclusions)
+			.map((item) => normalizeConclusionStatement(item))
+			.filter((item): item is ObjectiveConclusionStatement => item !== null),
+		limitations: asArray(record.limitations)
+			.map((item) => normalizeConclusionLimitation(item))
+			.filter((item): item is ObjectiveConclusionLimitation => item !== null),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
 export function normalizeMaterialSummary(value: unknown): MaterialSummary | null {
 	const record = asRecord(value);
 	if (!record) return null;
@@ -1479,6 +1846,7 @@ export function normalizeObjectiveResearchView(
 		evidence_routes: evidenceRoutes,
 		evidence_units: evidenceUnits,
 		logic_chain: normalizeObjectiveLogicChain(record?.logic_chain),
+		conclusion_package: normalizeObjectiveConclusionPackage(record?.conclusion_package),
 		existing_comparison_rows: normalizeUnknownRecordList(record?.existing_comparison_rows),
 		warnings: normalizeWarnings(record?.warnings)
 	};

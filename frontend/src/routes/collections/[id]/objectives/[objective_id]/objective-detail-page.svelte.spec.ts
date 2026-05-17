@@ -328,6 +328,197 @@ function objectivePayload() {
 				}
 			},
 			confidence: 0.83
+		},
+		conclusion_package: {
+			schema_version: 'objective_conclusion_package.v1',
+			title: 'How does heat treatment affect LPBF 316L tensile strength?',
+			objective: {
+				objective_id: 'obj_1',
+				question: 'How does heat treatment affect LPBF 316L tensile strength?',
+				material_scope: ['316L stainless steel'],
+				process_axes: ['heat treatment'],
+				property_axes: ['yield strength']
+			},
+			status: 'ready',
+			narrative: {
+				status: 'not_generated',
+				sections: []
+			},
+			paper_contributions: [
+				{
+					document_id: 'doc_1',
+					title: 'LPBF 316L heat treatment study',
+					source_filename: 'paper-a.pdf',
+					paper_role: 'primary_experiment',
+					relevance: 'high',
+					background: 'Reports tensile testing of as-built and heat-treated LPBF 316L.',
+					changed_variables: ['heat treatment'],
+					measured_property_scope: ['yield strength'],
+					evidence_unit_count: 11,
+					evidence_unit_ids: ['unit_measure', 'unit_condition', 'unit_obs']
+				}
+			],
+			primary_evidence_tables: [
+				{
+					table_id: 'measurement-results',
+					title: 'Measurement results',
+					rows: [
+						{
+							evidence_unit_id: 'unit_measure',
+							document_id: 'doc_1',
+							property: 'yield strength',
+							sample_context: {
+								sample: 'HT-SLM'
+							},
+							process_context: {
+								process: 'LPBF',
+								heat_treatment: 'annealed'
+							},
+							test_condition: {
+								method: 'tensile test'
+							},
+							value: 560,
+							source_value_text: '560 MPa',
+							unit: 'MPa',
+							resolution_status: 'unresolved_condition',
+							source_refs: [
+								{
+									document_id: 'doc_1',
+									source_kind: 'table',
+									source_ref: 'table-2',
+									evidence_id: 'ev_1',
+									anchor_id: 'anc_1',
+									page: 5
+								}
+							]
+						},
+						{
+							evidence_unit_id: 'unit_measure_secondary',
+							document_id: 'doc_1',
+							property: 'yield strength',
+							sample_context: {
+								sample: 'HT-SLM-2'
+							},
+							process_context: {
+								process: 'LPBF',
+								heat_treatment: 'annealed'
+							},
+							test_condition: {
+								method: 'tensile test'
+							},
+							value: 540,
+							source_value_text: '540 MPa',
+							unit: 'MPa',
+							resolution_status: 'unresolved_condition',
+							source_refs: []
+						}
+					],
+					measurement_value_ranges: [
+						{
+							property_normalized: 'yield strength',
+							min: {
+								evidence_unit_id: 'unit_measure_secondary',
+								value: 540,
+								unit: 'MPa',
+								sample_context: {
+									sample: 'HT-SLM-2'
+								},
+								process_context: {
+									process: 'LPBF'
+								},
+								document_id: 'doc_1',
+								source_refs: []
+							},
+							max: {
+								evidence_unit_id: 'unit_measure',
+								value: 560,
+								unit: 'MPa',
+								sample_context: {
+									sample: 'HT-SLM'
+								},
+								process_context: {
+									process: 'LPBF'
+								},
+								document_id: 'doc_1',
+								source_refs: []
+							},
+							unit: 'MPa',
+							count: 2
+						}
+					]
+				}
+			],
+			controlled_comparisons: [
+				{
+					evidence_unit_id: 'unit_compare',
+					document_id: 'doc_1',
+					property: 'yield strength',
+					comparison_axis: 'heat treatment',
+					direction: 'increase',
+					summary: 'Heat-treated samples exceeded the as-built baseline.',
+					sample_context: {
+						sample: 'HT-SLM'
+					},
+					process_context: {
+						heat_treatment: 'annealed'
+					},
+					baseline_context: {
+						sample_context: {
+							sample: 'as-built'
+						}
+					},
+					source_refs: [],
+					validity: 'controlled'
+				}
+			],
+			mechanism_chain: {
+				steps: [
+					{
+						step_role: 'process_to_microstructure',
+						label: 'Heat treatment changes cellular substructure.'
+					},
+					{
+						step_role: 'microstructure_to_property',
+						label: 'Microstructure changes affect the tensile response.'
+					}
+				],
+				evidence: [
+					{
+						evidence_unit_id: 'unit_interpretation',
+						document_id: 'doc_1',
+						unit_kind: 'interpretation',
+						property: 'strength mechanism',
+						summary:
+							'Annealing changes the cellular substructure, which the authors link to the tensile response.',
+						source_refs: []
+					}
+				],
+				evidence_unit_ids: ['unit_interpretation']
+			},
+			conclusions: [
+				{
+					claim:
+						'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.',
+					evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
+					strength: 'measured'
+				}
+			],
+			limitations: [
+				{
+					code: 'sample_process_context_incomplete',
+					message: 'Some measurements do not have complete sample and process context.',
+					evidence_unit_ids: ['unit_measure', 'unit_measure_secondary']
+				}
+			],
+			source_refs: [
+				{
+					evidence_unit_id: 'unit_measure',
+					document_id: 'doc_1',
+					source_kind: 'table',
+					source_ref: 'table-2',
+					page: 5
+				}
+			]
 		}
 	};
 }
@@ -350,7 +541,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 	});
 
-	it('renders the objective as a research conclusion package with evidence groups and source links', async () => {
+	it('renders the objective as a report-first conclusion package with evidence groups and source links', async () => {
 		render(Page);
 
 		await expect
@@ -365,86 +556,50 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(
-				browserPage.getByText(
-					'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.'
-				)
+				browserPage.getByRole('heading', {
+					name: 'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.'
+				})
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research focus' }))
+			.element(browserPage.getByText('Package status: ready'))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Controlled comparison is ready' }))
+			.element(browserPage.getByRole('heading', { name: 'Collection-level findings' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Primary evidence table' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Controlled comparisons' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Mechanism interpretations' }))
+			.element(browserPage.getByRole('heading', { name: 'Mechanism chain' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Limitations and uncertainties' }))
 			.toBeInTheDocument();
 		const pageText = document.body.textContent ?? '';
-		expect(pageText.indexOf('Controlled comparisons')).toBeLessThan(
-			pageText.indexOf('Research focus')
-		);
-		expect(pageText.indexOf('Controlled comparisons')).toBeLessThan(
-			pageText.indexOf('Controlled comparison is ready')
-		);
-		const judgementCards = document.querySelector('.scientific-judgement-grid');
+		await expect.element(browserPage.getByText('LPBF 316L heat treatment study').first()).toBeInTheDocument();
 		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Synthesizes 2 comparison evidence units for yield strength.');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Evidence units: 2; papers: 1');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Current: sample: HT-SLM; baseline: sample: as-built');
-		await expect.poll(() => judgementCards?.textContent ?? '').not.toContain('oeu_');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.not.toContain('A second heat-treated condition also exceeded the as-built baseline.');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain(
-				'Annealing changes the cellular substructure, which the authors link to the tensile response.'
-			);
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.not.toContain('Higher yield strength.');
-		await expect.poll(() => judgementCards?.textContent ?? '').not.toContain('440 - 475 MPa');
-		await expect.poll(() => judgementCards?.textContent ?? '').not.toContain('was investigated');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.not.toContain('The heat treatments induced a decrease in the tensile strength');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Some measurement evidence is unresolved.');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Unresolved sample, process, or test context');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain(
-				'2 measurement results cannot support a strict controlled comparison until the unresolved condition context is resolved.'
-			);
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Unresolved units: 2; papers: 1');
-		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.not.toContain('Yield strength reached 540 MPa.');
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Representative evidence' }))
+			.element(browserPage.getByRole('button', { name: '560 MPa', exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: '2 Comparison evidence', exact: true }))
+			.element(browserPage.getByRole('button', { name: '540 MPa', exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('Some measurement evidence is unresolved.');
+			.element(browserPage.getByRole('button', { name: /yield strength Heat-treated samples/ }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByRole('button', {
+					name: /strength mechanism Annealing changes the cellular substructure/
+				})
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Some measurements do not have complete sample and process context.'))
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Extraction diagnostics' }))
 			.toBeInTheDocument();
@@ -461,8 +616,11 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		expect(pageText.indexOf('Research conclusion package')).toBeLessThan(
 			pageText.indexOf('Relevant papers')
 		);
+		expect(pageText.indexOf('Collection-level findings')).toBeLessThan(
+			pageText.indexOf('Primary evidence table')
+		);
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Paper contribution map' }))
+			.element(browserPage.getByRole('heading', { name: 'Paper contribution map' }).first())
 			.toBeInTheDocument();
 		const contributionMap = browserPage.getByRole('region', { name: 'Paper contribution map' });
 		await expect.element(contributionMap.getByText('primary_experiment')).toBeInTheDocument();

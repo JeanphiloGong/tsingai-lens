@@ -1898,6 +1898,11 @@ class ResearchObjectiveService:
             len(units),
         )
         resolved_units = self._resolve_objective_evidence_unit_contexts(tuple(units))
+        resolved_units = self._inherit_objective_material_systems(
+            resolved_units,
+            objectives=objectives,
+            objective_contexts=objective_contexts,
+        )
         resolved_units = self._dedupe_shared_density_measurements(
             resolved_units,
             context_by_objective_id=context_by_objective_id,
@@ -2469,6 +2474,62 @@ class ResearchObjectiveService:
     ) -> str:
         seed = "|".join(("method_family", objective_id, document_id, family))
         return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+
+    def _inherit_objective_material_systems(
+        self,
+        units: tuple[ObjectiveEvidenceUnit, ...],
+        *,
+        objectives: tuple[ResearchObjective, ...] = (),
+        objective_contexts: tuple[ObjectiveContext, ...],
+    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        context_materials = {
+            objective.objective_id: self._single_material_system_from_scope(
+                objective.material_scope
+            )
+            for objective in objectives
+        }
+        context_materials.update(
+            {
+                context.objective_id: self._single_material_system_from_scope(
+                    context.material_scope
+                )
+                for context in objective_contexts
+                if context.material_scope
+            }
+        )
+        if not any(context_materials.values()):
+            return units
+
+        resolved_units: list[ObjectiveEvidenceUnit] = []
+        for unit in units:
+            if self._has_observed_evidence_value(unit.material_system):
+                resolved_units.append(unit)
+                continue
+            material_system = context_materials.get(unit.objective_id)
+            if material_system is None:
+                resolved_units.append(unit)
+                continue
+            record = unit.to_record()
+            record["material_system"] = material_system
+            resolved_units.append(ObjectiveEvidenceUnit.from_mapping(record))
+        return tuple(resolved_units)
+
+    def _single_material_system_from_scope(
+        self,
+        material_scope: tuple[str, ...],
+    ) -> dict[str, str] | None:
+        materials_by_key: dict[str, str] = {}
+        for material in material_scope:
+            text = str(material or "").strip()
+            if not text or not self._has_observed_evidence_value(text):
+                continue
+            key = self._axis_key(text)
+            if not key:
+                continue
+            materials_by_key.setdefault(key, text)
+        if len(materials_by_key) != 1:
+            return None
+        return {"family": next(iter(materials_by_key.values()))}
 
     def _attach_objective_method_test_conditions_to_measurements(
         self,

@@ -1475,9 +1475,90 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
         for unit in measurements
     )
     assert all(
+        unit.material_system == {"family": "316L stainless steel"}
+        for unit in measurements
+    )
+    assert all(
         unit.sample_context.get("Specimens") != "as-SLM (140/"
         for unit in measurements
     )
+
+
+def test_research_objective_service_inherits_single_objective_material(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "material_scope": ["316L stainless steel"],
+        }
+    )
+    units = (
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "oeu-missing-material",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "value_payload": {"value": 236.65},
+                "resolution_status": "resolved",
+            }
+        ),
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": "oeu-explicit-material",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "material_system": {"family": "AISI 316L stainless steel"},
+                "property_normalized": "yield strength",
+                "value_payload": {"value": 159.97},
+                "resolution_status": "resolved",
+            }
+        ),
+    )
+
+    resolved = service._inherit_objective_material_systems(
+        units,
+        objective_contexts=(objective_context,),
+    )
+
+    assert resolved[0].material_system == {"family": "316L stainless steel"}
+    assert resolved[1].material_system == {
+        "family": "AISI 316L stainless steel"
+    }
+
+
+def test_research_objective_service_does_not_inherit_ambiguous_material(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-multi-material",
+            "material_scope": ["316L stainless steel", "Ti-6Al-4V"],
+        }
+    )
+    unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-missing-material",
+            "objective_id": "obj-multi-material",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "value_payload": {"value": 236.65},
+            "resolution_status": "resolved",
+        }
+    )
+
+    resolved = service._inherit_objective_material_systems(
+        (unit,),
+        objective_contexts=(objective_context,),
+    )
+
+    assert resolved[0].material_system == {}
 
 
 def test_research_objective_service_normalizes_result_table_values_to_measurements(

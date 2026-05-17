@@ -392,6 +392,7 @@ class ResearchObjectiveService:
             source_logic_chain=self._select_objective_logic_chain(logic_chains),
             evidence_units=evidence_units,
         )
+        frame_views = self._objective_paper_frame_views(frames, facts=facts)
 
         return {
             "collection_id": collection_id,
@@ -407,10 +408,17 @@ class ResearchObjectiveService:
                 facts,
                 objective_id=objective_id,
             ),
-            "paper_frames": self._objective_paper_frame_views(frames, facts=facts),
+            "paper_frames": frame_views,
             "evidence_routes": routes,
             "evidence_units": [unit.to_record() for unit in evidence_units],
             "logic_chain": logic_chain.to_record() if logic_chain is not None else None,
+            "conclusion_package": self._objective_conclusion_package(
+                objective=objective,
+                objective_context=context,
+                frame_views=frame_views,
+                evidence_units=evidence_units,
+                logic_chain=logic_chain,
+            ),
             "existing_comparison_rows": [],
             "warnings": [],
         }
@@ -888,6 +896,330 @@ class ResearchObjectiveService:
                 "confidence": source_logic_chain.confidence,
             }
         )
+
+    def _objective_conclusion_package(
+        self,
+        *,
+        objective: ResearchObjective,
+        objective_context: ObjectiveContext | None,
+        frame_views: list[dict[str, Any]],
+        evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+        logic_chain: ObjectiveLogicChain | None,
+    ) -> dict[str, Any]:
+        measurements = tuple(
+            unit for unit in evidence_units if unit.unit_kind == "measurement"
+        )
+        comparisons = tuple(
+            unit for unit in evidence_units if unit.unit_kind == "comparison"
+        )
+        mechanism_units = tuple(
+            unit
+            for unit in evidence_units
+            if unit.unit_kind in {"characterization", "interpretation"}
+        )
+        measurement_ranges = self._objective_measurement_value_ranges(measurements)
+        limitations = self._objective_conclusion_limitations(
+            measurements=measurements,
+            comparisons=comparisons,
+            mechanism_units=mechanism_units,
+        )
+        return {
+            "schema_version": "objective_conclusion_package.v1",
+            "title": objective.question,
+            "objective": {
+                "objective_id": objective.objective_id,
+                "question": objective.question,
+                "material_scope": list(objective.material_scope),
+                "process_axes": list(objective.process_axes),
+                "property_axes": (
+                    list(objective_context.target_property_axes)
+                    if objective_context is not None
+                    else list(objective.property_axes)
+                ),
+            },
+            "status": self._objective_conclusion_status(
+                measurements=measurements,
+                logic_chain=logic_chain,
+            ),
+            "narrative": {
+                "status": "not_generated",
+                "sections": [],
+            },
+            "paper_contributions": self._objective_conclusion_paper_contributions(
+                frame_views=frame_views,
+                evidence_units=evidence_units,
+            ),
+            "primary_evidence_tables": [
+                {
+                    "table_id": "measurement-results",
+                    "title": "Measurement results",
+                    "rows": [
+                        self._objective_conclusion_measurement_row(unit)
+                        for unit in measurements
+                    ],
+                    "measurement_value_ranges": measurement_ranges,
+                }
+            ],
+            "controlled_comparisons": [
+                self._objective_conclusion_comparison(unit)
+                for unit in comparisons
+            ],
+            "mechanism_chain": self._objective_conclusion_mechanism_chain(
+                mechanism_units
+            ),
+            "conclusions": self._objective_conclusion_statements(
+                measurement_ranges=measurement_ranges,
+                comparisons=comparisons,
+                mechanism_units=mechanism_units,
+            ),
+            "limitations": limitations,
+            "source_refs": self._objective_conclusion_source_refs(evidence_units),
+        }
+
+    def _objective_conclusion_status(
+        self,
+        *,
+        measurements: tuple[ObjectiveEvidenceUnit, ...],
+        logic_chain: ObjectiveLogicChain | None,
+    ) -> str:
+        if logic_chain is not None and measurements:
+            return "ready"
+        if measurements:
+            return "limited"
+        return "empty"
+
+    def _objective_conclusion_paper_contributions(
+        self,
+        *,
+        frame_views: list[dict[str, Any]],
+        evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> list[dict[str, Any]]:
+        units_by_document: dict[str, list[ObjectiveEvidenceUnit]] = {}
+        for unit in evidence_units:
+            units_by_document.setdefault(unit.document_id, []).append(unit)
+        contributions: list[dict[str, Any]] = []
+        for frame in frame_views:
+            if frame.get("relevance") == "irrelevant":
+                continue
+            document_id = str(frame.get("document_id") or "")
+            document_units = units_by_document.get(document_id, [])
+            contributions.append(
+                {
+                    "document_id": document_id,
+                    "title": frame.get("title") or frame.get("source_filename"),
+                    "source_filename": frame.get("source_filename"),
+                    "paper_role": frame.get("paper_role"),
+                    "relevance": frame.get("relevance"),
+                    "background": frame.get("background"),
+                    "changed_variables": list(frame.get("changed_variables") or []),
+                    "measured_property_scope": list(
+                        frame.get("measured_property_scope") or []
+                    ),
+                    "evidence_unit_count": len(document_units),
+                    "evidence_unit_ids": [
+                        unit.evidence_unit_id for unit in document_units
+                    ],
+                }
+            )
+        return contributions
+
+    def _objective_conclusion_measurement_row(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "evidence_unit_id": unit.evidence_unit_id,
+                "document_id": unit.document_id,
+                "property": unit.property_normalized,
+                "sample_context": dict(unit.sample_context),
+                "process_context": dict(unit.process_context),
+                "test_condition": dict(unit.test_condition),
+                "value": self._objective_measurement_numeric_value(unit),
+                "source_value_text": unit.value_payload.get("source_value_text"),
+                "unit": unit.unit,
+                "resolution_status": unit.resolution_status,
+                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_conclusion_comparison(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "evidence_unit_id": unit.evidence_unit_id,
+                "document_id": unit.document_id,
+                "property": unit.property_normalized,
+                "comparison_axis": unit.value_payload.get("comparison_axis"),
+                "direction": unit.value_payload.get("direction"),
+                "summary": self._value_payload_text(unit.value_payload),
+                "sample_context": dict(unit.sample_context),
+                "process_context": dict(unit.process_context),
+                "baseline_context": dict(unit.baseline_context),
+                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
+                "validity": (
+                    "controlled"
+                    if unit.baseline_context
+                    else "directional"
+                ),
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_conclusion_mechanism_chain(
+        self,
+        mechanism_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> dict[str, Any]:
+        steps = [
+            {
+                "step_role": "process_to_microstructure",
+                "label": "Process parameters change thermal history and melt-pool behavior.",
+            },
+            {
+                "step_role": "microstructure_to_property",
+                "label": "Microstructure, defects, and phase features affect measured properties.",
+            },
+        ]
+        return {
+            "steps": steps,
+            "evidence": [
+                self._objective_logic_unit_reference(unit)
+                for unit in mechanism_units
+            ],
+            "evidence_unit_ids": [
+                unit.evidence_unit_id for unit in mechanism_units
+            ],
+        }
+
+    def _objective_conclusion_statements(
+        self,
+        *,
+        measurement_ranges: list[dict[str, Any]],
+        comparisons: tuple[ObjectiveEvidenceUnit, ...],
+        mechanism_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> list[dict[str, Any]]:
+        statements: list[dict[str, Any]] = []
+        for value_range in measurement_ranges:
+            property_name = str(value_range.get("property_normalized") or "").strip()
+            if not property_name:
+                continue
+            statements.append(
+                {
+                    "claim": (
+                        f"{property_name} has traceable measurement results "
+                        "for this objective."
+                    ),
+                    "evidence_unit_ids": [
+                        item.get("evidence_unit_id")
+                        for item in (
+                            value_range.get("min"),
+                            value_range.get("max"),
+                        )
+                        if isinstance(item, dict) and item.get("evidence_unit_id")
+                    ],
+                    "strength": "measured",
+                }
+            )
+        if comparisons:
+            statements.append(
+                {
+                    "claim": "Controlled or directional comparison evidence is available.",
+                    "evidence_unit_ids": [
+                        unit.evidence_unit_id for unit in comparisons
+                    ],
+                    "strength": "comparison",
+                }
+            )
+        if mechanism_units:
+            statements.append(
+                {
+                    "claim": "Mechanism evidence is available for explaining process-structure-property links.",
+                    "evidence_unit_ids": [
+                        unit.evidence_unit_id for unit in mechanism_units
+                    ],
+                    "strength": "mechanism",
+                }
+            )
+        return statements
+
+    def _objective_conclusion_limitations(
+        self,
+        *,
+        measurements: tuple[ObjectiveEvidenceUnit, ...],
+        comparisons: tuple[ObjectiveEvidenceUnit, ...],
+        mechanism_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> list[dict[str, Any]]:
+        limitations: list[dict[str, Any]] = []
+        if not measurements:
+            limitations.append(
+                {
+                    "code": "measurement_results_missing",
+                    "message": "No measurement results are available for this objective.",
+                    "evidence_unit_ids": [],
+                }
+            )
+        incomplete_context = [
+            unit.evidence_unit_id
+            for unit in measurements
+            if not unit.sample_context or not unit.process_context
+        ]
+        if incomplete_context:
+            limitations.append(
+                {
+                    "code": "sample_process_context_incomplete",
+                    "message": "Some measurements do not have complete sample and process context.",
+                    "evidence_unit_ids": incomplete_context,
+                }
+            )
+        directional_comparisons = [
+            unit.evidence_unit_id for unit in comparisons if not unit.baseline_context
+        ]
+        if directional_comparisons:
+            limitations.append(
+                {
+                    "code": "comparison_baseline_incomplete",
+                    "message": "Some comparison evidence is directional because baseline context is incomplete.",
+                    "evidence_unit_ids": directional_comparisons,
+                }
+            )
+        if not mechanism_units:
+            limitations.append(
+                {
+                    "code": "mechanism_evidence_missing",
+                    "message": "No mechanism or characterization evidence is available for this objective.",
+                    "evidence_unit_ids": [],
+                }
+            )
+        return limitations
+
+    def _objective_conclusion_source_refs(
+        self,
+        evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+    ) -> list[dict[str, Any]]:
+        refs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for unit in evidence_units:
+            for source_ref in unit.source_refs:
+                record = {
+                    key: value
+                    for key, value in {
+                        "evidence_unit_id": unit.evidence_unit_id,
+                        "document_id": unit.document_id,
+                        **dict(source_ref),
+                    }.items()
+                    if value not in (None, "", [], {})
+                }
+                key = json.dumps(record, ensure_ascii=False, sort_keys=True)
+                if key in seen:
+                    continue
+                seen.add(key)
+                refs.append(record)
+        return refs
 
     def _objective_list_item(self, objective: ResearchObjective, *, facts) -> dict[str, Any]:
         frames = self._filter_objective_records(

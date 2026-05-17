@@ -194,5 +194,9 @@ class ObjectiveResearchViewResponse(BaseModel):
     evidence_routes: list[ObjectiveEvidenceRouteResponse] = Field(default_factory=list)
     evidence_units: list[ObjectiveEvidenceUnitResponse] = Field(default_factory=list)
     logic_chain: ObjectiveLogicChainResponse | None = Field(default=None)
+    conclusion_package: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured objective-scoped scientific report package",
+    )
     existing_comparison_rows: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[ResearchViewWarningResponse] = Field(default_factory=list)

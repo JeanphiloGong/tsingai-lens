@@ -262,6 +262,129 @@ def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
     assert "ductility" not in str(logic_chain)
 
 
+def test_objective_workspace_detail_returns_conclusion_package(tmp_path):
+    collection_id, objective_id, service = _seed_objective_collection(tmp_path)
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-corrosion",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "corrosion potential",
+            "sample_context": {"sample": "as-built"},
+            "process_context": {"heat treatment": "none"},
+            "value_payload": {"source_value_text": "-243.8", "value": -243.8},
+            "unit": "mV",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.91,
+        }
+    )
+    comparison = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-comparison",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "comparison",
+            "property_normalized": "corrosion potential",
+            "sample_context": {"sample": "heat-treated"},
+            "process_context": {"heat treatment": "annealed"},
+            "baseline_context": {"sample": "as-built"},
+            "value_payload": {
+                "comparison_axis": "heat treatment",
+                "direction": "increase",
+                "source_value_text": "heat treatment improves corrosion resistance",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.82,
+        }
+    )
+    mechanism = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-mechanism",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "characterization",
+            "property_normalized": "corrosion resistance",
+            "sample_context": {"sample": "heat-treated"},
+            "process_context": {"heat treatment": "annealed"},
+            "value_payload": {
+                "source_value_text": (
+                    "heat treatment changed the passive film because chromium "
+                    "enrichment improved corrosion resistance"
+                )
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-3",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.77,
+        }
+    )
+    service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        facts.paper_skims,
+        facts.research_objectives,
+        facts.objective_contexts,
+        facts.objective_paper_frames,
+        facts.objective_evidence_routes,
+        (measurement, comparison, mechanism),
+        (
+            ObjectiveLogicChain.from_mapping(
+                {
+                    "objective_id": objective_id,
+                    "chain_scope": "objective",
+                    "question": facts.research_objectives[0].question,
+                    "evidence_unit_ids": [
+                        measurement.evidence_unit_id,
+                        comparison.evidence_unit_id,
+                        mechanism.evidence_unit_id,
+                    ],
+                    "chain_payload": {},
+                    "summary": "Persisted summary.",
+                    "confidence": 0.7,
+                }
+            ),
+        ),
+    )
+
+    payload = service.get_objective_research_view(collection_id, objective_id)
+
+    conclusion_package = payload["conclusion_package"]
+    assert conclusion_package["schema_version"] == "objective_conclusion_package.v1"
+    assert conclusion_package["status"] == "ready"
+    assert conclusion_package["narrative"]["status"] == "not_generated"
+    assert conclusion_package["paper_contributions"][0]["paper_role"] == (
+        "primary_experiment"
+    )
+    evidence_table = conclusion_package["primary_evidence_tables"][0]
+    assert evidence_table["rows"][0]["evidence_unit_id"] == "oeu-corrosion"
+    assert evidence_table["measurement_value_ranges"][0]["property_normalized"] == (
+        "corrosion potential"
+    )
+    assert conclusion_package["controlled_comparisons"][0]["validity"] == "controlled"
+    assert conclusion_package["mechanism_chain"]["evidence_unit_ids"] == [
+        "oeu-mechanism"
+    ]
+    assert conclusion_package["limitations"] == []
+    assert conclusion_package["source_refs"][0]["source_ref"] == "table-1"
+
+
 def test_objective_workspace_detail_filters_textual_measurement_without_numeric_value(
     tmp_path,
 ):

@@ -409,6 +409,20 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Key findings' }))
 			.toBeInTheDocument();
 		await expect
+			.element(browserPage.getByRole('heading', { name: 'Best parameter chain' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('1/5 leading properties')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Process background').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('No explicit test condition was attached to this row; verify the source paper before comparing across conditions.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('best in matrix · E06').first())
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Traceback').first()).toBeInTheDocument();
+		await expect
 			.element(browserPage.getByRole('heading', { name: 'Trend interpretation' }))
 			.toBeInTheDocument();
 		await expect
@@ -623,6 +637,56 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('3 sample(s), 4 measured property column(s).'))
 			.toBeInTheDocument();
+	});
+
+	it('does not promote narrative observations with embedded numbers into best parameter chains', async () => {
+		const payload: any = materialProfilePayload();
+		payload.sample_matrix.columns = [
+			{ value_key: 'elongation', label: 'Elongation', unit: '%' }
+		];
+		payload.sample_matrix.rows = [
+			{
+				row_id: 'row_text_observation',
+				sample_id: 'text_observation',
+				sample_label: '135 W-750 mm/s',
+				material: '316L stainless steel',
+				process_context: {},
+				values: {
+					elongation: {
+						display_value:
+							'The relatively low porosity levels in the 135 W-750 mm/s sample increase ductility by about 10%.',
+						status: 'observed',
+						confidence: 0.89,
+						evidence_refs: [{ evidence_ref_id: 'ev_text_observation', document_id: 'doc_1' }]
+					}
+				},
+				evidence_refs: []
+			}
+		];
+		payload.measured_properties = [];
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'No sample-level performance chain can be built from the current material matrix yet.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('best in matrix · E01')).not.toBeInTheDocument();
 	});
 
 	it('generates a material review report and exposes Markdown and PDF artifacts', async () => {

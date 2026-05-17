@@ -612,7 +612,7 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     assert profile["evidence_refs"][0]["fact_ids"] == ["oeu-as-built-icorr"]
 
 
-def test_collection_material_profile_prefers_core_matrix_when_objective_units_are_sparse():
+def test_collection_material_profile_uses_objective_profile_when_available():
     profiles, frames = _frames()
     service = _service_from_frames(
         profiles,
@@ -638,13 +638,9 @@ def test_collection_material_profile_prefers_core_matrix_when_objective_units_ar
     profile = service.get_collection_material_research_view("col-1", "mat-ti-6al-4v")
 
     rows = profile["sample_matrix"]["rows"]
-    assert [row["sample_id"] for row in rows] == ["var-s1"]
-    assert any(key.startswith("density") for key in rows[0]["values"])
-    assert any(key.startswith("yield_strength") for key in rows[0]["values"])
-    assert {item["property"] for item in profile["measured_properties"]} == {
-        "density",
-        "yield_strength",
-    }
+    assert [row["sample_label"] for row in rows] == ["summary"]
+    assert rows[0]["values"]["elongation"]["value"] == 33
+    assert {item["property"] for item in profile["measured_properties"]} == {"elongation"}
 
 
 def test_collection_research_view_uses_objective_units_without_old_facts():

@@ -499,6 +499,10 @@ const translations: Record<Language, Translations> = {
 						title: 'Material graph',
 						body: 'Navigate how this material connects process variables, samples, measured properties, findings, and evidence anchors.'
 					},
+					chain: {
+						title: 'Best parameter chain',
+						body: 'Start from the strongest parameter set, then inspect the background, process context, test conditions, results, comparison basis, and source evidence together.'
+					},
 					performance: {
 						title: 'Supporting data: performance matrix',
 						body: 'Use the matrix to verify which samples, conditions, values, and evidence support the findings.'
@@ -592,6 +596,29 @@ const translations: Record<Language, Translations> = {
 						trendHypothesis: 'trend hypothesis',
 						structuralObservation: 'structural observation'
 					}
+				},
+				chain: {
+					stepsLabel: 'Best parameter result chain',
+					processContext: 'Process background',
+					testConditions: 'Test conditions',
+					results: 'Observed results',
+					whyBest: 'Why this parameter set matters',
+					traceback: 'Traceback',
+					collectionScope: 'collection-level evidence',
+					backgroundText:
+						'{material} is studied through {processes}; this parameter set is supported by {paper}.',
+					scoreLabel: '{best}/{total} leading properties',
+					comparisonSummary:
+						'This sample leads {count} of {total} tracked properties: {best}.',
+					comparisonNoLeader:
+						'This sample has {count} comparable values, but none is the best among the tracked {total} properties.',
+					notBestFor: 'Not the leader for: {properties}.',
+					bestInMatrix: 'best in matrix',
+					observed: 'observed',
+					noProcessContext: 'No process parameters were attached to this sample row.',
+					noTestConditions:
+						'No explicit test condition was attached to this row; verify the source paper before comparing across conditions.',
+					empty: 'No sample-level performance chain can be built from the current material matrix yet.'
 				},
 				comparison: {
 					topic: 'Comparison topic: process variables and performance',
@@ -2944,6 +2971,10 @@ const translations: Record<Language, Translations> = {
 						title: '材料图谱',
 						body: '查看该材料如何连接工艺变量、样品、性能、关键发现和证据锚点。'
 					},
+					chain: {
+						title: '最佳参数链路',
+						body: '先看当前表现最强的参数组合，再把背景、工艺条件、测试条件、结果、比较依据和来源证据串起来核查。'
+					},
 					performance: {
 						title: '支撑数据：性能矩阵',
 						body: '用矩阵核对每条发现背后的样品、条件、数值和证据。'
@@ -3035,6 +3066,27 @@ const translations: Record<Language, Translations> = {
 						trendHypothesis: '趋势假设',
 						structuralObservation: '结构观察'
 					}
+				},
+				chain: {
+					stepsLabel: '最佳参数结果链路',
+					processContext: '工艺背景',
+					testConditions: '测试条件',
+					results: '观测结果',
+					whyBest: '为什么这个参数组合重要',
+					traceback: '证据回溯',
+					collectionScope: '集合级证据',
+					backgroundText:
+						'{material} 在当前集合中主要通过 {processes} 研究；该参数组合由 {paper} 支撑。',
+					scoreLabel: '{best}/{total} 项指标领先',
+					comparisonSummary: '该样品在 {total} 个跟踪指标中有 {count} 项领先：{best}。',
+					comparisonNoLeader:
+						'该样品有 {count} 个可比较数值，但在 {total} 个跟踪指标中暂未成为最高项。',
+					notBestFor: '非领先指标：{properties}。',
+					bestInMatrix: '矩阵内最高',
+					observed: '已观测',
+					noProcessContext: '该样品行暂未绑定工艺参数。',
+					noTestConditions: '该行暂未绑定明确测试条件；跨条件比较前需要回到原文核查。',
+					empty: '当前材料矩阵还不足以构建样品级性能链路。'
 				},
 				comparison: {
 					topic: '比较主题：工艺变量对性能的影响',

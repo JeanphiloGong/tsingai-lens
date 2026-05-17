@@ -106,6 +106,33 @@
 		evidenceCodes: string[];
 	};
 
+	type ChainEntry = {
+		key: string;
+		label: string;
+		value: string;
+	};
+
+	type ParameterChainMetric = {
+		key: string;
+		supportedValue: SupportedValue;
+		isBest: boolean;
+	};
+
+	type BestParameterChain = {
+		key: string;
+		row: SampleMatrixRow;
+		sampleLabel: string;
+		scoreLabel: string;
+		background: string;
+		processEntries: ChainEntry[];
+		testConditionEntries: ChainEntry[];
+		metrics: ParameterChainMetric[];
+		comparisonSummary: string;
+		notLeadingProperties: string[];
+		evidenceCodes: string[];
+		sourceLocation: string;
+	};
+
 	type MaterialGraphNodeKind = 'material' | 'process' | 'sample' | 'property' | 'finding';
 
 	type MaterialGraphNode = {
@@ -154,6 +181,22 @@
 		'post treatment summary',
 		'scan strategy'
 	].map(processAlias);
+	const TEST_CONDITION_HINTS = [
+		'test',
+		'condition',
+		'environment',
+		'electrolyte',
+		'solution',
+		'strain',
+		'loading',
+		'frequency',
+		'specimen',
+		'surface',
+		'temperature',
+		'corrosion',
+		'medium',
+		'ph'
+	];
 
 	const PREFERRED_PROPERTY_GROUPS = [
 		{
@@ -245,6 +288,13 @@
 		$t,
 		propertySummaries,
 		materialProfile?.canonical_name ?? materialId
+	);
+	$: bestParameterChains = buildBestParameterChains(
+		materialProfile,
+		focusedSampleRows,
+		propertyColumns,
+		evidenceCodeMap,
+		$t
 	);
 	$: bestPropertyValues = buildBestPropertyValues(
 		focusedSampleRows,
@@ -683,11 +733,23 @@
 		const raw = value.normalized_value ?? value.value;
 		if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
 		if (typeof raw === 'string' && raw.trim()) {
-			const parsed = Number(raw);
+			const text = raw.trim();
+			if (!/^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(text)) return null;
+			const parsed = Number(text);
 			if (Number.isFinite(parsed)) return parsed;
 		}
-		const match = formatEvidenceBackedValue(value).match(/-?\d+(?:\.\d+)?/);
-		return match ? Number(match[0]) : null;
+		const display = formatEvidenceBackedValue(value).trim();
+		if (
+			!/^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?\s*(?:%|mpa|gpa|hv|j\/mm3|j\/mm³|mm\/s|°c|c|ppm|um|µm)?$/i.test(
+				display
+			)
+		) {
+			return null;
+		}
+		const match = display.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/i);
+		if (!match) return null;
+		const parsed = Number(match[0]);
+		return Number.isFinite(parsed) ? parsed : null;
 	}
 
 	function comparisonPair(
@@ -815,6 +877,236 @@
 			.sort((first, second) => (second.numeric ?? 0) - (first.numeric ?? 0))[0];
 	}
 
+	function bestValueMap(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
+		return new Map(
+			columns
+				.map((column) => {
+					const best = bestValueForColumn(rows, column);
+					return best ? [column.key, best] : null;
+				})
+				.filter((item): item is [string, NonNullable<ReturnType<typeof bestValueForColumn>>] =>
+					Boolean(item)
+				)
+		);
+	}
+
+	function comparableValueCount(row: SampleMatrixRow, columns: PropertyColumn[]) {
+		return columns.filter((column) => numericValue(row.values[column.key]) !== null).length;
+	}
+
+	function rowLeaderCount(
+		row: SampleMatrixRow,
+		columns: PropertyColumn[],
+		bestByColumn: Map<string, NonNullable<ReturnType<typeof bestValueForColumn>>>
+	) {
+		return columns.filter((column) => {
+			const best = bestByColumn.get(column.key);
+			return Boolean(best && best.row.row_id === row.row_id);
+		}).length;
+	}
+
+	function rowPerformanceScore(
+		row: SampleMatrixRow,
+		columns: PropertyColumn[],
+		bestByColumn: Map<string, NonNullable<ReturnType<typeof bestValueForColumn>>>
+	) {
+		return (
+			rowLeaderCount(row, columns, bestByColumn) * 100 +
+			comparableValueCount(row, columns) * 10 +
+			(row.evidence_refs.length ? 1 : 0)
+		);
+	}
+
+	function bestRowsByCompositeScore(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
+		const bestByColumn = bestValueMap(rows, columns);
+		return rows
+			.map((row, index) => ({
+				row,
+				index,
+				score: rowPerformanceScore(row, columns, bestByColumn)
+			}))
+			.filter((item) => comparableValueCount(item.row, columns) > 0)
+			.sort((first, second) => second.score - first.score || first.index - second.index)
+			.slice(0, 3);
+	}
+
+	function processEntryLabel(key: string, translate: Translate) {
+		return processLabel(key, translate);
+	}
+
+	function processChainEntries(row: SampleMatrixRow, translate: Translate): ChainEntry[] {
+		const entries = Object.entries(row.process_context)
+			.filter(([key, value]) => value !== null && value !== undefined && value !== '')
+			.filter(([key]) => !isLikelyTestConditionKey(key))
+			.map(([key]) => ({
+				key,
+				label: processEntryLabel(key, translate),
+				value: processValueWithUnit(row, key)
+			}))
+			.filter((entry) => entry.value !== '--');
+
+		const preferred = entries.filter((entry) =>
+			[...PROCESS_SUMMARY_KEYS, ...PROCESS_BRIEF_KEYS.map(processAlias)].includes(processAlias(entry.key))
+		);
+		const selected = preferred.length ? preferred : entries;
+		return uniqueChainEntries(selected).slice(0, 6);
+	}
+
+	function isLikelyTestConditionKey(key: string) {
+		const normalized = key.toLowerCase().replace(/_/g, ' ');
+		return TEST_CONDITION_HINTS.some((hint) => normalized.includes(hint));
+	}
+
+	function testConditionEntries(row: SampleMatrixRow, translate: Translate): ChainEntry[] {
+		const fromTestConditions = Object.entries(row.test_condition ?? {})
+			.filter(([key, value]) => value !== null && value !== undefined && value !== '')
+			.map(([key, value]) => ({
+				key: `test:${key}`,
+				label: processEntryLabel(key, translate),
+				value: String(value)
+			}));
+		const fromProcessContext = Object.entries(row.process_context)
+			.filter(([key, value]) => value !== null && value !== undefined && value !== '')
+			.filter(([key]) => isLikelyTestConditionKey(key))
+			.map(([key]) => ({
+				key: `process:${key}`,
+				label: processEntryLabel(key, translate),
+				value: processValueWithUnit(row, key)
+			}))
+			.filter((entry) => entry.value !== '--');
+		return uniqueChainEntries([...fromTestConditions, ...fromProcessContext]).slice(0, 4);
+	}
+
+	function uniqueChainEntries(entries: ChainEntry[]) {
+		const seen = new Set<string>();
+		return entries.filter((entry) => {
+			const key = normalizeForMatch(`${entry.label}:${entry.value}`);
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		});
+	}
+
+	function sourceLocationForValue(value: SupportedValue) {
+		const ref = value.value.evidence_refs[0];
+		return ref?.locator || value.evidenceCode || '--';
+	}
+
+	function sourceLocationForValues(values: SupportedValue[]) {
+		const locations = uniqueList(values.map(sourceLocationForValue).filter((value) => value !== '--'));
+		return locations.slice(0, 3).join(', ') || '--';
+	}
+
+	function chainMetricRows(
+		row: SampleMatrixRow,
+		columns: PropertyColumn[],
+		codeMap: Map<string, string>,
+		bestByColumn: Map<string, NonNullable<ReturnType<typeof bestValueForColumn>>>,
+		translate: Translate
+	): ParameterChainMetric[] {
+		return columns
+			.map((column) => {
+				const value = row.values[column.key];
+				if (!value || numericValue(value) === null) return null;
+				return {
+					key: `${row.row_id}:${column.key}`,
+					supportedValue: supportedValue(row, column, value, codeMap, translate),
+					isBest: bestByColumn.get(column.key)?.row.row_id === row.row_id
+				};
+			})
+			.filter((item): item is ParameterChainMetric => item !== null);
+	}
+
+	function chainComparisonSummary(
+		metrics: ParameterChainMetric[],
+		translate: Translate,
+		totalProperties: number
+	) {
+		const bestMetrics = metrics.filter((metric) => metric.isBest);
+		if (bestMetrics.length) {
+			return translate('research.materialDossier.chain.comparisonSummary', {
+				best: bestMetrics
+					.map(
+						(metric) =>
+							`${metric.supportedValue.property} ${metric.supportedValue.displayValue}`
+					)
+					.join(', '),
+				count: bestMetrics.length,
+				total: totalProperties
+			});
+		}
+		return translate('research.materialDossier.chain.comparisonNoLeader', {
+			count: metrics.length,
+			total: totalProperties
+		});
+	}
+
+	function chainScoreLabel(
+		metrics: ParameterChainMetric[],
+		translate: Translate,
+		totalProperties: number
+	) {
+		const bestCount = metrics.filter((metric) => metric.isBest).length;
+		return translate('research.materialDossier.chain.scoreLabel', {
+			best: bestCount,
+			total: totalProperties
+		});
+	}
+
+	function chainBackground(
+		profile: MaterialProfile | null,
+		row: SampleMatrixRow,
+		translate: Translate
+	) {
+		const material = profile?.canonical_name || row.material || '--';
+		const processes = joinedList(
+			profile?.overview.process_families ?? [],
+			translate('research.materialDossier.narrative.unspecifiedProcess')
+		);
+		const paper = row.document_id
+			? materialPapers().find((item) => item.document_id === row.document_id)?.title
+			: null;
+		return translate('research.materialDossier.chain.backgroundText', {
+			material,
+			processes,
+			paper: paper || translate('research.materialDossier.chain.collectionScope')
+		});
+	}
+
+	function buildBestParameterChains(
+		profile: MaterialProfile | null,
+		rows: SampleMatrixRow[],
+		columns: PropertyColumn[],
+		codeMap: Map<string, string>,
+		translate: Translate
+	): BestParameterChain[] {
+		if (!rows.length || !columns.length) return [];
+		const bestByColumn = bestValueMap(rows, columns);
+		return bestRowsByCompositeScore(rows, columns).map(({ row }, index) => {
+			const metrics = chainMetricRows(row, columns, codeMap, bestByColumn, translate);
+			const leadingProperties = metrics
+				.filter((metric) => metric.isBest)
+				.map((metric) => metric.supportedValue.property);
+			const allProperties = metrics.map((metric) => metric.supportedValue.property);
+			return {
+				key: row.row_id,
+				row,
+				sampleLabel: sampleDisplayLabel(row, translate, index),
+				scoreLabel: chainScoreLabel(metrics, translate, columns.length),
+				background: chainBackground(profile, row, translate),
+				processEntries: processChainEntries(row, translate),
+				testConditionEntries: testConditionEntries(row, translate),
+				metrics,
+				comparisonSummary: chainComparisonSummary(metrics, translate, columns.length),
+				notLeadingProperties: allProperties.filter(
+					(property) => !leadingProperties.includes(property)
+				),
+				evidenceCodes: evidenceCodesForValues(metrics.map((metric) => metric.supportedValue)),
+				sourceLocation: sourceLocationForValues(metrics.map((metric) => metric.supportedValue))
+			};
+		});
+	}
+
 	function buildBestPropertyValues(
 		rows: SampleMatrixRow[],
 		columns: PropertyColumn[],
@@ -865,6 +1157,7 @@
 			sample_label: translate('research.materialDossier.table.collectionSummary'),
 			material: materialName,
 			process_context: {},
+			test_condition: {},
 			variable_axis: null,
 			variable_value: null,
 			values: { [column.key]: value },
@@ -912,6 +1205,7 @@
 				sample_label: translate('research.materialDossier.table.collectionSummary'),
 				material: materialName,
 				process_context: {},
+				test_condition: {},
 				variable_axis: null,
 				variable_value: null,
 				values,
@@ -1793,9 +2087,121 @@
 		<div class="dossier-layout">
 			{#if activeDossierTab === 'structured'}
 				<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
-				<section id="key-findings" class="dossier-card dossier-card--findings">
+				<section id="best-parameter-chain" class="dossier-card chain-card">
 					<div class="dossier-section-heading">
 						<span class="section-number">1</span>
+						<h3>{$t('research.materialDossier.sections.chain.title')}</h3>
+						<p>{$t('research.materialDossier.sections.chain.body')}</p>
+					</div>
+
+					<div class="chain-list">
+						{#each bestParameterChains as chain, index (chain.key)}
+							<article class="parameter-chain">
+								<div class="parameter-chain__header">
+									<div>
+										<span class="chain-rank">#{index + 1}</span>
+										<h4>{chain.sampleLabel}</h4>
+										<p>{chain.background}</p>
+									</div>
+									<span class="chain-score">{chain.scoreLabel}</span>
+								</div>
+
+								<div class="chain-steps" aria-label={$t('research.materialDossier.chain.stepsLabel')}>
+									<div class="chain-step">
+										<span>1</span>
+										<strong>{$t('research.materialDossier.chain.processContext')}</strong>
+										{#if chain.processEntries.length}
+											<dl>
+												{#each chain.processEntries as entry (entry.key)}
+													<div>
+														<dt>{entry.label}</dt>
+														<dd>{entry.value}</dd>
+													</div>
+												{/each}
+											</dl>
+										{:else}
+											<p>{$t('research.materialDossier.chain.noProcessContext')}</p>
+										{/if}
+									</div>
+
+									<div class="chain-step">
+										<span>2</span>
+										<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
+										{#if chain.testConditionEntries.length}
+											<dl>
+												{#each chain.testConditionEntries as entry (entry.key)}
+													<div>
+														<dt>{entry.label}</dt>
+														<dd>{entry.value}</dd>
+													</div>
+												{/each}
+											</dl>
+										{:else}
+											<p>{$t('research.materialDossier.chain.noTestConditions')}</p>
+										{/if}
+									</div>
+
+									<div class="chain-step chain-step--wide">
+										<span>3</span>
+										<strong>{$t('research.materialDossier.chain.results')}</strong>
+										<div class="chain-metrics">
+											{#each chain.metrics as metric (metric.key)}
+												<button
+													type="button"
+													class:chain-metric--best={metric.isBest}
+													class="chain-metric"
+													on:click={() => openSupportedValue(metric.supportedValue)}
+												>
+													<span>{metric.supportedValue.property}</span>
+													<strong>{metric.supportedValue.displayValue}</strong>
+													<small>
+														{metric.isBest
+															? $t('research.materialDossier.chain.bestInMatrix')
+															: $t('research.materialDossier.chain.observed')}
+														· {metric.supportedValue.evidenceCode}
+													</small>
+												</button>
+											{/each}
+										</div>
+									</div>
+								</div>
+
+								<div class="chain-judgement">
+									<div>
+										<strong>{$t('research.materialDossier.chain.whyBest')}</strong>
+										<p>{chain.comparisonSummary}</p>
+										{#if chain.notLeadingProperties.length}
+											<small
+												>{$t('research.materialDossier.chain.notBestFor', {
+													properties: chain.notLeadingProperties.join(', ')
+												})}</small
+											>
+										{/if}
+									</div>
+									<div>
+										<strong>{$t('research.materialDossier.chain.traceback')}</strong>
+										<p>{chain.sourceLocation}</p>
+										<div class="evidence-chip-row">
+											{#each chain.evidenceCodes as code}
+												<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
+													{code}
+												</button>
+											{:else}
+												<span class="evidence-chip evidence-chip--muted">--</span>
+											{/each}
+										</div>
+									</div>
+								</div>
+							</article>
+						{:else}
+							<p class="empty-copy">{$t('research.materialDossier.chain.empty')}</p>
+						{/each}
+					</div>
+				</section>
+
+				<section id="key-findings" class="dossier-card dossier-card--findings">
+					<div class="dossier-section-heading">
+						<span class="section-number">2</span>
 						<h3>{$t('research.materialDossier.sections.findings.title')}</h3>
 						<p>{$t('research.materialDossier.sections.findings.body')}</p>
 					</div>
@@ -1840,7 +2246,7 @@
 
 				<section id="material-graph" class="dossier-card material-graph-card">
 					<div class="dossier-section-heading">
-						<span class="section-number">2</span>
+						<span class="section-number">3</span>
 						<h3>{$t('research.materialDossier.sections.graph.title')}</h3>
 						<p>{$t('research.materialDossier.sections.graph.body')}</p>
 					</div>
@@ -1904,7 +2310,7 @@
 
 				<section id="trend-comparison" class="dossier-card">
 					<div class="dossier-section-heading">
-						<span class="section-number">3</span>
+						<span class="section-number">4</span>
 						<h3>{$t('research.materialDossier.sections.trends.title')}</h3>
 						<p>{$t('research.materialDossier.sections.trends.body')}</p>
 					</div>
@@ -2020,7 +2426,7 @@
 
 				<section id="performance-results" class="dossier-card">
 					<div class="dossier-section-heading">
-						<span class="section-number">4</span>
+						<span class="section-number">5</span>
 						<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
 						<p>{$t('research.materialDossier.sections.performance.body')}</p>
 					</div>
@@ -2081,7 +2487,7 @@
 
 				<section id="evidence-locator" class="dossier-card">
 					<div class="dossier-section-heading">
-						<span class="section-number">5</span>
+						<span class="section-number">6</span>
 						<h3>{$t('research.materialDossier.sections.evidence.title')}</h3>
 						<p>{$t('research.materialDossier.sections.evidence.body')}</p>
 					</div>
@@ -2316,14 +2722,15 @@
 				>
 					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
 					{#if activeDossierTab === 'structured'}
-						<a href="#key-findings">1 {$t('research.materialDossier.sections.findings.title')}</a>
-						<a href="#material-graph">2 {$t('research.materialDossier.sections.graph.title')}</a>
-						<a href="#trend-comparison">3 {$t('research.materialDossier.sections.trends.title')}</a>
+						<a href="#best-parameter-chain">1 {$t('research.materialDossier.sections.chain.title')}</a>
+						<a href="#key-findings">2 {$t('research.materialDossier.sections.findings.title')}</a>
+						<a href="#material-graph">3 {$t('research.materialDossier.sections.graph.title')}</a>
+						<a href="#trend-comparison">4 {$t('research.materialDossier.sections.trends.title')}</a>
 						<a href="#performance-results"
-							>4 {$t('research.materialDossier.sections.performance.title')}</a
+							>5 {$t('research.materialDossier.sections.performance.title')}</a
 						>
 						<a href="#evidence-locator"
-							>5 {$t('research.materialDossier.sections.evidence.title')}</a
+							>6 {$t('research.materialDossier.sections.evidence.title')}</a
 						>
 					{:else}
 						<a href="#narrative-overview"
@@ -2881,6 +3288,198 @@
 		color: #64748b;
 		font-size: 12px;
 		line-height: 18px;
+	}
+
+	.chain-card {
+		border-color: #bae6fd;
+		background: #f8fbff;
+	}
+
+	.chain-list,
+	.parameter-chain {
+		display: grid;
+		gap: 12px;
+	}
+
+	.parameter-chain {
+		padding: 14px;
+		border: 1px solid #dbeafe;
+		border-radius: 10px;
+		background: #ffffff;
+	}
+
+	.parameter-chain__header,
+	.chain-judgement {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 12px;
+		align-items: start;
+	}
+
+	.parameter-chain__header h4 {
+		margin: 4px 0 0;
+		color: #0f172a;
+		font-size: 18px;
+		font-weight: 800;
+		line-height: 26px;
+	}
+
+	.parameter-chain__header p,
+	.chain-step p,
+	.chain-judgement p,
+	.chain-judgement small {
+		margin: 0;
+		color: #475569;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.chain-rank,
+	.chain-score {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		padding: 3px 8px;
+		border-radius: 6px;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 18px;
+	}
+
+	.chain-rank {
+		background: #dbeafe;
+		color: #1d4ed8;
+	}
+
+	.chain-score {
+		border: 1px solid #bbf7d0;
+		background: #f0fdf4;
+		color: #15803d;
+		white-space: nowrap;
+	}
+
+	.chain-steps {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.chain-step {
+		display: grid;
+		align-content: start;
+		gap: 8px;
+		padding: 12px;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		background: #fbfdff;
+	}
+
+	.chain-step--wide {
+		grid-column: 1 / -1;
+	}
+
+	.chain-step > span {
+		width: 24px;
+		height: 24px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 999px;
+		background: #0f172a;
+		color: #ffffff;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 18px;
+	}
+
+	.chain-step > strong,
+	.chain-judgement strong {
+		color: #0f172a;
+		font-size: 13px;
+		font-weight: 800;
+		line-height: 20px;
+	}
+
+	.chain-step dl {
+		display: grid;
+		gap: 6px;
+		margin: 0;
+	}
+
+	.chain-step dl div {
+		display: grid;
+		grid-template-columns: minmax(110px, 0.5fr) minmax(0, 1fr);
+		gap: 8px;
+	}
+
+	.chain-step dt {
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.chain-step dd {
+		margin: 0;
+		color: #0f172a;
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 20px;
+		overflow-wrap: anywhere;
+	}
+
+	.chain-metrics {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: 8px;
+	}
+
+	.chain-metric {
+		display: grid;
+		gap: 2px;
+		min-height: 86px;
+		padding: 10px;
+		border: 1px solid #dbeafe;
+		border-radius: 8px;
+		background: #ffffff;
+		color: #0f172a;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.chain-metric:hover,
+	.chain-metric--best {
+		border-color: #2563eb;
+		background: #eff6ff;
+	}
+
+	.chain-metric span,
+	.chain-metric small {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.chain-metric strong {
+		color: #0f172a;
+		font-size: 17px;
+		font-weight: 800;
+		line-height: 24px;
+	}
+
+	.chain-metric--best small {
+		color: #2563eb;
+		font-weight: 800;
+	}
+
+	.chain-judgement {
+		grid-template-columns: minmax(0, 1fr) minmax(220px, 0.45fr);
+		padding-top: 2px;
+	}
+
+	.chain-judgement > div {
+		display: grid;
+		gap: 6px;
 	}
 
 	.material-graph-card {
@@ -3666,6 +4265,11 @@
 	:root[data-theme='dark'] .narrative-finding h4,
 	:root[data-theme='dark'] .narrative-metrics strong,
 	:root[data-theme='dark'] .best-value-card strong,
+	:root[data-theme='dark'] .parameter-chain__header h4,
+	:root[data-theme='dark'] .chain-step > strong,
+	:root[data-theme='dark'] .chain-judgement strong,
+	:root[data-theme='dark'] .chain-step dd,
+	:root[data-theme='dark'] .chain-metric strong,
 	:root[data-theme='dark'] .narrative-comparison-card strong,
 	:root[data-theme='dark'] .detail-drawer dd,
 	:root[data-theme='dark'] .pdf-data dd {
@@ -3675,6 +4279,9 @@
 	:root[data-theme='dark'] .dossier-tabs,
 	:root[data-theme='dark'] .dossier-state-card,
 	:root[data-theme='dark'] .dossier-card,
+	:root[data-theme='dark'] .parameter-chain,
+	:root[data-theme='dark'] .chain-step,
+	:root[data-theme='dark'] .chain-metric,
 	:root[data-theme='dark'] .aside-card,
 	:root[data-theme='dark'] .detail-drawer,
 	:root[data-theme='dark'] .paper-mini-card,
@@ -3705,6 +4312,13 @@
 	:root[data-theme='dark'] .dossier-header p,
 	:root[data-theme='dark'] .dossier-section-heading p,
 	:root[data-theme='dark'] .dossier-table-note,
+	:root[data-theme='dark'] .parameter-chain__header p,
+	:root[data-theme='dark'] .chain-step p,
+	:root[data-theme='dark'] .chain-judgement p,
+	:root[data-theme='dark'] .chain-judgement small,
+	:root[data-theme='dark'] .chain-step dt,
+	:root[data-theme='dark'] .chain-metric span,
+	:root[data-theme='dark'] .chain-metric small,
 	:root[data-theme='dark'] .comparison-panel > p,
 	:root[data-theme='dark'] .chart-caption,
 	:root[data-theme='dark'] .narrative-lede,
@@ -3726,6 +4340,12 @@
 
 		.material-graph-map {
 			grid-template-columns: repeat(5, minmax(170px, 1fr));
+		}
+
+		.parameter-chain__header,
+		.chain-judgement,
+		.chain-steps {
+			grid-template-columns: 1fr;
 		}
 
 		.dossier-aside {

@@ -85,6 +85,7 @@ export type SampleMatrixRow = {
 	sample_label: string;
 	material: string;
 	process_context: Record<string, string>;
+	test_condition?: Record<string, string>;
 	variable_axis: string | null;
 	variable_value: string | number | null;
 	values: Record<string, EvidenceBackedValue>;
@@ -737,6 +738,10 @@ export function normalizeSampleMatrixRow(value: unknown): SampleMatrixRow | null
 		process_context: normalizeContextRecord(
 			record.process_context ?? record.process_family ?? record.process,
 			'process'
+		),
+		test_condition: normalizeContextRecord(
+			record.test_condition ?? record.test_conditions ?? record.condition_context,
+			'condition'
 		),
 		variable_axis: nonEmptyText(record.variable_axis),
 		variable_value: toScalar(record.variable_value),

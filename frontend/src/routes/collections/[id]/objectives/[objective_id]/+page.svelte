@@ -76,6 +76,7 @@
 	let selectedEvidenceUnitId = '';
 	let selectedEvidenceKind = 'all';
 	let selectedEvidenceDocumentId = 'all';
+	let evidenceAuditOpen = false;
 	let evidenceSection: HTMLElement | null = null;
 
 	$: collectionId = $page.params.id ?? '';
@@ -604,6 +605,7 @@
 		selectedEvidenceKind = kind ?? 'all';
 		selectedEvidenceDocumentId = 'all';
 		selectedEvidenceUnitId = '';
+		evidenceAuditOpen = true;
 		evidenceSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 	}
 
@@ -611,6 +613,7 @@
 		selectedEvidenceKind = unit.unit_kind;
 		selectedEvidenceDocumentId = unit.document_id || 'all';
 		selectedEvidenceUnitId = unit.evidence_unit_id;
+		evidenceAuditOpen = true;
 		evidenceSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 	}
 
@@ -849,7 +852,6 @@
 			<div class="objective-main-column">
 				<section
 					class="objective-section"
-					bind:this={evidenceSection}
 					aria-labelledby="paper-contribution-title"
 				>
 					<div class="section-heading">
@@ -918,7 +920,7 @@
 					{/if}
 				</section>
 
-				<section class="objective-section">
+				<section class="objective-section" bind:this={evidenceSection}>
 					<div class="section-heading">
 						<div>
 							<h3>{$t('research.objectiveWorkspace.evidenceUnitsTitle')}</h3>
@@ -926,82 +928,120 @@
 						</div>
 						<span>{boolState(objectiveView.readiness.evidence_units_ready)}</span>
 					</div>
-					{#if evidenceUnits.length}
-						<div
-							class="evidence-toolbar"
-							aria-label={$t('research.objectiveWorkspace.evidenceFilters')}
-						>
-							<label>
-								<span>{$t('research.objectiveWorkspace.evidenceKindFilter')}</span>
-								<select bind:value={selectedEvidenceKind}>
-									{#each evidenceKindOptions as option (option.value)}
-										<option value={option.value}>
-											{option.label} ({option.count})
-										</option>
-									{/each}
-								</select>
-							</label>
-							<label>
-								<span>{$t('research.objectiveWorkspace.paperFilter')}</span>
-								<select bind:value={selectedEvidenceDocumentId}>
-									{#each evidenceDocumentOptions as option (option.value)}
-										<option value={option.value}>
-											{option.label} ({option.count})
-										</option>
-									{/each}
-								</select>
-							</label>
-						</div>
-					{/if}
-					{#if evidenceGroups.length}
-						<div class="evidence-group-list">
-							{#each evidenceGroups as group (group.kind)}
-								<section class="evidence-group" aria-label={$t(group.labelKey)}>
-									<div class="evidence-group__header">
-										<h4>{$t(group.labelKey)}</h4>
-										<span
-											>{$t('research.objectiveWorkspace.unitCount', {
-												count: group.units.length
-											})}</span
-										>
-										</div>
-										<div class="evidence-unit-list">
-											{#each evidenceGroupPreview(group.units) as unit (unit.evidence_unit_id)}
-												<button
-													class:selected={selectedEvidenceUnit?.evidence_unit_id ===
-														unit.evidence_unit_id}
-												class="evidence-unit-card"
-												type="button"
-												on:click={() => (selectedEvidenceUnitId = unit.evidence_unit_id)}
-											>
-												<span>{evidenceUnitTitle(unit)}</span>
-												<strong>{evidenceUnitValue(unit)}</strong>
-												{#if evidenceCardFacts(unit).length}
-													<div class="evidence-unit-card__facts">
-														{#each evidenceCardFacts(unit) as fact, index (`${fact}-${index}`)}
-															<span>{fact}</span>
-														{/each}
-													</div>
-												{/if}
-												<small>
-													{unit.document_id || $t('research.emptyValue')} · {confidenceLabel(
-														unit.confidence
-													)}
-													</small>
-												</button>
+
+					{#if representativeEvidenceUnits.length}
+						<div class="supporting-evidence-list">
+							{#each representativeEvidenceUnits as unit (unit.evidence_unit_id)}
+								<button
+									class:selected={selectedEvidenceUnit?.evidence_unit_id === unit.evidence_unit_id}
+									type="button"
+									on:click={() => focusEvidenceUnit(unit)}
+								>
+									<span>{$t(evidenceKindLabelKey(unit.unit_kind))}</span>
+									<strong>{evidenceUnitValue(unit)}</strong>
+									{#if evidenceCardFacts(unit).length}
+										<div class="evidence-unit-card__facts">
+											{#each evidenceCardFacts(unit) as fact, index (`supporting-${unit.evidence_unit_id}-${fact}-${index}`)}
+												<span>{fact}</span>
 											{/each}
 										</div>
-										{#if evidenceGroupHiddenCount(group.units)}
-											<p class="evidence-group__limit-note">
-												{$t('research.objectiveWorkspace.evidencePreviewLimit', {
-													shown: EVIDENCE_GROUP_PREVIEW_LIMIT,
-													total: group.units.length
-												})}
-											</p>
-										{/if}
-									</section>
-								{/each}
+									{/if}
+									<small>
+										{unit.document_id || $t('research.emptyValue')} · {confidenceLabel(
+											unit.confidence
+										)}
+									</small>
+								</button>
+							{/each}
+						</div>
+					{/if}
+
+					{#if evidenceUnits.length}
+						<details class="evidence-audit" bind:open={evidenceAuditOpen}>
+							<summary>
+								{$t('research.objectiveWorkspace.allEvidenceReview')}
+								<span>{filteredEvidenceUnits.length}</span>
+							</summary>
+							<div class="evidence-audit__body">
+								<div
+									class="evidence-toolbar"
+									aria-label={$t('research.objectiveWorkspace.evidenceFilters')}
+								>
+									<label>
+										<span>{$t('research.objectiveWorkspace.evidenceKindFilter')}</span>
+										<select bind:value={selectedEvidenceKind}>
+											{#each evidenceKindOptions as option (option.value)}
+												<option value={option.value}>
+													{option.label} ({option.count})
+												</option>
+											{/each}
+										</select>
+									</label>
+									<label>
+										<span>{$t('research.objectiveWorkspace.paperFilter')}</span>
+										<select bind:value={selectedEvidenceDocumentId}>
+											{#each evidenceDocumentOptions as option (option.value)}
+												<option value={option.value}>
+													{option.label} ({option.count})
+												</option>
+											{/each}
+										</select>
+									</label>
+								</div>
+								{#if evidenceGroups.length}
+									<div class="evidence-group-list">
+										{#each evidenceGroups as group (group.kind)}
+											<section class="evidence-group" aria-label={$t(group.labelKey)}>
+												<div class="evidence-group__header">
+													<h4>{$t(group.labelKey)}</h4>
+													<span
+														>{$t('research.objectiveWorkspace.unitCount', {
+															count: group.units.length
+														})}</span
+													>
+												</div>
+												<div class="evidence-unit-list">
+													{#each evidenceGroupPreview(group.units) as unit (unit.evidence_unit_id)}
+														<button
+															class:selected={selectedEvidenceUnit?.evidence_unit_id ===
+																unit.evidence_unit_id}
+															class="evidence-unit-card"
+															type="button"
+															on:click={() => (selectedEvidenceUnitId = unit.evidence_unit_id)}
+														>
+															<span>{evidenceUnitTitle(unit)}</span>
+															<strong>{evidenceUnitValue(unit)}</strong>
+															{#if evidenceCardFacts(unit).length}
+																<div class="evidence-unit-card__facts">
+																	{#each evidenceCardFacts(unit) as fact, index (`${fact}-${index}`)}
+																		<span>{fact}</span>
+																	{/each}
+																</div>
+															{/if}
+															<small>
+																{unit.document_id || $t('research.emptyValue')} · {confidenceLabel(
+																	unit.confidence
+																)}
+															</small>
+														</button>
+													{/each}
+												</div>
+												{#if evidenceGroupHiddenCount(group.units)}
+													<p class="evidence-group__limit-note">
+														{$t('research.objectiveWorkspace.evidencePreviewLimit', {
+															shown: EVIDENCE_GROUP_PREVIEW_LIMIT,
+															total: group.units.length
+														})}
+													</p>
+												{/if}
+											</section>
+										{/each}
+									</div>
+								{:else}
+									<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
+								{/if}
 							</div>
+						</details>
 					{:else}
 						<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
 					{/if}
@@ -1731,6 +1771,7 @@
 		line-height: 20px;
 	}
 
+	.supporting-evidence-list,
 	.evidence-unit-list {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1766,6 +1807,7 @@
 		font: inherit;
 	}
 
+	.supporting-evidence-list button,
 	.evidence-unit-card {
 		display: grid;
 		gap: 5px;
@@ -1778,12 +1820,16 @@
 		cursor: pointer;
 	}
 
+	.supporting-evidence-list button:hover,
+	.supporting-evidence-list button.selected,
 	.evidence-unit-card:hover,
 	.evidence-unit-card.selected {
 		border-color: var(--color-accent);
 		background: var(--surface-card);
 	}
 
+	.supporting-evidence-list button > span,
+	.supporting-evidence-list button small,
 	.evidence-unit-card span,
 	.evidence-unit-card small {
 		color: var(--text-secondary);
@@ -1791,6 +1837,7 @@
 		line-height: 18px;
 	}
 
+	.supporting-evidence-list button > strong,
 	.evidence-unit-card strong {
 		color: var(--text-primary);
 		font-size: 14px;
@@ -1823,6 +1870,39 @@
 		font-size: 13px;
 		line-height: 20px;
 		background: var(--surface-card);
+	}
+
+	.evidence-audit {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--bg-subtle);
+	}
+
+	.evidence-audit summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 13px 14px;
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+
+	.evidence-audit summary span {
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 9px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 16px;
+		background: var(--surface-card);
+	}
+
+	.evidence-audit__body {
+		display: grid;
+		gap: 14px;
+		border-top: 1px solid var(--border-default);
+		padding: 14px;
 	}
 
 	.objective-side-panel {
@@ -1980,6 +2060,7 @@
 		}
 
 			.evidence-toolbar,
+			.supporting-evidence-list,
 			.evidence-unit-list,
 			.evidence-readiness,
 			.research-focus__grid,

@@ -270,23 +270,20 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('button', { name: '1 Comparison evidence' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Measurement results' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Test conditions' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Characterization observations' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Comparison evidence' }))
-			.toBeInTheDocument();
-		await expect
 			.element(browserPage.getByText('No cross-paper comparison unit yet.'))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Extraction diagnostics' }))
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('All extracted evidence'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Measurement results' }))
+			.not.toBeInTheDocument();
 		expect(document.body.textContent?.indexOf('Research conclusion package')).toBeLessThan(
 			document.body.textContent?.indexOf('Logic chain')
 		);
@@ -323,8 +320,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Evidence units' }))
+			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
+		await browserPage.getByText('All extracted evidence').click();
 		await browserPage.getByLabelText('Evidence kind').selectOptions('comparison');
 
 		await expect
@@ -346,8 +344,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Evidence units' }))
+			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
+		await browserPage.getByText('All extracted evidence').click();
 		await browserPage.getByLabelText('Evidence kind').selectOptions('comparison');
 
 		const inspector = browserPage.getByRole('complementary', { name: 'Evidence detail' });
@@ -369,7 +368,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Evidence units' }))
+			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
 
 		const measurementCard = browserPage.getByRole('button', {
@@ -379,8 +378,10 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect.element(measurementCard.getByText('heat_treatment: annealed')).toBeInTheDocument();
 		await expect.element(measurementCard.getByText('method: tensile test')).toBeInTheDocument();
 
+		await browserPage.getByText('All extracted evidence').click();
 		await browserPage.getByLabelText('Evidence kind').selectOptions('comparison');
-		const comparisonCard = browserPage.getByRole('button', {
+		const comparisonGroup = browserPage.getByRole('region', { name: 'Comparison evidence' });
+		const comparisonCard = comparisonGroup.getByRole('button', {
 			name: /doc_1 · 79%/
 		});
 		await expect.element(comparisonCard.getByText('baseline: as-built')).toBeInTheDocument();
@@ -426,7 +427,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(duplicateCard.getByText('process: Non-preheated'))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Evidence units' }))
+			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
 	});
 
@@ -451,6 +452,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
+		await browserPage.getByText('All extracted evidence').click();
 		await expect
 			.element(browserPage.getByText('Measurement preview 6'))
 			.toBeInTheDocument();

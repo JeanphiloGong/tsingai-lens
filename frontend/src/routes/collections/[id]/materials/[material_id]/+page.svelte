@@ -144,21 +144,16 @@
 		'laser_power_w'
 	];
 	const PROCESS_SUMMARY_KEYS = [
-		'energy_density_j_mm3',
 		'energy density',
 		'volumetric energy density',
 		'laser energy density (j/ mm 3 )',
-		'scan_speed_mm_s',
 		'scan speed (mm/s)',
-		'laser_power_w',
 		'laser power',
-		'preheat_temperature_c',
 		'build platform conditions',
 		'type of heat treatment',
-		'post_treatment_summary',
-		'scan_strategy',
+		'post treatment summary',
 		'scan strategy'
-	];
+	].map(processAlias);
 
 	const PREFERRED_PROPERTY_GROUPS = [
 		{
@@ -558,8 +553,7 @@
 	}
 
 	function isMainProcessKey(key: string) {
-		const normalized = key.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
-		return PROCESS_SUMMARY_KEYS.some((candidate) => normalized === candidate);
+		return PROCESS_SUMMARY_KEYS.includes(processAlias(key));
 	}
 
 	function mainProcessKeys(rows: SampleMatrixRow[]) {

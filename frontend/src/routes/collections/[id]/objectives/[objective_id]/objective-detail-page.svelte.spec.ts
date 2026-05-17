@@ -371,6 +371,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toContain('Evidence units: 2; papers: 1');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
+			.toContain('Current: sample: HT-SLM; baseline: sample: as-built');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
 			.not.toContain('A second heat-treated condition also exceeded the as-built baseline.');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
@@ -391,7 +394,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toContain('Unresolved evidence: unresolved condition');
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
-			.toContain('2 unresolved Measurement results units need condition or join cleanup.');
+			.toContain(
+				'2 Measurement results units are not fully comparable because the unresolved condition sample, process, or test-condition context is incomplete.'
+			);
 		await expect
 			.poll(() => judgementCards?.textContent ?? '')
 			.toContain('Unresolved units: 2; papers: 1');

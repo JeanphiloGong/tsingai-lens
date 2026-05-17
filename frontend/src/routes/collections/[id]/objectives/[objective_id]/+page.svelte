@@ -532,6 +532,28 @@
 		return axes ? $t('research.objectiveWorkspace.controlledAxes', { axes }) : '';
 	}
 
+	function comparisonContextLabel(unit: ObjectiveEvidenceUnit) {
+		const axis = displayValue(unit.value_payload.comparison_axis);
+		const currentContext = displayValue(unit.sample_context);
+		const baselineContext =
+			displayValue(unit.baseline_context.sample_context) || displayValue(unit.baseline_context);
+		if (currentContext && baselineContext) {
+			return $t('research.objectiveWorkspace.comparisonContext', {
+				current: currentContext,
+				baseline: baselineContext
+			});
+		}
+		if (currentContext) {
+			return $t('research.objectiveWorkspace.comparisonCurrentContext', {
+				current: currentContext
+			});
+		}
+		if (axis) {
+			return $t('research.objectiveWorkspace.comparisonAxisContext', { axis });
+		}
+		return '';
+	}
+
 	function comparisonBody(unit: ObjectiveEvidenceUnit) {
 		const statement = displayValue(unit.value_payload.statement) || displayValue(unit.interpretation);
 		if (statement) return statement;
@@ -589,6 +611,7 @@
 						count: String(sortedUnits.length),
 						documents: String(documentCount || 1)
 					}),
+					comparisonContextLabel(representative),
 					controlledAxesSummary(representative)
 				]);
 
@@ -695,6 +718,7 @@
 					body: $t('research.objectiveWorkspace.unresolvedEvidenceGroupBody', {
 						count: String(sortedUnits.length),
 						kinds,
+						status: humanizeCode(status),
 						value: evidenceUnitValue(representative)
 					}),
 					meta: judgementMeta(representative, [
@@ -1576,6 +1600,12 @@
 		margin: 0 auto;
 		display: grid;
 		gap: 18px;
+		min-width: 0;
+	}
+
+	.objective-workspace > * {
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	.back-link,
@@ -1592,6 +1622,9 @@
 	.objective-summary-panel,
 	.objective-section,
 	.objective-side-panel {
+		box-sizing: border-box;
+		min-width: 0;
+		max-width: 100%;
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-lg);
 		background: var(--surface-card);
@@ -1603,6 +1636,7 @@
 		justify-content: space-between;
 		gap: 24px;
 		padding: 26px;
+		min-width: 0;
 	}
 
 	.objective-hero__main {
@@ -1634,6 +1668,7 @@
 		max-width: 900px;
 		font-size: 30px;
 		line-height: 38px;
+		overflow-wrap: anywhere;
 	}
 
 	.objective-hero p,
@@ -1647,6 +1682,7 @@
 		color: var(--text-secondary);
 		font-size: 14px;
 		line-height: 22px;
+		overflow-wrap: anywhere;
 	}
 
 	.objective-hero__status {
@@ -1668,6 +1704,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
+		min-width: 0;
 	}
 
 	.objective-chip-row span,
@@ -1682,6 +1719,8 @@
 		font-size: 12px;
 		line-height: 16px;
 		background: var(--bg-subtle);
+		max-width: 100%;
+		overflow-wrap: anywhere;
 	}
 
 	.objective-state-card {
@@ -1728,9 +1767,16 @@
 	.evidence-detail,
 	.evidence-chain-section,
 	.evidence-context-list,
-	.evidence-source-list {
+	.evidence-source-list,
+	.evidence-audit,
+	.evidence-audit__body,
+	.supporting-evidence-list,
+	.evidence-unit-list,
+	.evidence-toolbar {
 		display: grid;
 		gap: 14px;
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	.objective-summary-list span,
@@ -1850,12 +1896,14 @@
 	.scientific-judgement-grid {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px;
+		min-width: 0;
 	}
 
 	.scientific-judgement-grid section,
 	.judgement-list {
 		display: grid;
 		gap: 10px;
+		min-width: 0;
 	}
 
 	.scientific-judgement-grid__heading {
@@ -1880,6 +1928,9 @@
 		display: grid;
 		gap: 5px;
 		width: 100%;
+		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
 		padding: 11px;
@@ -2217,6 +2268,9 @@
 		display: grid;
 		gap: 5px;
 		width: 100%;
+		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
 		padding: 12px;
@@ -2289,6 +2343,9 @@
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
 		background: var(--bg-subtle);
+		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
 	}
 
 	.evidence-audit summary {
@@ -2316,6 +2373,9 @@
 		gap: 14px;
 		border-top: 1px solid var(--border-default);
 		padding: 14px;
+		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
 	}
 
 	.objective-side-panel {
@@ -2440,6 +2500,8 @@
 	@media (max-width: 760px) {
 		.objective-workspace {
 			gap: 12px;
+			max-width: 100%;
+			overflow: hidden;
 		}
 
 		.objective-hero,
@@ -2450,6 +2512,22 @@
 		.representative-evidence__heading,
 		.evidence-detail__header {
 			flex-direction: column;
+		}
+
+		.objective-hero {
+			display: grid;
+			padding: 20px 16px;
+		}
+
+		.objective-hero__main,
+		.objective-hero__status {
+			width: 100%;
+			min-width: 0;
+		}
+
+		.objective-hero h2 {
+			font-size: 26px;
+			line-height: 34px;
 		}
 
 		.objective-hero__status {
@@ -2467,6 +2545,16 @@
 		.paper-contribution-card dl,
 		.evidence-detail dl {
 			grid-template-columns: 1fr;
+		}
+
+		.evidence-unit-card__facts {
+			display: grid;
+			grid-template-columns: 1fr;
+		}
+
+		.evidence-unit-card__facts span {
+			white-space: normal;
+			text-overflow: clip;
 		}
 	}
 </style>

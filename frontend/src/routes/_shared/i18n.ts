@@ -384,9 +384,12 @@ const translations: Record<Language, Translations> = {
 				logicGap: 'Logic-chain gap',
 				unresolvedEvidenceGroupTitle: 'Unresolved evidence: {status}',
 				unresolvedEvidenceGroupBody:
-					'{count} unresolved {kinds} units need condition or join cleanup. Representative evidence: {value}',
+					'{count} {kinds} units are not fully comparable because the {status} sample, process, or test-condition context is incomplete. Representative evidence: {value}',
 				unresolvedEvidenceGroupMeta: 'Unresolved units: {count}; papers: {documents}',
 				controlledAxes: 'Controlled: {axes}',
+				comparisonContext: 'Current: {current}; baseline: {baseline}',
+				comparisonCurrentContext: 'Current context: {current}; baseline not resolved',
+				comparisonAxisContext: 'Comparison axis: {axis}',
 				comparisonGeneratedBody:
 					'{property}: {current} versus baseline {baseline}; reported direction is {direction}.',
 				comparisonGroupBody:
@@ -2894,9 +2897,12 @@ const translations: Record<Language, Translations> = {
 				logicGap: '逻辑链缺口',
 				unresolvedEvidenceGroupTitle: '未解析证据：{status}',
 				unresolvedEvidenceGroupBody:
-					'{count} 条未解析的{kinds}需要补齐条件或 join 关系。代表性证据：{value}',
+					'{count} 条{kinds}尚不能严格比较，因为 {status} 的样品、工艺或测试条件上下文不完整。代表性证据：{value}',
 				unresolvedEvidenceGroupMeta: '未解析单元：{count}；文献：{documents}',
 				controlledAxes: '已控制：{axes}',
+				comparisonContext: '当前组：{current}；基线：{baseline}',
+				comparisonCurrentContext: '当前组：{current}；基线尚未解析',
+				comparisonAxisContext: '比较轴：{axis}',
 				comparisonGeneratedBody: '{property}：{current} 对比基线 {baseline}；报告方向为 {direction}。',
 				comparisonGroupBody:
 					'汇总 {count} 条关于 {property} 的比较证据。代表性发现：{summary}',

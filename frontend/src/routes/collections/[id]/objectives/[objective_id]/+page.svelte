@@ -2053,46 +2053,30 @@
 			gap: 12px;
 		}
 
-		.objective-primary-grid {
-			order: 1;
+		.objective-hero,
+		.section-heading,
+		.logic-step__header,
+		.evidence-group__header,
+		.paper-contribution-card__header,
+		.representative-evidence__heading,
+		.evidence-detail__header {
+			flex-direction: column;
 		}
-
-		.objective-hero {
-			order: 2;
-		}
-
-		.objective-workspace-grid {
-			order: 3;
-		}
-
-		.objective-diagnostics {
-			order: 4;
-		}
-
-			.objective-hero,
-			.section-heading,
-			.logic-step__header,
-			.evidence-group__header,
-			.paper-contribution-card__header,
-			.representative-evidence__heading,
-			.evidence-detail__header {
-				flex-direction: column;
-			}
 
 		.objective-hero__status {
 			justify-items: start;
 		}
 
-			.evidence-toolbar,
-			.supporting-evidence-list,
-			.evidence-unit-list,
-			.evidence-readiness,
-			.research-focus__grid,
-			.representative-evidence__list,
-			.paper-contribution-card__metrics,
-			.paper-contribution-card dl,
-			.evidence-detail dl {
-				grid-template-columns: 1fr;
+		.evidence-toolbar,
+		.supporting-evidence-list,
+		.evidence-unit-list,
+		.evidence-readiness,
+		.research-focus__grid,
+		.representative-evidence__list,
+		.paper-contribution-card__metrics,
+		.paper-contribution-card dl,
+		.evidence-detail dl {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

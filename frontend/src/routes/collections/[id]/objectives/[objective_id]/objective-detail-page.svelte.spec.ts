@@ -437,6 +437,41 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 	});
 
+	it('shortens long document identifiers in compact evidence cards', async () => {
+		const payload: any = objectivePayload();
+		const longDocumentId =
+			'e30598b737366321b28ebd4a9b02b3679d05f35df0a1d8ed204dc55d1eaa9c5233f50b5be9ee26ef7e836237f394e6a016fad25536ef4eb9bd8fa1d8';
+		payload.paper_frames[0].document_id = longDocumentId;
+		payload.evidence_routes[0].document_id = longDocumentId;
+		payload.evidence_units = [
+			{
+				...payload.evidence_units[0],
+				document_id: longDocumentId,
+				source_refs: []
+			}
+		];
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/objectives/obj_1/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
+			.toBeInTheDocument();
+		const supportingSection = document.querySelector('.supporting-evidence-list');
+		await expect
+			.poll(() => supportingSection?.textContent ?? '')
+			.toContain('e30598b737...8fa1d8');
+		expect(supportingSection?.textContent).not.toContain(longDocumentId);
+	});
+
 	it('previews large evidence groups without rendering every unit at once', async () => {
 		const payload: any = objectivePayload();
 		payload.evidence_units = Array.from({ length: 8 }, (_, index) => ({

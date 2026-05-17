@@ -6,6 +6,7 @@
 	import { t } from '../../../../_shared/i18n';
 	import {
 		fetchObjectiveResearchView,
+		formatShortIdentifier,
 		getResearchViewStateTone,
 		type ObjectiveEvidenceRoute,
 		type ObjectiveEvidenceUnit,
@@ -167,6 +168,10 @@
 
 	function confidenceLabel(value: number) {
 		return value > 0 ? `${Math.round(value * 100)}%` : $t('research.emptyValue');
+	}
+
+	function evidenceCardSourceLabel(documentId: string | null) {
+		return formatShortIdentifier(documentId || null);
 	}
 
 	function boolState(value: boolean) {
@@ -958,7 +963,7 @@
 										</div>
 									{/if}
 									<small>
-										{unit.document_id || $t('research.emptyValue')} · {confidenceLabel(
+										{evidenceCardSourceLabel(unit.document_id)} · {confidenceLabel(
 											unit.confidence
 										)}
 									</small>
@@ -1030,7 +1035,7 @@
 																</div>
 															{/if}
 															<small>
-																{unit.document_id || $t('research.emptyValue')} · {confidenceLabel(
+																{evidenceCardSourceLabel(unit.document_id)} · {confidenceLabel(
 																	unit.confidence
 																)}
 															</small>

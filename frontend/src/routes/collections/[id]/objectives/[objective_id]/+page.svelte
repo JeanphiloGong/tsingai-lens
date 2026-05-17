@@ -1843,9 +1843,13 @@
 	.supporting-evidence-list button small,
 	.evidence-unit-card span,
 	.evidence-unit-card small {
+		min-width: 0;
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 18px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.supporting-evidence-list button > strong,

@@ -118,6 +118,12 @@
 		isBest: boolean;
 	};
 
+	type EvidenceCodeSummary = {
+		visibleLabels: string[];
+		hiddenCount: number;
+		title: string;
+	};
+
 	type BestParameterChain = {
 		key: string;
 		row: SampleMatrixRow;
@@ -170,6 +176,8 @@
 		'hatch_spacing_um',
 		'laser_power_w'
 	];
+	const MAX_PERFORMANCE_ROWS = 10;
+	const MAX_MATRIX_EVIDENCE_LABELS = 3;
 	const PROCESS_SUMMARY_KEYS = [
 		'energy density',
 		'volumetric energy density',
@@ -625,9 +633,7 @@
 		const aliases = new Set<string>();
 		const keys = Array.from(
 			new Set(rows.flatMap((row) => Object.keys(row.process_context)))
-		).filter(
-			(key) => isMainProcessKey(key) && rows.some((row) => processValue(row, key) !== '--')
-		);
+		).filter((key) => isMainProcessKey(key) && rows.some((row) => processValue(row, key) !== '--'));
 		for (const key of keys) {
 			const alias = processAlias(key);
 			if (aliases.has(alias)) continue;
@@ -960,7 +966,9 @@
 			.filter((entry) => entry.value !== '--');
 
 		const preferred = entries.filter((entry) =>
-			[...PROCESS_SUMMARY_KEYS, ...PROCESS_BRIEF_KEYS.map(processAlias)].includes(processAlias(entry.key))
+			[...PROCESS_SUMMARY_KEYS, ...PROCESS_BRIEF_KEYS.map(processAlias)].includes(
+				processAlias(entry.key)
+			)
 		);
 		const selected = preferred.length ? preferred : entries;
 		return uniqueChainEntries(selected).slice(0, 6);
@@ -1018,7 +1026,9 @@
 	}
 
 	function sourceLocationForValues(values: SupportedValue[]) {
-		const locations = uniqueList(values.map(sourceLocationForValue).filter((value) => value !== '--'));
+		const locations = uniqueList(
+			values.map(sourceLocationForValue).filter((value) => value !== '--')
+		);
 		return locations.slice(0, 3).join(', ') || '--';
 	}
 
@@ -1052,8 +1062,7 @@
 			return translate('research.materialDossier.chain.comparisonSummary', {
 				best: bestMetrics
 					.map(
-						(metric) =>
-							`${metric.supportedValue.property} ${metric.supportedValue.displayValue}`
+						(metric) => `${metric.supportedValue.property} ${metric.supportedValue.displayValue}`
 					)
 					.join(', '),
 				count: bestMetrics.length,
@@ -1217,10 +1226,8 @@
 				return { column, summary, value };
 			})
 			.filter((item): item is NonNullable<typeof item> => item !== null);
-		if (!summaryValues.length) return selectedRows;
-		const values = Object.fromEntries(
-			summaryValues.map((item) => [item.column.key, item.value])
-		);
+		if (!summaryValues.length || selectedRows.length) return selectedRows;
+		const values = Object.fromEntries(summaryValues.map((item) => [item.column.key, item.value]));
 		const evidenceRefs = summaryValues.flatMap((item) => item.value.evidence_refs);
 		const warnings = summaryValues.flatMap((item) => item.summary.warnings);
 		return [
@@ -1247,15 +1254,18 @@
 		columns: PropertyColumn[],
 		chains: BestParameterChain[]
 	) {
-		if (rows.length <= 16) return rows;
+		if (rows.length <= MAX_PERFORMANCE_ROWS) {
+			if (!columns.length) return rows;
+			return rows.filter((row) => rowHasAnyColumnValue(row, columns));
+		}
 		const selected = new Map<string, SampleMatrixRow>();
-		for (const chain of chains.slice(0, 5)) selected.set(chain.row.row_id, chain.row);
+		for (const chain of chains.slice(0, 3)) selected.set(chain.row.row_id, chain.row);
 		for (const column of columns) {
 			const best = bestValueForColumn(rows, column);
 			if (best) selected.set(best.row.row_id, best.row);
 		}
 		for (const row of rows) {
-			if (selected.size >= 16) break;
+			if (selected.size >= MAX_PERFORMANCE_ROWS) break;
 			if (comparableValueCount(row, columns) >= 2) selected.set(row.row_id, row);
 		}
 		return rows.filter((row) => selected.has(row.row_id));
@@ -1679,11 +1689,11 @@
 		return items.slice(0, 8);
 	}
 
-	function rowEvidenceLabels(
+	function rowEvidenceSummary(
 		row: SampleMatrixRow,
 		columns: PropertyColumn[],
 		codeMap: Map<string, string>
-	) {
+	): EvidenceCodeSummary {
 		const labels: string[] = [];
 		for (const column of columns) {
 			for (const ref of row.values[column.key]?.evidence_refs ?? []) {
@@ -1691,7 +1701,12 @@
 				if (!labels.includes(label)) labels.push(label);
 			}
 		}
-		return labels.join(', ') || '--';
+		const visibleLabels = labels.slice(0, MAX_MATRIX_EVIDENCE_LABELS);
+		return {
+			visibleLabels,
+			hiddenCount: Math.max(0, labels.length - visibleLabels.length),
+			title: labels.join(', ')
+		};
 	}
 
 	function openEvidenceCode(code: string) {
@@ -1704,7 +1719,9 @@
 	}
 
 	function evidenceCodesFromRefs(refs: EvidenceReference[], codeMap: Map<string, string>) {
-		return uniqueList(refs.map((ref) => evidenceCode(ref, codeMap)).filter((code) => code !== '--'));
+		return uniqueList(
+			refs.map((ref) => evidenceCode(ref, codeMap)).filter((code) => code !== '--')
+		);
 	}
 
 	function rowEvidenceCodes(
@@ -1772,9 +1789,11 @@
 
 	function findMaterialGraphNode(graph: MaterialGraph, nodeId: string) {
 		if (!nodeId) return null;
-		return Object.values(graph)
-			.flat()
-			.find((node) => node.id === nodeId) ?? null;
+		return (
+			Object.values(graph)
+				.flat()
+				.find((node) => node.id === nodeId) ?? null
+		);
 	}
 
 	function buildMaterialGraph(
@@ -1811,10 +1830,9 @@
 			}
 		];
 
-		const processKeys = (summary.changedKeys.length ? summary.changedKeys : summary.controlledKeys).slice(
-			0,
-			3
-		);
+		const processKeys = (
+			summary.changedKeys.length ? summary.changedKeys : summary.controlledKeys
+		).slice(0, 3);
 		graph.process = processKeys.map((key) => {
 			const values = uniqueList(rows.map((row) => processValueWithUnit(row, key))).filter(
 				(value) => value !== '--'
@@ -2133,462 +2151,496 @@
 		<div class="dossier-layout">
 			{#if activeDossierTab === 'structured'}
 				<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
-				<section id="best-parameter-chain" class="dossier-card chain-card">
-					<div class="dossier-section-heading">
-						<span class="section-number">1</span>
-						<h3>{$t('research.materialDossier.sections.chain.title')}</h3>
-						<p>{$t('research.materialDossier.sections.chain.body')}</p>
-					</div>
+					<section id="best-parameter-chain" class="dossier-card chain-card">
+						<div class="dossier-section-heading">
+							<span class="section-number">1</span>
+							<h3>{$t('research.materialDossier.sections.chain.title')}</h3>
+							<p>{$t('research.materialDossier.sections.chain.body')}</p>
+						</div>
 
-					<div class="chain-list">
-						{#each bestParameterChains as chain, index (chain.key)}
-							<article class="parameter-chain">
-								<div class="parameter-chain__header">
-									<div>
-										<span class="chain-rank">#{index + 1}</span>
-										<h4>{chain.sampleLabel}</h4>
-										<p>{chain.background}</p>
-									</div>
-									<span class="chain-score">{chain.scoreLabel}</span>
-								</div>
-
-								<div class="chain-steps" aria-label={$t('research.materialDossier.chain.stepsLabel')}>
-									<div class="chain-step">
-										<span>1</span>
-										<strong>{$t('research.materialDossier.chain.processContext')}</strong>
-										{#if chain.processEntries.length}
-											<dl>
-												{#each chain.processEntries as entry (entry.key)}
-													<div>
-														<dt>{entry.label}</dt>
-														<dd>{entry.value}</dd>
-													</div>
-												{/each}
-											</dl>
-										{:else}
-											<p>{$t('research.materialDossier.chain.noProcessContext')}</p>
-										{/if}
-									</div>
-
-									<div class="chain-step">
-										<span>2</span>
-										<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
-										{#if chain.testConditionEntries.length}
-											<dl>
-												{#each chain.testConditionEntries as entry (entry.key)}
-													<div>
-														<dt>{entry.label}</dt>
-														<dd>{entry.value}</dd>
-													</div>
-												{/each}
-											</dl>
-										{:else}
-											<p>{$t('research.materialDossier.chain.noTestConditions')}</p>
-										{/if}
-									</div>
-
-									<div class="chain-step chain-step--wide">
-										<span>3</span>
-										<strong>{$t('research.materialDossier.chain.results')}</strong>
-										<div class="chain-metrics">
-											{#each chain.metrics as metric (metric.key)}
-												<button
-													type="button"
-													class:chain-metric--best={metric.isBest}
-													class="chain-metric"
-													on:click={() => openSupportedValue(metric.supportedValue)}
-												>
-													<span>{metric.supportedValue.property}</span>
-													<strong>{metric.supportedValue.displayValue}</strong>
-													<small>
-														{metric.isBest
-															? $t('research.materialDossier.chain.bestInMatrix')
-															: $t('research.materialDossier.chain.observed')}
-														· {metric.supportedValue.evidenceCode}
-													</small>
-												</button>
-											{/each}
+						<div class="chain-list">
+							{#each bestParameterChains as chain, index (chain.key)}
+								<article class="parameter-chain">
+									<div class="parameter-chain__header">
+										<div>
+											<span class="chain-rank">#{index + 1}</span>
+											<h4>{chain.sampleLabel}</h4>
+											<p>{chain.background}</p>
 										</div>
+										<span class="chain-score">{chain.scoreLabel}</span>
 									</div>
-								</div>
 
-								<div class="chain-judgement">
-									<div>
-										<strong>{$t('research.materialDossier.chain.whyBest')}</strong>
-										<p>{chain.comparisonSummary}</p>
-										{#if chain.notLeadingProperties.length}
-											<small
-												>{$t('research.materialDossier.chain.notBestFor', {
-													properties: chain.notLeadingProperties.join(', ')
-												})}</small
-											>
-										{/if}
-									</div>
-									<div>
-										<strong>{$t('research.materialDossier.chain.traceback')}</strong>
-										<p>{chain.sourceLocation}</p>
-										<div class="evidence-chip-row">
-											{#each chain.evidenceCodes as code}
-												<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
-													{code}
-												</button>
-											{:else}
-												<span class="evidence-chip evidence-chip--muted">--</span>
-											{/each}
-										</div>
-									</div>
-								</div>
-							</article>
-						{:else}
-							<p class="empty-copy">{$t('research.materialDossier.chain.empty')}</p>
-						{/each}
-					</div>
-				</section>
-
-				<section id="key-findings" class="dossier-card dossier-card--findings">
-					<div class="dossier-section-heading">
-						<span class="section-number">2</span>
-						<h3>{$t('research.materialDossier.sections.findings.title')}</h3>
-						<p>{$t('research.materialDossier.sections.findings.body')}</p>
-					</div>
-
-					<div class="finding-grid">
-						{#each keyFindings as finding, index (finding.key)}
-							<article class="finding-card">
-								<div class="finding-card__header">
-									<span>{index + 1}</span>
-									<div>
-										<h4>{finding.title}</h4>
-										<p>{finding.body}</p>
-									</div>
-								</div>
-								<div class="finding-meta">
-									<span>{finding.type}</span>
-									<span
-										>{$t('research.materialDossier.evidence.confidence')}: {finding.confidence}</span
+									<div
+										class="chain-steps"
+										aria-label={$t('research.materialDossier.chain.stepsLabel')}
 									>
-									<span
-										>{$t('research.materialDossier.evidence.anchor')}:
-										{finding.evidenceCodes.join(', ') || '--'}</span
-									>
-								</div>
-								{#if finding.supportedValues.length}
-									<div class="finding-values">
-										{#each finding.supportedValues as value (value.key)}
-											<button type="button" on:click={() => openSupportedValue(value)}>
-												<strong>{value.sample}</strong>
-												<span>{value.property} = {value.displayValue}</span>
-												<small>{value.evidenceCode}</small>
-											</button>
-										{/each}
-									</div>
-								{/if}
-							</article>
-						{:else}
-							<p class="empty-copy">{$t('research.materialDossier.findings.empty')}</p>
-						{/each}
-					</div>
-				</section>
-
-				<section id="material-graph" class="dossier-card material-graph-card">
-					<div class="dossier-section-heading">
-						<span class="section-number">3</span>
-						<h3>{$t('research.materialDossier.sections.graph.title')}</h3>
-						<p>{$t('research.materialDossier.sections.graph.body')}</p>
-					</div>
-
-					<div
-						class="material-graph-map"
-						aria-label={$t('research.materialDossier.graph.label')}
-					>
-						{#each materialGraphColumns as column (column.kind)}
-							<div class={`material-graph-column material-graph-column--${column.kind}`}>
-								<h4>{column.title}</h4>
-								<div class="material-graph-node-list">
-									{#each column.nodes as node (node.id)}
-										<button
-											type="button"
-											class={`material-graph-node material-graph-node--${node.kind}`}
-											class:active={selectedGraphNodeId === node.id}
-											aria-label={$t('research.materialDossier.graph.selectNode', {
-												label: node.label
-											})}
-											on:click={() => selectGraphNode(node)}
-										>
-											<span>{graphNodeTypeLabel(node.kind, $t)}</span>
-											<strong>{node.label}</strong>
-											<small>{node.meta}</small>
-										</button>
-									{:else}
-										<p class="empty-copy">{$t('research.materialDossier.graph.emptyColumn')}</p>
-									{/each}
-								</div>
-							</div>
-						{/each}
-					</div>
-
-					<div class="material-graph-detail" aria-live="polite">
-						{#if selectedMaterialGraphNode}
-							<div>
-								<span>{graphNodeTypeLabel(selectedMaterialGraphNode.kind, $t)}</span>
-								<h4>{selectedMaterialGraphNode.label}</h4>
-								<p>{selectedMaterialGraphNode.detail}</p>
-							</div>
-							{#if selectedMaterialGraphNode.evidenceCodes.length}
-								<div class="material-graph-evidence">
-									<strong>{$t('research.materialDossier.graph.evidenceAnchors')}</strong>
-									<div class="evidence-chip-row">
-										{#each selectedMaterialGraphNode.evidenceCodes as code}
-											<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
-												{code}
-											</button>
-										{/each}
-									</div>
-								</div>
-							{:else}
-								<p class="empty-copy">{$t('research.materialDossier.graph.noEvidence')}</p>
-							{/if}
-						{:else}
-							<p class="empty-copy">{$t('research.materialDossier.graph.selectPrompt')}</p>
-						{/if}
-					</div>
-				</section>
-
-				<section id="trend-comparison" class="dossier-card">
-					<div class="dossier-section-heading">
-						<span class="section-number">4</span>
-						<h3>{$t('research.materialDossier.sections.trends.title')}</h3>
-						<p>{$t('research.materialDossier.sections.trends.body')}</p>
-					</div>
-
-					<div class="trend-grid">
-						<div class="comparison-panel">
-							<h4>{$t('research.materialDossier.comparison.topic')}</h4>
-							<p>
-								{$t('research.materialDossier.comparison.controls', {
-									controlled: processSummary.controlledLabels.join(', ') || '--'
-								})}
-							</p>
-							<div class="dossier-table-wrapper">
-								<table class="dossier-table dossier-table--compact">
-									<thead>
-										<tr>
-											<th>{$t('research.materialDossier.comparison.variable')}</th>
-											<th>{$t('research.materialDossier.comparison.property')}</th>
-											<th>{$t('research.materialDossier.comparison.observation')}</th>
-											<th>{$t('research.materialDossier.comparison.conclusion')}</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each comparisonRows as row (row.key)}
-											<tr>
-												<td>{row.variable}</td>
-												<td>{row.property}</td>
-												<td>
-													<div class="comparison-bars">
-														<span>{row.firstValue ?? '--'}</span>
-														<div class="bar-track">
-															<span
-																class="bar-fill bar-fill--primary"
-																style={`width: ${((row.firstValue ?? 0) / row.maxValue) * 100}%`}
-															></span>
-															<span
-																class="bar-fill bar-fill--secondary"
-																style={`width: ${((row.secondValue ?? 0) / row.maxValue) * 100}%`}
-															></span>
+										<div class="chain-step">
+											<span>1</span>
+											<strong>{$t('research.materialDossier.chain.processContext')}</strong>
+											{#if chain.processEntries.length}
+												<dl>
+													{#each chain.processEntries as entry (entry.key)}
+														<div>
+															<dt>{entry.label}</dt>
+															<dd>{entry.value}</dd>
 														</div>
-														<span>{row.secondValue ?? '--'}</span>
-													</div>
-												</td>
-												<td>{row.conclusion}</td>
-											</tr>
-										{:else}
-											<tr>
-												<td colspan="4" class="empty-cell">
-													{#if summaryTrendValues.length}
-														{$t('research.materialDossier.comparison.summaryOnly', {
-															values: summaryTrendText(summaryTrendValues)
-														})}
-													{:else}
-														{$t('research.materialDossier.comparison.empty')}
-													{/if}
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						</div>
-
-						<div class="chart-panel">
-							<h4>{$t('research.materialDossier.chart.title')}</h4>
-							{#if trendRows.length}
-								{@const trend = trendRows[0]}
-								<div class="mini-chart" aria-label={trend.property}>
-									<div class="chart-scale">
-										<span>{Math.ceil(trend.maxValue)}</span>
-										<span>{Math.round(trend.maxValue * 0.75)}</span>
-										<span>{Math.round(trend.maxValue * 0.5)}</span>
-										<span>0</span>
-									</div>
-									<div class="chart-bars">
-										<div class="chart-bar">
-											<span
-												class="chart-bar__fill chart-bar__fill--primary"
-												style={`height: ${((trend.firstValue ?? 0) / trend.maxValue) * 100}%`}
-											></span>
-											<strong>{trend.firstValue ?? '--'}</strong>
+													{/each}
+												</dl>
+											{:else}
+												<p>{$t('research.materialDossier.chain.noProcessContext')}</p>
+											{/if}
 										</div>
-										<div class="chart-bar">
-											<span
-												class="chart-bar__fill chart-bar__fill--secondary"
-												style={`height: ${((trend.secondValue ?? 0) / trend.maxValue) * 100}%`}
-											></span>
-											<strong>{trend.secondValue ?? '--'}</strong>
+
+										<div class="chain-step">
+											<span>2</span>
+											<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
+											{#if chain.testConditionEntries.length}
+												<dl>
+													{#each chain.testConditionEntries as entry (entry.key)}
+														<div>
+															<dt>{entry.label}</dt>
+															<dd>{entry.value}</dd>
+														</div>
+													{/each}
+												</dl>
+											{:else}
+												<p>{$t('research.materialDossier.chain.noTestConditions')}</p>
+											{/if}
 										</div>
-									</div>
-									<div class="chart-labels">
-										<span>{trend.firstLabel}</span>
-										<span>{trend.secondLabel}</span>
-									</div>
-								</div>
-								<p class="chart-caption">
-									{$t('research.materialDossier.chart.caption')}
-								</p>
-							{:else}
-								<p class="empty-copy">
-									{#if summaryTrendValues.length}
-										{$t('research.materialDossier.chart.summaryOnly', {
-											values: summaryTrendText(summaryTrendValues)
-										})}
-									{:else}
-										{$t('research.materialDossier.chart.empty')}
-									{/if}
-								</p>
-							{/if}
-						</div>
-					</div>
-				</section>
 
-				<section id="performance-results" class="dossier-card">
-					<div class="dossier-section-heading">
-						<span class="section-number">5</span>
-						<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
-						<p>{$t('research.materialDossier.sections.performance.body')}</p>
-					</div>
-
-					<div class="dossier-table-wrapper">
-						<table class="dossier-table dossier-table--wide">
-							<thead>
-								<tr>
-									<th>{$t('research.materialDossier.table.sampleCondition')}</th>
-									<th>{$t('research.materialDossier.table.primaryVariable')}</th>
-									<th>{$t('research.materialDossier.table.processSummary')}</th>
-									{#each propertyColumns as column (column.key)}
-										<th>{column.label}</th>
-									{/each}
-									<th>{$t('research.materialDossier.table.evidenceAnchors')}</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each performanceRows as row, rowIndex (row.row_id)}
-									<tr>
-										<td>
-											<div class="sample-condition">
-												<strong>{sampleDisplayLabel(row, $t, rowIndex)}</strong>
-												<small>{materialProfile.canonical_name}</small>
-											</div>
-										</td>
-										<td>{variableSummary(row, processSummary, $t)}</td>
-										<td>{processBrief(row)}</td>
-										{#each propertyColumns as column (column.key)}
-											{@const value = row.values[column.key]}
-											<td>
-												{#if value}
+										<div class="chain-step chain-step--wide">
+											<span>3</span>
+											<strong>{$t('research.materialDossier.chain.results')}</strong>
+											<div class="chain-metrics">
+												{#each chain.metrics as metric (metric.key)}
 													<button
 														type="button"
-														class="value-button"
-														on:click={() => openValueEvidence(row, column, value)}
+														class:chain-metric--best={metric.isBest}
+														class="chain-metric"
+														on:click={() => openSupportedValue(metric.supportedValue)}
 													>
-														{formatEvidenceBackedValue(value)}
+														<span>{metric.supportedValue.property}</span>
+														<strong>{metric.supportedValue.displayValue}</strong>
+														<small>
+															{metric.isBest
+																? $t('research.materialDossier.chain.bestInMatrix')
+																: $t('research.materialDossier.chain.observed')}
+															· {metric.supportedValue.evidenceCode}
+														</small>
+													</button>
+												{/each}
+											</div>
+										</div>
+									</div>
+
+									<div class="chain-judgement">
+										<div>
+											<strong>{$t('research.materialDossier.chain.whyBest')}</strong>
+											<p>{chain.comparisonSummary}</p>
+											{#if chain.notLeadingProperties.length}
+												<small
+													>{$t('research.materialDossier.chain.notBestFor', {
+														properties: chain.notLeadingProperties.join(', ')
+													})}</small
+												>
+											{/if}
+										</div>
+										<div>
+											<strong>{$t('research.materialDossier.chain.traceback')}</strong>
+											<p>{chain.sourceLocation}</p>
+											<div class="evidence-chip-row">
+												{#each chain.evidenceCodes as code}
+													<button
+														type="button"
+														class="evidence-chip"
+														on:click={() => openEvidenceCode(code)}
+													>
+														{code}
 													</button>
 												{:else}
-													<span class="empty-value">--</span>
-												{/if}
-											</td>
-										{/each}
-										<td>{rowEvidenceLabels(row, propertyColumns, evidenceCodeMap)}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-					<p class="dossier-table-note">
-						{$t('research.materialDossier.performance.summary', {
-							samples: performanceRows.length,
-							properties: propertyColumns.length
-						})}
-					</p>
-				</section>
+													<span class="evidence-chip evidence-chip--muted">--</span>
+												{/each}
+											</div>
+										</div>
+									</div>
+								</article>
+							{:else}
+								<p class="empty-copy">{$t('research.materialDossier.chain.empty')}</p>
+							{/each}
+						</div>
+					</section>
 
-				<section id="evidence-locator" class="dossier-card">
-					<div class="dossier-section-heading">
-						<span class="section-number">6</span>
-						<h3>{$t('research.materialDossier.sections.evidence.title')}</h3>
-						<p>{$t('research.materialDossier.sections.evidence.body')}</p>
-					</div>
+					<section id="key-findings" class="dossier-card dossier-card--findings">
+						<div class="dossier-section-heading">
+							<span class="section-number">2</span>
+							<h3>{$t('research.materialDossier.sections.findings.title')}</h3>
+							<p>{$t('research.materialDossier.sections.findings.body')}</p>
+						</div>
 
-					<div class="dossier-table-wrapper">
-						<table class="dossier-table">
-							<thead>
-								<tr>
-									<th>{$t('research.materialDossier.evidence.code')}</th>
-									<th>{$t('research.materialDossier.evidence.claim')}</th>
-									<th>{$t('research.materialDossier.evidence.type')}</th>
-									<th>{$t('research.materialDossier.evidence.location')}</th>
-									<th>{$t('research.materialDossier.evidence.anchor')}</th>
-									<th>{$t('research.materialDossier.evidence.confidence')}</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each evidenceRows as row (row.key)}
-									<tr>
-										<td>{row.code}</td>
-										<td>
+						<div class="finding-grid">
+							{#each keyFindings as finding, index (finding.key)}
+								<article class="finding-card">
+									<div class="finding-card__header">
+										<span>{index + 1}</span>
+										<div>
+											<h4>{finding.title}</h4>
+											<p>{finding.body}</p>
+										</div>
+									</div>
+									<div class="finding-meta">
+										<span>{finding.type}</span>
+										<span
+											>{$t('research.materialDossier.evidence.confidence')}: {finding.confidence}</span
+										>
+										<span
+											>{$t('research.materialDossier.evidence.anchor')}:
+											{finding.evidenceCodes.join(', ') || '--'}</span
+										>
+									</div>
+									{#if finding.supportedValues.length}
+										<div class="finding-values">
+											{#each finding.supportedValues as value (value.key)}
+												<button type="button" on:click={() => openSupportedValue(value)}>
+													<strong>{value.sample}</strong>
+													<span>{value.property} = {value.displayValue}</span>
+													<small>{value.evidenceCode}</small>
+												</button>
+											{/each}
+										</div>
+									{/if}
+								</article>
+							{:else}
+								<p class="empty-copy">{$t('research.materialDossier.findings.empty')}</p>
+							{/each}
+						</div>
+					</section>
+
+					<section id="material-graph" class="dossier-card material-graph-card">
+						<div class="dossier-section-heading">
+							<span class="section-number">3</span>
+							<h3>{$t('research.materialDossier.sections.graph.title')}</h3>
+							<p>{$t('research.materialDossier.sections.graph.body')}</p>
+						</div>
+
+						<div class="material-graph-map" aria-label={$t('research.materialDossier.graph.label')}>
+							{#each materialGraphColumns as column (column.kind)}
+								<div class={`material-graph-column material-graph-column--${column.kind}`}>
+									<h4>{column.title}</h4>
+									<div class="material-graph-node-list">
+										{#each column.nodes as node (node.id)}
 											<button
 												type="button"
-												class="evidence-row-button"
-												on:click={() => openEvidenceRow(row)}
+												class={`material-graph-node material-graph-node--${node.kind}`}
+												class:active={selectedGraphNodeId === node.id}
+												aria-label={$t('research.materialDossier.graph.selectNode', {
+													label: node.label
+												})}
+												on:click={() => selectGraphNode(node)}
 											>
-												{row.claim}
+												<span>{graphNodeTypeLabel(node.kind, $t)}</span>
+												<strong>{node.label}</strong>
+												<small>{node.meta}</small>
 											</button>
-										</td>
-										<td>{row.type}</td>
-										<td>
-											{#if row.href}
-												<a class="dossier-link" href={row.href}>{row.location}</a>
-											{:else}
-												{row.location}
-											{/if}
-										</td>
-										<td>{row.code}</td>
-										<td>{row.confidence}</td>
-									</tr>
+										{:else}
+											<p class="empty-copy">{$t('research.materialDossier.graph.emptyColumn')}</p>
+										{/each}
+									</div>
+								</div>
+							{/each}
+						</div>
+
+						<div class="material-graph-detail" aria-live="polite">
+							{#if selectedMaterialGraphNode}
+								<div>
+									<span>{graphNodeTypeLabel(selectedMaterialGraphNode.kind, $t)}</span>
+									<h4>{selectedMaterialGraphNode.label}</h4>
+									<p>{selectedMaterialGraphNode.detail}</p>
+								</div>
+								{#if selectedMaterialGraphNode.evidenceCodes.length}
+									<div class="material-graph-evidence">
+										<strong>{$t('research.materialDossier.graph.evidenceAnchors')}</strong>
+										<div class="evidence-chip-row">
+											{#each selectedMaterialGraphNode.evidenceCodes as code}
+												<button
+													type="button"
+													class="evidence-chip"
+													on:click={() => openEvidenceCode(code)}
+												>
+													{code}
+												</button>
+											{/each}
+										</div>
+									</div>
 								{:else}
+									<p class="empty-copy">{$t('research.materialDossier.graph.noEvidence')}</p>
+								{/if}
+							{:else}
+								<p class="empty-copy">{$t('research.materialDossier.graph.selectPrompt')}</p>
+							{/if}
+						</div>
+					</section>
+
+					<section id="trend-comparison" class="dossier-card">
+						<div class="dossier-section-heading">
+							<span class="section-number">4</span>
+							<h3>{$t('research.materialDossier.sections.trends.title')}</h3>
+							<p>{$t('research.materialDossier.sections.trends.body')}</p>
+						</div>
+
+						<div class="trend-grid">
+							<div class="comparison-panel">
+								<h4>{$t('research.materialDossier.comparison.topic')}</h4>
+								<p>
+									{$t('research.materialDossier.comparison.controls', {
+										controlled: processSummary.controlledLabels.join(', ') || '--'
+									})}
+								</p>
+								<div class="dossier-table-wrapper">
+									<table class="dossier-table dossier-table--compact">
+										<thead>
+											<tr>
+												<th>{$t('research.materialDossier.comparison.variable')}</th>
+												<th>{$t('research.materialDossier.comparison.property')}</th>
+												<th>{$t('research.materialDossier.comparison.observation')}</th>
+												<th>{$t('research.materialDossier.comparison.conclusion')}</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each comparisonRows as row (row.key)}
+												<tr>
+													<td>{row.variable}</td>
+													<td>{row.property}</td>
+													<td>
+														<div class="comparison-bars">
+															<span>{row.firstValue ?? '--'}</span>
+															<div class="bar-track">
+																<span
+																	class="bar-fill bar-fill--primary"
+																	style={`width: ${((row.firstValue ?? 0) / row.maxValue) * 100}%`}
+																></span>
+																<span
+																	class="bar-fill bar-fill--secondary"
+																	style={`width: ${((row.secondValue ?? 0) / row.maxValue) * 100}%`}
+																></span>
+															</div>
+															<span>{row.secondValue ?? '--'}</span>
+														</div>
+													</td>
+													<td>{row.conclusion}</td>
+												</tr>
+											{:else}
+												<tr>
+													<td colspan="4" class="empty-cell">
+														{#if summaryTrendValues.length}
+															{$t('research.materialDossier.comparison.summaryOnly', {
+																values: summaryTrendText(summaryTrendValues)
+															})}
+														{:else}
+															{$t('research.materialDossier.comparison.empty')}
+														{/if}
+													</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							</div>
+
+							<div class="chart-panel">
+								<h4>{$t('research.materialDossier.chart.title')}</h4>
+								{#if trendRows.length}
+									{@const trend = trendRows[0]}
+									<div class="mini-chart" aria-label={trend.property}>
+										<div class="chart-scale">
+											<span>{Math.ceil(trend.maxValue)}</span>
+											<span>{Math.round(trend.maxValue * 0.75)}</span>
+											<span>{Math.round(trend.maxValue * 0.5)}</span>
+											<span>0</span>
+										</div>
+										<div class="chart-bars">
+											<div class="chart-bar">
+												<span
+													class="chart-bar__fill chart-bar__fill--primary"
+													style={`height: ${((trend.firstValue ?? 0) / trend.maxValue) * 100}%`}
+												></span>
+												<strong>{trend.firstValue ?? '--'}</strong>
+											</div>
+											<div class="chart-bar">
+												<span
+													class="chart-bar__fill chart-bar__fill--secondary"
+													style={`height: ${((trend.secondValue ?? 0) / trend.maxValue) * 100}%`}
+												></span>
+												<strong>{trend.secondValue ?? '--'}</strong>
+											</div>
+										</div>
+										<div class="chart-labels">
+											<span>{trend.firstLabel}</span>
+											<span>{trend.secondLabel}</span>
+										</div>
+									</div>
+									<p class="chart-caption">
+										{$t('research.materialDossier.chart.caption')}
+									</p>
+								{:else}
+									<p class="empty-copy">
+										{#if summaryTrendValues.length}
+											{$t('research.materialDossier.chart.summaryOnly', {
+												values: summaryTrendText(summaryTrendValues)
+											})}
+										{:else}
+											{$t('research.materialDossier.chart.empty')}
+										{/if}
+									</p>
+								{/if}
+							</div>
+						</div>
+					</section>
+
+					<section id="performance-results" class="dossier-card">
+						<div class="dossier-section-heading">
+							<span class="section-number">5</span>
+							<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
+							<p>{$t('research.materialDossier.sections.performance.body')}</p>
+						</div>
+
+						<div class="dossier-table-wrapper">
+							<table class="dossier-table dossier-table--wide">
+								<thead>
 									<tr>
-										<td colspan="6" class="empty-cell">
-											{$t('research.materialDossier.evidence.empty')}
-										</td>
+										<th>{$t('research.materialDossier.table.sampleCondition')}</th>
+										<th>{$t('research.materialDossier.table.primaryVariable')}</th>
+										<th>{$t('research.materialDossier.table.processSummary')}</th>
+										{#each propertyColumns as column (column.key)}
+											<th>{column.label}</th>
+										{/each}
+										<th>{$t('research.materialDossier.table.evidenceAnchors')}</th>
 									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-					<a class="footer-link" href={resolve('/collections/[id]/evidence', { id: collectionId })}>
-						{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
-					</a>
-				</section>
-			</main>
+								</thead>
+								<tbody>
+									{#each performanceRows as row, rowIndex (row.row_id)}
+										<tr>
+											<td>
+												<div class="sample-condition">
+													<strong>{sampleDisplayLabel(row, $t, rowIndex)}</strong>
+													<small>{materialProfile.canonical_name}</small>
+												</div>
+											</td>
+											<td>{variableSummary(row, processSummary, $t)}</td>
+											<td>{processBrief(row)}</td>
+											{#each propertyColumns as column (column.key)}
+												{@const value = row.values[column.key]}
+												<td>
+													{#if value}
+														<button
+															type="button"
+															class="value-button"
+															on:click={() => openValueEvidence(row, column, value)}
+														>
+															{formatEvidenceBackedValue(value)}
+														</button>
+													{:else}
+														<span class="empty-value">--</span>
+													{/if}
+												</td>
+											{/each}
+											<td>
+												{#each [rowEvidenceSummary(row, propertyColumns, evidenceCodeMap)] as evidenceSummary}
+													{#if evidenceSummary.visibleLabels.length}
+														<div class="matrix-evidence-chips" title={evidenceSummary.title}>
+															{#each evidenceSummary.visibleLabels as code}
+																<button
+																	type="button"
+																	class="evidence-chip"
+																	on:click={() => openEvidenceCode(code)}
+																>
+																	{code}
+																</button>
+															{/each}
+															{#if evidenceSummary.hiddenCount}
+																<span class="evidence-chip evidence-chip--muted">
+																	+{evidenceSummary.hiddenCount} more
+																</span>
+															{/if}
+														</div>
+													{:else}
+														<span class="empty-value">--</span>
+													{/if}
+												{/each}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+						<p class="dossier-table-note">
+							{$t('research.materialDossier.performance.summary', {
+								samples: performanceRows.length,
+								properties: propertyColumns.length
+							})}
+						</p>
+					</section>
+
+					<section id="evidence-locator" class="dossier-card">
+						<div class="dossier-section-heading">
+							<span class="section-number">6</span>
+							<h3>{$t('research.materialDossier.sections.evidence.title')}</h3>
+							<p>{$t('research.materialDossier.sections.evidence.body')}</p>
+						</div>
+
+						<div class="dossier-table-wrapper">
+							<table class="dossier-table">
+								<thead>
+									<tr>
+										<th>{$t('research.materialDossier.evidence.code')}</th>
+										<th>{$t('research.materialDossier.evidence.claim')}</th>
+										<th>{$t('research.materialDossier.evidence.type')}</th>
+										<th>{$t('research.materialDossier.evidence.location')}</th>
+										<th>{$t('research.materialDossier.evidence.anchor')}</th>
+										<th>{$t('research.materialDossier.evidence.confidence')}</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each evidenceRows as row (row.key)}
+										<tr>
+											<td>{row.code}</td>
+											<td>
+												<button
+													type="button"
+													class="evidence-row-button"
+													on:click={() => openEvidenceRow(row)}
+												>
+													{row.claim}
+												</button>
+											</td>
+											<td>{row.type}</td>
+											<td>
+												{#if row.href}
+													<a class="dossier-link" href={row.href}>{row.location}</a>
+												{:else}
+													{row.location}
+												{/if}
+											</td>
+											<td>{row.code}</td>
+											<td>{row.confidence}</td>
+										</tr>
+									{:else}
+										<tr>
+											<td colspan="6" class="empty-cell">
+												{$t('research.materialDossier.evidence.empty')}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+						<a
+							class="footer-link"
+							href={resolve('/collections/[id]/evidence', { id: collectionId })}
+						>
+							{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
+						</a>
+					</section>
+				</main>
 			{:else}
 				<main
 					class="dossier-main dossier-main--narrative"
@@ -2681,7 +2733,11 @@
 									<p>{finding.body}</p>
 									<div class="evidence-chip-row">
 										{#each finding.evidenceCodes as code}
-											<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
+											<button
+												type="button"
+												class="evidence-chip"
+												on:click={() => openEvidenceCode(code)}
+											>
 												{code}
 											</button>
 										{:else}
@@ -2742,7 +2798,10 @@
 								</span>
 							{/each}
 						</div>
-						<a class="footer-link" href={resolve('/collections/[id]/evidence', { id: collectionId })}>
+						<a
+							class="footer-link"
+							href={resolve('/collections/[id]/evidence', { id: collectionId })}
+						>
 							{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
 						</a>
 					</section>
@@ -2768,7 +2827,9 @@
 				>
 					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
 					{#if activeDossierTab === 'structured'}
-						<a href="#best-parameter-chain">1 {$t('research.materialDossier.sections.chain.title')}</a>
+						<a href="#best-parameter-chain"
+							>1 {$t('research.materialDossier.sections.chain.title')}</a
+						>
 						<a href="#key-findings">2 {$t('research.materialDossier.sections.findings.title')}</a>
 						<a href="#material-graph">3 {$t('research.materialDossier.sections.graph.title')}</a>
 						<a href="#trend-comparison">4 {$t('research.materialDossier.sections.trends.title')}</a>
@@ -4050,6 +4111,14 @@
 	.evidence-chip-row {
 		display: flex;
 		flex-wrap: wrap;
+	}
+
+	.matrix-evidence-chips {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 160px;
 	}
 
 	.evidence-chip {

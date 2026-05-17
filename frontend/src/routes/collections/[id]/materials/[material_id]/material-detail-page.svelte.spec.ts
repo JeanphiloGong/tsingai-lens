@@ -459,6 +459,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: '95.4%' }).first())
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('+2 more').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'))
 			.toBeInTheDocument();
@@ -559,7 +560,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Available collection summary values:').first())
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('3 sample(s), 2 measured property column(s).'))
+			.element(browserPage.getByText('1 sample(s), 2 measured property column(s).'))
 			.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
@@ -644,7 +645,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('465 MPa').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Sparse sample 0')).not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('3 sample(s), 4 measured property column(s).'))
+			.element(browserPage.getByText('2 sample(s), 4 measured property column(s).'))
 			.toBeInTheDocument();
 	});
 
@@ -686,7 +687,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('S001 · Alternating strategy A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Low signal 0')).not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('3 sample(s), 5 measured property column(s).'))
+			.element(browserPage.getByText('2 sample(s), 5 measured property column(s).'))
 			.toBeInTheDocument();
 	});
 

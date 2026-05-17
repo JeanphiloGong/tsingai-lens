@@ -954,9 +954,19 @@
 		return processLabel(key, translate);
 	}
 
+	function hasDisplayValue(value: unknown) {
+		if (value === null || value === undefined) return false;
+		const text = String(value).trim();
+		return Boolean(text && text !== '-' && text !== '--');
+	}
+
+	function chainEntryAlias(entry: ChainEntry) {
+		return `${processAlias(entry.label)}:${normalizeForMatch(entry.value)}`;
+	}
+
 	function processChainEntries(row: SampleMatrixRow, translate: Translate): ChainEntry[] {
 		const entries = Object.entries(row.process_context)
-			.filter(([key, value]) => value !== null && value !== undefined && value !== '')
+			.filter(([, value]) => hasDisplayValue(value))
 			.filter(([key]) => !isLikelyTestConditionKey(key))
 			.map(([key]) => ({
 				key,
@@ -982,7 +992,7 @@
 
 	function testConditionEntries(row: SampleMatrixRow, translate: Translate): ChainEntry[] {
 		const fromTestConditions = Object.entries(row.test_condition ?? {})
-			.filter(([key, value]) => value !== null && value !== undefined && value !== '')
+			.filter(([, value]) => hasDisplayValue(value))
 			.filter(([key, value]) => isDisplayableConditionEntry(key, value))
 			.map(([key, value]) => ({
 				key: `test:${key}`,
@@ -990,7 +1000,7 @@
 				value: String(value)
 			}));
 		const fromProcessContext = Object.entries(row.process_context)
-			.filter(([key, value]) => value !== null && value !== undefined && value !== '')
+			.filter(([, value]) => hasDisplayValue(value))
 			.filter(([key]) => isLikelyTestConditionKey(key))
 			.map(([key]) => ({
 				key: `process:${key}`,
@@ -1013,11 +1023,22 @@
 	function uniqueChainEntries(entries: ChainEntry[]) {
 		const seen = new Set<string>();
 		return entries.filter((entry) => {
-			const key = normalizeForMatch(`${entry.label}:${entry.value}`);
+			const key = chainEntryAlias(entry);
 			if (seen.has(key)) return false;
 			seen.add(key);
 			return true;
 		});
+	}
+
+	function chainBackgroundProcessText(row: SampleMatrixRow, translate: Translate) {
+		const entries = processChainEntries(row, translate);
+		if (entries.length) {
+			return joinedList(
+				entries.slice(0, 3).map((entry) => `${entry.label} ${entry.value}`),
+				translate('research.materialDossier.narrative.unspecifiedProcess')
+			);
+		}
+		return translate('research.materialDossier.narrative.unspecifiedProcess');
 	}
 
 	function sourceLocationForValue(value: SupportedValue) {
@@ -1093,16 +1114,12 @@
 		translate: Translate
 	) {
 		const material = profile?.canonical_name || row.material || '--';
-		const processes = joinedList(
-			profile?.overview.process_families ?? [],
-			translate('research.materialDossier.narrative.unspecifiedProcess')
-		);
 		const paper = row.document_id
 			? materialPapers().find((item) => item.document_id === row.document_id)?.title
 			: null;
 		return translate('research.materialDossier.chain.backgroundText', {
 			material,
-			processes,
+			processes: chainBackgroundProcessText(row, translate),
 			paper: paper || translate('research.materialDossier.chain.collectionScope')
 		});
 	}

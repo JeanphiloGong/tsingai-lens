@@ -422,6 +422,12 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Process background').first())
 			.toBeInTheDocument();
 		await expect
+			.element(browserPage.getByText(/Scan strategy Alternating strategy A/).first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/studied through LPBF\/SLM/).first())
+			.not.toBeInTheDocument();
+		await expect
 			.element(browserPage.getByText('ASTM E8').first())
 			.toBeInTheDocument();
 		await expect

@@ -532,8 +532,8 @@ const translations: Record<Language, Translations> = {
 						body: 'Review the samples and how their process conditions differ.'
 					},
 					graph: {
-						title: 'Material graph',
-						body: 'Navigate how this material connects process variables, samples, measured properties, findings, and evidence anchors.'
+						title: 'Research chain map',
+						body: 'Read the strongest sample-level chains as process background, test condition, observed result, and source evidence.'
 					},
 					chain: {
 						title: 'Best parameter chain',
@@ -680,36 +680,10 @@ const translations: Record<Language, Translations> = {
 						'Available collection summary values: {values}. A trend chart needs paired sample values.'
 				},
 				graph: {
-					label: 'Material-scoped relationship graph',
-					selectNode: 'Select graph node {label}',
-					emptyColumn: 'No node yet',
-					selectPrompt:
-						'Select a material, process variable, sample, property, or finding to reveal related evidence anchors.',
-					evidenceAnchors: 'Evidence anchors',
-					noEvidence: 'No evidence anchor is attached to this graph node yet.',
-					materialMeta: '{papers} paper(s), {samples} sample(s), {properties} property group(s)',
-					changedVariable: 'Changed process variable',
-					controlledVariable: 'Controlled process variable',
-					processFamily: 'Process family',
-					processFamilyDetail: 'Process family reported for this material.',
-					bestValue: 'Best observed value: {value} in {sample}',
-					noPropertyValue: 'No observed value yet',
-					propertyUnit: 'Unit: {unit}',
-					propertyNoUnit: 'No unit reported',
-					columns: {
-						material: 'Material',
-						process: 'Process variables',
-						samples: 'Samples',
-						properties: 'Properties',
-						findings: 'Findings'
-					},
-					types: {
-						material: 'Material',
-						process: 'Process',
-						sample: 'Sample',
-						property: 'Property',
-						finding: 'Finding'
-					}
+					label: 'Material-scoped research chain map',
+					chainLabel: 'Chain {index}',
+					sample: 'Sample and paper context',
+					empty: 'No high-signal research chain can be mapped from the current sample matrix yet.'
 				},
 				narrative: {
 					mainLabel: 'Narrative material research dossier',
@@ -2367,7 +2341,7 @@ const translations: Record<Language, Translations> = {
 				noRelations: 'No visible relations for this object.',
 				viewEvidence: 'View evidence',
 				openComparison: 'Open comparison',
-				openMaterialGraph: 'Open material graph',
+				openMaterialGraph: 'Open research chain map',
 				locateSource: 'Locate source',
 				expand: 'Expand neighbors',
 				expanding: 'Expanding...',
@@ -3038,8 +3012,8 @@ const translations: Record<Language, Translations> = {
 						body: '了解有哪些样品及其工艺条件差异。'
 					},
 					graph: {
-						title: '材料图谱',
-						body: '查看该材料如何连接工艺变量、样品、性能、关键发现和证据锚点。'
+						title: '科研链路图',
+						body: '直接查看表现最强的样品级链路：工艺背景、测试条件、观测结果和来源证据。'
 					},
 					chain: {
 						title: '最佳参数链路',
@@ -3179,35 +3153,10 @@ const translations: Record<Language, Translations> = {
 					summaryOnly: '可用集合汇总值：{values}。趋势图需要成对样品数值。'
 				},
 				graph: {
-					label: '材料范围关系图',
-					selectNode: '选择图谱节点 {label}',
-					emptyColumn: '暂无节点',
-					selectPrompt: '选择材料、工艺变量、样品、性能或发现后，这里会显示关联证据锚点。',
-					evidenceAnchors: '证据锚点',
-					noEvidence: '当前图谱节点暂未关联证据锚点。',
-					materialMeta: '{papers} 篇文献，{samples} 个样品，{properties} 组性能',
-					changedVariable: '变化工艺变量',
-					controlledVariable: '控制工艺变量',
-					processFamily: '工艺族',
-					processFamilyDetail: '该材料在文献中报告的工艺族。',
-					bestValue: '最高观测值：{sample} 中的 {value}',
-					noPropertyValue: '暂无观测值',
-					propertyUnit: '单位：{unit}',
-					propertyNoUnit: '未报告单位',
-					columns: {
-						material: '材料',
-						process: '工艺变量',
-						samples: '样品',
-						properties: '性能',
-						findings: '发现'
-					},
-					types: {
-						material: '材料',
-						process: '工艺',
-						sample: '样品',
-						property: '性能',
-						finding: '发现'
-					}
+					label: '材料范围科研链路图',
+					chainLabel: '链路 {index}',
+					sample: '样品与论文背景',
+					empty: '当前样品矩阵还不足以映射高信号科研链路。'
 				},
 				narrative: {
 					mainLabel: '叙事型材料研究档案',
@@ -4793,7 +4742,7 @@ const translations: Record<Language, Translations> = {
 				noRelations: '当前对象暂无可见关系。',
 				viewEvidence: '查看证据',
 				openComparison: '打开比较',
-				openMaterialGraph: '打开材料图谱',
+				openMaterialGraph: '打开科研链路图',
 				locateSource: '定位原文',
 				expand: '展开邻域',
 				expanding: '展开中...',

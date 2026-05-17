@@ -441,7 +441,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Trend interpretation' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Material graph' }))
+			.element(browserPage.getByRole('heading', { name: 'Research chain map' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting data: performance matrix' }))
@@ -468,12 +468,79 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('+2 more').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Chain 1')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Sample and paper context').first())
 			.toBeInTheDocument();
-		await browserPage.getByRole('button', { name: 'Select graph node Hardness' }).click();
-		await expect.element(browserPage.getByText('Unit: HV')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Observed results').nth(1))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('215.6').first())
+			.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
 			).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
+	});
+
+	it('cleans table-origin labels in the research chain map', async () => {
+		const payload: any = materialProfilePayload();
+		payload.sample_matrix.rows = [
+			{
+				row_id: 'row_table_origin',
+				sample_id: 'as_slm_140_100',
+				sample_label: 'as-SLM(140/ 100)',
+				material: '316L stainless steel',
+				process_context: {
+					'Table 2 (continued) > Laser energy density (J/mm3)': '139',
+					'Table 2 (continued) > Laser power (W)': '140',
+					'Table 2 (continued) > Scan speed (mm/s)': '280'
+				},
+				test_condition: {},
+				values: {
+					hardness: {
+						display_value: '198.4 HV',
+						value: '198.4',
+						status: 'observed',
+						confidence: 0.94,
+						evidence_refs: [
+							{
+								evidence_ref_id: 'ev_table_origin_hardness',
+								document_id: 'doc_1',
+								source_kind: 'table',
+								locator: 'Table 2',
+								confidence: 0.94
+							}
+						]
+					}
+				},
+				evidence_refs: []
+			}
+		];
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Research chain map' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('as-SLM(140/100)').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Energy density').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Laser power').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Scan speed').first()).toBeInTheDocument();
+		const processStep = Array.from(document.querySelectorAll('.chain-map-step')).find((step) =>
+			step.textContent?.includes('Process background')
+		);
+		expect(processStep?.textContent).not.toContain('Table 2');
 	});
 
 	it('renders top-level measured property evidence when sample rows have no value cells', async () => {

@@ -139,25 +139,6 @@
 		sourceLocation: string;
 	};
 
-	type MaterialGraphNodeKind = 'material' | 'process' | 'sample' | 'property' | 'finding';
-
-	type MaterialGraphNode = {
-		id: string;
-		kind: MaterialGraphNodeKind;
-		label: string;
-		meta: string;
-		detail: string;
-		evidenceCodes: string[];
-	};
-
-	type MaterialGraph = Record<MaterialGraphNodeKind, MaterialGraphNode[]>;
-
-	type MaterialGraphColumn = {
-		kind: MaterialGraphNodeKind;
-		title: string;
-		nodes: MaterialGraphNode[];
-	};
-
 	const PROCESS_UNITS: Record<string, string> = {
 		laser_power_w: 'W',
 		scan_speed_mm_s: 'mm/s',
@@ -262,7 +243,6 @@
 	let error = '';
 	let loadedKey = '';
 	let activeDossierTab: MaterialDossierTab = 'structured';
-	let selectedGraphNodeId = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: materialId = $page.params.material_id ?? '';
@@ -272,7 +252,6 @@
 	$: propertySummaries = materialProfile?.measured_properties ?? [];
 	$: propertyColumns = materialPropertyColumns(materialProfile, sampleRows, sampleColumns, $t);
 	$: focusedSampleRows = focusedRowsForColumns(sampleRows, propertyColumns);
-	$: graphSampleRows = representativeRowsForGraph(focusedSampleRows, propertyColumns);
 	$: performanceRows = materialPerformanceRows(
 		focusedSampleRows,
 		propertyColumns,
@@ -325,18 +304,7 @@
 		propertySummaries,
 		materialProfile?.canonical_name ?? materialId
 	);
-	$: materialGraph = buildMaterialGraph(
-		materialProfile,
-		graphSampleRows,
-		propertyColumns,
-		processSummary,
-		keyFindings,
-		bestPropertyValues,
-		evidenceCodeMap,
-		$t
-	);
-	$: materialGraphColumns = materialGraphColumnList(materialGraph, $t);
-	$: selectedMaterialGraphNode = findMaterialGraphNode(materialGraph, selectedGraphNodeId);
+	$: chainMapRows = bestParameterChains.slice(0, 3);
 	$: materialTags = buildMaterialTags(materialProfile, $t);
 	$: paperCount = materialProfile?.overview.paper_count || materialPapers().length;
 	$: sampleCount = materialProfile?.overview.sample_count || sampleRows.length;
@@ -367,7 +335,6 @@
 		loading = true;
 		error = '';
 		selectedEvidence = null;
-		selectedGraphNodeId = '';
 		pdfDrawerOpen = false;
 		try {
 			materialProfile = await fetchMaterialResearchView(collectionId, materialId);
@@ -471,6 +438,22 @@
 
 	function normalizeForMatch(value: string) {
 		return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+	}
+
+	function cleanDisplayLabel(value: string) {
+		return value
+			.replace(/\bTable\s+\d+\s*(?:\([^)]*\))?\s*>\s*/gi, '')
+			.replace(/\s+/g, ' ')
+			.trim();
+	}
+
+	function cleanSampleLabel(value: string) {
+		return value
+			.replace(/\(\s+/g, '(')
+			.replace(/\s+\)/g, ')')
+			.replace(/\s*\/\s*/g, '/')
+			.replace(/\s+/g, ' ')
+			.trim();
 	}
 
 	function labelFromColumn(key: string, columns: SampleMatrixColumn[], translate: Translate) {
@@ -589,37 +572,17 @@
 		return focused.length ? focused : rows;
 	}
 
-	function representativeRowsForGraph(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
-		if (rows.length <= 8) return rows;
-		const bestByColumn = bestValueMap(rows, columns);
-		const leaders = rows
-			.map((row, index) => ({
-				row,
-				index,
-				score: rowPerformanceScore(row, columns, bestByColumn)
-			}))
-			.filter((item) => rowLeaderCount(item.row, columns, bestByColumn) > 0)
-			.sort((first, second) => second.score - first.score || first.index - second.index)
-			.slice(0, 8)
-			.sort((first, second) => first.index - second.index)
-			.map((item) => item.row);
-		if (leaders.length) return leaders;
-		return rows
-			.map((row, index) => ({
-				row,
-				index,
-				score: columns.filter((column) => Boolean(row.values[column.key])).length
-			}))
-			.filter((item) => item.score > 0)
-			.sort((first, second) => second.score - first.score || first.index - second.index)
-			.slice(0, 8)
-			.sort((first, second) => first.index - second.index)
-			.map((item) => item.row);
-	}
-
 	function processLabel(key: string, translate: Translate) {
+		const cleanedKey = cleanDisplayLabel(key);
+		const alias = processAlias(cleanedKey);
+		if (alias === 'energy_density') return translate('research.materialDossier.process.energy_density_j_mm3');
+		if (alias === 'scan_speed') return translate('research.materialDossier.process.scan_speed_mm_s');
+		if (alias === 'laser_power') return translate('research.materialDossier.process.laser_power_w');
+		if (alias === 'heat_treatment') return translate('research.materialDossier.process.post_treatment_summary');
+		if (alias === 'preheat') return translate('research.materialDossier.process.preheat_temperature_c');
+		if (alias === 'scan_strategy') return translate('research.materialDossier.process.scan_strategy');
 		const label = translate(`research.materialDossier.process.${key}`);
-		return label.startsWith('research.') ? key.replace(/_/g, ' ') : label;
+		return label.startsWith('research.') ? cleanedKey.replace(/_/g, ' ') : label;
 	}
 
 	function processValue(row: SampleMatrixRow, key: string) {
@@ -685,7 +648,7 @@
 	}
 
 	function sampleDisplayLabel(row: SampleMatrixRow, translate: Translate, index?: number) {
-		const rawLabel = row.sample_label || row.sample_id || '';
+		const rawLabel = cleanSampleLabel(row.sample_label || row.sample_id || '');
 		const condition = sampleConditionLabel(row, translate);
 		if (
 			rawLabel &&
@@ -1757,191 +1720,6 @@
 		return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 	}
 
-	function evidenceCodesFromRefs(refs: EvidenceReference[], codeMap: Map<string, string>) {
-		return uniqueList(
-			refs.map((ref) => evidenceCode(ref, codeMap)).filter((code) => code !== '--')
-		);
-	}
-
-	function rowEvidenceCodes(
-		row: SampleMatrixRow,
-		columns: PropertyColumn[],
-		codeMap: Map<string, string>
-	) {
-		return evidenceCodesFromRefs(
-			columns.flatMap((column) => row.values[column.key]?.evidence_refs ?? []),
-			codeMap
-		);
-	}
-
-	function propertyEvidenceCodes(
-		rows: SampleMatrixRow[],
-		column: PropertyColumn,
-		codeMap: Map<string, string>
-	) {
-		return evidenceCodesFromRefs(
-			rows.flatMap((row) => row.values[column.key]?.evidence_refs ?? []),
-			codeMap
-		);
-	}
-
-	function graphNodeTypeLabel(kind: MaterialGraphNodeKind, translate: Translate) {
-		return translate(`research.materialDossier.graph.types.${kind}`);
-	}
-
-	function selectGraphNode(node: MaterialGraphNode) {
-		selectedGraphNodeId = node.id;
-	}
-
-	function materialGraphColumnList(
-		graph: MaterialGraph,
-		translate: Translate
-	): MaterialGraphColumn[] {
-		return [
-			{
-				kind: 'material',
-				title: translate('research.materialDossier.graph.columns.material'),
-				nodes: graph.material
-			},
-			{
-				kind: 'process',
-				title: translate('research.materialDossier.graph.columns.process'),
-				nodes: graph.process
-			},
-			{
-				kind: 'sample',
-				title: translate('research.materialDossier.graph.columns.samples'),
-				nodes: graph.sample
-			},
-			{
-				kind: 'property',
-				title: translate('research.materialDossier.graph.columns.properties'),
-				nodes: graph.property
-			},
-			{
-				kind: 'finding',
-				title: translate('research.materialDossier.graph.columns.findings'),
-				nodes: graph.finding
-			}
-		];
-	}
-
-	function findMaterialGraphNode(graph: MaterialGraph, nodeId: string) {
-		if (!nodeId) return null;
-		return (
-			Object.values(graph)
-				.flat()
-				.find((node) => node.id === nodeId) ?? null
-		);
-	}
-
-	function buildMaterialGraph(
-		profile: MaterialProfile | null,
-		rows: SampleMatrixRow[],
-		columns: PropertyColumn[],
-		summary: ProcessSummary,
-		findings: KeyFinding[],
-		bestValues: SupportedValue[],
-		codeMap: Map<string, string>,
-		translate: Translate
-	): MaterialGraph {
-		const graph: MaterialGraph = {
-			material: [],
-			process: [],
-			sample: [],
-			property: [],
-			finding: []
-		};
-		if (!profile) return graph;
-
-		graph.material = [
-			{
-				id: 'material:current',
-				kind: 'material',
-				label: profile.canonical_name,
-				meta: translate('research.materialDossier.graph.materialMeta', {
-					papers: profile.overview.paper_count || profile.papers.length,
-					samples: profile.overview.sample_count || rows.length,
-					properties: profile.overview.measured_properties.length || columns.length
-				}),
-				detail: joinedList(profile.aliases, translate('research.emptyValue')),
-				evidenceCodes: []
-			}
-		];
-
-		const processKeys = (
-			summary.changedKeys.length ? summary.changedKeys : summary.controlledKeys
-		).slice(0, 3);
-		graph.process = processKeys.map((key) => {
-			const values = uniqueList(rows.map((row) => processValueWithUnit(row, key))).filter(
-				(value) => value !== '--'
-			);
-			return {
-				id: `process:${key}`,
-				kind: 'process',
-				label: processLabel(key, translate),
-				meta: values.join(' / ') || translate('research.emptyValue'),
-				detail: summary.changedKeys.includes(key)
-					? translate('research.materialDossier.graph.changedVariable')
-					: translate('research.materialDossier.graph.controlledVariable'),
-				evidenceCodes: []
-			};
-		});
-		if (!graph.process.length) {
-			graph.process = profile.overview.process_families.slice(0, 4).map((process) => ({
-				id: `process:${process}`,
-				kind: 'process',
-				label: process,
-				meta: translate('research.materialDossier.graph.processFamily'),
-				detail: translate('research.materialDossier.graph.processFamilyDetail'),
-				evidenceCodes: []
-			}));
-		}
-
-		graph.sample = rows.map((row, index) => ({
-			id: `sample:${row.row_id}`,
-			kind: 'sample',
-			label: sampleDisplayLabel(row, translate, index),
-			meta: variableSummary(row, summary, translate),
-			detail: processBrief(row),
-			evidenceCodes: rowEvidenceCodes(row, columns, codeMap)
-		}));
-
-		graph.property = columns.map((column) => {
-			const best = bestValues.find((value) => value.column.key === column.key);
-			const evidenceCodes = propertyEvidenceCodes(rows, column, codeMap);
-			if (!evidenceCodes.length && best?.evidenceCode && best.evidenceCode !== '--') {
-				evidenceCodes.push(best.evidenceCode);
-			}
-			return {
-				id: `property:${column.key}`,
-				kind: 'property',
-				label: column.shortLabel,
-				meta: best
-					? translate('research.materialDossier.graph.bestValue', {
-							sample: best.sample,
-							value: best.displayValue
-						})
-					: translate('research.materialDossier.graph.noPropertyValue'),
-				detail: column.unit
-					? translate('research.materialDossier.graph.propertyUnit', { unit: column.unit })
-					: translate('research.materialDossier.graph.propertyNoUnit'),
-				evidenceCodes
-			};
-		});
-
-		graph.finding = findings.map((finding) => ({
-			id: `finding:${finding.key}`,
-			kind: 'finding',
-			label: finding.title,
-			meta: `${finding.type} · ${finding.confidence}`,
-			detail: finding.body,
-			evidenceCodes: finding.evidenceCodes
-		}));
-
-		return graph;
-	}
-
 	function joinedList(values: string[], fallback: string) {
 		const cleaned = values.map((value) => value.trim()).filter(Boolean);
 		return cleaned.length ? cleaned.join(', ') : fallback;
@@ -2361,62 +2139,110 @@
 							<p>{$t('research.materialDossier.sections.graph.body')}</p>
 						</div>
 
-						<div class="material-graph-map" aria-label={$t('research.materialDossier.graph.label')}>
-							{#each materialGraphColumns as column (column.kind)}
-								<div class={`material-graph-column material-graph-column--${column.kind}`}>
-									<h4>{column.title}</h4>
-									<div class="material-graph-node-list">
-										{#each column.nodes as node (node.id)}
-											<button
-												type="button"
-												class={`material-graph-node material-graph-node--${node.kind}`}
-												class:active={selectedGraphNodeId === node.id}
-												aria-label={$t('research.materialDossier.graph.selectNode', {
-													label: node.label
-												})}
-												on:click={() => selectGraphNode(node)}
+						{#if chainMapRows.length}
+							<div class="chain-map" aria-label={$t('research.materialDossier.graph.label')}>
+								{#each chainMapRows as chain, index (chain.key)}
+									<article class="chain-map-card">
+										<div class="chain-map-card__header">
+											<span
+												>{$t('research.materialDossier.graph.chainLabel', {
+													index: index + 1
+												})}</span
 											>
-												<span>{graphNodeTypeLabel(node.kind, $t)}</span>
-												<strong>{node.label}</strong>
-												<small>{node.meta}</small>
-											</button>
-										{:else}
-											<p class="empty-copy">{$t('research.materialDossier.graph.emptyColumn')}</p>
-										{/each}
-									</div>
-								</div>
-							{/each}
-						</div>
-
-						<div class="material-graph-detail" aria-live="polite">
-							{#if selectedMaterialGraphNode}
-								<div>
-									<span>{graphNodeTypeLabel(selectedMaterialGraphNode.kind, $t)}</span>
-									<h4>{selectedMaterialGraphNode.label}</h4>
-									<p>{selectedMaterialGraphNode.detail}</p>
-								</div>
-								{#if selectedMaterialGraphNode.evidenceCodes.length}
-									<div class="material-graph-evidence">
-										<strong>{$t('research.materialDossier.graph.evidenceAnchors')}</strong>
-										<div class="evidence-chip-row">
-											{#each selectedMaterialGraphNode.evidenceCodes as code}
-												<button
-													type="button"
-													class="evidence-chip"
-													on:click={() => openEvidenceCode(code)}
-												>
-													{code}
-												</button>
-											{/each}
+											<h4>{chain.sampleLabel}</h4>
+											<p>{chain.comparisonSummary}</p>
 										</div>
-									</div>
-								{:else}
-									<p class="empty-copy">{$t('research.materialDossier.graph.noEvidence')}</p>
-								{/if}
-							{:else}
-								<p class="empty-copy">{$t('research.materialDossier.graph.selectPrompt')}</p>
-							{/if}
-						</div>
+
+										<div class="chain-map-grid">
+											<div class="chain-map-step">
+												<span>1</span>
+												<strong>{$t('research.materialDossier.graph.sample')}</strong>
+												<p>{chain.background}</p>
+											</div>
+
+											<div class="chain-map-step">
+												<span>2</span>
+												<strong>{$t('research.materialDossier.chain.processContext')}</strong>
+												{#if chain.processEntries.length}
+													<dl>
+														{#each chain.processEntries.slice(0, 4) as entry (entry.key)}
+															<div>
+																<dt>{entry.label}</dt>
+																<dd>{entry.value}</dd>
+															</div>
+														{/each}
+													</dl>
+												{:else}
+													<p>{$t('research.materialDossier.chain.noProcessContext')}</p>
+												{/if}
+											</div>
+
+											<div class="chain-map-step">
+												<span>3</span>
+												<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
+												{#if chain.testConditionEntries.length}
+													<dl>
+														{#each chain.testConditionEntries.slice(0, 3) as entry (entry.key)}
+															<div>
+																<dt>{entry.label}</dt>
+																<dd>{entry.value}</dd>
+															</div>
+														{/each}
+													</dl>
+												{:else}
+													<p>{$t('research.materialDossier.chain.noTestConditions')}</p>
+												{/if}
+											</div>
+
+											<div class="chain-map-step chain-map-step--result">
+												<span>4</span>
+												<strong>{$t('research.materialDossier.chain.results')}</strong>
+												<div class="chain-map-results">
+													{#each chain.metrics.slice(0, 4) as metric (metric.key)}
+														<button
+															type="button"
+															class:chain-map-result--best={metric.isBest}
+															class="chain-map-result"
+															on:click={() => openSupportedValue(metric.supportedValue)}
+														>
+															<small>{metric.supportedValue.property}</small>
+															<strong>{metric.supportedValue.displayValue}</strong>
+															<span>
+																{metric.isBest
+																	? $t('research.materialDossier.chain.bestInMatrix')
+																	: $t('research.materialDossier.chain.observed')}
+																· {metric.supportedValue.evidenceCode}
+															</span>
+														</button>
+													{/each}
+												</div>
+											</div>
+
+											<div class="chain-map-step chain-map-step--evidence">
+												<span>5</span>
+												<strong>{$t('research.materialDossier.chain.traceback')}</strong>
+												<p>{chain.sourceLocation}</p>
+												<div class="evidence-chip-row">
+													{#each chain.evidenceCodes as code}
+														<button
+															type="button"
+															class="evidence-chip"
+															on:click={() => openEvidenceCode(code)}
+														>
+															{code}
+														</button>
+													{:else}
+														<span class="evidence-chip evidence-chip--muted">--</span>
+													{/each}
+												</div>
+											</div>
+										</div>
+									</article>
+								{/each}
+							</div>
+						{:else}
+							<p class="empty-copy">{$t('research.materialDossier.graph.empty')}</p>
+						{/if}
 					</section>
 
 					<section id="trend-comparison" class="dossier-card">
@@ -3632,90 +3458,29 @@
 		gap: 14px;
 	}
 
-	.material-graph-map {
+	.chain-map {
 		display: grid;
-		grid-template-columns: repeat(5, minmax(0, 1fr));
-		gap: 10px;
-		align-items: stretch;
-		overflow-x: auto;
-		padding-bottom: 2px;
+		gap: 12px;
 	}
 
-	.material-graph-column {
-		position: relative;
-		min-width: 170px;
+	.chain-map-card {
 		display: grid;
-		align-content: start;
-		gap: 8px;
-		padding: 10px;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		background: #fbfdff;
+		gap: 12px;
+		padding: 14px;
+		border: 1px solid #dbeafe;
+		border-radius: 10px;
+		background: #ffffff;
 	}
 
-	.material-graph-column:not(:last-child)::after {
-		content: '';
-		position: absolute;
-		right: -8px;
-		top: 42px;
-		width: 14px;
-		height: 2px;
-		background: #cbd5e1;
-		z-index: 1;
-	}
-
-	.material-graph-column h4 {
-		margin: 0;
-		color: #0f172a;
-		font-size: 13px;
-		font-weight: 800;
-		line-height: 20px;
-	}
-
-	.material-graph-node-list {
-		display: grid;
-		gap: 8px;
-	}
-
-	.material-graph-node {
+	.chain-map-card__header {
 		display: grid;
 		gap: 4px;
-		min-height: 82px;
-		padding: 10px;
-		border: 1px solid #dbeafe;
-		border-radius: 8px;
-		background: #ffffff;
-		color: #0f172a;
-		text-align: left;
-		cursor: pointer;
 	}
 
-	.material-graph-node:hover,
-	.material-graph-node.active {
-		border-color: #2563eb;
-		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-	}
-
-	.material-graph-node--process {
-		border-color: #bae6fd;
-	}
-
-	.material-graph-node--sample {
-		border-color: #bbf7d0;
-	}
-
-	.material-graph-node--property {
-		border-color: #a5f3fc;
-	}
-
-	.material-graph-node--finding {
-		border-color: #fed7aa;
-	}
-
-	.material-graph-node span {
+	.chain-map-card__header span {
 		width: max-content;
 		max-width: 100%;
-		padding: 2px 7px;
+		padding: 2px 8px;
 		border-radius: 999px;
 		background: #eff6ff;
 		color: #2563eb;
@@ -3724,69 +3489,135 @@
 		line-height: 16px;
 	}
 
-	.material-graph-node strong {
-		color: #0f172a;
-		font-size: 13px;
-		line-height: 18px;
-		overflow-wrap: anywhere;
-	}
-
-	.material-graph-node small {
-		color: #64748b;
-		font-size: 12px;
-		line-height: 17px;
-		overflow-wrap: anywhere;
-	}
-
-	.material-graph-detail {
-		display: grid;
-		gap: 10px;
-		padding: 12px;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		background: #f8fafc;
-	}
-
-	.material-graph-detail > div:first-child {
-		display: grid;
-		gap: 4px;
-	}
-
-	.material-graph-detail span {
-		width: max-content;
-		padding: 2px 7px;
-		border-radius: 999px;
-		background: #e0f2fe;
-		color: #0369a1;
-		font-size: 11px;
-		font-weight: 800;
-		line-height: 16px;
-	}
-
-	.material-graph-detail h4 {
+	.chain-map-card__header h4 {
 		margin: 0;
 		color: #0f172a;
-		font-size: 15px;
+		font-size: 16px;
 		font-weight: 800;
-		line-height: 22px;
+		line-height: 24px;
+		overflow-wrap: anywhere;
 	}
 
-	.material-graph-detail p {
+	.chain-map-card__header p,
+	.chain-map-step p {
 		margin: 0;
 		color: #475569;
 		font-size: 13px;
 		line-height: 20px;
 	}
 
-	.material-graph-evidence {
+	.chain-map-grid {
 		display: grid;
-		gap: 8px;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: 10px;
 	}
 
-	.material-graph-evidence strong {
+	.chain-map-step {
+		display: grid;
+		align-content: start;
+		gap: 8px;
+		padding: 12px;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		background: #f8fafc;
+	}
+
+	.chain-map-step--result,
+	.chain-map-step--evidence {
+		grid-column: 1 / -1;
+	}
+
+	.chain-map-step > span {
+		width: 22px;
+		height: 22px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 7px;
+		background: #dbeafe;
+		color: #1d4ed8;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 18px;
+	}
+
+	.chain-map-step > strong {
 		color: #0f172a;
 		font-size: 13px;
 		line-height: 20px;
+	}
+
+	.chain-map-step dl {
+		display: grid;
+		gap: 6px;
+		margin: 0;
+	}
+
+	.chain-map-step dl div {
+		display: grid;
+		grid-template-columns: minmax(90px, 0.42fr) minmax(0, 1fr);
+		gap: 8px;
+	}
+
+	.chain-map-step dt {
+		margin: 0;
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.chain-map-step dd {
+		margin: 0;
+		color: #0f172a;
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 20px;
+		overflow-wrap: anywhere;
+	}
+
+	.chain-map-results {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.chain-map-result {
+		display: grid;
+		gap: 2px;
+		min-width: 150px;
+		padding: 9px 10px;
+		border: 1px solid #dbeafe;
+		border-radius: 8px;
+		background: #ffffff;
+		color: #0f172a;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.chain-map-result:hover,
+	.chain-map-result--best {
+		border-color: #2563eb;
+		background: #eff6ff;
+	}
+
+	.chain-map-result small,
+	.chain-map-result span {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.chain-map-result strong {
+		color: #0f172a;
+		font-size: 16px;
+		font-weight: 800;
+		line-height: 22px;
+	}
+
+	.chain-map-result--best span {
+		color: #2563eb;
+		font-weight: 800;
 	}
 
 	.dossier-table-wrapper {
@@ -4405,10 +4236,10 @@
 	:root[data-theme='dark'] .aside-card h3,
 	:root[data-theme='dark'] .comparison-panel h4,
 	:root[data-theme='dark'] .chart-panel h4,
-	:root[data-theme='dark'] .material-graph-column h4,
-	:root[data-theme='dark'] .material-graph-node strong,
-	:root[data-theme='dark'] .material-graph-detail h4,
-	:root[data-theme='dark'] .material-graph-evidence strong,
+	:root[data-theme='dark'] .chain-map-card__header h4,
+	:root[data-theme='dark'] .chain-map-step > strong,
+	:root[data-theme='dark'] .chain-map-step dd,
+	:root[data-theme='dark'] .chain-map-result strong,
 	:root[data-theme='dark'] .detail-drawer h3,
 	:root[data-theme='dark'] .dossier-table th,
 	:root[data-theme='dark'] .dossier-table td,
@@ -4443,9 +4274,9 @@
 	:root[data-theme='dark'] .best-value-card,
 	:root[data-theme='dark'] .narrative-comparison-card div,
 	:root[data-theme='dark'] .narrative-finding,
-	:root[data-theme='dark'] .material-graph-column,
-	:root[data-theme='dark'] .material-graph-node,
-	:root[data-theme='dark'] .material-graph-detail,
+	:root[data-theme='dark'] .chain-map-card,
+	:root[data-theme='dark'] .chain-map-step,
+	:root[data-theme='dark'] .chain-map-result,
 	:root[data-theme='dark'] .mini-chart {
 		border-color: var(--border-default);
 		background: var(--surface-card);
@@ -4478,8 +4309,11 @@
 	:root[data-theme='dark'] .narrative-lede,
 	:root[data-theme='dark'] .narrative-section-heading p,
 	:root[data-theme='dark'] .narrative-finding p,
-	:root[data-theme='dark'] .material-graph-node small,
-	:root[data-theme='dark'] .material-graph-detail p,
+	:root[data-theme='dark'] .chain-map-card__header p,
+	:root[data-theme='dark'] .chain-map-step p,
+	:root[data-theme='dark'] .chain-map-step dt,
+	:root[data-theme='dark'] .chain-map-result small,
+	:root[data-theme='dark'] .chain-map-result span,
 	:root[data-theme='dark'] .empty-value,
 	:root[data-theme='dark'] .empty-copy,
 	:root[data-theme='dark'] .empty-cell {
@@ -4492,14 +4326,14 @@
 			grid-template-columns: 1fr;
 		}
 
-		.material-graph-map {
-			grid-template-columns: repeat(5, minmax(170px, 1fr));
-		}
-
 		.parameter-chain__header,
 		.chain-judgement,
-		.chain-steps {
+		.chain-steps,
+		.chain-map-grid,
+		.chain-map-step--result,
+		.chain-map-step--evidence {
 			grid-template-columns: 1fr;
+			grid-column: auto;
 		}
 
 		.dossier-aside {

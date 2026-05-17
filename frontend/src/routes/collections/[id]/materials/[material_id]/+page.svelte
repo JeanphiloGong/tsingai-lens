@@ -143,6 +143,22 @@
 		'hatch_spacing_um',
 		'laser_power_w'
 	];
+	const PROCESS_SUMMARY_KEYS = [
+		'energy_density_j_mm3',
+		'energy density',
+		'volumetric energy density',
+		'laser energy density (j/ mm 3 )',
+		'scan_speed_mm_s',
+		'scan speed (mm/s)',
+		'laser_power_w',
+		'laser power',
+		'preheat_temperature_c',
+		'build platform conditions',
+		'type of heat treatment',
+		'post_treatment_summary',
+		'scan_strategy',
+		'scan strategy'
+	];
 
 	const PREFERRED_PROPERTY_GROUPS = [
 		{
@@ -541,6 +557,41 @@
 		return unit ? `${value} ${unit}` : value;
 	}
 
+	function isMainProcessKey(key: string) {
+		const normalized = key.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+		return PROCESS_SUMMARY_KEYS.some((candidate) => normalized === candidate);
+	}
+
+	function mainProcessKeys(rows: SampleMatrixRow[]) {
+		const selected: string[] = [];
+		const aliases = new Set<string>();
+		const keys = Array.from(
+			new Set(rows.flatMap((row) => Object.keys(row.process_context)))
+		).filter(
+			(key) => isMainProcessKey(key) && rows.some((row) => processValue(row, key) !== '--')
+		);
+		for (const key of keys) {
+			const alias = processAlias(key);
+			if (aliases.has(alias)) continue;
+			aliases.add(alias);
+			selected.push(key);
+		}
+		return selected.slice(0, 3);
+	}
+
+	function processAlias(key: string) {
+		const normalized = key.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+		if (normalized.includes('energy density')) return 'energy_density';
+		if (normalized.includes('scan speed')) return 'scan_speed';
+		if (normalized.includes('laser power')) return 'laser_power';
+		if (normalized.includes('heat treatment') || normalized.includes('post treatment')) {
+			return 'heat_treatment';
+		}
+		if (normalized.includes('preheat') || normalized.includes('build platform')) return 'preheat';
+		if (normalized.includes('scan strategy')) return 'scan_strategy';
+		return normalized;
+	}
+
 	function sampleConditionLabel(row: SampleMatrixRow, translate: Translate) {
 		const candidates = [
 			row.variable_value ? String(row.variable_value) : '',
@@ -576,9 +627,14 @@
 
 	function variableSummary(row: SampleMatrixRow, summary: ProcessSummary, translate: Translate) {
 		if (summary.changedKeys.length) {
-			return summary.changedKeys
-				.map((key) => `${processLabel(key, translate)} = ${processValueWithUnit(row, key)}`)
-				.join('; ');
+			const parts = summary.changedKeys
+				.map((key) => {
+					const value = processValueWithUnit(row, key);
+					if (value === '--') return '';
+					return `${processLabel(key, translate)} = ${value}`;
+				})
+				.filter(Boolean);
+			if (parts.length) return parts.join('; ');
 		}
 		if (row.variable_axis && row.variable_value !== null) {
 			return `${row.variable_axis} = ${row.variable_value}`;
@@ -587,16 +643,16 @@
 	}
 
 	function processBrief(row: SampleMatrixRow) {
-		const parts = PROCESS_BRIEF_KEYS.map((key) => processValueWithUnit(row, key)).filter(
-			(value) => value !== '--'
-		);
+		const keys = mainProcessKeys([row]);
+		const parts = (keys.length ? keys : PROCESS_BRIEF_KEYS)
+			.slice(0, 3)
+			.map((key) => processValueWithUnit(row, key))
+			.filter((value) => value !== '--');
 		return parts.join(' · ') || '--';
 	}
 
 	function buildProcessSummary(rows: SampleMatrixRow[], translate: Translate): ProcessSummary {
-		const keys = Array.from(
-			new Set(rows.flatMap((row) => Object.keys(row.process_context)))
-		).filter((key) => rows.some((row) => processValue(row, key) !== '--'));
+		const keys = mainProcessKeys(rows);
 		const controlledKeys: string[] = [];
 		const changedKeys: string[] = [];
 		const controlledLabels: string[] = [];
@@ -615,14 +671,16 @@
 				changedLabels.push(processLabel(key, translate));
 			}
 		}
+		const visibleChangedKeys = changedKeys.slice(0, 3);
+		const visibleChangedLabels = changedLabels.slice(0, 3);
 
 		return {
 			controlledKeys,
 			controlledLabels,
-			changedKeys,
-			changedLabels,
+			changedKeys: visibleChangedKeys,
+			changedLabels: visibleChangedLabels,
 			changedVariable:
-				changedLabels[0] || translate('research.materialDossier.comparison.defaultVariable')
+				visibleChangedLabels[0] || translate('research.materialDossier.comparison.defaultVariable')
 		};
 	}
 
@@ -1419,7 +1477,10 @@
 			}
 		];
 
-		const processKeys = summary.changedKeys.length ? summary.changedKeys : summary.controlledKeys;
+		const processKeys = (summary.changedKeys.length ? summary.changedKeys : summary.controlledKeys).slice(
+			0,
+			3
+		);
 		graph.process = processKeys.map((key) => {
 			const values = uniqueList(rows.map((row) => processValueWithUnit(row, key))).filter(
 				(value) => value !== '--'

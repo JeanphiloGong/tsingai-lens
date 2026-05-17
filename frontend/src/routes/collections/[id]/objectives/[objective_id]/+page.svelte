@@ -50,6 +50,14 @@
 		bodyKey: string;
 	};
 
+	type ScientificJudgementItem = {
+		id: string;
+		title: string;
+		body: string;
+		meta: string[];
+		unit: ObjectiveEvidenceUnit;
+	};
+
 	type ResearchFocusGroup = {
 		labelKey: string;
 		items: string[];
@@ -67,8 +75,15 @@
 		count: number;
 	};
 
-	const evidenceKindOrder = ['measurement', 'test_condition', 'characterization', 'comparison'];
+	const evidenceKindOrder = [
+		'measurement',
+		'test_condition',
+		'characterization',
+		'comparison',
+		'interpretation'
+	];
 	const EVIDENCE_GROUP_PREVIEW_LIMIT = 6;
+	const SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT = 3;
 
 	let objectiveView: ObjectiveResearchView | null = null;
 	let loading = false;
@@ -112,6 +127,8 @@
 	$: researchFocusGroups = objectiveView ? buildResearchFocusGroups(objectiveView) : [];
 	$: evidenceReadinessItems = objectiveView ? buildEvidenceReadinessItems(objectiveView) : [];
 	$: comparisonReadiness = objectiveView ? buildComparisonReadiness(objectiveView) : null;
+	$: controlledComparisonItems = buildControlledComparisonItems(evidenceUnits);
+	$: mechanismInterpretationItems = buildMechanismInterpretationItems(evidenceUnits);
 	$: representativeEvidenceUnits = buildRepresentativeEvidenceUnits(evidenceUnits);
 	$: selectedEvidenceUnit =
 		(selectedEvidenceUnitId
@@ -279,6 +296,7 @@
 		if (kind === 'characterization')
 			return 'research.objectiveWorkspace.characterizationObservations';
 		if (kind === 'comparison') return 'research.objectiveWorkspace.comparisonEvidence';
+		if (kind === 'interpretation') return 'research.objectiveWorkspace.authorInterpretations';
 		return 'research.objectiveWorkspace.otherEvidence';
 	}
 
@@ -491,6 +509,87 @@
 			titleKey: 'research.objectiveWorkspace.comparisonPendingTitle',
 			bodyKey: 'research.objectiveWorkspace.comparisonPendingBody'
 		};
+	}
+
+	function comparisonDirectionLabel(value: unknown) {
+		const direction = displayValue(value).toLowerCase();
+		if (direction === 'increase') return $t('research.objectiveWorkspace.directionIncrease');
+		if (direction === 'decrease') return $t('research.objectiveWorkspace.directionDecrease');
+		if (direction === 'no_change') return $t('research.objectiveWorkspace.directionNoChange');
+		return direction || $t('research.objectiveWorkspace.directionObserved');
+	}
+
+	function valueWithUnit(value: unknown, unit: string | null) {
+		const text = displayValue(value);
+		if (!text) return '';
+		if (!unit || text.includes(unit)) return text;
+		return `${text} ${unit}`;
+	}
+
+	function controlledAxesSummary(unit: ObjectiveEvidenceUnit) {
+		const axes = displayValue(unit.value_payload.controlled_axes);
+		return axes ? $t('research.objectiveWorkspace.controlledAxes', { axes }) : '';
+	}
+
+	function comparisonBody(unit: ObjectiveEvidenceUnit) {
+		const statement = displayValue(unit.value_payload.statement) || displayValue(unit.interpretation);
+		if (statement) return statement;
+		const property = unit.property_normalized || $t('research.objectiveWorkspace.measurementResults');
+		const current = valueWithUnit(
+			unit.value_payload.current_value ?? unit.value_payload.value,
+			unit.unit
+		);
+		const baseline = valueWithUnit(unit.baseline_context.value, unit.unit);
+		if (current && baseline) {
+			return $t('research.objectiveWorkspace.comparisonGeneratedBody', {
+				property,
+				current,
+				baseline,
+				direction: comparisonDirectionLabel(unit.value_payload.direction)
+			});
+		}
+		return evidenceUnitValue(unit);
+	}
+
+	function judgementMeta(unit: ObjectiveEvidenceUnit, extra: string[] = []) {
+		return [
+			...extra,
+			...evidenceCardFacts(unit),
+			evidenceCardSourceLabel(unit.document_id),
+			confidenceLabel(unit.confidence)
+		]
+			.filter(Boolean)
+			.slice(0, 5);
+	}
+
+	function buildControlledComparisonItems(units: ObjectiveEvidenceUnit[]): ScientificJudgementItem[] {
+		return units
+			.filter((unit) => unit.unit_kind === 'comparison')
+			.sort((left, right) => right.confidence - left.confidence)
+			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT)
+			.map((unit) => ({
+				id: unit.evidence_unit_id,
+				title: unit.property_normalized || $t('research.objectiveWorkspace.comparisonEvidence'),
+				body: comparisonBody(unit),
+				meta: judgementMeta(unit, [controlledAxesSummary(unit)]),
+				unit
+			}));
+	}
+
+	function buildMechanismInterpretationItems(
+		units: ObjectiveEvidenceUnit[]
+	): ScientificJudgementItem[] {
+		return units
+			.filter((unit) => unit.unit_kind === 'interpretation')
+			.sort((left, right) => right.confidence - left.confidence)
+			.slice(0, SCIENTIFIC_JUDGEMENT_PREVIEW_LIMIT)
+			.map((unit) => ({
+				id: unit.evidence_unit_id,
+				title: unit.property_normalized || $t('research.objectiveWorkspace.authorInterpretations'),
+				body: displayValue(unit.interpretation) || evidenceUnitValue(unit),
+				meta: judgementMeta(unit),
+				unit
+			}));
 	}
 
 	function buildRepresentativeEvidenceUnits(units: ObjectiveEvidenceUnit[]) {
@@ -781,6 +880,59 @@
 						<p>{$t(comparisonReadiness.bodyKey)}</p>
 					</div>
 				{/if}
+
+				<div
+					class="scientific-judgement-grid"
+					aria-label={$t('research.objectiveWorkspace.scientificJudgements')}
+				>
+					<section>
+						<div class="scientific-judgement-grid__heading">
+							<h4>{$t('research.objectiveWorkspace.controlledComparisons')}</h4>
+							<span>{controlledComparisonItems.length}</span>
+						</div>
+						{#if controlledComparisonItems.length}
+							<div class="judgement-list">
+								{#each controlledComparisonItems as item (item.id)}
+									<button type="button" on:click={() => focusEvidenceUnit(item.unit)}>
+										<strong>{item.title}</strong>
+										<p>{item.body}</p>
+										{#if item.meta.length}
+											<small>{item.meta.join(' · ')}</small>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<p class="judgement-empty">
+								{$t('research.objectiveWorkspace.noControlledComparisons')}
+							</p>
+						{/if}
+					</section>
+
+					<section>
+						<div class="scientific-judgement-grid__heading">
+							<h4>{$t('research.objectiveWorkspace.mechanismInterpretations')}</h4>
+							<span>{mechanismInterpretationItems.length}</span>
+						</div>
+						{#if mechanismInterpretationItems.length}
+							<div class="judgement-list">
+								{#each mechanismInterpretationItems as item (item.id)}
+									<button type="button" on:click={() => focusEvidenceUnit(item.unit)}>
+										<strong>{item.title}</strong>
+										<p>{item.body}</p>
+										{#if item.meta.length}
+											<small>{item.meta.join(' · ')}</small>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<p class="judgement-empty">
+								{$t('research.objectiveWorkspace.noMechanismInterpretations')}
+							</p>
+						{/if}
+					</section>
+				</div>
 
 				{#if representativeEvidenceUnits.length}
 					<div class="representative-evidence">
@@ -1396,6 +1548,7 @@
 	.objective-summary-list,
 	.collection-conclusion,
 	.research-focus,
+	.scientific-judgement-grid,
 	.representative-evidence,
 	.evidence-group-list,
 	.evidence-group,
@@ -1498,6 +1651,7 @@
 	}
 
 	.research-focus h4,
+	.scientific-judgement-grid h4,
 	.representative-evidence h4,
 	.comparison-readiness h4 {
 		margin: 0;
@@ -1513,11 +1667,73 @@
 	}
 
 	.research-focus__grid div,
+	.scientific-judgement-grid section,
 	.comparison-readiness {
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
 		padding: 12px;
 		background: var(--bg-subtle);
+	}
+
+	.scientific-judgement-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.scientific-judgement-grid section,
+	.judgement-list {
+		display: grid;
+		gap: 10px;
+	}
+
+	.scientific-judgement-grid__heading {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 10px;
+	}
+
+	.scientific-judgement-grid__heading span {
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 8px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 16px;
+		background: var(--surface-card);
+	}
+
+	.judgement-list button {
+		display: grid;
+		gap: 5px;
+		width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 11px;
+		text-align: left;
+		background: var(--surface-card);
+		cursor: pointer;
+		font: inherit;
+	}
+
+	.judgement-list button:hover {
+		border-color: var(--color-accent);
+	}
+
+	.judgement-list strong {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 20px;
+	}
+
+	.judgement-list p,
+	.judgement-list small,
+	.judgement-empty {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+		overflow-wrap: anywhere;
 	}
 
 	.research-focus__grid p {
@@ -2071,6 +2287,7 @@
 		.supporting-evidence-list,
 		.evidence-unit-list,
 		.evidence-readiness,
+		.scientific-judgement-grid,
 		.research-focus__grid,
 		.representative-evidence__list,
 		.paper-contribution-card__metrics,

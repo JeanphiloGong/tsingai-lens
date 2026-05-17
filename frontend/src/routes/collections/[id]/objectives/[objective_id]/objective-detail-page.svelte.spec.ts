@@ -200,6 +200,19 @@ function objectivePayload() {
 				source_refs: [],
 				resolution_status: 'resolved',
 				confidence: 0.79
+			},
+			{
+				evidence_unit_id: 'unit_interpretation',
+				objective_id: 'obj_1',
+				document_id: 'doc_1',
+				unit_kind: 'interpretation',
+				property_normalized: 'strength mechanism',
+				value_payload: {},
+				interpretation:
+					'Annealing changes the cellular substructure, which the authors link to the tensile response.',
+				source_refs: [],
+				resolution_status: 'resolved',
+				confidence: 0.77
 			}
 		],
 		logic_chain: {
@@ -265,6 +278,21 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Controlled comparison is ready' }))
 			.toBeInTheDocument();
 		await expect
+			.element(browserPage.getByRole('heading', { name: 'Controlled comparisons' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Mechanism interpretations' }))
+			.toBeInTheDocument();
+		const judgementCards = document.querySelector('.scientific-judgement-grid');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.toContain('Heat-treated samples exceeded the as-built baseline.');
+		await expect
+			.poll(() => judgementCards?.textContent ?? '')
+			.toContain(
+				'Annealing changes the cellular substructure, which the authors link to the tensile response.'
+			);
+		await expect
 			.element(browserPage.getByRole('heading', { name: 'Representative evidence' }))
 			.toBeInTheDocument();
 		await expect
@@ -303,7 +331,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(contributionMap.getByText('4')).toBeInTheDocument();
+		await expect.element(contributionMap.getByText('5')).toBeInTheDocument();
 
 		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' });
 		await expect

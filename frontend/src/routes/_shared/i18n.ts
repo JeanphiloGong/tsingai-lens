@@ -504,7 +504,7 @@ const translations: Record<Language, Translations> = {
 				title: 'Material research dossier',
 				mainLabel: 'Material research dossier content',
 				subtitle:
-					'This page consolidates samples, process parameters, performance results, comparisons, and evidence sources for the selected material.',
+					'A material report that keeps each result tied to its preparation state, test condition, evidence, and comparability boundary.',
 				tabs: {
 					label: 'Material dossier view',
 					structured: 'Structured dossier',
@@ -523,6 +523,10 @@ const translations: Record<Language, Translations> = {
 					exportCsv: 'Export data CSV'
 				},
 				sections: {
+					overview: {
+						title: 'Material report overview',
+						body: '{material} appears mainly in {processes} studies. Results are organized by material state, test condition, performance response, and source evidence rather than one cross-paper parameter ranking.'
+					},
 					findings: {
 						title: 'Key findings',
 						body: 'Evidence-backed conclusions derived from the sample values and source anchors.'
@@ -532,20 +536,24 @@ const translations: Record<Language, Translations> = {
 						body: 'Review the samples and how their process conditions differ.'
 					},
 					graph: {
-						title: 'Research chain map',
-						body: 'Read the strongest sample-level chains as process background, test condition, observed result, and source evidence.'
+						title: 'Material state map',
+						body: 'Read sample-level states as preparation, test condition, observed response, and source evidence.'
 					},
 					chain: {
-						title: 'Best parameter chain',
-						body: 'Start from the strongest parameter set, then inspect the background, process context, test conditions, results, comparison basis, and source evidence together.'
+						title: 'Representative material states',
+						body: 'Read each high-signal sample as a material state: preparation and post-treatment, test conditions, performance response, interpretation, and source evidence.'
+					},
+					materialProblems: {
+						title: 'Material questions',
+						body: 'Group the evidence by materials-science questions instead of a flat property matrix.'
 					},
 					performance: {
-						title: 'Supporting data: performance matrix',
+						title: 'Supporting data matrix',
 						body: 'Use the matrix to verify which samples, conditions, values, and evidence support the findings.'
 					},
 					trends: {
-						title: 'Trend interpretation',
-						body: 'Explain why the findings matter by comparing sample leaders and property trade-offs.'
+						title: 'Comparable groups',
+						body: 'Keep comparisons inside their paper, sample, and test-condition boundaries before reading trends across the collection.'
 					},
 					evidence: {
 						title: 'Evidence locator',
@@ -634,11 +642,11 @@ const translations: Record<Language, Translations> = {
 					}
 				},
 				chain: {
-					stepsLabel: 'Best parameter result chain',
-					processContext: 'Process background',
+					stepsLabel: 'Representative material state evidence chain',
+					processContext: 'Preparation and post-treatment',
 					testConditions: 'Test conditions',
-					results: 'Observed results',
-					whyBest: 'Why this parameter set matters',
+					results: 'Performance response',
+					whyBest: 'Materials interpretation',
 					traceback: 'Traceback',
 					collectionScope: 'collection-level evidence',
 					backgroundText:
@@ -648,13 +656,55 @@ const translations: Record<Language, Translations> = {
 					comparisonNoLeader:
 						'This sample has {count} comparable values, but none is the best among the tracked {total} properties.',
 					notBestFor: 'Not the leader for: {properties}.',
-					bestInMatrix: 'best in matrix',
+					bestInMatrix: 'leading in this matrix',
 					observed: 'observed',
 					noProcessContext: 'No process parameters were attached to this sample row.',
 					noTestConditions:
 						'No explicit test condition was attached to this row; verify the source paper before comparing across conditions.',
 					empty:
-						'No sample-level performance chain can be built from the current material matrix yet.'
+						'No representative material state can be built from the current material matrix yet.'
+				},
+				state: {
+					cardLabel: 'State {index}',
+					sourceLine: 'Source: {source}',
+					roles: {
+						texture: 'texture prediction state',
+						hardness: 'high-hardness state',
+						densification: 'densification / porosity state',
+						tensile: 'tensile response state',
+						representative: 'representative material state'
+					},
+					interpretation: 'Observed response: {values}. {boundary}',
+					notGlobalBest:
+						'This does not make the state globally optimal; non-leading or unverified responses include {properties}.',
+					sourceBounded:
+						'Interpret this inside its source paper and test condition, not as a cross-paper global ranking.',
+					noValues: 'no comparable numeric response'
+				},
+				problems: {
+					densification: {
+						title: 'Densification and porosity',
+						body: 'Traceable density/porosity evidence includes {values}. These results need sample-bound tests before becoming a full corrosion or mechanical conclusion.',
+						empty: 'No density or porosity response is ready in the selected material values.'
+					},
+					mechanical: {
+						title: 'Strength, ductility, and hardness',
+						body: 'Traceable mechanical responses include {values}. Compare them within the same paper/test system before ranking material states.',
+						empty: 'No strength, ductility, or hardness response is ready in the selected material values.'
+					},
+					texture: {
+						title: 'Texture and model prediction',
+						body: 'Traceable texture/model responses include {values}. Treat these as model/texture evidence rather than laser-parameter optimization.',
+						empty: 'No texture or model-prediction response is attached to the selected values.'
+					},
+					unclosed: {
+						title: 'Corrosion, fatigue, and open chains',
+						body: 'Corrosion and fatigue conclusions require the same sample to connect preparation, defect state, test condition, response, and evidence. Current partial chains should be shown as incomplete rather than ranked.'
+					},
+					status: {
+						traceable: 'Traceable',
+						partial: 'Partial chain'
+					}
 				},
 				comparison: {
 					topic: 'Comparison topic: process variables and performance',
@@ -2984,7 +3034,7 @@ const translations: Record<Language, Translations> = {
 			materialDossier: {
 				title: '材料研究档案',
 				mainLabel: '材料研究档案内容',
-				subtitle: '本页面整合了该材料在所选文献中的样品、工艺参数、性能结果、比较分析与证据来源。',
+				subtitle: '一份材料报告：每个结果都保留制备状态、测试条件、证据来源和可比较边界。',
 				tabs: {
 					label: '材料档案视图',
 					structured: '结构化档案',
@@ -3003,6 +3053,10 @@ const translations: Record<Language, Translations> = {
 					exportCsv: '导出数据 CSV'
 				},
 				sections: {
+					overview: {
+						title: '材料报告概览',
+						body: '{material} 主要围绕 {processes} 展开。结果按材料状态、测试条件、性能响应和来源证据组织，而不是做跨论文最佳参数排行。'
+					},
 					findings: {
 						title: '关键发现',
 						body: '由样品数值和证据锚点约束生成的可追溯结论。'
@@ -3012,20 +3066,24 @@ const translations: Record<Language, Translations> = {
 						body: '了解有哪些样品及其工艺条件差异。'
 					},
 					graph: {
-						title: '科研链路图',
-						body: '直接查看表现最强的样品级链路：工艺背景、测试条件、观测结果和来源证据。'
+						title: '材料状态图',
+						body: '按制备、测试条件、观测响应和来源证据阅读样品级状态。'
 					},
 					chain: {
-						title: '最佳参数链路',
-						body: '先看当前表现最强的参数组合，再把背景、工艺条件、测试条件、结果、比较依据和来源证据串起来核查。'
+						title: '代表性材料状态',
+						body: '把每个高信号样品作为一个材料状态阅读：制备/后处理、测试条件、性能响应、材料学解释和来源证据。'
+					},
+					materialProblems: {
+						title: '材料问题归纳',
+						body: '按材料科学问题归纳证据，而不是只展示一张平铺性能矩阵。'
 					},
 					performance: {
-						title: '支撑数据：性能矩阵',
+						title: '支撑数据矩阵',
 						body: '用矩阵核对每条发现背后的样品、条件、数值和证据。'
 					},
 					trends: {
-						title: '趋势解释',
-						body: '通过比较样品领先项和性能权衡，解释这些发现说明了什么。'
+						title: '可比较组',
+						body: '先把比较限定在来源论文、样品和测试条件内，再阅读跨集合趋势。'
 					},
 					evidence: {
 						title: '证据定位',
@@ -3112,11 +3170,11 @@ const translations: Record<Language, Translations> = {
 					}
 				},
 				chain: {
-					stepsLabel: '最佳参数结果链路',
-					processContext: '工艺背景',
+					stepsLabel: '代表性材料状态证据链',
+					processContext: '制备与后处理',
 					testConditions: '测试条件',
-					results: '观测结果',
-					whyBest: '为什么这个参数组合重要',
+					results: '性能响应',
+					whyBest: '材料学解释',
 					traceback: '证据回溯',
 					collectionScope: '集合级证据',
 					backgroundText:
@@ -3126,11 +3184,51 @@ const translations: Record<Language, Translations> = {
 					comparisonNoLeader:
 						'该样品有 {count} 个可比较数值，但在 {total} 个跟踪指标中暂未成为最高项。',
 					notBestFor: '非领先指标：{properties}。',
-					bestInMatrix: '矩阵内最高',
+					bestInMatrix: '本矩阵领先',
 					observed: '已观测',
 					noProcessContext: '该样品行暂未绑定工艺参数。',
 					noTestConditions: '该行暂未绑定明确测试条件；跨条件比较前需要回到原文核查。',
-					empty: '当前材料矩阵还不足以构建样品级性能链路。'
+					empty: '当前材料矩阵还不足以构建代表性材料状态。'
+				},
+				state: {
+					cardLabel: '状态 {index}',
+					sourceLine: '来源：{source}',
+					roles: {
+						texture: '织构预测状态',
+						hardness: '高硬度状态',
+						densification: '致密化 / 孔隙状态',
+						tensile: '拉伸响应状态',
+						representative: '代表性材料状态'
+					},
+					interpretation: '观测响应：{values}。{boundary}',
+					notGlobalBest: '这不能说明该状态全局最优；非领先或未验证响应包括 {properties}。',
+					sourceBounded: '应在来源论文和测试条件内解释，不能作为跨论文全局排名。',
+					noValues: '暂无可比较数值响应'
+				},
+				problems: {
+					densification: {
+						title: '致密化和孔隙',
+						body: '可追溯的密度/孔隙证据包括 {values}。这些结果需要接上同一样品测试后，才能形成完整腐蚀或力学结论。',
+						empty: '当前选中材料值中还没有可用的密度或孔隙响应。'
+					},
+					mechanical: {
+						title: '强度、塑性和硬度',
+						body: '可追溯的力学响应包括 {values}。这些结果应在同一论文/同一测试体系内比较后再排序。',
+						empty: '当前选中材料值中还没有强度、塑性或硬度响应。'
+					},
+					texture: {
+						title: '织构和模型预测',
+						body: '可追溯的织构/模型响应包括 {values}。这些应作为模型/织构证据解释，而不是激光参数优化排行。',
+						empty: '当前选中材料值中没有织构或模型预测响应。'
+					},
+					unclosed: {
+						title: '腐蚀、疲劳和未闭合链路',
+						body: '腐蚀和疲劳结论需要把同一样品的制备、缺陷状态、测试条件、响应和证据接起来。当前不完整链路应显示为未闭合，而不是参与排行。'
+					},
+					status: {
+						traceable: '可追溯',
+						partial: '未闭合'
+					}
 				},
 				comparison: {
 					topic: '比较主题：工艺变量对性能的影响',

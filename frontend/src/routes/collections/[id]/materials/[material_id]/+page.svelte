@@ -139,6 +139,14 @@
 		sourceLocation: string;
 	};
 
+	type MaterialProblemCard = {
+		key: string;
+		title: string;
+		body: string;
+		values: SupportedValue[];
+		status: string;
+	};
+
 	const PROCESS_UNITS: Record<string, string> = {
 		laser_power_w: 'W',
 		scan_speed_mm_s: 'mm/s',
@@ -304,7 +312,7 @@
 		propertySummaries,
 		materialProfile?.canonical_name ?? materialId
 	);
-	$: chainMapRows = bestParameterChains.slice(0, 3);
+	$: materialProblemCards = buildMaterialProblemCards(bestPropertyValues, summaryTrendValues, $t);
 	$: materialTags = buildMaterialTags(materialProfile, $t);
 	$: paperCount = materialProfile?.overview.paper_count || materialPapers().length;
 	$: sampleCount = materialProfile?.overview.sample_count || sampleRows.length;
@@ -595,8 +603,18 @@
 		const value = processValue(row, key);
 		if (value === '--') return value;
 		if (/[a-zA-Z%]/.test(value)) return value;
-		const unit = PROCESS_UNITS[key];
+		const unit = processUnitForKey(key);
 		return unit ? `${value} ${unit}` : value;
+	}
+
+	function processUnitForKey(key: string) {
+		if (PROCESS_UNITS[key]) return PROCESS_UNITS[key];
+		const alias = processAlias(cleanDisplayLabel(key));
+		if (alias === 'energy_density') return 'J/mm3';
+		if (alias === 'laser_power') return 'W';
+		if (alias === 'scan_speed') return 'mm/s';
+		if (alias === 'preheat') return 'C';
+		return null;
 	}
 
 	function isMainProcessKey(key: string) {
@@ -1593,9 +1611,168 @@
 	function paperTitle(ref: EvidenceReference | undefined) {
 		if (!ref?.document_id) return '--';
 		return (
-			materialPapers().find((paper) => paper.document_id === ref.document_id)?.title ||
+			paperDisplayName(materialPapers().find((paper) => paper.document_id === ref.document_id)) ||
 			formatShortIdentifier(ref.document_id)
 		);
+	}
+
+	function paperDisplayName(paper: MaterialPaperCoverage | undefined) {
+		return (paper?.title || paper?.source_filename || '').replace(/\.pdf$/i, '');
+	}
+
+	function paperForRow(row: SampleMatrixRow) {
+		if (!row.document_id) return undefined;
+		return materialPapers().find((paper) => paper.document_id === row.document_id);
+	}
+
+	function paperLabelForRow(row: SampleMatrixRow) {
+		const name = paperDisplayName(paperForRow(row));
+		if (!name) return formatShortIdentifier(row.document_id ?? '');
+		return name.match(/\bP\d{3}\b/i)?.[0] ?? name;
+	}
+
+	function materialStateRole(chain: BestParameterChain, translate: Translate) {
+		const text = normalizeForMatch(
+			[
+				chain.sampleLabel,
+				...chain.metrics.map((metric) => metric.supportedValue.property),
+				...chain.processEntries.map((entry) => `${entry.label} ${entry.value}`)
+			].join(' ')
+		);
+		if (text.includes('odf') || text.includes('jeffrey') || text.includes('texture')) {
+			return translate('research.materialDossier.state.roles.texture');
+		}
+		if (text.includes('hardness')) return translate('research.materialDossier.state.roles.hardness');
+		if (text.includes('density') || text.includes('porosity')) {
+			return translate('research.materialDossier.state.roles.densification');
+		}
+		if (text.includes('yield') || text.includes('tensile') || text.includes('elongation')) {
+			return translate('research.materialDossier.state.roles.tensile');
+		}
+		return translate('research.materialDossier.state.roles.representative');
+	}
+
+	function materialStateTitle(chain: BestParameterChain, translate: Translate) {
+		return `${paperLabelForRow(chain.row)} ${chain.sampleLabel}: ${materialStateRole(chain, translate)}`;
+	}
+
+	function materialStateSource(chain: BestParameterChain, translate: Translate) {
+		const paper = paperDisplayName(paperForRow(chain.row));
+		return paper || translate('research.materialDossier.chain.collectionScope');
+	}
+
+	function materialStateInterpretation(chain: BestParameterChain, translate: Translate) {
+		const leading = chain.metrics.filter((metric) => metric.isBest);
+		const observed = (leading.length ? leading : chain.metrics).slice(0, 3);
+		const values = observed
+			.map((metric) => `${metric.supportedValue.property} ${metric.supportedValue.displayValue}`)
+			.join(', ');
+		const boundary = chain.notLeadingProperties.length
+			? translate('research.materialDossier.state.notGlobalBest', {
+					properties: chain.notLeadingProperties.slice(0, 3).join(', ')
+				})
+			: translate('research.materialDossier.state.sourceBounded');
+		return translate('research.materialDossier.state.interpretation', {
+			values: values || translate('research.materialDossier.state.noValues'),
+			boundary
+		});
+	}
+
+	function valuesForProblem(values: SupportedValue[], role: string) {
+		return values.filter((value) => {
+			const text = normalizeForMatch(`${value.property} ${value.column.key}`);
+			if (role === 'density') return text.includes('density') || text.includes('porosity');
+			if (role === 'mechanical') {
+				return (
+					text.includes('hardness') ||
+					text.includes('yield') ||
+					text.includes('tensile') ||
+					text.includes('elongation')
+				);
+			}
+			if (role === 'texture') {
+				return (
+					text.includes('odf') ||
+					text.includes('jeffrey') ||
+					text.includes('predicted') ||
+					text.includes('texture')
+				);
+			}
+			return false;
+		});
+	}
+
+	function problemBody(
+		key: string,
+		values: SupportedValue[],
+		translate: Translate,
+		fallbackKey: string
+	) {
+		if (!values.length) return translate(fallbackKey);
+		return translate(`research.materialDossier.problems.${key}.body`, {
+			values: values
+				.slice(0, 3)
+				.map((value) => `${value.sample}: ${value.property} ${value.displayValue}`)
+				.join('; ')
+		});
+	}
+
+	function buildMaterialProblemCards(
+		bestValues: SupportedValue[],
+		summaryValues: SupportedValue[],
+		translate: Translate
+	): MaterialProblemCard[] {
+		const values = uniqueSupportedValues([...bestValues, ...summaryValues]);
+		const densityValues = valuesForProblem(values, 'density');
+		const mechanicalValues = valuesForProblem(values, 'mechanical');
+		const textureValues = valuesForProblem(values, 'texture');
+		return [
+			{
+				key: 'densification',
+				title: translate('research.materialDossier.problems.densification.title'),
+				body: problemBody(
+					'densification',
+					densityValues,
+					translate,
+					'research.materialDossier.problems.densification.empty'
+				),
+				values: densityValues.slice(0, 3),
+				status: translate('research.materialDossier.problems.status.traceable')
+			},
+			{
+				key: 'mechanical',
+				title: translate('research.materialDossier.problems.mechanical.title'),
+				body: problemBody(
+					'mechanical',
+					mechanicalValues,
+					translate,
+					'research.materialDossier.problems.mechanical.empty'
+				),
+				values: mechanicalValues.slice(0, 4),
+				status: translate('research.materialDossier.problems.status.traceable')
+			},
+			{
+				key: 'texture',
+				title: translate('research.materialDossier.problems.texture.title'),
+				body: problemBody(
+					'texture',
+					textureValues,
+					translate,
+					'research.materialDossier.problems.texture.empty'
+				),
+				values: textureValues.slice(0, 3),
+				status: textureValues.length
+					? translate('research.materialDossier.problems.status.traceable')
+					: translate('research.materialDossier.problems.status.partial')
+			},
+			{
+				key: 'unclosed',
+				title: translate('research.materialDossier.problems.unclosed.title'),
+				body: translate('research.materialDossier.problems.unclosed.body'),
+				values: [],
+				status: translate('research.materialDossier.problems.status.partial')
+			}
+		];
 	}
 
 	function sourceTypeLabel(ref: EvidenceReference | undefined, translate: Translate) {
@@ -1968,9 +2145,66 @@
 		<div class="dossier-layout">
 			{#if activeDossierTab === 'structured'}
 				<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
-					<section id="best-parameter-chain" class="dossier-card chain-card">
+					<section id="material-report-overview" class="dossier-card report-overview-card">
 						<div class="dossier-section-heading">
 							<span class="section-number">1</span>
+							<h3>{$t('research.materialDossier.sections.overview.title')}</h3>
+							<p>
+								{$t('research.materialDossier.sections.overview.body', {
+									material: materialProfile.canonical_name,
+									processes: joinedList(
+										materialProfile.overview.process_families,
+										$t('research.materialDossier.narrative.unspecifiedProcess')
+									)
+								})}
+							</p>
+						</div>
+						<div class="report-stat-grid">
+							<div>
+								<strong>{paperCount}</strong>
+								<span>{$t('research.materialDossier.aside.sourcePapers')}</span>
+							</div>
+							<div>
+								<strong>{sampleCount}</strong>
+								<span>{$t('research.overview.samples')}</span>
+							</div>
+							<div>
+								<strong>{measuredPropertyCount}</strong>
+								<span>{$t('research.overview.properties')}</span>
+							</div>
+							<div>
+								<strong>{evidenceCount}</strong>
+								<span>{$t('research.overview.evidence')}</span>
+							</div>
+						</div>
+						<div class="paper-contribution-grid">
+							{#each materialPapers().slice(0, 6) as paper (paper.document_id)}
+								<a
+									class="paper-contribution-card"
+									href={resolve('/collections/[id]/documents/[document_id]', {
+										id: collectionId,
+										document_id: paper.document_id
+									})}
+								>
+									<strong>{paperDisplayName(paper) || formatShortIdentifier(paper.document_id)}</strong>
+									<span>
+										{paper.sample_count}
+										{$t('research.overview.samples')} ·
+										{joinedList(
+											paper.measured_properties.slice(0, 3),
+											$t('research.materialDossier.narrative.unspecifiedProperties')
+										)}
+									</span>
+								</a>
+							{:else}
+								<p class="empty-copy">{$t('research.materialDossier.aside.noLiterature')}</p>
+							{/each}
+						</div>
+					</section>
+
+					<section id="representative-material-states" class="dossier-card chain-card">
+						<div class="dossier-section-heading">
+							<span class="section-number">2</span>
 							<h3>{$t('research.materialDossier.sections.chain.title')}</h3>
 							<p>{$t('research.materialDossier.sections.chain.body')}</p>
 						</div>
@@ -1980,9 +2214,17 @@
 								<article class="parameter-chain">
 									<div class="parameter-chain__header">
 										<div>
-											<span class="chain-rank">#{index + 1}</span>
-											<h4>{chain.sampleLabel}</h4>
-											<p>{chain.background}</p>
+											<span class="chain-rank"
+												>{$t('research.materialDossier.state.cardLabel', {
+													index: index + 1
+												})}</span
+											>
+											<h4>{materialStateTitle(chain, $t)}</h4>
+											<p>
+												{$t('research.materialDossier.state.sourceLine', {
+													source: materialStateSource(chain, $t)
+												})}
+											</p>
 										</div>
 										<span class="chain-score">{chain.scoreLabel}</span>
 									</div>
@@ -2053,14 +2295,7 @@
 									<div class="chain-judgement">
 										<div>
 											<strong>{$t('research.materialDossier.chain.whyBest')}</strong>
-											<p>{chain.comparisonSummary}</p>
-											{#if chain.notLeadingProperties.length}
-												<small
-													>{$t('research.materialDossier.chain.notBestFor', {
-														properties: chain.notLeadingProperties.join(', ')
-													})}</small
-												>
-											{/if}
+											<p>{materialStateInterpretation(chain, $t)}</p>
 										</div>
 										<div>
 											<strong>{$t('research.materialDossier.chain.traceback')}</strong>
@@ -2087,36 +2322,24 @@
 						</div>
 					</section>
 
-					<section id="key-findings" class="dossier-card dossier-card--findings">
+					<section id="material-problems" class="dossier-card material-problems-card">
 						<div class="dossier-section-heading">
-							<span class="section-number">2</span>
-							<h3>{$t('research.materialDossier.sections.findings.title')}</h3>
-							<p>{$t('research.materialDossier.sections.findings.body')}</p>
+							<span class="section-number">3</span>
+							<h3>{$t('research.materialDossier.sections.materialProblems.title')}</h3>
+							<p>{$t('research.materialDossier.sections.materialProblems.body')}</p>
 						</div>
 
-						<div class="finding-grid">
-							{#each keyFindings as finding, index (finding.key)}
-								<article class="finding-card">
-									<div class="finding-card__header">
-										<span>{index + 1}</span>
-										<div>
-											<h4>{finding.title}</h4>
-											<p>{finding.body}</p>
-										</div>
+						<div class="problem-grid">
+							{#each materialProblemCards as problem (problem.key)}
+								<article class="problem-card">
+									<div class="problem-card__header">
+										<h4>{problem.title}</h4>
+										<span>{problem.status}</span>
 									</div>
-									<div class="finding-meta">
-										<span>{finding.type}</span>
-										<span
-											>{$t('research.materialDossier.evidence.confidence')}: {finding.confidence}</span
-										>
-										<span
-											>{$t('research.materialDossier.evidence.anchor')}:
-											{finding.evidenceCodes.join(', ') || '--'}</span
-										>
-									</div>
-									{#if finding.supportedValues.length}
+									<p>{problem.body}</p>
+									{#if problem.values.length}
 										<div class="finding-values">
-											{#each finding.supportedValues as value (value.key)}
+											{#each problem.values as value (value.key)}
 												<button type="button" on:click={() => openSupportedValue(value)}>
 													<strong>{value.sample}</strong>
 													<span>{value.property} = {value.displayValue}</span>
@@ -2126,123 +2349,8 @@
 										</div>
 									{/if}
 								</article>
-							{:else}
-								<p class="empty-copy">{$t('research.materialDossier.findings.empty')}</p>
 							{/each}
 						</div>
-					</section>
-
-					<section id="material-graph" class="dossier-card material-graph-card">
-						<div class="dossier-section-heading">
-							<span class="section-number">3</span>
-							<h3>{$t('research.materialDossier.sections.graph.title')}</h3>
-							<p>{$t('research.materialDossier.sections.graph.body')}</p>
-						</div>
-
-						{#if chainMapRows.length}
-							<div class="chain-map" aria-label={$t('research.materialDossier.graph.label')}>
-								{#each chainMapRows as chain, index (chain.key)}
-									<article class="chain-map-card">
-										<div class="chain-map-card__header">
-											<span
-												>{$t('research.materialDossier.graph.chainLabel', {
-													index: index + 1
-												})}</span
-											>
-											<h4>{chain.sampleLabel}</h4>
-											<p>{chain.comparisonSummary}</p>
-										</div>
-
-										<div class="chain-map-grid">
-											<div class="chain-map-step">
-												<span>1</span>
-												<strong>{$t('research.materialDossier.graph.sample')}</strong>
-												<p>{chain.background}</p>
-											</div>
-
-											<div class="chain-map-step">
-												<span>2</span>
-												<strong>{$t('research.materialDossier.chain.processContext')}</strong>
-												{#if chain.processEntries.length}
-													<dl>
-														{#each chain.processEntries.slice(0, 4) as entry (entry.key)}
-															<div>
-																<dt>{entry.label}</dt>
-																<dd>{entry.value}</dd>
-															</div>
-														{/each}
-													</dl>
-												{:else}
-													<p>{$t('research.materialDossier.chain.noProcessContext')}</p>
-												{/if}
-											</div>
-
-											<div class="chain-map-step">
-												<span>3</span>
-												<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
-												{#if chain.testConditionEntries.length}
-													<dl>
-														{#each chain.testConditionEntries.slice(0, 3) as entry (entry.key)}
-															<div>
-																<dt>{entry.label}</dt>
-																<dd>{entry.value}</dd>
-															</div>
-														{/each}
-													</dl>
-												{:else}
-													<p>{$t('research.materialDossier.chain.noTestConditions')}</p>
-												{/if}
-											</div>
-
-											<div class="chain-map-step chain-map-step--result">
-												<span>4</span>
-												<strong>{$t('research.materialDossier.chain.results')}</strong>
-												<div class="chain-map-results">
-													{#each chain.metrics.slice(0, 4) as metric (metric.key)}
-														<button
-															type="button"
-															class:chain-map-result--best={metric.isBest}
-															class="chain-map-result"
-															on:click={() => openSupportedValue(metric.supportedValue)}
-														>
-															<small>{metric.supportedValue.property}</small>
-															<strong>{metric.supportedValue.displayValue}</strong>
-															<span>
-																{metric.isBest
-																	? $t('research.materialDossier.chain.bestInMatrix')
-																	: $t('research.materialDossier.chain.observed')}
-																· {metric.supportedValue.evidenceCode}
-															</span>
-														</button>
-													{/each}
-												</div>
-											</div>
-
-											<div class="chain-map-step chain-map-step--evidence">
-												<span>5</span>
-												<strong>{$t('research.materialDossier.chain.traceback')}</strong>
-												<p>{chain.sourceLocation}</p>
-												<div class="evidence-chip-row">
-													{#each chain.evidenceCodes as code}
-														<button
-															type="button"
-															class="evidence-chip"
-															on:click={() => openEvidenceCode(code)}
-														>
-															{code}
-														</button>
-													{:else}
-														<span class="evidence-chip evidence-chip--muted">--</span>
-													{/each}
-												</div>
-											</div>
-										</div>
-									</article>
-								{/each}
-							</div>
-						{:else}
-							<p class="empty-copy">{$t('research.materialDossier.graph.empty')}</p>
-						{/if}
 					</section>
 
 					<section id="trend-comparison" class="dossier-card">
@@ -2692,11 +2800,15 @@
 				>
 					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
 					{#if activeDossierTab === 'structured'}
-						<a href="#best-parameter-chain"
-							>1 {$t('research.materialDossier.sections.chain.title')}</a
+						<a href="#material-report-overview"
+							>1 {$t('research.materialDossier.sections.overview.title')}</a
 						>
-						<a href="#key-findings">2 {$t('research.materialDossier.sections.findings.title')}</a>
-						<a href="#material-graph">3 {$t('research.materialDossier.sections.graph.title')}</a>
+						<a href="#representative-material-states"
+							>2 {$t('research.materialDossier.sections.chain.title')}</a
+						>
+						<a href="#material-problems"
+							>3 {$t('research.materialDossier.sections.materialProblems.title')}</a
+						>
 						<a href="#trend-comparison">4 {$t('research.materialDossier.sections.trends.title')}</a>
 						<a href="#performance-results"
 							>5 {$t('research.materialDossier.sections.performance.title')}</a
@@ -2891,7 +3003,9 @@
 					<p class="pdf-error" role="alert">{pdfReportError}</p>
 				{/if}
 				<ul class="pdf-list">
-					<li>{$t('research.materialDossier.sections.findings.title')}</li>
+					<li>{$t('research.materialDossier.sections.overview.title')}</li>
+					<li>{$t('research.materialDossier.sections.chain.title')}</li>
+					<li>{$t('research.materialDossier.sections.materialProblems.title')}</li>
 					<li>{$t('research.materialDossier.sections.trends.title')}</li>
 					<li>{$t('research.materialDossier.sections.performance.title')}</li>
 					<li>{$t('research.materialDossier.sections.evidence.title')}</li>
@@ -3149,75 +3263,10 @@
 		line-height: 20px;
 	}
 
-	.finding-grid {
-		display: grid;
-		gap: 12px;
-	}
-
-	.finding-card {
-		display: grid;
-		gap: 12px;
-		padding: 14px;
-		border: 1px solid #dbeafe;
-		border-radius: 10px;
-		background: #f8fbff;
-	}
-
-	.finding-card__header {
-		display: grid;
-		grid-template-columns: 26px minmax(0, 1fr);
-		gap: 10px;
-		align-items: start;
-	}
-
-	.finding-card__header > span {
-		width: 24px;
-		height: 24px;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 8px;
-		background: #2563eb;
-		color: #ffffff;
-		font-size: 13px;
-		font-weight: 800;
-		line-height: 18px;
-	}
-
-	.finding-card h4 {
-		margin: 0;
-		color: #0f172a;
-		font-size: 16px;
-		font-weight: 700;
-		line-height: 24px;
-	}
-
-	.finding-card p {
-		margin: 4px 0 0;
-		color: #475569;
-		font-size: 14px;
-		line-height: 22px;
-	}
-
-	.finding-meta,
 	.finding-values {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
-	}
-
-	.finding-meta span {
-		display: inline-flex;
-		align-items: center;
-		min-height: 24px;
-		padding: 3px 8px;
-		border: 1px solid #e2e8f0;
-		border-radius: 6px;
-		background: #ffffff;
-		color: #475569;
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
 	}
 
 	.finding-values button {
@@ -3262,6 +3311,101 @@
 		line-height: 18px;
 	}
 
+	.report-overview-card,
+	.material-problems-card {
+		gap: 14px;
+	}
+
+	.report-stat-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.report-stat-grid div {
+		display: grid;
+		gap: 3px;
+		padding: 12px;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		background: #fbfdff;
+	}
+
+	.report-stat-grid strong {
+		color: #0f172a;
+		font-size: 20px;
+		font-weight: 800;
+		line-height: 28px;
+	}
+
+	.report-stat-grid span {
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.paper-contribution-grid,
+	.problem-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 10px;
+	}
+
+	.paper-contribution-card,
+	.problem-card {
+		display: grid;
+		gap: 8px;
+		padding: 12px;
+		border: 1px solid #dbeafe;
+		border-radius: 8px;
+		background: #ffffff;
+		color: #0f172a;
+		text-decoration: none;
+	}
+
+	.paper-contribution-card:hover {
+		border-color: #2563eb;
+		background: #eff6ff;
+	}
+
+	.paper-contribution-card strong,
+	.problem-card h4 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 14px;
+		font-weight: 800;
+		line-height: 20px;
+		overflow-wrap: anywhere;
+	}
+
+	.paper-contribution-card span,
+	.problem-card p {
+		margin: 0;
+		color: #475569;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.problem-card__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 10px;
+	}
+
+	.problem-card__header span {
+		flex: 0 0 auto;
+		padding: 2px 7px;
+		border: 1px solid #bfdbfe;
+		border-radius: 999px;
+		background: #eff6ff;
+		color: #2563eb;
+		font-size: 11px;
+		font-weight: 800;
+		line-height: 16px;
+	}
+
 	.chain-card {
 		border-color: #bae6fd;
 		background: #f8fbff;
@@ -3298,8 +3442,7 @@
 
 	.parameter-chain__header p,
 	.chain-step p,
-	.chain-judgement p,
-	.chain-judgement small {
+	.chain-judgement p {
 		margin: 0;
 		color: #475569;
 		font-size: 13px;
@@ -3452,172 +3595,6 @@
 	.chain-judgement > div {
 		display: grid;
 		gap: 6px;
-	}
-
-	.material-graph-card {
-		gap: 14px;
-	}
-
-	.chain-map {
-		display: grid;
-		gap: 12px;
-	}
-
-	.chain-map-card {
-		display: grid;
-		gap: 12px;
-		padding: 14px;
-		border: 1px solid #dbeafe;
-		border-radius: 10px;
-		background: #ffffff;
-	}
-
-	.chain-map-card__header {
-		display: grid;
-		gap: 4px;
-	}
-
-	.chain-map-card__header span {
-		width: max-content;
-		max-width: 100%;
-		padding: 2px 8px;
-		border-radius: 999px;
-		background: #eff6ff;
-		color: #2563eb;
-		font-size: 11px;
-		font-weight: 800;
-		line-height: 16px;
-	}
-
-	.chain-map-card__header h4 {
-		margin: 0;
-		color: #0f172a;
-		font-size: 16px;
-		font-weight: 800;
-		line-height: 24px;
-		overflow-wrap: anywhere;
-	}
-
-	.chain-map-card__header p,
-	.chain-map-step p {
-		margin: 0;
-		color: #475569;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.chain-map-grid {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		gap: 10px;
-	}
-
-	.chain-map-step {
-		display: grid;
-		align-content: start;
-		gap: 8px;
-		padding: 12px;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		background: #f8fafc;
-	}
-
-	.chain-map-step--result,
-	.chain-map-step--evidence {
-		grid-column: 1 / -1;
-	}
-
-	.chain-map-step > span {
-		width: 22px;
-		height: 22px;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 7px;
-		background: #dbeafe;
-		color: #1d4ed8;
-		font-size: 12px;
-		font-weight: 800;
-		line-height: 18px;
-	}
-
-	.chain-map-step > strong {
-		color: #0f172a;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.chain-map-step dl {
-		display: grid;
-		gap: 6px;
-		margin: 0;
-	}
-
-	.chain-map-step dl div {
-		display: grid;
-		grid-template-columns: minmax(90px, 0.42fr) minmax(0, 1fr);
-		gap: 8px;
-	}
-
-	.chain-map-step dt {
-		margin: 0;
-		color: #64748b;
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
-	}
-
-	.chain-map-step dd {
-		margin: 0;
-		color: #0f172a;
-		font-size: 13px;
-		font-weight: 700;
-		line-height: 20px;
-		overflow-wrap: anywhere;
-	}
-
-	.chain-map-results {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-	}
-
-	.chain-map-result {
-		display: grid;
-		gap: 2px;
-		min-width: 150px;
-		padding: 9px 10px;
-		border: 1px solid #dbeafe;
-		border-radius: 8px;
-		background: #ffffff;
-		color: #0f172a;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.chain-map-result:hover,
-	.chain-map-result--best {
-		border-color: #2563eb;
-		background: #eff6ff;
-	}
-
-	.chain-map-result small,
-	.chain-map-result span {
-		color: #64748b;
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.chain-map-result strong {
-		color: #0f172a;
-		font-size: 16px;
-		font-weight: 800;
-		line-height: 22px;
-	}
-
-	.chain-map-result--best span {
-		color: #2563eb;
-		font-weight: 800;
 	}
 
 	.dossier-table-wrapper {
@@ -4236,13 +4213,12 @@
 	:root[data-theme='dark'] .aside-card h3,
 	:root[data-theme='dark'] .comparison-panel h4,
 	:root[data-theme='dark'] .chart-panel h4,
-	:root[data-theme='dark'] .chain-map-card__header h4,
-	:root[data-theme='dark'] .chain-map-step > strong,
-	:root[data-theme='dark'] .chain-map-step dd,
-	:root[data-theme='dark'] .chain-map-result strong,
 	:root[data-theme='dark'] .detail-drawer h3,
 	:root[data-theme='dark'] .dossier-table th,
 	:root[data-theme='dark'] .dossier-table td,
+	:root[data-theme='dark'] .report-stat-grid strong,
+	:root[data-theme='dark'] .paper-contribution-card strong,
+	:root[data-theme='dark'] .problem-card h4,
 	:root[data-theme='dark'] .paper-mini-card span,
 	:root[data-theme='dark'] .chart-bar strong,
 	:root[data-theme='dark'] .chart-labels,
@@ -4274,9 +4250,9 @@
 	:root[data-theme='dark'] .best-value-card,
 	:root[data-theme='dark'] .narrative-comparison-card div,
 	:root[data-theme='dark'] .narrative-finding,
-	:root[data-theme='dark'] .chain-map-card,
-	:root[data-theme='dark'] .chain-map-step,
-	:root[data-theme='dark'] .chain-map-result,
+	:root[data-theme='dark'] .report-stat-grid div,
+	:root[data-theme='dark'] .paper-contribution-card,
+	:root[data-theme='dark'] .problem-card,
 	:root[data-theme='dark'] .mini-chart {
 		border-color: var(--border-default);
 		background: var(--surface-card);
@@ -4300,20 +4276,17 @@
 	:root[data-theme='dark'] .parameter-chain__header p,
 	:root[data-theme='dark'] .chain-step p,
 	:root[data-theme='dark'] .chain-judgement p,
-	:root[data-theme='dark'] .chain-judgement small,
 	:root[data-theme='dark'] .chain-step dt,
 	:root[data-theme='dark'] .chain-metric span,
 	:root[data-theme='dark'] .chain-metric small,
+	:root[data-theme='dark'] .report-stat-grid span,
+	:root[data-theme='dark'] .paper-contribution-card span,
+	:root[data-theme='dark'] .problem-card p,
 	:root[data-theme='dark'] .comparison-panel > p,
 	:root[data-theme='dark'] .chart-caption,
 	:root[data-theme='dark'] .narrative-lede,
 	:root[data-theme='dark'] .narrative-section-heading p,
 	:root[data-theme='dark'] .narrative-finding p,
-	:root[data-theme='dark'] .chain-map-card__header p,
-	:root[data-theme='dark'] .chain-map-step p,
-	:root[data-theme='dark'] .chain-map-step dt,
-	:root[data-theme='dark'] .chain-map-result small,
-	:root[data-theme='dark'] .chain-map-result span,
 	:root[data-theme='dark'] .empty-value,
 	:root[data-theme='dark'] .empty-copy,
 	:root[data-theme='dark'] .empty-cell {
@@ -4329,9 +4302,7 @@
 		.parameter-chain__header,
 		.chain-judgement,
 		.chain-steps,
-		.chain-map-grid,
-		.chain-map-step--result,
-		.chain-map-step--evidence {
+		.report-stat-grid {
 			grid-template-columns: 1fr;
 			grid-column: auto;
 		}

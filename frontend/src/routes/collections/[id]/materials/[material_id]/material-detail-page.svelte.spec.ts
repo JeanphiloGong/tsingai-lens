@@ -412,14 +412,17 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Key findings' }))
+			.element(browserPage.getByRole('heading', { name: 'Material report overview' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Best parameter chain' }))
+			.element(browserPage.getByRole('heading', { name: 'Representative material states' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Material questions' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('1/5 leading properties')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Process background').first())
+			.element(browserPage.getByText('Preparation and post-treatment').first())
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText(/Scan strategy Alternating strategy A/).first())
@@ -434,17 +437,17 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('This long method paragraph should stay out'))
 			.not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('best in matrix · E06').first())
+			.element(browserPage.getByText('leading in this matrix · E06').first())
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Traceback').first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Trend interpretation' }))
+			.element(browserPage.getByText('Observed response:').first())
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research chain map' }))
+			.element(browserPage.getByRole('heading', { name: 'Comparable groups' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Supporting data: performance matrix' }))
+			.element(browserPage.getByRole('heading', { name: 'Supporting data matrix' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Evidence locator' }))
@@ -456,11 +459,10 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('S002 · Island strategy B').first())
 			.toBeInTheDocument();
 		await expect
-			.element(
-				browserPage.getByRole('heading', {
-					name: 'Highest density does not align with highest strength'
-				})
-			)
+			.element(browserPage.getByRole('heading', { name: 'Densification and porosity' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Strength, ductility, and hardness' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: '95.4%' }).first())
@@ -469,22 +471,24 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'))
 			.not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Chain 1')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Sample and paper context').first())
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Observed results').nth(1))
+			.element(browserPage.getByText('Performance response').first())
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('215.6').first())
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Research chain map'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Best parameter chain'))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
 			).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
 	});
 
-	it('cleans table-origin labels in the research chain map', async () => {
+	it('cleans table-origin labels in the representative material state report', async () => {
 		const payload: any = materialProfilePayload();
 		payload.sample_matrix.rows = [
 			{
@@ -531,14 +535,17 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research chain map' }))
+			.element(browserPage.getByRole('heading', { name: 'Representative material states' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('as-SLM(140/100)').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Energy density').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('139 J/mm3').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Laser power').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('140 W').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Scan speed').first()).toBeInTheDocument();
-		const processStep = Array.from(document.querySelectorAll('.chain-map-step')).find((step) =>
-			step.textContent?.includes('Process background')
+		await expect.element(browserPage.getByText('280 mm/s').first()).toBeInTheDocument();
+		const processStep = Array.from(document.querySelectorAll('.chain-step')).find((step) =>
+			step.textContent?.includes('Preparation and post-treatment')
 		);
 		expect(processStep?.textContent).not.toContain('Table 2');
 	});
@@ -602,14 +609,12 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('610 MPa').first()).toBeInTheDocument();
 		await expect
-			.element(
-				browserPage.getByRole('heading', {
-					name: 'Tensile strength is available as an evidence-backed property'
-				})
-			)
+			.element(browserPage.getByRole('heading', { name: 'Strength, ductility, and hardness' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('316L stainless steel Tensile strength 610 MPa'))
+			.element(
+				browserPage.getByText(/Collection summary: Tensile strength 610 MPa/)
+			)
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Collection summary').first())
@@ -764,7 +769,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 	});
 
-	it('does not promote narrative observations with embedded numbers into best parameter chains', async () => {
+	it('does not promote narrative observations with embedded numbers into representative material states', async () => {
 		const payload: any = materialProfilePayload();
 		payload.sample_matrix.columns = [
 			{ value_key: 'elongation', label: 'Elongation', unit: '%' }
@@ -807,11 +812,13 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'No sample-level performance chain can be built from the current material matrix yet.'
+					'No representative material state can be built from the current material matrix yet.'
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('best in matrix · E01')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('leading in this matrix · E01'))
+			.not.toBeInTheDocument();
 	});
 
 	it('generates a material review report and exposes Markdown and PDF artifacts', async () => {

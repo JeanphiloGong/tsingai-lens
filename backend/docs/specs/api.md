@@ -1216,20 +1216,24 @@ Graph 语义约束：
 - `/graph` 返回结构字段：
   `collection_id / nodes / edges / truncated`
 - graph node 只保留：
-  `id / label / type / role / summary / metrics / detail_rows / degree`
+  `id / label / type / role / summary / metrics / detail_rows / objective_id /
+  logic_chain_id / degree`
 - graph edge 只保留：
   `id / source / target / weight / edge_description`
 - graph node `type` 当前可以是：
-  `objective | logic_chain_step`
-- graph node `role` 当前可以是：
-  `research_objective | material_scope | process_sample_context |
+  `objective | material_system | material_scope | process_sample_context |
   test_conditions | characterization | measurement_results |
+  controlled_comparisons | mechanism_interpretation | limitations`
+- graph node `role` 当前可以是：
+  `research_objective | material_system | material_scope |
+  process_sample_context | test_conditions | characterization | measurement_results |
   controlled_comparisons | mechanism_interpretation | limitations`
 - `detail_rows` 是聚合 step 的证据明细表。paper-local keys such as
   `Case 15`、`condition no. 2`、单条 measurement value 不应作为默认画布节点；
-  它们应进入对应 `logic_chain_step.detail_rows`
+  它们应进入对应 semantic node `detail_rows`
 - graph edge `edge_description` 当前可以是：
-  `objective_to_logic_chain_step | logic_chain_step_to_step`
+  `objective_to_material_system | material_system_to_material_scope |
+  <source_step>_to_<target_step>`
 - `/graph/nodes/{node_id}/neighbors` 返回中心节点的一跳邻域，字段与 `/graph`
   保持同一结构
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码

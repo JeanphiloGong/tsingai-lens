@@ -7,7 +7,15 @@ from typing import Any, Mapping
 
 _NODE_TYPE_PRIORITY = {
     "objective": 0,
-    "logic_chain_step": 1,
+    "material_system": 1,
+    "material_scope": 2,
+    "process_sample_context": 3,
+    "test_conditions": 4,
+    "characterization": 5,
+    "measurement_results": 6,
+    "controlled_comparisons": 7,
+    "mechanism_interpretation": 8,
+    "limitations": 9,
 }
 _STEP_SEQUENCE = (
     ("material_scope", "Material scope"),
@@ -139,6 +147,10 @@ def _build_objective_record(row: Mapping[str, Any]) -> dict[str, Any]:
     ]
     return {
         "objective_id": objective_id,
+        "question": question,
+        "material_scope": material_scope,
+        "process_axes": process_axes,
+        "property_axes": property_axes,
         "node": {
             "id": f"obj:{objective_id}",
             "label": _shorten_text(question, 120),
@@ -151,6 +163,7 @@ def _build_objective_record(row: Mapping[str, Any]) -> dict[str, Any]:
                 "property_axis_count": len(property_axes),
             },
             "detail_rows": detail_rows,
+            "objective_id": objective_id,
             "degree": 0,
         },
     }
@@ -214,11 +227,21 @@ def _build_logic_chain_step_projection(
         if evidence_unit_id in units_by_id
     ]
     chain_payload = _as_mapping(chain.get("chain_payload"))
-    nodes = [
+    objective_record = objective_records[objective_id]
+    material_nodes = _build_material_system_nodes(
+        logic_chain_id=logic_chain_id,
+        objective_id=objective_id,
+        objective_record=objective_record,
+        chain_payload=chain_payload,
+        units=units,
+        doc_records=doc_records,
+    )
+    step_nodes = [
         _build_step_node(
             logic_chain_id=logic_chain_id,
             objective_id=objective_id,
             chain=chain,
+            objective_record=objective_record,
             role=role,
             label=label,
             units=units,
@@ -227,17 +250,40 @@ def _build_logic_chain_step_projection(
         )
         for role, label in _STEP_SEQUENCE
     ]
+    nodes = [*material_nodes, *step_nodes]
     edges: list[dict[str, Any]] = []
     first_step_id = _step_node_id(logic_chain_id, _STEP_SEQUENCE[0][0])
-    edges.append(
-        {
-            "id": f"edge:obj:{objective_id}:step:{logic_chain_id}:{_STEP_SEQUENCE[0][0]}",
-            "source": f"obj:{objective_id}",
-            "target": first_step_id,
-            "weight": 1.0,
-            "edge_description": "objective_to_logic_chain_step",
-        }
-    )
+    if material_nodes:
+        for material_node in material_nodes:
+            material_node_id = str(material_node["id"])
+            edges.append(
+                {
+                    "id": f"edge:obj:{objective_id}:{material_node_id}",
+                    "source": f"obj:{objective_id}",
+                    "target": material_node_id,
+                    "weight": 1.0,
+                    "edge_description": "objective_to_material_system",
+                }
+            )
+            edges.append(
+                {
+                    "id": f"edge:{material_node_id}:step:{logic_chain_id}:{_STEP_SEQUENCE[0][0]}",
+                    "source": material_node_id,
+                    "target": first_step_id,
+                    "weight": 1.0,
+                    "edge_description": "material_system_to_material_scope",
+                }
+            )
+    else:
+        edges.append(
+            {
+                "id": f"edge:obj:{objective_id}:step:{logic_chain_id}:{_STEP_SEQUENCE[0][0]}",
+                "source": f"obj:{objective_id}",
+                "target": first_step_id,
+                "weight": 1.0,
+                "edge_description": "objective_to_material_scope",
+            }
+        )
     for (source_role, _source_label), (target_role, _target_label) in zip(
         _STEP_SEQUENCE,
         _STEP_SEQUENCE[1:],
@@ -249,10 +295,119 @@ def _build_logic_chain_step_projection(
                 "source": _step_node_id(logic_chain_id, source_role),
                 "target": _step_node_id(logic_chain_id, target_role),
                 "weight": 1.0,
-                "edge_description": "logic_chain_step_to_step",
+                "edge_description": f"{source_role}_to_{target_role}",
             }
         )
     return {"nodes": nodes, "edges": edges}
+
+
+def _build_material_system_nodes(
+    *,
+    logic_chain_id: str,
+    objective_id: str,
+    objective_record: Mapping[str, Any],
+    chain_payload: Mapping[str, Any],
+    units: list[dict[str, Any]],
+    doc_records: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    material_labels = _collect_material_labels(
+        objective_record=objective_record,
+        chain_payload=chain_payload,
+        units=units,
+    )
+    return [
+        _build_material_system_node(
+            logic_chain_id=logic_chain_id,
+            objective_id=objective_id,
+            material_label=material_label,
+            units=units,
+            doc_records=doc_records,
+        )
+        for material_label in material_labels
+    ]
+
+
+def _build_material_system_node(
+    *,
+    logic_chain_id: str,
+    objective_id: str,
+    material_label: str,
+    units: list[dict[str, Any]],
+    doc_records: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    matching_units = [
+        unit
+        for unit in units
+        if (_material_label(unit.get("material_system")) or "").casefold()
+        == material_label.casefold()
+    ]
+    evidence_rows = [
+        _evidence_unit_detail_row(unit, doc_records)
+        for unit in matching_units
+    ]
+    paper_ids = {
+        document_id
+        for row in evidence_rows
+        if (document_id := _as_text(row.get("document_id")))
+    }
+    detail_rows = [
+        _drop_empty_values(
+            {
+                "label": material_label,
+                "material": material_label,
+                "paper_count": len(paper_ids),
+                "evidence_count": len(matching_units),
+            }
+        )
+    ]
+    detail_rows.extend(evidence_rows)
+    return {
+        "id": _material_system_node_id(logic_chain_id, material_label),
+        "label": _shorten_text(material_label, 96),
+        "type": "material_system",
+        "role": "material_system",
+        "summary": f"{material_label} material system for this research objective.",
+        "metrics": {
+            "row_count": len(detail_rows),
+            "paper_count": len(paper_ids),
+            "evidence_count": len(matching_units),
+        },
+        "detail_rows": detail_rows,
+        "objective_id": objective_id,
+        "logic_chain_id": logic_chain_id,
+        "degree": 0,
+    }
+
+
+def _collect_material_labels(
+    *,
+    objective_record: Mapping[str, Any],
+    chain_payload: Mapping[str, Any],
+    units: list[dict[str, Any]],
+) -> list[str]:
+    objective_payload = _as_mapping(chain_payload.get("objective"))
+    candidates = [
+        *_string_list(objective_record.get("material_scope")),
+        *_string_list(objective_payload.get("material_scope")),
+    ]
+    candidates.extend(
+        material_label
+        for unit in units
+        if (material_label := _material_label(unit.get("material_system")))
+    )
+
+    labels: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        label = _clean_graph_text(candidate)
+        if not label:
+            continue
+        key = label.casefold()
+        if key in _PLACEHOLDER_VALUES or key in seen:
+            continue
+        seen.add(key)
+        labels.append(label)
+    return labels
 
 
 def _build_step_node(
@@ -260,6 +415,7 @@ def _build_step_node(
     logic_chain_id: str,
     objective_id: str,
     chain: Mapping[str, Any],
+    objective_record: Mapping[str, Any],
     role: str,
     label: str,
     units: list[dict[str, Any]],
@@ -269,6 +425,7 @@ def _build_step_node(
     rows = _step_detail_rows(
         role=role,
         chain=chain,
+        objective_record=objective_record,
         units=units,
         doc_records=doc_records,
         chain_payload=chain_payload,
@@ -282,7 +439,7 @@ def _build_step_node(
     return {
         "id": _step_node_id(logic_chain_id, role),
         "label": label,
-        "type": "logic_chain_step",
+        "type": role,
         "role": role,
         "summary": summary,
         "metrics": {
@@ -301,15 +458,22 @@ def _step_detail_rows(
     *,
     role: str,
     chain: Mapping[str, Any],
+    objective_record: Mapping[str, Any],
     units: list[dict[str, Any]],
     doc_records: dict[str, dict[str, Any]],
     chain_payload: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     if role == "material_scope":
         objective = _as_mapping(chain_payload.get("objective"))
-        material_scope = _string_list(objective.get("material_scope"))
-        process_axes = _string_list(objective.get("process_axes"))
-        property_axes = _string_list(objective.get("property_axes"))
+        material_scope = _string_list(objective.get("material_scope")) or _string_list(
+            objective_record.get("material_scope")
+        )
+        process_axes = _string_list(objective.get("process_axes")) or _string_list(
+            objective_record.get("process_axes")
+        )
+        property_axes = _string_list(objective.get("property_axes")) or _string_list(
+            objective_record.get("property_axes")
+        )
         return [
             _drop_empty_values(
                 {
@@ -317,7 +481,8 @@ def _step_detail_rows(
                     "material": _join_terms(material_scope),
                     "process": _join_terms(process_axes),
                     "property": _join_terms(property_axes),
-                    "interpretation": _as_text(chain.get("question")),
+                    "interpretation": _as_text(chain.get("question"))
+                    or _as_text(objective_record.get("question")),
                     "confidence": chain.get("confidence"),
                 }
             )
@@ -481,6 +646,11 @@ def _step_summary(
 
 def _step_node_id(logic_chain_id: str, role: str) -> str:
     return f"step:{logic_chain_id}:{role}"
+
+
+def _material_system_node_id(logic_chain_id: str, material_label: str) -> str:
+    suffix = sha1(material_label.casefold().encode("utf-8")).hexdigest()[:12]
+    return f"material_system:{logic_chain_id}:{suffix}"
 
 
 def _truncate_graph(

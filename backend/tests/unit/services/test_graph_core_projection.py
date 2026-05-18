@@ -114,7 +114,7 @@ def _core_graph_fact_set(collection_id: str) -> CoreFactSet:
     )
 
 
-def test_core_projection_builds_logic_chain_step_graph_payload():
+def test_core_projection_builds_semantic_logic_chain_graph_payload():
     nodes, edges, truncated = load_core_graph_payload(
         profiles=(_profile(),),
         research_objectives=(_objective(),),
@@ -128,8 +128,9 @@ def test_core_projection_builds_logic_chain_step_graph_payload():
     nodes_by_id = {node["id"]: node for node in nodes}
     assert "obj:obj-1" in nodes_by_id
     assert nodes_by_id["obj:obj-1"]["type"] == "objective"
-    assert {node["type"] for node in nodes} == {"objective", "logic_chain_step"}
-    assert {node["role"] for node in nodes if node["type"] == "logic_chain_step"} == {
+    assert {node["type"] for node in nodes} == {
+        "objective",
+        "material_system",
         "material_scope",
         "process_sample_context",
         "test_conditions",
@@ -139,8 +140,24 @@ def test_core_projection_builds_logic_chain_step_graph_payload():
         "mechanism_interpretation",
         "limitations",
     }
+    assert {node["role"] for node in nodes if node["id"].startswith("step:")} == {
+        "material_scope",
+        "process_sample_context",
+        "test_conditions",
+        "characterization",
+        "measurement_results",
+        "controlled_comparisons",
+        "mechanism_interpretation",
+        "limitations",
+    }
+    material_nodes = [node for node in nodes if node["type"] == "material_system"]
+    assert len(material_nodes) == 1
+    assert material_nodes[0]["label"] == "316L stainless steel"
+    assert material_nodes[0]["logic_chain_id"] == "chain-1"
+    assert material_nodes[0]["objective_id"] == "obj-1"
 
     measurement_step = nodes_by_id["step:chain-1:measurement_results"]
+    assert measurement_step["type"] == "measurement_results"
     assert measurement_step["metrics"]["row_count"] == 1
     assert measurement_step["detail_rows"] == [
         {
@@ -171,12 +188,16 @@ def test_core_projection_builds_logic_chain_step_graph_payload():
     process_step = nodes_by_id["step:chain-1:process_sample_context"]
     assert "Case: 15" in process_step["detail_rows"][0]["sample"]
     assert not any(node["type"] == "measurement" for node in nodes)
+    assert not any(node["type"] == "test_condition" for node in nodes)
+    assert not any(node["type"] == "controlled_comparison" for node in nodes)
+    assert not any(node["type"] == "document" for node in nodes)
     assert not any(node["label"] == "Case: 15" for node in nodes)
 
     edge_descriptions = {edge["edge_description"] for edge in edges}
     assert {
-        "objective_to_logic_chain_step",
-        "logic_chain_step_to_step",
+        "objective_to_material_system",
+        "material_system_to_material_scope",
+        "material_scope_to_process_sample_context",
     }.issubset(edge_descriptions)
 
 
@@ -197,7 +218,18 @@ def test_core_projection_keeps_case_out_of_canvas_nodes():
         min_weight=0.0,
     )
 
-    assert {node["type"] for node in nodes} == {"objective", "logic_chain_step"}
+    assert {node["type"] for node in nodes} == {
+        "objective",
+        "material_system",
+        "material_scope",
+        "process_sample_context",
+        "test_conditions",
+        "characterization",
+        "measurement_results",
+        "controlled_comparisons",
+        "mechanism_interpretation",
+        "limitations",
+    }
     assert not any(node["label"] == "Case: 15" for node in nodes)
     test_step = next(node for node in nodes if node.get("role") == "test_conditions")
     assert test_step["detail_rows"] == []
@@ -225,11 +257,11 @@ def test_core_projection_truncates_step_graph_by_objective_and_step_order():
     assert truncated is True
     assert len(nodes) == 5
     assert nodes[0]["type"] == "objective"
-    assert [node["role"] for node in nodes[1:]] == [
+    assert [node["type"] for node in nodes[1:]] == [
+        "material_system",
         "material_scope",
         "process_sample_context",
         "test_conditions",
-        "characterization",
     ]
 
 
@@ -287,7 +319,8 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
 
     assert payload["collection_id"] == collection_id
     assert any(node["type"] == "objective" for node in payload["nodes"])
-    assert any(node["type"] == "logic_chain_step" for node in payload["nodes"])
+    assert any(node["type"] == "material_system" for node in payload["nodes"])
+    assert any(node["type"] == "measurement_results" for node in payload["nodes"])
     assert any(
         node["role"] == "measurement_results" and node["detail_rows"]
         for node in payload["nodes"]
@@ -303,7 +336,8 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
-    assert b"logic_chain_step" in graphml_bytes
+    assert b"material_system" in graphml_bytes
+    assert b"measurement_results" in graphml_bytes
 
 
 def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):

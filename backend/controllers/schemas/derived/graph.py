@@ -24,6 +24,8 @@ class GraphNodeResponse(BaseModel):
         default_factory=list,
         description="聚合节点详情行",
     )
+    objective_id: str | None = Field(default=None, description="关联研究目标 ID")
+    logic_chain_id: str | None = Field(default=None, description="关联科研链路 ID")
     degree: int | None = Field(default=None, description="节点度数")
 
 

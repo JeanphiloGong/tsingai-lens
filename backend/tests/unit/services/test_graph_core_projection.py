@@ -204,6 +204,8 @@ def test_core_projection_builds_semantic_logic_chain_graph_payload():
         edge["edge_description"] == "semantic_chain_step_to_step"
         and edge["source_role"] == "material_scope"
         and edge["target_role"] == "process_sample_context"
+        and edge["objective_id"] == "obj-1"
+        and edge["logic_chain_id"] == "chain-1"
         for edge in edges
     )
 
@@ -263,6 +265,11 @@ def test_core_projection_reuses_material_system_across_objectives():
         for edge in edges
         if edge["target"] == material_id
     } == {"objective_to_material_system"}
+    assert {
+        edge["logic_chain_id"]
+        for edge in edges
+        if edge["target"] == material_id
+    } == {"chain-1", "chain-2"}
 
 
 def test_core_projection_keeps_case_out_of_canvas_nodes():

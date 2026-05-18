@@ -265,6 +265,8 @@ def _build_logic_chain_step_projection(
                     "edge_description": "objective_to_material_system",
                     "source_role": "research_objective",
                     "target_role": "material_system",
+                    "objective_id": objective_id,
+                    "logic_chain_id": logic_chain_id,
                 }
             )
             edges.append(
@@ -276,6 +278,8 @@ def _build_logic_chain_step_projection(
                     "edge_description": "material_system_to_material_scope",
                     "source_role": "material_system",
                     "target_role": _STEP_SEQUENCE[0][0],
+                    "objective_id": objective_id,
+                    "logic_chain_id": logic_chain_id,
                 }
             )
     else:
@@ -288,6 +292,8 @@ def _build_logic_chain_step_projection(
                 "edge_description": "objective_to_material_scope",
                 "source_role": "research_objective",
                 "target_role": _STEP_SEQUENCE[0][0],
+                "objective_id": objective_id,
+                "logic_chain_id": logic_chain_id,
             }
         )
     for (source_role, _source_label), (target_role, _target_label) in zip(
@@ -304,6 +310,8 @@ def _build_logic_chain_step_projection(
                 "edge_description": "semantic_chain_step_to_step",
                 "source_role": source_role,
                 "target_role": target_role,
+                "objective_id": objective_id,
+                "logic_chain_id": logic_chain_id,
             }
         )
     return {"nodes": nodes, "edges": edges}

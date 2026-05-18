@@ -1219,7 +1219,7 @@ Graph 语义约束：
   `id / label / type / role / summary / metrics / detail_rows / objective_id /
   logic_chain_id / degree`
 - graph edge 只保留：
-  `id / source / target / weight / edge_description`
+  `id / source / target / weight / edge_description / source_role / target_role`
 - graph node `type` 当前可以是：
   `objective | material_system | material_scope | process_sample_context |
   test_conditions | characterization | measurement_results |
@@ -1233,7 +1233,11 @@ Graph 语义约束：
   它们应进入对应 semantic node `detail_rows`
 - graph edge `edge_description` 当前可以是：
   `objective_to_material_system | material_system_to_material_scope |
-  <source_step>_to_<target_step>`
+  objective_to_material_scope | semantic_chain_step_to_step`
+- 当 `edge_description=semantic_chain_step_to_step` 时，`source_role` 和
+  `target_role` 表达具体链路环节，例如
+  `material_scope -> process_sample_context`。这样 graph API 保持稳定边类型，
+  前端仍能恢复具体科研链路顺序
 - `/graph/nodes/{node_id}/neighbors` 返回中心节点的一跳邻域，字段与 `/graph`
   保持同一结构
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码

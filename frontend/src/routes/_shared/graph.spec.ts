@@ -69,8 +69,12 @@ describe('graph shared helpers', () => {
 			kind: 'logic_chain',
 			resourceId: 'chain-1'
 		});
+		expect(parseGraphNodeId('material_system:chain-1:hash')).toEqual({
+			kind: 'material_system',
+			resourceId: 'chain-1:hash'
+		});
 		expect(parseGraphNodeId('step:chain-1:measurement_results')).toEqual({
-			kind: 'logic_chain_step',
+			kind: 'measurement_results',
 			resourceId: 'chain-1:measurement_results'
 		});
 		expect(parseGraphNodeId('proc:hash-1')).toEqual({
@@ -87,7 +91,7 @@ describe('graph shared helpers', () => {
 		});
 	});
 
-	it('recognizes logic-chain-step graph nodes from the backend contract', () => {
+	it('recognizes semantic chain graph nodes from the backend contract', () => {
 		const graph: GraphResponse = {
 			collection_id: 'col_1',
 			truncated: false,
@@ -96,7 +100,7 @@ describe('graph shared helpers', () => {
 				{
 					id: 'step:c1:measurement_results',
 					label: 'Measurement results',
-					type: 'logic_chain_step',
+					type: 'measurement_results',
 					role: 'measurement_results',
 					summary: '1 measurement row supports this chain step.',
 					metrics: { row_count: 1, paper_count: 1, evidence_count: 1 },
@@ -119,10 +123,10 @@ describe('graph shared helpers', () => {
 		});
 		expect(buildNodeTypeCounts(graph)).toMatchObject({
 			objective: 1,
-			logic_chain_step: 1,
+			measurement_results: 1,
 			unknown: 0
 		});
-		expect(getNodeTypeStyle('logic_chain_step').icon).toBe('logic-chain-step');
+		expect(getNodeTypeStyle('measurement_results').icon).toBe('measurement-results');
 	});
 
 	it('formats raw graph labels for display', () => {
@@ -208,20 +212,27 @@ describe('graph shared helpers', () => {
 		expect(element.data?.fullLabel).toContain('Details: Tensile Specimens');
 	});
 
-	it('positions objective logic-chain steps from canonical step ids', () => {
+	it('positions objective semantic chain nodes from canonical ids', () => {
 		const elements = buildCytoscapeElements({
 			nodes: [
 				{ id: 'obj:o1', label: 'Objective A', type: 'objective', degree: 1 },
 				{
+					id: 'material_system:chain-a:steel',
+					label: '316L stainless steel',
+					type: 'material_system',
+					logic_chain_id: 'chain-a',
+					degree: 2
+				},
+				{
 					id: 'step:chain-a:measurement_results',
 					label: 'Measurement results',
-					type: 'logic_chain_step',
+					type: 'measurement_results',
 					degree: 1
 				},
 				{
 					id: 'step:chain-a:material_scope',
 					label: 'Material scope',
-					type: 'logic_chain_step',
+					type: 'material_scope',
 					degree: 1
 				}
 			],
@@ -229,16 +240,23 @@ describe('graph shared helpers', () => {
 				{
 					id: 'e1',
 					source: 'obj:o1',
-					target: 'step:chain-a:material_scope',
+					target: 'material_system:chain-a:steel',
 					weight: 1,
-					edge_description: 'objective_to_logic_chain_step'
+					edge_description: 'objective_to_material_system'
 				},
 				{
 					id: 'e2',
+					source: 'material_system:chain-a:steel',
+					target: 'step:chain-a:material_scope',
+					weight: 1,
+					edge_description: 'material_system_to_material_scope'
+				},
+				{
+					id: 'e3',
 					source: 'step:chain-a:material_scope',
 					target: 'step:chain-a:measurement_results',
 					weight: 1,
-					edge_description: 'logic_chain_step_to_step'
+					edge_description: 'material_scope_to_measurement_results'
 				}
 			]
 		});
@@ -246,8 +264,10 @@ describe('graph shared helpers', () => {
 		const byId = new Map(elements.map((element) => [String(element.data?.id), element]));
 
 		expect(byId.get('obj:o1')?.position).toEqual({ x: 0, y: 0 });
-		expect(byId.get('step:chain-a:material_scope')?.position).toEqual({ x: 250, y: 0 });
-		expect(byId.get('step:chain-a:measurement_results')?.position).toEqual({ x: 994, y: 0 });
+		expect(byId.get('material_system:chain-a:steel')?.position).toEqual({ x: 270, y: 0 });
+		expect(byId.get('step:chain-a:material_scope')?.position).toEqual({ x: 478, y: 0 });
+		expect(byId.get('step:chain-a:measurement_results')?.position).toEqual({ x: 1310, y: 0 });
+		expect(byId.get('step:chain-a:measurement_results')?.data?.detailRows).toEqual([]);
 	});
 
 	it('does not emit unsupported Cytoscape shadow style properties', () => {

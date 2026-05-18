@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
-	import cytoscape, { type Core, type NodeSingular } from 'cytoscape';
+	import cytoscape, { type CollectionReturnValue, type Core, type NodeSingular } from 'cytoscape';
 	import fcose from 'cytoscape-fcose';
 	import { errorMessage, getApiErrorCode, isHttpStatusError } from '../../../_shared/api';
 	import {
@@ -146,6 +146,10 @@
 		if (!cy) return;
 		const visible = visibleGraphElements();
 		if (!visible || visible.empty()) return;
+		if (layoutName === 'logic_chain') {
+			fitLogicChainGraph(visible, animate);
+			return;
+		}
 		if (animate) {
 			cy.animate({
 				fit: { eles: visible, padding: graphPadding },
@@ -155,6 +159,27 @@
 			return;
 		}
 		cy.fit(visible, graphPadding);
+	}
+
+	function fitLogicChainGraph(visible: CollectionReturnValue, animate = true) {
+		if (!cy) return;
+		const objective = visible.nodes('[entityType = "objective"]').first();
+		const material = visible.nodes('[entityType = "material_system"]').first();
+		const scope = visible.nodes('[entityType = "material_scope"]').first();
+		const firstRow = objective.union(material).union(scope).filter((element) => !element.empty());
+		const target = firstRow.length ? firstRow : visible;
+		const zoom = 0.88;
+		if (animate) {
+			cy.animate({
+				center: { eles: target },
+				zoom,
+				duration: graphAnimationDuration,
+				easing: 'ease-out-cubic'
+			});
+			return;
+		}
+		cy.center(target);
+		cy.zoom(zoom);
 	}
 
 	function centerGraph() {
@@ -344,6 +369,17 @@
 			id: node.id(),
 			label: String(node.data('fullLabel') ?? node.id()),
 			type: entityType,
+			role: String(node.data('role') ?? entityType),
+			summary:
+				typeof node.data('summary') === 'string' ? String(node.data('summary')) : null,
+			metrics: (node.data('metrics') ?? {}) as Record<string, unknown>,
+			detail_rows: Array.isArray(node.data('detailRows')) ? node.data('detailRows') : [],
+			objective_id:
+				typeof node.data('objectiveId') === 'string' ? String(node.data('objectiveId')) : null,
+			logic_chain_id:
+				typeof node.data('logicChainId') === 'string'
+					? String(node.data('logicChainId'))
+					: null,
 			degree: Number(node.data('degree') ?? 0),
 			kind: parsed.kind === 'unknown' ? entityType : parsed.kind,
 			resourceId: parsed.resourceId || null,
@@ -500,9 +536,21 @@
 		const key =
 			type === 'test_condition'
 				? 'testCondition'
-				: type === 'logic_chain_step'
-					? 'logicChainStep'
-					: type;
+				: type === 'test_conditions'
+					? 'testConditions'
+					: type === 'material_system'
+						? 'materialSystem'
+						: type === 'material_scope'
+							? 'materialScope'
+							: type === 'process_sample_context'
+								? 'processSampleContext'
+								: type === 'measurement_results'
+									? 'measurementResults'
+									: type === 'controlled_comparisons'
+										? 'controlledComparisons'
+										: type === 'mechanism_interpretation'
+											? 'mechanismInterpretation'
+											: type;
 		const translated = $t(`graph.legend.${key}`);
 		return translated === `graph.legend.${key}` ? formatMachineText(type) : translated;
 	}

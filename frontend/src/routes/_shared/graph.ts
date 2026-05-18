@@ -52,7 +52,14 @@ export type GraphNeighborsResponse = {
 export type GraphNodeRef =
 	| { kind: 'objective'; resourceId: string }
 	| { kind: 'logic_chain'; resourceId: string }
-	| { kind: 'logic_chain_step'; resourceId: string }
+	| { kind: 'material_system'; resourceId: string }
+	| { kind: 'material_scope'; resourceId: string }
+	| { kind: 'process_sample_context'; resourceId: string }
+	| { kind: 'test_conditions'; resourceId: string }
+	| { kind: 'measurement_results'; resourceId: string }
+	| { kind: 'controlled_comparisons'; resourceId: string }
+	| { kind: 'mechanism_interpretation'; resourceId: string }
+	| { kind: 'limitations'; resourceId: string }
 	| { kind: 'document'; resourceId: string }
 	| { kind: 'evidence'; resourceId: string }
 	| { kind: 'comparison'; resourceId: string }
@@ -76,7 +83,14 @@ export type GraphQuery = {
 export type GraphNodeType =
 	| 'objective'
 	| 'logic_chain'
-	| 'logic_chain_step'
+	| 'material_system'
+	| 'material_scope'
+	| 'process_sample_context'
+	| 'test_conditions'
+	| 'measurement_results'
+	| 'controlled_comparisons'
+	| 'mechanism_interpretation'
+	| 'limitations'
 	| 'document'
 	| 'evidence'
 	| 'comparison'
@@ -160,11 +174,21 @@ const logicChainStepRoles = [
 	'controlled_comparisons',
 	'mechanism_interpretation',
 	'limitations'
-];
+] as const;
+type LogicChainStepRole = (typeof logicChainStepRoles)[number];
+type SemanticChainNodeType = 'material_system' | LogicChainStepRole;
 
 export const graphNodeTypeOrder: GraphNodeType[] = [
 	'objective',
-	'logic_chain_step',
+	'material_system',
+	'material_scope',
+	'process_sample_context',
+	'test_conditions',
+	'characterization',
+	'measurement_results',
+	'controlled_comparisons',
+	'mechanism_interpretation',
+	'limitations',
 	'logic_chain',
 	'document',
 	'measurement',
@@ -178,8 +202,7 @@ export const graphNodeTypeOrder: GraphNodeType[] = [
 	'test_condition',
 	'baseline',
 	'variant',
-	'mechanism',
-	'characterization'
+	'mechanism'
 ];
 
 const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
@@ -195,11 +218,53 @@ const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
 		shape: 'round-rectangle',
 		icon: 'logic-chain'
 	},
-	logic_chain_step: {
+	material_system: {
+		color: '#7C3AED',
+		background: '#F5F3FF',
+		shape: 'round-rectangle',
+		icon: 'material-system'
+	},
+	material_scope: {
 		color: '#0F766E',
 		background: '#CCFBF1',
 		shape: 'round-rectangle',
-		icon: 'logic-chain-step'
+		icon: 'material-scope'
+	},
+	process_sample_context: {
+		color: '#0284C7',
+		background: '#E0F2FE',
+		shape: 'round-rectangle',
+		icon: 'process-sample-context'
+	},
+	test_conditions: {
+		color: '#475569',
+		background: '#F1F5F9',
+		shape: 'round-rectangle',
+		icon: 'test-conditions'
+	},
+	measurement_results: {
+		color: '#0891B2',
+		background: '#CFFAFE',
+		shape: 'round-rectangle',
+		icon: 'measurement-results'
+	},
+	controlled_comparisons: {
+		color: '#EA580C',
+		background: '#FFEDD5',
+		shape: 'round-rectangle',
+		icon: 'controlled-comparisons'
+	},
+	mechanism_interpretation: {
+		color: '#BE123C',
+		background: '#FFE4E6',
+		shape: 'round-rectangle',
+		icon: 'mechanism-interpretation'
+	},
+	limitations: {
+		color: '#9333EA',
+		background: '#FAF5FF',
+		shape: 'round-rectangle',
+		icon: 'limitations'
 	},
 	document: {
 		color: '#2563EB',
@@ -294,8 +359,16 @@ const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
 };
 
 const edgeTypeLabels: Record<string, string> = {
-	objective_to_logic_chain_step: 'starts',
-	logic_chain_step_to_step: 'then',
+	objective_to_material_system: 'material',
+	material_system_to_material_scope: 'scope',
+	objective_to_material_scope: 'scope',
+	material_scope_to_process_sample_context: 'process',
+	process_sample_context_to_test_conditions: 'tests',
+	test_conditions_to_characterization: 'characterizes',
+	characterization_to_measurement_results: 'measures',
+	measurement_results_to_controlled_comparisons: 'compares',
+	controlled_comparisons_to_mechanism_interpretation: 'explains',
+	mechanism_interpretation_to_limitations: 'limits',
 	objective_to_evidence: 'scopes',
 	document_to_evidence: 'source',
 	evidence_to_material: 'material',
@@ -364,7 +437,14 @@ export function parseGraphNodeId(nodeId: string): GraphNodeRef {
 
 	if (prefix === 'obj') return { kind: 'objective', resourceId };
 	if (prefix === 'chain') return { kind: 'logic_chain', resourceId };
-	if (prefix === 'step') return { kind: 'logic_chain_step', resourceId };
+	if (prefix === 'material_system') return { kind: 'material_system', resourceId };
+	if (prefix === 'step') {
+		const step = parseLogicChainStepNodeId(nodeId);
+		if (step && isLogicChainStepType(step.role)) {
+			return { kind: step.role, resourceId };
+		}
+		return { kind: 'unknown', resourceId };
+	}
 	if (prefix === 'doc') return { kind: 'document', resourceId };
 	if (prefix === 'evi') return { kind: 'evidence', resourceId };
 	if (prefix === 'cmp') return { kind: 'comparison', resourceId };
@@ -703,23 +783,33 @@ function isAggregateNodeType(type: GraphNodeType) {
 	);
 }
 
+function isLogicChainStepType(type: string | GraphNodeType): type is LogicChainStepRole {
+	return logicChainStepRoles.includes(type as LogicChainStepRole);
+}
+
+function isSemanticChainNodeType(
+	type: string | GraphNodeType
+): type is SemanticChainNodeType {
+	return type === 'material_system' || isLogicChainStepType(type);
+}
+
 function graphNodeDimensions(type: GraphNodeType, label: string, degree: number) {
 	if (type === 'objective') {
 		return {
-			width: 188,
-			height: 88,
-			textMaxWidth: 158,
-			fontSize: 12,
+			width: 220,
+			height: 92,
+			textMaxWidth: 188,
+			fontSize: 13,
 			layoutWeight: 22000
 		};
 	}
 
-	if (type === 'logic_chain_step') {
+	if (isSemanticChainNodeType(type)) {
 		return {
-			width: 174,
-			height: 78,
-			textMaxWidth: 142,
-			fontSize: 11,
+			width: type === 'material_system' ? 196 : 188,
+			height: 82,
+			textMaxWidth: type === 'material_system' ? 164 : 154,
+			fontSize: 12,
 			layoutWeight: 18000
 		};
 	}
@@ -771,7 +861,9 @@ export function getNodeDescription(node: GraphNode | GraphSelectedNode) {
 	const type = normalizeGraphNodeType(node.type);
 	const label = getNodeLabel(node, 72);
 	if (type === 'objective') return `${label} is a research objective for this collection.`;
-	if (type === 'logic_chain_step')
+	if (type === 'material_system')
+		return `${label} is the material system scoped by this research objective.`;
+	if (isLogicChainStepType(type))
 		return `${label} is an aggregated step in the research logic chain.`;
 	if (type === 'logic_chain')
 		return `${label} is an assembled research logic chain backed by evidence units.`;
@@ -792,8 +884,6 @@ export function getNodeDescription(node: GraphNode | GraphSelectedNode) {
 		return `${label} is a method or process context extracted from the collection.`;
 	if (type === 'mechanism')
 		return `${label} is an author interpretation or mechanism evidence unit.`;
-	if (type === 'characterization')
-		return `${label} is a characterization observation evidence unit.`;
 	if (type === 'variant') return `${label} is a variant or experimental branch.`;
 	return `${label} is a graph object in this collection.`;
 }
@@ -867,7 +957,13 @@ export function buildCytoscapeElements(
 		const fullLabel = formatGraphLabel(node.label || node.id);
 		const label = getNodeDisplayLabel(
 			node,
-			isAggregateNodeType(type) ? 48 : type === 'comparison' ? 30 : 28
+			isSemanticChainNodeType(type)
+				? 42
+				: isAggregateNodeType(type)
+					? 48
+					: type === 'comparison'
+						? 30
+						: 28
 		);
 		const degree = node.degree ?? 0;
 		const dimensions = graphNodeDimensions(type, label, degree);
@@ -879,11 +975,17 @@ export function buildCytoscapeElements(
 				fullLabel,
 				displayLabel: label,
 				entityType: type,
+				role: node.role ?? type,
 				typeColor: style.color,
 				typeBackground: style.background,
 				typeShape: style.shape,
 				typeIcon: style.icon,
 				degree,
+				summary: node.summary ?? null,
+				metrics: node.metrics ?? {},
+				detailRows: node.detail_rows ?? [],
+				objectiveId: node.objective_id ?? null,
+				logicChainId: node.logic_chain_id ?? null,
 				width: dimensions.width,
 				height: dimensions.height,
 				textMaxWidth: dimensions.textMaxWidth,
@@ -1150,8 +1252,7 @@ function isEvidenceUnitNodeType(type: GraphNodeType) {
 		type === 'evidence' ||
 		type === 'measurement' ||
 		type === 'controlled_comparison' ||
-		type === 'mechanism' ||
-		type === 'characterization'
+		type === 'mechanism'
 	);
 }
 
@@ -1247,7 +1348,7 @@ function orderedKeyChainNeighbors(
 function isKeyChainNodeType(type: GraphNodeType) {
 	return (
 		type === 'objective' ||
-		type === 'logic_chain_step' ||
+		isSemanticChainNodeType(type) ||
 		type === 'logic_chain' ||
 		type === 'document' ||
 		isEvidenceUnitNodeType(type) ||
@@ -1262,16 +1363,17 @@ function isKeyChainNodeType(type: GraphNodeType) {
 
 function keyChainNodePriority(type: GraphNodeType) {
 	if (type === 'objective') return 0;
-	if (type === 'logic_chain_step') return 1;
-	if (type === 'logic_chain') return 2;
-	if (type === 'document') return 3;
-	if (isEvidenceUnitNodeType(type)) return 4;
-	if (type === 'material') return 5;
-	if (type === 'property') return 6;
-	if (type === 'process') return 7;
-	if (type === 'sample') return 8;
-	if (type === 'test_condition') return 9;
-	if (type === 'baseline') return 10;
+	if (type === 'material_system') return 1;
+	if (isLogicChainStepType(type)) return 2 + logicChainStepRoles.indexOf(type);
+	if (type === 'logic_chain') return 20;
+	if (type === 'document') return 21;
+	if (isEvidenceUnitNodeType(type)) return 22;
+	if (type === 'material') return 23;
+	if (type === 'property') return 24;
+	if (type === 'process') return 25;
+	if (type === 'sample') return 26;
+	if (type === 'test_condition') return 27;
+	if (type === 'baseline') return 28;
 	return 99;
 }
 
@@ -1300,10 +1402,10 @@ function collectOverviewBuckets(
 		const neighbor = nodeById.get(neighborId);
 		const type = normalizeGraphNodeType(neighbor?.type);
 		if (type === 'objective') buckets.objectives.add(neighborId);
-		if (type === 'logic_chain_step') buckets.logicChains.add(neighborId);
+		if (isSemanticChainNodeType(type)) buckets.logicChains.add(neighborId);
 		if (type === 'logic_chain') buckets.logicChains.add(neighborId);
 		if (type === 'document') buckets.documents.add(neighborId);
-		if (type === 'material') buckets.materials.add(neighborId);
+		if (type === 'material' || type === 'material_system') buckets.materials.add(neighborId);
 		if (type === 'property') buckets.properties.add(neighborId);
 		if (isOverviewContextType(type)) buckets.contexts.add(neighborId);
 
@@ -1317,7 +1419,7 @@ function collectOverviewBuckets(
 				if (evidenceNeighborType === 'logic_chain') {
 					buckets.logicChains.add(evidenceNeighborId);
 				}
-				if (evidenceNeighborType === 'logic_chain_step') {
+				if (isSemanticChainNodeType(evidenceNeighborType)) {
 					buckets.logicChains.add(evidenceNeighborId);
 				}
 				if (evidenceNeighborType === 'document') {
@@ -1369,21 +1471,26 @@ function buildLogicChainPositions(
 		(node) => normalizeGraphNodeType(node.type) === 'objective'
 	);
 	const stepNodes = graph.nodes.filter(
-		(node) => normalizeGraphNodeType(node.type) === 'logic_chain_step'
+		(node) => isSemanticChainNodeType(normalizeGraphNodeType(node.type))
 	);
 	if (!objectiveNodes.length || !stepNodes.length) return positions;
 
 	const objectiveByChain = new Map<string, GraphNode>();
 	for (const edge of graph.edges) {
-		if (edge.edge_description !== 'objective_to_logic_chain_step') continue;
+		if (
+			edge.edge_description !== 'objective_to_material_system' &&
+			edge.edge_description !== 'objective_to_material_scope'
+		) {
+			continue;
+		}
 		const source = graph.nodes.find((node) => node.id === edge.source);
 		const target = graph.nodes.find((node) => node.id === edge.target);
-		const targetRef = parseLogicChainStepNodeId(target?.id ?? '');
+		const targetRef = target ? graphChainNodeRef(target) : null;
 		if (
 			source &&
 			target &&
 			normalizeGraphNodeType(source.type) === 'objective' &&
-			normalizeGraphNodeType(target.type) === 'logic_chain_step' &&
+			isSemanticChainNodeType(normalizeGraphNodeType(target.type)) &&
 			targetRef
 		) {
 			objectiveByChain.set(targetRef.chainId, source);
@@ -1393,7 +1500,7 @@ function buildLogicChainPositions(
 
 	const stepsByChain = new Map<string, GraphNode[]>();
 	for (const node of stepNodes) {
-		const stepRef = parseLogicChainStepNodeId(node.id);
+		const stepRef = graphChainNodeRef(node);
 		if (!stepRef || !objectiveByChain.has(stepRef.chainId)) continue;
 		const steps = stepsByChain.get(stepRef.chainId) ?? [];
 		steps.push(node);
@@ -1403,14 +1510,14 @@ function buildLogicChainPositions(
 	const chains = Array.from(objectiveByChain.entries()).sort(([, first], [, second]) =>
 		String(first.label).localeCompare(String(second.label))
 	);
-	const rowGap = 118;
-	const columnGap = 186;
+	const rowGap = 128;
+	const columnGap = 208;
 	for (const [rowIndex, [chainId, objective]] of chains.entries()) {
 		const y = rowIndex * rowGap;
 		positions.set(objective.id, { x: 0, y });
 		const steps = [...(stepsByChain.get(chainId) ?? [])].sort(sortLogicChainSteps);
 		for (const step of steps) {
-			positions.set(step.id, { x: 250 + logicChainStepColumn(step) * columnGap, y });
+			positions.set(step.id, { x: 270 + logicChainStepColumn(step) * columnGap, y });
 		}
 	}
 	return positions;
@@ -1424,9 +1531,22 @@ function sortLogicChainSteps(first: GraphNode, second: GraphNode) {
 }
 
 function logicChainStepColumn(node: GraphNode) {
-	const role = String(node.role || parseLogicChainStepNodeId(node.id)?.role || '');
-	const roleIndex = logicChainStepRoles.indexOf(role);
-	return roleIndex >= 0 ? roleIndex : logicChainStepRoles.length;
+	const type = normalizeGraphNodeType(node.type);
+	if (type === 'material_system') return 0;
+	const role = String(node.role || parseLogicChainStepNodeId(node.id)?.role || type || '');
+	const roleIndex = logicChainStepRoles.findIndex((stepRole) => stepRole === role);
+	return roleIndex >= 0 ? roleIndex + 1 : logicChainStepRoles.length + 1;
+}
+
+function graphChainNodeRef(node: GraphNode) {
+	const logicChainId = String(node.logic_chain_id ?? '').trim();
+	if (logicChainId) return { chainId: logicChainId, role: String(node.role ?? node.type ?? '') };
+	if (normalizeGraphNodeType(node.type) === 'material_system') {
+		const parts = node.id.split(':');
+		const chainId = parts[1]?.trim();
+		return chainId ? { chainId, role: 'material_system' } : null;
+	}
+	return parseLogicChainStepNodeId(node.id);
 }
 
 function parseLogicChainStepNodeId(nodeId: string) {
@@ -1524,7 +1644,7 @@ function parseSelectedNode(node: GraphSelectedNode): GraphNodeRef {
 	const kind = normalizeGraphNodeType(node.kind ?? node.type);
 	if (
 		kind === 'objective' ||
-		kind === 'logic_chain_step' ||
+		isSemanticChainNodeType(kind) ||
 		kind === 'logic_chain' ||
 		kind === 'document' ||
 		kind === 'evidence' ||
@@ -1537,8 +1657,7 @@ function parseSelectedNode(node: GraphSelectedNode): GraphNodeRef {
 		kind === 'sample' ||
 		kind === 'test_condition' ||
 		kind === 'baseline' ||
-		kind === 'mechanism' ||
-		kind === 'characterization'
+		kind === 'mechanism'
 	) {
 		return { kind, resourceId };
 	}

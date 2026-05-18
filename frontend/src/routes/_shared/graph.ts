@@ -32,6 +32,10 @@ export type GraphEdge = {
 	target: string;
 	weight?: number | null;
 	edge_description?: string | null;
+	source_role?: string | null;
+	target_role?: string | null;
+	objective_id?: string | null;
+	logic_chain_id?: string | null;
 };
 
 export type GraphResponse = {
@@ -362,6 +366,7 @@ const edgeTypeLabels: Record<string, string> = {
 	objective_to_material_system: 'material',
 	material_system_to_material_scope: 'scope',
 	objective_to_material_scope: 'scope',
+	semantic_chain_step_to_step: 'then',
 	material_scope_to_process_sample_context: 'process',
 	process_sample_context_to_test_conditions: 'tests',
 	test_conditions_to_characterization: 'characterizes',
@@ -1016,6 +1021,10 @@ export function buildCytoscapeElements(
 				source: edge.source,
 				target: edge.target,
 				edgeDescription: edge.edge_description ?? 'related_to',
+				sourceRole: edge.source_role ?? null,
+				targetRole: edge.target_role ?? null,
+				objectiveId: edge.objective_id ?? null,
+				logicChainId: edge.logic_chain_id ?? null,
 				label: style.label,
 				weight: edge.weight ?? null,
 				width: edgeWidth(edge.weight),
@@ -1467,6 +1476,8 @@ function buildLogicChainPositions(
 	graph: Pick<GraphResponse, 'nodes' | 'edges'>
 ): Map<string, GraphPosition> {
 	const positions = new Map<string, GraphPosition>();
+	const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+	const materialChainIds = buildMaterialChainIds(graph, nodeById);
 	const objectiveNodes = graph.nodes.filter(
 		(node) => normalizeGraphNodeType(node.type) === 'objective'
 	);
@@ -1485,7 +1496,12 @@ function buildLogicChainPositions(
 		}
 		const source = graph.nodes.find((node) => node.id === edge.source);
 		const target = graph.nodes.find((node) => node.id === edge.target);
-		const targetRef = target ? graphChainNodeRef(target) : null;
+		const targetRef =
+			edge.logic_chain_id && target
+				? { chainId: String(edge.logic_chain_id), role: String(edge.target_role ?? target.type ?? '') }
+				: target
+					? graphChainNodeRef(target, materialChainIds)
+					: null;
 		if (
 			source &&
 			target &&
@@ -1500,11 +1516,13 @@ function buildLogicChainPositions(
 
 	const stepsByChain = new Map<string, GraphNode[]>();
 	for (const node of stepNodes) {
-		const stepRef = graphChainNodeRef(node);
-		if (!stepRef || !objectiveByChain.has(stepRef.chainId)) continue;
-		const steps = stepsByChain.get(stepRef.chainId) ?? [];
-		steps.push(node);
-		stepsByChain.set(stepRef.chainId, steps);
+		const stepRefs = graphChainNodeRefs(node, materialChainIds);
+		for (const stepRef of stepRefs) {
+			if (!objectiveByChain.has(stepRef.chainId)) continue;
+			const steps = stepsByChain.get(stepRef.chainId) ?? [];
+			steps.push(node);
+			stepsByChain.set(stepRef.chainId, steps);
+		}
 	}
 
 	const chains = Array.from(objectiveByChain.entries()).sort(([, first], [, second]) =>
@@ -1512,13 +1530,24 @@ function buildLogicChainPositions(
 	);
 	const rowGap = 128;
 	const columnGap = 208;
+	const chainRows = new Map<string, number>();
 	for (const [rowIndex, [chainId, objective]] of chains.entries()) {
 		const y = rowIndex * rowGap;
+		chainRows.set(chainId, y);
 		positions.set(objective.id, { x: 0, y });
 		const steps = [...(stepsByChain.get(chainId) ?? [])].sort(sortLogicChainSteps);
 		for (const step of steps) {
+			if (normalizeGraphNodeType(step.type) === 'material_system') continue;
 			positions.set(step.id, { x: 270 + logicChainStepColumn(step) * columnGap, y });
 		}
+	}
+	for (const [materialId, chainIds] of materialChainIds.entries()) {
+		const rowPositions = Array.from(chainIds, (chainId) => chainRows.get(chainId)).filter(
+			(row): row is number => typeof row === 'number'
+		);
+		if (!rowPositions.length) continue;
+		const y = rowPositions.reduce((total, row) => total + row, 0) / rowPositions.length;
+		positions.set(materialId, { x: 270, y });
 	}
 	return positions;
 }
@@ -1538,12 +1567,46 @@ function logicChainStepColumn(node: GraphNode) {
 	return roleIndex >= 0 ? roleIndex + 1 : logicChainStepRoles.length + 1;
 }
 
-function graphChainNodeRef(node: GraphNode) {
+function buildMaterialChainIds(
+	graph: Pick<GraphResponse, 'nodes' | 'edges'>,
+	nodeById: Map<string, GraphNode>
+) {
+	const materialChainIds = new Map<string, Set<string>>();
+	for (const edge of graph.edges) {
+		if (edge.edge_description !== 'material_system_to_material_scope') continue;
+		const source = nodeById.get(edge.source);
+		const target = nodeById.get(edge.target);
+		if (
+			normalizeGraphNodeType(source?.type) !== 'material_system' ||
+			normalizeGraphNodeType(target?.type) !== 'material_scope'
+		) {
+			continue;
+		}
+		const targetRef = edge.logic_chain_id && target
+			? { chainId: String(edge.logic_chain_id), role: String(edge.target_role ?? target.type ?? '') }
+			: target
+				? graphChainNodeRef(target, materialChainIds)
+				: null;
+		if (!targetRef) continue;
+		const chainIds = materialChainIds.get(edge.source) ?? new Set<string>();
+		chainIds.add(targetRef.chainId);
+		materialChainIds.set(edge.source, chainIds);
+	}
+	return materialChainIds;
+}
+
+function graphChainNodeRefs(node: GraphNode, materialChainIds: Map<string, Set<string>>) {
+	const ref = graphChainNodeRef(node, materialChainIds);
+	if (ref) return [ref];
+	const chainIds = materialChainIds.get(node.id);
+	return chainIds ? Array.from(chainIds, (chainId) => ({ chainId, role: 'material_system' })) : [];
+}
+
+function graphChainNodeRef(node: GraphNode, materialChainIds: Map<string, Set<string>>) {
 	const logicChainId = String(node.logic_chain_id ?? '').trim();
 	if (logicChainId) return { chainId: logicChainId, role: String(node.role ?? node.type ?? '') };
 	if (normalizeGraphNodeType(node.type) === 'material_system') {
-		const parts = node.id.split(':');
-		const chainId = parts[1]?.trim();
+		const [chainId] = Array.from(materialChainIds.get(node.id) ?? []);
 		return chainId ? { chainId, role: 'material_system' } : null;
 	}
 	return parseLogicChainStepNodeId(node.id);

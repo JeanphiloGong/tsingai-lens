@@ -69,9 +69,9 @@ describe('graph shared helpers', () => {
 			kind: 'logic_chain',
 			resourceId: 'chain-1'
 		});
-		expect(parseGraphNodeId('material_system:chain-1:hash')).toEqual({
+		expect(parseGraphNodeId('material_system:hash')).toEqual({
 			kind: 'material_system',
-			resourceId: 'chain-1:hash'
+			resourceId: 'hash'
 		});
 		expect(parseGraphNodeId('step:chain-1:measurement_results')).toEqual({
 			kind: 'measurement_results',
@@ -217,10 +217,9 @@ describe('graph shared helpers', () => {
 			nodes: [
 				{ id: 'obj:o1', label: 'Objective A', type: 'objective', degree: 1 },
 				{
-					id: 'material_system:chain-a:steel',
+					id: 'material_system:steel',
 					label: '316L stainless steel',
 					type: 'material_system',
-					logic_chain_id: 'chain-a',
 					degree: 2
 				},
 				{
@@ -240,23 +239,27 @@ describe('graph shared helpers', () => {
 				{
 					id: 'e1',
 					source: 'obj:o1',
-					target: 'material_system:chain-a:steel',
+					target: 'material_system:steel',
 					weight: 1,
-					edge_description: 'objective_to_material_system'
+					edge_description: 'objective_to_material_system',
+					logic_chain_id: 'chain-a'
 				},
 				{
 					id: 'e2',
-					source: 'material_system:chain-a:steel',
+					source: 'material_system:steel',
 					target: 'step:chain-a:material_scope',
 					weight: 1,
-					edge_description: 'material_system_to_material_scope'
+					edge_description: 'material_system_to_material_scope',
+					logic_chain_id: 'chain-a'
 				},
 				{
 					id: 'e3',
 					source: 'step:chain-a:material_scope',
 					target: 'step:chain-a:measurement_results',
 					weight: 1,
-					edge_description: 'material_scope_to_measurement_results'
+					edge_description: 'semantic_chain_step_to_step',
+					source_role: 'material_scope',
+					target_role: 'measurement_results'
 				}
 			]
 		});
@@ -264,10 +267,76 @@ describe('graph shared helpers', () => {
 		const byId = new Map(elements.map((element) => [String(element.data?.id), element]));
 
 		expect(byId.get('obj:o1')?.position).toEqual({ x: 0, y: 0 });
-		expect(byId.get('material_system:chain-a:steel')?.position).toEqual({ x: 270, y: 0 });
+		expect(byId.get('material_system:steel')?.position).toEqual({ x: 270, y: 0 });
 		expect(byId.get('step:chain-a:material_scope')?.position).toEqual({ x: 478, y: 0 });
 		expect(byId.get('step:chain-a:measurement_results')?.position).toEqual({ x: 1310, y: 0 });
 		expect(byId.get('step:chain-a:measurement_results')?.data?.detailRows).toEqual([]);
+		expect(byId.get('step:chain-a:measurement_results')?.data?.targetRole).toBeUndefined();
+	});
+
+	it('centers shared material nodes across objective chains', () => {
+		const elements = buildCytoscapeElements({
+			nodes: [
+				{ id: 'obj:o1', label: 'Objective A', type: 'objective', degree: 1 },
+				{ id: 'obj:o2', label: 'Objective B', type: 'objective', degree: 1 },
+				{
+					id: 'material_system:steel',
+					label: '316L stainless steel',
+					type: 'material_system',
+					degree: 4
+				},
+				{
+					id: 'step:chain-a:material_scope',
+					label: 'Material scope',
+					type: 'material_scope',
+					degree: 1
+				},
+				{
+					id: 'step:chain-b:material_scope',
+					label: 'Material scope',
+					type: 'material_scope',
+					degree: 1
+				}
+			],
+			edges: [
+				{
+					id: 'e1',
+					source: 'obj:o1',
+					target: 'material_system:steel',
+					edge_description: 'objective_to_material_system',
+					logic_chain_id: 'chain-a'
+				},
+				{
+					id: 'e2',
+					source: 'obj:o2',
+					target: 'material_system:steel',
+					edge_description: 'objective_to_material_system',
+					logic_chain_id: 'chain-b'
+				},
+				{
+					id: 'e3',
+					source: 'material_system:steel',
+					target: 'step:chain-a:material_scope',
+					edge_description: 'material_system_to_material_scope',
+					logic_chain_id: 'chain-a'
+				},
+				{
+					id: 'e4',
+					source: 'material_system:steel',
+					target: 'step:chain-b:material_scope',
+					edge_description: 'material_system_to_material_scope',
+					logic_chain_id: 'chain-b'
+				}
+			]
+		});
+
+		const byId = new Map(elements.map((element) => [String(element.data?.id), element]));
+
+		expect(byId.get('obj:o1')?.position).toEqual({ x: 0, y: 0 });
+		expect(byId.get('obj:o2')?.position).toEqual({ x: 0, y: 128 });
+		expect(byId.get('material_system:steel')?.position).toEqual({ x: 270, y: 64 });
+		expect(byId.get('step:chain-a:material_scope')?.position).toEqual({ x: 478, y: 0 });
+		expect(byId.get('step:chain-b:material_scope')?.position).toEqual({ x: 478, y: 128 });
 	});
 
 	it('does not emit unsupported Cytoscape shadow style properties', () => {

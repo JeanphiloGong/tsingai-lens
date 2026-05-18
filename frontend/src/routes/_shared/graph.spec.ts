@@ -778,6 +778,15 @@ describe('graph shared helpers', () => {
 		]);
 		expect(materialGraph.edges).toHaveLength(6);
 		expect(materialGraph.nodes.some((node) => node.type === 'document')).toBe(false);
+		expect(materialGraph.nodes.find((node) => node.id === 'material_system:steel')?.position).toEqual({
+			x: 0,
+			y: 0
+		});
+		expect(materialGraph.nodes.find((node) => node.id === 'obj:o1')?.position?.x).toBeLessThan(0);
+		expect(
+			materialGraph.nodes.find((node) => node.id === 'step:chain-a:measurement_results')?.position
+				?.x
+		).toBeGreaterThan(0);
 	});
 
 	it('links selected aggregate nodes to comparison rows', () => {

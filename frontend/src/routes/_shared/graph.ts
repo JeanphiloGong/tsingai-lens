@@ -22,6 +22,7 @@ export type GraphNode = {
 	objective_id?: string | null;
 	logic_chain_id?: string | null;
 	degree?: number | null;
+	position?: GraphPosition | null;
 };
 
 export type GraphNodeDetailRow = Record<string, unknown>;
@@ -750,7 +751,17 @@ export function buildMaterialCentricGraph(
 		}
 	}
 
-	const nodes = graph.nodes.filter((node) => selectedNodeIds.has(node.id));
+	const positions = buildMaterialCentricPositions(
+		graph.nodes.filter((node) => selectedNodeIds.has(node.id)),
+		graph.edges,
+		nodeById
+	);
+	const nodes = graph.nodes
+		.filter((node) => selectedNodeIds.has(node.id))
+		.map((node) => ({
+			...node,
+			position: positions.get(node.id) ?? node.position ?? null
+		}));
 	const edges = graph.edges.filter(
 		(edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
 	);
@@ -1046,6 +1057,7 @@ export function buildCytoscapeElements(
 			},
 			position:
 				options.previousPositions?.get(node.id) ??
+				node.position ??
 				logicChainPositions.get(node.id) ??
 				fallbackPosition(node.id, index, graph.nodes.length)
 		});
@@ -1443,6 +1455,73 @@ function orderedMaterialBranchNodeIds(
 			sortGraphNodesByDegree(left, right)
 		);
 	});
+}
+
+function buildMaterialCentricPositions(
+	nodes: GraphNode[],
+	edges: GraphEdge[],
+	nodeById: Map<string, GraphNode>
+) {
+	const positions = new Map<string, GraphPosition>();
+	const selectedNodeIds = new Set(nodes.map((node) => node.id));
+	const materialNodes = nodes
+		.filter((node) => normalizeGraphNodeType(node.type) === 'material_system')
+		.sort(sortGraphNodesByDegree);
+	if (!materialNodes.length) return positions;
+
+	const materialGap = 720;
+	for (const [materialIndex, material] of materialNodes.entries()) {
+		const originY = materialIndex * materialGap;
+		positions.set(material.id, { x: 0, y: originY });
+
+		const chainIds = new Set<string>();
+		for (const edge of edges) {
+			if (!edge.logic_chain_id) continue;
+			if (edge.source !== material.id && edge.target !== material.id) continue;
+			chainIds.add(String(edge.logic_chain_id));
+		}
+
+		const objectiveByChain = new Map<string, GraphNode>();
+		for (const edge of edges) {
+			if (!edge.logic_chain_id) continue;
+			if (edge.edge_description !== 'objective_to_material_system') continue;
+			if (edge.target !== material.id) continue;
+			const source = nodeById.get(edge.source);
+			if (source && selectedNodeIds.has(source.id)) {
+				objectiveByChain.set(String(edge.logic_chain_id), source);
+			}
+		}
+
+		const chains = Array.from(chainIds).sort((left, right) => {
+			const leftObjective = objectiveByChain.get(left);
+			const rightObjective = objectiveByChain.get(right);
+			return String(leftObjective?.label ?? left).localeCompare(
+				String(rightObjective?.label ?? right)
+			);
+		});
+		const rowGap = 132;
+		const startY = originY - ((chains.length - 1) * rowGap) / 2;
+		for (const [rowIndex, chainId] of chains.entries()) {
+			const y = startY + rowIndex * rowGap;
+			const objective = objectiveByChain.get(chainId);
+			if (objective) {
+				positions.set(objective.id, { x: -320, y });
+			}
+
+			const chainSteps = nodes
+				.filter((node) => {
+					if (!selectedNodeIds.has(node.id)) return false;
+					if (!isLogicChainStepType(normalizeGraphNodeType(node.type))) return false;
+					return graphChainNodeRefs(node, new Map()).some((ref) => ref.chainId === chainId);
+				})
+				.sort(sortLogicChainSteps);
+			for (const step of chainSteps) {
+				positions.set(step.id, { x: 250 + logicChainStepColumn(step) * 168, y });
+			}
+		}
+	}
+
+	return positions;
 }
 
 function keyChainNodePriority(type: GraphNodeType) {

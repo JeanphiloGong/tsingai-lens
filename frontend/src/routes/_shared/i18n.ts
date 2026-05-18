@@ -2358,6 +2358,7 @@ const translations: Record<Language, Translations> = {
 			},
 			viewMode: {
 				keyChain: 'Key research chain',
+				materialCentric: 'Material hub',
 				full: 'Full graph'
 			},
 			layout: {
@@ -4832,6 +4833,7 @@ const translations: Record<Language, Translations> = {
 			},
 			viewMode: {
 				keyChain: '关键科研链路',
+				materialCentric: '材料枢纽',
 				full: '完整图谱'
 			},
 			layout: {

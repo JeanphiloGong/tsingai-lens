@@ -8,6 +8,7 @@
 		buildCytoscapeElements,
 		buildCytoscapeStyles,
 		buildGraphMeta,
+		buildMaterialCentricGraph,
 		buildNodeTypeCounts,
 		downloadGraphml as downloadGraphmlFile,
 		exportGraphPng,
@@ -38,6 +39,7 @@
 	cytoscape.use(fcose);
 
 	type LayoutName = 'logic_chain' | 'fcose' | 'cose' | 'grid' | 'circle';
+	type GraphViewMode = 'objective_chain' | 'material_centric' | 'full';
 	type SelectedNode = GraphNode & {
 		kind: GraphNodeType | 'unknown';
 		resourceId: string | null;
@@ -74,6 +76,7 @@
 
 	let maxNodes = defaultMaxNodes;
 	let minWeight = defaultMinWeight;
+	let viewMode: GraphViewMode = 'objective_chain';
 	let layoutName: LayoutName = 'logic_chain';
 	let searchQuery = '';
 	let visibleNodeTypes: Partial<Record<GraphNodeType, boolean>> = buildDefaultVisibleTypes();
@@ -118,6 +121,7 @@
 	function resetControlState() {
 		maxNodes = defaultMaxNodes;
 		minWeight = defaultMinWeight;
+		viewMode = 'objective_chain';
 		layoutName = 'logic_chain';
 		searchQuery = '';
 		visibleNodeTypes = buildDefaultVisibleTypes();
@@ -217,6 +221,10 @@
 	}
 
 	function buildDisplayGraphData(sourceGraph: GraphResponse | null) {
+		if (!sourceGraph) return null;
+		if (viewMode === 'material_centric') {
+			return buildMaterialCentricGraph(sourceGraph, { maxNodes });
+		}
 		return sourceGraph;
 	}
 
@@ -661,6 +669,7 @@
 				maxNodes,
 				minWeight,
 				layoutName,
+				viewMode,
 				searchQuery,
 				visibleNodeTypes
 			}
@@ -851,6 +860,20 @@
 				<details class="graph-advanced-settings" open>
 					<summary>{$t('graph.controls.advanced')}</summary>
 					<div class="graph-advanced-grid">
+						<label class="graph-control-field" for="graph-view-mode">
+							<span>{$t('graph.controls.viewMode')}</span>
+							<select
+								id="graph-view-mode"
+								class="graph-input"
+								bind:value={viewMode}
+								disabled={graphLoading}
+								on:change={handleControlRender}
+							>
+								<option value="objective_chain">{$t('graph.viewMode.keyChain')}</option>
+								<option value="material_centric">{$t('graph.viewMode.materialCentric')}</option>
+								<option value="full">{$t('graph.viewMode.full')}</option>
+							</select>
+						</label>
 						<label class="graph-control-field" for="graph-max-nodes">
 							<span>{$t('graph.controls.maxNodes')}</span>
 							<input

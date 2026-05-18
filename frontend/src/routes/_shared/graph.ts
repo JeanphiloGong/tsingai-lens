@@ -716,6 +716,53 @@ export function buildCollectionOverviewGraph(
 	};
 }
 
+export function buildMaterialCentricGraph(
+	graph: GraphResponse | null | undefined,
+	options: { maxNodes?: number } = {}
+): GraphResponse {
+	const emptyGraph: GraphResponse = {
+		collection_id: graph?.collection_id ?? '',
+		nodes: [],
+		edges: [],
+		truncated: Boolean(graph?.truncated)
+	};
+	if (!graph) return emptyGraph;
+
+	const maxNodes = Math.max(1, Math.trunc(options.maxNodes ?? 200));
+	const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+	const selectedNodeIds = new Set<string>();
+
+	function addNode(nodeId: string) {
+		if (selectedNodeIds.has(nodeId)) return true;
+		if (!nodeById.has(nodeId) || selectedNodeIds.size >= maxNodes) return false;
+		selectedNodeIds.add(nodeId);
+		return true;
+	}
+
+	const materialNodes = graph.nodes
+		.filter((node) => normalizeGraphNodeType(node.type) === 'material_system')
+		.sort(sortGraphNodesByDegree);
+	for (const material of materialNodes) {
+		if (!addNode(material.id)) break;
+		for (const branchNodeId of orderedMaterialBranchNodeIds(material.id, graph, nodeById)) {
+			addNode(branchNodeId);
+			if (selectedNodeIds.size >= maxNodes) break;
+		}
+	}
+
+	const nodes = graph.nodes.filter((node) => selectedNodeIds.has(node.id));
+	const edges = graph.edges.filter(
+		(edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
+	);
+
+	return {
+		collection_id: graph.collection_id,
+		nodes,
+		edges,
+		truncated: Boolean(graph.truncated || selectedNodeIds.size < graph.nodes.length)
+	};
+}
+
 export function getNodeTypeStyle(type?: string | null): GraphTypeStyle {
 	return nodeTypeStyles[normalizeGraphNodeType(type)];
 }
@@ -1368,6 +1415,34 @@ function isKeyChainNodeType(type: GraphNodeType) {
 		type === 'test_condition' ||
 		type === 'baseline'
 	);
+}
+
+function orderedMaterialBranchNodeIds(
+	materialNodeId: string,
+	graph: Pick<GraphResponse, 'nodes' | 'edges'>,
+	nodeById: Map<string, GraphNode>
+) {
+	const directNodeIds = new Set<string>();
+	const chainIds = new Set<string>();
+	for (const edge of graph.edges) {
+		if (edge.source !== materialNodeId && edge.target !== materialNodeId) continue;
+		directNodeIds.add(edge.source === materialNodeId ? edge.target : edge.source);
+		if (edge.logic_chain_id) chainIds.add(edge.logic_chain_id);
+	}
+	for (const node of graph.nodes) {
+		if (node.logic_chain_id && chainIds.has(node.logic_chain_id)) {
+			directNodeIds.add(node.id);
+		}
+	}
+	return Array.from(directNodeIds).sort((leftId, rightId) => {
+		const left = nodeById.get(leftId);
+		const right = nodeById.get(rightId);
+		return (
+			keyChainNodePriority(normalizeGraphNodeType(left?.type)) -
+				keyChainNodePriority(normalizeGraphNodeType(right?.type)) ||
+			sortGraphNodesByDegree(left, right)
+		);
+	});
 }
 
 function keyChainNodePriority(type: GraphNodeType) {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildCollectionOverviewGraph,
 	buildCollectionGraphmlUrl,
+	buildMaterialCentricGraph,
 	buildCytoscapeElements,
 	buildCytoscapeStyles,
 	buildGraphMeta,
@@ -702,6 +703,81 @@ describe('graph shared helpers', () => {
 		);
 		expect(keyChain.nodes.some((node) => node.id === 'evi:orphan')).toBe(false);
 		expect(keyChain.nodes.some((node) => node.type === 'unknown')).toBe(false);
+	});
+
+	it('projects shared material hubs into material-centric maps', () => {
+		const graph: GraphResponse = {
+			collection_id: 'col_1',
+			truncated: false,
+			nodes: [
+				{ id: 'obj:o1', label: 'Objective A', type: 'objective', degree: 1 },
+				{ id: 'obj:o2', label: 'Objective B', type: 'objective', degree: 1 },
+				{ id: 'material_system:steel', label: '316L stainless steel', type: 'material_system', degree: 4 },
+				{ id: 'step:chain-a:material_scope', label: 'Material scope', type: 'material_scope', logic_chain_id: 'chain-a', degree: 1 },
+				{ id: 'step:chain-a:measurement_results', label: 'Measurement results', type: 'measurement_results', logic_chain_id: 'chain-a', degree: 1 },
+				{ id: 'step:chain-b:material_scope', label: 'Material scope', type: 'material_scope', logic_chain_id: 'chain-b', degree: 1 },
+				{ id: 'step:chain-b:mechanism_interpretation', label: 'Mechanism', type: 'mechanism_interpretation', logic_chain_id: 'chain-b', degree: 1 },
+				{ id: 'doc:d1', label: 'Paper A', type: 'document', degree: 1 }
+			],
+			edges: [
+				{
+					id: 'e1',
+					source: 'obj:o1',
+					target: 'material_system:steel',
+					edge_description: 'objective_to_material_system',
+					logic_chain_id: 'chain-a'
+				},
+				{
+					id: 'e2',
+					source: 'obj:o2',
+					target: 'material_system:steel',
+					edge_description: 'objective_to_material_system',
+					logic_chain_id: 'chain-b'
+				},
+				{
+					id: 'e3',
+					source: 'material_system:steel',
+					target: 'step:chain-a:material_scope',
+					edge_description: 'material_system_to_material_scope',
+					logic_chain_id: 'chain-a'
+				},
+				{
+					id: 'e4',
+					source: 'material_system:steel',
+					target: 'step:chain-b:material_scope',
+					edge_description: 'material_system_to_material_scope',
+					logic_chain_id: 'chain-b'
+				},
+				{
+					id: 'e5',
+					source: 'step:chain-a:material_scope',
+					target: 'step:chain-a:measurement_results',
+					edge_description: 'semantic_chain_step_to_step',
+					logic_chain_id: 'chain-a'
+				},
+				{
+					id: 'e6',
+					source: 'step:chain-b:material_scope',
+					target: 'step:chain-b:mechanism_interpretation',
+					edge_description: 'semantic_chain_step_to_step',
+					logic_chain_id: 'chain-b'
+				}
+			]
+		};
+
+		const materialGraph = buildMaterialCentricGraph(graph, { maxNodes: 20 });
+
+		expect(materialGraph.nodes.map((node) => node.id)).toEqual([
+			'obj:o1',
+			'obj:o2',
+			'material_system:steel',
+			'step:chain-a:material_scope',
+			'step:chain-a:measurement_results',
+			'step:chain-b:material_scope',
+			'step:chain-b:mechanism_interpretation'
+		]);
+		expect(materialGraph.edges).toHaveLength(6);
+		expect(materialGraph.nodes.some((node) => node.type === 'document')).toBe(false);
 	});
 
 	it('links selected aggregate nodes to comparison rows', () => {

@@ -15,8 +15,16 @@ export type GraphNode = {
 	id: string;
 	label: string;
 	type?: string | null;
+	role?: string | null;
+	summary?: string | null;
+	metrics?: Record<string, unknown>;
+	detail_rows?: GraphNodeDetailRow[];
+	objective_id?: string | null;
+	logic_chain_id?: string | null;
 	degree?: number | null;
 };
+
+export type GraphNodeDetailRow = Record<string, unknown>;
 
 export type GraphEdge = {
 	id: string;
@@ -44,6 +52,7 @@ export type GraphNeighborsResponse = {
 export type GraphNodeRef =
 	| { kind: 'objective'; resourceId: string }
 	| { kind: 'logic_chain'; resourceId: string }
+	| { kind: 'logic_chain_step'; resourceId: string }
 	| { kind: 'document'; resourceId: string }
 	| { kind: 'evidence'; resourceId: string }
 	| { kind: 'comparison'; resourceId: string }
@@ -67,6 +76,7 @@ export type GraphQuery = {
 export type GraphNodeType =
 	| 'objective'
 	| 'logic_chain'
+	| 'logic_chain_step'
 	| 'document'
 	| 'evidence'
 	| 'comparison'
@@ -141,8 +151,20 @@ export type GraphSelectedObjectDetail = {
 
 export type CytoscapeThemeName = 'light' | 'dark';
 
+const logicChainStepRoles = [
+	'material_scope',
+	'process_sample_context',
+	'test_conditions',
+	'characterization',
+	'measurement_results',
+	'controlled_comparisons',
+	'mechanism_interpretation',
+	'limitations'
+];
+
 export const graphNodeTypeOrder: GraphNodeType[] = [
 	'objective',
+	'logic_chain_step',
 	'logic_chain',
 	'document',
 	'measurement',
@@ -172,6 +194,12 @@ const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
 		background: '#FEF3C7',
 		shape: 'round-rectangle',
 		icon: 'logic-chain'
+	},
+	logic_chain_step: {
+		color: '#0F766E',
+		background: '#CCFBF1',
+		shape: 'round-rectangle',
+		icon: 'logic-chain-step'
 	},
 	document: {
 		color: '#2563EB',
@@ -266,6 +294,8 @@ const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
 };
 
 const edgeTypeLabels: Record<string, string> = {
+	objective_to_logic_chain_step: 'starts',
+	logic_chain_step_to_step: 'then',
 	objective_to_evidence: 'scopes',
 	document_to_evidence: 'source',
 	evidence_to_material: 'material',
@@ -334,6 +364,7 @@ export function parseGraphNodeId(nodeId: string): GraphNodeRef {
 
 	if (prefix === 'obj') return { kind: 'objective', resourceId };
 	if (prefix === 'chain') return { kind: 'logic_chain', resourceId };
+	if (prefix === 'step') return { kind: 'logic_chain_step', resourceId };
 	if (prefix === 'doc') return { kind: 'document', resourceId };
 	if (prefix === 'evi') return { kind: 'evidence', resourceId };
 	if (prefix === 'cmp') return { kind: 'comparison', resourceId };
@@ -673,6 +704,26 @@ function isAggregateNodeType(type: GraphNodeType) {
 }
 
 function graphNodeDimensions(type: GraphNodeType, label: string, degree: number) {
+	if (type === 'objective') {
+		return {
+			width: 188,
+			height: 88,
+			textMaxWidth: 158,
+			fontSize: 12,
+			layoutWeight: 22000
+		};
+	}
+
+	if (type === 'logic_chain_step') {
+		return {
+			width: 174,
+			height: 78,
+			textMaxWidth: 142,
+			fontSize: 11,
+			layoutWeight: 18000
+		};
+	}
+
 	const aggregate = isAggregateNodeType(type);
 	const degreeBoost = Math.min(Math.max(degree, 0), 6);
 	if (aggregate) {
@@ -697,12 +748,7 @@ function graphNodeDimensions(type: GraphNodeType, label: string, degree: number)
 		};
 	}
 
-	if (
-		type === 'objective' ||
-		type === 'logic_chain' ||
-		type === 'document' ||
-		isEvidenceUnitNodeType(type)
-	) {
+	if (type === 'logic_chain' || type === 'document' || isEvidenceUnitNodeType(type)) {
 		return {
 			width: 108 + degreeBoost * 3,
 			height: 58 + degreeBoost * 2,
@@ -725,6 +771,8 @@ export function getNodeDescription(node: GraphNode | GraphSelectedNode) {
 	const type = normalizeGraphNodeType(node.type);
 	const label = getNodeLabel(node, 72);
 	if (type === 'objective') return `${label} is a research objective for this collection.`;
+	if (type === 'logic_chain_step')
+		return `${label} is an aggregated step in the research logic chain.`;
 	if (type === 'logic_chain')
 		return `${label} is an assembled research logic chain backed by evidence units.`;
 	if (type === 'document') return `${label} is a source document in this collection.`;
@@ -810,6 +858,7 @@ export function buildCytoscapeElements(
 ): ElementDefinition[] {
 	const nodeIds = new Set(graph.nodes.map((node) => node.id));
 	const nodeMap = new Map(graph.nodes.map((node) => [node.id, node]));
+	const logicChainPositions = buildLogicChainPositions(graph);
 	const elements: ElementDefinition[] = [];
 
 	for (const [index, node] of graph.nodes.entries()) {
@@ -843,6 +892,7 @@ export function buildCytoscapeElements(
 			},
 			position:
 				options.previousPositions?.get(node.id) ??
+				logicChainPositions.get(node.id) ??
 				fallbackPosition(node.id, index, graph.nodes.length)
 		});
 	}
@@ -994,6 +1044,9 @@ export function buildCytoscapeStyles(theme: CytoscapeThemeName = 'light') {
 export async function runGraphLayout(cy: Core, layoutName = 'fcose') {
 	const nodeCount = cy.nodes().length;
 	if (nodeCount < 2) return;
+	if (layoutName === 'logic_chain') {
+		return;
+	}
 	const requestedName =
 		layoutName === 'grid' || layoutName === 'circle' || layoutName === 'cose'
 			? layoutName
@@ -1194,6 +1247,7 @@ function orderedKeyChainNeighbors(
 function isKeyChainNodeType(type: GraphNodeType) {
 	return (
 		type === 'objective' ||
+		type === 'logic_chain_step' ||
 		type === 'logic_chain' ||
 		type === 'document' ||
 		isEvidenceUnitNodeType(type) ||
@@ -1208,15 +1262,16 @@ function isKeyChainNodeType(type: GraphNodeType) {
 
 function keyChainNodePriority(type: GraphNodeType) {
 	if (type === 'objective') return 0;
-	if (type === 'logic_chain') return 1;
-	if (type === 'document') return 2;
-	if (isEvidenceUnitNodeType(type)) return 3;
-	if (type === 'material') return 4;
-	if (type === 'property') return 5;
-	if (type === 'process') return 6;
-	if (type === 'sample') return 7;
-	if (type === 'test_condition') return 8;
-	if (type === 'baseline') return 9;
+	if (type === 'logic_chain_step') return 1;
+	if (type === 'logic_chain') return 2;
+	if (type === 'document') return 3;
+	if (isEvidenceUnitNodeType(type)) return 4;
+	if (type === 'material') return 5;
+	if (type === 'property') return 6;
+	if (type === 'process') return 7;
+	if (type === 'sample') return 8;
+	if (type === 'test_condition') return 9;
+	if (type === 'baseline') return 10;
 	return 99;
 }
 
@@ -1245,6 +1300,7 @@ function collectOverviewBuckets(
 		const neighbor = nodeById.get(neighborId);
 		const type = normalizeGraphNodeType(neighbor?.type);
 		if (type === 'objective') buckets.objectives.add(neighborId);
+		if (type === 'logic_chain_step') buckets.logicChains.add(neighborId);
 		if (type === 'logic_chain') buckets.logicChains.add(neighborId);
 		if (type === 'document') buckets.documents.add(neighborId);
 		if (type === 'material') buckets.materials.add(neighborId);
@@ -1259,6 +1315,9 @@ function collectOverviewBuckets(
 					buckets.objectives.add(evidenceNeighborId);
 				}
 				if (evidenceNeighborType === 'logic_chain') {
+					buckets.logicChains.add(evidenceNeighborId);
+				}
+				if (evidenceNeighborType === 'logic_chain_step') {
 					buckets.logicChains.add(evidenceNeighborId);
 				}
 				if (evidenceNeighborType === 'document') {
@@ -1300,6 +1359,84 @@ function fallbackPosition(nodeId: string, index: number, total: number): GraphPo
 		x: Math.cos(angle) * ring + ((hash >> 4) % 90) - 45,
 		y: Math.sin(angle) * ring + ((hash >> 10) % 90) - 45
 	};
+}
+
+function buildLogicChainPositions(
+	graph: Pick<GraphResponse, 'nodes' | 'edges'>
+): Map<string, GraphPosition> {
+	const positions = new Map<string, GraphPosition>();
+	const objectiveNodes = graph.nodes.filter(
+		(node) => normalizeGraphNodeType(node.type) === 'objective'
+	);
+	const stepNodes = graph.nodes.filter(
+		(node) => normalizeGraphNodeType(node.type) === 'logic_chain_step'
+	);
+	if (!objectiveNodes.length || !stepNodes.length) return positions;
+
+	const objectiveByChain = new Map<string, GraphNode>();
+	for (const edge of graph.edges) {
+		if (edge.edge_description !== 'objective_to_logic_chain_step') continue;
+		const source = graph.nodes.find((node) => node.id === edge.source);
+		const target = graph.nodes.find((node) => node.id === edge.target);
+		const targetRef = parseLogicChainStepNodeId(target?.id ?? '');
+		if (
+			source &&
+			target &&
+			normalizeGraphNodeType(source.type) === 'objective' &&
+			normalizeGraphNodeType(target.type) === 'logic_chain_step' &&
+			targetRef
+		) {
+			objectiveByChain.set(targetRef.chainId, source);
+		}
+	}
+	if (!objectiveByChain.size) return positions;
+
+	const stepsByChain = new Map<string, GraphNode[]>();
+	for (const node of stepNodes) {
+		const stepRef = parseLogicChainStepNodeId(node.id);
+		if (!stepRef || !objectiveByChain.has(stepRef.chainId)) continue;
+		const steps = stepsByChain.get(stepRef.chainId) ?? [];
+		steps.push(node);
+		stepsByChain.set(stepRef.chainId, steps);
+	}
+
+	const chains = Array.from(objectiveByChain.entries()).sort(([, first], [, second]) =>
+		String(first.label).localeCompare(String(second.label))
+	);
+	const rowGap = 118;
+	const columnGap = 186;
+	for (const [rowIndex, [chainId, objective]] of chains.entries()) {
+		const y = rowIndex * rowGap;
+		positions.set(objective.id, { x: 0, y });
+		const steps = [...(stepsByChain.get(chainId) ?? [])].sort(sortLogicChainSteps);
+		for (const step of steps) {
+			positions.set(step.id, { x: 250 + logicChainStepColumn(step) * columnGap, y });
+		}
+	}
+	return positions;
+}
+
+function sortLogicChainSteps(first: GraphNode, second: GraphNode) {
+	const firstColumn = logicChainStepColumn(first);
+	const secondColumn = logicChainStepColumn(second);
+	if (firstColumn !== secondColumn) return firstColumn - secondColumn;
+	return String(first.label).localeCompare(String(second.label));
+}
+
+function logicChainStepColumn(node: GraphNode) {
+	const role = String(node.role || parseLogicChainStepNodeId(node.id)?.role || '');
+	const roleIndex = logicChainStepRoles.indexOf(role);
+	return roleIndex >= 0 ? roleIndex : logicChainStepRoles.length;
+}
+
+function parseLogicChainStepNodeId(nodeId: string) {
+	if (!nodeId.startsWith('step:')) return null;
+	const parts = nodeId.split(':');
+	if (parts.length < 3) return null;
+	const chainId = parts[1]?.trim();
+	const role = parts.slice(2).join(':').trim();
+	if (!chainId || !role) return null;
+	return { chainId, role };
 }
 
 function selectedMatchesEvidence(selected: GraphSelectedObject, evidence: EvidenceCard): boolean {
@@ -1387,6 +1524,7 @@ function parseSelectedNode(node: GraphSelectedNode): GraphNodeRef {
 	const kind = normalizeGraphNodeType(node.kind ?? node.type);
 	if (
 		kind === 'objective' ||
+		kind === 'logic_chain_step' ||
 		kind === 'logic_chain' ||
 		kind === 'document' ||
 		kind === 'evidence' ||

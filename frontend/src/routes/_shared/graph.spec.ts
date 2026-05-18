@@ -69,6 +69,10 @@ describe('graph shared helpers', () => {
 			kind: 'logic_chain',
 			resourceId: 'chain-1'
 		});
+		expect(parseGraphNodeId('step:chain-1:measurement_results')).toEqual({
+			kind: 'logic_chain_step',
+			resourceId: 'chain-1:measurement_results'
+		});
 		expect(parseGraphNodeId('proc:hash-1')).toEqual({
 			kind: 'process',
 			resourceId: 'hash-1'
@@ -83,31 +87,26 @@ describe('graph shared helpers', () => {
 		});
 	});
 
-	it('recognizes objective-first graph node types from the backend contract', () => {
+	it('recognizes logic-chain-step graph nodes from the backend contract', () => {
 		const graph: GraphResponse = {
 			collection_id: 'col_1',
 			truncated: false,
 			nodes: [
 				{ id: 'obj:o1', label: 'Objective', type: 'objective', degree: 1 },
-				{ id: 'chain:c1', label: 'Logic chain', type: 'logic_chain', degree: 1 },
-				{ id: 'evi:m1', label: 'Yield strength | 365.6 MPa', type: 'measurement', degree: 1 },
 				{
-					id: 'evi:cc1',
-					label: 'Case 15 higher than Case 1',
-					type: 'controlled_comparison',
-					degree: 1
-				},
-				{ id: 'sample:s1', label: 'Case: 15', type: 'sample', degree: 1 },
-				{
-					id: 'evi:mech1',
-					label: 'Higher density explains strength',
-					type: 'mechanism',
-					degree: 1
-				},
-				{
-					id: 'evi:char1',
-					label: 'Fine cellular structure observed',
-					type: 'characterization',
+					id: 'step:c1:measurement_results',
+					label: 'Measurement results',
+					type: 'logic_chain_step',
+					role: 'measurement_results',
+					summary: '1 measurement row supports this chain step.',
+					metrics: { row_count: 1, paper_count: 1, evidence_count: 1 },
+					detail_rows: [
+						{
+							evidence_unit_id: 'oeu-1',
+							property: 'yield strength',
+							value: '365.6 MPa'
+						}
+					],
 					degree: 1
 				}
 			],
@@ -115,21 +114,15 @@ describe('graph shared helpers', () => {
 		};
 
 		expect(buildGraphMeta(graph)).toMatchObject({
-			nodeCount: 7,
-			nodeTypeCount: 7
+			nodeCount: 2,
+			nodeTypeCount: 2
 		});
 		expect(buildNodeTypeCounts(graph)).toMatchObject({
 			objective: 1,
-			logic_chain: 1,
-			measurement: 1,
-			controlled_comparison: 1,
-			sample: 1,
-			mechanism: 1,
-			characterization: 1,
+			logic_chain_step: 1,
 			unknown: 0
 		});
-		expect(getNodeTypeStyle('measurement').icon).toBe('measurement');
-		expect(getNodeTypeStyle('controlled_comparison').icon).toBe('controlled-comparison');
+		expect(getNodeTypeStyle('logic_chain_step').icon).toBe('logic-chain-step');
 	});
 
 	it('formats raw graph labels for display', () => {
@@ -213,6 +206,48 @@ describe('graph shared helpers', () => {
 
 		expect(element.data?.label).toBe('Tensile Testing');
 		expect(element.data?.fullLabel).toContain('Details: Tensile Specimens');
+	});
+
+	it('positions objective logic-chain steps from canonical step ids', () => {
+		const elements = buildCytoscapeElements({
+			nodes: [
+				{ id: 'obj:o1', label: 'Objective A', type: 'objective', degree: 1 },
+				{
+					id: 'step:chain-a:measurement_results',
+					label: 'Measurement results',
+					type: 'logic_chain_step',
+					degree: 1
+				},
+				{
+					id: 'step:chain-a:material_scope',
+					label: 'Material scope',
+					type: 'logic_chain_step',
+					degree: 1
+				}
+			],
+			edges: [
+				{
+					id: 'e1',
+					source: 'obj:o1',
+					target: 'step:chain-a:material_scope',
+					weight: 1,
+					edge_description: 'objective_to_logic_chain_step'
+				},
+				{
+					id: 'e2',
+					source: 'step:chain-a:material_scope',
+					target: 'step:chain-a:measurement_results',
+					weight: 1,
+					edge_description: 'logic_chain_step_to_step'
+				}
+			]
+		});
+
+		const byId = new Map(elements.map((element) => [String(element.data?.id), element]));
+
+		expect(byId.get('obj:o1')?.position).toEqual({ x: 0, y: 0 });
+		expect(byId.get('step:chain-a:material_scope')?.position).toEqual({ x: 250, y: 0 });
+		expect(byId.get('step:chain-a:measurement_results')?.position).toEqual({ x: 994, y: 0 });
 	});
 
 	it('does not emit unsupported Cytoscape shadow style properties', () => {

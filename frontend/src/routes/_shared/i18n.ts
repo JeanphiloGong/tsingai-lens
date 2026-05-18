@@ -2359,24 +2359,27 @@ const translations: Record<Language, Translations> = {
 				full: 'Full graph'
 			},
 			layout: {
+				logicChain: 'Logic chain layout',
 				fcose: 'fCoSE force layout',
 				cose: 'CoSE force layout',
 				grid: 'Grid layout',
 				circle: 'Circle layout'
 			},
 			canvas: {
-				title: 'Collection overview map',
+				title: 'Research logic chain',
 				meta: 'Nodes {nodes} · Edges {edges}',
 				fit: 'Fit canvas',
 				zoomIn: 'Zoom in',
 				zoomOut: 'Zoom out',
 				center: 'Center',
 				layout: 'Layout',
-				ariaLabel: 'Interactive collection overview map canvas',
+				ariaLabel: 'Interactive research logic chain canvas',
 				empty: 'No visible graph elements match the current controls.'
 			},
 			legend: {
 				label: 'Node type legend',
+				objective: 'Objective',
+				logicChainStep: 'Logic step',
 				document: 'Document',
 				evidence: 'Evidence',
 				comparison: 'Comparison',
@@ -2389,11 +2392,20 @@ const translations: Record<Language, Translations> = {
 				unknown: 'Unknown'
 			},
 			detail: {
-				title: 'Selected object detail',
+				title: 'Chain step detail',
 				empty:
-					'Click a material, paper, theme, or review bucket to inspect related comparisons and source locations.',
+					'Click an objective or logic-chain step to inspect its supporting evidence rows.',
 				clear: 'Clear',
 				loading: 'Loading detail...',
+				evidenceRows: 'Rows',
+				stepEvidence: 'Step evidence',
+				noStepEvidence: 'No evidence rows were extracted for this step.',
+				rowsLimited: 'Showing the first 12 of {count} rows.',
+				paper: 'Paper',
+				property: 'Property',
+				value: 'Value',
+				context: 'Context',
+				source: 'Source',
 				relatedEvidence: 'Evidence',
 				relatedComparisons: 'Comparisons',
 				relatedDocuments: 'Documents',
@@ -4820,24 +4832,27 @@ const translations: Record<Language, Translations> = {
 				full: '完整图谱'
 			},
 			layout: {
+				logicChain: '逻辑链布局',
 				fcose: 'fCoSE 力导向布局',
 				cose: 'CoSE 力导向布局',
 				grid: '网格布局',
 				circle: '环形布局'
 			},
 			canvas: {
-				title: '集合总览地图',
+				title: '科研逻辑链',
 				meta: '节点 {nodes} · 边 {edges}',
 				fit: '适配画布',
 				zoomIn: '放大',
 				zoomOut: '缩小',
 				center: '居中',
 				layout: '布局',
-				ariaLabel: '可交互的集合总览地图画布',
+				ariaLabel: '可交互的科研逻辑链画布',
 				empty: '当前控制条件下没有可见图谱元素。'
 			},
 			legend: {
 				label: '节点类型图例',
+				objective: '研究目标',
+				logicChainStep: '逻辑环节',
 				document: '文档',
 				evidence: '证据',
 				comparison: '比较',
@@ -4850,10 +4865,19 @@ const translations: Record<Language, Translations> = {
 				unknown: '未知'
 			},
 			detail: {
-				title: '选中对象详情',
-				empty: '点击材料、文献、主题或待审节点，查看关联比较和原文位置。',
+				title: '链路环节详情',
+				empty: '点击研究目标或逻辑环节，查看支撑它的证据行。',
 				clear: '清除',
 				loading: '正在加载详情...',
+				evidenceRows: '证据行',
+				stepEvidence: '环节证据',
+				noStepEvidence: '该环节暂未抽取到证据行。',
+				rowsLimited: '当前显示 {count} 行中的前 12 行。',
+				paper: '文献',
+				property: '性质',
+				value: '数值',
+				context: '上下文',
+				source: '来源',
 				relatedEvidence: '关联证据',
 				relatedComparisons: '关联比较',
 				relatedDocuments: '关联文档',

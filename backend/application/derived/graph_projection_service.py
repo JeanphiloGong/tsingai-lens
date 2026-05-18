@@ -317,8 +317,8 @@ def _build_material_system_nodes(
     )
     return [
         _build_material_system_node(
-            logic_chain_id=logic_chain_id,
             objective_id=objective_id,
+            logic_chain_id=logic_chain_id,
             material_label=material_label,
             units=units,
             doc_records=doc_records,
@@ -329,8 +329,8 @@ def _build_material_system_nodes(
 
 def _build_material_system_node(
     *,
-    logic_chain_id: str,
     objective_id: str,
+    logic_chain_id: str,
     material_label: str,
     units: list[dict[str, Any]],
     doc_records: dict[str, dict[str, Any]],
@@ -355,6 +355,8 @@ def _build_material_system_node(
             {
                 "label": material_label,
                 "material": material_label,
+                "objective_id": objective_id,
+                "logic_chain_id": logic_chain_id,
                 "paper_count": len(paper_ids),
                 "evidence_count": len(matching_units),
             }
@@ -362,19 +364,21 @@ def _build_material_system_node(
     ]
     detail_rows.extend(evidence_rows)
     return {
-        "id": _material_system_node_id(logic_chain_id, material_label),
+        "id": _material_system_node_id(material_label),
         "label": _shorten_text(material_label, 96),
         "type": "material_system",
         "role": "material_system",
-        "summary": f"{material_label} material system for this research objective.",
+        "summary": f"{material_label} material system across this collection.",
         "metrics": {
             "row_count": len(detail_rows),
             "paper_count": len(paper_ids),
             "evidence_count": len(matching_units),
+            "objective_count": 1,
+            "logic_chain_count": 1,
         },
         "detail_rows": detail_rows,
-        "objective_id": objective_id,
-        "logic_chain_id": logic_chain_id,
+        "objective_id": None,
+        "logic_chain_id": None,
         "degree": 0,
     }
 
@@ -648,9 +652,9 @@ def _step_node_id(logic_chain_id: str, role: str) -> str:
     return f"step:{logic_chain_id}:{role}"
 
 
-def _material_system_node_id(logic_chain_id: str, material_label: str) -> str:
+def _material_system_node_id(material_label: str) -> str:
     suffix = sha1(material_label.casefold().encode("utf-8")).hexdigest()[:12]
-    return f"material_system:{logic_chain_id}:{suffix}"
+    return f"material_system:{suffix}"
 
 
 def _truncate_graph(
@@ -837,7 +841,63 @@ def _ordered_nodes(nodes: Any) -> list[dict[str, Any]]:
 
 
 def _put_node(index: dict[str, dict[str, Any]], node: dict[str, Any]) -> None:
-    index[str(node["id"])] = node
+    node_id = str(node["id"])
+    existing = index.get(node_id)
+    if existing and existing.get("type") == "material_system" and node.get("type") == "material_system":
+        _merge_material_system_node(existing, node)
+        return
+    index[node_id] = node
+
+
+def _merge_material_system_node(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    rows = [
+        *[row for row in _as_list(existing.get("detail_rows")) if isinstance(row, Mapping)],
+        *[row for row in _as_list(incoming.get("detail_rows")) if isinstance(row, Mapping)],
+    ]
+    deduped_rows: list[dict[str, Any]] = []
+    seen_rows: set[tuple[tuple[str, str], ...]] = set()
+    for row in rows:
+        row_dict = dict(row)
+        key = tuple(sorted((str(item_key), str(item_value)) for item_key, item_value in row_dict.items()))
+        if key in seen_rows:
+            continue
+        seen_rows.add(key)
+        deduped_rows.append(row_dict)
+
+    objective_ids = {
+        objective_id
+        for row in deduped_rows
+        if (objective_id := _as_text(row.get("objective_id")))
+    }
+    logic_chain_ids = {
+        logic_chain_id
+        for row in deduped_rows
+        if (logic_chain_id := _as_text(row.get("logic_chain_id")))
+    }
+    paper_ids = {
+        document_id
+        for row in deduped_rows
+        if (document_id := _as_text(row.get("document_id")))
+    }
+    evidence_ids = {
+        evidence_unit_id
+        for row in deduped_rows
+        if (evidence_unit_id := _as_text(row.get("evidence_unit_id")))
+    }
+
+    existing["detail_rows"] = deduped_rows
+    existing["metrics"] = {
+        **_as_mapping(existing.get("metrics")),
+        "row_count": len(deduped_rows),
+        "paper_count": len(paper_ids),
+        "evidence_count": len(evidence_ids),
+        "objective_count": len(objective_ids),
+        "logic_chain_count": len(logic_chain_ids),
+    }
+    existing["summary"] = (
+        f"{existing.get('label')} material system across "
+        f"{len(objective_ids) or 1} research objective(s)."
+    )
 
 
 def _put_edge(index: dict[str, dict[str, Any]], edge: dict[str, Any]) -> None:

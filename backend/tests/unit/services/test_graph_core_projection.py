@@ -153,8 +153,9 @@ def test_core_projection_builds_semantic_logic_chain_graph_payload():
     material_nodes = [node for node in nodes if node["type"] == "material_system"]
     assert len(material_nodes) == 1
     assert material_nodes[0]["label"] == "316L stainless steel"
-    assert material_nodes[0]["logic_chain_id"] == "chain-1"
-    assert material_nodes[0]["objective_id"] == "obj-1"
+    assert material_nodes[0]["logic_chain_id"] is None
+    assert material_nodes[0]["objective_id"] is None
+    assert material_nodes[0]["metrics"]["objective_count"] == 1
 
     measurement_step = nodes_by_id["step:chain-1:measurement_results"]
     assert measurement_step["type"] == "measurement_results"
@@ -199,6 +200,63 @@ def test_core_projection_builds_semantic_logic_chain_graph_payload():
         "material_system_to_material_scope",
         "material_scope_to_process_sample_context",
     }.issubset(edge_descriptions)
+
+
+def test_core_projection_reuses_material_system_across_objectives():
+    second_objective = {
+        **_objective("obj-2"),
+        "question": "How does heat treatment affect LPBF 316L hardness?",
+        "process_axes": ["LPBF", "heat treatment"],
+        "property_axes": ["hardness"],
+    }
+    second_unit = {
+        **_measurement_unit("oeu-2", objective_id="obj-2"),
+        "property_normalized": "hardness",
+        "value_payload": {"source_value_text": "198.4", "value": 198.4},
+        "unit": "HV",
+    }
+    second_chain = {
+        **_logic_chain(),
+        "logic_chain_id": "chain-2",
+        "objective_id": "obj-2",
+        "question": second_objective["question"],
+        "evidence_unit_ids": ["oeu-2"],
+    }
+
+    nodes, edges, truncated = load_core_graph_payload(
+        profiles=(_profile(),),
+        research_objectives=(_objective(), second_objective),
+        objective_evidence_units=(_measurement_unit(), second_unit),
+        objective_logic_chains=(_logic_chain(), second_chain),
+        max_nodes=40,
+        min_weight=0.0,
+    )
+
+    assert truncated is False
+    material_nodes = [node for node in nodes if node["type"] == "material_system"]
+    assert len(material_nodes) == 1
+    material_node = material_nodes[0]
+    assert material_node["label"] == "316L stainless steel"
+    assert material_node["metrics"]["objective_count"] == 2
+    assert material_node["metrics"]["logic_chain_count"] == 2
+    assert {
+        row.get("objective_id")
+        for row in material_node["detail_rows"]
+        if row.get("objective_id")
+    } == {"obj-1", "obj-2"}
+    assert {
+        row.get("logic_chain_id")
+        for row in material_node["detail_rows"]
+        if row.get("logic_chain_id")
+    } == {"chain-1", "chain-2"}
+
+    material_id = material_node["id"]
+    assert sum(1 for edge in edges if edge["target"] == material_id) == 2
+    assert {
+        edge["edge_description"]
+        for edge in edges
+        if edge["target"] == material_id
+    } == {"objective_to_material_system"}
 
 
 def test_core_projection_keeps_case_out_of_canvas_nodes():

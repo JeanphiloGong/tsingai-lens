@@ -5,6 +5,7 @@ import {
 	buildCytoscapeElements,
 	buildCytoscapeStyles,
 	buildGraphMeta,
+	buildKeyChainGraph,
 	buildNodeTypeCounts,
 	filterGraphElements,
 	formatGraphLabel,
@@ -60,10 +61,75 @@ describe('graph shared helpers', () => {
 			kind: 'baseline',
 			resourceId: 'jkl'
 		});
+		expect(parseGraphNodeId('obj:objective-1')).toEqual({
+			kind: 'objective',
+			resourceId: 'objective-1'
+		});
+		expect(parseGraphNodeId('chain:chain-1')).toEqual({
+			kind: 'logic_chain',
+			resourceId: 'chain-1'
+		});
+		expect(parseGraphNodeId('proc:hash-1')).toEqual({
+			kind: 'process',
+			resourceId: 'hash-1'
+		});
+		expect(parseGraphNodeId('sample:hash-2')).toEqual({
+			kind: 'sample',
+			resourceId: 'hash-2'
+		});
 		expect(parseGraphNodeId('weird')).toEqual({
 			kind: 'unknown',
 			resourceId: ''
 		});
+	});
+
+	it('recognizes objective-first graph node types from the backend contract', () => {
+		const graph: GraphResponse = {
+			collection_id: 'col_1',
+			truncated: false,
+			nodes: [
+				{ id: 'obj:o1', label: 'Objective', type: 'objective', degree: 1 },
+				{ id: 'chain:c1', label: 'Logic chain', type: 'logic_chain', degree: 1 },
+				{ id: 'evi:m1', label: 'Yield strength | 365.6 MPa', type: 'measurement', degree: 1 },
+				{
+					id: 'evi:cc1',
+					label: 'Case 15 higher than Case 1',
+					type: 'controlled_comparison',
+					degree: 1
+				},
+				{ id: 'sample:s1', label: 'Case: 15', type: 'sample', degree: 1 },
+				{
+					id: 'evi:mech1',
+					label: 'Higher density explains strength',
+					type: 'mechanism',
+					degree: 1
+				},
+				{
+					id: 'evi:char1',
+					label: 'Fine cellular structure observed',
+					type: 'characterization',
+					degree: 1
+				}
+			],
+			edges: []
+		};
+
+		expect(buildGraphMeta(graph)).toMatchObject({
+			nodeCount: 7,
+			nodeTypeCount: 7
+		});
+		expect(buildNodeTypeCounts(graph)).toMatchObject({
+			objective: 1,
+			logic_chain: 1,
+			measurement: 1,
+			controlled_comparison: 1,
+			sample: 1,
+			mechanism: 1,
+			characterization: 1,
+			unknown: 0
+		});
+		expect(getNodeTypeStyle('measurement').icon).toBe('measurement');
+		expect(getNodeTypeStyle('controlled_comparison').icon).toBe('controlled-comparison');
 	});
 
 	it('formats raw graph labels for display', () => {
@@ -197,6 +263,27 @@ describe('graph shared helpers', () => {
 		expect(layoutName).toBe('grid');
 	});
 
+	it('uses a simple layout for large complete graphs', async () => {
+		vi.useFakeTimers();
+		let layoutName = '';
+		const cy = {
+			nodes: () => ({ length: 1200 }),
+			layout: (options: { name?: string }) => {
+				layoutName = options.name ?? '';
+				return {
+					on: vi.fn(),
+					run: vi.fn()
+				};
+			}
+		} as unknown as Core;
+
+		const layout = runGraphLayout(cy, 'fcose');
+		await vi.advanceTimersByTimeAsync(1600);
+
+		await expect(layout).resolves.toBeUndefined();
+		expect(layoutName).toBe('grid');
+	});
+
 	it('projects collection graphs into aggregate overview maps', () => {
 		const graph: GraphResponse = {
 			collection_id: 'col_1',
@@ -268,6 +355,229 @@ describe('graph shared helpers', () => {
 				expect.objectContaining({ source: 'mat:steel', target: 'tc:lpbf' })
 			])
 		);
+	});
+
+	it('projects objective-first evidence units into aggregate overview maps', () => {
+		const graph: GraphResponse = {
+			collection_id: 'col_1',
+			truncated: false,
+			nodes: [
+				{ id: 'obj:o1', label: 'LPBF 316L mechanical objective', type: 'objective', degree: 1 },
+				{ id: 'chain:c1', label: 'Density to strength chain', type: 'logic_chain', degree: 1 },
+				{ id: 'doc:d1', label: 'Paper A', type: 'document', degree: 1 },
+				{ id: 'evi:m1', label: 'Yield strength | 365.6 MPa', type: 'measurement', degree: 5 },
+				{ id: 'mat:steel', label: '316L stainless steel', type: 'material', degree: 1 },
+				{ id: 'prop:yield', label: 'yield strength', type: 'property', degree: 1 },
+				{ id: 'proc:scan', label: 'scan speed: 900 mm/s', type: 'process', degree: 1 },
+				{ id: 'sample:case15', label: 'Case: 15', type: 'sample', degree: 1 }
+			],
+			edges: [
+				{
+					id: 'e1',
+					source: 'obj:o1',
+					target: 'evi:m1',
+					weight: 1,
+					edge_description: 'objective_to_evidence'
+				},
+				{
+					id: 'e2',
+					source: 'chain:c1',
+					target: 'evi:m1',
+					weight: 1,
+					edge_description: 'logic_chain_to_evidence'
+				},
+				{
+					id: 'e3',
+					source: 'doc:d1',
+					target: 'evi:m1',
+					weight: 1,
+					edge_description: 'document_to_evidence'
+				},
+				{
+					id: 'e4',
+					source: 'evi:m1',
+					target: 'mat:steel',
+					weight: 1,
+					edge_description: 'evidence_to_material'
+				},
+				{
+					id: 'e5',
+					source: 'evi:m1',
+					target: 'prop:yield',
+					weight: 1,
+					edge_description: 'evidence_to_property'
+				},
+				{
+					id: 'e6',
+					source: 'evi:m1',
+					target: 'proc:scan',
+					weight: 1,
+					edge_description: 'evidence_to_process'
+				},
+				{
+					id: 'e7',
+					source: 'evi:m1',
+					target: 'sample:case15',
+					weight: 1,
+					edge_description: 'evidence_to_sample'
+				}
+			]
+		};
+
+		const overview = buildCollectionOverviewGraph(graph);
+
+		expect(overview.nodes.map((node) => node.type)).toEqual([
+			'objective',
+			'logic_chain',
+			'document',
+			'material',
+			'property',
+			'process',
+			'sample'
+		]);
+		expect(overview.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					source: 'obj:o1',
+					target: 'mat:steel',
+					edge_description: 'overview_objective_material'
+				}),
+				expect.objectContaining({
+					source: 'chain:c1',
+					target: 'mat:steel',
+					edge_description: 'overview_logic_chain_material'
+				}),
+				expect.objectContaining({
+					source: 'doc:d1',
+					target: 'mat:steel',
+					edge_description: 'overview_document_material'
+				}),
+				expect.objectContaining({
+					source: 'mat:steel',
+					target: 'prop:yield',
+					edge_description: 'overview_material_property'
+				}),
+				expect.objectContaining({
+					source: 'mat:steel',
+					target: 'proc:scan',
+					edge_description: 'overview_material_context'
+				}),
+				expect.objectContaining({
+					source: 'mat:steel',
+					target: 'sample:case15',
+					edge_description: 'overview_material_context'
+				})
+			])
+		);
+	});
+
+	it('projects objective-first graphs into key chain maps', () => {
+		const graph: GraphResponse = {
+			collection_id: 'col_1',
+			truncated: false,
+			nodes: [
+				{ id: 'obj:o1', label: 'LPBF 316L mechanical objective', type: 'objective', degree: 3 },
+				{ id: 'chain:c1', label: 'Density to strength chain', type: 'logic_chain', degree: 2 },
+				{ id: 'doc:d1', label: 'Paper A', type: 'document', degree: 2 },
+				{ id: 'evi:m1', label: 'Yield strength | 365.6 MPa', type: 'measurement', degree: 8 },
+				{ id: 'mat:steel', label: '316L stainless steel', type: 'material', degree: 3 },
+				{ id: 'prop:yield', label: 'yield strength', type: 'property', degree: 2 },
+				{ id: 'proc:scan', label: 'scan speed: 900 mm/s', type: 'process', degree: 2 },
+				{ id: 'sample:case15', label: 'Case: 15', type: 'sample', degree: 1 },
+				{ id: 'tc:tensile', label: 'method: tensile test', type: 'test_condition', degree: 1 },
+				{ id: 'evi:orphan', label: 'Unscoped note', type: 'measurement', degree: 1 },
+				{ id: 'x:unknown', label: 'Unresolved', type: 'unknown', degree: 1 }
+			],
+			edges: [
+				{
+					id: 'e1',
+					source: 'obj:o1',
+					target: 'evi:m1',
+					weight: 1,
+					edge_description: 'objective_to_evidence'
+				},
+				{
+					id: 'e2',
+					source: 'chain:c1',
+					target: 'evi:m1',
+					weight: 1,
+					edge_description: 'logic_chain_to_evidence'
+				},
+				{
+					id: 'e3',
+					source: 'doc:d1',
+					target: 'evi:m1',
+					weight: 1,
+					edge_description: 'document_to_evidence'
+				},
+				{
+					id: 'e4',
+					source: 'evi:m1',
+					target: 'mat:steel',
+					weight: 1,
+					edge_description: 'evidence_to_material'
+				},
+				{
+					id: 'e5',
+					source: 'evi:m1',
+					target: 'prop:yield',
+					weight: 1,
+					edge_description: 'evidence_to_property'
+				},
+				{
+					id: 'e6',
+					source: 'evi:m1',
+					target: 'proc:scan',
+					weight: 1,
+					edge_description: 'evidence_to_process'
+				},
+				{
+					id: 'e7',
+					source: 'evi:m1',
+					target: 'sample:case15',
+					weight: 1,
+					edge_description: 'evidence_to_sample'
+				},
+				{
+					id: 'e8',
+					source: 'evi:m1',
+					target: 'tc:tensile',
+					weight: 1,
+					edge_description: 'evidence_to_test_condition'
+				},
+				{
+					id: 'e9',
+					source: 'evi:orphan',
+					target: 'x:unknown',
+					weight: 1,
+					edge_description: 'related_to'
+				}
+			]
+		};
+
+		const keyChain = buildKeyChainGraph(graph, { maxNodes: 8 });
+
+		expect(keyChain.truncated).toBe(true);
+		expect(keyChain.nodes.map((node) => node.id)).toEqual([
+			'obj:o1',
+			'chain:c1',
+			'doc:d1',
+			'evi:m1',
+			'mat:steel',
+			'prop:yield',
+			'proc:scan',
+			'sample:case15'
+		]);
+		expect(keyChain.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: 'obj:o1', target: 'evi:m1' }),
+				expect.objectContaining({ source: 'chain:c1', target: 'evi:m1' }),
+				expect.objectContaining({ source: 'doc:d1', target: 'evi:m1' }),
+				expect.objectContaining({ source: 'evi:m1', target: 'mat:steel' })
+			])
+		);
+		expect(keyChain.nodes.some((node) => node.id === 'evi:orphan')).toBe(false);
+		expect(keyChain.nodes.some((node) => node.type === 'unknown')).toBe(false);
 	});
 
 	it('links selected aggregate nodes to comparison rows', () => {

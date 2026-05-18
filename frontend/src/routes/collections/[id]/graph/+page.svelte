@@ -7,8 +7,8 @@
 	import {
 		buildCytoscapeElements,
 		buildCytoscapeStyles,
-		buildCollectionOverviewGraph,
 		buildGraphMeta,
+		buildKeyChainGraph,
 		buildNodeTypeCounts,
 		downloadGraphml as downloadGraphmlFile,
 		exportGraphPng,
@@ -86,23 +86,12 @@
 		label: string;
 		target: string;
 	};
-	type OverviewNodePreview = {
-		id: string;
-		label: string;
-		type: GraphNodeType;
-		degree: number;
-	};
-	type OverviewStats = {
-		materials: number;
-		documents: number;
-		properties: number;
-		themes: number;
-		reviewBuckets: number;
-		hiddenDetailNodes: number;
-	};
+	type GraphViewMode = 'key_chain' | 'full';
 
 	const defaultMaxNodes = 200;
 	const defaultMinWeight = 0;
+	const defaultLayoutName: LayoutName = 'grid';
+	const defaultViewMode: GraphViewMode = 'key_chain';
 	const graphPadding = 72;
 	const graphAnimationDuration = 220;
 
@@ -126,7 +115,8 @@
 
 	let maxNodes = defaultMaxNodes;
 	let minWeight = defaultMinWeight;
-	let layoutName: LayoutName = 'fcose';
+	let layoutName: LayoutName = defaultLayoutName;
+	let viewMode: GraphViewMode = defaultViewMode;
 	let searchQuery = '';
 	let visibleNodeTypes: Partial<Record<GraphNodeType, boolean>> = buildDefaultVisibleTypes();
 	let visibleNodes = 0;
@@ -144,19 +134,11 @@
 	let documentItems: DocumentProfile[] = [];
 
 	$: collectionId = $page.params.id ?? '';
-	$: overviewGraphData = buildCollectionOverviewGraph(graphData);
-	$: graphMeta = buildGraphMeta(overviewGraphData);
+	$: displayGraphData = buildDisplayGraphData();
+	$: graphMeta = buildGraphMeta(displayGraphData);
 	$: graphLoading = loading && !graphData;
-	$: nodeTypeCounts = buildNodeTypeCounts(overviewGraphData);
+	$: nodeTypeCounts = buildNodeTypeCounts(displayGraphData);
 	$: availableNodeTypes = graphNodeTypeOrder.filter((type) => nodeTypeCounts[type] > 0);
-	$: overviewStats = buildOverviewStats(graphData, overviewGraphData);
-	$: coreMaterialNodes = topOverviewNodes(overviewGraphData, ['material'], 4);
-	$: denseTopicNodes = topOverviewNodes(
-		overviewGraphData,
-		['property', 'process', 'variant', 'test_condition', 'baseline'],
-		4
-	);
-	$: reviewBucketNodes = buildReviewBucketNodes(overviewGraphData, 4);
 	$: surfaceState = getWorkspaceSurfaceState(workspace, 'graph');
 	$: selectedObject = selectedNode
 		? ({ kind: 'node', node: selectedNode } as GraphSelectedObject)
@@ -178,7 +160,7 @@
 	};
 	$: commonRelations = buildCommonRelations();
 	$: showEmptyGraph =
-		!graphLoading && (!graphData || !overviewGraphData.nodes.length || (notFound && !visibleNodes));
+		!graphLoading && (!graphData || !graphData.nodes.length || (notFound && !visibleNodes));
 	$: if (cy) {
 		searchQuery;
 		visibleNodeTypes;
@@ -203,7 +185,8 @@
 	function resetControlState() {
 		maxNodes = defaultMaxNodes;
 		minWeight = defaultMinWeight;
-		layoutName = 'fcose';
+		layoutName = defaultLayoutName;
+		viewMode = defaultViewMode;
 		searchQuery = '';
 		visibleNodeTypes = buildDefaultVisibleTypes();
 		linkedTab = 'evidence';
@@ -268,12 +251,19 @@
 	}
 
 	function buildVisibleGraphPayload() {
-		if (!graphData) return { nodes: [], edges: [] };
-		return filterGraphElements(buildCollectionOverviewGraph(graphData), {
+		const displayGraph = buildDisplayGraphData();
+		if (!displayGraph) return { nodes: [], edges: [] };
+		return filterGraphElements(displayGraph, {
 			maxNodes,
 			minWeight,
 			visibleNodeTypes
 		});
+	}
+
+	function buildDisplayGraphData() {
+		if (!graphData) return null;
+		if (viewMode === 'key_chain') return buildKeyChainGraph(graphData, { maxNodes });
+		return graphData;
 	}
 
 	async function renderGraph(focusNodeId: string | null = null) {
@@ -554,9 +544,13 @@
 		try {
 			if (graphResult.status !== 'fulfilled') throw graphResult.reason;
 			graphData = graphResult.value;
-			visibleNodeTypes = ensureVisibleTypes(buildCollectionOverviewGraph(graphData));
+			const nextDisplayGraph = buildDisplayGraphData();
+			visibleNodeTypes = ensureVisibleTypes(nextDisplayGraph);
 			await renderGraph();
-			nextStatus = graphData.truncated ? $t('graph.status.loadedTruncated') : '';
+			nextStatus =
+				graphData.truncated || nextDisplayGraph?.truncated
+					? $t('graph.status.loadedTruncated')
+					: '';
 		} catch (err) {
 			const errorCode = getApiErrorCode(err);
 			error = errorMessage(err);
@@ -626,6 +620,7 @@
 
 	async function handleControlRender() {
 		if (!graphData) return;
+		visibleNodeTypes = ensureVisibleTypes(buildDisplayGraphData());
 		await renderGraph(selectedNode?.id ?? null);
 	}
 
@@ -676,76 +671,6 @@
 			if (next[type] === undefined) next[type] = true;
 		}
 		return next;
-	}
-
-	function buildOverviewStats(
-		sourceGraph: GraphResponse | null,
-		overviewGraph: GraphResponse
-	): OverviewStats {
-		const counts = buildNodeTypeCounts(overviewGraph);
-		return {
-			materials: counts.material,
-			documents: counts.document,
-			properties: counts.property,
-			themes:
-				counts.process + counts.variant + counts.test_condition + counts.baseline + counts.unknown,
-			reviewBuckets: buildReviewBucketNodes(overviewGraph, Number.POSITIVE_INFINITY).length,
-			hiddenDetailNodes: (sourceGraph?.nodes ?? []).filter((node) => {
-				const type = String(node.type ?? 'unknown');
-				return type === 'comparison' || type === 'evidence';
-			}).length
-		};
-	}
-
-	function topOverviewNodes(
-		graph: GraphResponse,
-		types: GraphNodeType[],
-		limit: number
-	): OverviewNodePreview[] {
-		const typeSet = new Set(types);
-		return graph.nodes
-			.filter((node) => typeSet.has(String(node.type ?? 'unknown') as GraphNodeType))
-			.sort(
-				(a, b) => Number(b.degree ?? 0) - Number(a.degree ?? 0) || a.label.localeCompare(b.label)
-			)
-			.slice(0, limit)
-			.map((node) => ({
-				id: node.id,
-				label: formatGraphLabel(node.label || node.id),
-				type: String(node.type ?? 'unknown') as GraphNodeType,
-				degree: Number(node.degree ?? 0)
-			}));
-	}
-
-	function buildReviewBucketNodes(graph: GraphResponse, limit: number): OverviewNodePreview[] {
-		return graph.nodes
-			.filter(isReviewBucketNode)
-			.sort(
-				(a, b) => Number(b.degree ?? 0) - Number(a.degree ?? 0) || a.label.localeCompare(b.label)
-			)
-			.slice(0, limit)
-			.map((node) => ({
-				id: node.id,
-				label: formatGraphLabel(node.label || node.id),
-				type: String(node.type ?? 'unknown') as GraphNodeType,
-				degree: Number(node.degree ?? 0)
-			}));
-	}
-
-	function isReviewBucketNode(node: GraphNode) {
-		const label = `${node.id} ${node.label}`.toLowerCase();
-		const type = String(node.type ?? 'unknown');
-		return (
-			type === 'unknown' ||
-			label.includes('unspecified') ||
-			label.includes('unknown') ||
-			label.includes('unassigned') ||
-			label.includes('missing') ||
-			label.includes('not reported') ||
-			label.includes('未指定') ||
-			label.includes('未知') ||
-			label.includes('未归属')
-		);
 	}
 
 	function toggleNodeType(type: GraphNodeType, checked: boolean) {
@@ -1090,109 +1015,48 @@
 			<h2>{$t('graph.empty.title')}</h2>
 			<p>{$t('graph.empty.description')}</p>
 			<div class="graph-empty-state__actions">
-				<button class="graph-button graph-button--primary" type="button" on:click={handleGenerateGraph}>
+				<button
+					class="graph-button graph-button--primary"
+					type="button"
+					on:click={handleGenerateGraph}
+				>
 					{$t('graph.empty.action')}
 				</button>
-				<button class="graph-button graph-button--ghost" type="button" on:click={handleRefreshGraph}>
+				<button
+					class="graph-button graph-button--ghost"
+					type="button"
+					on:click={handleRefreshGraph}
+				>
 					{$t('graph.actions.refreshStatus')}
 				</button>
 			</div>
 			{#if workspace && surfaceState !== 'ready'}
-				<p class="graph-empty-state__note">{$t(`overview.surfaceStateCards.${surfaceState}.body`)}</p>
+				<p class="graph-empty-state__note">
+					{$t(`overview.surfaceStateCards.${surfaceState}.body`)}
+				</p>
 			{/if}
 		</section>
 	{:else}
-		<section class="graph-page-card graph-overview-panel" aria-labelledby="graph-overview-title">
-			<div class="graph-overview-header">
-				<div>
-					<h2 id="graph-overview-title">{$t('graph.overview.title')}</h2>
-					<p>{$t('graph.overview.lead')}</p>
-				</div>
-				<span>{$t('graph.overview.detailNodes', { count: overviewStats.hiddenDetailNodes })}</span>
-			</div>
-
-			<div class="graph-overview-metrics" aria-label={$t('graph.overview.metricsLabel')}>
-				<div>
-					<span>{$t('graph.overview.materials')}</span>
-					<strong>{overviewStats.materials}</strong>
-				</div>
-				<div>
-					<span>{$t('graph.overview.documents')}</span>
-					<strong>{overviewStats.documents}</strong>
-				</div>
-				<div>
-					<span>{$t('graph.overview.properties')}</span>
-					<strong>{overviewStats.properties}</strong>
-				</div>
-				<div>
-					<span>{$t('graph.overview.themes')}</span>
-					<strong>{overviewStats.themes}</strong>
-				</div>
-				<div>
-					<span>{$t('graph.overview.reviewBuckets')}</span>
-					<strong>{overviewStats.reviewBuckets}</strong>
-				</div>
-			</div>
-
-			<div class="graph-overview-lists">
-				<div>
-					<h3>{$t('graph.overview.coreMaterials')}</h3>
-					{#if coreMaterialNodes.length}
-						<ul>
-							{#each coreMaterialNodes as node (node.id)}
-								<li>
-									<button type="button" on:click={() => void selectNode(node.id, { focus: true })}>
-										<span>{node.label}</span>
-										<strong>{node.degree}</strong>
-									</button>
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p>{$t('graph.overview.emptyList')}</p>
-					{/if}
-				</div>
-				<div>
-					<h3>{$t('graph.overview.denseThemes')}</h3>
-					{#if denseTopicNodes.length}
-						<ul>
-							{#each denseTopicNodes as node (node.id)}
-								<li>
-									<button type="button" on:click={() => void selectNode(node.id, { focus: true })}>
-										<span>{node.label}</span>
-										<strong>{node.degree}</strong>
-									</button>
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p>{$t('graph.overview.emptyList')}</p>
-					{/if}
-				</div>
-				<div>
-					<h3>{$t('graph.overview.qualityIssues')}</h3>
-					{#if reviewBucketNodes.length}
-						<ul>
-							{#each reviewBucketNodes as node (node.id)}
-								<li>
-									<button type="button" on:click={() => void selectNode(node.id, { focus: true })}>
-										<span>{node.label}</span>
-										<strong>{node.degree}</strong>
-									</button>
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p>{$t('graph.overview.emptyList')}</p>
-					{/if}
-				</div>
-			</div>
-		</section>
-
 		<div class="graph-workspace" aria-label={$t('graph.workspace.label')}>
 			<aside class="graph-page-card graph-controls-panel" aria-labelledby="graph-controls-title">
 				<div class="graph-panel-header">
 					<h2 id="graph-controls-title">{$t('graph.controls.title')}</h2>
+				</div>
+
+				<div class="graph-control-group">
+					<label class="graph-control-label" for="graph-view-mode">
+						{$t('graph.controls.viewMode')}
+					</label>
+					<select
+						id="graph-view-mode"
+						class="graph-input"
+						bind:value={viewMode}
+						disabled={graphLoading}
+						on:change={handleControlRender}
+					>
+						<option value="key_chain">{$t('graph.viewMode.keyChain')}</option>
+						<option value="full">{$t('graph.viewMode.full')}</option>
+					</select>
 				</div>
 
 				<div class="graph-control-group">
@@ -1289,7 +1153,11 @@
 								<option value="circle">{$t('graph.layout.circle')}</option>
 							</select>
 						</label>
-						<button class="graph-link-button graph-link-button--icon" type="button" on:click={handleRestoreDefaults}>
+						<button
+							class="graph-link-button graph-link-button--icon"
+							type="button"
+							on:click={handleRestoreDefaults}
+						>
 							<span class="action-icon action-icon--refresh" aria-hidden="true"></span>
 							{$t('graph.controls.restoreDefaults')}
 						</button>
@@ -1319,19 +1187,43 @@
 						<p>{$t('graph.canvas.meta', { nodes: visibleNodes, edges: visibleEdges })}</p>
 					</div>
 					<div class="graph-canvas-actions">
-						<button class="graph-tool-button" type="button" title={$t('graph.canvas.fit')} on:click={() => fitGraph(true)}>
+						<button
+							class="graph-tool-button"
+							type="button"
+							title={$t('graph.canvas.fit')}
+							on:click={() => fitGraph(true)}
+						>
 							<span class="action-icon action-icon--fit" aria-hidden="true"></span>
 						</button>
-						<button class="graph-tool-button" type="button" title={$t('graph.canvas.zoomIn')} on:click={() => zoomGraph(1.18)}>
+						<button
+							class="graph-tool-button"
+							type="button"
+							title={$t('graph.canvas.zoomIn')}
+							on:click={() => zoomGraph(1.18)}
+						>
 							<span class="action-icon action-icon--plus" aria-hidden="true"></span>
 						</button>
-						<button class="graph-tool-button" type="button" title={$t('graph.canvas.zoomOut')} on:click={() => zoomGraph(0.84)}>
+						<button
+							class="graph-tool-button"
+							type="button"
+							title={$t('graph.canvas.zoomOut')}
+							on:click={() => zoomGraph(0.84)}
+						>
 							<span class="action-icon action-icon--minus" aria-hidden="true"></span>
 						</button>
-						<button class="graph-tool-button" type="button" title={$t('graph.canvas.center')} on:click={centerGraph}>
+						<button
+							class="graph-tool-button"
+							type="button"
+							title={$t('graph.canvas.center')}
+							on:click={centerGraph}
+						>
 							<span class="action-icon action-icon--target" aria-hidden="true"></span>
 						</button>
-						<button class="graph-tool-button graph-tool-button--text" type="button" on:click={handleLayout}>
+						<button
+							class="graph-tool-button graph-tool-button--text"
+							type="button"
+							on:click={handleLayout}
+						>
 							{$t('graph.canvas.layout')}
 						</button>
 					</div>
@@ -1339,10 +1231,7 @@
 
 				<div class="graph-legend" aria-label={$t('graph.legend.label')}>
 					{#each availableNodeTypes as type}
-						<span
-							class="graph-legend-item"
-							style={`--node-color:${getNodeTypeStyle(type).color};`}
-						>
+						<span class="graph-legend-item" style={`--node-color:${getNodeTypeStyle(type).color};`}>
 							<i aria-hidden="true"></i>
 							{nodeTypeLabel(type)}
 						</span>
@@ -1350,7 +1239,11 @@
 				</div>
 
 				<div class="graph-canvas-stage">
-					<div class="graph-cytoscape" bind:this={graphContainer} aria-label={$t('graph.canvas.ariaLabel')}></div>
+					<div
+						class="graph-cytoscape"
+						bind:this={graphContainer}
+						aria-label={$t('graph.canvas.ariaLabel')}
+					></div>
 					{#if graphLoading}
 						<div class="graph-canvas-state graph-canvas-state--loading">
 							<div class="graph-spinner" aria-hidden="true"></div>
@@ -1506,7 +1399,10 @@
 						<h3>{selectedEdge.sourceLabel} -&gt; {selectedEdge.targetLabel}</h3>
 						<div class="graph-detail-kv">
 							<span>{$t('graph.detail.relationshipType')}</span>
-							<strong>{selectedEdge.relationLabel || formatMachineText(selectedEdge.edge_description)}</strong>
+							<strong
+								>{selectedEdge.relationLabel ||
+									formatMachineText(selectedEdge.edge_description)}</strong
+							>
 						</div>
 						<div class="graph-detail-kv">
 							<span>{$t('graph.detail.confidence')}</span>
@@ -1526,14 +1422,23 @@
 						</div>
 						<div class="graph-detail-actions">
 							{#if selectedActionHref('source')}
-								<a class="graph-button graph-button--primary" href={selectedActionHref('source') ?? '#'}>
+								<a
+									class="graph-button graph-button--primary"
+									href={selectedActionHref('source') ?? '#'}
+								>
 									{$t('graph.detail.viewSource')}
 								</a>
 							{/if}
-							<a class="graph-button graph-button--ghost" href={selectedActionHref('evidence') ?? '#'}>
+							<a
+								class="graph-button graph-button--ghost"
+								href={selectedActionHref('evidence') ?? '#'}
+							>
 								{$t('graph.detail.viewEvidence')}
 							</a>
-							<a class="graph-button graph-button--ghost" href={selectedActionHref('comparison') ?? '#'}>
+							<a
+								class="graph-button graph-button--ghost"
+								href={selectedActionHref('comparison') ?? '#'}
+							>
 								{$t('graph.detail.openComparison')}
 							</a>
 						</div>
@@ -1570,7 +1475,10 @@
 					</p>
 				</div>
 				{#if selectedObject}
-					<a class="graph-link-button" href={selectedActionHref('comparison') ?? `/collections/${collectionId}/comparisons`}>
+					<a
+						class="graph-link-button"
+						href={selectedActionHref('comparison') ?? `/collections/${collectionId}/comparisons`}
+					>
 						{$t('graph.linked.viewAll')}
 					</a>
 				{/if}
@@ -1641,7 +1549,9 @@
 							<article class="graph-linked-card">
 								<div class="graph-linked-card__header">
 									<h3>{item.display.result_summary || item.row_id}</h3>
-									<span class="graph-chip">{formatMachineText(item.assessment.comparability_status)}</span>
+									<span class="graph-chip"
+										>{formatMachineText(item.assessment.comparability_status)}</span
+									>
 								</div>
 								<p>
 									{formatGraphLabel(item.display.material_system_normalized)} /
@@ -1961,146 +1871,6 @@
 		border-color: #fecaca;
 		background: #fee2e2;
 		color: #b91c1c;
-	}
-
-	.graph-overview-panel {
-		display: grid;
-		gap: 16px;
-		padding: 18px;
-	}
-
-	.graph-overview-header {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 16px;
-	}
-
-	.graph-overview-header h2,
-	.graph-overview-lists h3 {
-		margin: 0;
-		color: #0f172a;
-		font-weight: 700;
-		letter-spacing: 0;
-	}
-
-	.graph-overview-header h2 {
-		font-size: 18px;
-		line-height: 26px;
-	}
-
-	.graph-overview-header p {
-		max-width: 760px;
-		margin: 4px 0 0;
-		color: #64748b;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.graph-overview-header > span {
-		flex: 0 0 auto;
-		padding: 5px 10px;
-		border-radius: 999px;
-		background: #f8fafc;
-		color: #64748b;
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
-	}
-
-	.graph-overview-metrics {
-		display: grid;
-		grid-template-columns: repeat(5, minmax(0, 1fr));
-		gap: 10px;
-	}
-
-	.graph-overview-metrics div {
-		min-width: 0;
-		display: grid;
-		gap: 3px;
-		padding: 12px;
-		border: 1px solid #e6ebf2;
-		border-radius: 12px;
-		background: #fbfdff;
-	}
-
-	.graph-overview-metrics span,
-	.graph-overview-lists p {
-		color: #64748b;
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.graph-overview-metrics strong {
-		color: #0f172a;
-		font-size: 22px;
-		line-height: 28px;
-	}
-
-	.graph-overview-lists {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 12px;
-	}
-
-	.graph-overview-lists > div {
-		min-width: 0;
-		display: grid;
-		align-content: start;
-		gap: 8px;
-	}
-
-	.graph-overview-lists h3 {
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.graph-overview-lists ul {
-		display: grid;
-		gap: 6px;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.graph-overview-lists button {
-		width: 100%;
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 10px;
-		min-height: 34px;
-		padding: 7px 9px;
-		border: 1px solid #e6ebf2;
-		border-radius: 10px;
-		background: #ffffff;
-		color: #0f172a;
-		text-align: left;
-		font-size: 13px;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.graph-overview-lists button:hover {
-		border-color: #bfdbfe;
-		background: #eff6ff;
-	}
-
-	.graph-overview-lists button span {
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.graph-overview-lists button strong {
-		min-width: 28px;
-		padding: 1px 7px;
-		border-radius: 999px;
-		background: #f1f5f9;
-		color: #64748b;
-		text-align: center;
-		font-size: 12px;
 	}
 
 	.graph-empty-state {
@@ -2742,7 +2512,20 @@
 		inset: 6px;
 		border: 3px solid currentColor;
 		border-radius: 999px;
-		clip-path: polygon(0 38%, 42% 38%, 42% 0, 58% 0, 58% 38%, 100% 38%, 100% 58%, 58% 58%, 58% 100%, 42% 100%, 42% 58%, 0 58%);
+		clip-path: polygon(
+			0 38%,
+			42% 38%,
+			42% 0,
+			58% 0,
+			58% 38%,
+			100% 38%,
+			100% 58%,
+			58% 58%,
+			58% 100%,
+			42% 100%,
+			42% 58%,
+			0 58%
+		);
 	}
 
 	.graph-icon--network::after {
@@ -2921,22 +2704,6 @@
 			order: 3;
 		}
 
-		.graph-overview-header {
-			display: grid;
-		}
-
-		.graph-overview-header > span {
-			width: max-content;
-		}
-
-		.graph-overview-metrics {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-
-		.graph-overview-lists {
-			grid-template-columns: 1fr;
-		}
-
 		.graph-controls-panel {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			align-items: start;
@@ -2962,7 +2729,6 @@
 		}
 
 		.graph-header-card,
-		.graph-overview-panel,
 		.graph-linked-panel {
 			padding: 16px;
 		}
@@ -2982,10 +2748,6 @@
 		}
 
 		.graph-controls-panel {
-			grid-template-columns: 1fr;
-		}
-
-		.graph-overview-metrics {
 			grid-template-columns: 1fr;
 		}
 
@@ -3027,10 +2789,6 @@
 	:global(:root[data-theme='dark']) .graph-panel-header h2,
 	:global(:root[data-theme='dark']) .graph-canvas-toolbar h2,
 	:global(:root[data-theme='dark']) .graph-linked-header h2,
-	:global(:root[data-theme='dark']) .graph-overview-header h2,
-	:global(:root[data-theme='dark']) .graph-overview-lists h3,
-	:global(:root[data-theme='dark']) .graph-overview-metrics strong,
-	:global(:root[data-theme='dark']) .graph-overview-lists button,
 	:global(:root[data-theme='dark']) .graph-selected-summary h3,
 	:global(:root[data-theme='dark']) .graph-edge-detail h3,
 	:global(:root[data-theme='dark']) .graph-linked-card h3,
@@ -3047,10 +2805,6 @@
 	:global(:root[data-theme='dark']) .graph-meta-row,
 	:global(:root[data-theme='dark']) .graph-canvas-toolbar p,
 	:global(:root[data-theme='dark']) .graph-linked-header p,
-	:global(:root[data-theme='dark']) .graph-overview-header p,
-	:global(:root[data-theme='dark']) .graph-overview-header > span,
-	:global(:root[data-theme='dark']) .graph-overview-metrics span,
-	:global(:root[data-theme='dark']) .graph-overview-lists p,
 	:global(:root[data-theme='dark']) .graph-detail-section p,
 	:global(:root[data-theme='dark']) .graph-edge-detail p,
 	:global(:root[data-theme='dark']) .graph-linked-card p,
@@ -3067,9 +2821,6 @@
 	:global(:root[data-theme='dark']) .graph-search-control,
 	:global(:root[data-theme='dark']) .graph-node-type-row,
 	:global(:root[data-theme='dark']) .graph-control-status,
-	:global(:root[data-theme='dark']) .graph-overview-header > span,
-	:global(:root[data-theme='dark']) .graph-overview-metrics div,
-	:global(:root[data-theme='dark']) .graph-overview-lists button,
 	:global(:root[data-theme='dark']) .graph-detail-stat-grid div,
 	:global(:root[data-theme='dark']) .graph-compact-list li,
 	:global(:root[data-theme='dark']) .graph-relation-list li,

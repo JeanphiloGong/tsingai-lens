@@ -42,13 +42,21 @@ export type GraphNeighborsResponse = {
 };
 
 export type GraphNodeRef =
+	| { kind: 'objective'; resourceId: string }
+	| { kind: 'logic_chain'; resourceId: string }
 	| { kind: 'document'; resourceId: string }
 	| { kind: 'evidence'; resourceId: string }
 	| { kind: 'comparison'; resourceId: string }
+	| { kind: 'measurement'; resourceId: string }
+	| { kind: 'controlled_comparison'; resourceId: string }
 	| { kind: 'material'; resourceId: string }
 	| { kind: 'property'; resourceId: string }
+	| { kind: 'process'; resourceId: string }
+	| { kind: 'sample'; resourceId: string }
 	| { kind: 'test_condition'; resourceId: string }
 	| { kind: 'baseline'; resourceId: string }
+	| { kind: 'mechanism'; resourceId: string }
+	| { kind: 'characterization'; resourceId: string }
 	| { kind: 'unknown'; resourceId: string };
 
 export type GraphQuery = {
@@ -57,15 +65,22 @@ export type GraphQuery = {
 };
 
 export type GraphNodeType =
+	| 'objective'
+	| 'logic_chain'
 	| 'document'
 	| 'evidence'
 	| 'comparison'
+	| 'measurement'
+	| 'controlled_comparison'
 	| 'material'
 	| 'property'
 	| 'test_condition'
 	| 'baseline'
 	| 'variant'
 	| 'process'
+	| 'sample'
+	| 'mechanism'
+	| 'characterization'
 	| 'unknown';
 
 export type GraphFilters = {
@@ -127,23 +142,54 @@ export type GraphSelectedObjectDetail = {
 export type CytoscapeThemeName = 'light' | 'dark';
 
 export const graphNodeTypeOrder: GraphNodeType[] = [
+	'objective',
+	'logic_chain',
 	'document',
+	'measurement',
+	'controlled_comparison',
 	'evidence',
 	'comparison',
 	'material',
 	'property',
+	'process',
+	'sample',
 	'test_condition',
 	'baseline',
 	'variant',
-	'process'
+	'mechanism',
+	'characterization'
 ];
 
 const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
+	objective: {
+		color: '#1D4ED8',
+		background: '#DBEAFE',
+		shape: 'round-rectangle',
+		icon: 'objective'
+	},
+	logic_chain: {
+		color: '#B45309',
+		background: '#FEF3C7',
+		shape: 'round-rectangle',
+		icon: 'logic-chain'
+	},
 	document: {
 		color: '#2563EB',
 		background: '#EFF6FF',
 		shape: 'round-rectangle',
 		icon: 'document'
+	},
+	measurement: {
+		color: '#0891B2',
+		background: '#CFFAFE',
+		shape: 'round-rectangle',
+		icon: 'measurement'
+	},
+	controlled_comparison: {
+		color: '#EA580C',
+		background: '#FFEDD5',
+		shape: 'diamond',
+		icon: 'controlled-comparison'
 	},
 	evidence: {
 		color: '#10B981',
@@ -193,6 +239,24 @@ const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
 		shape: 'round-rectangle',
 		icon: 'process'
 	},
+	sample: {
+		color: '#4F46E5',
+		background: '#EEF2FF',
+		shape: 'round-rectangle',
+		icon: 'sample'
+	},
+	mechanism: {
+		color: '#BE123C',
+		background: '#FFE4E6',
+		shape: 'round-rectangle',
+		icon: 'mechanism'
+	},
+	characterization: {
+		color: '#047857',
+		background: '#D1FAE5',
+		shape: 'round-rectangle',
+		icon: 'characterization'
+	},
 	unknown: {
 		color: '#94A3B8',
 		background: '#F8FAFC',
@@ -202,12 +266,26 @@ const nodeTypeStyles: Record<GraphNodeType, GraphTypeStyle> = {
 };
 
 const edgeTypeLabels: Record<string, string> = {
+	objective_to_evidence: 'scopes',
 	document_to_evidence: 'source',
+	evidence_to_material: 'material',
+	evidence_to_property: 'property',
+	evidence_to_process: 'process',
+	evidence_to_sample: 'sample',
+	evidence_to_test_condition: 'test condition',
+	evidence_to_baseline: 'baseline',
+	objective_to_logic_chain: 'logic chain',
+	document_to_logic_chain: 'paper logic',
+	logic_chain_to_evidence: 'uses evidence',
 	evidence_to_comparison: 'supports',
 	comparison_to_material: 'material',
 	comparison_to_property: 'property',
 	comparison_to_test_condition: 'test condition',
 	comparison_to_baseline: 'baseline',
+	overview_objective_material: 'material scope',
+	overview_logic_chain_material: 'evidence scope',
+	overview_objective_topic: 'focus',
+	overview_logic_chain_topic: 'supports',
 	overview_document_material: 'studies',
 	overview_material_property: 'property',
 	overview_material_context: 'context',
@@ -254,11 +332,15 @@ export function parseGraphNodeId(nodeId: string): GraphNodeRef {
 		return { kind: 'unknown', resourceId: '' };
 	}
 
+	if (prefix === 'obj') return { kind: 'objective', resourceId };
+	if (prefix === 'chain') return { kind: 'logic_chain', resourceId };
 	if (prefix === 'doc') return { kind: 'document', resourceId };
 	if (prefix === 'evi') return { kind: 'evidence', resourceId };
 	if (prefix === 'cmp') return { kind: 'comparison', resourceId };
 	if (prefix === 'mat') return { kind: 'material', resourceId };
 	if (prefix === 'prop') return { kind: 'property', resourceId };
+	if (prefix === 'proc') return { kind: 'process', resourceId };
+	if (prefix === 'sample') return { kind: 'sample', resourceId };
 	if (prefix === 'tc') return { kind: 'test_condition', resourceId };
 	if (prefix === 'base') return { kind: 'baseline', resourceId };
 	return { kind: 'unknown', resourceId };
@@ -336,6 +418,56 @@ export function filterGraphElements(
 	return { nodes, edges };
 }
 
+export function buildKeyChainGraph(
+	graph: GraphResponse | null | undefined,
+	options: { maxNodes?: number } = {}
+): GraphResponse {
+	const emptyGraph: GraphResponse = {
+		collection_id: graph?.collection_id ?? '',
+		nodes: [],
+		edges: [],
+		truncated: Boolean(graph?.truncated)
+	};
+	if (!graph) return emptyGraph;
+
+	const maxNodes = Math.max(1, Math.trunc(options.maxNodes ?? 200));
+	const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+	const adjacency = buildAdjacency(graph.edges);
+	const selectedNodeIds = new Set<string>();
+
+	function addNode(nodeId: string) {
+		if (selectedNodeIds.has(nodeId)) return true;
+		if (!nodeById.has(nodeId) || selectedNodeIds.size >= maxNodes) return false;
+		selectedNodeIds.add(nodeId);
+		return true;
+	}
+
+	for (const node of orderedKeyChainBackboneNodes(graph.nodes)) {
+		if (!addNode(node.id)) break;
+	}
+
+	for (const evidenceNode of orderedKeyChainEvidenceNodes(graph.nodes, adjacency, nodeById)) {
+		if (!addNode(evidenceNode.id)) break;
+
+		for (const neighborId of orderedKeyChainNeighbors(evidenceNode.id, adjacency, nodeById)) {
+			addNode(neighborId);
+			if (selectedNodeIds.size >= maxNodes) break;
+		}
+	}
+
+	const nodes = graph.nodes.filter((node) => selectedNodeIds.has(node.id));
+	const edges = graph.edges.filter(
+		(edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
+	);
+
+	return {
+		collection_id: graph.collection_id,
+		nodes,
+		edges,
+		truncated: Boolean(graph.truncated || selectedNodeIds.size < graph.nodes.length)
+	};
+}
+
 export function buildCollectionOverviewGraph(
 	graph: GraphResponse | null | undefined
 ): GraphResponse {
@@ -376,8 +508,21 @@ export function buildCollectionOverviewGraph(
 	}
 
 	for (const node of graph.nodes) {
-		if (normalizeGraphNodeType(node.type) !== 'comparison') continue;
-		const buckets = collectComparisonOverviewBuckets(node.id, nodeById, adjacency);
+		const type = normalizeGraphNodeType(node.type);
+		if (!isOverviewBridgeNodeType(type)) continue;
+		const buckets = collectOverviewBuckets(node.id, nodeById, adjacency);
+
+		for (const objectiveId of buckets.objectives) {
+			for (const materialId of buckets.materials) {
+				addRelation(objectiveId, materialId, 'overview_objective_material');
+			}
+		}
+
+		for (const logicChainId of buckets.logicChains) {
+			for (const materialId of buckets.materials) {
+				addRelation(logicChainId, materialId, 'overview_logic_chain_material');
+			}
+		}
 
 		for (const documentId of buckets.documents) {
 			for (const materialId of buckets.materials) {
@@ -395,6 +540,22 @@ export function buildCollectionOverviewGraph(
 		}
 
 		if (!buckets.materials.size) {
+			for (const objectiveId of buckets.objectives) {
+				for (const propertyId of buckets.properties) {
+					addRelation(objectiveId, propertyId, 'overview_objective_topic');
+				}
+				for (const contextId of buckets.contexts) {
+					addRelation(objectiveId, contextId, 'overview_objective_topic');
+				}
+			}
+			for (const logicChainId of buckets.logicChains) {
+				for (const propertyId of buckets.properties) {
+					addRelation(logicChainId, propertyId, 'overview_logic_chain_topic');
+				}
+				for (const contextId of buckets.contexts) {
+					addRelation(logicChainId, contextId, 'overview_logic_chain_topic');
+				}
+			}
 			for (const documentId of buckets.documents) {
 				for (const propertyId of buckets.properties) {
 					addRelation(documentId, propertyId, 'overview_document_topic');
@@ -502,7 +663,12 @@ function truncateGraphLabel(label: string, limit: number) {
 
 function isAggregateNodeType(type: GraphNodeType) {
 	return (
-		type === 'material' || type === 'property' || type === 'test_condition' || type === 'baseline'
+		type === 'material' ||
+		type === 'property' ||
+		type === 'process' ||
+		type === 'sample' ||
+		type === 'test_condition' ||
+		type === 'baseline'
 	);
 }
 
@@ -521,7 +687,7 @@ function graphNodeDimensions(type: GraphNodeType, label: string, degree: number)
 		};
 	}
 
-	if (type === 'comparison') {
+	if (type === 'comparison' || type === 'controlled_comparison') {
 		return {
 			width: 104 + degreeBoost * 4,
 			height: 72 + degreeBoost * 2,
@@ -531,7 +697,12 @@ function graphNodeDimensions(type: GraphNodeType, label: string, degree: number)
 		};
 	}
 
-	if (type === 'document' || type === 'evidence') {
+	if (
+		type === 'objective' ||
+		type === 'logic_chain' ||
+		type === 'document' ||
+		isEvidenceUnitNodeType(type)
+	) {
 		return {
 			width: 108 + degreeBoost * 3,
 			height: 58 + degreeBoost * 2,
@@ -553,17 +724,28 @@ function graphNodeDimensions(type: GraphNodeType, label: string, degree: number)
 export function getNodeDescription(node: GraphNode | GraphSelectedNode) {
 	const type = normalizeGraphNodeType(node.type);
 	const label = getNodeLabel(node, 72);
+	if (type === 'objective') return `${label} is a research objective for this collection.`;
+	if (type === 'logic_chain')
+		return `${label} is an assembled research logic chain backed by evidence units.`;
 	if (type === 'document') return `${label} is a source document in this collection.`;
 	if (type === 'evidence') return `${label} is an extracted evidence claim linked to source text.`;
+	if (type === 'measurement') return `${label} is an objective-scoped measurement evidence unit.`;
+	if (type === 'controlled_comparison')
+		return `${label} is an objective-scoped controlled comparison evidence unit.`;
 	if (type === 'comparison')
 		return `${label} is a comparison row connecting evidence and review context.`;
 	if (type === 'material')
 		return `${label} is a material or material system shared by collection results.`;
 	if (type === 'property') return `${label} is a measured or reported property.`;
+	if (type === 'sample') return `${label} is a sample or specimen context.`;
 	if (type === 'test_condition') return `${label} is an experimental or evaluation condition.`;
 	if (type === 'baseline') return `${label} is a baseline or control reference.`;
 	if (type === 'process')
 		return `${label} is a method or process context extracted from the collection.`;
+	if (type === 'mechanism')
+		return `${label} is an author interpretation or mechanism evidence unit.`;
+	if (type === 'characterization')
+		return `${label} is a characterization observation evidence unit.`;
 	if (type === 'variant') return `${label} is a variant or experimental branch.`;
 	return `${label} is a graph object in this collection.`;
 }
@@ -671,8 +853,8 @@ export function buildCytoscapeElements(
 		const sourceType = normalizeGraphNodeType(nodeMap.get(edge.source)?.type);
 		const targetType = normalizeGraphNodeType(nodeMap.get(edge.target)?.type);
 		const hubEdge =
-			sourceType === 'comparison' ||
-			targetType === 'comparison' ||
+			isOverviewBridgeNodeType(sourceType) ||
+			isOverviewBridgeNodeType(targetType) ||
 			isAggregateNodeType(sourceType) ||
 			isAggregateNodeType(targetType);
 		elements.push({
@@ -816,7 +998,8 @@ export async function runGraphLayout(cy: Core, layoutName = 'fcose') {
 		layoutName === 'grid' || layoutName === 'circle' || layoutName === 'cose'
 			? layoutName
 			: 'fcose';
-	const name = requestedName === 'fcose' && nodeCount <= 2 ? 'grid' : requestedName;
+	const name =
+		requestedName === 'fcose' && (nodeCount <= 2 || nodeCount > 300) ? 'grid' : requestedName;
 
 	await new Promise<void>((resolve) => {
 		let settled = false;
@@ -896,17 +1079,31 @@ function normalizeGraphNodeType(type?: string | null): GraphNodeType {
 }
 
 function isCollectionOverviewNodeType(type: GraphNodeType) {
-	return type !== 'comparison' && type !== 'evidence';
+	return !isOverviewBridgeNodeType(type);
 }
 
 function isOverviewContextType(type: GraphNodeType) {
 	return (
 		type === 'process' ||
+		type === 'sample' ||
 		type === 'variant' ||
 		type === 'test_condition' ||
-		type === 'baseline' ||
-		type === 'unknown'
+		type === 'baseline'
 	);
+}
+
+function isEvidenceUnitNodeType(type: GraphNodeType) {
+	return (
+		type === 'evidence' ||
+		type === 'measurement' ||
+		type === 'controlled_comparison' ||
+		type === 'mechanism' ||
+		type === 'characterization'
+	);
+}
+
+function isOverviewBridgeNodeType(type: GraphNodeType) {
+	return type === 'comparison' || isEvidenceUnitNodeType(type);
 }
 
 function buildAdjacency(edges: GraphEdge[]) {
@@ -929,30 +1126,142 @@ function connectedNodeIds(adjacency: Map<string, GraphEdge[]>, nodeId: string) {
 	);
 }
 
-function collectComparisonOverviewBuckets(
-	comparisonNodeId: string,
+function orderedKeyChainBackboneNodes(nodes: GraphNode[]) {
+	return nodes
+		.filter((node) => {
+			const type = normalizeGraphNodeType(node.type);
+			return type === 'objective' || type === 'logic_chain' || type === 'document';
+		})
+		.sort(sortGraphNodesByDegree);
+}
+
+function orderedKeyChainEvidenceNodes(
+	nodes: GraphNode[],
+	adjacency: Map<string, GraphEdge[]>,
+	nodeById: Map<string, GraphNode>
+) {
+	return nodes
+		.filter((node) => isEvidenceUnitNodeType(normalizeGraphNodeType(node.type)))
+		.sort((left, right) => {
+			const leftScore = keyChainEvidenceScore(left.id, adjacency, nodeById);
+			const rightScore = keyChainEvidenceScore(right.id, adjacency, nodeById);
+			return rightScore - leftScore || sortGraphNodesByDegree(left, right);
+		});
+}
+
+function keyChainEvidenceScore(
+	nodeId: string,
+	adjacency: Map<string, GraphEdge[]>,
+	nodeById: Map<string, GraphNode>
+) {
+	const types = new Set(
+		connectedNodeIds(adjacency, nodeId).map((neighborId) =>
+			normalizeGraphNodeType(nodeById.get(neighborId)?.type)
+		)
+	);
+	let score = 0;
+	if (types.has('objective')) score += 8;
+	if (types.has('logic_chain')) score += 8;
+	if (types.has('document')) score += 5;
+	if (types.has('material')) score += 3;
+	if (types.has('property')) score += 3;
+	if (types.has('process')) score += 2;
+	if (types.has('sample')) score += 1;
+	return score;
+}
+
+function orderedKeyChainNeighbors(
+	nodeId: string,
+	adjacency: Map<string, GraphEdge[]>,
+	nodeById: Map<string, GraphNode>
+) {
+	return connectedNodeIds(adjacency, nodeId)
+		.filter((neighborId) => {
+			const type = normalizeGraphNodeType(nodeById.get(neighborId)?.type);
+			return isKeyChainNodeType(type);
+		})
+		.sort((leftId, rightId) => {
+			const left = nodeById.get(leftId);
+			const right = nodeById.get(rightId);
+			return (
+				keyChainNodePriority(normalizeGraphNodeType(left?.type)) -
+					keyChainNodePriority(normalizeGraphNodeType(right?.type)) ||
+				sortGraphNodesByDegree(left, right)
+			);
+		});
+}
+
+function isKeyChainNodeType(type: GraphNodeType) {
+	return (
+		type === 'objective' ||
+		type === 'logic_chain' ||
+		type === 'document' ||
+		isEvidenceUnitNodeType(type) ||
+		type === 'material' ||
+		type === 'property' ||
+		type === 'process' ||
+		type === 'sample' ||
+		type === 'test_condition' ||
+		type === 'baseline'
+	);
+}
+
+function keyChainNodePriority(type: GraphNodeType) {
+	if (type === 'objective') return 0;
+	if (type === 'logic_chain') return 1;
+	if (type === 'document') return 2;
+	if (isEvidenceUnitNodeType(type)) return 3;
+	if (type === 'material') return 4;
+	if (type === 'property') return 5;
+	if (type === 'process') return 6;
+	if (type === 'sample') return 7;
+	if (type === 'test_condition') return 8;
+	if (type === 'baseline') return 9;
+	return 99;
+}
+
+function sortGraphNodesByDegree(left: GraphNode | undefined, right: GraphNode | undefined) {
+	return (
+		Number(right?.degree ?? 0) - Number(left?.degree ?? 0) ||
+		String(left?.label ?? left?.id ?? '').localeCompare(String(right?.label ?? right?.id ?? ''))
+	);
+}
+
+function collectOverviewBuckets(
+	bridgeNodeId: string,
 	nodeById: Map<string, GraphNode>,
 	adjacency: Map<string, GraphEdge[]>
 ) {
 	const buckets = {
+		objectives: new Set<string>(),
+		logicChains: new Set<string>(),
 		documents: new Set<string>(),
 		materials: new Set<string>(),
 		properties: new Set<string>(),
 		contexts: new Set<string>()
 	};
 
-	for (const neighborId of connectedNodeIds(adjacency, comparisonNodeId)) {
+	for (const neighborId of connectedNodeIds(adjacency, bridgeNodeId)) {
 		const neighbor = nodeById.get(neighborId);
 		const type = normalizeGraphNodeType(neighbor?.type);
+		if (type === 'objective') buckets.objectives.add(neighborId);
+		if (type === 'logic_chain') buckets.logicChains.add(neighborId);
 		if (type === 'document') buckets.documents.add(neighborId);
 		if (type === 'material') buckets.materials.add(neighborId);
 		if (type === 'property') buckets.properties.add(neighborId);
 		if (isOverviewContextType(type)) buckets.contexts.add(neighborId);
 
-		if (type === 'evidence') {
+		if (isOverviewBridgeNodeType(type)) {
 			for (const evidenceNeighborId of connectedNodeIds(adjacency, neighborId)) {
 				const evidenceNeighbor = nodeById.get(evidenceNeighborId);
-				if (normalizeGraphNodeType(evidenceNeighbor?.type) === 'document') {
+				const evidenceNeighborType = normalizeGraphNodeType(evidenceNeighbor?.type);
+				if (evidenceNeighborType === 'objective') {
+					buckets.objectives.add(evidenceNeighborId);
+				}
+				if (evidenceNeighborType === 'logic_chain') {
+					buckets.logicChains.add(evidenceNeighborId);
+				}
+				if (evidenceNeighborType === 'document') {
 					buckets.documents.add(evidenceNeighborId);
 				}
 			}
@@ -1077,13 +1386,21 @@ function parseSelectedNode(node: GraphSelectedNode): GraphNodeRef {
 	const resourceId = String(node.resourceId ?? node.id).trim();
 	const kind = normalizeGraphNodeType(node.kind ?? node.type);
 	if (
+		kind === 'objective' ||
+		kind === 'logic_chain' ||
 		kind === 'document' ||
 		kind === 'evidence' ||
 		kind === 'comparison' ||
+		kind === 'measurement' ||
+		kind === 'controlled_comparison' ||
 		kind === 'material' ||
 		kind === 'property' ||
+		kind === 'process' ||
+		kind === 'sample' ||
 		kind === 'test_condition' ||
-		kind === 'baseline'
+		kind === 'baseline' ||
+		kind === 'mechanism' ||
+		kind === 'characterization'
 	) {
 		return { kind, resourceId };
 	}
@@ -1113,6 +1430,9 @@ function nodeLabelMatchesComparison(
 	}
 	if (kind === 'property') {
 		return normalizeSearch(comparison.display.property_normalized) === value;
+	}
+	if (kind === 'process') {
+		return normalizeSearch(comparison.display.process_normalized) === value;
 	}
 	if (kind === 'test_condition') {
 		return normalizeSearch(comparison.display.test_condition_normalized) === value;

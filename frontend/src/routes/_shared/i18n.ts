@@ -2340,6 +2340,7 @@ const translations: Record<Language, Translations> = {
 			},
 			controls: {
 				title: 'Overview controls',
+				viewMode: 'View mode',
 				search: 'Search nodes',
 				searchPlaceholder: 'Search node name or keyword...',
 				focusSearch: 'Focus matching node',
@@ -2352,6 +2353,10 @@ const translations: Record<Language, Translations> = {
 				visibleNodes: 'Visible nodes',
 				visibleEdges: 'Visible edges',
 				loadState: 'Load state'
+			},
+			viewMode: {
+				keyChain: 'Key research chain',
+				full: 'Full graph'
 			},
 			layout: {
 				fcose: 'fCoSE force layout',
@@ -4796,6 +4801,7 @@ const translations: Record<Language, Translations> = {
 			},
 			controls: {
 				title: '总览控制',
+				viewMode: '视图模式',
 				search: '搜索节点',
 				searchPlaceholder: '搜索节点名称或关键词...',
 				focusSearch: '定位匹配节点',
@@ -4808,6 +4814,10 @@ const translations: Record<Language, Translations> = {
 				visibleNodes: '可见节点',
 				visibleEdges: '可见边',
 				loadState: '加载状态'
+			},
+			viewMode: {
+				keyChain: '关键科研链路',
+				full: '完整图谱'
 			},
 			layout: {
 				fcose: 'fCoSE 力导向布局',

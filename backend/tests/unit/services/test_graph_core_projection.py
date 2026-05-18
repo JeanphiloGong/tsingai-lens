@@ -272,6 +272,37 @@ def test_core_projection_reuses_material_system_across_objectives():
     } == {"chain-1", "chain-2"}
 
 
+def test_core_projection_canonicalizes_material_system_word_order():
+    second_objective = {
+        **_objective("obj-2"),
+        "material_scope": ["stainless steel 316L"],
+    }
+    second_unit = {
+        **_measurement_unit("oeu-2", objective_id="obj-2"),
+        "material_system": {"family": "stainless steel 316L"},
+    }
+    second_chain = {
+        **_logic_chain(),
+        "logic_chain_id": "chain-2",
+        "objective_id": "obj-2",
+        "evidence_unit_ids": ["oeu-2"],
+    }
+
+    nodes, _edges, _truncated = load_core_graph_payload(
+        profiles=(_profile(),),
+        research_objectives=(_objective(), second_objective),
+        objective_evidence_units=(_measurement_unit(), second_unit),
+        objective_logic_chains=(_logic_chain(), second_chain),
+        max_nodes=40,
+        min_weight=0.0,
+    )
+
+    material_nodes = [node for node in nodes if node["type"] == "material_system"]
+    assert len(material_nodes) == 1
+    assert material_nodes[0]["label"] == "316L stainless steel"
+    assert material_nodes[0]["metrics"]["objective_count"] == 2
+
+
 def test_core_projection_keeps_case_out_of_canvas_nodes():
     unit = {
         **_measurement_unit(),

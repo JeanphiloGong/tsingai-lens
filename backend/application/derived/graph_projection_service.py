@@ -351,11 +351,12 @@ def _build_material_system_node(
     units: list[dict[str, Any]],
     doc_records: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
+    canonical_label = _canonical_material_label(material_label)
     matching_units = [
         unit
         for unit in units
-        if (_material_label(unit.get("material_system")) or "").casefold()
-        == material_label.casefold()
+        if _canonical_material_label(_material_label(unit.get("material_system")) or "").casefold()
+        == canonical_label.casefold()
     ]
     evidence_rows = [
         _evidence_unit_detail_row(unit, doc_records)
@@ -370,7 +371,8 @@ def _build_material_system_node(
         _drop_empty_values(
             {
                 "label": material_label,
-                "material": material_label,
+                "material": canonical_label,
+                "source_material": material_label,
                 "objective_id": objective_id,
                 "logic_chain_id": logic_chain_id,
                 "paper_count": len(paper_ids),
@@ -380,11 +382,11 @@ def _build_material_system_node(
     ]
     detail_rows.extend(evidence_rows)
     return {
-        "id": _material_system_node_id(material_label),
-        "label": _shorten_text(material_label, 96),
+        "id": _material_system_node_id(canonical_label),
+        "label": _shorten_text(canonical_label, 96),
         "type": "material_system",
         "role": "material_system",
-        "summary": f"{material_label} material system across this collection.",
+        "summary": f"{canonical_label} material system across this collection.",
         "metrics": {
             "row_count": len(detail_rows),
             "paper_count": len(paper_ids),
@@ -422,6 +424,7 @@ def _collect_material_labels(
         label = _clean_graph_text(candidate)
         if not label:
             continue
+        label = _canonical_material_label(label)
         key = label.casefold()
         if key in _PLACEHOLDER_VALUES or key in seen:
             continue
@@ -669,8 +672,19 @@ def _step_node_id(logic_chain_id: str, role: str) -> str:
 
 
 def _material_system_node_id(material_label: str) -> str:
-    suffix = sha1(material_label.casefold().encode("utf-8")).hexdigest()[:12]
+    suffix = sha1(_canonical_material_label(material_label).casefold().encode("utf-8")).hexdigest()[:12]
     return f"material_system:{suffix}"
+
+
+def _canonical_material_label(value: str) -> str:
+    label = _clean_graph_text(value) or ""
+    parts = label.split()
+    if len(parts) < 2:
+        return label
+    last = parts[-1]
+    if any(char.isdigit() for char in last) and any(char.isalpha() for char in last):
+        return " ".join([last, *parts[:-1]])
+    return label
 
 
 def _truncate_graph(

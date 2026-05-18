@@ -794,7 +794,7 @@ export function getNodeLabel(node: GraphNode | GraphSelectedNode, limit = 34) {
 	return truncateGraphLabel(label, limit);
 }
 
-function getNodeDisplayLabel(node: GraphNode | GraphSelectedNode, limit = 34) {
+export function getGraphNodeDisplayLabel(node: GraphNode | GraphSelectedNode, limit = 34) {
 	const label = compactGraphKeyValueLabel(formatGraphLabel(node.label || node.id));
 	return truncateGraphLabel(label, limit);
 }
@@ -832,7 +832,20 @@ function compactGraphKeyValueLabel(label: string) {
 
 function truncateGraphLabel(label: string, limit: number) {
 	if (label.length <= limit) return label;
+	const shortenedQuestion = shortenQuestionLabel(label, limit);
+	if (shortenedQuestion !== label) return shortenedQuestion;
 	return `${label.slice(0, Math.max(1, limit - 1)).trimEnd()}...`;
+}
+
+function shortenQuestionLabel(label: string, limit: number) {
+	const cleaned = label.replace(/\?+$/, '').trim();
+	const matched = cleaned.match(/^(How|What|Why|When|Where|Which)\s+(?:Do|Does|Can|Will|Is|Are)\s+(.+)$/i);
+	if (!matched) return label;
+	const body = matched[2]?.trim();
+	if (!body) return label;
+	const compact = body.replace(/\b(Affect|Influence|Impact|Change|Determine|Control)\b.*$/i, '').trim();
+	const candidate = compact || body;
+	return candidate.length <= limit ? candidate : `${candidate.slice(0, Math.max(1, limit - 1)).trimEnd()}...`;
 }
 
 function isAggregateNodeType(type: GraphNodeType) {
@@ -859,20 +872,20 @@ function isSemanticChainNodeType(
 function graphNodeDimensions(type: GraphNodeType, label: string, degree: number) {
 	if (type === 'objective') {
 		return {
-			width: 220,
-			height: 92,
-			textMaxWidth: 188,
-			fontSize: 13,
+			width: 250,
+			height: 104,
+			textMaxWidth: 218,
+			fontSize: 14,
 			layoutWeight: 22000
 		};
 	}
 
 	if (isSemanticChainNodeType(type)) {
 		return {
-			width: type === 'material_system' ? 196 : 188,
-			height: 82,
-			textMaxWidth: type === 'material_system' ? 164 : 154,
-			fontSize: 12,
+			width: type === 'material_system' ? 230 : 196,
+			height: type === 'material_system' ? 92 : 86,
+			textMaxWidth: type === 'material_system' ? 194 : 164,
+			fontSize: type === 'material_system' ? 14 : 12,
 			layoutWeight: 18000
 		};
 	}
@@ -1018,15 +1031,17 @@ export function buildCytoscapeElements(
 		const style = getNodeTypeStyle(node.type);
 		const type = normalizeGraphNodeType(node.type);
 		const fullLabel = formatGraphLabel(node.label || node.id);
-		const label = getNodeDisplayLabel(
+		const label = getGraphNodeDisplayLabel(
 			node,
-			isSemanticChainNodeType(type)
-				? 42
-				: isAggregateNodeType(type)
-					? 48
-					: type === 'comparison'
-						? 30
-						: 28
+			type === 'objective'
+				? 58
+				: isSemanticChainNodeType(type)
+					? 42
+					: isAggregateNodeType(type)
+						? 48
+						: type === 'comparison'
+							? 30
+							: 28
 		);
 		const degree = node.degree ?? 0;
 		const dimensions = graphNodeDimensions(type, label, degree);

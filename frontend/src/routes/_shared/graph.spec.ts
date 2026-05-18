@@ -10,6 +10,7 @@ import {
 	buildNodeTypeCounts,
 	filterGraphElements,
 	formatGraphLabel,
+	getGraphNodeDisplayLabel,
 	getLinkedComparisons,
 	getNodeTypeStyle,
 	parseGraphNodeId,
@@ -90,6 +91,29 @@ describe('graph shared helpers', () => {
 			kind: 'unknown',
 			resourceId: ''
 		});
+	});
+
+	it('keeps objective labels readable by preserving the scientific variable', () => {
+		expect(
+			getGraphNodeDisplayLabel(
+				{
+					id: 'obj:o1',
+					label: 'How do energy density, scanning speed, and scanning strategy affect 316L performance?',
+					type: 'objective'
+			},
+				42
+			)
+		).toBe('Energy Density, Scanning Speed, And Scann...');
+		expect(
+			getGraphNodeDisplayLabel(
+				{
+					id: 'material_system:steel',
+					label: '316L stainless steel',
+					type: 'material_system'
+				},
+				42
+			)
+		).toBe('316L Stainless Steel');
 	});
 
 	it('recognizes semantic chain graph nodes from the backend contract', () => {

@@ -150,10 +150,19 @@
 		if (!cy) return;
 		const visible = visibleGraphElements();
 		if (!visible || visible.empty()) return;
+		if (viewMode === 'material_centric') {
+			fitVisibleGraph(visible, animate);
+			return;
+		}
 		if (viewMode !== 'full' && layoutName === 'logic_chain') {
 			fitLogicChainGraph(visible, animate);
 			return;
 		}
+		fitVisibleGraph(visible, animate);
+	}
+
+	function fitVisibleGraph(visible: CollectionReturnValue, animate = true) {
+		if (!cy) return;
 		if (animate) {
 			cy.animate({
 				fit: { eles: visible, padding: graphPadding },

@@ -426,7 +426,7 @@
 			weight: typeof edge.data('weight') === 'number' ? Number(edge.data('weight')) : null,
 			sourceLabel: nodeLabelForId(String(edge.data('source') ?? '')),
 			targetLabel: nodeLabelForId(String(edge.data('target') ?? '')),
-			relationLabel: String(edge.data('label') ?? '')
+			relationLabel: String(edge.data('fullLabel') ?? edge.data('label') ?? '')
 		};
 		syncSelectionStyles();
 		if (focus) {

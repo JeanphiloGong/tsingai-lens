@@ -237,6 +237,28 @@ describe('graph shared helpers', () => {
 		expect(element.data?.fullLabel).toContain('Details: Tensile Specimens');
 	});
 
+	it('hides routine semantic edge labels on the canvas while preserving full labels', () => {
+		const elements = buildCytoscapeElements({
+			nodes: [
+				{ id: 'obj:o1', label: 'Objective A', type: 'objective', degree: 1 },
+				{ id: 'material_system:steel', label: '316L stainless steel', type: 'material_system', degree: 1 }
+			],
+			edges: [
+				{
+					id: 'e1',
+					source: 'obj:o1',
+					target: 'material_system:steel',
+					edge_description: 'objective_to_material_system'
+				}
+			]
+		});
+		const edge = elements.find((element) => element.group === 'edges');
+
+		expect(edge?.data?.label).toBe('');
+		expect(edge?.data?.fullLabel).toBe('material');
+		expect(edge?.data?.edgeDescription).toBe('objective_to_material_system');
+	});
+
 	it('positions objective semantic chain nodes from canonical ids', () => {
 		const elements = buildCytoscapeElements({
 			nodes: [

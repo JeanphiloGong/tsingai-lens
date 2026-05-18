@@ -1099,7 +1099,8 @@ export function buildCytoscapeElements(
 				targetRole: edge.target_role ?? null,
 				objectiveId: edge.objective_id ?? null,
 				logicChainId: edge.logic_chain_id ?? null,
-				label: style.label,
+				label: visibleEdgeCanvasLabel(edge.edge_description, style.label),
+				fullLabel: style.label,
 				weight: edge.weight ?? null,
 				width: edgeWidth(edge.weight),
 				lineStyle: style.lineStyle,
@@ -1109,6 +1110,17 @@ export function buildCytoscapeElements(
 	}
 
 	return elements;
+}
+
+function visibleEdgeCanvasLabel(edgeDescription: string | null | undefined, label: string) {
+	const description = String(edgeDescription ?? '').trim();
+	const mutedLabels = new Set([
+		'objective_to_material_system',
+		'material_system_to_material_scope',
+		'objective_to_material_scope',
+		'semantic_chain_step_to_step'
+	]);
+	return mutedLabels.has(description) ? '' : label;
 }
 
 export function buildCytoscapeStyles(theme: CytoscapeThemeName = 'light') {

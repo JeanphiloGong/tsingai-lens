@@ -150,7 +150,7 @@
 		if (!cy) return;
 		const visible = visibleGraphElements();
 		if (!visible || visible.empty()) return;
-		if (layoutName === 'logic_chain') {
+		if (viewMode !== 'full' && layoutName === 'logic_chain') {
 			fitLogicChainGraph(visible, animate);
 			return;
 		}
@@ -170,7 +170,10 @@
 		const objective = visible.nodes('[entityType = "objective"]').first();
 		const material = visible.nodes('[entityType = "material_system"]').first();
 		const scope = visible.nodes('[entityType = "material_scope"]').first();
-		const firstRow = objective.union(material).union(scope).filter((element) => !element.empty());
+		const firstRow =
+			viewMode === 'material_centric'
+				? material.union(objective).filter((element) => !element.empty())
+				: objective.union(material).union(scope).filter((element) => !element.empty());
 		const target = firstRow.length ? firstRow : visible;
 		const zoom = 0.88;
 		if (animate) {
@@ -226,6 +229,18 @@
 			return buildMaterialCentricGraph(sourceGraph, { maxNodes });
 		}
 		return sourceGraph;
+	}
+
+	function canvasTitleKey() {
+		if (viewMode === 'material_centric') return 'graph.canvas.materialTitle';
+		if (viewMode === 'full') return 'graph.canvas.fullTitle';
+		return 'graph.canvas.title';
+	}
+
+	function canvasAriaLabelKey() {
+		if (viewMode === 'material_centric') return 'graph.canvas.materialAriaLabel';
+		if (viewMode === 'full') return 'graph.canvas.fullAriaLabel';
+		return 'graph.canvas.ariaLabel';
 	}
 
 	async function renderGraph(focusNodeId: string | null = null) {
@@ -513,6 +528,13 @@
 		if (graphData) {
 			await renderGraph();
 		}
+	}
+
+	async function handleViewModeChange() {
+		if (!graphData) return;
+		visibleNodeTypes = ensureVisibleTypes(buildDisplayGraphData(graphData));
+		clearSelection(false);
+		await renderGraph();
 	}
 
 	async function handleControlRender() {
@@ -867,7 +889,7 @@
 								class="graph-input"
 								bind:value={viewMode}
 								disabled={graphLoading}
-								on:change={handleControlRender}
+								on:change={handleViewModeChange}
 							>
 								<option value="objective_chain">{$t('graph.viewMode.keyChain')}</option>
 								<option value="material_centric">{$t('graph.viewMode.materialCentric')}</option>
@@ -946,7 +968,7 @@
 			<section class="graph-page-card graph-canvas-panel" aria-labelledby="graph-canvas-title">
 				<div class="graph-canvas-toolbar">
 					<div>
-						<h2 id="graph-canvas-title">{$t('graph.canvas.title')}</h2>
+						<h2 id="graph-canvas-title">{$t(canvasTitleKey())}</h2>
 						<p>{$t('graph.canvas.meta', { nodes: visibleNodes, edges: visibleEdges })}</p>
 					</div>
 					<div class="graph-canvas-actions">
@@ -1005,7 +1027,7 @@
 					<div
 						class="graph-cytoscape"
 						bind:this={graphContainer}
-						aria-label={$t('graph.canvas.ariaLabel')}
+						aria-label={$t(canvasAriaLabelKey())}
 					></div>
 					{#if graphLoading}
 						<div class="graph-canvas-state graph-canvas-state--loading">

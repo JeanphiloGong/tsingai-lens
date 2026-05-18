@@ -2370,6 +2370,8 @@ const translations: Record<Language, Translations> = {
 			},
 			canvas: {
 				title: 'Research logic chain',
+				materialTitle: 'Material-centered research map',
+				fullTitle: 'Full collection graph',
 				meta: 'Nodes {nodes} · Edges {edges}',
 				fit: 'Fit canvas',
 				zoomIn: 'Zoom in',
@@ -2377,6 +2379,8 @@ const translations: Record<Language, Translations> = {
 				center: 'Center',
 				layout: 'Layout',
 				ariaLabel: 'Interactive research logic chain canvas',
+				materialAriaLabel: 'Interactive material-centered research map canvas',
+				fullAriaLabel: 'Interactive full collection graph canvas',
 				empty: 'No visible graph elements match the current controls.'
 			},
 			legend: {
@@ -4845,6 +4849,8 @@ const translations: Record<Language, Translations> = {
 			},
 			canvas: {
 				title: '科研逻辑链',
+				materialTitle: '材料中心科研图',
+				fullTitle: '完整集合图谱',
 				meta: '节点 {nodes} · 边 {edges}',
 				fit: '适配画布',
 				zoomIn: '放大',
@@ -4852,6 +4858,8 @@ const translations: Record<Language, Translations> = {
 				center: '居中',
 				layout: '布局',
 				ariaLabel: '可交互的科研逻辑链画布',
+				materialAriaLabel: '可交互的材料中心科研图画布',
+				fullAriaLabel: '可交互的完整集合图谱画布',
 				empty: '当前控制条件下没有可见图谱元素。'
 			},
 			legend: {

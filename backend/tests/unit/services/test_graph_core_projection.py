@@ -198,8 +198,14 @@ def test_core_projection_builds_semantic_logic_chain_graph_payload():
     assert {
         "objective_to_material_system",
         "material_system_to_material_scope",
-        "material_scope_to_process_sample_context",
+        "semantic_chain_step_to_step",
     }.issubset(edge_descriptions)
+    assert any(
+        edge["edge_description"] == "semantic_chain_step_to_step"
+        and edge["source_role"] == "material_scope"
+        and edge["target_role"] == "process_sample_context"
+        for edge in edges
+    )
 
 
 def test_core_projection_reuses_material_system_across_objectives():
@@ -396,6 +402,7 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
     assert b"<graphml" in graphml_bytes
     assert b"material_system" in graphml_bytes
     assert b"measurement_results" in graphml_bytes
+    assert b"semantic_chain_step_to_step" in graphml_bytes
 
 
 def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
@@ -457,4 +464,7 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
     assert {edge["id"] for edge in payload["edges"]} >= {
         "edge:step:chain-1:characterization:measurement_results",
         "edge:step:chain-1:measurement_results:controlled_comparisons",
+    }
+    assert {edge["edge_description"] for edge in payload["edges"]} == {
+        "semantic_chain_step_to_step"
     }

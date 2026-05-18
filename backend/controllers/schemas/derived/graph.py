@@ -32,6 +32,8 @@ class GraphNodeResponse(BaseModel):
 class GraphEdgeResponse(BaseModel):
     """Edge payload returned by the collection graph endpoint."""
 
+    model_config = {"extra": "allow"}
+
     id: str = Field(..., description="关系 ID")
     source: str = Field(..., description="源节点 ID")
     target: str = Field(..., description="目标节点 ID")

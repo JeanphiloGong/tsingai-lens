@@ -1216,26 +1216,22 @@ Graph 语义约束：
 - `/graph` 返回结构字段：
   `collection_id / nodes / edges / truncated`
 - graph node 只保留：
-  `id / label / type / degree`
+  `id / label / type / role / summary / metrics / detail_rows / degree`
 - graph edge 只保留：
   `id / source / target / weight / edge_description`
 - graph node `type` 当前可以是：
-  `objective | logic_chain | document | evidence | measurement |
-  controlled_comparison | material | property | process | sample |
-  test_condition | baseline | mechanism | characterization`
+  `objective | logic_chain_step`
+- graph node `role` 当前可以是：
+  `research_objective | material_scope | process_sample_context |
+  test_conditions | characterization | measurement_results |
+  controlled_comparisons | mechanism_interpretation | limitations`
+- `detail_rows` 是聚合 step 的证据明细表。paper-local keys such as
+  `Case 15`、`condition no. 2`、单条 measurement value 不应作为默认画布节点；
+  它们应进入对应 `logic_chain_step.detail_rows`
 - graph edge `edge_description` 当前可以是：
-  `objective_to_evidence | document_to_evidence | evidence_to_material |
-  evidence_to_property | evidence_to_process | evidence_to_sample |
-  evidence_to_test_condition | evidence_to_baseline |
-  objective_to_logic_chain | document_to_logic_chain | logic_chain_to_evidence`
+  `objective_to_logic_chain_step | logic_chain_step_to_step`
 - `/graph/nodes/{node_id}/neighbors` 返回中心节点的一跳邻域，字段与 `/graph`
-  保持同一精简结构
-- 节点详情不再经由 graph 聚合透出；前端应根据 `obj:` / `doc:` / `evi:` /
-  `chain:` 前缀回到 objective / document / evidence / logic-chain canonical
-  资源
-- 聚合节点 `mat:` / `prop:` / `proc:` / `sample:` / `tc:` / `base:` 不提供
-  graph-owned detail；前端应回到 objective workspace 并使用对应过滤参数做
-  canonical drilldown
+  保持同一结构
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码
   `graph_not_ready`
 - `graph_not_ready.detail.missing_artifacts` 应返回缺失的 graph 语义输入文件名，

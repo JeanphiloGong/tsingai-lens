@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
+
+
+class GraphNodeDetailRowResponse(BaseModel):
+    """Structured rows attached to an aggregated graph node."""
+
+    model_config = {"extra": "allow"}
 
 
 class GraphNodeResponse(BaseModel):
@@ -9,6 +17,13 @@ class GraphNodeResponse(BaseModel):
     id: str = Field(..., description="节点 ID")
     label: str = Field(..., description="节点显示名称")
     type: str | None = Field(default=None, description="节点类型")
+    role: str | None = Field(default=None, description="聚合节点角色")
+    summary: str | None = Field(default=None, description="节点摘要")
+    metrics: dict[str, Any] = Field(default_factory=dict, description="节点指标")
+    detail_rows: list[GraphNodeDetailRowResponse] = Field(
+        default_factory=list,
+        description="聚合节点详情行",
+    )
     degree: int | None = Field(default=None, description="节点度数")
 
 

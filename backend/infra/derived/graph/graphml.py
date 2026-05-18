@@ -11,6 +11,8 @@ def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byte
     key_defs = [
         ("label", "node", "string"),
         ("type", "node", "string"),
+        ("role", "node", "string"),
+        ("summary", "node", "string"),
         ("degree", "node", "int"),
         ("edge_description", "edge", "string"),
         ("weight", "edge", "double"),
@@ -34,7 +36,7 @@ def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byte
 
     for node in nodes:
         node_el = SubElement(graph, "node", id=node["id"])
-        for key in ["label", "type", "degree"]:
+        for key in ["label", "type", "role", "summary", "degree"]:
             add_data(node_el, key, node.get(key))
 
     for edge in edges:

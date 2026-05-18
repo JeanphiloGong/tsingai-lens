@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from hashlib import sha1
 from types import SimpleNamespace
 
 from application.derived.graph_projection_service import load_core_graph_payload
@@ -13,10 +12,6 @@ from domain.core.research_objective import (
     ResearchObjective,
 )
 from infra.persistence.sqlite import SqliteCoreFactRepository
-
-
-def _semantic_node_id(prefix: str, label: str) -> str:
-    return f"{prefix}:{sha1(label.lower().encode('utf-8')).hexdigest()}"
 
 
 def _profile(document_id: str = "paper-1") -> dict:
@@ -119,7 +114,7 @@ def _core_graph_fact_set(collection_id: str) -> CoreFactSet:
     )
 
 
-def test_core_projection_builds_objective_first_graph_payload():
+def test_core_projection_builds_logic_chain_step_graph_payload():
     nodes, edges, truncated = load_core_graph_payload(
         profiles=(_profile(),),
         research_objectives=(_objective(),),
@@ -132,45 +127,60 @@ def test_core_projection_builds_objective_first_graph_payload():
     assert truncated is False
     nodes_by_id = {node["id"]: node for node in nodes}
     assert "obj:obj-1" in nodes_by_id
-    assert "doc:paper-1" in nodes_by_id
-    assert "evi:oeu-1" in nodes_by_id
-    assert "evi:oeu-cmp" in nodes_by_id
-    assert "chain:chain-1" in nodes_by_id
-    assert not any(node["type"] == "comparison" for node in nodes)
-
     assert nodes_by_id["obj:obj-1"]["type"] == "objective"
-    assert nodes_by_id["evi:oeu-1"]["type"] == "measurement"
-    assert nodes_by_id["evi:oeu-cmp"]["type"] == "controlled_comparison"
-    assert nodes_by_id["chain:chain-1"]["type"] == "logic_chain"
-    assert nodes_by_id[_semantic_node_id("mat", "316L stainless steel")]["type"] == (
-        "material"
+    assert {node["type"] for node in nodes} == {"objective", "logic_chain_step"}
+    assert {node["role"] for node in nodes if node["type"] == "logic_chain_step"} == {
+        "material_scope",
+        "process_sample_context",
+        "test_conditions",
+        "characterization",
+        "measurement_results",
+        "controlled_comparisons",
+        "mechanism_interpretation",
+        "limitations",
+    }
+
+    measurement_step = nodes_by_id["step:chain-1:measurement_results"]
+    assert measurement_step["metrics"]["row_count"] == 1
+    assert measurement_step["detail_rows"] == [
+        {
+            "label": "yield strength | 365.6 MPa",
+            "row_type": "measurement",
+            "paper": "Core Graph Paper",
+            "document_id": "paper-1",
+            "evidence_unit_id": "oeu-1",
+            "property": "yield strength",
+            "value": "365.6 MPa",
+            "unit": "MPa",
+            "material": "316L stainless steel",
+            "sample": "Case: 15; sample_number: 15",
+            "process": "energy density: 100 J/mm^3; scan speed: 900 mm/s",
+            "test_condition": "method: tensile test",
+            "baseline": "reference: Case 1",
+            "source": "table:table-2 p.7",
+            "resolution_status": "resolved",
+            "confidence": 0.88,
+        }
+    ]
+    comparison_step = nodes_by_id["step:chain-1:controlled_comparisons"]
+    assert comparison_step["detail_rows"][0]["evidence_unit_id"] == "oeu-cmp"
+    assert comparison_step["detail_rows"][0]["interpretation"] == (
+        "Case 15 improved yield strength over the baseline."
     )
-    assert nodes_by_id[_semantic_node_id("prop", "yield strength")]["type"] == "property"
-    assert nodes_by_id[_semantic_node_id("sample", "Case: 15; sample_number: 15")][
-        "type"
-    ] == "sample"
-    assert nodes_by_id[_semantic_node_id("proc", "energy density: 100 J/mm^3; scan speed: 900 mm/s")][
-        "type"
-    ] == "process"
-    assert nodes_by_id[_semantic_node_id("tc", "method: tensile test")]["type"] == (
-        "test_condition"
-    )
+
+    process_step = nodes_by_id["step:chain-1:process_sample_context"]
+    assert "Case: 15" in process_step["detail_rows"][0]["sample"]
+    assert not any(node["type"] == "measurement" for node in nodes)
+    assert not any(node["label"] == "Case: 15" for node in nodes)
 
     edge_descriptions = {edge["edge_description"] for edge in edges}
     assert {
-        "objective_to_evidence",
-        "document_to_evidence",
-        "evidence_to_material",
-        "evidence_to_property",
-        "evidence_to_sample",
-        "evidence_to_process",
-        "evidence_to_test_condition",
-        "objective_to_logic_chain",
-        "logic_chain_to_evidence",
+        "objective_to_logic_chain_step",
+        "logic_chain_step_to_step",
     }.issubset(edge_descriptions)
 
 
-def test_core_projection_keeps_case_out_of_test_condition_nodes():
+def test_core_projection_keeps_case_out_of_canvas_nodes():
     unit = {
         **_measurement_unit(),
         "test_condition": {"Case": "15"},
@@ -187,15 +197,13 @@ def test_core_projection_keeps_case_out_of_test_condition_nodes():
         min_weight=0.0,
     )
 
-    test_condition_labels = {
-        node["label"] for node in nodes if node["type"] == "test_condition"
-    }
-    sample_labels = {node["label"] for node in nodes if node["type"] == "sample"}
-    assert test_condition_labels == set()
-    assert sample_labels == {"Case: 15"}
+    assert {node["type"] for node in nodes} == {"objective", "logic_chain_step"}
+    assert not any(node["label"] == "Case: 15" for node in nodes)
+    test_step = next(node for node in nodes if node.get("role") == "test_conditions")
+    assert test_step["detail_rows"] == []
 
 
-def test_core_projection_truncation_reserves_objective_backbone_capacity():
+def test_core_projection_truncates_step_graph_by_objective_and_step_order():
     profiles = tuple(_profile(f"paper-{index}") for index in range(1, 5))
     units = tuple(
         {
@@ -210,19 +218,19 @@ def test_core_projection_truncation_reserves_objective_backbone_capacity():
         research_objectives=(_objective(),),
         objective_evidence_units=units,
         objective_logic_chains=(),
-        max_nodes=10,
+        max_nodes=5,
         min_weight=0.0,
     )
 
     assert truncated is True
-    backbone_count = sum(
-        1
-        for node in nodes
-        if node["type"] in {"objective", "document", "measurement", "controlled_comparison"}
-    )
-    semantic_count = len(nodes) - backbone_count
-    assert backbone_count >= 6
-    assert semantic_count <= 4
+    assert len(nodes) == 5
+    assert nodes[0]["type"] == "objective"
+    assert [node["role"] for node in nodes[1:]] == [
+        "material_scope",
+        "process_sample_context",
+        "test_conditions",
+        "characterization",
+    ]
 
 
 def test_graph_service_serves_objective_projection_without_comparison_rows(
@@ -279,7 +287,12 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
 
     assert payload["collection_id"] == collection_id
     assert any(node["type"] == "objective" for node in payload["nodes"])
-    assert any(node["type"] == "measurement" for node in payload["nodes"])
+    assert any(node["type"] == "logic_chain_step" for node in payload["nodes"])
+    assert any(
+        node["role"] == "measurement_results" and node["detail_rows"]
+        for node in payload["nodes"]
+    )
+    assert not any(node["type"] == "measurement" for node in payload["nodes"])
     assert not any(node["type"] == "comparison" for node in payload["nodes"])
 
     graphml_bytes, filename = graph_service.build_graphml(
@@ -290,6 +303,7 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
+    assert b"logic_chain_step" in graphml_bytes
 
 
 def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
@@ -337,18 +351,18 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
 
     payload = graph_service.get_collection_graph_neighbors(
         collection_id=collection_id,
-        node_id="evi:oeu-1",
+        node_id="step:chain-1:measurement_results",
     )
 
     assert payload["collection_id"] == collection_id
-    assert payload["center_node_id"] == "evi:oeu-1"
+    assert payload["center_node_id"] == "step:chain-1:measurement_results"
     assert payload["truncated"] is False
     assert {node["id"] for node in payload["nodes"]} >= {
-        "doc:paper-1",
-        "obj:obj-1",
-        "evi:oeu-1",
+        "step:chain-1:characterization",
+        "step:chain-1:measurement_results",
+        "step:chain-1:controlled_comparisons",
     }
     assert {edge["id"] for edge in payload["edges"]} >= {
-        "edge:doc:paper-1:evi:oeu-1",
-        "edge:obj:obj-1:evi:oeu-1",
+        "edge:step:chain-1:characterization:measurement_results",
+        "edge:step:chain-1:measurement_results:controlled_comparisons",
     }

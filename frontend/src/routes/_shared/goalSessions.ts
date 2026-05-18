@@ -20,6 +20,7 @@ export type GoalSession = {
 	collection_id: string;
 	focused_material_id: string | null;
 	focused_paper_id: string | null;
+	focused_objective_id: string | null;
 	goal_text: string | null;
 	goal_brief_json: Record<string, unknown>;
 	answer_mode: GoalAnswerMode;
@@ -64,6 +65,7 @@ type CreateGoalSessionOptions = {
 	collection_id: string;
 	focused_material_id?: string | null;
 	focused_paper_id?: string | null;
+	focused_objective_id?: string | null;
 	goal_text?: string | null;
 	goal_brief_json?: Record<string, unknown>;
 	answer_mode?: GoalAnswerMode;
@@ -82,6 +84,7 @@ export async function createGoalSession(options: CreateGoalSessionOptions) {
 			collection_id: options.collection_id,
 			focused_material_id: options.focused_material_id ?? null,
 			focused_paper_id: options.focused_paper_id ?? null,
+			focused_objective_id: options.focused_objective_id ?? null,
 			goal_text: options.goal_text ?? null,
 			goal_brief_json: options.goal_brief_json ?? {},
 			answer_mode: options.answer_mode ?? 'hybrid'

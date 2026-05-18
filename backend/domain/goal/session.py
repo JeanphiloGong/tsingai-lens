@@ -162,6 +162,7 @@ class GoalSessionRecord:
     collection_id: str
     focused_material_id: str | None
     focused_paper_id: str | None
+    focused_objective_id: str | None
     goal_text: str | None
     goal_brief_json: Mapping[str, Any]
     answer_mode: GoalAnswerMode
@@ -182,6 +183,7 @@ class GoalSessionRecord:
         collection_id: str,
         focused_material_id: Any = None,
         focused_paper_id: Any = None,
+        focused_objective_id: Any = None,
         goal_text: Any = None,
         goal_brief_json: Mapping[str, Any] | None = None,
         answer_mode: Any = "hybrid",
@@ -194,6 +196,7 @@ class GoalSessionRecord:
             collection_id=_normalize_required_text(collection_id, "collection_id"),
             focused_material_id=_normalize_optional_text(focused_material_id),
             focused_paper_id=_normalize_optional_text(focused_paper_id),
+            focused_objective_id=_normalize_optional_text(focused_objective_id),
             goal_text=_normalize_optional_text(goal_text),
             goal_brief_json=dict(goal_brief_json or {}),
             answer_mode=normalize_answer_mode(answer_mode),
@@ -220,6 +223,9 @@ class GoalSessionRecord:
                 payload.get("focused_material_id")
             ),
             focused_paper_id=_normalize_optional_text(payload.get("focused_paper_id")),
+            focused_objective_id=_normalize_optional_text(
+                payload.get("focused_objective_id")
+            ),
             goal_text=_normalize_optional_text(payload.get("goal_text")),
             goal_brief_json=_normalize_mapping(payload.get("goal_brief_json")),
             answer_mode=normalize_answer_mode(payload.get("answer_mode")),
@@ -249,6 +255,7 @@ class GoalSessionRecord:
                 next_record,
                 focused_material_id=None,
                 focused_paper_id=None,
+                focused_objective_id=None,
             )
         return next_record
 
@@ -257,6 +264,7 @@ class GoalSessionRecord:
         *,
         material_id: Any = None,
         paper_id: Any = None,
+        objective_id: Any = None,
     ) -> "GoalSessionRecord":
         next_record = self
         material_text = _normalize_optional_text(material_id)
@@ -265,6 +273,9 @@ class GoalSessionRecord:
         paper_text = _normalize_optional_text(paper_id)
         if paper_text:
             next_record = replace(next_record, focused_paper_id=paper_text)
+        objective_text = _normalize_optional_text(objective_id)
+        if objective_text:
+            next_record = replace(next_record, focused_objective_id=objective_text)
         return next_record
 
     def with_focus(
@@ -272,11 +283,13 @@ class GoalSessionRecord:
         *,
         focused_material_id: Any,
         focused_paper_id: Any,
+        focused_objective_id: Any,
     ) -> "GoalSessionRecord":
         return replace(
             self,
             focused_material_id=_normalize_optional_text(focused_material_id),
             focused_paper_id=_normalize_optional_text(focused_paper_id),
+            focused_objective_id=_normalize_optional_text(focused_objective_id),
         )
 
     def with_goal_text(self, goal_text: Any) -> "GoalSessionRecord":
@@ -343,6 +356,7 @@ class GoalSessionRecord:
             "collection_id": self.collection_id,
             "focused_material_id": self.focused_material_id,
             "focused_paper_id": self.focused_paper_id,
+            "focused_objective_id": self.focused_objective_id,
             "goal_text": self.goal_text,
             "goal_brief_json": dict(self.goal_brief_json),
             "answer_mode": self.answer_mode,

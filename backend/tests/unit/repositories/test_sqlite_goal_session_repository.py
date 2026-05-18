@@ -10,6 +10,7 @@ def _session_record() -> dict:
         "collection_id": "col_demo",
         "focused_material_id": "mat-316l",
         "focused_paper_id": None,
+        "focused_objective_id": "obj_lpbf",
         "goal_text": "Compare strength and ductility.",
         "goal_brief_json": {"objective": "compare"},
         "answer_mode": "hybrid",

@@ -20,6 +20,7 @@ class GoalSessionCreateRequest(BaseModel):
     collection_id: str = Field(..., description="Bound collection id")
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
+    focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] = Field(
         default_factory=dict,
@@ -34,6 +35,7 @@ class GoalSessionUpdateRequest(BaseModel):
     collection_id: str | None = Field(default=None, description="Bound collection id")
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
+    focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] | None = Field(
         default=None,
@@ -50,6 +52,7 @@ class GoalSessionResponse(BaseModel):
     collection_id: str = Field(..., description="Bound collection id")
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
+    focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] = Field(
         default_factory=dict,

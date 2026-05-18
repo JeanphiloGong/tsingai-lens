@@ -56,7 +56,8 @@
 	$: collectionId = $page.params.id ?? '';
 	$: queryMaterialId = $page.url.searchParams.get('material_id') ?? '';
 	$: queryPaperId = $page.url.searchParams.get('paper_id') ?? '';
-	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}`;
+	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
+	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}`;
 	$: activeSessionId = session?.session_id ?? '';
 	$: if (collectionId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
@@ -146,6 +147,7 @@
 			if (storedSessionId) {
 				try {
 					session = await fetchGoalSession(storedSessionId);
+					if (!sessionMatchesCurrentFocus(session)) session = null;
 				} catch {
 					if (!sessionId) clearStoredSessionId();
 					session = null;
@@ -157,6 +159,7 @@
 					collection_id: collectionId,
 					focused_material_id: queryMaterialId || null,
 					focused_paper_id: queryPaperId || null,
+					focused_objective_id: queryObjectiveId || null,
 					answer_mode: 'hybrid'
 				});
 				messages = [];
@@ -176,6 +179,15 @@
 		}
 	}
 
+	function sessionMatchesCurrentFocus(nextSession: GoalSession | null) {
+		if (!nextSession || nextSession.collection_id !== collectionId) return false;
+		return (
+			(nextSession.focused_material_id ?? '') === queryMaterialId &&
+			(nextSession.focused_paper_id ?? '') === queryPaperId &&
+			(nextSession.focused_objective_id ?? '') === queryObjectiveId
+		);
+	}
+
 	async function startNewSession() {
 		loading = true;
 		error = '';
@@ -185,6 +197,7 @@
 				collection_id: collectionId,
 				focused_material_id: queryMaterialId || null,
 				focused_paper_id: queryPaperId || null,
+				focused_objective_id: queryObjectiveId || null,
 				answer_mode: 'hybrid'
 			});
 			messages = [];
@@ -223,7 +236,8 @@
 			const response = await postGoalSessionMessage(session.session_id, text, {
 				route: 'collection_assistant',
 				material_id: queryMaterialId || null,
-				paper_id: queryPaperId || null
+				paper_id: queryPaperId || null,
+				objective_id: queryObjectiveId || null
 			});
 			messages = [...messages, response];
 			session = await fetchGoalSession(session.session_id);

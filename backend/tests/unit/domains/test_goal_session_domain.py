@@ -13,6 +13,7 @@ def test_goal_session_record_requires_collection_and_normalizes_context() -> Non
         collection_id=" col_123 ",
         focused_material_id=" mat-316l ",
         focused_paper_id="",
+        focused_objective_id=" obj_lpbf ",
         goal_text="  compare strength  ",
         goal_brief_json={"target": "316L"},
         answer_mode="GROUNDED",
@@ -23,6 +24,7 @@ def test_goal_session_record_requires_collection_and_normalizes_context() -> Non
     assert session.collection_id == "col_123"
     assert session.focused_material_id == "mat-316l"
     assert session.focused_paper_id is None
+    assert session.focused_objective_id == "obj_lpbf"
     assert session.goal_text == "compare strength"
     assert session.answer_mode == "grounded"
     assert session.to_record()["goal_brief_json"] == {"target": "316L"}

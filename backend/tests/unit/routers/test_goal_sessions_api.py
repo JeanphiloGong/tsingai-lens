@@ -75,6 +75,7 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
         sessions_controller.create_goal_session(
             GoalSessionCreateRequest(
                 collection_id=collection["collection_id"],
+                focused_objective_id="obj_lpbf_strength",
             )
         )
     )
@@ -92,6 +93,7 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
     )
 
     assert session.collection_id == collection["collection_id"]
+    assert session.focused_objective_id == "obj_lpbf_strength"
     assert session.goal_text is None
     assert session.goal_brief_json == {}
     assert session.answer_mode == "hybrid"

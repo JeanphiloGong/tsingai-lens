@@ -38,6 +38,7 @@ async def create_goal_session(payload: GoalSessionCreateRequest) -> GoalSessionR
             collection_id=payload.collection_id,
             focused_material_id=payload.focused_material_id,
             focused_paper_id=payload.focused_paper_id,
+            focused_objective_id=payload.focused_objective_id,
             goal_text=payload.goal_text,
             goal_brief_json=payload.goal_brief_json,
             answer_mode=payload.answer_mode,

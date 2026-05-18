@@ -893,6 +893,14 @@
 				</span>
 				<strong>{confidenceLabel(objectiveView.objective.confidence)}</strong>
 				<span>{$t('research.objectives.confidence')}</span>
+				<a
+					class="objective-hero__assistant-link"
+					href={`${resolve('/collections/[id]/assistant', {
+						id: collectionId
+					})}?objective_id=${encodeURIComponent(objectiveId)}`}
+				>
+					{$t('research.objectiveWorkspace.askCopilot')}
+				</a>
 			</div>
 		</header>
 
@@ -1710,6 +1718,21 @@
 		color: var(--text-primary);
 		font-size: 28px;
 		line-height: 34px;
+	}
+
+	.objective-hero__assistant-link {
+		margin-top: 6px;
+		padding: 8px 12px;
+		border: 1px solid var(--border-subtle);
+		border-radius: 8px;
+		color: var(--accent-strong);
+		font-size: 13px;
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.objective-hero__assistant-link:hover {
+		background: var(--bg-subtle);
 	}
 
 	.objective-chip-row {

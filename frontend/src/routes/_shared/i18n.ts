@@ -339,6 +339,7 @@ const translations: Record<Language, Translations> = {
 				title: 'Objective workspace',
 				eyebrow: 'Research objective',
 				back: 'Back to objectives',
+				askCopilot: 'Ask Copilot',
 				loading: 'Loading objective workspace...',
 				errorTitle: 'Objective workspace is unavailable',
 				emptyTitle: 'No objective workspace',
@@ -697,7 +698,8 @@ const translations: Record<Language, Translations> = {
 					mechanical: {
 						title: 'Strength, ductility, and hardness',
 						body: 'Traceable mechanical responses include {values}. Compare them within the same paper/test system before ranking material states.',
-						empty: 'No strength, ductility, or hardness response is ready in the selected material values.'
+						empty:
+							'No strength, ductility, or hardness response is ready in the selected material values.'
 					},
 					texture: {
 						title: 'Texture and model prediction',
@@ -2906,6 +2908,7 @@ const translations: Record<Language, Translations> = {
 				title: '目标工作区',
 				eyebrow: '研究目标',
 				back: '返回研究目标',
+				askCopilot: '询问助手',
 				loading: '正在加载目标工作区...',
 				errorTitle: '目标工作区不可用',
 				emptyTitle: '暂无目标工作区',

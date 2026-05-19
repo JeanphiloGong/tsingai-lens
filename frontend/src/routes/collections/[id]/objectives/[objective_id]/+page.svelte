@@ -1795,6 +1795,10 @@
 		gap: 10px;
 	}
 
+	.objective-report-aside .research-focus__grid {
+		grid-template-columns: 1fr;
+	}
+
 		.research-focus__grid div,
 		.comparison-readiness {
 			border: 1px solid var(--border-default);
@@ -1815,6 +1819,10 @@
 		display: grid;
 		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: 8px;
+	}
+
+	.objective-report-aside .evidence-readiness {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
 	.evidence-readiness button {

@@ -590,6 +590,22 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     ]["condition"] == "method: potentiodynamic polarization"
     assert profile["measured_properties"][0]["display_range"] == "0.4-1.2 uA/cm2"
     assert profile["evidence_refs"][0]["fact_ids"] == ["oeu-as-built-icorr"]
+    report_package = profile["report_package"]
+    assert report_package["schema_version"] == "material_report_package.v1"
+    assert report_package["canonical_name"] == "316L stainless steel"
+    assert report_package["paper_contributions"][0]["document_id"] == "paper-1"
+    chains = report_package["material_state_chains"]
+    assert [chain["sample_label"] for chain in chains] == ["as-built", "heat-treated"]
+    assert chains[0]["preparation_context"] == {"process": "LPBF"}
+    assert chains[0]["test_conditions"] == {
+        "method": "potentiodynamic polarization",
+        "medium": "3.5 wt.% NaCl",
+    }
+    assert chains[0]["performance_results"][0]["property"] == (
+        "corrosion current density"
+    )
+    assert chains[0]["performance_results"][0]["display_value"] == "1.2 uA/cm2"
+    assert chains[0]["source_evidence"][0]["fact_ids"] == ["oeu-as-built-icorr"]
 
 
 def test_collection_material_profile_uses_objective_profile_when_available():
@@ -621,6 +637,18 @@ def test_collection_material_profile_uses_objective_profile_when_available():
     assert [row["sample_label"] for row in rows] == ["summary"]
     assert rows[0]["values"]["elongation"]["value"] == 33
     assert {item["property"] for item in profile["measured_properties"]} == {"elongation"}
+    chain = profile["report_package"]["material_state_chains"][0]
+    assert profile["report_package"]["status"] == "partial"
+    assert chain["unresolved_fields"] == [
+        "preparation_context",
+        "test_conditions",
+    ]
+    assert "summary is missing preparation_context." in profile["report_package"][
+        "limitations"
+    ]
+    assert "summary is missing test_conditions." in profile["report_package"][
+        "limitations"
+    ]
 
 
 def test_collection_research_view_uses_objective_units_without_old_facts():

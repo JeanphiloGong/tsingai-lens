@@ -364,6 +364,90 @@ class PropertySummaryResponse(BaseModel):
     )
 
 
+class MaterialReportPerformanceResultResponse(BaseModel):
+    """One measured response inside a material-state report chain."""
+
+    property: str = Field(..., description="性能指标")
+    display_value: str | None = Field(default=None, description="展示值")
+    value: float | int | str | None = Field(default=None, description="原始或数值值")
+    unit: str | None = Field(default=None, description="单位")
+    condition: str | None = Field(default=None, description="测试条件摘要")
+    status: EvidenceBackedValueStatus = Field(..., description="值状态")
+    evidence_refs: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="支撑证据",
+    )
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="结果级 warning",
+    )
+
+
+class MaterialReportStateChainResponse(BaseModel):
+    """Traceable preparation-test-result chain for one material state."""
+
+    chain_id: str = Field(..., description="材料状态链 ID")
+    document_id: str | None = Field(default=None, description="来源文档 ID")
+    sample_id: str = Field(..., description="样品或 variant ID")
+    sample_label: str | None = Field(default=None, description="样品展示名")
+    material: str | None = Field(default=None, description="材料体系")
+    material_state: str | None = Field(default=None, description="材料状态")
+    preparation_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description="制备/工艺上下文",
+    )
+    test_conditions: dict[str, Any] = Field(default_factory=dict, description="测试条件")
+    performance_results: list[MaterialReportPerformanceResultResponse] = Field(
+        default_factory=list,
+        description="性能结果",
+    )
+    source_evidence: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="链路证据",
+    )
+    comparability_boundary: list[str] = Field(
+        default_factory=list,
+        description="可比性边界",
+    )
+    confidence: float | None = Field(default=None, description="链路置信度")
+    unresolved_fields: list[str] = Field(default_factory=list, description="未解析字段")
+
+
+class MaterialReportPaperContributionResponse(BaseModel):
+    """One paper's contribution to a material report package."""
+
+    document_id: str = Field(..., description="文档 ID")
+    title: str | None = Field(default=None, description="标题")
+    source_filename: str | None = Field(default=None, description="源文件名")
+    sample_count: int = Field(default=0, description="样品数")
+    measured_properties: list[str] = Field(default_factory=list, description="性能指标")
+    contribution_summary: str = Field(..., description="贡献摘要")
+
+
+class MaterialReportPackageResponse(BaseModel):
+    """Backend-built package for rendering the material research report."""
+
+    schema_version: str = Field(..., description="报告包 schema 版本")
+    status: ResearchViewState = Field(..., description="报告包状态")
+    title: str = Field(..., description="报告包标题")
+    material_id: str = Field(..., description="材料 ID")
+    canonical_name: str = Field(..., description="规范材料名")
+    summary: str = Field(..., description="确定性摘要")
+    paper_contributions: list[MaterialReportPaperContributionResponse] = Field(
+        default_factory=list,
+        description="文献贡献",
+    )
+    material_state_chains: list[MaterialReportStateChainResponse] = Field(
+        default_factory=list,
+        description="材料状态链",
+    )
+    limitations: list[str] = Field(default_factory=list, description="限制和不确定性")
+    source_refs: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="包级证据引用",
+    )
+
+
 class DocumentMaterialProfileResponse(BaseModel):
     """One paper's view of one material."""
 
@@ -477,6 +561,10 @@ class MaterialProfileResponse(BaseModel):
     evidence_refs: list[EvidenceReferenceResponse] = Field(
         default_factory=list,
         description="支撑证据",
+    )
+    report_package: MaterialReportPackageResponse | None = Field(
+        default=None,
+        description="材料科研报告数据包",
     )
     debug_links: dict[str, str | None] = Field(default_factory=dict, description="调试链接")
     warnings: list[ResearchViewWarningResponse] = Field(

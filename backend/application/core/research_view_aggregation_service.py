@@ -1838,6 +1838,7 @@ class ResearchViewAggregationService:
                 *sample_matrix.get("warnings", []),
             ]
         )
+        evidence_refs = self._build_objective_evidence_refs(material_rows)
         return {
             "collection_id": collection_id,
             "material_id": entry["material_id"],
@@ -1865,7 +1866,16 @@ class ResearchViewAggregationService:
             "measured_properties": measured_properties,
             "comparison_groups": [],
             "condition_series": [],
-            "evidence_refs": self._build_objective_evidence_refs(material_rows),
+            "evidence_refs": evidence_refs,
+            "report_package": self._build_material_report_package(
+                material_id=entry["material_id"],
+                canonical_name=entry["canonical_name"],
+                sample_matrix=sample_matrix,
+                papers=papers,
+                measured_properties=measured_properties,
+                evidence_refs=evidence_refs,
+                warnings=warnings,
+            ),
             "debug_links": {
                 "all_comparisons": f"/api/v1/collections/{collection_id}/comparisons",
                 "results": f"/api/v1/collections/{collection_id}/results",
@@ -1873,6 +1883,196 @@ class ResearchViewAggregationService:
             },
             "warnings": warnings,
         }
+
+    def _build_material_report_package(
+        self,
+        *,
+        material_id: str,
+        canonical_name: str,
+        sample_matrix: dict[str, Any],
+        papers: list[dict[str, Any]],
+        measured_properties: list[dict[str, Any]],
+        evidence_refs: list[dict[str, Any]],
+        warnings: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        chains = [
+            self._build_material_report_chain(row)
+            for row in sample_matrix.get("rows", [])
+        ]
+        limitations: list[str] = []
+        if not chains:
+            limitations.append("No resolved material-state chains are available.")
+        for chain in chains:
+            for field in chain.get("unresolved_fields", []):
+                limitations.append(
+                    f"{chain.get('sample_label') or chain.get('sample_id')} is missing {field}."
+                )
+        for warning in warnings:
+            if message := self._safe_text(warning.get("message")):
+                limitations.append(message)
+
+        property_names = [
+            self._safe_text(item.get("property")) or ""
+            for item in measured_properties
+            if self._safe_text(item.get("property"))
+        ]
+        return {
+            "schema_version": "material_report_package.v1",
+            "status": "ready" if chains and not limitations else "partial",
+            "title": f"{canonical_name} material-state report",
+            "material_id": material_id,
+            "canonical_name": canonical_name,
+            "summary": self._material_report_summary(
+                canonical_name,
+                chains,
+                property_names,
+            ),
+            "paper_contributions": [
+                self._build_material_report_paper_contribution(paper)
+                for paper in papers
+            ],
+            "material_state_chains": chains,
+            "limitations": self._dedupe_strings(limitations),
+            "source_refs": evidence_refs,
+        }
+
+    def _build_material_report_chain(
+        self,
+        row: dict[str, Any],
+    ) -> dict[str, Any]:
+        results = [
+            self._build_material_report_result(property_name, value)
+            for property_name, value in sorted(row.get("values", {}).items())
+        ]
+        source_evidence = self._dedupe_evidence_refs(
+            [
+                *row.get("evidence_refs", []),
+                *[
+                    ref
+                    for result in results
+                    for ref in result.get("evidence_refs", [])
+                ],
+            ]
+        )
+        unresolved_fields: list[str] = []
+        if not row.get("process_context"):
+            unresolved_fields.append("preparation_context")
+        if not row.get("test_condition"):
+            unresolved_fields.append("test_conditions")
+        if not results:
+            unresolved_fields.append("performance_results")
+        if not source_evidence:
+            unresolved_fields.append("source_evidence")
+        return {
+            "chain_id": f"material-chain:{row.get('sample_id')}",
+            "document_id": row.get("document_id"),
+            "sample_id": row.get("sample_id"),
+            "sample_label": row.get("sample_label"),
+            "material": row.get("material"),
+            "material_state": row.get("sample_label"),
+            "preparation_context": row.get("process_context", {}),
+            "test_conditions": row.get("test_condition", {}),
+            "performance_results": results,
+            "source_evidence": source_evidence,
+            "comparability_boundary": self._material_chain_boundaries(row, results),
+            "confidence": self._material_chain_confidence(results),
+            "unresolved_fields": unresolved_fields,
+        }
+
+    def _build_material_report_result(
+        self,
+        property_name: str,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "property": property_name,
+            "display_value": value.get("display_value"),
+            "value": value.get("value"),
+            "unit": value.get("unit"),
+            "condition": value.get("condition"),
+            "status": value.get("status") or "missing",
+            "evidence_refs": value.get("evidence_refs", []),
+            "warnings": value.get("warnings", []),
+        }
+
+    def _build_material_report_paper_contribution(
+        self,
+        paper: dict[str, Any],
+    ) -> dict[str, Any]:
+        measured_properties = [
+            item
+            for item in paper.get("measured_properties", [])
+            if self._safe_text(item)
+        ]
+        title = self._safe_text(paper.get("title")) or self._safe_text(
+            paper.get("source_filename")
+        )
+        return {
+            "document_id": paper.get("document_id"),
+            "title": paper.get("title"),
+            "source_filename": paper.get("source_filename"),
+            "sample_count": int(paper.get("sample_count") or 0),
+            "measured_properties": measured_properties,
+            "contribution_summary": (
+                f"{title or paper.get('document_id')} contributes "
+                f"{int(paper.get('sample_count') or 0)} material-state sample(s)"
+                + (
+                    f" with {', '.join(measured_properties)} measurements."
+                    if measured_properties
+                    else "."
+                )
+            ),
+        }
+
+    def _material_report_summary(
+        self,
+        canonical_name: str,
+        chains: list[dict[str, Any]],
+        property_names: list[str],
+    ) -> str:
+        properties = ", ".join(property_names[:5]) if property_names else "no resolved property"
+        return (
+            f"{canonical_name} has {len(chains)} resolved material-state "
+            f"chain(s) covering {properties}."
+        )
+
+    def _material_chain_boundaries(
+        self,
+        row: dict[str, Any],
+        results: list[dict[str, Any]],
+    ) -> list[str]:
+        boundaries: list[str] = []
+        if not row.get("test_condition"):
+            boundaries.append("Testing conditions are unresolved for this material state.")
+        if len(results) <= 1:
+            boundaries.append("This chain has limited property coverage for comparison.")
+        return boundaries
+
+    def _material_chain_confidence(
+        self,
+        results: list[dict[str, Any]],
+    ) -> float | None:
+        confidences = [
+            ref.get("confidence")
+            for result in results
+            for ref in result.get("evidence_refs", [])
+            if self._numeric_or_none(ref.get("confidence")) is not None
+        ]
+        if not confidences:
+            return None
+        return round(sum(float(value) for value in confidences) / len(confidences), 3)
+
+    def _dedupe_evidence_refs(
+        self,
+        refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        deduped: dict[str, dict[str, Any]] = {}
+        for ref in refs:
+            ref_id = self._safe_text(ref.get("evidence_ref_id"))
+            if not ref_id:
+                continue
+            deduped.setdefault(ref_id, ref)
+        return list(deduped.values())
 
     def _build_objective_material_index(
         self,

@@ -1420,12 +1420,7 @@ class ResearchObjectiveService:
         cleaned = value.strip()
         cleaned = re.sub(r"\.pdf$", "", cleaned, flags=re.IGNORECASE).strip()
         cleaned = re.sub(r"^[0-9a-f]{16,}[_-]+", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(
-            r"^(P\d{3})[-_\s]+",
-            lambda match: f"{match.group(1).upper()} - ",
-            cleaned,
-            flags=re.IGNORECASE,
-        )
+        cleaned = re.sub(r"^P\d{3}[-_\s]+", "", cleaned, flags=re.IGNORECASE)
         cleaned = cleaned.replace("_", " ")
         return " ".join(cleaned.split())
 

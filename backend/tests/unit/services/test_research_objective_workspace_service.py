@@ -483,6 +483,7 @@ def test_objective_conclusion_uses_readable_paper_labels_for_hashed_pdf_titles(
         "P001 - Effect of energy density and scanning strategy on densification"
     )
     assert "2eb73dc558fc4b16ba1fa23d917ad671" not in answer_section["body"]
+    assert "P001 - P001" not in answer_section["body"]
     assert ".pdf" not in contribution["display_title"]
 
 

@@ -1,6 +1,6 @@
 [project]
 name = "tsingai-lens"
-version = "0.7.0"
+version = "0.7.1"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,7 +22,7 @@ dependencies = [
     "lancedb>=0.17.0",
     "litellm>=1.77.1",
     "markdown>=3.6",
-    "mineru[all]>=2.2.2",
+    "mineru>=2.2.2",
     "networkx>=3.4.2",
     "nltk==3.9.1",
     "numpy>=1.25.2",

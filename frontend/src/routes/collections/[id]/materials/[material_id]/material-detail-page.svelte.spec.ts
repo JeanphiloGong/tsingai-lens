@@ -351,7 +351,86 @@ function materialProfilePayload() {
 					]
 				}
 			}
-		]
+		],
+		report_package: {
+			schema_version: 'material_report_package.v1',
+			status: 'partial',
+			title: '316L stainless steel material-state report',
+			material_id: 'mat_316l',
+			canonical_name: '316L stainless steel',
+			summary:
+				'316L stainless steel has 2 resolved material-state chains covering density and mechanical response.',
+			paper_contributions: [
+				{
+					document_id: 'doc_1',
+					title: 'Paper A',
+					source_filename: '316L Stainless Steel Process Study.pdf',
+					sample_count: 2,
+					measured_properties: ['relative density', 'hardness', 'yield strength'],
+					contribution_summary:
+						'Paper A contributes 2 material-state sample(s) with relative density, hardness, yield strength measurements.'
+				}
+			],
+			material_state_chains: [
+				{
+					chain_id: 'material-chain:S001',
+					document_id: 'doc_1',
+					sample_id: 'S001',
+					sample_label: 'S001',
+					material: '316L stainless steel',
+					material_state: 'S001',
+					preparation_context: {
+						scan_strategy: 'Alternating strategy A',
+						laser_power_w: '200',
+						scan_speed_mm_s: '800'
+					},
+					test_conditions: {
+						method: 'Tensile testing',
+						standard: 'ASTM E8'
+					},
+					performance_results: [
+						{
+							property: 'hardness',
+							display_value: '215.6',
+							status: 'observed',
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_hardness_s001',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.95
+								}
+							]
+						}
+					],
+					source_evidence: [
+						{
+							evidence_ref_id: 'ev_hardness_s001',
+							document_id: 'doc_1',
+							source_kind: 'table',
+							locator: 'Table 2',
+							confidence: 0.95
+						}
+					],
+					comparability_boundary: [
+						'Compare only within Paper A tensile and hardness conditions.'
+					],
+					confidence: 0.95,
+					unresolved_fields: []
+				}
+			],
+			limitations: ['S002 is missing test_conditions.'],
+			source_refs: [
+				{
+					evidence_ref_id: 'ev_hardness_s001',
+					document_id: 'doc_1',
+					source_kind: 'table',
+					locator: 'Table 2',
+					confidence: 0.95
+				}
+			]
+		}
 	};
 }
 
@@ -420,7 +499,6 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Material questions' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('1/5 leading properties')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Preparation and post-treatment').first())
 			.toBeInTheDocument();
@@ -436,13 +514,12 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('This long method paragraph should stay out'))
 			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('hardness').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('215.6').first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('leading in this matrix · E06').first())
+			.element(browserPage.getByText('Compare only within Paper A tensile and hardness conditions.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Traceback').first()).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Observed response:').first())
-			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Comparable groups' }))
 			.toBeInTheDocument();
@@ -794,6 +871,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			}
 		];
 		payload.measured_properties = [];
+		payload.report_package = null;
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const path = requestPath(input);
 
@@ -812,7 +890,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'No representative material state can be built from the current material matrix yet.'
+					'Material report package has not been generated for this material.'
 				)
 			)
 			.toBeInTheDocument();

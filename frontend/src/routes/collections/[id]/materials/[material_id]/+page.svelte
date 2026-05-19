@@ -18,6 +18,8 @@
 		formatShortIdentifier,
 		type EvidenceBackedValue,
 		type EvidenceReference,
+		type MaterialReportPerformanceResult,
+		type MaterialReportStateChain,
 		type MaterialPaperCoverage,
 		type MaterialProfile,
 		type PropertySummary,
@@ -256,6 +258,8 @@
 	$: materialId = $page.params.material_id ?? '';
 	$: loadKey = `${collectionId}:${materialId}`;
 	$: sampleRows = materialProfile?.sample_matrix.rows ?? [];
+	$: reportPackage = materialProfile?.report_package ?? null;
+	$: reportChains = reportPackage?.material_state_chains ?? [];
 	$: sampleColumns = sampleMatrixColumns(materialProfile, sampleRows);
 	$: propertySummaries = materialProfile?.measured_properties ?? [];
 	$: propertyColumns = materialPropertyColumns(materialProfile, sampleRows, sampleColumns, $t);
@@ -276,7 +280,8 @@
 		collectionId,
 		$t,
 		propertySummaries,
-		materialProfile?.canonical_name ?? materialId
+		materialProfile?.canonical_name ?? materialId,
+		reportPackage
 	);
 	$: processSummary = buildProcessSummary(focusedSampleRows, $t);
 	$: comparisonRows = buildComparisonRows(focusedSampleRows, propertyColumns, processSummary, $t);
@@ -1056,6 +1061,57 @@
 		return locations.slice(0, 3).join(', ') || '--';
 	}
 
+	function reportContextEntries(context: Record<string, string>, translate: Translate): ChainEntry[] {
+		return Object.entries(context)
+			.filter(([, value]) => hasDisplayValue(value))
+			.map(([key, value]) => ({
+				key,
+				label: processEntryLabel(key, translate),
+				value: String(value)
+			}))
+			.slice(0, 8);
+	}
+
+	function reportResultLabel(result: MaterialReportPerformanceResult) {
+		if (result.display_value) return result.display_value;
+		if (result.value !== null && result.value !== undefined) {
+			return result.unit ? `${result.value} ${result.unit}` : String(result.value);
+		}
+		return '--';
+	}
+
+	function reportEvidenceCodes(
+		refs: EvidenceReference[],
+		codeMap: Map<string, string>
+	): string[] {
+		return uniqueList(refs.map((ref) => evidenceCode(ref, codeMap)).filter((code) => code !== '--'));
+	}
+
+	function reportChainEvidenceCodes(
+		chain: MaterialReportStateChain,
+		codeMap: Map<string, string>
+	): string[] {
+		return reportEvidenceCodes(
+			[
+				...chain.source_evidence,
+				...chain.performance_results.flatMap((result) => result.evidence_refs)
+			],
+			codeMap
+		);
+	}
+
+	function reportChainSourceLocation(chain: MaterialReportStateChain) {
+		const locations = uniqueList(
+			[
+				...chain.source_evidence,
+				...chain.performance_results.flatMap((result) => result.evidence_refs)
+			]
+				.map((ref) => ref.locator || '')
+				.filter(Boolean)
+		);
+		return locations.slice(0, 3).join(', ') || '--';
+	}
+
 	function chainMetricRows(
 		row: SampleMatrixRow,
 		columns: PropertyColumn[],
@@ -1825,7 +1881,8 @@
 		collection: string,
 		translate: Translate,
 		summaries: PropertySummary[],
-		materialName: string
+		materialName: string,
+		reportPackage: MaterialProfile['report_package']
 	): EvidenceLocatorRow[] {
 		const items: EvidenceLocatorRow[] = [];
 		for (const row of rows) {
@@ -1860,6 +1917,35 @@
 					type: sourceTypeLabel(ref, translate),
 					location: ref.locator || '--',
 					confidence: confidenceScore(value.confidence ?? ref.confidence),
+					href: detail.href,
+					detail
+				});
+			}
+		}
+		for (const chain of reportPackage?.material_state_chains ?? []) {
+			for (const ref of [
+				...chain.source_evidence,
+				...chain.performance_results.flatMap((result) => result.evidence_refs)
+			]) {
+				const code = evidenceCode(ref, codeMap);
+				if (items.some((item) => item.code === code)) continue;
+				const detail = {
+					title: chain.material_state || chain.sample_label || chain.sample_id,
+					sample: chain.sample_label || chain.sample_id,
+					source: paperTitle(ref),
+					location: ref.locator || '--',
+					anchor: code,
+					confidence: confidenceLabel(ref.confidence, translate),
+					excerpt: translate('research.materialDossier.evidence.contextUnavailable'),
+					href: evidenceHref(ref, collection)
+				};
+				items.push({
+					key: `${chain.chain_id}:${ref.evidence_ref_id}`,
+					code,
+					claim: `${detail.sample} report-chain evidence`,
+					type: sourceTypeLabel(ref, translate),
+					location: detail.location,
+					confidence: confidenceScore(ref.confidence),
 					href: detail.href,
 					detail
 				});
@@ -2210,7 +2296,7 @@
 						</div>
 
 						<div class="chain-list">
-							{#each bestParameterChains as chain, index (chain.key)}
+							{#each reportChains as chain, index (chain.chain_id)}
 								<article class="parameter-chain">
 									<div class="parameter-chain__header">
 										<div>
@@ -2219,14 +2305,10 @@
 													index: index + 1
 												})}</span
 											>
-											<h4>{materialStateTitle(chain, $t)}</h4>
-											<p>
-												{$t('research.materialDossier.state.sourceLine', {
-													source: materialStateSource(chain, $t)
-												})}
-											</p>
+											<h4>{chain.material_state || chain.sample_label || chain.sample_id}</h4>
+											<p>{chain.material || materialProfile.canonical_name}</p>
 										</div>
-										<span class="chain-score">{chain.scoreLabel}</span>
+										<span class="chain-score">{confidenceLabel(chain.confidence, $t)}</span>
 									</div>
 
 									<div
@@ -2236,9 +2318,9 @@
 										<div class="chain-step">
 											<span>1</span>
 											<strong>{$t('research.materialDossier.chain.processContext')}</strong>
-											{#if chain.processEntries.length}
+											{#if reportContextEntries(chain.preparation_context, $t).length}
 												<dl>
-													{#each chain.processEntries as entry (entry.key)}
+													{#each reportContextEntries(chain.preparation_context, $t) as entry (entry.key)}
 														<div>
 															<dt>{entry.label}</dt>
 															<dd>{entry.value}</dd>
@@ -2253,9 +2335,9 @@
 										<div class="chain-step">
 											<span>2</span>
 											<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
-											{#if chain.testConditionEntries.length}
+											{#if reportContextEntries(chain.test_conditions, $t).length}
 												<dl>
-													{#each chain.testConditionEntries as entry (entry.key)}
+													{#each reportContextEntries(chain.test_conditions, $t) as entry (entry.key)}
 														<div>
 															<dt>{entry.label}</dt>
 															<dd>{entry.value}</dd>
@@ -2271,22 +2353,17 @@
 											<span>3</span>
 											<strong>{$t('research.materialDossier.chain.results')}</strong>
 											<div class="chain-metrics">
-												{#each chain.metrics as metric (metric.key)}
-													<button
-														type="button"
-														class:chain-metric--best={metric.isBest}
-														class="chain-metric"
-														on:click={() => openSupportedValue(metric.supportedValue)}
-													>
-														<span>{metric.supportedValue.property}</span>
-														<strong>{metric.supportedValue.displayValue}</strong>
+												{#each chain.performance_results as result (result.property)}
+													<div class="chain-metric">
+														<span>{result.property}</span>
+														<strong>{reportResultLabel(result)}</strong>
 														<small>
-															{metric.isBest
-																? $t('research.materialDossier.chain.bestInMatrix')
-																: $t('research.materialDossier.chain.observed')}
-															· {metric.supportedValue.evidenceCode}
+															{$t('research.materialDossier.chain.observed')}
+															{#if result.condition}
+																· {result.condition}
+															{/if}
 														</small>
-													</button>
+													</div>
 												{/each}
 											</div>
 										</div>
@@ -2294,14 +2371,23 @@
 
 									<div class="chain-judgement">
 										<div>
-											<strong>{$t('research.materialDossier.chain.whyBest')}</strong>
-											<p>{materialStateInterpretation(chain, $t)}</p>
+											<strong>{$t('research.materialDossier.chain.boundary')}</strong>
+											{#if chain.comparability_boundary.length || chain.unresolved_fields.length}
+												<p>
+													{[
+														...chain.comparability_boundary,
+														...chain.unresolved_fields.map((field) => `${field} unresolved`)
+													].join(' ')}
+												</p>
+											{:else}
+												<p>{$t('research.materialDossier.chain.boundaryReady')}</p>
+											{/if}
 										</div>
 										<div>
 											<strong>{$t('research.materialDossier.chain.traceback')}</strong>
-											<p>{chain.sourceLocation}</p>
+											<p>{reportChainSourceLocation(chain)}</p>
 											<div class="evidence-chip-row">
-												{#each chain.evidenceCodes as code}
+												{#each reportChainEvidenceCodes(chain, evidenceCodeMap) as code}
 													<button
 														type="button"
 														class="evidence-chip"
@@ -2317,7 +2403,11 @@
 									</div>
 								</article>
 							{:else}
-								<p class="empty-copy">{$t('research.materialDossier.chain.empty')}</p>
+								<p class="empty-copy">
+									{reportPackage
+										? $t('research.materialDossier.chain.empty')
+										: $t('research.materialDossier.chain.packageUnavailable')}
+								</p>
 							{/each}
 						</div>
 					</section>
@@ -3562,8 +3652,7 @@
 		cursor: pointer;
 	}
 
-	.chain-metric:hover,
-	.chain-metric--best {
+	.chain-metric:hover {
 		border-color: #2563eb;
 		background: #eff6ff;
 	}
@@ -3580,11 +3669,6 @@
 		font-size: 17px;
 		font-weight: 800;
 		line-height: 24px;
-	}
-
-	.chain-metric--best small {
-		color: #2563eb;
-		font-weight: 800;
 	}
 
 	.chain-judgement {

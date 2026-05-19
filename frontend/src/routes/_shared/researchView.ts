@@ -493,6 +493,55 @@ export type MaterialProfileOverview = {
 	variable_axes: string[];
 };
 
+export type MaterialReportPerformanceResult = {
+	property: string;
+	display_value: string;
+	value: string | number | null;
+	unit: string | null;
+	condition: string | null;
+	status: EvidenceBackedValueStatus;
+	evidence_refs: EvidenceReference[];
+	warnings: ResearchViewWarning[];
+};
+
+export type MaterialReportStateChain = {
+	chain_id: string;
+	document_id: string | null;
+	sample_id: string;
+	sample_label: string;
+	material: string;
+	material_state: string;
+	preparation_context: Record<string, string>;
+	test_conditions: Record<string, string>;
+	performance_results: MaterialReportPerformanceResult[];
+	source_evidence: EvidenceReference[];
+	comparability_boundary: string[];
+	confidence: number | null;
+	unresolved_fields: string[];
+};
+
+export type MaterialReportPaperContribution = {
+	document_id: string;
+	title: string | null;
+	source_filename: string | null;
+	sample_count: number;
+	measured_properties: string[];
+	contribution_summary: string;
+};
+
+export type MaterialReportPackage = {
+	schema_version: string;
+	status: ResearchViewState;
+	title: string;
+	material_id: string;
+	canonical_name: string;
+	summary: string;
+	paper_contributions: MaterialReportPaperContribution[];
+	material_state_chains: MaterialReportStateChain[];
+	limitations: string[];
+	source_refs: EvidenceReference[];
+};
+
 export type MaterialProfile = {
 	collection_id: string;
 	material_id: string;
@@ -507,6 +556,7 @@ export type MaterialProfile = {
 	comparison_groups: ComparableGroup[];
 	condition_series: ConditionSeries[];
 	evidence_refs: EvidenceReference[];
+	report_package: MaterialReportPackage | null;
 	debug_links: Record<string, string>;
 	warnings: ResearchViewWarning[];
 };
@@ -686,6 +736,98 @@ function normalizeContextRecord(value: unknown, fallbackKey: string): Record<str
 		return text ? { [fallbackKey]: text } : {};
 	}
 	return normalizeStringRecord(value);
+}
+
+function normalizeMaterialReportResult(value: unknown): MaterialReportPerformanceResult | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const property = toText(record.property ?? record.property_normalized ?? record.name);
+	if (!property) return null;
+
+	return {
+		property,
+		display_value: toText(record.display_value ?? record.display ?? record.value),
+		value: toScalar(record.value),
+		unit: nonEmptyText(record.unit),
+		condition: nonEmptyText(record.condition ?? record.test_condition),
+		status: normalizeEvidenceStatus(record.status),
+		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence),
+		warnings: normalizeWarnings(record.warnings)
+	};
+}
+
+function normalizeMaterialReportChain(value: unknown): MaterialReportStateChain | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const chainId = toText(record.chain_id ?? record.id);
+	const sampleId = toText(record.sample_id ?? record.variant_id ?? chainId);
+	if (!chainId && !sampleId) return null;
+
+	return {
+		chain_id: chainId || sampleId,
+		document_id: nonEmptyText(record.document_id),
+		sample_id: sampleId || chainId,
+		sample_label: toText(record.sample_label ?? record.label ?? record.material_state, sampleId),
+		material: toText(record.material ?? record.material_system, '--'),
+		material_state: toText(record.material_state ?? record.sample_label ?? record.label, sampleId),
+		preparation_context: normalizeContextRecord(
+			record.preparation_context ?? record.process_context,
+			'process'
+		),
+		test_conditions: normalizeContextRecord(
+			record.test_conditions ?? record.test_condition,
+			'condition'
+		),
+		performance_results: normalizeObjectList(
+			record.performance_results ?? record.results,
+			'items'
+		)
+			.map((item) => normalizeMaterialReportResult(item))
+			.filter((item): item is MaterialReportPerformanceResult => item !== null),
+		source_evidence: normalizeEvidenceReferences(record.source_evidence ?? record.evidence_refs),
+		comparability_boundary: toStringList(record.comparability_boundary ?? record.boundaries),
+		confidence: toOptionalNumber(record.confidence),
+		unresolved_fields: toStringList(record.unresolved_fields)
+	};
+}
+
+function normalizeMaterialReportContribution(value: unknown): MaterialReportPaperContribution | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const documentId = toText(record.document_id ?? record.id);
+	if (!documentId) return null;
+
+	return {
+		document_id: documentId,
+		title: nonEmptyText(record.title),
+		source_filename: nonEmptyText(record.source_filename),
+		sample_count: toNumber(record.sample_count),
+		measured_properties: toStringList(record.measured_properties ?? record.properties),
+		contribution_summary: toText(record.contribution_summary ?? record.summary, documentId)
+	};
+}
+
+function normalizeMaterialReportPackage(value: unknown): MaterialReportPackage | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const chains = normalizeObjectList(record.material_state_chains ?? record.chains, 'items')
+		.map((item) => normalizeMaterialReportChain(item))
+		.filter((item): item is MaterialReportStateChain => item !== null);
+
+	return {
+		schema_version: toText(record.schema_version, 'material_report_package.v1'),
+		status: normalizeResearchState(record.status, chains.length ? 'partial' : 'empty'),
+		title: toText(record.title, 'Material report package'),
+		material_id: toText(record.material_id),
+		canonical_name: toText(record.canonical_name),
+		summary: toText(record.summary),
+		paper_contributions: normalizeObjectList(record.paper_contributions, 'items')
+			.map((item) => normalizeMaterialReportContribution(item))
+			.filter((item): item is MaterialReportPaperContribution => item !== null),
+		material_state_chains: chains,
+		limitations: toStringList(record.limitations),
+		source_refs: normalizeEvidenceReferences(record.source_refs ?? record.evidence_refs)
+	};
 }
 
 function normalizeLinkRecord(value: unknown): Record<string, string> {
@@ -1736,6 +1878,7 @@ export function normalizeMaterialProfile(
 			.map((item) => normalizeConditionSeries(item))
 			.filter((item): item is ConditionSeries => item !== null),
 		evidence_refs: normalizeEvidenceReferences(record?.evidence_refs ?? record?.evidence),
+		report_package: normalizeMaterialReportPackage(record?.report_package),
 		debug_links: normalizeLinkRecord(record?.debug_links),
 		warnings: normalizeWarnings(record?.warnings)
 	};

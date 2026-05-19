@@ -655,6 +655,9 @@ const translations: Record<Language, Translations> = {
 					testConditions: 'Test conditions',
 					results: 'Performance response',
 					whyBest: 'Materials interpretation',
+					boundary: 'Comparability boundary',
+					boundaryReady:
+						'Preparation, test condition, result, and source evidence are resolved for this chain.',
 					traceback: 'Traceback',
 					collectionScope: 'collection-level evidence',
 					backgroundText:
@@ -670,7 +673,9 @@ const translations: Record<Language, Translations> = {
 					noTestConditions:
 						'No explicit test condition was attached to this row; verify the source paper before comparing across conditions.',
 					empty:
-						'No representative material state can be built from the current material matrix yet.'
+						'No representative material state can be built from the current material report package yet.',
+					packageUnavailable:
+						'Material report package has not been generated for this material.'
 				},
 				state: {
 					cardLabel: 'State {index}',
@@ -3213,6 +3218,8 @@ const translations: Record<Language, Translations> = {
 					testConditions: '测试条件',
 					results: '性能响应',
 					whyBest: '材料学解释',
+					boundary: '可比较边界',
+					boundaryReady: '该链路的制备、测试条件、结果和来源证据已经解析。',
 					traceback: '证据回溯',
 					collectionScope: '集合级证据',
 					backgroundText:
@@ -3226,7 +3233,8 @@ const translations: Record<Language, Translations> = {
 					observed: '已观测',
 					noProcessContext: '该样品行暂未绑定工艺参数。',
 					noTestConditions: '该行暂未绑定明确测试条件；跨条件比较前需要回到原文核查。',
-					empty: '当前材料矩阵还不足以构建代表性材料状态。'
+					empty: '当前材料报告包还不足以构建代表性材料状态。',
+					packageUnavailable: '该材料尚未生成材料报告包。'
 				},
 				state: {
 					cardLabel: '状态 {index}',

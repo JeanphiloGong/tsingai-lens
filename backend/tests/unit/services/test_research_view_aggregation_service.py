@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
+    ResearchViewNotReadyError,
 )
 from domain.core import (
     BaselineReference,
@@ -505,10 +506,7 @@ def test_collection_research_view_builds_coverage_and_comparable_groups():
     assert group["properties"] == ["yield_strength"]
     assert len(group["matrix"]["rows"]) == 2
 
-    assert payload["materials"][0]["material_id"] == "mat-ti-6al-4v"
-    assert payload["materials"][0]["paper_count"] == 1
-    assert payload["materials"][0]["sample_count"] == 2
-    assert payload["materials"][0]["comparison_count"] == 1
+    assert payload["materials"] == []
 
 
 def test_collection_research_view_returns_empty_state_for_empty_collection():
@@ -522,40 +520,22 @@ def test_collection_research_view_returns_empty_state_for_empty_collection():
     assert payload["comparable_groups"] == []
 
 
-def test_collection_materials_and_profile_are_material_scoped():
+def test_collection_material_endpoints_require_objective_evidence_units():
     service = _service(comparison_rows=_comparison_rows())
 
-    materials = service.list_collection_materials("col-1")
+    try:
+        service.list_collection_materials("col-1")
+    except ResearchViewNotReadyError as exc:
+        assert exc.collection_id == "col-1"
+    else:  # pragma: no cover
+        raise AssertionError("old facts must not drive collection material list")
 
-    assert materials["state"] == "ready"
-    assert [item["material_id"] for item in materials["materials"]] == [
-        "mat-ti-6al-4v"
-    ]
-    summary = materials["materials"][0]
-    assert summary["canonical_name"] == "Ti-6Al-4V"
-    assert summary["measured_properties"] == ["density", "yield_strength"]
-    assert summary["links"]["research_view"].endswith(
-        "/materials/mat-ti-6al-4v/research-view"
-    )
-
-    profile = service.get_collection_material_research_view(
-        "col-1",
-        "mat-ti-6al-4v",
-    )
-
-    assert profile["canonical_name"] == "Ti-6Al-4V"
-    assert profile["overview"]["sample_count"] == 1
-    assert [row["sample_id"] for row in profile["sample_matrix"]["rows"]] == ["var-s1"]
-    assert [paper["document_id"] for paper in profile["papers"]] == ["paper-1"]
-    assert {item["parameter"] for item in profile["process_parameter_ranges"]} >= {
-        "laser_power_w",
-        "scan_speed_mm_s",
-    }
-    assert {item["property"] for item in profile["measured_properties"]} == {
-        "density",
-        "yield_strength",
-    }
-    assert profile["comparison_groups"][0]["material_system"] == "Ti-6Al-4V"
+    try:
+        service.get_collection_material_research_view("col-1", "mat-ti-6al-4v")
+    except ResearchViewNotReadyError as exc:
+        assert exc.collection_id == "col-1"
+    else:  # pragma: no cover
+        raise AssertionError("old facts must not drive collection material profile")
 
 
 def test_collection_materials_can_use_objective_evidence_units_without_old_facts():
@@ -690,7 +670,21 @@ def test_collection_research_view_uses_objective_units_without_old_facts():
 
 
 def test_collection_materials_does_not_build_comparison_matrices(monkeypatch):
-    service = _service(comparison_rows=_comparison_rows())
+    profiles, _ = _frames()
+    service = _service_from_frames(
+        profiles,
+        {
+            "evidence_anchors": [],
+            "method_facts": [],
+            "sample_variants": [],
+            "test_conditions": [],
+            "baseline_references": [],
+            "measurement_results": [],
+            "characterization_observations": [],
+            "structure_features": [],
+        },
+        objective_units=_objective_units(),
+    )
 
     def fail_matrix_build(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("material list should not build cross-paper matrices")
@@ -700,8 +694,8 @@ def test_collection_materials_does_not_build_comparison_matrices(monkeypatch):
     materials = service.list_collection_materials("col-1")
 
     assert materials["state"] == "ready"
-    assert materials["materials"][0]["material_id"] == "mat-ti-6al-4v"
-    assert materials["materials"][0]["comparison_count"] == 1
+    assert materials["materials"][0]["material_id"] == "mat-316l-stainless-steel"
+    assert materials["materials"][0]["comparison_count"] == 0
 
 
 def test_document_material_profile_stays_inside_one_paper():
@@ -724,176 +718,6 @@ def test_document_material_profile_stays_inside_one_paper():
         "tc-25",
         "tc-200",
     }
-
-
-def test_material_profile_inherits_single_document_material_and_keeps_filename():
-    profiles, frames = _frames()
-    profiles[0]["title"] = None
-    profiles[0]["source_filename"] = (
-        "Effect of energy density on 316L stainless steel.pdf"
-    )
-    frames["sample_variants"][0]["host_material_system"] = {
-        "name": "unspecified material system",
-    }
-    frames["sample_variants"][0]["composition"] = "unspecified material system"
-
-    service = _service_from_frames(profiles, frames)
-
-    materials = service.list_collection_materials("col-1")
-    profile = service.get_collection_material_research_view(
-        "col-1",
-        "mat-316l-stainless-steel",
-    )
-
-    assert [item["material_id"] for item in materials["materials"]] == [
-        "mat-316l-stainless-steel"
-    ]
-    assert materials["materials"][0]["sample_count"] == 1
-    assert profile["canonical_name"] == "316L stainless steel"
-    assert profile["papers"][0].get("title") is None
-    assert profile["papers"][0]["source_filename"] == (
-        "Effect of energy density on 316L stainless steel.pdf"
-    )
-    assert profile["sample_matrix"]["rows"][0]["material"] == "316L stainless steel"
-
-
-def test_material_profile_uses_document_material_when_variant_mentions_argon():
-    profiles, frames = _frames()
-    profiles[0]["title"] = None
-    profiles[0]["source_filename"] = (
-        "P002-Effect of Preheating Build Platform on 316L Stainless Steel.pdf"
-    )
-    frames["sample_variants"][0]["variant_label"] = "P150"
-    frames["sample_variants"][0]["host_material_system"] = {
-        "family": "argon",
-        "composition": None,
-    }
-    frames["sample_variants"][0]["composition"] = None
-
-    service = _service_from_frames(profiles, frames)
-
-    materials = service.list_collection_materials("col-1")
-    profile = service.get_collection_material_research_view(
-        "col-1",
-        "mat-316l-stainless-steel",
-    )
-
-    assert [item["material_id"] for item in materials["materials"]] == [
-        "mat-316l-stainless-steel"
-    ]
-    assert materials["materials"][0]["canonical_name"] == "316L stainless steel"
-    assert profile["sample_matrix"]["rows"][0]["sample_label"] == "P150"
-    assert profile["sample_matrix"]["rows"][0]["material"] == "316L stainless steel"
-
-
-def test_material_profile_keeps_unspecified_material_process_and_angle_samples():
-    profiles, frames = _frames()
-    profiles[0]["source_filename"] = (
-        "P005-Influence of porosity on mechanical properties of SLM 316L stainless steel.pdf"
-    )
-    frames["sample_variants"] = [
-        {
-            "variant_id": "var-power",
-            "document_id": "paper-1",
-            "collection_id": "col-1",
-            "variant_label": "375 W-2100 mm/s",
-            "host_material_system": {"family": "unspecified material system"},
-            "composition": "unspecified material system",
-            "variable_axis_type": None,
-            "variable_value": None,
-            "process_context": {},
-            "source_anchor_ids": ["anc-density"],
-        },
-        {
-            "variant_id": "var-angle-0",
-            "document_id": "paper-1",
-            "collection_id": "col-1",
-            "variant_label": "0",
-            "host_material_system": {"family": "unspecified material system"},
-            "composition": "unspecified material system",
-            "variable_axis_type": None,
-            "variable_value": None,
-            "process_context": {},
-            "source_anchor_ids": [],
-        },
-        {
-            "variant_id": "var-angle-45",
-            "document_id": "paper-1",
-            "collection_id": "col-1",
-            "variant_label": "45",
-            "host_material_system": {"family": "unspecified material system"},
-            "composition": "unspecified material system",
-            "variable_axis_type": None,
-            "variable_value": None,
-            "process_context": {},
-            "source_anchor_ids": [],
-        },
-    ]
-    frames["measurement_results"] = [
-        {
-            "result_id": "res-density",
-            "document_id": "paper-1",
-            "collection_id": "col-1",
-            "variant_id": "var-power",
-            "property_normalized": "density",
-            "value_payload": {"value": 99.1, "source_value_text": "99.1"},
-            "unit": "%",
-            "test_condition_id": None,
-            "evidence_anchor_ids": ["anc-density"],
-        }
-    ]
-    frames["test_conditions"] = []
-
-    service = _service_from_frames(profiles, frames)
-
-    materials = service.list_collection_materials("col-1")
-    profile = service.get_collection_material_research_view(
-        "col-1",
-        "mat-316l-stainless-steel",
-    )
-
-    assert materials["materials"][0]["sample_count"] == 3
-    assert profile["overview"]["sample_count"] == 3
-    assert [row["sample_label"] for row in profile["sample_matrix"]["rows"]] == [
-        "375 W-2100 mm/s",
-        "0",
-        "45",
-    ]
-    assert {
-        row["material"] for row in profile["sample_matrix"]["rows"]
-    } == {"316L stainless steel"}
-    assert profile["measured_properties"][0]["property"] == "density"
-
-
-def test_material_profile_inherits_single_document_comparison_material():
-    profiles, frames = _frames()
-    profiles[0]["title"] = "PBF Sample Study"
-    frames["sample_variants"][0]["host_material_system"] = {
-        "name": "unspecified material system",
-    }
-    frames["sample_variants"][0]["composition"] = "unspecified material system"
-    comparison_rows = _comparison_rows()
-    for row in comparison_rows:
-        row["material_system_normalized"] = "316L stainless steel"
-
-    service = _service_from_frames(
-        profiles,
-        frames,
-        comparison_rows=comparison_rows,
-    )
-
-    materials = service.list_collection_materials("col-1")
-    profile = service.get_collection_material_research_view(
-        "col-1",
-        "mat-316l-stainless-steel",
-    )
-
-    assert [item["material_id"] for item in materials["materials"]] == [
-        "mat-316l-stainless-steel"
-    ]
-    assert profile["canonical_name"] == "316L stainless steel"
-    assert profile["overview"]["sample_count"] == 1
-    assert profile["sample_matrix"]["rows"][0]["material"] == "316L stainless steel"
 
 
 def test_objective_material_profile_inherits_material_scope_for_sample_measurements():

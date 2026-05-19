@@ -234,20 +234,15 @@ class ResearchViewAggregationService:
             projection,
             frames,
         )
-        materials = self._build_material_summaries(
-            collection_id,
-            frames,
-            comparable_groups,
-        )
         return self._build_collection_research_payload(
             collection_id=collection_id,
             overview=overview,
-            materials=materials,
+            materials=[],
             paper_coverage=paper_coverage,
             comparable_groups=comparable_groups,
             comparison_projection_warning=(
-                "Paper coverage is available, but comparable groups are not "
-                "available until comparison artifacts are generated."
+                "Paper coverage is available, but material research-view "
+                "requires objective evidence units."
                 if projection is None
                 else None
             ),
@@ -348,37 +343,7 @@ class ResearchViewAggregationService:
                 }
             )
 
-        frames = self._core_fact_records(facts)
-        projection = self._comparison_projection_from_facts(facts)
-        comparable_groups = self._build_comparable_groups(
-            collection_id,
-            projection,
-            frames,
-            include_matrix=False,
-        )
-        materials = self._build_material_summaries(
-            collection_id,
-            frames,
-            comparable_groups,
-        )
-        warnings: list[dict[str, Any]] = []
-        if collection.get("paper_count") and not materials:
-            warnings.append(
-                self._warning(
-                    code="no_material_profiles",
-                    severity="warning",
-                    scope="materials",
-                    message="No reliable material bindings were available for this collection.",
-                )
-            )
-        return self._clean_value(
-            {
-                "collection_id": collection_id,
-                "state": self._derive_material_list_state(materials, warnings),
-                "materials": materials,
-                "warnings": self._dedupe_warnings(warnings),
-            }
-        )
+        raise ResearchViewNotReadyError(collection_id)
 
     def get_collection_material_research_view(
         self,
@@ -391,7 +356,6 @@ class ResearchViewAggregationService:
 
         facts = self._load_collection_facts(collection_id)
         objective_material_rows = self._objective_material_rows_from_facts(facts)
-        frames = self._core_fact_records(facts)
         if objective_material_rows:
             profile = self._build_objective_material_profile(
                 collection_id,
@@ -403,35 +367,7 @@ class ResearchViewAggregationService:
                 raise ResearchViewMaterialNotFoundError(collection_id, material_id)
             return self._clean_value(profile)
 
-        projection = self._comparison_projection_from_facts(facts)
-        material_index_groups = self._build_comparable_groups(
-            collection_id,
-            projection,
-            frames,
-            include_matrix=False,
-        )
-        material_key = self._material_key_from_material_id(
-            material_id,
-            frames,
-            material_index_groups,
-        )
-        if material_key is None:
-            raise ResearchViewMaterialNotFoundError(collection_id, material_id)
-        comparable_groups = self._build_comparable_groups(
-            collection_id,
-            projection,
-            frames,
-            material_key=material_key,
-        )
-        profile = self._build_material_profile(
-            collection_id,
-            material_id,
-            frames,
-            comparable_groups,
-        )
-        if profile is None:
-            raise ResearchViewMaterialNotFoundError(collection_id, material_id)
-        return self._clean_value(profile)
+        raise ResearchViewNotReadyError(collection_id)
 
     def get_document_research_view(
         self,

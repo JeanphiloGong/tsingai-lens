@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -1244,7 +1245,128 @@ def test_research_objective_service_persists_generated_objective_report(tmp_path
     assert len(llm_client.calls) == 1
     user_prompt = llm_client.calls[0]["messages"][1]["content"]
     assert "560 MPa" in user_prompt
-    assert "table-2" in user_prompt
+    assert "P001" in user_prompt
+
+
+def test_research_objective_report_context_is_llm_sized(tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Report Context")
+    collection_id = collection["collection_id"]
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does energy density affect LPBF 316L density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density"],
+            "property_axes": ["density"],
+        }
+    )
+    evidence_units = [
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": f"paper-{index}",
+                "unit_kind": "measurement",
+                "property_normalized": "density",
+                "material_system": {"family": "316L stainless steel"},
+                "sample_context": {"sample": f"S{index:03d}"},
+                "process_context": {
+                    "process": "LPBF",
+                    "energy_density": f"{70 + index} J/mm3",
+                },
+                "value_payload": {
+                    "value": 95 + index / 100,
+                    "source_value_text": f"{95 + index / 100:.2f} %",
+                    "long_note": "not report-critical " * 200,
+                },
+                "unit": "%",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": f"table-{index}",
+                        "page": index,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+        for index in range(60)
+    ]
+    repository.replace_collection_research_objectives(
+        collection_id,
+        (
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "title": "LPBF 316L density",
+                    "source_filename": "paper-1.pdf",
+                    "doc_role": "experimental",
+                }
+            ),
+        ),
+        (objective,),
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "question": objective.question,
+                    "material_scope": ["316L stainless steel"],
+                    "target_property_axes": ["density"],
+                }
+            ),
+        ),
+        (
+            ObjectivePaperFrame.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "changed_variables": ["energy density"],
+                    "measured_property_scope": ["density"],
+                }
+            ),
+        ),
+        (),
+        tuple(evidence_units),
+        (
+            ObjectiveLogicChain.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "chain_scope": "objective",
+                    "question": objective.question,
+                    "evidence_unit_ids": [
+                        unit.evidence_unit_id for unit in evidence_units
+                    ],
+                    "chain_payload": {"huge": "logic-chain-detail " * 1000},
+                    "summary": "Density increases across selected evidence.",
+                    "confidence": 0.8,
+                }
+            ),
+        ),
+    )
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        core_fact_repository=repository,
+    )
+
+    context = service._build_objective_report_context(
+        collection_id,
+        objective.objective_id,
+    )
+    payload = json.dumps(context, ensure_ascii=False)
+
+    assert context["schema_version"] == "objective_report_context.v2"
+    assert "logic_chain" not in context
+    assert "conclusion_package" not in context
+    assert "not report-critical" not in payload
+    assert "table-0" not in payload
+    assert "source_kind" in payload
+    assert len(context["evidence_units"]) <= 2
+    assert len(context["representative_measurements"]) <= 6
+    assert len(context["source_refs"]) <= 6
+    assert len(payload) < 9000
 
 
 def test_research_objective_service_forces_extractable_objective_route_roles(

@@ -50,6 +50,15 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 _DEFAULT_OBJECTIVE_REPORT_LANGUAGE = "zh"
+_OBJECTIVE_REPORT_CONTEXT_EVIDENCE_LIMIT = 2
+_OBJECTIVE_REPORT_CONTEXT_SOURCE_REF_LIMIT = 6
+_OBJECTIVE_REPORT_CONTEXT_FINDING_LIMIT = 4
+_OBJECTIVE_REPORT_CONTEXT_CONTRIBUTION_LIMIT = 4
+_OBJECTIVE_REPORT_CONTEXT_COMPARISON_LIMIT = 3
+_OBJECTIVE_REPORT_CONTEXT_MECHANISM_EVIDENCE_LIMIT = 2
+_OBJECTIVE_REPORT_CONTEXT_LIMITATION_LIMIT = 3
+_OBJECTIVE_REPORT_CONTEXT_MEASUREMENT_ROW_LIMIT = 6
+_OBJECTIVE_REPORT_CONTEXT_TEXT_LIMIT = 120
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
@@ -2621,12 +2630,14 @@ class ResearchObjectiveService:
             or expert_report.get("source_traceback")
             or []
         )
+        evidence_units = self._objective_report_evidence_units(
+            detail["evidence_units"],
+            limit=_OBJECTIVE_REPORT_CONTEXT_EVIDENCE_LIMIT,
+        )
         context = {
-            "schema_version": "objective_report_context.v1",
-            "collection_id": collection_id,
-            "objective": detail["objective"],
+            "schema_version": "objective_report_context.v2",
+            "objective": self._objective_report_objective(detail["objective"]),
             "readiness": detail["readiness"],
-            "paper_frames": detail["paper_frames"],
             "evidence_summary": {
                 "evidence_unit_count": len(detail["evidence_units"]),
                 "measurement_count": self._count_records_by_kind(
@@ -2646,18 +2657,259 @@ class ResearchObjectiveService:
                     "interpretation",
                 ),
             },
-            "evidence_units": self._objective_report_evidence_units(
-                detail["evidence_units"],
+            "report_seed": self._objective_report_seed(expert_report),
+            "representative_measurements": self._objective_report_measurement_rows(
+                conclusion_package.get("primary_evidence_tables"),
             ),
-            "logic_chain": detail["logic_chain"],
-            "conclusion_package": conclusion_package,
-            "source_refs": self._objective_report_source_refs(source_refs),
+            "evidence_units": evidence_units,
+            "source_refs": self._objective_report_source_refs(
+                source_refs,
+                limit=_OBJECTIVE_REPORT_CONTEXT_SOURCE_REF_LIMIT,
+            ),
         }
         return context
+
+    def _objective_report_objective(
+        self,
+        objective: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "question": objective.get("question"),
+                "material_scope": objective.get("material_scope"),
+                "process_axes": objective.get("process_axes"),
+                "property_axes": objective.get("property_axes"),
+                "comparison_intent": self._truncate_report_context_text(
+                    objective.get("comparison_intent")
+                ),
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_report_measurement_rows(self, value: Any) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for table in value if isinstance(value, list) else []:
+            if not isinstance(table, dict):
+                continue
+            for row in table.get("rows", []) if isinstance(table.get("rows"), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                rows.append(
+                    {
+                        key: compact_value
+                        for key, compact_value in {
+                            "property": row.get("property"),
+                            "sample": self._truncate_report_context_text(
+                                self._compact_sample_label(row.get("sample_context"))
+                            ),
+                            "process": self._truncate_report_context_text(
+                                self._compact_process_label(row.get("process_context"))
+                            ),
+                            "value": row.get("source_value_text") or row.get("value"),
+                            "unit": row.get("unit"),
+                            "source": self._objective_report_first_source_label(
+                                row.get("source_refs")
+                            ),
+                        }.items()
+                        if compact_value not in (None, "", [], {})
+                    }
+                )
+                if len(rows) >= _OBJECTIVE_REPORT_CONTEXT_MEASUREMENT_ROW_LIMIT:
+                    return rows
+        return rows
+
+    def _objective_report_first_source_label(self, value: Any) -> str | None:
+        refs = self._objective_report_source_refs(value, limit=1)
+        if not refs:
+            return None
+        ref = refs[0]
+        label = ref.get("display_label")
+        if label:
+            return str(label)
+        kind = ref.get("source_kind")
+        page = ref.get("page")
+        if kind and page not in (None, "", [], {}):
+            return f"{kind} p.{page}"
+        return str(kind or "") or None
+
+    def _objective_report_seed(self, expert_report: dict[str, Any]) -> dict[str, Any]:
+        if not expert_report:
+            return {}
+        return {
+            key: value
+            for key, value in {
+                "headline_conclusion": self._truncate_report_context_text(
+                    expert_report.get("headline_conclusion")
+                ),
+                "scientific_context": self._truncate_report_context_text(
+                    expert_report.get("scientific_context")
+                ),
+                "key_findings": self._objective_report_seed_records(
+                    expert_report.get("key_findings"),
+                    limit=_OBJECTIVE_REPORT_CONTEXT_FINDING_LIMIT,
+                ),
+                "evidence_matrix": self._objective_report_seed_evidence_matrix(
+                    expert_report.get("evidence_matrix")
+                ),
+                "paper_contribution_map": self._objective_report_seed_records(
+                    expert_report.get("paper_contribution_map"),
+                    limit=_OBJECTIVE_REPORT_CONTEXT_CONTRIBUTION_LIMIT,
+                ),
+                "controlled_comparisons": self._objective_report_seed_records(
+                    expert_report.get("controlled_comparisons"),
+                    limit=_OBJECTIVE_REPORT_CONTEXT_COMPARISON_LIMIT,
+                ),
+                "mechanism_chain": self._objective_report_seed_mechanism_chain(
+                    expert_report.get("mechanism_chain"),
+                ),
+                "limitations": self._objective_report_seed_records(
+                    expert_report.get("limitations"),
+                    limit=_OBJECTIVE_REPORT_CONTEXT_LIMITATION_LIMIT,
+                ),
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_report_seed_mechanism_chain(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            key: compact_value
+            for key, compact_value in {
+                "steps": self._objective_report_seed_records(value.get("steps"), limit=6),
+                "evidence": self._objective_report_seed_records(
+                    value.get("evidence"),
+                    limit=_OBJECTIVE_REPORT_CONTEXT_MECHANISM_EVIDENCE_LIMIT,
+                ),
+            }.items()
+            if compact_value not in (None, "", [], {})
+        }
+
+    def _objective_report_seed_evidence_matrix(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            key: compact_value
+            for key, compact_value in {
+                "relevant_paper_count": value.get("relevant_paper_count"),
+                "measurement_result_count": value.get("measurement_result_count"),
+                "measurement_property_count": value.get("measurement_property_count"),
+                "controlled_comparison_count": value.get(
+                    "controlled_comparison_count"
+                ),
+                "mechanism_evidence_count": value.get("mechanism_evidence_count"),
+                "limitation_count": value.get("limitation_count"),
+                "source_ref_count": value.get("source_ref_count"),
+                "measurement_value_ranges": self._objective_report_value_ranges(
+                    value.get("measurement_value_ranges"),
+                ),
+            }.items()
+            if compact_value not in (None, "", [], {})
+        }
+
+    def _objective_report_value_ranges(self, value: Any) -> list[dict[str, Any]]:
+        ranges: list[dict[str, Any]] = []
+        for item in value if isinstance(value, list) else []:
+            if not isinstance(item, dict):
+                continue
+            min_item = item.get("min") if isinstance(item.get("min"), dict) else {}
+            max_item = item.get("max") if isinstance(item.get("max"), dict) else {}
+            ranges.append(
+                {
+                    key: compact_value
+                    for key, compact_value in {
+                        "property": item.get("property_normalized"),
+                        "count": item.get("measurement_count"),
+                        "min": self._objective_report_range_endpoint(min_item),
+                        "max": self._objective_report_range_endpoint(max_item),
+                    }.items()
+                    if compact_value not in (None, "", [], {})
+                }
+            )
+            if len(ranges) >= 2:
+                break
+        return ranges
+
+    def _objective_report_range_endpoint(self, value: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: compact_value
+            for key, compact_value in {
+                "value": value.get("value"),
+                "text": self._truncate_report_context_text(
+                    value.get("source_value_text")
+                ),
+                "sample": self._truncate_report_context_text(
+                    self._compact_sample_label(value.get("sample_context"))
+                ),
+            }.items()
+            if compact_value not in (None, "", [], {})
+        }
+
+    def _objective_report_seed_records(
+        self,
+        value: Any,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        compact_records: list[dict[str, Any]] = []
+        for item in value if isinstance(value, list) else []:
+            compact = self._compact_report_context_value(item)
+            if isinstance(compact, dict) and compact:
+                compact_records.append(compact)
+            if len(compact_records) >= limit:
+                break
+        return compact_records
+
+    def _compact_report_context_value(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return self._truncate_report_context_text(value)
+        if isinstance(value, list):
+            return [
+                compact
+                for item in value[:8]
+                if (compact := self._compact_report_context_value(item))
+                not in (None, "", [], {})
+            ]
+        if not isinstance(value, dict):
+            return value
+        compact: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in {
+                "document_id",
+                "evidence_unit_id",
+                "comparison_id",
+                "finding_id",
+                "anchor_id",
+                "route_id",
+                "source_ref",
+                "source_refs",
+                "evidence_unit_ids",
+                "traceability",
+                "chain_payload",
+                "test_condition",
+                "source_filename",
+                "evidence_unit_count",
+            }:
+                continue
+            compact_value = self._compact_report_context_value(item)
+            if compact_value not in (None, "", [], {}):
+                compact[key] = compact_value
+        return compact
+
+    def _truncate_report_context_text(self, value: Any) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if len(text) <= _OBJECTIVE_REPORT_CONTEXT_TEXT_LIMIT:
+            return text
+        return f"{text[:_OBJECTIVE_REPORT_CONTEXT_TEXT_LIMIT].rstrip()}..."
 
     def _objective_report_evidence_units(
         self,
         evidence_units: list[dict[str, Any]],
+        *,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         compact_units: list[dict[str, Any]] = []
         for unit in evidence_units:
@@ -2666,29 +2918,94 @@ class ResearchObjectiveService:
                     key: value
                     for key, value in {
                         "evidence_unit_id": unit.get("evidence_unit_id"),
-                        "document_id": unit.get("document_id"),
                         "unit_kind": unit.get("unit_kind"),
                         "property_normalized": unit.get("property_normalized"),
-                        "material_system": unit.get("material_system"),
-                        "sample_context": unit.get("sample_context"),
-                        "process_context": unit.get("process_context"),
-                        "test_condition": unit.get("test_condition"),
-                        "value_payload": unit.get("value_payload"),
+                        "sample": self._compact_sample_label(
+                            unit.get("sample_context")
+                        ),
+                        "process": self._compact_process_label(
+                            unit.get("process_context")
+                        ),
+                        "value_payload": self._compact_report_value_payload(
+                            unit.get("value_payload")
+                        ),
                         "unit": unit.get("unit"),
                         "baseline_context": unit.get("baseline_context"),
-                        "interpretation": unit.get("interpretation"),
-                        "source_refs": unit.get("source_refs"),
+                        "interpretation": self._truncate_report_context_text(
+                            unit.get("interpretation")
+                        ),
+                        "source_refs": self._objective_report_source_refs(
+                            unit.get("source_refs"),
+                            limit=1,
+                        ),
                         "resolution_status": unit.get("resolution_status"),
                         "confidence": unit.get("confidence"),
                     }.items()
                     if value not in (None, "", [], {})
                 }
             )
+            if limit is not None and len(compact_units) >= limit:
+                break
         return compact_units
+
+    def _compact_report_value_payload(self, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return self._compact_report_context_value(value)
+        kept_keys = (
+            "value",
+            "min",
+            "max",
+            "direction",
+            "statement",
+            "source_value_text",
+        )
+        compact: dict[str, Any] = {}
+        for key in kept_keys:
+            compact_value = self._compact_report_context_value(value.get(key))
+            if compact_value not in (None, "", [], {}):
+                compact[key] = compact_value
+        return compact
+
+    def _compact_sample_label(self, value: Any) -> str | None:
+        if isinstance(value, dict):
+            for key in (
+                "sample_label",
+                "sample",
+                "sample_id",
+                "Specimens",
+                "ID",
+                "material",
+            ):
+                if value.get(key) not in (None, "", [], {}):
+                    return str(value.get(key))
+            if value:
+                return "; ".join(
+                    f"{key}={item}"
+                    for key, item in list(value.items())[:3]
+                    if item not in (None, "", [], {})
+                )
+        return self._truncate_report_context_text(value)
+
+    def _compact_process_label(self, value: Any) -> str | None:
+        if isinstance(value, dict):
+            parts: list[str] = []
+            for key in (
+                "process",
+                "energy_density",
+                "scanning_speed",
+                "scanning_strategy",
+                "heat_treatment",
+            ):
+                if value.get(key) not in (None, "", [], {}):
+                    parts.append(f"{key}={value.get(key)}")
+            return "; ".join(parts[:4]) or None
+        return self._truncate_report_context_text(value)
 
     def _objective_report_source_refs(
         self,
         source_refs: Any,
+        *,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         compact_refs: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -2699,13 +3016,9 @@ class ResearchObjectiveService:
                 key: value
                 for key, value in {
                     "evidence_unit_id": source_ref.get("evidence_unit_id"),
-                    "document_id": source_ref.get("document_id"),
                     "display_label": source_ref.get("display_label"),
                     "source_kind": source_ref.get("source_kind"),
-                    "source_ref": source_ref.get("source_ref"),
                     "page": source_ref.get("page") or source_ref.get("page_number"),
-                    "anchor_id": source_ref.get("anchor_id"),
-                    "route_id": source_ref.get("route_id"),
                     "role": source_ref.get("role"),
                 }.items()
                 if value not in (None, "", [], {})
@@ -2717,6 +3030,8 @@ class ResearchObjectiveService:
                 continue
             seen.add(key)
             compact_refs.append(record)
+            if limit is not None and len(compact_refs) >= limit:
+                break
         return compact_refs
 
     def _generate_objective_report_markdown(
@@ -2735,6 +3050,13 @@ class ResearchObjectiveService:
         user_prompt = (
             f"Language: {'Chinese' if language == 'zh' else 'English'}\n"
             "Write one Markdown report for this research objective.\n"
+            "Use representative_measurements explicitly in the support-data "
+            "section. When those rows contain named samples or conditions, list "
+            "their values instead of only summarizing the range. In "
+            "## 支撑数据, include a Markdown table with one row for every "
+            "representative_measurements item; do not omit intermediate rows "
+            "such as M-VED when they are present. Keep the report evidence-first "
+            "and avoid generic filler.\n"
             "Required sections:\n"
             "# 研究目标\n"
             "## 结论摘要\n"
@@ -2746,18 +3068,21 @@ class ResearchObjectiveService:
             "## 局限性与不确定性\n"
             "## 证据来源\n"
             "If a section lacks evidence, say so explicitly instead of filling it with generic text.\n\n"
-            f"EvidencePackage:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
+            f"EvidencePackage:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
         )
         completion = self._get_report_llm_client().chat.completions.create(
             model=self.report_model,
-            temperature=0.15,
+            temperature=0,
+            max_tokens=1200,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         )
         content = completion.choices[0].message.content if completion.choices else None
-        return self._coerce_llm_message_content(content)
+        return self._strip_report_reasoning_markup(
+            self._coerce_llm_message_content(content)
+        )
 
     def _get_report_llm_client(self):
         if self._report_llm_client is None:
@@ -2800,6 +3125,14 @@ class ResearchObjectiveService:
         if not match:
             return None
         return match.group(1).strip() or None
+
+    def _strip_report_reasoning_markup(self, markdown: str) -> str:
+        return re.sub(
+            r"^\s*<think>.*?</think>\s*",
+            "",
+            markdown,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
 
     def _count_records_by_kind(
         self,

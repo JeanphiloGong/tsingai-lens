@@ -380,8 +380,12 @@ class _ObjectiveExtractor:
 
 
 class _FakeObjectiveReportLLMClient:
-    def __init__(self, markdown: str) -> None:
-        self.markdown = markdown
+    def __init__(self, markdown: str | list[str]) -> None:
+        self.markdown_responses = (
+            list(markdown)
+            if isinstance(markdown, list)
+            else [markdown]
+        )
         self.calls: list[dict[str, Any]] = []
         self.chat = SimpleNamespace(
             completions=SimpleNamespace(create=self._create_completion)
@@ -389,7 +393,8 @@ class _FakeObjectiveReportLLMClient:
 
     def _create_completion(self, **kwargs):
         self.calls.append(kwargs)
-        message = SimpleNamespace(content=self.markdown)
+        index = min(len(self.calls) - 1, len(self.markdown_responses) - 1)
+        message = SimpleNamespace(content=self.markdown_responses[index])
         choice = SimpleNamespace(message=message)
         return SimpleNamespace(choices=[choice])
 
@@ -1215,14 +1220,16 @@ def test_research_objective_service_persists_generated_objective_report(tmp_path
         (logic_chain,),
     )
     llm_client = _FakeObjectiveReportLLMClient(
-        "# 研究目标\n\n## 结论摘要\nHT-SLM reaches 560 MPa [paper-1 · table-2].\n\n"
-        "## 文献贡献\nP001 reports tensile testing.\n\n"
-        "## 样品、工艺和测试条件\nLPBF 316L, HT-SLM, tensile test.\n\n"
-        "## 支撑数据\n560 MPa.\n\n"
-        "## 受控比较\n当前证据不足。\n\n"
-        "## 机制解释\n当前证据不足。\n\n"
-        "## 局限性与不确定性\n单篇文献。\n\n"
-        "## 证据来源\npaper-1 table-2."
+        [
+            "# 研究目标\nHow does heat treatment affect LPBF 316L yield strength?",
+            "## 集合级结论\nHT-SLM reaches 560 MPa [paper-1 · table-2].",
+            "## 文献贡献图\nP001 reports tensile testing.",
+            "## 证据矩阵\nOne measurement unit is available.",
+            "## 受控比较\n当前证据不足。",
+            "## 机制链路\n当前证据不足。",
+            "## 证据来源\npaper-1 table-2.",
+            "## 局限性与不确定性\n单篇文献。",
+        ]
     )
     service = ResearchObjectiveService(
         collection_service=collection_service,
@@ -1242,10 +1249,15 @@ def test_research_objective_service_persists_generated_objective_report(tmp_path
     assert generated["model"] == "test-model"
     assert detail["objective_report"]["report_id"] == generated["report_id"]
     assert detail["objective_report"]["markdown"] == generated["markdown"]
-    assert len(llm_client.calls) == 1
-    user_prompt = llm_client.calls[0]["messages"][1]["content"]
+    assert len(llm_client.calls) == 8
+    user_prompt = llm_client.calls[1]["messages"][1]["content"]
     assert "560 MPa" in user_prompt
-    assert "P001" in user_prompt
+    assert "SectionEvidencePacket" in user_prompt
+    assert "logic_chain" not in user_prompt
+    assert llm_client.calls[0]["messages"][1]["content"].count("# 研究目标") == 1
+    assert generated["markdown"].index("# 研究目标") < generated["markdown"].index(
+        "## 集合级结论"
+    )
 
 
 def test_research_objective_report_context_is_llm_sized(tmp_path):

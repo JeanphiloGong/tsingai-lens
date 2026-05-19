@@ -3286,40 +3286,50 @@ class ResearchObjectiveService:
         *,
         language: str,
     ) -> str:
+        section_entries = self._build_objective_report_section_packets(
+            context,
+            language=language,
+        )
+        generated_sections: list[str] = []
+        for entry in section_entries:
+            markdown = self._generate_objective_report_section_markdown(
+                section=entry["section"],
+                packet=entry["packet"],
+                language=language,
+            )
+            if markdown:
+                generated_sections.append(markdown)
+        return "\n\n".join(generated_sections).strip()
+
+    def _generate_objective_report_section_markdown(
+        self,
+        *,
+        section: dict[str, Any],
+        packet: dict[str, Any],
+        language: str,
+    ) -> str:
         system_prompt = (
             "You are a senior materials scientist writing a research-objective "
-            "report from a provided evidence package. Use only the provided "
-            "facts. Do not invent samples, values, mechanisms, papers, or "
-            "comparisons. Every concrete claim with a value or comparison must "
-            "cite the provided source labels when available."
+            "report section from a provided evidence packet. Use only the "
+            "provided facts. Do not invent samples, values, mechanisms, "
+            "papers, or comparisons. Every concrete claim with a value or "
+            "comparison must cite the provided source labels when available."
         )
         user_prompt = (
             f"Language: {'Chinese' if language == 'zh' else 'English'}\n"
-            "Write one Markdown report for this research objective.\n"
-            "Use representative_measurements explicitly in the support-data "
-            "section. When those rows contain named samples or conditions, list "
-            "their values instead of only summarizing the range. In "
-            "## 支撑数据, include a Markdown table with one row for every "
-            "representative_measurements item; do not omit intermediate rows "
-            "such as M-VED when they are present. Keep the report evidence-first "
-            "and avoid generic filler.\n"
-            "Required sections:\n"
-            "# 研究目标\n"
-            "## 结论摘要\n"
-            "## 文献贡献\n"
-            "## 样品、工艺和测试条件\n"
-            "## 支撑数据\n"
-            "## 受控比较\n"
-            "## 机制解释\n"
-            "## 局限性与不确定性\n"
-            "## 证据来源\n"
-            "If a section lacks evidence, say so explicitly instead of filling it with generic text.\n\n"
-            f"EvidencePackage:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
+            f"Write only this Markdown section: {section['heading']}\n"
+            f"Section question: {section['question']}\n"
+            "Start with exactly the requested heading. Do not write other "
+            "report sections. If the packet contains representative_measurements, "
+            "include a Markdown table with every representative measurement row. "
+            "If the packet lacks evidence, say so explicitly instead of filling "
+            "it with generic text.\n\n"
+            f"SectionEvidencePacket:\n{json.dumps(packet, ensure_ascii=False, separators=(',', ':'))}"
         )
         completion = self._get_report_llm_client().chat.completions.create(
             model=self.report_model,
             temperature=0,
-            max_tokens=1200,
+            max_tokens=500,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

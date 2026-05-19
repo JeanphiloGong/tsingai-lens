@@ -453,6 +453,7 @@ const translations: Record<Language, Translations> = {
 				evidenceUnitsTitle: 'Supporting evidence',
 				evidenceUnitsBody:
 					'Representative evidence is shown first; open the full review to inspect all extracted units.',
+				evidenceAuditTitle: 'Evidence audit and diagnostics',
 				allEvidenceReview: 'All extracted evidence',
 				evidenceFilters: 'Evidence filters',
 				evidenceKindFilter: 'Evidence kind',
@@ -3021,6 +3022,7 @@ const translations: Record<Language, Translations> = {
 				noRoutes: '暂未生成证据路由。',
 				evidenceUnitsTitle: '支撑证据',
 				evidenceUnitsBody: '先展示代表性证据；展开完整审查可查看全部已抽取证据单元。',
+				evidenceAuditTitle: '证据审计与诊断',
 				allEvidenceReview: '全部抽取证据',
 				evidenceFilters: '证据筛选',
 				evidenceKindFilter: '证据类型',

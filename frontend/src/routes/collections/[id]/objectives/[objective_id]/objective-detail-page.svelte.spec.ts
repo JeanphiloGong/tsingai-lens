@@ -344,22 +344,34 @@ function objectivePayload() {
 				status: 'ready',
 				sections: [
 					{
-						section_id: 'research_objective',
-						title: 'Research objective',
-						body: 'How does heat treatment affect LPBF 316L tensile strength?',
+						section_id: 'answer',
+						title: 'Answer',
+						body:
+							'For LPBF 316L, the current evidence package evaluates how heat treatment affects yield strength. The strongest contribution is LPBF 316L heat treatment study because it directly contributes heat treatment evidence tied to yield strength.',
 						claims: [],
-						evidence_unit_ids: [],
-						source_refs: []
+						evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
+						source_refs: [
+							{
+								evidence_unit_id: 'unit_measure',
+								document_id: 'doc_1',
+								source_kind: 'table',
+								source_ref: 'table-2',
+								evidence_id: 'ev_1',
+								anchor_id: 'anc_1',
+								page: 5,
+								display_label: 'P001 · Table 2 · p.5'
+							}
+						]
 					},
 					{
-						section_id: 'collection_level_conclusion',
-						title: 'Collection-level conclusion',
+						section_id: 'key_evidence',
+						title: 'Key evidence',
 						body:
-							'The collection shows traceable tensile evidence that heat-treated LPBF 316L changes yield strength, while the current package still needs complete condition resolution.',
+							'The key evidence table contains 2 measurement rows. Across those rows, yield strength range 540-560 MPa.',
 						claims: [
 							{
 								claim:
-									'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.',
+									'yield strength spans 540 MPa to 560 MPa across HT-SLM-2 and HT-SLM.',
 								evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
 								source_refs: [
 									{
@@ -369,7 +381,8 @@ function objectivePayload() {
 										source_ref: 'table-2',
 										evidence_id: 'ev_1',
 										anchor_id: 'anc_1',
-										page: 5
+										page: 5,
+										display_label: 'P001 · Table 2 · p.5'
 									}
 								],
 								strength: 'measured'
@@ -401,7 +414,8 @@ function objectivePayload() {
 								document_id: 'doc_1',
 								source_kind: 'table',
 								source_ref: 'table-2',
-								page: 5
+								page: 5,
+								display_label: 'P001 · Table 2 · p.5'
 							}
 						]
 					}
@@ -579,7 +593,8 @@ function objectivePayload() {
 					document_id: 'doc_1',
 					source_kind: 'table',
 					source_ref: 'table-2',
-					page: 5
+					page: 5,
+					display_label: 'P001 · Table 2 · p.5'
 				}
 			]
 		}
@@ -620,7 +635,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.'
+					'For LPBF 316L, the current evidence package evaluates how heat treatment affects yield strength.'
 				)
 			)
 			.toBeInTheDocument();
@@ -628,69 +643,48 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Package status: ready'))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Collection-level findings' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Collection-level conclusion' }))
+			.element(browserPage.getByRole('heading', { name: 'Key evidence' }))
 			.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
-					'The collection shows traceable tensile evidence that heat-treated LPBF 316L changes yield strength, while the current package still needs complete condition resolution.'
+					'The key evidence table contains 2 measurement rows. Across those rows, yield strength range 540-560 MPa.'
 				)
 			)
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Primary evidence table' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Controlled comparisons' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Mechanism chain' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Limitations and uncertainties' }).first())
 			.toBeInTheDocument();
 		const pageText = document.body.textContent ?? '';
-		await expect.element(browserPage.getByText('LPBF 316L heat treatment study').first()).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: '560 MPa', exact: true }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: '540 MPa', exact: true }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: /yield strength Heat-treated samples/ }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByRole('button', {
-					name: /strength mechanism Annealing changes the cellular substructure/
-				})
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Some measurements do not have complete sample and process context.'))
-			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Extraction diagnostics' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Evidence audit and diagnostics'))
+			.toBeInTheDocument();
+		await browserPage.getByText('Evidence audit and diagnostics').click();
+		await expect.element(browserPage.getByText('LPBF 316L heat treatment study').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: /Yield strength reached 560 MPa/ }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('All extracted evidence')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Measurement results' }))
 			.not.toBeInTheDocument();
 		expect(pageText.indexOf('Research conclusion package')).toBeLessThan(
-			pageText.indexOf('Logic chain')
+			pageText.indexOf('Evidence audit and diagnostics')
 		);
 		expect(pageText.indexOf('Research conclusion package')).toBeLessThan(
-			pageText.indexOf('Relevant papers')
-		);
-		expect(pageText.indexOf('Collection-level findings')).toBeLessThan(
-			pageText.indexOf('Primary evidence table')
+			pageText.indexOf('Extraction diagnostics')
 		);
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Paper contribution map' }).first())
@@ -704,12 +698,12 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(contributionMap.getByText('11', { exact: true })).toBeInTheDocument();
 
-		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' }).first();
+		const sourceLink = browserPage.getByRole('link', { name: 'P001 · Table 2 · p.5' }).first();
 		await expect
 			.element(sourceLink)
 			.toHaveAttribute(
 				'href',
-				'/collections/col_123/documents/doc_1?page=5&evidence_id=ev_1&anchor_id=anc_1&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
+				'/collections/col_123/documents/doc_1?page=5&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
 			);
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
@@ -719,6 +713,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 	it('filters evidence units by kind and updates the inspector', async () => {
 		render(Page);
 
+		await browserPage.getByText('Evidence audit and diagnostics').click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
@@ -743,6 +738,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 	it('presents evidence detail as a research chain record', async () => {
 		render(Page);
 
+		await browserPage.getByText('Evidence audit and diagnostics').click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
@@ -768,6 +764,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 	it('summarizes evidence context on evidence cards', async () => {
 		render(Page);
 
+		await browserPage.getByText('Evidence audit and diagnostics').click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
@@ -821,6 +818,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
+		await browserPage.getByText('Evidence audit and diagnostics').click();
 		const duplicateCard = browserPage.getByRole('button', {
 			name: /doc_1 · 92%/
 		});
@@ -859,6 +857,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
+		await browserPage.getByText('Evidence audit and diagnostics').click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
 			.toBeInTheDocument();
@@ -888,6 +887,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
+		await browserPage.getByText('Evidence audit and diagnostics').click();
 		await browserPage.getByText('All extracted evidence').click();
 		await expect.element(browserPage.getByText('Measurement preview 6')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Measurement preview 7')).not.toBeInTheDocument();
@@ -900,14 +900,14 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 	});
 
-	it('uses logic-chain steps to focus related evidence', async () => {
+	it('uses evidence readiness controls to focus related evidence', async () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Logic chain' }))
+			.element(browserPage.getByRole('button', { name: /Measurement results/ }))
 			.toBeInTheDocument();
 
-		await browserPage.getByRole('button', { name: /Measured results/ }).click();
+		await browserPage.getByRole('button', { name: /Measurement results/ }).click();
 		await expect.element(browserPage.getByLabelText('Evidence kind')).toHaveValue('measurement');
 		await expect
 			.element(
@@ -917,7 +917,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 
-		await browserPage.getByRole('button', { name: /Experimental conditions/ }).click();
+		await browserPage.getByRole('button', { name: /^1 Test conditions$/ }).click();
 		await expect.element(browserPage.getByLabelText('Evidence kind')).toHaveValue('test_condition');
 		await expect
 			.element(

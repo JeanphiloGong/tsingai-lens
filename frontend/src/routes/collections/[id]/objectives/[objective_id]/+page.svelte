@@ -8,13 +8,13 @@
 		fetchObjectiveResearchView,
 		formatShortIdentifier,
 		getResearchViewStateTone,
-		type ObjectiveConclusionContribution,
 		type ObjectiveConclusionPackage,
-		type ObjectiveConclusionNarrativeClaim,
-		type ObjectiveConclusionNarrativeSection,
-		type ObjectiveConclusionStatement,
 		type ObjectiveEvidenceRoute,
 		type ObjectiveEvidenceUnit,
+		type ObjectiveExpertComparison,
+		type ObjectiveExpertFinding,
+		type ObjectiveExpertLimitation,
+		type ObjectiveExpertPaperContribution,
 		type ObjectivePaperFrame,
 		type ObjectiveResearchView
 	} from '../../../../_shared/researchView';
@@ -99,21 +99,13 @@
 	$: evidenceUnits = objectiveView?.evidence_units ?? [];
 	$: evidenceRoutes = objectiveView?.evidence_routes ?? [];
 	$: conclusionPackage = objectiveView?.conclusion_package ?? null;
-	$: conclusionMeasurementTables = conclusionPackage?.primary_evidence_tables ?? [];
-	$: conclusionMeasurementRowCount = conclusionMeasurementTables.reduce(
-		(count, table) => count + table.rows.length,
-		0
-	);
-	$: conclusionContributions = conclusionPackage?.paper_contributions ?? [];
-	$: conclusionComparisons = conclusionPackage?.controlled_comparisons ?? [];
-	$: reportSections = conclusionPackage?.narrative.sections ?? [];
-	$: reportAnswerSection =
-		reportSections.find((section) => section.section_id === 'answer') ??
-		reportSections.find((section) => section.section_id === 'collection_level_conclusion') ??
-		null;
-	$: reportBodySections = reportSections.filter(
-		(section) => !['answer', 'collection_level_conclusion'].includes(section.section_id)
-	);
+	$: expertReport = conclusionPackage?.expert_report ?? null;
+	$: reportMatrix = expertReport?.evidence_matrix ?? null;
+	$: reportContributionMap = expertReport?.paper_contribution_map ?? [];
+	$: reportComparisons = expertReport?.controlled_comparisons ?? [];
+	$: reportMechanismChain = expertReport?.mechanism_chain ?? null;
+	$: reportLimitations = expertReport?.limitations ?? [];
+	$: reportSourceTraceback = expertReport?.source_traceback ?? [];
 	$: relevantFrameCount = frames.filter((frame) => frame.relevance !== 'irrelevant').length;
 	$: evidenceKindOptions = buildEvidenceKindOptions(evidenceUnits);
 	$: evidenceDocumentOptions = buildEvidenceDocumentOptions(frames, evidenceUnits);
@@ -173,6 +165,8 @@
 	}
 
 	function collectionConclusionText(view: ObjectiveResearchView) {
+		const expertHeadline = view.conclusion_package?.expert_report?.headline_conclusion;
+		if (expertHeadline) return expertHeadline;
 		const answerSection = view.conclusion_package?.narrative.sections.find((section) =>
 			['answer', 'collection_level_conclusion'].includes(section.section_id)
 		);
@@ -192,39 +186,53 @@
 
 	function conclusionStatusLabel(pkg: ObjectiveConclusionPackage | null) {
 		if (!pkg) return $t('research.objectiveWorkspace.noLogicChain');
-		return humanizeCode(pkg.status);
+		return humanizeCode(pkg.expert_report?.status ?? pkg.status);
 	}
 
-	function contributionTitle(contribution: ObjectiveConclusionContribution) {
-		return contribution.title || contribution.source_filename || contribution.document_id;
-	}
-
-	function conclusionStatementMeta(statement: ObjectiveConclusionStatement) {
+	function expertFindingMeta(finding: ObjectiveExpertFinding) {
 		return uniqueMeta([
-			statement.strength,
-			statement.evidence_unit_ids.length
+			finding.strength,
+			finding.evidence_unit_ids.length
 				? $t('research.objectiveWorkspace.unitCount', {
-						count: statement.evidence_unit_ids.length
+						count: finding.evidence_unit_ids.length
 					})
 				: ''
 		]).join(' · ');
 	}
 
-	function reportClaimMeta(claim: ObjectiveConclusionNarrativeClaim) {
+	function expertContributionTitle(contribution: ObjectiveExpertPaperContribution) {
+		return contribution.display_title || contribution.paper_label || contribution.document_id;
+	}
+
+	function expertContributionMeta(contribution: ObjectiveExpertPaperContribution) {
 		return uniqueMeta([
-			claim.strength,
-			claim.evidence_unit_ids.length
-				? $t('research.objectiveWorkspace.unitCount', {
-						count: claim.evidence_unit_ids.length
-					})
-				: ''
+			contribution.paper_label ?? '',
+			contribution.paper_role,
+			contribution.relevance
 		]).join(' · ');
 	}
 
-	function sectionTone(section: ObjectiveConclusionNarrativeSection) {
-		if (section.section_id === 'limitations') return 'limited';
-		if (section.section_id === 'source_traceback') return 'source';
-		return 'default';
+	function expertComparisonMeta(comparison: ObjectiveExpertComparison) {
+		return uniqueMeta([
+			comparison.property ?? '',
+			comparison.comparison_axis
+				? $t('research.objectiveWorkspace.comparisonAxisContext', {
+						axis: comparison.comparison_axis
+					})
+				: '',
+			comparison.validity
+		]).join(' · ');
+	}
+
+	function expertLimitationMeta(limitation: ObjectiveExpertLimitation) {
+		return uniqueMeta([
+			humanizeCode(limitation.code),
+			limitation.evidence_unit_ids.length
+				? $t('research.objectiveWorkspace.unitCount', {
+						count: limitation.evidence_unit_ids.length
+					})
+				: ''
+		]).join(' · ');
 	}
 
 	function paperContributionSummary(paper: PaperCoverage) {
@@ -707,15 +715,13 @@
 		};
 	}
 
-	function sectionSourceEntries(section: ObjectiveConclusionNarrativeSection): SourceEntry[] {
-		const refs = section.source_refs.length
-			? section.source_refs
-			: section.claims.flatMap((claim) => claim.source_refs);
-		return refs
+	function sourceEntriesFromRefs(sourceRefs: Record<string, unknown>[], limit = 6): SourceEntry[] {
+		return sourceRefs
 			.map((sourceRef) => sourceEntryFromRef(sourceRef))
 			.filter((entry): entry is SourceEntry => entry !== null)
-			.slice(0, 6);
+			.slice(0, limit);
 	}
+
 </script>
 
 <svelte:head>
@@ -805,72 +811,56 @@
 					{/if}
 				</article>
 
-				{#if conclusionPackage}
+				{#if expertReport}
 					<div class="report-metrics" aria-label={$t('research.objectiveWorkspace.reportEvidenceMatrix')}>
 						<article>
-							<strong>{conclusionContributions.length}</strong>
+							<strong>{reportMatrix?.relevant_paper_count ?? 0}</strong>
 							<span>{$t('research.objectiveWorkspace.relevantPapers')}</span>
 						</article>
 						<article>
-							<strong>{conclusionMeasurementRowCount}</strong>
+							<strong>{reportMatrix?.measurement_result_count ?? 0}</strong>
 							<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
 						</article>
 						<article>
-							<strong>{conclusionComparisons.length}</strong>
+							<strong>{reportMatrix?.controlled_comparison_count ?? 0}</strong>
 							<span>{$t('research.objectiveWorkspace.controlledComparisons')}</span>
 						</article>
 						<article>
-							<strong>{conclusionPackage.mechanism_chain.evidence.length}</strong>
+							<strong>{reportMatrix?.mechanism_evidence_count ?? 0}</strong>
 							<span>{$t('research.objectiveWorkspace.mechanismInterpretations')}</span>
 						</article>
 					</div>
 
-					{#if reportSections.length || conclusionPackage.conclusions.length}
-						<section class="report-body" aria-label={$t('research.objectiveWorkspace.reportConclusionTitle')}>
-							{#if reportSections.length}
-								{#if reportAnswerSection?.claims.length}
-									<div class="report-claim-list report-claim-list--lead">
-										{#each reportAnswerSection.claims as claim, index (`answer-${index}`)}
-											<div>
-												<strong>{claim.claim}</strong>
-												{#if reportClaimMeta(claim)}
-													<small>{reportClaimMeta(claim)}</small>
-												{/if}
-											</div>
-										{/each}
-									</div>
-								{/if}
-								<div class="report-narrative">
-									{#each reportBodySections as section (section.section_id)}
-										<article class={`report-narrative-card report-narrative-card--${sectionTone(section)}`}>
-											<div class="report-narrative-card__heading">
-												<h5>{section.title}</h5>
-												{#if section.evidence_unit_ids.length}
-													<span>
-														{$t('research.objectiveWorkspace.unitCount', {
-															count: section.evidence_unit_ids.length
-														})}
-													</span>
-												{/if}
-											</div>
-											{#if section.body}
-												<p>{section.body}</p>
+					<section class="report-body" aria-label={$t('research.objectiveWorkspace.reportConclusionTitle')}>
+						{#if expertReport.scientific_context}
+							<article class="report-narrative-card">
+								<div class="report-narrative-card__heading">
+									<h5>{$t('research.objectiveWorkspace.scientificContext')}</h5>
+								</div>
+								<p>{expertReport.scientific_context}</p>
+							</article>
+						{/if}
+
+						{#if expertReport.key_findings.length}
+							<article class="report-narrative-card" aria-label={$t('research.objectiveWorkspace.keyFindings')}>
+								<div class="report-narrative-card__heading">
+									<h5>{$t('research.objectiveWorkspace.keyFindings')}</h5>
+									<span>
+										{$t('research.objectiveWorkspace.unitCount', {
+											count: expertReport.key_findings.length
+										})}
+									</span>
+								</div>
+								<div class="report-claim-list">
+									{#each expertReport.key_findings as finding (finding.finding_id)}
+										<div>
+											<strong>{finding.statement}</strong>
+											{#if expertFindingMeta(finding)}
+												<small>{expertFindingMeta(finding)}</small>
 											{/if}
-											{#if section.claims.length}
-												<div class="report-claim-list">
-													{#each section.claims as claim, index (`${section.section_id}-${index}`)}
-														<div>
-															<strong>{claim.claim}</strong>
-															{#if reportClaimMeta(claim)}
-																<small>{reportClaimMeta(claim)}</small>
-															{/if}
-														</div>
-													{/each}
-												</div>
-											{/if}
-											{#if sectionSourceEntries(section).length}
+											{#if sourceEntriesFromRefs(finding.source_refs, 3).length}
 												<div class="report-source-row">
-													{#each sectionSourceEntries(section) as source, index (`${section.section_id}-${source.label}-${index}`)}
+													{#each sourceEntriesFromRefs(finding.source_refs, 3) as source, index (`finding-${finding.finding_id}-${source.label}-${index}`)}
 														<a
 															href={`${resolve('/collections/[id]/documents/[document_id]', {
 																id: collectionId,
@@ -882,23 +872,149 @@
 													{/each}
 												</div>
 											{/if}
-										</article>
+										</div>
 									{/each}
 								</div>
-							{:else}
-								<div class="report-statement-list">
-									{#each conclusionPackage.conclusions as statement, index (`statement-${index}`)}
-										<article>
-											<p>{statement.claim}</p>
-											{#if conclusionStatementMeta(statement)}
-												<small>{conclusionStatementMeta(statement)}</small>
+							</article>
+						{/if}
+
+						{#if reportContributionMap.length}
+							<section
+								class="report-paper-list"
+								aria-label={$t('research.objectiveWorkspace.paperContributionTitle')}
+							>
+								<div class="report-subsection-heading">
+									<h4>{$t('research.objectiveWorkspace.paperContributionTitle')}</h4>
+								</div>
+								{#each reportContributionMap as contribution (contribution.document_id)}
+									<article>
+										<div>
+											<h5>{expertContributionTitle(contribution)}</h5>
+											{#if expertContributionMeta(contribution)}
+												<small>{expertContributionMeta(contribution)}</small>
 											{/if}
-										</article>
-									{/each}
+										</div>
+										<p>
+											{contribution.contribution_summary ||
+												$t('research.objectiveWorkspace.noBackground')}
+										</p>
+										<div class="report-paper-list__meta">
+											<span>{listLabel(contribution.changed_variables)}</span>
+											<span>{listLabel(contribution.measured_property_scope)}</span>
+											<span>
+												{$t('research.objectiveWorkspace.unitCount', {
+													count: contribution.evidence_unit_count
+												})}
+											</span>
+										</div>
+									</article>
+								{/each}
+							</section>
+						{/if}
+
+						{#if reportComparisons.length}
+							<section class="report-narrative" aria-label={$t('research.objectiveWorkspace.controlledComparisons')}>
+								<div class="report-subsection-heading">
+									<h4>{$t('research.objectiveWorkspace.controlledComparisons')}</h4>
 								</div>
+								{#each reportComparisons as comparison (comparison.comparison_id)}
+									<article class="report-narrative-card">
+										<div class="report-narrative-card__heading">
+											<h5>{comparison.summary || $t('research.objectiveWorkspace.comparisonEvidence')}</h5>
+											<span>{humanizeCode(comparison.validity)}</span>
+										</div>
+										{#if expertComparisonMeta(comparison)}
+											<p>{expertComparisonMeta(comparison)}</p>
+										{/if}
+										{#if compactRecordValue(comparison.sample_context) || compactRecordValue(comparison.baseline_context)}
+											<div class="report-context-row">
+												{#if compactRecordValue(comparison.sample_context)}
+													<span>{compactRecordValue(comparison.sample_context)}</span>
+												{/if}
+												{#if compactRecordValue(comparison.baseline_context)}
+													<span>{compactRecordValue(comparison.baseline_context)}</span>
+												{/if}
+											</div>
+										{/if}
+									</article>
+								{/each}
+							</section>
+						{/if}
+
+						{#if reportMechanismChain?.steps.length || reportMechanismChain?.evidence.length}
+							<section class="report-narrative" aria-label={$t('research.objectiveWorkspace.mechanismChainTitle')}>
+								<div class="report-subsection-heading">
+									<h4>{$t('research.objectiveWorkspace.mechanismChainTitle')}</h4>
+								</div>
+								{#if reportMechanismChain.steps.length}
+									<div class="mechanism-step-list">
+										{#each reportMechanismChain.steps as step (step.step_role)}
+											<article>
+												<span>{humanizeCode(step.step_role)}</span>
+												<p>{step.label}</p>
+											</article>
+										{/each}
+									</div>
+								{/if}
+								{#each reportMechanismChain.evidence as evidence (evidence.evidence_unit_id)}
+									<article class="report-narrative-card">
+										<div class="report-narrative-card__heading">
+											<h5>{evidence.property || $t('research.objectiveWorkspace.authorInterpretations')}</h5>
+											<span>{humanizeCode(evidence.unit_kind)}</span>
+										</div>
+										{#if evidence.summary}
+											<p>{evidence.summary}</p>
+										{/if}
+									</article>
+								{/each}
+							</section>
+						{/if}
+
+						<section class="report-narrative" aria-label={$t('research.objectiveWorkspace.limitations')}>
+							<div class="report-subsection-heading">
+								<h4>{$t('research.objectiveWorkspace.limitations')}</h4>
+							</div>
+							{#if reportLimitations.length}
+								{#each reportLimitations as limitation, index (`limitation-${limitation.code}-${index}`)}
+									<article class="report-narrative-card report-narrative-card--limited">
+										<div class="report-narrative-card__heading">
+											<h5>{humanizeCode(limitation.code)}</h5>
+											{#if expertLimitationMeta(limitation)}
+												<span>{expertLimitationMeta(limitation)}</span>
+											{/if}
+										</div>
+										<p>{limitation.message}</p>
+									</article>
+								{/each}
+							{:else}
+								<div class="empty-panel">{$t('research.objectiveWorkspace.noLimitations')}</div>
 							{/if}
 						</section>
-					{/if}
+
+						{#if reportSourceTraceback.length}
+							<section class="report-narrative" aria-label={$t('research.objectiveWorkspace.sourceTraceback')}>
+								<div class="report-subsection-heading">
+									<h4>{$t('research.objectiveWorkspace.sourceTraceback')}</h4>
+								</div>
+								<div class="report-source-row">
+									{#each sourceEntriesFromRefs(reportSourceTraceback, 10) as source, index (`trace-${source.label}-${index}`)}
+										<a
+											href={`${resolve('/collections/[id]/documents/[document_id]', {
+												id: collectionId,
+												document_id: source.documentId || ''
+											})}${source.query}`}
+										>
+											{source.label}
+										</a>
+									{/each}
+								</div>
+							</section>
+						{/if}
+					</section>
+				{:else if conclusionPackage}
+					<div class="empty-panel">
+						{$t('research.objectiveWorkspace.noExpertReport')}
+					</div>
 				{:else}
 					<div class="empty-panel">{$t('research.objectiveWorkspace.noConclusionPackage')}</div>
 				{/if}
@@ -1615,8 +1731,7 @@
 		min-width: 0;
 	}
 
-	.research-focus span,
-	.representative-evidence__heading span {
+	.research-focus span {
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 18px;
@@ -1630,7 +1745,6 @@
 
 	.report-lead span,
 	.report-lead p,
-	.report-statement-list small,
 	.report-paper-list span,
 	.report-paper-list small {
 		margin: 0;
@@ -1649,7 +1763,9 @@
 	}
 
 	.report-narrative,
-	.report-claim-list {
+	.report-claim-list,
+	.report-paper-list,
+	.mechanism-step-list {
 		display: grid;
 		gap: 12px;
 		min-width: 0;
@@ -1716,6 +1832,71 @@
 		min-width: 0;
 	}
 
+	.report-subsection-heading {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.report-subsection-heading h4,
+	.report-paper-list h5 {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 16px;
+		line-height: 22px;
+		overflow-wrap: anywhere;
+	}
+
+	.report-paper-list article,
+	.mechanism-step-list article {
+		display: grid;
+		gap: 8px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 14px;
+		background: var(--bg-subtle);
+		min-width: 0;
+	}
+
+	.report-paper-list article > div:first-child {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.report-paper-list p,
+	.mechanism-step-list p {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 22px;
+		overflow-wrap: anywhere;
+	}
+
+	.report-paper-list__meta,
+	.report-context-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.report-paper-list__meta span,
+	.report-context-row span,
+	.mechanism-step-list span {
+		max-width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 9px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 16px;
+		background: var(--surface-card);
+		overflow-wrap: anywhere;
+	}
+
 	.report-source-row {
 		display: flex;
 		flex-wrap: wrap;
@@ -1741,8 +1922,7 @@
 		gap: 10px;
 	}
 
-	.report-metrics article,
-	.report-statement-list article {
+	.report-metrics article {
 		display: grid;
 		gap: 6px;
 		min-width: 0;
@@ -1767,17 +1947,8 @@
 
 	.report-narrative-card__heading span,
 	.report-claim-list small,
-	.report-source-row a,
-	.report-statement-list article {
+	.report-source-row a {
 		background: var(--surface-card);
-	}
-
-	.report-statement-list p {
-		margin: 0;
-		color: var(--text-secondary);
-		font-size: 14px;
-		line-height: 22px;
-		overflow-wrap: anywhere;
 	}
 
 	.research-focus h4,

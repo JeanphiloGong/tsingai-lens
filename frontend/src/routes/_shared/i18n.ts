@@ -368,6 +368,10 @@ const translations: Record<Language, Translations> = {
 				mechanismChainTitle: 'Mechanism chain',
 				noConclusionPackage:
 					'No structured conclusion package is available yet; use the evidence audit below for source review.',
+				noExpertReport:
+					'The conclusion package is available, but the expert report view has not been assembled yet.',
+				scientificContext: 'Scientific context',
+				keyFindings: 'Key findings',
 				researchFocus: 'Research focus',
 				evidenceReadiness: 'Evidence readiness',
 				representativeEvidence: 'Representative evidence',
@@ -2946,6 +2950,9 @@ const translations: Record<Language, Translations> = {
 				primaryEvidenceTitle: '主要支撑数据表',
 				mechanismChainTitle: '机制链',
 				noConclusionPackage: '暂未生成结构化结论包；可先使用下方证据审查核对来源。',
+				noExpertReport: '结论包已返回，但专家报告视图尚未组装。',
+				scientificContext: '科研背景',
+				keyFindings: '关键发现',
 				researchFocus: '研究范围',
 				evidenceReadiness: '证据成熟度',
 				representativeEvidence: '代表性证据',

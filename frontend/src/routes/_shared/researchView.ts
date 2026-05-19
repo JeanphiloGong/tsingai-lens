@@ -400,6 +400,93 @@ export type ObjectiveConclusionLimitation = {
 	evidence_unit_ids: string[];
 };
 
+export type ObjectiveExpertFinding = {
+	finding_id: string;
+	statement: string;
+	strength: string;
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertEvidenceMatrix = {
+	relevant_paper_count: number;
+	measurement_result_count: number;
+	measurement_property_count: number;
+	controlled_comparison_count: number;
+	mechanism_evidence_count: number;
+	limitation_count: number;
+	source_ref_count: number;
+	measurement_value_ranges: ObjectiveConclusionMeasurementRange[];
+};
+
+export type ObjectiveExpertPaperContribution = {
+	document_id: string;
+	paper_label: string | null;
+	display_title: string | null;
+	paper_role: string;
+	relevance: string;
+	contribution_summary: string | null;
+	changed_variables: string[];
+	measured_property_scope: string[];
+	evidence_unit_count: number;
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertComparison = {
+	comparison_id: string;
+	evidence_unit_id: string;
+	document_id: string | null;
+	property: string | null;
+	comparison_axis: string | null;
+	direction: string | null;
+	validity: string;
+	summary: string | null;
+	sample_context: Record<string, unknown>;
+	process_context: Record<string, unknown>;
+	baseline_context: Record<string, unknown>;
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertMechanismEvidence = {
+	evidence_unit_id: string;
+	document_id: string | null;
+	unit_kind: string;
+	property: string | null;
+	summary: string | null;
+	sample_context: Record<string, unknown>;
+	process_context: Record<string, unknown>;
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertMechanismChain = {
+	steps: ObjectiveConclusionMechanismStep[];
+	evidence: ObjectiveExpertMechanismEvidence[];
+	evidence_unit_ids: string[];
+};
+
+export type ObjectiveExpertLimitation = {
+	code: string;
+	message: string;
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertReport = {
+	schema_version: string;
+	status: string;
+	headline_conclusion: string;
+	scientific_context: string;
+	key_findings: ObjectiveExpertFinding[];
+	evidence_matrix: ObjectiveExpertEvidenceMatrix;
+	paper_contribution_map: ObjectiveExpertPaperContribution[];
+	controlled_comparisons: ObjectiveExpertComparison[];
+	mechanism_chain: ObjectiveExpertMechanismChain;
+	limitations: ObjectiveExpertLimitation[];
+	source_traceback: Record<string, unknown>[];
+	traceability: Record<string, unknown>;
+};
+
 export type ObjectiveConclusionPackage = {
 	schema_version: string;
 	title: string;
@@ -419,6 +506,7 @@ export type ObjectiveConclusionPackage = {
 	conclusions: ObjectiveConclusionStatement[];
 	limitations: ObjectiveConclusionLimitation[];
 	source_refs: Record<string, unknown>[];
+	expert_report: ObjectiveExpertReport | null;
 };
 
 export type ObjectiveList = {
@@ -1454,6 +1542,169 @@ function normalizeConclusionLimitation(value: unknown): ObjectiveConclusionLimit
 	};
 }
 
+function normalizeObjectiveExpertFinding(value: unknown): ObjectiveExpertFinding | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const statement = toText(record.statement ?? record.claim ?? record.summary);
+	if (!statement) return null;
+
+	return {
+		finding_id: toText(record.finding_id ?? record.id, statement),
+		statement,
+		strength: toText(record.strength, 'evidence'),
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertEvidenceMatrix(
+	value: unknown
+): ObjectiveExpertEvidenceMatrix {
+	const record = asRecord(value);
+	return {
+		relevant_paper_count: toNumber(record?.relevant_paper_count),
+		measurement_result_count: toNumber(record?.measurement_result_count),
+		measurement_property_count: toNumber(record?.measurement_property_count),
+		controlled_comparison_count: toNumber(record?.controlled_comparison_count),
+		mechanism_evidence_count: toNumber(record?.mechanism_evidence_count),
+		limitation_count: toNumber(record?.limitation_count),
+		source_ref_count: toNumber(record?.source_ref_count),
+		measurement_value_ranges: asArray(record?.measurement_value_ranges)
+			.map((item) => normalizeConclusionMeasurementRange(item))
+			.filter((item): item is ObjectiveConclusionMeasurementRange => item !== null)
+	};
+}
+
+function normalizeObjectiveExpertPaperContribution(
+	value: unknown
+): ObjectiveExpertPaperContribution | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const documentId = toText(record.document_id ?? record.paper_id);
+	if (!documentId) return null;
+
+	return {
+		document_id: documentId,
+		paper_label: nonEmptyText(record.paper_label),
+		display_title: nonEmptyText(record.display_title ?? record.title),
+		paper_role: toText(record.paper_role, 'uncertain'),
+		relevance: toText(record.relevance, 'uncertain'),
+		contribution_summary: nonEmptyText(record.contribution_summary ?? record.summary),
+		changed_variables: toStringList(record.changed_variables),
+		measured_property_scope: toStringList(record.measured_property_scope),
+		evidence_unit_count: toNumber(record.evidence_unit_count),
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertComparison(value: unknown): ObjectiveExpertComparison | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
+	const comparisonId = toText(record.comparison_id ?? record.id, evidenceUnitId);
+	if (!evidenceUnitId && !comparisonId) return null;
+
+	return {
+		comparison_id: comparisonId || evidenceUnitId,
+		evidence_unit_id: evidenceUnitId,
+		document_id: nonEmptyText(record.document_id),
+		property: nonEmptyText(record.property ?? record.property_normalized),
+		comparison_axis: nonEmptyText(record.comparison_axis),
+		direction: nonEmptyText(record.direction),
+		validity: toText(record.validity, 'directional'),
+		summary: nonEmptyText(record.summary ?? record.statement),
+		sample_context: normalizeUnknownRecord(record.sample_context),
+		process_context: normalizeUnknownRecord(record.process_context),
+		baseline_context: normalizeUnknownRecord(record.baseline_context),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertMechanismEvidence(
+	value: unknown
+): ObjectiveExpertMechanismEvidence | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
+	if (!evidenceUnitId) return null;
+
+	return {
+		evidence_unit_id: evidenceUnitId,
+		document_id: nonEmptyText(record.document_id),
+		unit_kind: toText(record.unit_kind, 'interpretation'),
+		property: nonEmptyText(record.property ?? record.property_normalized),
+		summary: nonEmptyText(record.summary ?? record.statement ?? record.interpretation),
+		sample_context: normalizeUnknownRecord(record.sample_context),
+		process_context: normalizeUnknownRecord(record.process_context),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertMechanismChain(value: unknown): ObjectiveExpertMechanismChain {
+	const record = asRecord(value);
+	return {
+		steps: asArray(record?.steps)
+			.map((item) => normalizeConclusionMechanismStep(item))
+			.filter((item): item is ObjectiveConclusionMechanismStep => item !== null),
+		evidence: asArray(record?.evidence)
+			.map((item) => normalizeObjectiveExpertMechanismEvidence(item))
+			.filter((item): item is ObjectiveExpertMechanismEvidence => item !== null),
+		evidence_unit_ids: toStringList(record?.evidence_unit_ids)
+	};
+}
+
+function normalizeObjectiveExpertLimitation(value: unknown): ObjectiveExpertLimitation | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const message = toText(record.message ?? record.detail ?? record.code);
+	if (!message) return null;
+
+	return {
+		code: toText(record.code, 'limitation'),
+		message,
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertReport(value: unknown): ObjectiveExpertReport | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const headlineConclusion = toText(record.headline_conclusion ?? record.answer);
+	const scientificContext = toText(record.scientific_context ?? record.context);
+	if (!headlineConclusion && !scientificContext) return null;
+
+	return {
+		schema_version: toText(record.schema_version, 'objective_expert_report.v1'),
+		status: toText(record.status, 'empty'),
+		headline_conclusion: headlineConclusion,
+		scientific_context: scientificContext,
+		key_findings: asArray(record.key_findings)
+			.map((item) => normalizeObjectiveExpertFinding(item))
+			.filter((item): item is ObjectiveExpertFinding => item !== null),
+		evidence_matrix: normalizeObjectiveExpertEvidenceMatrix(record.evidence_matrix),
+		paper_contribution_map: asArray(record.paper_contribution_map)
+			.map((item) => normalizeObjectiveExpertPaperContribution(item))
+			.filter((item): item is ObjectiveExpertPaperContribution => item !== null),
+		controlled_comparisons: asArray(record.controlled_comparisons)
+			.map((item) => normalizeObjectiveExpertComparison(item))
+			.filter((item): item is ObjectiveExpertComparison => item !== null),
+		mechanism_chain: normalizeObjectiveExpertMechanismChain(record.mechanism_chain),
+		limitations: asArray(record.limitations)
+			.map((item) => normalizeObjectiveExpertLimitation(item))
+			.filter((item): item is ObjectiveExpertLimitation => item !== null),
+		source_traceback: normalizeUnknownRecordList(record.source_traceback),
+		traceability: normalizeUnknownRecord(record.traceability)
+	};
+}
+
 function normalizeConclusionNarrativeClaim(
 	value: unknown
 ): ObjectiveConclusionNarrativeClaim | null {
@@ -1536,7 +1787,8 @@ function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusio
 		limitations: asArray(record.limitations)
 			.map((item) => normalizeConclusionLimitation(item))
 			.filter((item): item is ObjectiveConclusionLimitation => item !== null),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		expert_report: normalizeObjectiveExpertReport(record.expert_report)
 	};
 }
 

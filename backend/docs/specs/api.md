@@ -409,11 +409,18 @@ Objective research-view 最小返回结构：
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
 
-这是 research-facing 聚合合同，用来把 raw paper facts 组织成样品矩阵、
+这是 research-facing 聚合合同，用来把 Core 研究证据组织成样品矩阵、
 条件序列、文献覆盖、材料档案和 collection 比较组。
 
 它不是 raw `measurement_results` 或 result-card list 的兼容包装；前端不应在
 主界面重新从一条条 fact 自行拼矩阵。
+
+Collection-scoped materials 是 objective-first 输出：`/materials` 与
+`/materials/{material_id}/research-view` 只能由 objective evidence units 和
+objective material rows 驱动。旧 paper facts 路径可以继续服务 document-scoped
+research-view、debug 或 source 核验，但不得作为 collection material 主页面的
+fallback。collection 已有文件但尚未生成 objective material evidence 时，这两个
+collection material 接口应返回 `409 research_view_not_ready`。
 
 Collection research-view 最小返回结构：
 
@@ -465,6 +472,7 @@ Collection material profile 最小返回结构：
 - `comparison_groups`
 - `condition_series`
 - `evidence_refs`
+- `report_package`
 - `debug_links`
 - `warnings`
 
@@ -507,8 +515,31 @@ empty | processing | partial | ready | failed
   condition 数、evidence 数和主要 warning
 - `materials` 是 collection 的主材料入口；`comparison_groups` 是材料档案内
   的分析模块和高级调试入口，不是顶级主导航对象
-- collection material profile 可以跨文献聚合别名、样品、工艺范围、性能摘要
-  和比较组
+- collection material profile 可以跨文献聚合别名、样品、工艺范围、性能摘要、
+  比较组和 `report_package`
+- `report_package` 是材料详情页的主报告数据包，最小包含：
+  - `schema_version`
+  - `status`
+  - `title`
+  - `material_id`
+  - `canonical_name`
+  - `summary`
+  - `paper_contributions`
+  - `material_state_chains`
+  - `limitations`
+  - `source_refs`
+- `material_state_chains` 是按材料状态组织的科研链路，每条链路至少表达：
+  - `sample_id` / `sample_label`
+  - `material` / `material_state`
+  - `preparation_context`
+  - `test_conditions`
+  - `performance_results`
+  - `source_evidence`
+  - `comparability_boundary`
+  - `confidence`
+  - `unresolved_fields`
+- `report_package.status` 为 `partial` 时表示仍可展示已解析链路，但前端必须同时
+  展示 `limitations`、`comparability_boundary` 或 `unresolved_fields`
 - document material profile 只表达单篇文献内一个材料的事实，不做跨文献合并
 - `sample_matrix.rows` 应优先是一行一个真实 sample / variant
 - generic material/process mention 不应成为主矩阵样品行

@@ -545,7 +545,23 @@ empty | processing | partial | ready | failed
   - `material_state_chains`
   - `limitations`
   - `evidence_appendix`
+  - `document`
   - `source_refs`
+- `report_package.document` 是材料详情页优先消费的 Markdown 报告文档，最小包含：
+  - `schema_version`，当前为 `material_report_document.v1`
+  - `status`
+  - `title`
+  - `markdown`
+  - `citations`
+  - `outline`
+  - `warnings`
+  - `evidence_appendix`
+- `document.markdown` 是 reader-facing 报告正文，必须用类似 `[E001]` 的 citation
+  token 标注可追溯结论；`document.citations` 是 citation ID 到
+  `EvidenceReference` 的映射，前端用它打开 source traceback
+- 当前 `document.markdown` 可以由后端确定性 composer 从已有
+  `report_package` evidence 生成；后续如果引入 LLM writer，也必须由显式构建或
+  生成动作产出持久化/可读取 artifact，`GET .../research-view` 不得触发 LLM 调用
 - `material_state_chains` / `representative_states`
   是按材料状态组织的精选科研链路，不是完整 `sample_matrix.rows` 的逐行镜像；
   完整样品/条件行必须继续由 `sample_matrix` 和 `evidence_appendix` 承载

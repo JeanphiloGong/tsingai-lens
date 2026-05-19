@@ -261,6 +261,27 @@ must only read persisted artifacts.
   density rows, and P006 texture/model cases matter without forcing them into a
   uniform card shape.
 
+## First Implementation Slice
+
+The first shipped slice establishes the API and frontend rendering contract
+before adding the LLM writer:
+
+- `report_package.document` is returned from material research-view responses
+  with `schema_version=material_report_document.v1`
+- the document contains deterministic Markdown assembled from the existing
+  material report package, outline entries, `citations`, warnings, and the
+  evidence appendix
+- citation tokens such as `[E001]` are backed by `EvidenceReference` records so
+  the frontend can open the existing evidence drawer/source traceback
+- the material detail page prefers `document.markdown` when present and keeps
+  the matrix, comparisons, and evidence locator as supporting views
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view`
+  remains read-only and does not call the LLM
+
+This slice is intentionally a deterministic baseline. The section-scoped LLM
+writer, grounding validator, and persistence trigger remain the next report
+generation work.
+
 ## Relationship To Existing Report Work
 
 This plan is related to, but distinct from, material review PDF generation.

@@ -950,7 +950,10 @@ class ResearchObjectiveService:
             comparisons=comparisons,
             mechanism_units=mechanism_units,
         )
-        source_refs = self._objective_conclusion_source_refs(evidence_units)
+        source_refs = self._objective_conclusion_source_refs(
+            evidence_units,
+            paper_contributions=paper_contributions,
+        )
         narrative_sections = self._objective_conclusion_narrative_sections(
             objective=objective,
             paper_contributions=paper_contributions,
@@ -1014,21 +1017,50 @@ class ResearchObjectiveService:
     ) -> list[dict[str, Any]]:
         return [
             {
-                "section_id": "research_objective",
-                "title": "Research objective",
-                "body": objective.question,
+                "section_id": "answer",
+                "title": "Answer",
+                "body": self._objective_conclusion_answer(
+                    objective=objective,
+                    paper_contributions=paper_contributions,
+                    measurement_ranges=measurement_ranges,
+                    controlled_comparisons=controlled_comparisons,
+                    mechanism_chain=mechanism_chain,
+                    limitations=limitations,
+                ),
+                "claims": [],
+                "evidence_unit_ids": self._dedupe_preserving_order(
+                    [
+                        evidence_unit_id
+                        for statement in conclusions
+                        for evidence_unit_id in statement.get("evidence_unit_ids", [])
+                    ]
+                ),
+                "source_refs": self._objective_source_refs_for_evidence_ids(
+                    source_refs,
+                    [
+                        evidence_unit_id
+                        for statement in conclusions
+                        for evidence_unit_id in statement.get("evidence_unit_ids", [])
+                    ],
+                ),
+            },
+            {
+                "section_id": "research_context",
+                "title": "Research context",
+                "body": self._objective_conclusion_context_summary(
+                    objective=objective,
+                    paper_contributions=paper_contributions,
+                ),
                 "claims": [],
                 "evidence_unit_ids": [],
                 "source_refs": [],
             },
             {
-                "section_id": "collection_level_conclusion",
-                "title": "Collection-level conclusion",
-                "body": self._objective_conclusion_collection_summary(
-                    objective=objective,
+                "section_id": "key_evidence",
+                "title": "Key evidence",
+                "body": self._objective_conclusion_evidence_summary(
                     measurement_ranges=measurement_ranges,
-                    controlled_comparisons=controlled_comparisons,
-                    mechanism_chain=mechanism_chain,
+                    primary_evidence_tables=primary_evidence_tables,
                 ),
                 "claims": [
                     self._objective_traceable_claim(
@@ -1054,8 +1086,8 @@ class ResearchObjectiveService:
                 ),
             },
             {
-                "section_id": "paper_contribution_map",
-                "title": "Paper contribution map",
+                "section_id": "paper_contributions",
+                "title": "Paper contributions",
                 "body": self._objective_conclusion_paper_summary(paper_contributions),
                 "claims": [
                     self._objective_traceable_claim(
@@ -1082,29 +1114,6 @@ class ResearchObjectiveService:
                         evidence_unit_id
                         for contribution in paper_contributions
                         for evidence_unit_id in contribution.get("evidence_unit_ids", [])
-                    ],
-                ),
-            },
-            {
-                "section_id": "evidence_matrix",
-                "title": "Evidence matrix",
-                "body": self._objective_conclusion_evidence_matrix_summary(
-                    primary_evidence_tables
-                ),
-                "claims": [],
-                "evidence_unit_ids": self._dedupe_preserving_order(
-                    [
-                        str(row.get("evidence_unit_id") or "")
-                        for table in primary_evidence_tables
-                        for row in table.get("rows", [])
-                    ]
-                ),
-                "source_refs": self._objective_source_refs_for_evidence_ids(
-                    source_refs,
-                    [
-                        str(row.get("evidence_unit_id") or "")
-                        for table in primary_evidence_tables
-                        for row in table.get("rows", [])
                     ],
                 ),
             },
@@ -1198,6 +1207,70 @@ class ResearchObjectiveService:
             },
         ]
 
+    def _objective_conclusion_answer(
+        self,
+        *,
+        objective: ResearchObjective,
+        paper_contributions: list[dict[str, Any]],
+        measurement_ranges: list[dict[str, Any]],
+        controlled_comparisons: list[dict[str, Any]],
+        mechanism_chain: dict[str, Any],
+        limitations: list[dict[str, Any]],
+    ) -> str:
+        materials = self._human_join(objective.material_scope)
+        process_axes = self._human_join(objective.process_axes)
+        property_axes = self._human_join(objective.property_axes)
+        primary_paper = self._objective_primary_contribution(paper_contributions)
+        pieces = [
+            (
+                f"For {materials or 'the selected material system'}, the current "
+                f"evidence package evaluates how {process_axes or 'the process variables'} "
+                f"affect {property_axes or 'the target response'}."
+            )
+        ]
+        if primary_paper is not None:
+            pieces.append(
+                f"The strongest contribution is {self._objective_contribution_title(primary_paper)}, "
+                f"because it directly contributes {self._objective_contribution_scope(primary_paper)}."
+            )
+        range_summary = self._objective_logic_chain_range_summary(measurement_ranges)
+        if range_summary:
+            pieces.append(f"The resolved measurement evidence covers {range_summary}.")
+        if controlled_comparisons:
+            pieces.append(
+                f"{len(controlled_comparisons)} comparison item(s) connect the variable changes to observed results."
+            )
+        mechanism_count = len(mechanism_chain.get("evidence", []))
+        if mechanism_count:
+            pieces.append(
+                "Mechanism evidence links processing or treatment changes to microstructure, defects, "
+                "or author interpretation before reaching the reported property response."
+            )
+        if limitations:
+            pieces.append(
+                "The conclusion should still be read with the listed limitations because some joins, "
+                "conditions, or mechanism evidence remain incomplete."
+            )
+        return " ".join(pieces)
+
+    def _objective_conclusion_context_summary(
+        self,
+        *,
+        objective: ResearchObjective,
+        paper_contributions: list[dict[str, Any]],
+    ) -> str:
+        materials = self._human_join(objective.material_scope)
+        process_axes = self._human_join(objective.process_axes)
+        property_axes = self._human_join(objective.property_axes)
+        paper_count = len(paper_contributions)
+        return (
+            f"Objective: {objective.question} The report is scoped to "
+            f"{materials or 'the selected material system'}, process axes "
+            f"{process_axes or 'not specified'}, and target properties "
+            f"{property_axes or 'not specified'}. {paper_count} relevant paper(s) "
+            "are considered in this objective-scoped evidence package."
+        )
+
     def _objective_traceable_claim(
         self,
         statement: dict[str, Any],
@@ -1239,28 +1312,25 @@ class ResearchObjectiveService:
             if str(source_ref.get("evidence_unit_id") or "") in wanted
         ]
 
-    def _objective_conclusion_collection_summary(
+    def _objective_conclusion_evidence_summary(
         self,
         *,
-        objective: ResearchObjective,
         measurement_ranges: list[dict[str, Any]],
-        controlled_comparisons: list[dict[str, Any]],
-        mechanism_chain: dict[str, Any],
+        primary_evidence_tables: list[dict[str, Any]],
     ) -> str:
-        pieces = [objective.question]
+        row_count = sum(
+            len(table.get("rows", []))
+            for table in primary_evidence_tables
+        )
         range_summary = self._objective_logic_chain_range_summary(measurement_ranges)
+        if not row_count:
+            return "No resolved measurement rows are available yet for this objective."
         if range_summary:
-            pieces.append(f"Traceable measured ranges are available: {range_summary}.")
-        if controlled_comparisons:
-            pieces.append(
-                f"{len(controlled_comparisons)} comparison finding(s) support the objective."
+            return (
+                f"The key evidence table contains {row_count} measurement row(s). "
+                f"Across those rows, {range_summary}."
             )
-        mechanism_count = len(mechanism_chain.get("evidence", []))
-        if mechanism_count:
-            pieces.append(
-                f"{mechanism_count} mechanism or characterization finding(s) explain the observed trend."
-            )
-        return " ".join(pieces)
+        return f"The key evidence table contains {row_count} measurement row(s)."
 
     def _objective_conclusion_paper_summary(
         self,
@@ -1268,33 +1338,76 @@ class ResearchObjectiveService:
     ) -> str:
         if not paper_contributions:
             return "No paper contribution records are available for this objective."
-        roles = self._dedupe_preserving_order(
-            [
-                str(contribution.get("paper_role") or "")
-                for contribution in paper_contributions
-            ]
-        )
-        role_text = ", ".join(roles) if roles else "uncertain roles"
-        return (
-            f"{len(paper_contributions)} relevant paper(s) contribute evidence "
-            f"to this objective with roles: {role_text}."
-        )
+        primary = self._objective_primary_contribution(paper_contributions)
+        secondary_count = max(len(paper_contributions) - 1, 0)
+        if primary is None:
+            return f"{len(paper_contributions)} relevant paper(s) contribute objective-scoped evidence."
+        pieces = [
+            f"{self._objective_contribution_title(primary)} is the primary contribution: "
+            f"it provides {self._objective_contribution_scope(primary)}."
+        ]
+        if secondary_count:
+            pieces.append(
+                f"The remaining {secondary_count} paper(s) are supporting or limited contributions for this objective."
+            )
+        return " ".join(pieces)
 
     def _objective_contribution_claim(
         self,
         contribution: dict[str, Any],
     ) -> str:
-        title = contribution.get("title") or contribution.get("document_id") or "This paper"
-        variables = ", ".join(contribution.get("changed_variables", []) or [])
-        properties = ", ".join(contribution.get("measured_property_scope", []) or [])
+        title = self._objective_contribution_title(contribution)
+        variables = self._human_join(contribution.get("changed_variables", []) or [])
+        properties = self._human_join(contribution.get("measured_property_scope", []) or [])
         details = []
         if variables:
-            details.append(f"variables {variables}")
+            details.append(f"variables: {variables}")
         if properties:
-            details.append(f"properties {properties}")
+            details.append(f"properties: {properties}")
         if details:
-            return f"{title} contributes {' and '.join(details)}."
+            return f"{title} contributes {'; '.join(details)}."
         return f"{title} contributes objective-scoped evidence."
+
+    def _objective_primary_contribution(
+        self,
+        paper_contributions: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not paper_contributions:
+            return None
+
+        def rank(contribution: dict[str, Any]) -> tuple[int, int, int, str]:
+            relevance = str(contribution.get("relevance") or "").lower()
+            role = str(contribution.get("paper_role") or "").lower()
+            relevance_score = {"high": 3, "medium": 2, "low": 1}.get(relevance, 0)
+            role_score = 2 if "primary" in role or "experiment" in role else 0
+            evidence_count = int(contribution.get("evidence_unit_count") or 0)
+            return (
+                relevance_score,
+                role_score,
+                evidence_count,
+                str(contribution.get("document_id") or ""),
+            )
+
+        return max(paper_contributions, key=rank)
+
+    def _objective_contribution_title(self, contribution: dict[str, Any]) -> str:
+        return str(
+            contribution.get("title")
+            or contribution.get("source_filename")
+            or contribution.get("document_id")
+            or "This paper"
+        )
+
+    def _objective_contribution_scope(self, contribution: dict[str, Any]) -> str:
+        variables = self._human_join(contribution.get("changed_variables", []) or [])
+        properties = self._human_join(contribution.get("measured_property_scope", []) or [])
+        if variables and properties:
+            return f"{variables} evidence tied to {properties}"
+        if variables:
+            return f"{variables} process-variable evidence"
+        if properties:
+            return f"{properties} property evidence"
+        return "objective-scoped evidence"
 
     def _objective_conclusion_evidence_matrix_summary(
         self,
@@ -1320,15 +1433,15 @@ class ResearchObjectiveService:
         controlled_comparisons: list[dict[str, Any]],
     ) -> str:
         if not controlled_comparisons:
-            return "No controlled comparison evidence is available yet."
+            return "No controlled comparison evidence is available yet, so the report cannot make a strict variable-isolated comparison."
         controlled_count = sum(
             1
             for comparison in controlled_comparisons
             if comparison.get("validity") == "controlled"
         )
         return (
-            f"{len(controlled_comparisons)} comparison item(s) are available; "
-            f"{controlled_count} have an explicit baseline context."
+            f"{len(controlled_comparisons)} comparison item(s) are available. "
+            f"{controlled_count} comparison item(s) include an explicit baseline context; the others should be read as directional evidence."
         )
 
     def _objective_conclusion_mechanism_summary(
@@ -1337,11 +1450,16 @@ class ResearchObjectiveService:
     ) -> str:
         evidence_count = len(mechanism_chain.get("evidence", []))
         if not evidence_count:
-            return "No mechanism evidence is available yet."
-        step_count = len(mechanism_chain.get("steps", []))
+            return "No mechanism evidence is available yet, so the report cannot explain how the process variables cause the observed response."
+        step_labels = [
+            str(step.get("label") or "")
+            for step in mechanism_chain.get("steps", [])
+            if isinstance(step, dict) and step.get("label")
+        ]
+        if step_labels:
+            return " ".join(step_labels)
         return (
-            f"The mechanism chain has {step_count} step(s) and "
-            f"{evidence_count} linked evidence item(s)."
+            "Mechanism evidence is linked, but the process-structure-property steps are not resolved yet."
         )
 
     def _objective_conclusion_limitation_summary(
@@ -1350,6 +1468,13 @@ class ResearchObjectiveService:
     ) -> str:
         if not limitations:
             return "No explicit limitations are reported for the current evidence package."
+        messages = [
+            str(limitation.get("message") or "").strip()
+            for limitation in limitations[:3]
+            if limitation.get("message")
+        ]
+        if messages:
+            return " ".join(messages)
         return f"{len(limitations)} limitation or uncertainty item(s) constrain this conclusion."
 
     def _objective_conclusion_source_summary(
@@ -1362,8 +1487,8 @@ class ResearchObjectiveService:
             [str(source_ref.get("document_id") or "") for source_ref in source_refs]
         )
         return (
-            f"{len(source_refs)} source reference(s) support this report "
-            f"across {len(documents)} document(s)."
+            f"{len(source_refs)} source reference(s) support this report across "
+            f"{len(documents)} document(s). Use these links to audit the evidence behind each claim."
         )
 
     def _objective_conclusion_traceability(
@@ -1530,8 +1655,10 @@ class ResearchObjectiveService:
             statements.append(
                 {
                     "claim": (
-                        f"{property_name} has traceable measurement results "
-                        "for this objective."
+                        self._objective_measurement_range_claim(
+                            property_name=property_name,
+                            value_range=value_range,
+                        )
                     ),
                     "evidence_unit_ids": [
                         item.get("evidence_unit_id")
@@ -1547,7 +1674,7 @@ class ResearchObjectiveService:
         if comparisons:
             statements.append(
                 {
-                    "claim": "Controlled or directional comparison evidence is available.",
+                    "claim": "Comparison evidence connects at least one variable change to the target response.",
                     "evidence_unit_ids": [
                         unit.evidence_unit_id for unit in comparisons
                     ],
@@ -1557,7 +1684,7 @@ class ResearchObjectiveService:
         if mechanism_units:
             statements.append(
                 {
-                    "claim": "Mechanism evidence is available for explaining process-structure-property links.",
+                    "claim": "Characterization or interpretation evidence supports a process-structure-property explanation.",
                     "evidence_unit_ids": [
                         unit.evidence_unit_id for unit in mechanism_units
                     ],
@@ -1565,6 +1692,31 @@ class ResearchObjectiveService:
                 }
             )
         return statements
+
+    def _objective_measurement_range_claim(
+        self,
+        *,
+        property_name: str,
+        value_range: dict[str, Any],
+    ) -> str:
+        min_point = value_range.get("min")
+        max_point = value_range.get("max")
+        if not isinstance(min_point, dict) or not isinstance(max_point, dict):
+            return f"{property_name} is backed by resolved measurement evidence."
+        unit = str(value_range.get("unit") or "").strip()
+        min_value = min_point.get("source_value_text") or min_point.get("value")
+        max_value = max_point.get("source_value_text") or max_point.get("value")
+        if min_value in (None, "") or max_value in (None, ""):
+            return f"{property_name} is backed by resolved measurement evidence."
+        min_label = self._objective_measurement_point_label(min_point)
+        max_label = self._objective_measurement_point_label(max_point)
+        if min_point.get("evidence_unit_id") == max_point.get("evidence_unit_id"):
+            return f"{property_name} is reported as {self._format_value_with_unit(min_value, unit)} for {min_label}."
+        return (
+            f"{property_name} spans {self._format_value_with_unit(min_value, unit)} "
+            f"to {self._format_value_with_unit(max_value, unit)} across "
+            f"{min_label} and {max_label}."
+        )
 
     def _objective_conclusion_limitations(
         self,
@@ -1619,9 +1771,12 @@ class ResearchObjectiveService:
     def _objective_conclusion_source_refs(
         self,
         evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+        *,
+        paper_contributions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         refs: list[dict[str, Any]] = []
         seen: set[str] = set()
+        document_labels = self._objective_document_display_labels(paper_contributions)
         for unit in evidence_units:
             for source_ref in unit.source_refs:
                 record = {
@@ -1633,12 +1788,101 @@ class ResearchObjectiveService:
                     }.items()
                     if value not in (None, "", [], {})
                 }
+                record["display_label"] = self._objective_source_display_label(
+                    record,
+                    document_labels=document_labels,
+                )
                 key = json.dumps(record, ensure_ascii=False, sort_keys=True)
                 if key in seen:
                     continue
                 seen.add(key)
                 refs.append(record)
         return refs
+
+    def _objective_document_display_labels(
+        self,
+        paper_contributions: list[dict[str, Any]],
+    ) -> dict[str, str]:
+        labels: dict[str, str] = {}
+        for index, contribution in enumerate(paper_contributions, start=1):
+            document_id = str(contribution.get("document_id") or "")
+            if document_id:
+                labels[document_id] = f"P{index:03d}"
+        return labels
+
+    def _objective_source_display_label(
+        self,
+        source_ref: dict[str, Any],
+        *,
+        document_labels: dict[str, str],
+    ) -> str:
+        document_id = str(source_ref.get("document_id") or "").strip()
+        document_label = document_labels.get(document_id) or self._short_source_identifier(
+            document_id
+        )
+        kind_label = self._objective_source_kind_label(source_ref)
+        page = source_ref.get("page") or source_ref.get("page_number")
+        parts = [document_label, kind_label]
+        if page not in (None, "", [], {}):
+            parts.append(f"p.{page}")
+        return " · ".join(part for part in parts if part)
+
+    def _objective_source_kind_label(self, source_ref: dict[str, Any]) -> str:
+        kind = str(source_ref.get("source_kind") or "").strip().lower()
+        source_ref_id = str(source_ref.get("source_ref") or "").strip()
+        if kind in {"table", "table_cell"}:
+            table_number = self._trailing_number(source_ref_id)
+            return f"Table {table_number}" if table_number else "Table"
+        if kind in {"figure", "image"}:
+            figure_number = self._trailing_number(source_ref_id)
+            return f"Figure {figure_number}" if figure_number else "Figure"
+        if kind in {"text_window", "block", "paragraph", "section"}:
+            return "Text"
+        return kind.replace("_", " ").title() if kind else "Source"
+
+    def _trailing_number(self, value: str) -> str:
+        match = re.search(r"(\d+)(?!.*\d)", value)
+        return match.group(1) if match else ""
+
+    def _short_source_identifier(self, value: str) -> str:
+        if not value:
+            return ""
+        return value if len(value) <= 12 else value[:12]
+
+    def _objective_measurement_point_label(self, point: dict[str, Any]) -> str:
+        sample_context = point.get("sample_context")
+        process_context = point.get("process_context")
+        for record in (sample_context, process_context):
+            if not isinstance(record, dict):
+                continue
+            for key in ("sample", "sample_id", "sample_label", "condition", "name"):
+                value = record.get(key)
+                if value not in (None, "", [], {}):
+                    return str(value)
+            for value in record.values():
+                if value not in (None, "", [], {}):
+                    return str(value)
+        return "one resolved condition"
+
+    def _format_value_with_unit(self, value: Any, unit: str) -> str:
+        text = str(value)
+        if not unit or unit in text:
+            return text
+        return f"{text} {unit}"
+
+    def _human_join(self, values: Any) -> str:
+        items = [
+            str(value).strip()
+            for value in values
+            if str(value).strip()
+        ] if isinstance(values, (list, tuple)) else []
+        if not items:
+            return ""
+        if len(items) == 1:
+            return items[0]
+        if len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return f"{', '.join(items[:-1])}, and {items[-1]}"
 
     def _objective_list_item(self, objective: ResearchObjective, *, facts) -> dict[str, Any]:
         frames = self._filter_objective_records(

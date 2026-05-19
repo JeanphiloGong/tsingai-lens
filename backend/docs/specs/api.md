@@ -536,11 +536,20 @@ empty | processing | partial | ready | failed
   - `material_id`
   - `canonical_name`
   - `summary`
+  - `executive_summary`
+  - `material_scope`
   - `paper_contributions`
+  - `key_findings`
+  - `representative_states`
+  - `thematic_sections`
   - `material_state_chains`
   - `limitations`
+  - `evidence_appendix`
   - `source_refs`
-- `material_state_chains` 是按材料状态组织的科研链路，每条链路至少表达：
+- `material_state_chains` / `representative_states`
+  是按材料状态组织的精选科研链路，不是完整 `sample_matrix.rows` 的逐行镜像；
+  完整样品/条件行必须继续由 `sample_matrix` 和 `evidence_appendix` 承载
+- 每条代表性材料状态链路至少表达：
   - `sample_id` / `sample_label`
   - `material` / `material_state`
   - `preparation_context`
@@ -550,6 +559,13 @@ empty | processing | partial | ready | failed
   - `comparability_boundary`
   - `confidence`
   - `unresolved_fields`
+- `key_findings` 是报告级关键发现，每条 finding 必须保留支撑
+  `evidence_refs`
+- `thematic_sections` 是报告级主题章节，例如致密化/孔隙、强度/塑性/硬度、
+  织构/模型预测、腐蚀/疲劳未闭合链路；章节可以引用多个代表状态和证据
+- `evidence_appendix` 至少表达完整 `sample_matrix` 行数、property 数、
+  evidence 数和 source table 数；前端应把它作为核验入口，而不是把所有行渲染成
+  主报告卡片
 - `report_package.status` 为 `partial` 时表示仍可展示已解析链路，但前端必须同时
   展示 `limitations`、`comparability_boundary` 或 `unresolved_fields`
 - document material profile 只表达单篇文献内一个材料的事实，不做跨文献合并

@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 _DEFAULT_OBJECTIVE_REPORT_LANGUAGE = "zh"
+_OBJECTIVE_REPORT_VERSION = "objective_report_sectioned_v1"
 _OBJECTIVE_REPORT_CONTEXT_EVIDENCE_LIMIT = 2
 _OBJECTIVE_REPORT_CONTEXT_SOURCE_REF_LIMIT = 6
 _OBJECTIVE_REPORT_CONTEXT_FINDING_LIMIT = 4
@@ -59,6 +60,90 @@ _OBJECTIVE_REPORT_CONTEXT_MECHANISM_EVIDENCE_LIMIT = 2
 _OBJECTIVE_REPORT_CONTEXT_LIMITATION_LIMIT = 3
 _OBJECTIVE_REPORT_CONTEXT_MEASUREMENT_ROW_LIMIT = 6
 _OBJECTIVE_REPORT_CONTEXT_TEXT_LIMIT = 120
+_OBJECTIVE_REPORT_SECTION_DEFINITIONS = (
+    {
+        "key": "objective_header",
+        "heading": {"zh": "# 研究目标", "en": "# Research Objective"},
+        "question": {
+            "zh": "这个 objective 要回答什么问题？",
+            "en": "What question does this objective answer?",
+        },
+        "required_evidence": ("objective", "readiness", "evidence_summary"),
+    },
+    {
+        "key": "collection_conclusion",
+        "heading": {
+            "zh": "## 集合级结论",
+            "en": "## Collection-Level Conclusion",
+        },
+        "question": {
+            "zh": "这批文献围绕该 objective 共同证明了什么？",
+            "en": "What does the collection prove for this objective?",
+        },
+        "required_evidence": (
+            "report_seed",
+            "representative_measurements",
+            "evidence_summary",
+        ),
+    },
+    {
+        "key": "paper_contribution_map",
+        "heading": {"zh": "## 文献贡献图", "en": "## Paper Contribution Map"},
+        "question": {
+            "zh": "每篇文献分别贡献了什么证据？",
+            "en": "What evidence does each paper contribute?",
+        },
+        "required_evidence": ("paper_contribution_map",),
+    },
+    {
+        "key": "evidence_matrix",
+        "heading": {"zh": "## 证据矩阵", "en": "## Evidence Matrix"},
+        "question": {
+            "zh": "当前 objective 的证据覆盖到哪些事实类型？",
+            "en": "Which fact families are covered for this objective?",
+        },
+        "required_evidence": ("evidence_summary", "evidence_matrix"),
+    },
+    {
+        "key": "controlled_comparisons",
+        "heading": {"zh": "## 受控比较", "en": "## Controlled Comparisons"},
+        "question": {
+            "zh": "哪些比较是真正围绕变量和结果建立的？",
+            "en": "Which comparisons link variables to results?",
+        },
+        "required_evidence": ("controlled_comparisons", "representative_measurements"),
+    },
+    {
+        "key": "mechanism_chain",
+        "heading": {"zh": "## 机制链路", "en": "## Mechanism Chain"},
+        "question": {
+            "zh": "作者如何解释工艺、组织和性能之间的关系？",
+            "en": "How do the authors connect process, structure, and properties?",
+        },
+        "required_evidence": ("mechanism_chain",),
+    },
+    {
+        "key": "source_traceback",
+        "heading": {"zh": "## 证据来源", "en": "## Source Traceback"},
+        "question": {
+            "zh": "这些结论可以追溯到哪些 source references？",
+            "en": "Which source references support these claims?",
+        },
+        "required_evidence": ("source_refs",),
+    },
+    {
+        "key": "limitations",
+        "heading": {
+            "zh": "## 局限性与不确定性",
+            "en": "## Limitations / Uncertainties",
+        },
+        "question": {
+            "zh": "哪些证据缺口、不可比点或不确定性限制结论？",
+            "en": "Which gaps, weak comparisons, or uncertainties limit the answer?",
+        },
+        "required_evidence": ("limitations", "readiness"),
+    },
+)
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
@@ -2668,6 +2753,167 @@ class ResearchObjectiveService:
             ),
         }
         return context
+
+    def _build_objective_report_plan(
+        self,
+        *,
+        language: str,
+    ) -> dict[str, Any]:
+        locale = "zh" if language == "zh" else "en"
+        return {
+            "report_version": _OBJECTIVE_REPORT_VERSION,
+            "sections": [
+                {
+                    "key": str(section["key"]),
+                    "heading": section["heading"][locale],
+                    "question": section["question"][locale],
+                    "required_evidence": list(section["required_evidence"]),
+                }
+                for section in _OBJECTIVE_REPORT_SECTION_DEFINITIONS
+            ],
+        }
+
+    def _build_objective_report_section_packets(
+        self,
+        context: dict[str, Any],
+        *,
+        language: str,
+    ) -> list[dict[str, Any]]:
+        plan = self._build_objective_report_plan(language=language)
+        return [
+            {
+                "section": section,
+                "packet": self._objective_report_section_packet(context, section["key"]),
+            }
+            for section in plan["sections"]
+        ]
+
+    def _objective_report_section_packet(
+        self,
+        context: dict[str, Any],
+        section_key: str,
+    ) -> dict[str, Any]:
+        report_seed = context.get("report_seed") or {}
+        if section_key == "objective_header":
+            return {
+                key: value
+                for key, value in {
+                    "objective": context.get("objective"),
+                    "readiness": context.get("readiness"),
+                    "evidence_summary": context.get("evidence_summary"),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "collection_conclusion":
+            return {
+                key: value
+                for key, value in {
+                    "headline_conclusion": report_seed.get("headline_conclusion"),
+                    "scientific_context": report_seed.get("scientific_context"),
+                    "key_findings": report_seed.get("key_findings"),
+                    "evidence_summary": context.get("evidence_summary"),
+                    "representative_measurements": context.get(
+                        "representative_measurements"
+                    ),
+                    "source_refs": self._objective_report_source_refs(
+                        context.get("source_refs"),
+                        limit=3,
+                    ),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "paper_contribution_map":
+            return {
+                key: value
+                for key, value in {
+                    "paper_contribution_map": report_seed.get(
+                        "paper_contribution_map"
+                    ),
+                    "source_refs": self._objective_report_source_refs(
+                        context.get("source_refs"),
+                        limit=3,
+                    ),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "evidence_matrix":
+            return {
+                key: value
+                for key, value in {
+                    "evidence_summary": context.get("evidence_summary"),
+                    "evidence_matrix": report_seed.get("evidence_matrix"),
+                    "evidence_units": context.get("evidence_units"),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "controlled_comparisons":
+            return {
+                key: value
+                for key, value in {
+                    "controlled_comparisons": report_seed.get(
+                        "controlled_comparisons"
+                    ),
+                    "representative_measurements": context.get(
+                        "representative_measurements"
+                    ),
+                    "evidence_units": self._objective_report_units_by_kind(
+                        context.get("evidence_units"),
+                        {"measurement", "comparison"},
+                    ),
+                    "source_refs": self._objective_report_source_refs(
+                        context.get("source_refs"),
+                        limit=3,
+                    ),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "mechanism_chain":
+            return {
+                key: value
+                for key, value in {
+                    "mechanism_chain": report_seed.get("mechanism_chain"),
+                    "evidence_units": self._objective_report_units_by_kind(
+                        context.get("evidence_units"),
+                        {"characterization", "interpretation"},
+                    ),
+                    "source_refs": self._objective_report_source_refs(
+                        context.get("source_refs"),
+                        limit=3,
+                    ),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "source_traceback":
+            return {
+                key: value
+                for key, value in {
+                    "source_refs": context.get("source_refs"),
+                    "evidence_units": context.get("evidence_units"),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "limitations":
+            return {
+                key: value
+                for key, value in {
+                    "limitations": report_seed.get("limitations"),
+                    "readiness": context.get("readiness"),
+                    "evidence_summary": context.get("evidence_summary"),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        return {}
+
+    def _objective_report_units_by_kind(
+        self,
+        evidence_units: Any,
+        kinds: set[str],
+    ) -> list[dict[str, Any]]:
+        return [
+            unit
+            for unit in evidence_units
+            if isinstance(unit, dict) and unit.get("unit_kind") in kinds
+        ] if isinstance(evidence_units, list) else []
 
     def _objective_report_objective(
         self,

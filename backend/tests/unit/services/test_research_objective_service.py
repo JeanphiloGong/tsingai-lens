@@ -1369,6 +1369,98 @@ def test_research_objective_report_context_is_llm_sized(tmp_path):
     assert len(payload) < 9000
 
 
+def test_research_objective_report_section_plan_and_packets_are_scoped(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How does energy density affect LPBF 316L density?",
+            "material_scope": ["316L stainless steel"],
+        },
+        "readiness": {"state": "partial", "warnings": ["No comparisons yet"]},
+        "evidence_summary": {
+            "evidence_unit_count": 3,
+            "measurement_count": 1,
+            "comparison_count": 1,
+            "characterization_count": 1,
+            "interpretation_count": 0,
+        },
+        "report_seed": {
+            "headline_conclusion": "Higher energy density improves densification.",
+            "scientific_context": "LPBF 316L densification is process sensitive.",
+            "key_findings": [{"summary": "Density increases from L-VED to H-VED."}],
+            "evidence_matrix": {"measurement_result_count": 3},
+            "paper_contribution_map": [
+                {"paper_label": "P001", "contribution": "parameter matrix"}
+            ],
+            "controlled_comparisons": [
+                {"summary": "H-VED has higher density than L-VED."}
+            ],
+            "mechanism_chain": {
+                "steps": ["energy density", "porosity", "relative density"],
+            },
+            "limitations": [{"summary": "Only one paper has comparable density."}],
+        },
+        "representative_measurements": [
+            {
+                "property": "relative density",
+                "sample": "H-VED",
+                "value": "99.60%",
+                "source": "P001 Table 1",
+            }
+        ],
+        "evidence_units": [
+            {"evidence_unit_id": "eu-measure", "unit_kind": "measurement"},
+            {"evidence_unit_id": "eu-compare", "unit_kind": "comparison"},
+            {"evidence_unit_id": "eu-char", "unit_kind": "characterization"},
+        ],
+        "source_refs": [
+            {
+                "evidence_unit_id": "eu-measure",
+                "display_label": "P001 Table 1",
+                "source_kind": "table",
+            }
+        ],
+    }
+
+    plan = service._build_objective_report_plan(language="zh")
+    packets = service._build_objective_report_section_packets(context, language="zh")
+
+    assert [section["key"] for section in plan["sections"]] == [
+        "objective_header",
+        "collection_conclusion",
+        "paper_contribution_map",
+        "evidence_matrix",
+        "controlled_comparisons",
+        "mechanism_chain",
+        "source_traceback",
+        "limitations",
+    ]
+    assert plan["report_version"] == "objective_report_sectioned_v1"
+    assert packets[0]["section"]["heading"] == "# 研究目标"
+    packets_by_key = {item["section"]["key"]: item["packet"] for item in packets}
+    assert "objective" in packets_by_key["objective_header"]
+    assert (
+        packets_by_key["collection_conclusion"]["representative_measurements"][0][
+            "value"
+        ]
+        == "99.60%"
+    )
+    assert packets_by_key["controlled_comparisons"]["evidence_units"] == [
+        {"evidence_unit_id": "eu-measure", "unit_kind": "measurement"},
+        {"evidence_unit_id": "eu-compare", "unit_kind": "comparison"},
+    ]
+    assert packets_by_key["mechanism_chain"]["evidence_units"] == [
+        {"evidence_unit_id": "eu-char", "unit_kind": "characterization"}
+    ]
+    assert "limitations" in packets_by_key["limitations"]
+    assert len(json.dumps(packets_by_key["controlled_comparisons"])) < len(
+        json.dumps(context)
+    )
+
+
 def test_research_objective_service_forces_extractable_objective_route_roles(
     tmp_path,
 ):

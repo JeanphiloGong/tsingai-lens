@@ -628,7 +628,11 @@ class ResearchObjectiveService:
             )
             if not markdown:
                 raise RuntimeError("objective report generation returned empty markdown")
-            warnings = self._objective_report_warnings(context, markdown)
+            warnings = self._objective_report_warnings(
+                context,
+                markdown,
+                language=language,
+            )
             status = "ready_with_warnings" if warnings else "ready"
             now = self._now_iso()
             artifact = ObjectiveReportArtifact.from_mapping(
@@ -3352,15 +3356,183 @@ class ResearchObjectiveService:
         self,
         context: dict[str, Any],
         markdown: str,
+        *,
+        language: str = _DEFAULT_OBJECTIVE_REPORT_LANGUAGE,
     ) -> list[str]:
         warnings: list[str] = []
-        if not context["source_refs"]:
+        if not context.get("source_refs"):
             warnings.append("No source references are available for this report.")
-        if not context["evidence_units"]:
+        if not context.get("evidence_units"):
             warnings.append("No objective evidence units are available for this report.")
         if markdown.count("## ") < 6:
             warnings.append("Generated report is missing one or more expected sections.")
+        for entry in self._build_objective_report_section_packets(
+            context,
+            language=language,
+        ):
+            warnings.extend(
+                self._objective_report_section_warnings(
+                    section=entry["section"],
+                    packet=entry["packet"],
+                    markdown=markdown,
+                )
+            )
+        warnings.extend(
+            self._objective_report_unsupported_number_warnings(context, markdown)
+        )
+        warnings.extend(
+            self._objective_report_unknown_source_warnings(context, markdown)
+        )
+        return list(dict.fromkeys(warnings))
+
+    def _objective_report_section_warnings(
+        self,
+        *,
+        section: dict[str, Any],
+        packet: dict[str, Any],
+        markdown: str,
+    ) -> list[str]:
+        section_key = str(section.get("key") or "")
+        heading = str(section.get("heading") or "").strip()
+        warnings: list[str] = []
+        if heading and heading not in markdown:
+            warnings.append(f"Missing objective report section: {heading}")
+        if section_key == "collection_conclusion":
+            for value_text in self._objective_report_required_measurement_values(packet):
+                if not self._report_text_contains_value(markdown, value_text):
+                    warnings.append(
+                        f"Missing representative measurement in objective report: {value_text}"
+                    )
         return warnings
+
+    def _objective_report_required_measurement_values(
+        self,
+        packet: dict[str, Any],
+    ) -> list[str]:
+        required_values: list[str] = []
+        for row in packet.get("representative_measurements", []):
+            if not isinstance(row, dict):
+                continue
+            value = str(row.get("value") or "").strip()
+            unit = str(row.get("unit") or "").strip()
+            if not value:
+                continue
+            value_text = value
+            if unit and unit.casefold() not in value.casefold():
+                value_text = f"{value} {unit}"
+            required_values.append(value_text)
+        return required_values
+
+    def _report_text_contains_value(self, markdown: str, value_text: str) -> bool:
+        return self._normalize_report_value_text(
+            value_text
+        ) in self._normalize_report_value_text(markdown)
+
+    def _normalize_report_value_text(self, value: str) -> str:
+        return re.sub(r"\s+", "", value).casefold()
+
+    def _objective_report_unsupported_number_warnings(
+        self,
+        context: dict[str, Any],
+        markdown: str,
+    ) -> list[str]:
+        allowed_numbers = {
+            self._normalize_report_number_token(token)
+            for token in self._objective_report_number_tokens(
+                json.dumps(context, ensure_ascii=False)
+            )
+        }
+        warnings: list[str] = []
+        seen: set[str] = set()
+        for token in self._objective_report_number_tokens(markdown):
+            normalized = self._normalize_report_number_token(token)
+            if normalized in allowed_numbers or normalized in seen:
+                continue
+            seen.add(normalized)
+            warnings.append(f"Unsupported numeric value in objective report: {token}")
+            if len(warnings) >= 5:
+                break
+        return warnings
+
+    def _objective_report_number_tokens(self, text: str) -> list[str]:
+        return re.findall(
+            r"(?<![A-Za-z0-9])[-+]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\s*"
+            r"(?:MPa|GPa|Pa|%|J/mm(?:3|³)|°C/s|C/s|mm/s|µm|um|HV|"
+            r"mA/cm(?:2|²)|A/cm(?:2|²)|g/cm(?:3|³))",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+    def _normalize_report_number_token(self, token: str) -> str:
+        return re.sub(
+            r"\s+",
+            "",
+            token.replace("³", "3").replace("²", "2").replace("µ", "u"),
+        ).casefold()
+
+    def _objective_report_unknown_source_warnings(
+        self,
+        context: dict[str, Any],
+        markdown: str,
+    ) -> list[str]:
+        allowed_labels = self._objective_report_source_label_tokens(context)
+        warnings: list[str] = []
+        seen: set[str] = set()
+        for label in re.findall(r"\[([^\]]+)\]", markdown):
+            normalized_label = self._normalize_source_label(label)
+            if normalized_label in seen or not self._looks_like_report_source_label(
+                normalized_label
+            ):
+                continue
+            seen.add(normalized_label)
+            if not any(token in normalized_label for token in allowed_labels):
+                warnings.append(f"Unknown source reference in objective report: {label}")
+        return warnings
+
+    def _objective_report_source_label_tokens(
+        self,
+        value: Any,
+    ) -> set[str]:
+        labels: set[str] = set()
+        if isinstance(value, dict):
+            kind = str(value.get("source_kind") or "").strip()
+            page = value.get("page")
+            if kind and page not in (None, "", [], {}):
+                labels.add(self._normalize_source_label(f"{kind} p.{page}"))
+            for key, item in value.items():
+                if key in {
+                    "display_label",
+                    "source",
+                    "source_ref",
+                    "evidence_unit_id",
+                    "document_id",
+                } and item not in (None, "", [], {}):
+                    labels.add(self._normalize_source_label(str(item)))
+                labels.update(self._objective_report_source_label_tokens(item))
+        elif isinstance(value, list):
+            for item in value:
+                labels.update(self._objective_report_source_label_tokens(item))
+        return {label for label in labels if label}
+
+    def _looks_like_report_source_label(self, normalized_label: str) -> bool:
+        return any(
+            marker in normalized_label
+            for marker in (
+                "paper",
+                "table",
+                "figure",
+                "fig",
+                "source",
+                "block",
+                "section",
+                "evidence",
+                "eu-",
+                "p00",
+            )
+        )
+
+    def _normalize_source_label(self, value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip().casefold()
 
     def _objective_report_response(
         self,

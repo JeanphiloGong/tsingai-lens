@@ -1222,12 +1222,12 @@ def test_research_objective_service_persists_generated_objective_report(tmp_path
     llm_client = _FakeObjectiveReportLLMClient(
         [
             "# 研究目标\nHow does heat treatment affect LPBF 316L yield strength?",
-            "## 集合级结论\nHT-SLM reaches 560 MPa [paper-1 · table-2].",
+            "## 集合级结论\nHT-SLM reaches 560 MPa [P001 · Table 2 · p.5].",
             "## 文献贡献图\nP001 reports tensile testing.",
             "## 证据矩阵\nOne measurement unit is available.",
             "## 受控比较\n当前证据不足。",
             "## 机制链路\n当前证据不足。",
-            "## 证据来源\npaper-1 table-2.",
+            "## 证据来源\nP001 · Table 2 · p.5.",
             "## 局限性与不确定性\n单篇文献。",
         ]
     )
@@ -1471,6 +1471,62 @@ def test_research_objective_report_section_plan_and_packets_are_scoped(tmp_path)
     assert len(json.dumps(packets_by_key["controlled_comparisons"])) < len(
         json.dumps(context)
     )
+
+
+def test_research_objective_report_warnings_verify_section_claims(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How does energy density affect LPBF 316L density?",
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {"evidence_unit_count": 1, "measurement_count": 1},
+        "report_seed": {},
+        "representative_measurements": [
+            {
+                "property": "relative density",
+                "sample": "H-VED",
+                "value": "99.60%",
+                "source": "P001 Table 1",
+            }
+        ],
+        "evidence_units": [
+            {
+                "evidence_unit_id": "eu-density",
+                "unit_kind": "measurement",
+                "value_payload": {"source_value_text": "99.60%"},
+            }
+        ],
+        "source_refs": [
+            {
+                "display_label": "P001 Table 1",
+                "source_kind": "table",
+                "page": 5,
+            }
+        ],
+    }
+    markdown = (
+        "# 研究目标\nEnergy density objective.\n\n"
+        "## 集合级结论\nThe report cites [P999 Table 9] and says 101.20%.\n\n"
+        "## 文献贡献图\nP001 contributes.\n\n"
+        "## 证据矩阵\nOne measurement.\n\n"
+        "## 受控比较\nNo comparison.\n\n"
+        "## 机制链路\nNo mechanism.\n\n"
+        "## 证据来源\n[P999 Table 9].\n\n"
+        "## 局限性与不确定性\nSingle paper."
+    )
+
+    warnings = service._objective_report_warnings(context, markdown)
+
+    assert (
+        "Missing representative measurement in objective report: 99.60%"
+        in warnings
+    )
+    assert "Unsupported numeric value in objective report: 101.20%" in warnings
+    assert "Unknown source reference in objective report: P999 Table 9" in warnings
 
 
 def test_research_objective_service_forces_extractable_objective_route_roles(

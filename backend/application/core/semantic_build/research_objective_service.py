@@ -923,6 +923,46 @@ class ResearchObjectiveService:
             comparisons=comparisons,
             mechanism_units=mechanism_units,
         )
+        paper_contributions = self._objective_conclusion_paper_contributions(
+            frame_views=frame_views,
+            evidence_units=evidence_units,
+        )
+        primary_evidence_tables = [
+            {
+                "table_id": "measurement-results",
+                "title": "Measurement results",
+                "rows": [
+                    self._objective_conclusion_measurement_row(unit)
+                    for unit in measurements
+                ],
+                "measurement_value_ranges": measurement_ranges,
+            }
+        ]
+        controlled_comparisons = [
+            self._objective_conclusion_comparison(unit)
+            for unit in comparisons
+        ]
+        mechanism_chain = self._objective_conclusion_mechanism_chain(
+            mechanism_units
+        )
+        conclusions = self._objective_conclusion_statements(
+            measurement_ranges=measurement_ranges,
+            comparisons=comparisons,
+            mechanism_units=mechanism_units,
+        )
+        source_refs = self._objective_conclusion_source_refs(evidence_units)
+        narrative_sections = self._objective_conclusion_narrative_sections(
+            objective=objective,
+            paper_contributions=paper_contributions,
+            measurement_ranges=measurement_ranges,
+            primary_evidence_tables=primary_evidence_tables,
+            controlled_comparisons=controlled_comparisons,
+            mechanism_chain=mechanism_chain,
+            conclusions=conclusions,
+            limitations=limitations,
+            source_refs=source_refs,
+        )
+        traceability = self._objective_conclusion_traceability(narrative_sections)
         return {
             "schema_version": "objective_conclusion_package.v1",
             "title": objective.question,
@@ -942,38 +982,417 @@ class ResearchObjectiveService:
                 logic_chain=logic_chain,
             ),
             "narrative": {
-                "status": "not_generated",
-                "sections": [],
+                "status": (
+                    "ready"
+                    if narrative_sections and not traceability["unsupported_claim_count"]
+                    else "limited"
+                ),
+                "sections": narrative_sections,
             },
-            "paper_contributions": self._objective_conclusion_paper_contributions(
-                frame_views=frame_views,
-                evidence_units=evidence_units,
-            ),
-            "primary_evidence_tables": [
-                {
-                    "table_id": "measurement-results",
-                    "title": "Measurement results",
-                    "rows": [
-                        self._objective_conclusion_measurement_row(unit)
-                        for unit in measurements
-                    ],
-                    "measurement_value_ranges": measurement_ranges,
-                }
-            ],
-            "controlled_comparisons": [
-                self._objective_conclusion_comparison(unit)
-                for unit in comparisons
-            ],
-            "mechanism_chain": self._objective_conclusion_mechanism_chain(
-                mechanism_units
-            ),
-            "conclusions": self._objective_conclusion_statements(
-                measurement_ranges=measurement_ranges,
-                comparisons=comparisons,
-                mechanism_units=mechanism_units,
-            ),
+            "paper_contributions": paper_contributions,
+            "primary_evidence_tables": primary_evidence_tables,
+            "controlled_comparisons": controlled_comparisons,
+            "mechanism_chain": mechanism_chain,
+            "conclusions": conclusions,
             "limitations": limitations,
-            "source_refs": self._objective_conclusion_source_refs(evidence_units),
+            "source_refs": source_refs,
+            "traceability": traceability,
+        }
+
+    def _objective_conclusion_narrative_sections(
+        self,
+        *,
+        objective: ResearchObjective,
+        paper_contributions: list[dict[str, Any]],
+        measurement_ranges: list[dict[str, Any]],
+        primary_evidence_tables: list[dict[str, Any]],
+        controlled_comparisons: list[dict[str, Any]],
+        mechanism_chain: dict[str, Any],
+        conclusions: list[dict[str, Any]],
+        limitations: list[dict[str, Any]],
+        source_refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "section_id": "research_objective",
+                "title": "Research objective",
+                "body": objective.question,
+                "claims": [],
+                "evidence_unit_ids": [],
+                "source_refs": [],
+            },
+            {
+                "section_id": "collection_level_conclusion",
+                "title": "Collection-level conclusion",
+                "body": self._objective_conclusion_collection_summary(
+                    objective=objective,
+                    measurement_ranges=measurement_ranges,
+                    controlled_comparisons=controlled_comparisons,
+                    mechanism_chain=mechanism_chain,
+                ),
+                "claims": [
+                    self._objective_traceable_claim(
+                        statement,
+                        source_refs=source_refs,
+                    )
+                    for statement in conclusions
+                ],
+                "evidence_unit_ids": self._dedupe_preserving_order(
+                    [
+                        evidence_unit_id
+                        for statement in conclusions
+                        for evidence_unit_id in statement.get("evidence_unit_ids", [])
+                    ]
+                ),
+                "source_refs": self._objective_source_refs_for_evidence_ids(
+                    source_refs,
+                    [
+                        evidence_unit_id
+                        for statement in conclusions
+                        for evidence_unit_id in statement.get("evidence_unit_ids", [])
+                    ],
+                ),
+            },
+            {
+                "section_id": "paper_contribution_map",
+                "title": "Paper contribution map",
+                "body": self._objective_conclusion_paper_summary(paper_contributions),
+                "claims": [
+                    self._objective_traceable_claim(
+                        {
+                            "claim": self._objective_contribution_claim(contribution),
+                            "evidence_unit_ids": contribution.get("evidence_unit_ids", []),
+                            "strength": "paper_contribution",
+                        },
+                        source_refs=source_refs,
+                    )
+                    for contribution in paper_contributions
+                    if contribution.get("evidence_unit_ids")
+                ],
+                "evidence_unit_ids": self._dedupe_preserving_order(
+                    [
+                        evidence_unit_id
+                        for contribution in paper_contributions
+                        for evidence_unit_id in contribution.get("evidence_unit_ids", [])
+                    ]
+                ),
+                "source_refs": self._objective_source_refs_for_evidence_ids(
+                    source_refs,
+                    [
+                        evidence_unit_id
+                        for contribution in paper_contributions
+                        for evidence_unit_id in contribution.get("evidence_unit_ids", [])
+                    ],
+                ),
+            },
+            {
+                "section_id": "evidence_matrix",
+                "title": "Evidence matrix",
+                "body": self._objective_conclusion_evidence_matrix_summary(
+                    primary_evidence_tables
+                ),
+                "claims": [],
+                "evidence_unit_ids": self._dedupe_preserving_order(
+                    [
+                        str(row.get("evidence_unit_id") or "")
+                        for table in primary_evidence_tables
+                        for row in table.get("rows", [])
+                    ]
+                ),
+                "source_refs": self._objective_source_refs_for_evidence_ids(
+                    source_refs,
+                    [
+                        str(row.get("evidence_unit_id") or "")
+                        for table in primary_evidence_tables
+                        for row in table.get("rows", [])
+                    ],
+                ),
+            },
+            {
+                "section_id": "controlled_comparisons",
+                "title": "Controlled comparisons",
+                "body": self._objective_conclusion_comparison_summary(
+                    controlled_comparisons
+                ),
+                "claims": [
+                    self._objective_traceable_claim(
+                        {
+                            "claim": comparison.get("summary"),
+                            "evidence_unit_ids": [comparison.get("evidence_unit_id")],
+                            "strength": comparison.get("validity") or "comparison",
+                        },
+                        source_refs=source_refs,
+                    )
+                    for comparison in controlled_comparisons
+                    if comparison.get("summary")
+                ],
+                "evidence_unit_ids": self._dedupe_preserving_order(
+                    [
+                        str(comparison.get("evidence_unit_id") or "")
+                        for comparison in controlled_comparisons
+                    ]
+                ),
+                "source_refs": self._objective_source_refs_for_evidence_ids(
+                    source_refs,
+                    [
+                        str(comparison.get("evidence_unit_id") or "")
+                        for comparison in controlled_comparisons
+                    ],
+                ),
+            },
+            {
+                "section_id": "mechanism_chain",
+                "title": "Mechanism chain",
+                "body": self._objective_conclusion_mechanism_summary(mechanism_chain),
+                "claims": [
+                    self._objective_traceable_claim(
+                        {
+                            "claim": evidence.get("summary"),
+                            "evidence_unit_ids": [evidence.get("evidence_unit_id")],
+                            "strength": "mechanism",
+                        },
+                        source_refs=source_refs,
+                    )
+                    for evidence in mechanism_chain.get("evidence", [])
+                    if evidence.get("summary")
+                ],
+                "evidence_unit_ids": list(mechanism_chain.get("evidence_unit_ids", [])),
+                "source_refs": self._objective_source_refs_for_evidence_ids(
+                    source_refs,
+                    list(mechanism_chain.get("evidence_unit_ids", [])),
+                ),
+            },
+            {
+                "section_id": "limitations",
+                "title": "Limitations and uncertainties",
+                "body": self._objective_conclusion_limitation_summary(limitations),
+                "claims": [],
+                "evidence_unit_ids": self._dedupe_preserving_order(
+                    [
+                        evidence_unit_id
+                        for limitation in limitations
+                        for evidence_unit_id in limitation.get("evidence_unit_ids", [])
+                    ]
+                ),
+                "source_refs": self._objective_source_refs_for_evidence_ids(
+                    source_refs,
+                    [
+                        evidence_unit_id
+                        for limitation in limitations
+                        for evidence_unit_id in limitation.get("evidence_unit_ids", [])
+                    ],
+                ),
+            },
+            {
+                "section_id": "source_traceback",
+                "title": "Source traceback",
+                "body": self._objective_conclusion_source_summary(source_refs),
+                "claims": [],
+                "evidence_unit_ids": self._dedupe_preserving_order(
+                    [
+                        str(source_ref.get("evidence_unit_id") or "")
+                        for source_ref in source_refs
+                    ]
+                ),
+                "source_refs": source_refs,
+            },
+        ]
+
+    def _objective_traceable_claim(
+        self,
+        statement: dict[str, Any],
+        *,
+        source_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        evidence_unit_ids = self._dedupe_preserving_order(
+            [
+                str(evidence_unit_id or "")
+                for evidence_unit_id in statement.get("evidence_unit_ids", [])
+            ]
+        )
+        claim_source_refs = self._objective_source_refs_for_evidence_ids(
+            source_refs,
+            evidence_unit_ids,
+        )
+        return {
+            key: value
+            for key, value in {
+                "claim": statement.get("claim"),
+                "evidence_unit_ids": evidence_unit_ids,
+                "source_refs": claim_source_refs,
+                "strength": statement.get("strength"),
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_source_refs_for_evidence_ids(
+        self,
+        source_refs: list[dict[str, Any]],
+        evidence_unit_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        wanted = {str(evidence_unit_id or "") for evidence_unit_id in evidence_unit_ids}
+        if not wanted:
+            return []
+        return [
+            source_ref
+            for source_ref in source_refs
+            if str(source_ref.get("evidence_unit_id") or "") in wanted
+        ]
+
+    def _objective_conclusion_collection_summary(
+        self,
+        *,
+        objective: ResearchObjective,
+        measurement_ranges: list[dict[str, Any]],
+        controlled_comparisons: list[dict[str, Any]],
+        mechanism_chain: dict[str, Any],
+    ) -> str:
+        pieces = [objective.question]
+        range_summary = self._objective_logic_chain_range_summary(measurement_ranges)
+        if range_summary:
+            pieces.append(f"Traceable measured ranges are available: {range_summary}.")
+        if controlled_comparisons:
+            pieces.append(
+                f"{len(controlled_comparisons)} comparison finding(s) support the objective."
+            )
+        mechanism_count = len(mechanism_chain.get("evidence", []))
+        if mechanism_count:
+            pieces.append(
+                f"{mechanism_count} mechanism or characterization finding(s) explain the observed trend."
+            )
+        return " ".join(pieces)
+
+    def _objective_conclusion_paper_summary(
+        self,
+        paper_contributions: list[dict[str, Any]],
+    ) -> str:
+        if not paper_contributions:
+            return "No paper contribution records are available for this objective."
+        roles = self._dedupe_preserving_order(
+            [
+                str(contribution.get("paper_role") or "")
+                for contribution in paper_contributions
+            ]
+        )
+        role_text = ", ".join(roles) if roles else "uncertain roles"
+        return (
+            f"{len(paper_contributions)} relevant paper(s) contribute evidence "
+            f"to this objective with roles: {role_text}."
+        )
+
+    def _objective_contribution_claim(
+        self,
+        contribution: dict[str, Any],
+    ) -> str:
+        title = contribution.get("title") or contribution.get("document_id") or "This paper"
+        variables = ", ".join(contribution.get("changed_variables", []) or [])
+        properties = ", ".join(contribution.get("measured_property_scope", []) or [])
+        details = []
+        if variables:
+            details.append(f"variables {variables}")
+        if properties:
+            details.append(f"properties {properties}")
+        if details:
+            return f"{title} contributes {' and '.join(details)}."
+        return f"{title} contributes objective-scoped evidence."
+
+    def _objective_conclusion_evidence_matrix_summary(
+        self,
+        primary_evidence_tables: list[dict[str, Any]],
+    ) -> str:
+        row_count = sum(
+            len(table.get("rows", []))
+            for table in primary_evidence_tables
+        )
+        range_count = sum(
+            len(table.get("measurement_value_ranges", []))
+            for table in primary_evidence_tables
+        )
+        if not row_count:
+            return "No measurement rows are available for the evidence matrix."
+        return (
+            f"The evidence matrix contains {row_count} measurement row(s) "
+            f"and {range_count} property range summary item(s)."
+        )
+
+    def _objective_conclusion_comparison_summary(
+        self,
+        controlled_comparisons: list[dict[str, Any]],
+    ) -> str:
+        if not controlled_comparisons:
+            return "No controlled comparison evidence is available yet."
+        controlled_count = sum(
+            1
+            for comparison in controlled_comparisons
+            if comparison.get("validity") == "controlled"
+        )
+        return (
+            f"{len(controlled_comparisons)} comparison item(s) are available; "
+            f"{controlled_count} have an explicit baseline context."
+        )
+
+    def _objective_conclusion_mechanism_summary(
+        self,
+        mechanism_chain: dict[str, Any],
+    ) -> str:
+        evidence_count = len(mechanism_chain.get("evidence", []))
+        if not evidence_count:
+            return "No mechanism evidence is available yet."
+        step_count = len(mechanism_chain.get("steps", []))
+        return (
+            f"The mechanism chain has {step_count} step(s) and "
+            f"{evidence_count} linked evidence item(s)."
+        )
+
+    def _objective_conclusion_limitation_summary(
+        self,
+        limitations: list[dict[str, Any]],
+    ) -> str:
+        if not limitations:
+            return "No explicit limitations are reported for the current evidence package."
+        return f"{len(limitations)} limitation or uncertainty item(s) constrain this conclusion."
+
+    def _objective_conclusion_source_summary(
+        self,
+        source_refs: list[dict[str, Any]],
+    ) -> str:
+        if not source_refs:
+            return "No source references are attached to the current report package."
+        documents = self._dedupe_preserving_order(
+            [str(source_ref.get("document_id") or "") for source_ref in source_refs]
+        )
+        return (
+            f"{len(source_refs)} source reference(s) support this report "
+            f"across {len(documents)} document(s)."
+        )
+
+    def _objective_conclusion_traceability(
+        self,
+        sections: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        unsupported_claims = []
+        traceable_claim_count = 0
+        for section in sections:
+            for claim in section.get("claims", []):
+                if not isinstance(claim, dict):
+                    continue
+                claim_text = str(claim.get("claim") or "").strip()
+                if not claim_text:
+                    continue
+                if claim.get("evidence_unit_ids") and claim.get("source_refs"):
+                    traceable_claim_count += 1
+                    continue
+                unsupported_claims.append(
+                    {
+                        "section_id": section.get("section_id"),
+                        "claim": claim_text,
+                    }
+                )
+        return {
+            "status": "ready" if not unsupported_claims else "limited",
+            "traceable_claim_count": traceable_claim_count,
+            "unsupported_claim_count": len(unsupported_claims),
+            "unsupported_claims": unsupported_claims,
         }
 
     def _objective_conclusion_status(

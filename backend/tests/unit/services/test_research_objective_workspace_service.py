@@ -368,7 +368,26 @@ def test_objective_workspace_detail_returns_conclusion_package(tmp_path):
     conclusion_package = payload["conclusion_package"]
     assert conclusion_package["schema_version"] == "objective_conclusion_package.v1"
     assert conclusion_package["status"] == "ready"
-    assert conclusion_package["narrative"]["status"] == "not_generated"
+    assert conclusion_package["narrative"]["status"] == "ready"
+    assert [
+        section["section_id"]
+        for section in conclusion_package["narrative"]["sections"]
+    ] == [
+        "research_objective",
+        "collection_level_conclusion",
+        "paper_contribution_map",
+        "evidence_matrix",
+        "controlled_comparisons",
+        "mechanism_chain",
+        "limitations",
+        "source_traceback",
+    ]
+    collection_section = conclusion_package["narrative"]["sections"][1]
+    assert collection_section["claims"][0]["evidence_unit_ids"] == [
+        "oeu-corrosion"
+    ]
+    assert collection_section["claims"][0]["source_refs"][0]["source_ref"] == "table-1"
+    assert conclusion_package["traceability"]["unsupported_claim_count"] == 0
     assert conclusion_package["paper_contributions"][0]["paper_role"] == (
         "primary_experiment"
     )

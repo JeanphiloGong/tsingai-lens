@@ -18,6 +18,7 @@
 		formatShortIdentifier,
 		type EvidenceBackedValue,
 		type EvidenceReference,
+		type MaterialReportDocument,
 		type MaterialReportPerformanceResult,
 		type MaterialReportStateChain,
 		type MaterialPaperCoverage,
@@ -30,6 +31,15 @@
 	type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 	type MaterialDossierTab = 'structured' | 'narrative';
+
+	type MaterialReportMarkdownInline =
+		| { type: 'text'; text: string }
+		| { type: 'citation'; id: string };
+
+	type MaterialReportMarkdownBlock =
+		| { type: 'heading'; level: number; key: string; text: string; anchor: string }
+		| { type: 'paragraph'; key: string; parts: MaterialReportMarkdownInline[] }
+		| { type: 'list'; key: string; items: MaterialReportMarkdownInline[][] };
 
 	type PropertyColumn = {
 		key: string;
@@ -259,6 +269,8 @@
 	$: loadKey = `${collectionId}:${materialId}`;
 	$: sampleRows = materialProfile?.sample_matrix.rows ?? [];
 	$: reportPackage = materialProfile?.report_package ?? null;
+	$: reportDocument = reportPackage?.document ?? null;
+	$: reportDocumentBlocks = reportDocument ? parseMaterialReportMarkdown(reportDocument) : [];
 	$: reportChains = reportPackage?.representative_states?.length
 		? reportPackage.representative_states
 		: (reportPackage?.material_state_chains ?? []);
@@ -1122,6 +1134,122 @@
 		return reportEvidenceCodes(refs, codeMap).slice(0, limit);
 	}
 
+	function parseMaterialReportMarkdown(
+		document: MaterialReportDocument
+	): MaterialReportMarkdownBlock[] {
+		const blocks: MaterialReportMarkdownBlock[] = [];
+		let listItems: MaterialReportMarkdownInline[][] = [];
+		const flushList = () => {
+			if (!listItems.length) return;
+			blocks.push({
+				type: 'list',
+				key: `list:${blocks.length}`,
+				items: listItems
+			});
+			listItems = [];
+		};
+
+		for (const line of document.markdown.split('\n')) {
+			const text = line.trim();
+			if (!text) {
+				flushList();
+				continue;
+			}
+			const heading = /^(#{1,3})\s+(.+)$/.exec(text);
+			if (heading) {
+				flushList();
+				blocks.push({
+					type: 'heading',
+					level: heading[1].length,
+					key: `heading:${blocks.length}`,
+					text: heading[2],
+					anchor: reportHeadingAnchor(document, heading[2])
+				});
+				continue;
+			}
+			const listItem = /^-\s+(.+)$/.exec(text);
+			if (listItem) {
+				listItems.push(parseMaterialReportInline(listItem[1], document));
+				continue;
+			}
+			flushList();
+			blocks.push({
+				type: 'paragraph',
+				key: `paragraph:${blocks.length}`,
+				parts: parseMaterialReportInline(text, document)
+			});
+		}
+		flushList();
+		return blocks;
+	}
+
+	function parseMaterialReportInline(text: string, document: MaterialReportDocument) {
+		const parts: MaterialReportMarkdownInline[] = [];
+		const citationPattern = /\[(E\d{3,})\]/g;
+		let cursor = 0;
+		for (const match of text.matchAll(citationPattern)) {
+			const index = match.index ?? 0;
+			if (index > cursor) {
+				parts.push({ type: 'text', text: text.slice(cursor, index) });
+			}
+			const citationId = match[1];
+			if (document.citations[citationId]) {
+				parts.push({ type: 'citation', id: citationId });
+			} else {
+				parts.push({ type: 'text', text: match[0] });
+			}
+			cursor = index + match[0].length;
+		}
+		if (cursor < text.length) {
+			parts.push({ type: 'text', text: text.slice(cursor) });
+		}
+		return parts;
+	}
+
+	function reportHeadingAnchor(document: MaterialReportDocument, title: string) {
+		return (
+			document.outline.find((item) => item.title === title)?.anchor ||
+			title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+		);
+	}
+
+	function openReportCitation(document: MaterialReportDocument, citationId: string) {
+		const ref = document.citations[citationId];
+		if (!ref) return;
+		const code = evidenceCode(ref, evidenceCodeMap);
+		const row = evidenceRows.find((item) => item.code === code);
+		if (row) {
+			openEvidenceRow({
+				...row,
+				code: citationId,
+				detail: {
+					...row.detail,
+					anchor: citationId
+				}
+			});
+			return;
+		}
+		openEvidenceRow({
+			key: `material-report:${citationId}`,
+			code: citationId,
+			claim: `${document.title} ${citationId}`,
+			type: sourceTypeLabel(ref, $t),
+			location: ref.locator || '--',
+			confidence: confidenceScore(ref.confidence),
+			href: evidenceHref(ref, collectionId),
+			detail: {
+				title: `${document.title} ${citationId}`,
+				sample: document.title,
+				source: paperTitle(ref),
+				location: ref.locator || '--',
+				anchor: citationId,
+				confidence: confidenceLabel(ref.confidence, $t),
+				excerpt: $t('research.materialDossier.evidence.contextUnavailable'),
+				href: evidenceHref(ref, collectionId)
+			}
+		});
+	}
+
 	function chainMetricRows(
 		row: SampleMatrixRow,
 		columns: PropertyColumn[],
@@ -1656,6 +1784,11 @@
 			for (const ref of summary.evidence_refs) {
 				if (ref.evidence_ref_id && !ids.includes(ref.evidence_ref_id))
 					ids.push(ref.evidence_ref_id);
+			}
+		}
+		for (const ref of Object.values(materialProfile?.report_package?.document?.citations ?? {})) {
+			if (ref.evidence_ref_id && !ids.includes(ref.evidence_ref_id)) {
+				ids.push(ref.evidence_ref_id);
 			}
 		}
 		return new Map(ids.map((id, index) => [id, `E${String(index + 1).padStart(2, '0')}`]));
@@ -2252,7 +2385,60 @@
 		<div class="dossier-layout">
 			{#if activeDossierTab === 'structured'}
 				<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
-					<section id="material-report-overview" class="dossier-card report-overview-card">
+					{#if reportDocument}
+						<section id="material-report-document" class="dossier-card material-report-document-card">
+							<article class="material-report-markdown" aria-label={reportDocument.title}>
+								{#each reportDocumentBlocks as block (block.key)}
+									{#if block.type === 'heading'}
+										{#if block.level === 1}
+											<h3 id={block.anchor}>{block.text}</h3>
+										{:else if block.level === 2}
+											<h4 id={block.anchor}>{block.text}</h4>
+										{:else}
+											<h5 id={block.anchor}>{block.text}</h5>
+										{/if}
+									{:else if block.type === 'paragraph'}
+										<p>
+											{#each block.parts as part}
+												{#if part.type === 'citation'}
+													<button
+														type="button"
+														class="report-citation"
+														on:click={() => openReportCitation(reportDocument, part.id)}
+													>
+														[{part.id}]
+													</button>
+												{:else}
+													{part.text}
+												{/if}
+											{/each}
+										</p>
+									{:else}
+										<ul>
+											{#each block.items as item}
+												<li>
+													{#each item as part}
+														{#if part.type === 'citation'}
+															<button
+																type="button"
+																class="report-citation"
+																on:click={() => openReportCitation(reportDocument, part.id)}
+															>
+																[{part.id}]
+															</button>
+														{:else}
+															{part.text}
+														{/if}
+													{/each}
+												</li>
+											{/each}
+										</ul>
+									{/if}
+								{/each}
+							</article>
+						</section>
+					{:else}
+						<section id="material-report-overview" class="dossier-card report-overview-card">
 						<div class="dossier-section-heading">
 							<span class="section-number">1</span>
 							<h3>{$t('research.materialDossier.sections.overview.title')}</h3>
@@ -2484,6 +2670,7 @@
 							{/each}
 						</div>
 					</section>
+					{/if}
 
 					<section id="material-problems" class="dossier-card material-problems-card">
 						<div class="dossier-section-heading">
@@ -2963,12 +3150,18 @@
 				>
 					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
 					{#if activeDossierTab === 'structured'}
-						<a href="#material-report-overview"
-							>1 {$t('research.materialDossier.sections.overview.title')}</a
-						>
-						<a href="#representative-material-states"
-							>2 {$t('research.materialDossier.sections.chain.title')}</a
-						>
+						{#if reportDocument}
+							<a href="#material-report-document"
+								>1 {$t('research.materialDossier.report.documentTitle')}</a
+							>
+						{:else}
+							<a href="#material-report-overview"
+								>1 {$t('research.materialDossier.sections.overview.title')}</a
+							>
+							<a href="#representative-material-states"
+								>2 {$t('research.materialDossier.sections.chain.title')}</a
+							>
+						{/if}
 						<a href="#material-problems"
 							>3 {$t('research.materialDossier.sections.materialProblems.title')}</a
 						>
@@ -3475,8 +3668,86 @@
 	}
 
 	.report-overview-card,
+	.material-report-document-card,
 	.material-problems-card {
 		gap: 14px;
+	}
+
+	.material-report-document-card {
+		padding: 0;
+	}
+
+	.material-report-markdown {
+		display: grid;
+		gap: 12px;
+		padding: 24px;
+		color: #1e293b;
+	}
+
+	.material-report-markdown h3,
+	.material-report-markdown h4,
+	.material-report-markdown h5 {
+		margin: 0;
+		color: #0f172a;
+		letter-spacing: 0;
+	}
+
+	.material-report-markdown h3 {
+		font-size: 28px;
+		font-weight: 850;
+		line-height: 36px;
+	}
+
+	.material-report-markdown h4 {
+		margin-top: 10px;
+		padding-top: 14px;
+		border-top: 1px solid #e2e8f0;
+		font-size: 18px;
+		font-weight: 800;
+		line-height: 26px;
+	}
+
+	.material-report-markdown h5 {
+		font-size: 15px;
+		font-weight: 800;
+		line-height: 22px;
+	}
+
+	.material-report-markdown p,
+	.material-report-markdown li {
+		margin: 0;
+		color: #334155;
+		font-size: 14px;
+		line-height: 23px;
+		overflow-wrap: anywhere;
+	}
+
+	.material-report-markdown ul {
+		display: grid;
+		gap: 7px;
+		margin: 0;
+		padding-left: 20px;
+	}
+
+	.report-citation {
+		display: inline-flex;
+		align-items: center;
+		min-height: 22px;
+		margin-left: 3px;
+		padding: 0 6px;
+		border: 1px solid #bfdbfe;
+		border-radius: 6px;
+		background: #eff6ff;
+		color: #2563eb;
+		font-size: 12px;
+		font-weight: 850;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.report-citation:hover {
+		border-color: #2563eb;
+		background: #dbeafe;
 	}
 
 	.report-stat-grid {

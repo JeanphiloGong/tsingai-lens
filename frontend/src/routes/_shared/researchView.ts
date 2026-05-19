@@ -669,6 +669,23 @@ export type MaterialReportAppendix = {
 	source_table_count: number;
 };
 
+export type MaterialReportOutlineItem = {
+	level: number;
+	title: string;
+	anchor: string;
+};
+
+export type MaterialReportDocument = {
+	schema_version: string;
+	status: ResearchViewState;
+	title: string;
+	markdown: string;
+	citations: Record<string, EvidenceReference>;
+	outline: MaterialReportOutlineItem[];
+	warnings: ResearchViewWarning[];
+	evidence_appendix: MaterialReportAppendix;
+};
+
 export type MaterialReportPackage = {
 	schema_version: string;
 	status: ResearchViewState;
@@ -685,6 +702,7 @@ export type MaterialReportPackage = {
 	material_state_chains: MaterialReportStateChain[];
 	limitations: string[];
 	evidence_appendix: MaterialReportAppendix;
+	document: MaterialReportDocument | null;
 	source_refs: EvidenceReference[];
 };
 
@@ -1003,6 +1021,47 @@ function normalizeMaterialReportAppendix(value: unknown): MaterialReportAppendix
 	};
 }
 
+function normalizeMaterialReportOutlineItem(value: unknown): MaterialReportOutlineItem | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const title = toText(record.title);
+	if (!title) return null;
+	return {
+		level: toNumber(record.level, 2),
+		title,
+		anchor: toText(record.anchor, title.toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+	};
+}
+
+function normalizeMaterialReportCitations(value: unknown): Record<string, EvidenceReference> {
+	const record = asRecord(value);
+	if (!record) return {};
+	return Object.fromEntries(
+		Object.entries(record)
+			.map(([citationId, ref]) => [citationId, normalizeEvidenceReference(ref)] as const)
+			.filter((item): item is [string, EvidenceReference] => item[1] !== null)
+	);
+}
+
+function normalizeMaterialReportDocument(value: unknown): MaterialReportDocument | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const markdown = toText(record.markdown);
+	if (!markdown) return null;
+	return {
+		schema_version: toText(record.schema_version, 'material_report_document.v1'),
+		status: normalizeResearchState(record.status, 'partial'),
+		title: toText(record.title, 'Material report'),
+		markdown,
+		citations: normalizeMaterialReportCitations(record.citations),
+		outline: normalizeObjectList(record.outline, 'items')
+			.map((item) => normalizeMaterialReportOutlineItem(item))
+			.filter((item): item is MaterialReportOutlineItem => item !== null),
+		warnings: normalizeWarnings(record.warnings),
+		evidence_appendix: normalizeMaterialReportAppendix(record.evidence_appendix)
+	};
+}
+
 function normalizeMaterialReportPackage(value: unknown): MaterialReportPackage | null {
 	const record = asRecord(value);
 	if (!record) return null;
@@ -1035,6 +1094,7 @@ function normalizeMaterialReportPackage(value: unknown): MaterialReportPackage |
 		material_state_chains: chains,
 		limitations: toStringList(record.limitations),
 		evidence_appendix: normalizeMaterialReportAppendix(record.evidence_appendix),
+		document: normalizeMaterialReportDocument(record.document),
 		source_refs: normalizeEvidenceReferences(record.source_refs ?? record.evidence_refs)
 	};
 }

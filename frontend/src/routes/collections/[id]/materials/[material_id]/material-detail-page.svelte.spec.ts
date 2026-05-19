@@ -518,6 +518,59 @@ function materialProfilePayload() {
 				evidence_count: 1,
 				source_table_count: 1
 			},
+			document: {
+				schema_version: 'material_report_document.v1',
+				status: 'partial',
+				title: '316L stainless steel Material Report',
+				markdown: [
+					'# 316L stainless steel Material Report',
+					'',
+					'## Executive Summary',
+					'',
+					'316L stainless steel is best read as a scoped material report rather than a global parameter ranking.',
+					'',
+					'## Representative Material States',
+					'',
+					'### S001',
+					'',
+					'- Preparation: scan_strategy: Alternating strategy A, laser_power_w: 200',
+					'- Testing: method: Tensile testing, standard: ASTM E8',
+					'- Response: hardness 215.6 [E001]',
+					'- Comparability: Compare only within Paper A tensile and hardness conditions.',
+					'',
+					'## Limitations And Comparability',
+					'',
+					'- S002 is missing test_conditions.'
+				].join('\n'),
+				citations: {
+					E001: {
+						evidence_ref_id: 'ev_hardness_s001',
+						document_id: 'doc_1',
+						source_kind: 'table',
+						locator: 'Table 2',
+						confidence: 0.95
+					}
+				},
+				outline: [
+					{
+						level: 1,
+						title: '316L stainless steel Material Report',
+						anchor: '316l-stainless-steel-material-report'
+					},
+					{
+						level: 2,
+						title: 'Representative Material States',
+						anchor: 'representative-material-states'
+					}
+				],
+				warnings: [],
+				evidence_appendix: {
+					sample_matrix_row_count: 2,
+					property_count: 3,
+					evidence_count: 1,
+					source_table_count: 1
+				}
+			},
 			source_refs: [
 				{
 					evidence_ref_id: 'ev_hardness_s001',
@@ -585,34 +638,41 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Material report overview' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel Material Report' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Executive Summary' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('scoped material report rather than a global parameter ranking'))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('S001 links preparation, testing, and response'))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Thematic analysis' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Hardness and tensile values are scoped to Paper A testing conditions.'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Representative Material States' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Representative material states' }))
+			.element(browserPage.getByText(/Response: hardness 215\.6/))
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: '[E001]' })).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Material questions' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Preparation and post-treatment').first())
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText(/Scan strategy Alternating strategy A/).first())
+			.element(browserPage.getByText(/scan_strategy: Alternating strategy A/).first())
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText(/studied through LPBF\/SLM/).first())
@@ -628,7 +688,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Compare only within Paper A tensile and hardness conditions.'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Traceback').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Traceback').first()).not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Comparable groups' }))
 			.toBeInTheDocument();
@@ -658,9 +718,6 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'))
 			.not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Performance response').first())
-			.toBeInTheDocument();
-		await expect
 			.element(browserPage.getByText('215.6').first())
 			.toBeInTheDocument();
 		await expect
@@ -676,6 +733,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 
 	it('cleans table-origin labels in the representative material state report', async () => {
 		const payload: any = materialProfilePayload();
+		payload.report_package.document = null;
 		payload.sample_matrix.rows = [
 			{
 				row_id: 'row_table_origin',
@@ -791,7 +849,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('610 MPa').first()).toBeInTheDocument();
 		await expect
@@ -903,7 +961,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('448 MPa').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('465 MPa').first()).toBeInTheDocument();
@@ -946,7 +1004,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('S001 · Alternating strategy A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Low signal 0')).not.toBeInTheDocument();
@@ -994,7 +1052,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
 		await expect
 			.element(
@@ -1037,7 +1095,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Generate review PDF' }).click();
 		await browserPage.getByRole('button', { name: 'Generate review', exact: true }).click();
@@ -1075,7 +1133,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel' }))
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
 		await browserPage.getByRole('tab', { name: 'Narrative research' }).click();
 

@@ -692,6 +692,7 @@ const translations: Record<Language, Translations> = {
 						'Material report package has not been generated for this material.'
 				},
 				report: {
+					documentTitle: 'Material report',
 					sectionsTitle: 'Thematic analysis',
 					sectionsBody:
 						'Read the material evidence as scoped scientific themes; the complete sample matrix stays in the supporting appendix.',
@@ -3269,6 +3270,7 @@ const translations: Record<Language, Translations> = {
 					packageUnavailable: '该材料尚未生成材料报告包。'
 				},
 				report: {
+					documentTitle: '材料报告',
 					sectionsTitle: '主题分析',
 					sectionsBody: '按材料科学问题阅读证据；完整样品矩阵保留在支撑附录中。',
 					sectionLabel: '报告主题：{title}'

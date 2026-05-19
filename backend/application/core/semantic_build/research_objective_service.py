@@ -1392,11 +1392,42 @@ class ResearchObjectiveService:
 
     def _objective_contribution_title(self, contribution: dict[str, Any]) -> str:
         return str(
-            contribution.get("title")
+            contribution.get("display_title")
+            or contribution.get("title")
             or contribution.get("source_filename")
             or contribution.get("document_id")
             or "This paper"
         )
+
+    def _objective_paper_display_title(
+        self,
+        *,
+        title: Any,
+        source_filename: Any,
+        paper_label: str,
+    ) -> str:
+        raw_title = str(title or source_filename or "").strip()
+        if not raw_title:
+            return paper_label
+        cleaned = self._objective_clean_paper_title(raw_title)
+        if not cleaned:
+            return paper_label
+        if cleaned.lower().startswith(f"{paper_label.lower()} - "):
+            return cleaned
+        return f"{paper_label} - {cleaned}"
+
+    def _objective_clean_paper_title(self, value: str) -> str:
+        cleaned = value.strip()
+        cleaned = re.sub(r"\.pdf$", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"^[0-9a-f]{16,}[_-]+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            r"^(P\d{3})[-_\s]+",
+            lambda match: f"{match.group(1).upper()} - ",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = cleaned.replace("_", " ")
+        return " ".join(cleaned.split())
 
     def _objective_contribution_scope(self, contribution: dict[str, Any]) -> str:
         variables = self._human_join(contribution.get("changed_variables", []) or [])
@@ -1547,11 +1578,20 @@ class ResearchObjectiveService:
                 continue
             document_id = str(frame.get("document_id") or "")
             document_units = units_by_document.get(document_id, [])
+            paper_label = f"P{len(contributions) + 1:03d}"
+            title = frame.get("title") or frame.get("source_filename")
+            source_filename = frame.get("source_filename")
             contributions.append(
                 {
                     "document_id": document_id,
-                    "title": frame.get("title") or frame.get("source_filename"),
-                    "source_filename": frame.get("source_filename"),
+                    "paper_label": paper_label,
+                    "title": title,
+                    "display_title": self._objective_paper_display_title(
+                        title=title,
+                        source_filename=source_filename,
+                        paper_label=paper_label,
+                    ),
+                    "source_filename": source_filename,
                     "paper_role": frame.get("paper_role"),
                     "relevance": frame.get("relevance"),
                     "background": frame.get("background"),

@@ -1895,14 +1895,15 @@ class ResearchViewAggregationService:
         evidence_refs: list[dict[str, Any]],
         warnings: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        chains = [
+        all_chains = [
             self._build_material_report_chain(row)
             for row in sample_matrix.get("rows", [])
         ]
+        representative_chains = self._select_representative_material_chains(all_chains)
         limitations: list[str] = []
-        if not chains:
+        if not all_chains:
             limitations.append("No resolved material-state chains are available.")
-        for chain in chains:
+        for chain in representative_chains:
             for field in chain.get("unresolved_fields", []):
                 limitations.append(
                     f"{chain.get('sample_label') or chain.get('sample_id')} is missing {field}."
@@ -1916,23 +1917,43 @@ class ResearchViewAggregationService:
             for item in measured_properties
             if self._safe_text(item.get("property"))
         ]
+        executive_summary = self._material_report_summary(
+            canonical_name,
+            representative_chains,
+            property_names,
+        )
         return {
             "schema_version": "material_report_package.v1",
-            "status": "ready" if chains and not limitations else "partial",
+            "status": "ready" if representative_chains and not limitations else "partial",
             "title": f"{canonical_name} material-state report",
             "material_id": material_id,
             "canonical_name": canonical_name,
-            "summary": self._material_report_summary(
+            "summary": executive_summary,
+            "executive_summary": executive_summary,
+            "material_scope": self._build_material_report_scope(
                 canonical_name,
-                chains,
-                property_names,
+                sample_matrix,
+                papers,
+                evidence_refs,
             ),
             "paper_contributions": [
                 self._build_material_report_paper_contribution(paper)
                 for paper in papers
             ],
-            "material_state_chains": chains,
+            "key_findings": self._build_material_report_findings(representative_chains),
+            "representative_states": representative_chains,
+            "thematic_sections": self._build_material_report_sections(
+                canonical_name,
+                all_chains,
+                representative_chains,
+            ),
+            "material_state_chains": representative_chains,
             "limitations": self._dedupe_strings(limitations),
+            "evidence_appendix": self._build_material_report_appendix(
+                sample_matrix,
+                property_names,
+                evidence_refs,
+            ),
             "source_refs": evidence_refs,
         }
 
@@ -1994,6 +2015,233 @@ class ResearchViewAggregationService:
             "evidence_refs": value.get("evidence_refs", []),
             "warnings": value.get("warnings", []),
         }
+
+    def _select_representative_material_chains(
+        self,
+        chains: list[dict[str, Any]],
+        *,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        if len(chains) <= limit:
+            return chains
+        ranked = sorted(
+            chains,
+            key=lambda chain: (
+                self._material_report_chain_score(chain),
+                self._safe_text(chain.get("sample_label")) or "",
+            ),
+            reverse=True,
+        )
+        selected: list[dict[str, Any]] = []
+        selected_documents: set[str] = set()
+        for chain in ranked:
+            document_id = self._safe_text(chain.get("document_id")) or ""
+            if document_id in selected_documents:
+                continue
+            selected.append(chain)
+            if document_id:
+                selected_documents.add(document_id)
+            if len(selected) >= limit:
+                return selected
+        for chain in ranked:
+            if chain in selected:
+                continue
+            selected.append(chain)
+            if len(selected) >= limit:
+                break
+        return selected
+
+    def _material_report_chain_score(self, chain: dict[str, Any]) -> tuple[int, int, float]:
+        results = self._as_list(chain.get("performance_results"))
+        evidence = self._as_list(chain.get("source_evidence"))
+        context_count = len(self._as_mapping(chain.get("preparation_context"))) + len(
+            self._as_mapping(chain.get("test_conditions"))
+        )
+        property_weight = 0
+        for result in results:
+            property_name = (self._safe_text(self._as_mapping(result).get("property")) or "").lower()
+            if any(
+                token in property_name
+                for token in (
+                    "relative density",
+                    "density",
+                    "hardness",
+                    "yield strength",
+                    "tensile strength",
+                    "elongation",
+                    "corrosion",
+                    "fatigue",
+                    "odf",
+                    "jeffrey",
+                )
+            ):
+                property_weight += 2
+            else:
+                property_weight += 1
+        confidence = self._numeric_or_none(chain.get("confidence")) or 0
+        return (len(results) + property_weight, context_count + len(evidence), float(confidence))
+
+    def _build_material_report_scope(
+        self,
+        canonical_name: str,
+        sample_matrix: dict[str, Any],
+        papers: list[dict[str, Any]],
+        evidence_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        routes: list[str] = []
+        for row in sample_matrix.get("rows", []):
+            for value in self._as_mapping(row.get("process_context")).values():
+                text = self._safe_text(value)
+                if text:
+                    routes.append(text)
+        return {
+            "material_system": canonical_name,
+            "preparation_routes": self._dedupe_strings(routes)[:8],
+            "source_paper_count": len(papers),
+            "sample_row_count": len(sample_matrix.get("rows", [])),
+            "evidence_count": len(evidence_refs),
+        }
+
+    def _build_material_report_findings(
+        self,
+        chains: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        findings: list[dict[str, Any]] = []
+        for index, chain in enumerate(chains[:6], start=1):
+            label = self._safe_text(chain.get("sample_label")) or self._safe_text(
+                chain.get("sample_id")
+            ) or f"state {index}"
+            results = self._as_list(chain.get("performance_results"))
+            result_text = self._material_report_result_summary(results)
+            findings.append(
+                {
+                    "finding_id": f"finding:{index}",
+                    "title": f"{label} links preparation, testing, and response",
+                    "body": (
+                        f"{label} is a representative material state with {result_text}."
+                        if result_text
+                        else f"{label} is a representative material state with traceable evidence."
+                    ),
+                    "evidence_refs": self._as_list(chain.get("source_evidence"))[:5],
+                }
+            )
+        return findings
+
+    def _build_material_report_sections(
+        self,
+        canonical_name: str,
+        all_chains: list[dict[str, Any]],
+        representative_chains: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        section_specs = (
+            (
+                "densification-porosity",
+                "Densification and porosity",
+                ("density", "porosity", "densification"),
+            ),
+            (
+                "strength-ductility-hardness",
+                "Strength, ductility, and hardness",
+                ("yield strength", "tensile strength", "elongation", "hardness"),
+            ),
+            (
+                "texture-model-prediction",
+                "Texture and model prediction",
+                ("texture", "odf", "jeffrey", "predicted yield"),
+            ),
+            (
+                "corrosion-fatigue-open-chains",
+                "Corrosion, fatigue, and open chains",
+                ("corrosion", "fatigue"),
+            ),
+        )
+        sections: list[dict[str, Any]] = []
+        for section_id, title, tokens in section_specs:
+            matching = [
+                chain
+                for chain in all_chains
+                if self._chain_has_property_token(chain, tokens)
+            ]
+            evidence_refs = self._dedupe_evidence_refs(
+                [
+                    ref
+                    for chain in matching[:5]
+                    for ref in self._as_list(chain.get("source_evidence"))
+                ]
+            )
+            count_text = (
+                f"{len(matching)} supporting state(s)"
+                if matching
+                else "no resolved supporting states"
+            )
+            sections.append(
+                {
+                    "section_id": section_id,
+                    "title": title,
+                    "body": (
+                        f"{canonical_name} has {count_text} for this theme. "
+                        "Use these findings as scoped evidence rather than a global parameter ranking."
+                    ),
+                    "key_points": [
+                        self._material_report_chain_point(chain)
+                        for chain in representative_chains
+                        if self._chain_has_property_token(chain, tokens)
+                    ][:3],
+                    "evidence_refs": evidence_refs[:8],
+                }
+            )
+        return sections
+
+    def _build_material_report_appendix(
+        self,
+        sample_matrix: dict[str, Any],
+        property_names: list[str],
+        evidence_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        source_tables = {
+            self._safe_text(self._as_mapping(ref.get("locator")).get("source_ref"))
+            for ref in evidence_refs
+            if self._safe_text(self._as_mapping(ref.get("locator")).get("source_ref"))
+        }
+        return {
+            "sample_matrix_row_count": len(sample_matrix.get("rows", [])),
+            "property_count": len(property_names),
+            "evidence_count": len(evidence_refs),
+            "source_table_count": len(source_tables),
+        }
+
+    def _chain_has_property_token(
+        self,
+        chain: dict[str, Any],
+        tokens: tuple[str, ...],
+    ) -> bool:
+        haystack = " ".join(
+            self._safe_text(self._as_mapping(result).get("property")) or ""
+            for result in self._as_list(chain.get("performance_results"))
+        ).lower()
+        return any(token in haystack for token in tokens)
+
+    def _material_report_result_summary(
+        self,
+        results: list[Any],
+    ) -> str:
+        parts: list[str] = []
+        for result_value in results[:4]:
+            result = self._as_mapping(result_value)
+            property_name = self._safe_text(result.get("property"))
+            display_value = self._safe_text(result.get("display_value"))
+            if property_name and display_value:
+                parts.append(f"{property_name} {display_value}")
+        return ", ".join(parts)
+
+    def _material_report_chain_point(self, chain: dict[str, Any]) -> str:
+        label = self._safe_text(chain.get("sample_label")) or self._safe_text(
+            chain.get("sample_id")
+        ) or "material state"
+        result_text = self._material_report_result_summary(
+            self._as_list(chain.get("performance_results"))
+        )
+        return f"{label}: {result_text}" if result_text else label
 
     def _build_material_report_paper_contribution(
         self,

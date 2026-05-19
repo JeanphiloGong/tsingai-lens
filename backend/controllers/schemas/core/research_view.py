@@ -424,6 +424,50 @@ class MaterialReportPaperContributionResponse(BaseModel):
     contribution_summary: str = Field(..., description="贡献摘要")
 
 
+class MaterialReportScopeResponse(BaseModel):
+    """Collection-level material report scope."""
+
+    material_system: str = Field(..., description="材料体系")
+    preparation_routes: list[str] = Field(default_factory=list, description="主要制备路线")
+    source_paper_count: int = Field(default=0, description="来源文献数")
+    sample_row_count: int = Field(default=0, description="支撑矩阵行数")
+    evidence_count: int = Field(default=0, description="证据引用数")
+
+
+class MaterialReportFindingResponse(BaseModel):
+    """One evidence-backed finding in the material report."""
+
+    finding_id: str = Field(..., description="finding ID")
+    title: str = Field(..., description="finding 标题")
+    body: str = Field(..., description="finding 内容")
+    evidence_refs: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="支撑证据",
+    )
+
+
+class MaterialReportSectionResponse(BaseModel):
+    """One thematic report section."""
+
+    section_id: str = Field(..., description="章节 ID")
+    title: str = Field(..., description="章节标题")
+    body: str = Field(..., description="章节正文")
+    key_points: list[str] = Field(default_factory=list, description="关键点")
+    evidence_refs: list[EvidenceReferenceResponse] = Field(
+        default_factory=list,
+        description="章节证据",
+    )
+
+
+class MaterialReportAppendixResponse(BaseModel):
+    """Supporting evidence appendix summary."""
+
+    sample_matrix_row_count: int = Field(default=0, description="完整样品矩阵行数")
+    property_count: int = Field(default=0, description="性能指标数")
+    evidence_count: int = Field(default=0, description="证据数")
+    source_table_count: int = Field(default=0, description="来源表格数")
+
+
 class MaterialReportPackageResponse(BaseModel):
     """Backend-built package for rendering the material research report."""
 
@@ -433,15 +477,30 @@ class MaterialReportPackageResponse(BaseModel):
     material_id: str = Field(..., description="材料 ID")
     canonical_name: str = Field(..., description="规范材料名")
     summary: str = Field(..., description="确定性摘要")
+    executive_summary: str = Field(..., description="报告摘要")
+    material_scope: MaterialReportScopeResponse = Field(..., description="材料范围")
     paper_contributions: list[MaterialReportPaperContributionResponse] = Field(
         default_factory=list,
         description="文献贡献",
     )
+    key_findings: list[MaterialReportFindingResponse] = Field(
+        default_factory=list,
+        description="关键发现",
+    )
+    representative_states: list[MaterialReportStateChainResponse] = Field(
+        default_factory=list,
+        description="精选代表材料状态",
+    )
+    thematic_sections: list[MaterialReportSectionResponse] = Field(
+        default_factory=list,
+        description="主题分析章节",
+    )
     material_state_chains: list[MaterialReportStateChainResponse] = Field(
         default_factory=list,
-        description="材料状态链",
+        description="精选材料状态链；完整矩阵在 sample_matrix 中",
     )
     limitations: list[str] = Field(default_factory=list, description="限制和不确定性")
+    evidence_appendix: MaterialReportAppendixResponse = Field(..., description="证据附录摘要")
     source_refs: list[EvidenceReferenceResponse] = Field(
         default_factory=list,
         description="包级证据引用",

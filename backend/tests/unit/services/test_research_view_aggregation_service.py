@@ -593,9 +593,14 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     report_package = profile["report_package"]
     assert report_package["schema_version"] == "material_report_package.v1"
     assert report_package["canonical_name"] == "316L stainless steel"
+    assert report_package["material_scope"]["sample_row_count"] == 2
+    assert report_package["evidence_appendix"]["sample_matrix_row_count"] == 2
     assert report_package["paper_contributions"][0]["document_id"] == "paper-1"
     chains = report_package["material_state_chains"]
     assert [chain["sample_label"] for chain in chains] == ["as-built", "heat-treated"]
+    assert report_package["representative_states"] == chains
+    assert report_package["key_findings"]
+    assert report_package["thematic_sections"]
     assert chains[0]["preparation_context"] == {"process": "LPBF"}
     assert chains[0]["test_conditions"] == {
         "method": "potentiodynamic polarization",
@@ -606,6 +611,67 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     )
     assert chains[0]["performance_results"][0]["display_value"] == "1.2 uA/cm2"
     assert chains[0]["source_evidence"][0]["fact_ids"] == ["oeu-as-built-icorr"]
+
+
+def test_material_report_package_selects_representative_states_from_full_matrix():
+    profiles, _ = _frames()
+    objective_units = [
+        {
+            "evidence_unit_id": f"oeu-sample-{index}",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": f"sample-{index}"},
+            "process_context": {"process": "LPBF", "laser_power_w": 200 + index},
+            "test_condition": {"method": "tensile"},
+            "property_normalized": "yield strength",
+            "value_payload": {
+                "value": 400 + index,
+                "source_value_text": str(400 + index),
+            },
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "route_id": f"route-table-{index}",
+                    "source_kind": "table",
+                    "source_ref": f"table-{index}",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+        for index in range(12)
+    ]
+    service = _service_from_frames(
+        profiles,
+        {
+            "evidence_anchors": [],
+            "method_facts": [],
+            "sample_variants": [],
+            "test_conditions": [],
+            "baseline_references": [],
+            "measurement_results": [],
+            "characterization_observations": [],
+            "structure_features": [],
+        },
+        objective_units=objective_units,
+    )
+
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    assert len(profile["sample_matrix"]["rows"]) == 12
+    report_package = profile["report_package"]
+    assert report_package["evidence_appendix"]["sample_matrix_row_count"] == 12
+    assert len(report_package["material_state_chains"]) == 8
+    assert len(report_package["representative_states"]) == 8
+    assert len(report_package["key_findings"]) == 6
+    assert {chain["sample_label"] for chain in report_package["material_state_chains"]} < {
+        f"sample-{index}" for index in range(12)
+    }
 
 
 def test_collection_material_profile_uses_objective_profile_when_available():

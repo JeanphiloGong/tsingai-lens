@@ -16,10 +16,13 @@
 - `results` 是核心产品对象资源
 - `documents` 是来源核验资源
 - `evidence/cards` 是支撑型资源，主要服务于 result/document/comparison drilldown
-- `protocol/*` 是条件分支，不是所有 collection 的默认主产物
 - `graph/*`、`reports/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
+- `materials/{material_id}/review-report*` 是基于 material research-view 的
+  AI-assisted review draft 生成能力，不是 raw 数据导出
 - 当前没有单独公开的 `query/search` 产品接口
 - `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
+- `goal-sessions/*` 是绑定 collection 的 AI research copilot 会话层，必须区分
+  collection evidence 与 general fallback
 - 所有业务响应都会回传 `X-Request-ID`
   - 客户端可主动传入 `X-Request-ID` 参与链路关联
   - 如果未传入或值非法，后端会生成新的 request id 并回写到响应头
@@ -41,19 +44,26 @@
 6. 从 workspace 进入 `comparisons`
 7. 从 `comparisons` drilldown 到 `results`
 8. 需要核验来源时，从 `results` 回到 `documents`
-9. 只有 collection 适合 protocol 分支时，才进入 protocol steps/search/sop
-10. 在 comparison/result/document 中需要核验证据时，调用 traceback 接口并跳转文档查看器
+9. 在 comparison/result/document 中需要核验证据时，调用 traceback 接口并跳转文档查看器
 
-可选 goal-first 流程（当前只覆盖 Goal Brief / Intake）：
+可选 collection-bound 短对话流程：
+
+1. `POST /api/v1/goal-sessions` 绑定一个 collection
+2. `PATCH /api/v1/goal-sessions/{session_id}` 设置 goal、focus material/paper 或回答模式
+3. `POST /api/v1/goal-sessions/{session_id}/messages`
+4. 根据返回的 `source_mode` 区分知识库证据、证据不足、通用背景回退或纯通用回答
+5. 从返回的 `source_links` 进入可访问的文献或证据位置；`used_evidence_ids` 只作诊断追踪
+
+可选 goal-first collection seeding 流程（当前只覆盖 Goal Brief / Intake）：
 
 1. `POST /api/v1/goals/intake`
 2. 从响应读取 `seed_collection.collection_id`
 3. 打开 `GET /api/v1/collections/{collection_id}/workspace`
-4. 后续统一进入 `comparisons`、`results`、`documents`
+4. 后续统一进入 `goal-sessions`、`comparisons`、`results`、`documents`
 
 ## 资源与接口
 
-### Goal Brief / Intake（当前公开入口）
+### Goal Brief / Intake（可选 collection seeding 入口）
 
 - `POST /api/v1/goals/intake`
 
@@ -94,6 +104,77 @@
 - 返回中不得直接内嵌 `document_profiles`、`evidence_cards`、`comparison_rows`
 - 返回必须提供 `seed_collection.collection_id`，并收敛到统一 collection 路由
 
+### Goal Sessions / Collection-bound Short Conversation
+
+- `POST /api/v1/goal-sessions`
+- `GET /api/v1/goal-sessions/{session_id}`
+- `PATCH /api/v1/goal-sessions/{session_id}`
+- `POST /api/v1/goal-sessions/{session_id}/messages`
+- `GET /api/v1/goal-sessions/{session_id}/messages`
+
+最小 session 字段：
+
+- `session_id`
+- `user_id`
+- `collection_id`
+- `focused_material_id`
+- `focused_paper_id`
+- `goal_text`
+- `goal_brief_json`
+- `answer_mode`
+- `rolling_summary`
+- `last_evidence_ids`
+- `last_material_ids`
+- `last_paper_ids`
+- `collection_data_version`
+
+最小创建请求只需要绑定 collection：
+
+```json
+{
+  "collection_id": "col_xxx"
+}
+```
+
+`goal_text`、`focused_material_id`、`focused_paper_id`、`answer_mode` 和
+`goal_brief_json` 都是可选会话上下文。`goal_brief_json` 是可选 metadata，不是开始
+对话的前置条件。
+
+`answer_mode` 可选值：
+
+- `grounded`：只允许基于当前 collection 的 Core 证据回答；无证据时返回受限说明
+- `hybrid`：默认模式；优先查 collection，缺少证据时允许通用背景回退
+- `general`：不以当前 collection 作为证据来源，只做通用背景回答
+
+message 返回必须包含：
+
+- `answer`
+- `source_mode`
+- `used_evidence_ids`
+- `warnings`
+- `links`
+- `source_links`
+
+`source_mode` 可选值：
+
+- `collection_grounded`
+- `collection_limited`
+- `general_fallback`
+- `general_only`
+
+语义约束：
+
+- session 必须绑定一个 collection
+- session 可以在没有结构化 Goal Brief 的情况下开始
+- grounded/hybrid 模式必须先检索当前 collection 的 Core 或 derived Core artifact
+- collection-grounded 结论不得编造 evidence id、sample id、paper name 或 property value
+- `source_links` 必须是前端可访问的 document/evidence 路由；普通回答 UI 不应把文献
+  内部 ID 当作主要来源展示
+- general fallback 必须明确标注不是当前 collection 证据结论
+- rolling summary 可以记录对话连续性，但不得把 general fallback 提升为 collection evidence
+- 当前短对话层不产出 final coverage assessment、gap detection、clue ranking 或
+  next-step decision support
+
 ### Collection 与任务入口
 
 - `POST /api/v1/collections`
@@ -106,6 +187,8 @@
 - `GET /api/v1/collections/{collection_id}/tasks`
 - `GET /api/v1/tasks/{task_id}`
 - `GET /api/v1/tasks/{task_id}/artifacts`
+- `POST /api/v1/collections/{collection_id}/references/build`
+- `GET /api/v1/collections/{collection_id}/references`
 
 约束：
 
@@ -114,13 +197,23 @@
 - collection 页面如果要展示任务历史，应走 collection 维度的 tasks 接口
 - `task_type` 对外固定为 `build`
 - `current_stage` 对外应使用：
-  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | paper_facts_started | comparison_rows_started | protocol_artifacts_started | artifacts_ready | failed`
+  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | paper_facts_started | comparison_rows_started | artifacts_ready | failed`
 - `graphrag_index_started`、`graphrag_index_completed`
   已退役，不再属于公开或内部活动合同
 - Source 结构产物当前包括
-  `documents.parquet`、`text_units.parquet`、`blocks.parquet`、
-  `figures.parquet`、`table_rows.parquet`、`table_cells.parquet`
-  以及 `image_assets/`
+  `documents`、`text_units`、`blocks`、
+  `figures`、`tables`、`table_rows`、
+  `table_cells` 以及 `image_assets/`
+- Source 引用文献扩展是独立流程，不属于 collection build 主链路：
+  - `POST /api/v1/collections/{collection_id}/references/build`
+    从已生成的 Source `blocks` 中抽取 References/Bibliography 条目、正文 citation
+    mention 和 metadata-only candidate pool
+  - `GET /api/v1/collections/{collection_id}/references`
+    读取 `entries`、`mentions`、`resolutions`、`candidates`
+  - 当前版本不自动下载引用 PDF，不自动把引用文献导入 collection input，不把引用
+    条目提升为 Core research facts
+  - 如果 Source artifacts 尚未生成，build 接口返回 `409`，错误码为
+    `source_artifacts_not_ready`
 - `GET /api/v1/tasks/{task_id}/artifacts`
   与 workspace 内的 `artifacts` 都应对 comparison semantic 相关产物额外暴露
   `*_stale` 字段，用来表达：
@@ -154,26 +247,25 @@
 
 其中：
 
-- `workflow` 应优先表达 `comparisons`、`results`、`documents`、`protocol`、
-  `graph` 五个阶段的状态
+- `workflow` 应优先表达 `comparisons`、`results`、`documents`、`graph` 四个阶段的状态
   - `evidence` 可以在迁移期继续作为 secondary compatibility field 暴露
 - 状态值应使用显式语义，例如
   `not_started | processing | ready | limited | not_applicable | failed`
 - `workflow.results`
-  应以 `comparable_results.parquet` 与
-  `collection_comparable_results.parquet` 作为 readiness 语义判断
-  - `comparison_rows.parquet` 只是可重建 projection/cache，不是 results 的
+  应以 `comparable_results` 与
+  `collection_comparable_results` 作为 readiness 语义判断
+  - `comparison_rows` 只是可重建 projection/cache，不是 results 的
     contract 前提
 - `workflow.comparisons`
-  应以 `comparable_results.parquet` 与
-  `collection_comparable_results.parquet` 作为 readiness 语义判断
-  - `comparison_rows.parquet` 只是可重建 projection/cache，不是 comparisons
+  应以 `comparable_results` 与
+  `collection_comparable_results` 作为 readiness 语义判断
+  - `comparison_rows` 只是可重建 projection/cache，不是 comparisons
     或 graph 的 contract 前提
 - `status_summary=ready`
   应表示 collection-scoped comparison read model 已就绪，即使 row cache 尚未预生成
 - `document_summary` 应来自 `document_profiles` 的 collection 级汇总
-- `warnings` 应表达 review-heavy、protocol-limited、comparison-limited、
-  traceability-limited 等 collection 风险
+- `warnings` 应表达 review-heavy、comparison-limited、traceability-limited 等
+  collection 风险
 - `links` 应指向主资源页面，而不是让前端自己拼内部跳转语义
 - `links.comparisons`、`links.results`、`links.documents`
   应是 collection 主工作流入口
@@ -183,6 +275,24 @@
   如果继续暴露，应直接给出当前 collection 对应的 filtered corpus retrieval
   路径，即 `/api/v1/comparable-results?collection_id={collection_id}`
   - 它是 semantic inspection / retrieval surface，不应替代 `links.results`
+- `links.research_view`
+  指向 collection research aggregation，即
+  `/api/v1/collections/{collection_id}/research-view`
+- `links.research_materials`
+  指向 collection materials 主入口，即
+  `/api/v1/collections/{collection_id}/materials`
+- `links.research_material`
+  是 collection material profile 路径模板，即
+  `/api/v1/collections/{collection_id}/materials/{material_id}/research-view`
+- `links.research_documents`
+  是 document research aggregation 路径模板，即
+  `/api/v1/collections/{collection_id}/documents/{document_id}/research-view`
+- `links.research_document_materials`
+  是 document-scoped material list 路径模板，即
+  `/api/v1/collections/{collection_id}/documents/{document_id}/materials`
+- `links.research_document_material`
+  是 document-scoped material profile 路径模板，即
+  `/api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
 - `artifacts` 对每类产物应同时提供
   `*_generated` 与 `*_ready` 两类布尔值：
   - `generated` 表示该阶段产物文件已生成（可能为空）
@@ -196,29 +306,356 @@
   - `generated=true` 仅表示文件或投影前提存在
   - `ready=true` 还要求它们当前没有 stale
 - `figures_generated` / `figures_ready`
-  对应 Source 层 `figures.parquet` 的生成与可消费状态
+  对应 Source 层 `figures` 的生成与可消费状态
   - figure 行可以存在而 `image_path` 为空
   - 这种情况下仍应保留 figure traceability 行，不应直接丢弃
 - `graph_generated`
-  表示 `document_profiles.parquet`、`evidence_cards.parquet`、
-  `comparable_results.parquet`、`collection_comparable_results.parquet`
+  表示 `document_profiles`、`evidence_cards`、
+  `comparable_results`、`collection_comparable_results`
   四个 Core graph 语义输入文件都已生成
 - `graph_ready`
   表示上述 Core graph 语义输入已具备图投影消费条件，而不是
-  `entities.parquet` / `relationships.parquet` 是否存在
+  `entities` / `relationships` 是否存在
 - `artifacts` 不再暴露 `graphml_generated` / `graphml_ready`
   因为 GraphML 已改为基于 Core graph 的按需导出能力，不再是构建阶段的 readiness 产物
 - `capabilities.can_download_graphml`
   应与 `graph_ready` 保持一致，表达当前 collection 是否可以导出按需生成的 GraphML
 - `capabilities.can_view_results`
-  应在 `comparable_results.parquet` 与 `collection_comparable_results.parquet`
+  应在 `comparable_results` 与 `collection_comparable_results`
   已生成时为 `true`
   - 它表达当前 collection 的 product-facing result surface 可被消费
 - `capabilities.can_view_comparable_results`
-  应在 `comparable_results.parquet` 与 `collection_comparable_results.parquet`
+  应在 `comparable_results` 与 `collection_comparable_results`
   已生成时为 `true`
   - 它表达 collection-filtered corpus comparable-result surface 可被消费
-  - 不要求 `comparison_rows.parquet` 预先存在
+  - 不要求 `comparison_rows` 预先存在
+- `capabilities.can_view_research_view`
+  应在 paper facts 已生成时为 `true`
+  - 它表达 sample matrix / paper coverage 聚合有可消费输入
+  - 空 collection 仍可请求 research-view endpoint，但状态应为 `empty`
+
+### Research Objectives
+
+- `GET /api/v1/collections/{collection_id}/objectives`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
+
+这是 objective-first 工作区的主读取合同。接口只读取已经落库的 Core
+research-objective records，不在 GET 请求中触发 LLM 构建。
+
+Objective list 最小返回结构：
+
+- `collection_id`
+- `state`
+- `readiness`
+- `objectives`
+- `warnings`
+
+Objective research-view 最小返回结构：
+
+- `collection_id`
+- `state`
+- `objective`
+- `objective_context`
+- `readiness`
+- `paper_frames`
+- `evidence_routes`
+- `evidence_units`
+- `logic_chain`
+- `existing_comparison_rows`
+- `warnings`
+
+`objective` 至少包含：
+
+- `objective_id`
+- `question`
+- `material_scope`
+- `process_axes`
+- `property_axes`
+- `comparison_intent`
+- `confidence`
+
+`readiness` 使用：
+
+- `objectives_ready`
+- `frames_ready`
+- `routes_ready`
+- `evidence_units_ready`
+- `logic_chain_ready`
+
+语义要求：
+
+- objective 是主资源身份；material 只作为 scope/facet 展示
+- `/materials` 不返回 objective records
+- `paper_frames` 来自 `ObjectivePaperFrame`，并补充 document title 与
+  source filename
+- `relevant_tables` 与 `excluded_tables` 必须是真实 Source table id
+- `evidence_routes`、`evidence_units`、`logic_chain`
+  在下游 builder 未完成时可以为空，但字段必须保留
+- `existing_comparison_rows` 当前是投影保留字段，不作为第一版 objective
+  research-view 的事实来源
+
+错误语义：
+
+- collection 不存在：`404`
+- research objectives 尚未生成且 collection 非空：`409 research_objectives_not_ready`
+- objective research-view 指向不存在目标：`404 research_objective_not_found`
+
+### Research View
+
+- `GET /api/v1/collections/{collection_id}/research-view`
+- `GET /api/v1/collections/{collection_id}/materials`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
+
+这是 research-facing 聚合合同，用来把 raw paper facts 组织成样品矩阵、
+条件序列、文献覆盖、材料档案和 collection 比较组。
+
+它不是 raw `measurement_results` 或 result-card list 的兼容包装；前端不应在
+主界面重新从一条条 fact 自行拼矩阵。
+
+Collection research-view 最小返回结构：
+
+- `collection_id`
+- `state`
+- `overview`
+- `materials`
+- `paper_coverage`
+- `comparable_groups`
+- `cross_paper_matrices`
+- `trend_series`
+- `evidence_links`
+- `debug_links`
+- `warnings`
+
+Paper research-view 最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `paper_title`
+- `state`
+- `overview`
+- `materials`
+- `sample_matrix`
+- `condition_series`
+- `evidence_links`
+- `debug_links`
+- `warnings`
+
+Collection materials 最小返回结构：
+
+- `collection_id`
+- `state`
+- `materials`
+- `warnings`
+
+Collection material profile 最小返回结构：
+
+- `collection_id`
+- `material_id`
+- `canonical_name`
+- `aliases`
+- `state`
+- `overview`
+- `papers`
+- `sample_matrix`
+- `process_parameter_ranges`
+- `measured_properties`
+- `comparison_groups`
+- `condition_series`
+- `evidence_refs`
+- `debug_links`
+- `warnings`
+
+Document materials 最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `state`
+- `materials`
+- `warnings`
+
+Document material profile 最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `material_id`
+- `canonical_name`
+- `aliases`
+- `state`
+- `overview`
+- `sample_matrix`
+- `process_conditions`
+- `test_conditions`
+- `measured_properties`
+- `within_paper_comparisons`
+- `condition_series`
+- `evidence_refs`
+- `debug_links`
+- `warnings`
+
+状态值使用：
+
+```text
+empty | processing | partial | ready | failed
+```
+
+语义要求：
+
+- `paper_coverage` 每篇文献一行，表达样品数、工艺参数数、measurement 数、
+  condition 数、evidence 数和主要 warning
+- `materials` 是 collection 的主材料入口；`comparison_groups` 是材料档案内
+  的分析模块和高级调试入口，不是顶级主导航对象
+- collection material profile 可以跨文献聚合别名、样品、工艺范围、性能摘要
+  和比较组
+- document material profile 只表达单篇文献内一个材料的事实，不做跨文献合并
+- `sample_matrix.rows` 应优先是一行一个真实 sample / variant
+- generic material/process mention 不应成为主矩阵样品行
+- 重复 measurement facts 应折叠到同一 `EvidenceBackedValue.duplicate_count`
+  中，而不是产生重复 visible rows
+- 温度、时间、应变率、频率等条件轴应形成 `condition_series`
+- 每个 observed value 应保留 `evidence_refs`，无法保留时应给出结构化
+  warning
+
+错误语义：
+
+- collection 不存在：`404`
+- paper facts 尚未生成且 collection 非空：`409 research_view_not_ready`
+- document research-view 指向不存在文档：`404 research_view_document_not_found`
+- material profile 指向不存在材料：`404 research_view_material_not_found`
+
+### Material Review Reports
+
+- `POST /api/v1/collections/{collection_id}/materials/{material_id}/review-report`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report.md`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report.pdf`
+
+这是材料档案的高价值输出能力：后端先读取 collection material profile
+research-view，整理为 `MaterialReviewContextPack`，再进入分阶段综述生成流水线。
+流水线会生成写作数据包、提纲、分节上下文、分节草稿、证据绑定结果、审核记录、
+修订记录和最终 Markdown，然后校验证据引用并渲染 PDF。
+
+产品定位是 AI-assisted review draft，不是正式发表论文，也不是普通导出。
+PDF/Markdown 内必须保留说明：
+
+```text
+本文件为基于当前文献集合生成的 AI 辅助综述论文草稿，正式学术使用前需人工审阅。
+```
+
+生成请求体：
+
+```json
+{
+  "language": "zh",
+  "report_type": "review_draft",
+  "include_appendix": true,
+  "force_regenerate": false
+}
+```
+
+字段语义：
+
+- `language`
+  当前支持 `zh | en`，默认 `zh`
+- `report_type`
+  当前仅支持 `review_draft`
+- `include_appendix`
+  是否把 evidence table 放入 AI 上下文和报告附录
+- `force_regenerate`
+  是否忽略已有报告并重新生成
+
+`POST` 返回最小结构：
+
+- `report_id`
+- `collection_id`
+- `material_id`
+- `status`
+- `stage`
+- `message`
+- `title`
+- `language`
+- `report_type`
+- `include_appendix`
+- `readiness`
+- `readiness_reason`
+- `data_version`
+- `warnings`
+- `created_at`
+- `updated_at`
+- `generated_at`
+- `pdf_url`
+- `markdown_url`
+
+`status` 使用：
+
+```text
+generating | ready | ready_with_warnings | failed
+```
+
+`readiness` 使用：
+
+```text
+strong | usable | preliminary | insufficient
+```
+
+`stage` 使用更细的生成阶段。`status` 仍保持稳定的对外任务状态：
+
+```text
+requested
+building_data_pack
+planning_outline
+selecting_section_contexts
+writing_sections
+binding_evidence
+reviewing
+revising
+integrating
+rendering_pdf
+ready
+ready_with_warnings
+failed
+```
+
+生成流程：
+
+1. 读取 material research-view。
+2. 构造 `MaterialReviewContextPack`，只包含综述写作需要的材料、文献范围、
+   样品-工艺矩阵、性能矩阵、comparison clusters、trend findings、
+   conflicts、research gaps、evidence table 和 limitations。
+3. 构造确定性的 `data_pack.json`，计算样品数、工艺参数空间、性能范围、
+   极值样品、样品级对比、趋势候选和质量 flags。
+4. 生成 `outline.json`，单篇或少量文献时使用证据边界章节，不生成实质性的
+   跨文献一致性结论章节。
+5. 生成 `section_contexts.json`，每个章节只接收该章节需要的数据子集。
+6. 分章节调用 AI 写作，写出 `sections.json`；结果章节必须包含样品、数值和
+   evidence id。
+7. 写出 `bound_claims.json` 和 `review_notes.json`，检查证据 ID、样品 ID、
+   数值、泛泛表述、单篇文献过度外推和缺失核心数据。
+8. 对失败章节最多执行两轮自动修订，写出 `revisions.json`；无法修复时使用
+   确定性的证据绑定段落兜底，并把问题保留为 warning。
+9. 整合最终 Markdown，追加确定性附录，包括样品-工艺矩阵、样品-性能矩阵、
+   evidence table 和必要的 reviewer warnings。
+10. 校验 Markdown 中的 evidence id，写出 Markdown 和 PDF。
+
+证据约束：
+
+- AI 输入不应直接暴露 raw JSON、长 result id、hash id、抽取日志或 debug 信息
+- 后端会把 evidence refs 映射为 `E01`、`E02` 这类报告内证据 ID
+- Markdown 中出现不存在的 evidence id 时，报告状态应为
+  `ready_with_warnings`
+- 结论章节缺少 evidence citation 时，报告状态应为
+  `ready_with_warnings`
+- 机制解释必须区分数据直接支持、趋势观察、机制性假设和研究空白
+
+错误语义：
+
+- collection 不存在：`404`
+- material profile 指向不存在材料：`404 research_view_material_not_found`
+- paper facts 尚未生成且 collection 非空：`409 research_view_not_ready`
+- 报告尚未生成：`404 material_review_report_not_found`
+- Markdown/PDF 尚未就绪：`409 material_review_report_not_ready`
 
 ### Documents
 
@@ -244,8 +681,6 @@
 - `title`
 - `source_filename`
 - `doc_type`
-- `protocol_extractable`
-- `protocol_extractability_signals`
 - `parsing_warnings`
 - `confidence`
 
@@ -262,9 +697,6 @@
 - 空字符串不应返回给前端，应统一归一化为 `null`
 - `doc_type` 使用
   `experimental | review | mixed | uncertain`
-- `protocol_extractable` 使用
-  `yes | partial | no | uncertain`
-- `protocol_extractability_signals` 当前为预留字段，返回空数组
 - `parsing_warnings` 仅用于固定 triage warning，例如
   `insufficient_content | classification_uncertain`
 - 这是增量字段扩展，不改变 endpoint，也不破坏旧字段
@@ -284,8 +716,6 @@
   "title": "High-Rate Performance of Layered Oxide Cathodes",
   "source_filename": "wang_2024_battery.pdf",
   "doc_type": "experimental",
-  "protocol_extractable": "yes",
-  "protocol_extractability_signals": [],
   "parsing_warnings": [],
   "confidence": 0.91
 }
@@ -421,7 +851,7 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
 - 结果页应同时提供回到 comparison 视图和 source document 的链接
 - 结果页不应把 `binding`、`normalized_context`、`collection_overlays`
   这些 raw semantic 字段直接作为主页面合同
-- `comparison_rows.parquet` 不是 results contract 的语义真源
+- `comparison_rows` 不是 results contract 的语义真源
 - 如果 collection 还没有生成 comparable result semantic artifacts，应返回
   `409 results_not_ready`
 
@@ -494,14 +924,14 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
   应作为 document-side grouped drilldown 的顶层字段，由 backend 从同一 semantic
   truth 投影而来
 - `collection_overlays`
-  必须来自 `collection_comparable_results.parquet`，按 `comparable_result_id`
+  必须来自 `collection_comparable_results`，按 `comparable_result_id`
   关联
 - `collection_overlays`
   必须显式带出评估策略元数据与 reassessment trigger，而不是只返回裸
   assessment 结果
 - `projected_rows`
   只是按需附带的 projection/cache 视图，默认可为空或 `null`
-- 该接口不应要求 `comparison_rows.parquet` 预先存在
+- 该接口不应要求 `comparison_rows` 预先存在
 
 查询参数：
 
@@ -587,7 +1017,7 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
 - 如果 `collection_id` 不存在：
   - 结果集按 corpus-wide scan 返回
   - 可附带所有匹配 collection 的 current overlays
-- 该接口不应要求 `comparison_rows.parquet` 预先存在
+- 该接口不应要求 `comparison_rows` 预先存在
 - `GET /api/v1/comparable-results/{comparable_result_id}`
   读取单个 corpus comparable result；如果同时传 `collection_id`，则按该 collection 的
   current scope 解释是否命中
@@ -750,27 +1180,13 @@ comparison 对 traceback 的依赖约定：
 
 - 一行表示一个可供 collection 级检查的 normalized result，不是 pairwise 对比对象
 - `/comparisons`
-  当前以 `comparable_results.parquet` +
-  `collection_comparable_results.parquet` 为语义真源，并可按需重投影 row cache
+  当前以 `comparable_results` +
+  `collection_comparable_results` 为语义真源，并可按需重投影 row cache
 - `comparability_status` 使用
   `comparable | limited | not_comparable | insufficient`
-- 前端应把 comparison rows 作为主比较表，而不是把 protocol steps 当主表
+- 前端应把 comparison rows 作为主比较表
 - comparison row 的主 drilldown 应进入 `results/{result_id}`，而不是把 row
   自己当成最终事实页
-
-### Protocol 条件分支
-
-- `GET /api/v1/collections/{collection_id}/protocol/steps`
-- `GET /api/v1/collections/{collection_id}/protocol/search`
-- `POST /api/v1/collections/{collection_id}/protocol/sop`
-
-这些接口仍然保留，但前端不能假设每个 collection 都有高质量 protocol 输出。
-
-前端约束：
-
-- protocol 入口必须保持 collection 维度
-- 如果 workspace 或 document profiles 已经表明 collection 不适合 protocol，
-  前端应降级展示，而不是强推 protocol 页面
 
 ### Graph、Reports 次级界面
 
@@ -786,32 +1202,44 @@ comparison 对 traceback 的依赖约定：
 Graph 语义约束：
 
 - `/graph` 与 `/graphml` 只消费
-  `document_profiles.parquet`、`evidence_cards.parquet`、
-  `comparable_results.parquet`、`collection_comparable_results.parquet`
-- graph 与 report 派生读路径应通过共享的 in-memory projection substrate
-  从这些 semantic artifacts 投影，不要求 `comparison_rows.parquet` 预先存在
+  `document_profiles`、`research_objectives`、
+  `objective_evidence_units`、`objective_logic_chains`
+- graph 派生读路径应从 objective-first semantic records 投影，不要求
+  `comparison_rows` 预先存在
 - 它们当前是 Core-derived graph projection，不再以
-  `entities.parquet`、`relationships.parquet`、`communities.parquet`
+  `entities`、`relationships`、`communities`
   作为产品语义前提
-- `comparison_rows.parquet` 在这条链路里只是可重建的 projection/cache，
-  graph/report 请求不应把它当成必需输入，也不应为了只读访问而要求先物化它
+- collection-wide `comparison_rows` 不再是这条链路的语义输入；paper-local
+  keys such as `Case`、`condition number`、`sample number` may appear as
+  sample or trace context, but must not be projected as test conditions unless
+  resolved evidence says they are real test conditions
 - `/graph` 返回结构字段：
   `collection_id / nodes / edges / truncated`
 - graph node 只保留：
-  `id / label / type / degree`
+  `id / label / type / role / summary / metrics / detail_rows / objective_id /
+  logic_chain_id / degree`
 - graph edge 只保留：
-  `id / source / target / weight / edge_description`
+  `id / source / target / weight / edge_description / source_role / target_role`
 - graph node `type` 当前可以是：
-  `document | evidence | comparison | material | property | test_condition | baseline`
+  `objective | material_system | material_scope | process_sample_context |
+  test_conditions | characterization | measurement_results |
+  controlled_comparisons | mechanism_interpretation | limitations`
+- graph node `role` 当前可以是：
+  `research_objective | material_system | material_scope |
+  process_sample_context | test_conditions | characterization | measurement_results |
+  controlled_comparisons | mechanism_interpretation | limitations`
+- `detail_rows` 是聚合 step 的证据明细表。paper-local keys such as
+  `Case 15`、`condition no. 2`、单条 measurement value 不应作为默认画布节点；
+  它们应进入对应 semantic node `detail_rows`
 - graph edge `edge_description` 当前可以是：
-  `document_to_evidence | evidence_to_comparison | comparison_to_material |
-  comparison_to_property | comparison_to_test_condition | comparison_to_baseline`
+  `objective_to_material_system | material_system_to_material_scope |
+  objective_to_material_scope | semantic_chain_step_to_step`
+- 当 `edge_description=semantic_chain_step_to_step` 时，`source_role` 和
+  `target_role` 表达具体链路环节，例如
+  `material_scope -> process_sample_context`。这样 graph API 保持稳定边类型，
+  前端仍能恢复具体科研链路顺序
 - `/graph/nodes/{node_id}/neighbors` 返回中心节点的一跳邻域，字段与 `/graph`
-  保持同一精简结构
-- 节点详情不再经由 graph 聚合透出；前端应根据 `doc:` / `evi:` / `cmp:`
-  前缀回到 document / evidence / comparison canonical 资源
-- 聚合节点 `mat:` / `prop:` / `tc:` / `base:` 不提供 graph-owned detail；
-  前端应回到 `/comparisons` 并使用对应过滤参数做 canonical drilldown
+  保持同一结构
 - graph 输入未就绪时，应返回 `409`，并携带稳定错误码
   `graph_not_ready`
 - `graph_not_ready.detail.missing_artifacts` 应返回缺失的 graph 语义输入文件名，
@@ -852,9 +1280,6 @@ readiness 类错误至少应包含：
 - `evidence/cards`
   - 作为支撑型资源，未生成时返回 `409`
   - 生成后即使为空也可返回 `200`，`count=0`
-- `protocol/*`
-  - 入口基于 `protocol_steps_generated` 判断是否可访问
-  - `protocol_steps_generated=true` 且 `protocol_steps_ready=false` 时允许返回空列表或空结果
 - `graph`
   - Core graph 输入缺失时返回 `409`
   - 请求的 `node_id` 不存在时，`/graph/nodes/{node_id}/neighbors` 返回 `404`
@@ -863,8 +1288,7 @@ readiness 类错误至少应包含：
 
 - 浏览器与前端代码只应依赖 `/api/v1/*` 与 `/api/*` 两类前缀
 - collection 详情页的主状态来源是 `workspace`
-- 前端不应把 `sections_ready`、`procedure_blocks_ready` 这类内部产物状态当成长期主合同
-- protocol 页面不是默认首页，comparison workspace 才是
+- 前端不应把内部产物状态当成长期主合同
 - 前端主工作流应理解为 `comparisons -> results -> documents`
 - `results` 是主 drilldown 对象，不应直接用 raw `comparable-results` retrieval payload 代替
 - goal-first 响应只用于 Goal Brief / Intake 与 collection handoff，主展示仍必须消费 Core 资源

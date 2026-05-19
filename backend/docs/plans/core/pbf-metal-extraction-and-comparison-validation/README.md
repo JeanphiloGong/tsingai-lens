@@ -7,7 +7,7 @@ This is a narrow Core topic-proof family. It does not own the shared
 evidence-chain contract and it does not replace the backend-wide implementation
 family for product-surface cutover.
 
-The family keeps three live pages because this local subject now needs:
+The family keeps multiple live pages because this local subject now needs:
 
 - a proposal page that explains why this wave exists, what semantic center it
   protects, and what outcomes it is trying to prove
@@ -19,6 +19,11 @@ The family keeps three live pages because this local subject now needs:
 - a fact-thickening plan that turns the landed evidence-chain read projection
   into concrete PBF-metal schema, prompt, normalization, policy, and fixture
   work
+- an expert gold-set evaluation plan that explains how human-filled annotation
+  tables become backend quality measurements, error reports, and regression
+  tests
+- a P001 repair plan that turns the first expert-gold evaluation results into
+  concrete extraction, normalization, and binding fixes
 - an implementation plan that turns that direction into executable delivery
   slices, file areas, and verification commands
 
@@ -37,6 +42,13 @@ The family keeps three live pages because this local subject now needs:
   Detailed next backend plan for PBF-metal schema, prompt, normalization,
   comparability policy, and acceptance fixture work after read projection
   landing
+- [`expert-gold-set-evaluation-plan.md`](expert-gold-set-evaluation-plan.md)
+  Convert expert-filled annotation tables into a gold set, compare them with
+  normal Core extraction output, classify errors, and drive regression tests
+- [`p001-extraction-quality-repair-plan.md`](p001-extraction-quality-repair-plan.md)
+  Repair the first P001 evaluator findings: duplicate measurements, conceptual
+  sample variants, process parameter column shifts, and fragmented test
+  conditions
 - [`implementation-plan.md`](implementation-plan.md)
   Delivery slices, owned file areas, verification commands, and acceptance
   gates for the execution wave
@@ -54,6 +66,10 @@ The family keeps three live pages because this local subject now needs:
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
   Earlier structured-extraction cutover plan that this wave narrows and
   hardens
+- [`../research-objective-first/p001-remaining-gold-gap-repair-plan.md`](../research-objective-first/p001-remaining-gold-gap-repair-plan.md)
+  Research-objective-first follow-up plan that uses the P001 gold milestone to
+  repair method-family conditions, pairwise comparison relations, and
+  characterization observations
 - [`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
   Current implemented comparison-semantic substrate
 - [`../../backend-wide/materials-comparison-v2/implementation-plan.md`](../../backend-wide/materials-comparison-v2/implementation-plan.md)

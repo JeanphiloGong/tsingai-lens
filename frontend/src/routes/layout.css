@@ -749,6 +749,11 @@ textarea {
   background: rgba(43, 111, 247, 0.08);
 }
 
+.dropzone--disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .dropzone-input {
   display: none;
 }
@@ -1852,8 +1857,9 @@ textarea {
   min-height: 52px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
+  overflow: visible;
   padding: 6px 10px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -1886,6 +1892,17 @@ textarea {
 .collection-tabs summary:hover {
   color: var(--text-primary);
   background: #f8fafc;
+}
+
+.collection-tabs a.locked {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+  opacity: 0.74;
+}
+
+.collection-tabs a.locked:hover {
+  color: var(--text-disabled);
+  background: transparent;
 }
 
 .collection-tabs a.active,
@@ -1925,6 +1942,42 @@ textarea {
 
 .collection-panel {
   gap: 24px;
+}
+
+.collection-locked-surface {
+  display: grid;
+  gap: 14px;
+  max-width: 720px;
+  padding: 28px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.collection-locked-surface__eyebrow {
+  margin: 0;
+  color: var(--warning-text);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.collection-locked-surface h2,
+.collection-locked-surface p {
+  margin: 0;
+}
+
+.collection-locked-surface h2 {
+  font-size: 24px;
+  line-height: 32px;
+}
+
+.collection-locked-surface p {
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 24px;
 }
 
 .overview-stack {
@@ -2413,6 +2466,7 @@ textarea {
 :root[data-theme='dark'] .avatar-placeholder,
 :root[data-theme='dark'] .overview-card,
 :root[data-theme='dark'] .readiness-card,
+:root[data-theme='dark'] .collection-locked-surface,
 :root[data-theme='dark'] .collection-tabs,
 :root[data-theme='dark'] .collection-tabs__menu {
   background: rgba(16, 26, 44, 0.88);

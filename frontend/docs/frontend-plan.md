@@ -19,13 +19,16 @@
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
+- 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、`GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
 - 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`
 - 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
 - 结果与文档证据链：`GET /api/v1/collections/{collection_id}/results/{result_id}`、`GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics?include_grouped_projections=true`
 - 图谱与 GraphML：`GET /api/v1/collections/{collection_id}/graph`、`GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`、`GET /api/v1/collections/{collection_id}/graphml`
 - 图谱 drilldown 详情：`GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、`GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`、`GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
 - 图谱聚合节点 drilldown：回到 `GET /api/v1/collections/{collection_id}/comparisons`，并使用 `material_system_normalized`、`property_normalized`、`test_condition_normalized`、`baseline_normalized` 过滤参数
-- Protocol 结果：`GET /api/v1/collections/{collection_id}/protocol/steps`、`GET /api/v1/collections/{collection_id}/protocol/search`、`POST /api/v1/collections/{collection_id}/protocol/sop`
+- Collection-bound AI 研究助手：`POST /api/v1/goal-sessions`、
+  `GET|PATCH /api/v1/goal-sessions/{session_id}`、
+  `POST|GET /api/v1/goal-sessions/{session_id}/messages`
 
 ## 前端实现约束
 
@@ -35,12 +38,24 @@
 - collection workspace 与首页统一把任务启动视为 `build`，不再向浏览器公开旧的 `/tasks/index` 合同
 - 前端主合同不再依赖 `sections_ready` 或 `graphml_ready`；GraphML 导出能力统一看 `capabilities.can_download_graphml`
 - 集合图谱页使用 `Cytoscape.js` 在浏览器端本地布局；邻域扩展保留已有节点位置并只对新增节点做增量重排，不依赖服务端坐标
-- 图谱页的语义聚合节点目前是 `material / property / test_condition / baseline`；默认显示 `material / property`，并通过前端类型开关显式控制其余节点可见性
+- 集合图谱页默认使用前端 overview 投影：画布收起 `comparison / evidence`
+  细节点，展示 `document`、`material`、`property`、`process`、`variant`、
+  `test_condition`、`baseline`、`unknown` 结构节点，并用聚合边表达文献、材料、性能和上下文之间的 collection-level 导航关系
+- 单个材料的细粒度样品、工艺变量、性能、发现和证据关系由
+  `/collections/{collection_id}/materials/{material_id}` 材料档案内的 material-scoped graph 承载；集合图谱只提供进入材料档案的导航入口
+- `/collections/{collection_id}/objectives` 和
+  `/collections/{collection_id}/objectives/{objective_id}` 是 objective-first
+  工作区入口；它读取 objective list 与 objective research-view，不复用
+  material endpoint 返回目标数据
+- `/collections/{collection_id}/assistant` 使用同源 `goal-sessions` API，是绑定当前
+  collection 的研究助手入口；它必须显示 `collection_grounded`、
+  `collection_limited`、`general_fallback`、`general_only` 来源边界，并把材料详情页传入的
+  `material_id` 作为显式 focus context
 - 报告结果不再是当前浏览器主流程；workspace 只保留降级说明，不再维护前端 reports API 客户端
 - 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已退役为说明页，不再发旧浏览器请求
 
 ## 验收重点
 
 - Network 面板中的产品请求只出现 `/api/v1/*` 与 `/api/*`
-- 首页、集合工作区、文件上传、任务轮询、图谱、步骤、SOP 都通过同源入口工作
+- 首页、集合工作区、文件上传、任务轮询、图谱、证据和比较都通过同源入口工作
 - 浏览器中的 API 文档入口固定为 `/api/docs`

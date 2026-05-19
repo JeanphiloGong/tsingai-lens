@@ -12,9 +12,15 @@ TaskStage = Literal[
     "source_artifacts_started",
     "source_artifacts_completed",
     "document_profiles_started",
+    "research_objectives_started",
+    "objective_paper_skim_started",
+    "objective_discovery_started",
+    "objective_paper_framing_started",
+    "objective_evidence_routing_started",
+    "objective_evidence_units_started",
+    "objective_logic_chains_started",
     "paper_facts_started",
     "comparison_rows_started",
-    "protocol_artifacts_started",
     "artifacts_ready",
     "failed",
 ]
@@ -41,6 +47,10 @@ class TaskResponse(BaseModel):
     status: TaskStatus = Field(..., description="任务状态")
     current_stage: TaskStage = Field(..., description="当前阶段")
     progress_percent: int = Field(default=0, description="进度百分比")
+    progress_detail: dict[str, Any] | None = Field(
+        default=None,
+        description="当前阶段的可读子进度，例如 current/total/unit/message",
+    )
     output_path: str | None = Field(default=None, description="输出目录")
     errors: list[str] = Field(default_factory=list, description="错误列表")
     warnings: list[str] = Field(default_factory=list, description="警告列表")
@@ -56,41 +66,41 @@ class ArtifactStatusResponse(BaseModel):
     task_id: str = Field(..., description="任务 ID")
     collection_id: str = Field(..., description="集合 ID")
     output_path: str = Field(..., description="输出目录")
-    documents_generated: bool = Field(default=False, description="documents.parquet 是否存在")
-    documents_ready: bool = Field(default=False, description="documents.parquet 是否存在且非空")
-    document_profiles_generated: bool = Field(default=False, description="document_profiles.parquet 是否存在")
-    document_profiles_ready: bool = Field(default=False, description="document_profiles.parquet 是否存在且非空")
-    evidence_anchors_generated: bool = Field(default=False, description="evidence_anchors.parquet 是否存在")
-    evidence_anchors_ready: bool = Field(default=False, description="evidence_anchors.parquet 是否存在且非空")
-    method_facts_generated: bool = Field(default=False, description="method_facts.parquet 是否存在")
-    method_facts_ready: bool = Field(default=False, description="method_facts.parquet 是否存在且非空")
-    evidence_cards_generated: bool = Field(default=False, description="evidence_cards.parquet 是否存在")
-    evidence_cards_ready: bool = Field(default=False, description="evidence_cards.parquet 是否存在且非空")
-    characterization_observations_generated: bool = Field(default=False, description="characterization_observations.parquet 是否存在")
-    characterization_observations_ready: bool = Field(default=False, description="characterization_observations.parquet 是否存在且非空")
-    structure_features_generated: bool = Field(default=False, description="structure_features.parquet 是否存在")
-    structure_features_ready: bool = Field(default=False, description="structure_features.parquet 是否存在且非空")
-    test_conditions_generated: bool = Field(default=False, description="test_conditions.parquet 是否存在")
-    test_conditions_ready: bool = Field(default=False, description="test_conditions.parquet 是否存在且非空")
-    baseline_references_generated: bool = Field(default=False, description="baseline_references.parquet 是否存在")
-    baseline_references_ready: bool = Field(default=False, description="baseline_references.parquet 是否存在且非空")
-    sample_variants_generated: bool = Field(default=False, description="sample_variants.parquet 是否存在")
-    sample_variants_ready: bool = Field(default=False, description="sample_variants.parquet 是否存在且非空")
-    measurement_results_generated: bool = Field(default=False, description="measurement_results.parquet 是否存在")
-    measurement_results_ready: bool = Field(default=False, description="measurement_results.parquet 是否存在且非空")
-    comparable_results_generated: bool = Field(default=False, description="comparable_results.parquet 是否存在")
-    comparable_results_ready: bool = Field(default=False, description="comparable_results.parquet 是否存在且非空")
-    collection_comparable_results_generated: bool = Field(default=False, description="collection_comparable_results.parquet 是否存在")
-    collection_comparable_results_ready: bool = Field(default=False, description="collection_comparable_results.parquet 是否存在且非空")
+    documents_generated: bool = Field(default=False, description="documents 是否已生成")
+    documents_ready: bool = Field(default=False, description="documents 是否已生成且非空")
+    document_profiles_generated: bool = Field(default=False, description="document_profiles 是否已生成")
+    document_profiles_ready: bool = Field(default=False, description="document_profiles 是否已生成且非空")
+    evidence_anchors_generated: bool = Field(default=False, description="evidence_anchors 是否已生成")
+    evidence_anchors_ready: bool = Field(default=False, description="evidence_anchors 是否已生成且非空")
+    method_facts_generated: bool = Field(default=False, description="method_facts 是否已生成")
+    method_facts_ready: bool = Field(default=False, description="method_facts 是否已生成且非空")
+    evidence_cards_generated: bool = Field(default=False, description="evidence_cards 是否已生成")
+    evidence_cards_ready: bool = Field(default=False, description="evidence_cards 是否已生成且非空")
+    characterization_observations_generated: bool = Field(default=False, description="characterization_observations 是否已生成")
+    characterization_observations_ready: bool = Field(default=False, description="characterization_observations 是否已生成且非空")
+    structure_features_generated: bool = Field(default=False, description="structure_features 是否已生成")
+    structure_features_ready: bool = Field(default=False, description="structure_features 是否已生成且非空")
+    test_conditions_generated: bool = Field(default=False, description="test_conditions 是否已生成")
+    test_conditions_ready: bool = Field(default=False, description="test_conditions 是否已生成且非空")
+    baseline_references_generated: bool = Field(default=False, description="baseline_references 是否已生成")
+    baseline_references_ready: bool = Field(default=False, description="baseline_references 是否已生成且非空")
+    sample_variants_generated: bool = Field(default=False, description="sample_variants 是否已生成")
+    sample_variants_ready: bool = Field(default=False, description="sample_variants 是否已生成且非空")
+    measurement_results_generated: bool = Field(default=False, description="measurement_results 是否已生成")
+    measurement_results_ready: bool = Field(default=False, description="measurement_results 是否已生成且非空")
+    comparable_results_generated: bool = Field(default=False, description="comparable_results 是否已生成")
+    comparable_results_ready: bool = Field(default=False, description="comparable_results 是否已生成且非空")
+    collection_comparable_results_generated: bool = Field(default=False, description="collection_comparable_results 是否已生成")
+    collection_comparable_results_ready: bool = Field(default=False, description="collection_comparable_results 是否已生成且非空")
     collection_comparable_results_stale: bool = Field(
         default=False,
-        description="collection_comparable_results.parquet 是否已因 policy/version drift 而过期",
+        description="collection_comparable_results 是否已因 policy/version drift 而过期",
     )
-    comparison_rows_generated: bool = Field(default=False, description="comparison_rows.parquet 投影缓存是否存在")
-    comparison_rows_ready: bool = Field(default=False, description="comparison_rows.parquet 投影缓存是否存在且非空")
+    comparison_rows_generated: bool = Field(default=False, description="comparison_rows 是否已生成")
+    comparison_rows_ready: bool = Field(default=False, description="comparison_rows 是否已生成且非空")
     comparison_rows_stale: bool = Field(
         default=False,
-        description="comparison_rows.parquet 是否因上游 scope artifact 过期而失效",
+        description="comparison_rows 是否因上游 scope artifact 过期而失效",
     )
     graph_generated: bool = Field(default=False, description="Core graph 所需 backbone 与 comparison semantic 输入是否均已生成")
     graph_ready: bool = Field(default=False, description="Core graph 视图是否可按需投影")
@@ -98,24 +108,14 @@ class ArtifactStatusResponse(BaseModel):
         default=False,
         description="Core graph 语义输入是否因 collection scope artifact 过期而不再 current",
     )
-    blocks_generated: bool = Field(default=False, description="blocks.parquet 是否存在")
-    blocks_ready: bool = Field(default=False, description="blocks.parquet 是否存在且非空")
-    figures_generated: bool = Field(default=False, description="figures.parquet 是否存在")
-    figures_ready: bool = Field(default=False, description="figures.parquet 是否存在且非空")
-    table_rows_generated: bool = Field(default=False, description="table_rows.parquet 是否存在")
-    table_rows_ready: bool = Field(default=False, description="table_rows.parquet 是否存在且非空")
-    table_cells_generated: bool = Field(default=False, description="table_cells.parquet 是否存在")
-    table_cells_ready: bool = Field(default=False, description="table_cells.parquet 是否存在且非空")
-    procedure_blocks_generated: bool = Field(default=False, description="procedure_blocks.parquet 是否存在")
-    procedure_blocks_ready: bool = Field(
-        default=False,
-        description="procedure_blocks.parquet 是否存在且非空",
-    )
-    protocol_steps_generated: bool = Field(default=False, description="protocol_steps.parquet 是否存在")
-    protocol_steps_ready: bool = Field(
-        default=False,
-        description="protocol_steps.parquet 是否存在且非空",
-    )
+    blocks_generated: bool = Field(default=False, description="blocks 是否已生成")
+    blocks_ready: bool = Field(default=False, description="blocks 是否已生成且非空")
+    figures_generated: bool = Field(default=False, description="figures 是否已生成")
+    figures_ready: bool = Field(default=False, description="figures 是否已生成且非空")
+    table_rows_generated: bool = Field(default=False, description="table_rows 是否已生成")
+    table_rows_ready: bool = Field(default=False, description="table_rows 是否已生成且非空")
+    table_cells_generated: bool = Field(default=False, description="table_cells 是否已生成")
+    table_cells_ready: bool = Field(default=False, description="table_cells 是否已生成且非空")
     updated_at: str = Field(..., description="更新时间")
 
 

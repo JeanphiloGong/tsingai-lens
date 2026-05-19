@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 
-import pandas as pd
 import pytest
 
 try:
@@ -13,45 +10,16 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from controllers.core import comparable_results as comparable_results_controller
-from domain.core.comparison import (
+from domain.core import (
+    CollectionComparableResult,
     ComparableResult,
+    CoreFactSet,
+)
+from domain.core.comparison import (
     build_collection_assessment_input_fingerprint,
 )
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        payload = {
-            "columns": list(frame.columns),
-            "records": frame.to_dict(orient="records"),
-        }
-        Path(path).write_text(json.dumps(payload), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload["records"], columns=payload["columns"])
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _write_semantic_comparison_artifacts(
-    output_dir: Path,
-    comparable_results: list[dict],
-    scoped_results: list[dict],
-) -> None:
-    pd.DataFrame(comparable_results).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(scoped_results).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
 
 
 def _build_semantic_comparison_record(
@@ -143,11 +111,33 @@ def _build_semantic_comparison_record(
     return comparable_result, scoped_result
 
 
+def _store_core_comparable_result_facts(
+    comparison_service: ComparisonService,
+    collection_id: str,
+    *,
+    comparable_results: list[dict],
+    scoped_results: list[dict],
+) -> None:
+    comparison_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            comparison_artifacts_ready=True,
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row) for row in comparable_results
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row)
+                for row in scoped_results
+            ),
+        ),
+    )
+
+
 @pytest.fixture()
 def comparable_result_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(collection_service, artifact_registry)
+    comparison_service = ComparisonService(collection_service)
 
     monkeypatch.setattr(
         comparable_results_controller,
@@ -155,32 +145,27 @@ def comparable_result_services(monkeypatch, tmp_path):
         comparison_service,
     )
 
-    return collection_service, artifact_registry, comparison_service
+    return collection_service, comparison_service
 
 
 def test_comparable_results_route_returns_200_without_row_cache(
     comparable_result_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _comparison_service = comparable_result_services
+    collection_service, comparison_service = comparable_result_services
     collection = collection_service.create_collection(name="Comparable Results Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     comparable_result, scoped_result = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-route-1",
         source_document_id="paper-1",
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
+    _store_core_comparable_result_facts(
+        comparison_service,
+        collection_id,
+        comparable_results=[comparable_result],
+        scoped_results=[scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         comparable_results_controller.list_comparable_results(collection_id=collection_id)
@@ -192,13 +177,12 @@ def test_comparable_results_route_returns_200_without_row_cache(
     assert payload.items[0].comparable_result_id == "cres-route-1"
     assert payload.items[0].observed_collection_ids == [collection_id]
     assert payload.items[0].collection_overlays[0].collection_id == collection_id
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_comparable_result_detail_route_returns_404_when_missing(
     comparable_result_services,
 ):
-    _collection_service, _artifact_registry, _comparison_service = comparable_result_services
+    _collection_service, _comparison_service = comparable_result_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(

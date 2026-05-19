@@ -21,10 +21,9 @@ for the Lens v1 direction.
 The main problems are:
 
 - `application/` mixes collection lifecycle, task orchestration, workspace
-  assembly, graph access, and protocol logic in one flat namespace
+  assembly, graph access, and report logic in one flat namespace
 - transport-facing concerns and business-domain concerns are not clearly
   separated
-- protocol services currently occupy too much of the parsing backbone
 - frontend-facing collection workflow semantics are not clearly mirrored in code
   ownership
 
@@ -35,7 +34,7 @@ For Lens v1, backend code should reflect the actual business loop:
 3. documents are profiled
 4. evidence is extracted
 5. comparisons are generated
-6. protocol remains a conditional branch
+6. graph and reports remain secondary derived surfaces
 
 ## Architecture Rules
 
@@ -43,7 +42,6 @@ For Lens v1, backend code should reflect the actual business loop:
 - keep HTTP parsing thin and close to route ownership
 - keep use-case orchestration inside domain-local application packages
 - keep shared artifact contracts in root docs, not copied into ad hoc code
-- keep protocol behind documents, evidence, and comparisons
 - do not introduce a catch-all `services/` layer as a second junk drawer
 
 ## Target Domain Map
@@ -74,7 +72,22 @@ Owns the collection-facing summary read model:
 - workspace overview
 - workflow readiness summary
 - collection-level warnings
-- navigation links into profiles, evidence, comparisons, and protocol
+- navigation links into profiles, evidence, comparisons, graph, and reports
+
+### Goal
+
+Owns collection-bound conversation state and source-boundary records:
+
+- goal session state
+- user and assistant message records
+- answer source modes
+- user-navigable source links
+- rolling conversation summary metadata
+
+This domain currently models the chat conversation only. It must not introduce
+Goal Consumer / Decision Layer concepts such as coverage assessment, gap
+detection, clue ranking, or next-step decision support until that product slice
+is explicitly added.
 
 ### Documents
 
@@ -82,7 +95,6 @@ Owns document-level profiling:
 
 - `document_profiles`
 - document type classification
-- protocol suitability decisions
 - collection-level profile rollups
 
 ### Evidence
@@ -103,18 +115,6 @@ Owns comparison-semantic substrate plus collection-facing comparison views:
 - comparability judgments
 - comparison warnings
 - collection comparison filtering and sorting
-
-### Protocol
-
-Owns the conditional downstream branch:
-
-- protocol source preparation
-- section and block parsing
-- protocol candidate or step derivation
-- protocol search
-- SOP draft generation
-
-This domain must not be the default parsing backbone for Lens v1.
 
 ### Graph
 
@@ -149,9 +149,6 @@ backend/
     comparisons/
       router.py
       schemas.py
-    protocol/
-      router.py
-      schemas.py
     graph/
       router.py
       schemas.py
@@ -165,7 +162,6 @@ backend/
     documents/
     evidence/
     comparisons/
-    protocol/
     graph/
     reports/
   domain/
@@ -175,7 +171,6 @@ backend/
     documents/
     evidence/
     comparisons/
-    protocol/
   infra/
     persistence/
     ingestion/
@@ -201,8 +196,6 @@ Examples:
 
 - workspace routes should not manually assemble task, artifact, and collection
   state
-- protocol routes should not decide collection suitability on their own if that
-  decision belongs to document profiles
 - comparison routes should not reimplement evidence normalization logic
 
 ## Application Boundary Rules
@@ -220,8 +213,6 @@ Examples:
   evidence card extraction and retrieval
 - `application/comparisons/`
   comparable-result assembly, collection overlays, and row projection retrieval
-- `application/protocol/`
-  protocol-specific parsing, search, and SOP flows
 - `application/indexing/`
   task kickoff and indexing orchestration
 
@@ -253,23 +244,6 @@ Create domain folders and relocate current files without changing behavior:
 - `application/report_service.py`
   -> `application/reports/service.py`
 
-Protocol files should move together under one domain package:
-
-- `application/protocol_source_service.py`
-- `application/protocol_section_service.py`
-- `application/protocol_block_service.py`
-- `application/protocol_normalize_service.py`
-- `application/protocol_validate_service.py`
-- `application/protocol_extract_service.py`
-- `application/protocol_pipeline_service.py`
-- `application/protocol_search_service.py`
-- `application/protocol_sop_service.py`
-- `application/protocol_document_meta_service.py`
-
-to:
-
-- `application/protocol/*`
-
 ### Wave 2: Add the Lens v1 backbone packages
 
 Introduce new domain-local packages that match the agreed Lens v1 backbone:
@@ -278,7 +252,7 @@ Introduce new domain-local packages that match the agreed Lens v1 backbone:
 - `application/evidence/`
 - `application/comparisons/`
 
-These should be added before protocol is expanded further.
+These should be added before secondary graph and report surfaces expand.
 
 ### Wave 3: Rewire controllers by domain
 
@@ -286,12 +260,8 @@ Move flat controller modules into domain packages, for example:
 
 - `controllers/workspace.py`
   -> `controllers/workspace/router.py`
-- `controllers/protocol.py`
-  -> `controllers/protocol/router.py`
 - `controllers/schemas/workspace.py`
   -> `controllers/workspace/schemas.py`
-- `controllers/schemas/protocol.py`
-  -> `controllers/protocol/schemas.py`
 
 The same pattern should apply to collections, indexing tasks, graph, reports,
 and query.
@@ -311,12 +281,12 @@ The recommended backend order is:
 
 1. freeze the v1 API contract
 2. carve out domain packages without changing behavior
-3. repair current protocol payload fidelity
+3. remove retired branch-specific payload baggage from the main API
 4. add `documents` domain support for `document_profiles`
 5. add `evidence` domain support for `evidence_cards`
 6. add `comparisons` domain support for `ComparableResult`,
    `CollectionComparableResult`, and row projection
-7. push protocol behind the evidence-first backbone
+7. keep graph and reports behind the evidence-first backbone
 
 ## Relationship To Root Docs
 

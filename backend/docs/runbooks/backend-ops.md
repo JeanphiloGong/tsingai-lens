@@ -49,5 +49,8 @@ python3 ../scripts/check_docs_governance.py
 - Backend data persists under `backend/data`.
 - Public HTTP paths are split between `/api/*` for docs and static assets and
   `/api/v1/*` for business APIs.
-- Collection artifact readiness should be checked before calling graph or
-  protocol endpoints from clients.
+- Collection artifact readiness should be checked before calling graph
+  endpoints from clients.
+- Collection build tasks run in a dedicated single-worker thread inside the
+  backend process. The task creation request returns after queueing, and
+  clients should poll `GET /api/v1/tasks/{task_id}` for progress.

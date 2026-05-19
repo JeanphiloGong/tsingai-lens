@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { errorMessage } from './_shared/api';
   import {
     createCollection,
@@ -10,7 +10,6 @@
     fetchCollections,
     type Collection
   } from './_shared/collections';
-  import { buildCollectionGraphmlUrl } from './_shared/graph';
   import { language, t } from './_shared/i18n';
   import { createBuildTask } from './_shared/tasks';
 
@@ -49,6 +48,8 @@
   let searchTerm = '';
   let statusFilter: StatusFilter = 'all';
   let openRowMenuId = '';
+  let rowMenuPanelStyle = '';
+  let collectionPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   $: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
   $: sortedCollections = [...$collections].sort(compareCollectionsByUpdated);
@@ -74,15 +75,42 @@
     await loadCollections();
   });
 
-  async function loadCollections() {
+  onDestroy(() => {
+    clearCollectionPoll();
+  });
+
+  function clearCollectionPoll() {
+    if (collectionPollTimer) {
+      clearTimeout(collectionPollTimer);
+      collectionPollTimer = null;
+    }
+  }
+
+  function hasProcessingCollections(items: Collection[]) {
+    return items.some((collection) => getStatusGroup(collection.status) === 'processing');
+  }
+
+  function scheduleCollectionPoll() {
+    clearCollectionPoll();
+    collectionPollTimer = setTimeout(() => {
+      void loadCollections(false);
+    }, 2500);
+  }
+
+  async function loadCollections(showLoading = true) {
     error = '';
-    loading = true;
+    if (showLoading) loading = true;
     try {
-      await fetchCollections();
+      const items = await fetchCollections();
+      if (hasProcessingCollections(items)) {
+        scheduleCollectionPoll();
+      } else {
+        clearCollectionPoll();
+      }
     } catch (err) {
       error = errorMessage(err);
     } finally {
-      loading = false;
+      if (showLoading) loading = false;
     }
   }
 
@@ -178,10 +206,17 @@
 
   function getStatusGroup(status?: string | null) {
     const normalized = status?.toLowerCase() ?? '';
-    if (normalized === 'processing') return 'processing';
-    if (normalized === 'attention_required' || normalized === 'failed') return 'attention';
+    if (['processing', 'running', 'queued', 'started', 'in_progress'].includes(normalized)) {
+      return 'processing';
+    }
+    if (['attention_required', 'failed', 'partial_success'].includes(normalized)) {
+      return 'attention';
+    }
     if (
       normalized === 'ready' ||
+      normalized === 'completed' ||
+      normalized === 'complete' ||
+      normalized === 'success' ||
       normalized === 'graph_ready' ||
       normalized === 'document_profiled' ||
       normalized === 'comparison_pending' ||
@@ -205,6 +240,23 @@
     return $t('home.statusDisplay.pending');
   }
 
+  function buildActionLabel(collection: Collection) {
+    const group = getStatusGroup(collection.status);
+    if (group === 'processing') return $t('home.actionProcessing');
+    if (group === 'complete' || group === 'attention') return $t('home.actionRetryProcessing');
+    return $t('home.actionStartProcessing');
+  }
+
+  function isBuildActionDisabled(collection: Collection) {
+    return getStatusGroup(collection.status) === 'processing' || !collection.paper_count;
+  }
+
+  function buildActionTitle(collection: Collection) {
+    if (!collection.paper_count) return $t('home.indexNoFiles');
+    if (getStatusGroup(collection.status) === 'processing') return $t('home.actionProcessing');
+    return buildActionLabel(collection);
+  }
+
   function nextStep(collection: Collection) {
     const group = getStatusGroup(collection.status);
     if (group === 'processing') {
@@ -217,7 +269,7 @@
     if (group === 'complete') {
       return {
         label: $t('home.nextCompare'),
-        href: `/collections/${collection.id}/comparisons`
+        href: `/collections/${collection.id}/objectives`
       };
     }
 
@@ -227,8 +279,31 @@
     };
   }
 
-  function toggleRowMenu(collectionId: string) {
-    openRowMenuId = openRowMenuId === collectionId ? '' : collectionId;
+  function toggleRowMenu(collectionId: string, event: MouseEvent) {
+    if (openRowMenuId === collectionId) {
+      openRowMenuId = '';
+      rowMenuPanelStyle = '';
+      return;
+    }
+
+    const button = event.currentTarget;
+    if (button instanceof HTMLElement) {
+      const rect = button.getBoundingClientRect();
+      const margin = 12;
+      const menuWidth = 164;
+      const menuHeight = 132;
+      const top = Math.max(
+        margin,
+        Math.min(rect.bottom + 8, window.innerHeight - menuHeight - margin)
+      );
+      const left = Math.max(
+        margin,
+        Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - margin)
+      );
+      rowMenuPanelStyle = `--row-menu-top: ${Math.round(top)}px; --row-menu-left: ${Math.round(left)}px;`;
+    }
+
+    openRowMenuId = collectionId;
   }
 
   function setRowMessage(id: string, message: string, type: 'info' | 'error' = 'info') {
@@ -237,33 +312,6 @@
       const { [id]: _, ...rest } = rowMessages;
       rowMessages = rest;
     }, 3000);
-  }
-
-  async function exportGraph(collectionId: string) {
-    openRowMenuId = '';
-    try {
-      setRowMessage(collectionId, $t('home.exporting'));
-      const response = await fetch(
-        buildCollectionGraphmlUrl(collectionId, { maxNodes: 200, minWeight: 0 })
-      );
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get('content-disposition') ?? '';
-      const matched = disposition.match(/filename="(.+?)"/i);
-      const fileName = matched?.[1] ?? `graph-${collectionId}-${Date.now()}.graphml`;
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = fileName;
-      link.click();
-      URL.revokeObjectURL(objectUrl);
-      setRowMessage(collectionId, $t('home.exported'));
-    } catch (err) {
-      setRowMessage(collectionId, errorMessage(err), 'error');
-    }
   }
 
   async function runBuild(collection: Collection) {
@@ -275,7 +323,15 @@
 
     try {
       setRowMessage(collection.id, $t('home.indexing'));
-      await createBuildTask(collection.id);
+      const task = await createBuildTask(collection.id);
+      collections.update((items) =>
+        items.map((item) =>
+          item.id === collection.id
+            ? { ...item, status: 'running', updated_at: task.updated_at || item.updated_at }
+            : item
+        )
+      );
+      scheduleCollectionPoll();
       setRowMessage(collection.id, $t('home.indexStarted'));
     } catch (err) {
       setRowMessage(collection.id, errorMessage(err), 'error');
@@ -445,17 +501,19 @@
                         name: collection.name || $t('collection.unknownName')
                       })}
                       aria-expanded={openRowMenuId === collection.id}
-                      on:click={() => toggleRowMenu(collection.id)}
+                      on:click={(event) => toggleRowMenu(collection.id, event)}
                     >
                       ...
                     </button>
                     {#if openRowMenuId === collection.id}
-                      <div class="row-menu__panel">
-                        <button type="button" on:click={() => runBuild(collection)}>
-                          {$t('home.actionIndex')}
-                        </button>
-                        <button type="button" on:click={() => exportGraph(collection.id)}>
-                          {$t('home.actionExport')}
+                      <div class="row-menu__panel" style={rowMenuPanelStyle}>
+                        <button
+                          type="button"
+                          disabled={isBuildActionDisabled(collection)}
+                          title={buildActionTitle(collection)}
+                          on:click={() => runBuild(collection)}
+                        >
+                          {buildActionLabel(collection)}
                         </button>
                         <button
                           type="button"
@@ -1027,10 +1085,10 @@
   }
 
   .row-menu__panel {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    z-index: 5;
+    position: fixed;
+    top: var(--row-menu-top, 0);
+    left: var(--row-menu-left, 0);
+    z-index: 30;
     display: grid;
     min-width: 148px;
     gap: 4px;

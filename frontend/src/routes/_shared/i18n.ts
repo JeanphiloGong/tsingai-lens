@@ -88,16 +88,16 @@ const translations: Record<Language, Translations> = {
 			},
 			metricsPlaceholder: 'Pending API',
 			updatedPlaceholder: '—',
-			nextCompare: 'Enter comparison',
+			nextCompare: 'Enter objectives',
 			nextProgress: 'View progress',
 			nextWorkspace: 'Open workspace',
 			actionEnter: 'Enter',
 			moreActions: 'More actions for {name}',
-			actionExport: 'Export',
 			actionIndex: 'Process',
+			actionStartProcessing: 'Start processing',
+			actionRetryProcessing: 'Retry processing',
+			actionProcessing: 'Processing',
 			actionDelete: 'Delete',
-			exporting: 'Preparing export...',
-			exported: 'Export ready',
 			indexing: 'Starting processing...',
 			indexStarted: 'Processing started',
 			indexNoFiles: 'Upload files before starting processing.',
@@ -149,11 +149,17 @@ const translations: Record<Language, Translations> = {
 			moreLabel: 'More',
 			tabs: {
 				overview: 'Overview',
+				comparison: 'Comparison',
 				comparisons: 'Comparisons',
 				results: 'Extracted Results',
+				extractedFacts: 'Extracted Facts',
 				evidence: 'Evidence',
 				documents: 'Documents',
-				protocol: 'Protocol',
+				materials: 'Materials',
+				objectives: 'Objectives',
+				papers: 'Papers',
+				allComparisons: 'All Comparisons',
+				assistant: 'AI Copilot',
 				graph: 'Graph'
 			},
 			actionsLabel: 'Collection actions',
@@ -164,7 +170,748 @@ const translations: Record<Language, Translations> = {
 			metaDocuments: '{count} document(s)',
 			metaUpdated: 'Updated: {time}',
 			deleteConfirm:
-				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.'
+				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.',
+			lock: {
+				eyebrow: 'Locked view',
+				title: 'Processing required',
+				readyToProcess:
+					'Process this collection before opening research objectives, evidence, comparisons, materials, graph, or copilot views.',
+				processing:
+					'This collection is still processing. Research views unlock after the current run completes.',
+				failed:
+					'The latest processing run failed. Review the workspace status or rerun processing before trusting downstream views.',
+				empty: 'Upload documents and process the collection before opening research views.',
+				backToWorkspace: 'Back to workspace'
+			}
+		},
+		goalCopilot: {
+			eyebrow: 'Collection Copilot',
+			title: 'AI Research Copilot',
+			beta: 'Beta',
+			subtitle:
+				'Ask questions against the bound collection first. Hybrid mode falls back to general background only when collection evidence is missing.',
+			sidebarLabel: 'AI research assistant sessions',
+			contextLabel: 'Goal session context',
+			chatLabel: 'Goal copilot conversation',
+			chatTitle: 'Collection-bound conversation',
+			collection: 'Knowledge base',
+			goal: 'Goal',
+			goalPlaceholder: 'Compare LPBF process effects on strength and elongation...',
+			focusedMaterial: 'Focused material',
+			focusedMaterialPlaceholder: 'Optional material id or name',
+			focusedPaper: 'Focused paper',
+			focusedPaperPlaceholder: 'Optional paper or document id',
+			mode: 'Answer mode',
+			modes: {
+				grounded: 'Grounded',
+				hybrid: 'Hybrid',
+				general: 'General'
+			},
+			saveContext: 'Save context',
+			saving: 'Saving...',
+			contextSaved: 'Context saved',
+			newSession: 'New session',
+			newSessionReady: 'New session ready',
+			historyTitle: 'Conversation history',
+			emptyHistory: 'No conversations yet',
+			untitledSession: 'New conversation',
+			knowledgeCardLabel: 'Open current knowledge base',
+			currentKnowledge: 'Current knowledge base',
+			commandsTitle: 'Commands',
+			sessionMeta: '{mode} · {id}',
+			openWorkspace: 'Open workspace',
+			loading: 'Loading copilot...',
+			headerPrefix: 'Answering questions from the current collection: ',
+			more: 'More',
+			emptyTitle: 'Ask this collection directly',
+			emptyBody: 'I will prioritize answers from the literature in the current collection.',
+			userRole: 'You',
+			assistantRole: 'Lens',
+			evidenceLabel: 'Evidence used',
+			sourceLinks: {
+				label: 'Answer sources',
+				document: 'Paper {number}',
+				evidence: 'Source {number}'
+			},
+			messageLabel: 'Message',
+			messagePlaceholder:
+				'Ask the current collection, for example: compare LPBF process effects on strength and elongation',
+			inputHint: 'AI can generate inaccurate information. Check important content.',
+			send: 'Send',
+			sending: 'Sending...',
+			suggestions: {
+				summary: 'Summarize the main conclusions of this literature set',
+				lpbf: 'Compare LPBF process effects on strength and elongation',
+				elongation: 'Which papers mention elongation?',
+				samples: 'What comparable samples are in these papers?'
+			},
+			actions: {
+				like: 'Like answer',
+				dislike: 'Dislike answer',
+				copy: 'Copy answer'
+			},
+			sourceMode: {
+				collection_grounded: 'Collection evidence',
+				collection_limited: 'Limited collection evidence',
+				general_fallback: 'General fallback',
+				general_only: 'General background'
+			}
+		},
+		research: {
+			emptyValue: '--',
+			warnings: 'Warnings',
+			warningPaperCount: '{message} ({count} papers)',
+			warningOccurrenceCount: '{message} ({count} occurrences)',
+			state: {
+				empty: 'Empty',
+				processing: 'Processing',
+				partial: 'Partial',
+				ready: 'Ready',
+				failed: 'Failed'
+			},
+			valueStatus: {
+				observed: 'Observed',
+				normalized: 'Normalized',
+				inferred: 'Inferred',
+				missing: 'Missing',
+				conflicted: 'Conflicted'
+			},
+			overview: {
+				title: 'Research overview',
+				body: 'Aggregated view of papers, samples, variables, properties, and evidence readiness.',
+				pendingTitle: 'Research aggregation is not ready',
+				pendingBody:
+					'The collection is processed, but the research aggregation view is not available. Finish processing or retry the research-view build.',
+				documents: 'Documents',
+				samples: 'Samples',
+				measurements: 'Measurements',
+				evidence: 'Evidence',
+				materials: 'Materials',
+				processes: 'Processes',
+				variables: 'Variables',
+				properties: 'Properties'
+			},
+			materials: {
+				title: 'Materials',
+				body: 'Canonical materials detected in this collection, with paper coverage, sample counts, measured properties, and evidence status.',
+				loading: 'Loading materials...',
+				errorTitle: 'Materials are unavailable',
+				emptyTitle: 'No material profiles yet',
+				emptyBody:
+					'The material aggregation endpoint returned no material summaries for this collection.',
+				refresh: 'Refresh materials',
+				summaryTitle: 'Material summary',
+				materialCount: '{count} material(s)',
+				paperCount: '{count} paper(s)',
+				sampleCount: '{count} sample(s)',
+				aliases: 'Aliases',
+				papers: 'Papers',
+				comparisons: 'Comparisons',
+				evidenceCoverage: 'Evidence coverage',
+				openProfile: 'Open material profile'
+			},
+			objectives: {
+				title: 'Research objectives',
+				body: 'Question-shaped objectives discovered for this collection, with material scope, process axes, property axes, and paper-frame coverage.',
+				loading: 'Loading research objectives...',
+				errorTitle: 'Research objectives are unavailable',
+				pendingTitle: 'Research objectives are pending',
+				pendingBody: 'Finish collection processing before reviewing objectives.',
+				emptyTitle: 'No research objectives yet',
+				emptyBody: 'The objective endpoint returned no objective summaries for this collection.',
+				refresh: 'Refresh objectives',
+				openOverview: 'Open collection overview',
+				summaryTitle: 'Objective summary',
+				objectiveCount: '{count} objective(s)',
+				paperFrameCount: '{count} paper frame(s)',
+				routeCount: '{count} evidence route(s)',
+				paperFrames: 'Paper frames',
+				routes: 'Routes',
+				evidenceUnits: 'Evidence units',
+				confidence: 'Confidence',
+				materialScope: 'Material scope',
+				processAxes: 'Process axes',
+				propertyAxes: 'Property axes',
+				noIntent: 'No comparison intent returned.',
+				openWorkspace: 'Open objective workspace'
+			},
+			objectiveWorkspace: {
+				title: 'Objective workspace',
+				eyebrow: 'Research objective',
+				back: 'Back to objectives',
+				askCopilot: 'Ask Copilot',
+				loading: 'Loading objective workspace...',
+				errorTitle: 'Objective workspace is unavailable',
+				emptyTitle: 'No objective workspace',
+				emptyBody: 'The objective research-view endpoint returned no data.',
+				noIntent: 'No comparison intent returned.',
+				ready: 'Ready',
+				pending: 'Pending',
+				summary: 'Objective workspace summary',
+				relevantPapers: 'Relevant papers',
+				measurementResults: 'Measurement results',
+				testConditions: 'Test conditions',
+				characterizationObservations: 'Characterization observations',
+				comparisonEvidence: 'Comparison evidence',
+				authorInterpretations: 'Author interpretations',
+				otherEvidence: 'Other evidence',
+				contextTitle: 'Objective context',
+				variableAxes: 'Variable axes',
+				conclusionPackageTitle: 'Research conclusion package',
+				conclusionPackageBody:
+					'Objective-scoped report package with conclusions, paper contributions, evidence, mechanism, and uncertainty.',
+				collectionConclusion: 'Collection-level conclusion',
+				reportStatus: 'Package status: {status}',
+				reportEvidenceMatrix: 'Report evidence matrix',
+				reportConclusionTitle: 'Collection-level findings',
+				primaryEvidenceTitle: 'Primary evidence table',
+				mechanismChainTitle: 'Mechanism chain',
+				noConclusionPackage:
+					'No structured conclusion package is available yet; use the evidence audit below for source review.',
+				researchFocus: 'Research focus',
+				evidenceReadiness: 'Evidence readiness',
+				representativeEvidence: 'Representative evidence',
+				comparisonReadyTitle: 'Controlled comparison is ready',
+				comparisonReadyBody:
+					'Measurements, test conditions, and direct comparison evidence are present for this objective.',
+				comparisonLimitedTitle: 'Controlled comparison is limited',
+				comparisonLimitedBody:
+					'Values are available, but the extracted condition or comparison evidence is still incomplete.',
+				comparisonPendingTitle: 'Controlled comparison is pending',
+				comparisonPendingBody:
+					'The objective needs measurement, condition, and comparison evidence before a defensible comparison can be made.',
+				scientificJudgements: 'Scientific judgement cards',
+				controlledComparisons: 'Controlled comparisons',
+				mechanismInterpretations: 'Mechanism interpretations',
+				limitations: 'Limitations and uncertainties',
+				noControlledComparisons:
+					'No controlled comparison units are available for this objective yet.',
+				noMechanismInterpretations:
+					'No author mechanism interpretations are available for this objective yet.',
+				noLimitations: 'No logic-chain gaps or unresolved evidence are currently reported.',
+				logicGap: 'Logic-chain gap',
+				unresolvedEvidenceGroupTitle: 'Unresolved sample, process, or test context',
+				unresolvedEvidenceGroupBody:
+					'{count} {kinds} cannot support a strict controlled comparison until the {status} context is resolved.',
+				unresolvedEvidenceGroupMeta: 'Unresolved units: {count}; papers: {documents}',
+				controlledAxes: 'Controlled: {axes}',
+				comparisonContext: 'Current: {current}; baseline: {baseline}',
+				comparisonCurrentContext: 'Current context: {current}; baseline not resolved',
+				comparisonAxisContext: 'Comparison axis: {axis}',
+				comparisonGeneratedBody:
+					'{property}: {current} versus baseline {baseline}; reported direction is {direction}.',
+				comparisonGroupBody:
+					'Synthesizes {count} comparison evidence units for {property}. Representative finding: {summary}',
+				comparisonGroupMeta: 'Evidence units: {count}; papers: {documents}',
+				directionIncrease: 'increase',
+				directionDecrease: 'decrease',
+				directionNoChange: 'no change',
+				directionObserved: 'observed difference',
+				gapLabels: {
+					sample_or_process_context_missing: 'Sample or process context is missing.',
+					test_condition_missing: 'Test conditions are missing.',
+					measurement_results_missing: 'Measurement results are missing.',
+					characterization_observations_missing: 'Characterization observations are missing.',
+					comparison_units_missing: 'Controlled comparison units are missing.',
+					unresolved_measurements_present: 'Some measurement evidence is unresolved.'
+				},
+				scopeStep: 'Research scope',
+				coverageStep: 'Paper coverage',
+				conditionsStep: 'Experimental conditions',
+				measurementsStep: 'Measured results',
+				observationsStep: 'Structure observations',
+				gapsStep: 'Gaps and comparisons',
+				noScope: 'No material, process, or property scope is available yet.',
+				noCoverage: 'No relevant papers have been selected for this objective yet.',
+				noConditions: 'No resolved test-condition evidence is available yet.',
+				noMeasurements: 'No measurement evidence is available yet.',
+				noObservations: 'No characterization evidence is available yet.',
+				noGaps: 'No explicit logic-chain gaps are currently reported.',
+				paperContributionTitle: 'Paper contribution map',
+				paperContributionBody:
+					'Each paper is shown by its role in this objective, the evidence it contributes, and the source areas that support the contribution.',
+				paperContributionFallback:
+					'Contributes variables {variables} and measured properties {properties} to this objective.',
+				unitCount: '{count} unit(s)',
+				routeCount: '{count} route(s)',
+				openPaper: 'Open source paper',
+				framesTitle: 'Paper frames',
+				tableCount: '{count} table reference(s)',
+				changedVariables: 'Changed variables',
+				measuredScope: 'Measured scope',
+				relevantSections: 'Relevant sections',
+				relevantTables: 'Relevant tables',
+				excludedTables: 'Excluded tables',
+				noBackground: 'No paper-specific background returned.',
+				noFrames: 'No paper frames were returned for this objective.',
+				routesTitle: 'Evidence routes',
+				source: 'Source',
+				role: 'Role',
+				extractable: 'Extractable',
+				schema: 'Schema',
+				noRoutes: 'No evidence routes are available yet.',
+				evidenceUnitsTitle: 'Supporting evidence',
+				evidenceUnitsBody:
+					'Representative evidence is shown first; open the full review to inspect all extracted units.',
+				allEvidenceReview: 'All extracted evidence',
+				evidenceFilters: 'Evidence filters',
+				evidenceKindFilter: 'Evidence kind',
+				paperFilter: 'Paper',
+				allEvidenceKinds: 'All evidence kinds',
+				allPapers: 'All papers',
+				evidencePreviewLimit:
+					'Showing the first {shown} of {total} units for this group. Use filters or the detail panel for focused review.',
+				noEvidenceUnits: 'No resolved evidence units are available yet.',
+				evidenceDetail: 'Evidence detail',
+				evidenceDetailBody: 'Inspect the selected unit and jump back to its source paper.',
+				kind: 'Kind',
+				property: 'Property',
+				value: 'Value',
+				status: 'Status',
+				confidence: 'Confidence',
+				finding: 'Finding',
+				sampleAndProcess: 'Sample and process',
+				comparisonBaseline: 'Comparison baseline',
+				sourceTraceback: 'Source traceback',
+				sampleContext: 'Sample context',
+				processContext: 'Process context',
+				testCondition: 'Test condition',
+				resolvedCondition: 'Resolved condition',
+				sources: 'Sources',
+				page: 'p. {page}',
+				noValue: 'No value payload returned.',
+				logicChainTitle: 'Logic chain',
+				logicChainBody:
+					'Use these steps to jump from the research scope to the supporting evidence groups.',
+				noLogicChain: 'No objective logic chain is available yet.',
+				diagnosticsTitle: 'Extraction diagnostics',
+				diagnosticsBody:
+					'Paper frames and evidence routes are kept here for debugging the extraction path without making them the main research view.'
+			},
+			materialProfile: {
+				title: 'Material profile',
+				body: 'Collection-scoped material profile with papers, samples, process ranges, properties, comparisons, condition series, and evidence.',
+				back: 'Back to materials',
+				loading: 'Loading material profile...',
+				errorTitle: 'Material profile is unavailable',
+				emptyTitle: 'No material profile',
+				emptyBody: 'The material profile endpoint returned no data for this material.',
+				refresh: 'Refresh profile',
+				summaryTitle: 'Material profile summary',
+				overview: 'Overview',
+				papers: 'Papers using this material',
+				processRanges: 'Process parameter ranges',
+				propertySummaries: 'Property summaries',
+				comparisons: 'Comparisons for this material',
+				rangeCoverage: '{samples} sample(s), {papers} paper(s)',
+				noProcessRanges: 'No process ranges were returned for this material.',
+				noPropertySummaries: 'No property summaries were returned for this material.',
+				seriesCount: '{count} series'
+			},
+			materialDossier: {
+				title: 'Material research dossier',
+				mainLabel: 'Material research dossier content',
+				subtitle:
+					'A material report that keeps each result tied to its preparation state, test condition, evidence, and comparability boundary.',
+				tabs: {
+					label: 'Material dossier view',
+					structured: 'Structured dossier',
+					narrative: 'Narrative research'
+				},
+				tags: {
+					alloySteel: 'Alloy steel'
+				},
+				actions: {
+					label: 'Material dossier actions',
+					viewPapers: 'View papers',
+					viewEvidence: 'View evidence',
+					askCopilot: 'Ask Copilot',
+					generatePdf: 'Generate review PDF',
+					refresh: 'Refresh',
+					exportCsv: 'Export data CSV'
+				},
+				sections: {
+					overview: {
+						title: 'Material report overview',
+						body: '{material} appears mainly in {processes} studies. Results are organized by material state, test condition, performance response, and source evidence rather than one cross-paper parameter ranking.'
+					},
+					findings: {
+						title: 'Key findings',
+						body: 'Evidence-backed conclusions derived from the sample values and source anchors.'
+					},
+					samples: {
+						title: 'Samples and process parameters',
+						body: 'Review the samples and how their process conditions differ.'
+					},
+					graph: {
+						title: 'Material state map',
+						body: 'Read sample-level states as preparation, test condition, observed response, and source evidence.'
+					},
+					chain: {
+						title: 'Representative material states',
+						body: 'Read each high-signal sample as a material state: preparation and post-treatment, test conditions, performance response, interpretation, and source evidence.'
+					},
+					materialProblems: {
+						title: 'Material questions',
+						body: 'Group the evidence by materials-science questions instead of a flat property matrix.'
+					},
+					performance: {
+						title: 'Supporting data matrix',
+						body: 'Use the matrix to verify which samples, conditions, values, and evidence support the findings.'
+					},
+					trends: {
+						title: 'Comparable groups',
+						body: 'Keep comparisons inside their paper, sample, and test-condition boundaries before reading trends across the collection.'
+					},
+					evidence: {
+						title: 'Evidence locator',
+						body: 'Locate the source evidence for each value and conclusion.'
+					}
+				},
+				table: {
+					sampleId: 'Sample',
+					sampleCondition: 'Sample / condition',
+					primaryVariable: 'Primary variable',
+					processSummary: 'Process summary',
+					collectionSummary: 'Collection summary',
+					sampleFallback: 'Sample {index}',
+					scanStrategy: 'Scan strategy',
+					laserPower: 'Laser power (W)',
+					scanSpeed: 'Scan speed (mm/s)',
+					energyDensity: 'Energy density (J/mm3)',
+					layerThickness: 'Layer thickness (um)',
+					hatchSpacing: 'Hatch spacing',
+					otherParameters: 'Other parameters',
+					testCondition: 'Test condition',
+					evidenceAnchors: 'Evidence anchors'
+				},
+				process: {
+					scan_strategy: 'Scan strategy',
+					laser_power_w: 'Laser power',
+					scan_speed_mm_s: 'Scan speed',
+					hatch_spacing_um: 'Hatch spacing',
+					layer_thickness_um: 'Layer thickness',
+					energy_density_j_mm3: 'Energy density',
+					energy_density_origin: 'Energy density origin',
+					build_orientation: 'Build orientation',
+					post_treatment_summary: 'Post treatment',
+					preheat_temperature_c: 'Preheat temperature',
+					shielding_gas: 'Shielding gas',
+					oxygen_level_ppm: 'Oxygen level',
+					powder_size_distribution_um: 'Powder size distribution',
+					process_normalized: 'Process'
+				},
+				properties: {
+					relativeDensity: 'Relative density (%)',
+					relativeDensityShort: 'Relative density',
+					hardness: 'Hardness (HV)',
+					hardnessShort: 'Hardness',
+					yieldStrength: 'Yield strength (MPa)',
+					yieldStrengthShort: 'Yield strength',
+					tensileStrength: 'Tensile strength (MPa)',
+					tensileStrengthShort: 'Tensile strength',
+					elongation: 'Elongation (%)',
+					elongationShort: 'Elongation',
+					density: 'Density',
+					hardnesshv: 'Hardness (HV)',
+					yieldstrength: 'Yield strength',
+					tensilestrength: 'Tensile strength'
+				},
+				samples: {
+					summary:
+						'{count} sample(s). Controlled variables: {controlled}; changed variables: {changed}.'
+				},
+				performance: {
+					summary: '{samples} sample(s), {properties} measured property column(s).'
+				},
+				findings: {
+					empty: 'No evidence-backed finding can be derived from the current material values yet.',
+					supportedByValues: '{values}. Evidence: {evidence}.',
+					highestStrengthTitle: '{sample} shows the highest strength',
+					splitStrengthTitle: 'Strength maxima are split across samples',
+					highestElongationTitle: '{sample} shows the highest elongation',
+					highestPropertyTitle: '{sample} shows the highest {property}',
+					summaryPropertyTitle: '{property} is available as an evidence-backed property',
+					summaryPropertyBody: '{property} is reported as {value}. Evidence: {evidence}.',
+					densityMismatchTitle: 'Highest density does not align with highest strength',
+					densityMismatchBody:
+						'{densitySample} has the highest density ({densityValue}), while {strengthSample} leads strength ({strengthValues}). Evidence: {evidence}.',
+					tradeoffTitle: 'Current data suggests a strength-ductility trade-off',
+					tradeoffBody:
+						'{strengthSample} leads strength while {elongationSample} leads elongation. Evidence: {evidence}.',
+					processOnlyTitle: 'Samples differ by process context',
+					processOnlyBody:
+						'The current matrix varies by {changed}, but comparable performance values are not ready yet.',
+					types: {
+						directObservation: 'direct observation',
+						comparativeInference: 'comparative inference',
+						trendHypothesis: 'trend hypothesis',
+						structuralObservation: 'structural observation'
+					}
+				},
+				chain: {
+					stepsLabel: 'Representative material state evidence chain',
+					processContext: 'Preparation and post-treatment',
+					testConditions: 'Test conditions',
+					results: 'Performance response',
+					whyBest: 'Materials interpretation',
+					traceback: 'Traceback',
+					collectionScope: 'collection-level evidence',
+					backgroundText:
+						'{material} is studied through {processes}; this parameter set is supported by {paper}.',
+					scoreLabel: '{best}/{total} leading properties',
+					comparisonSummary: 'This sample leads {count} of {total} tracked properties: {best}.',
+					comparisonNoLeader:
+						'This sample has {count} comparable values, but none is the best among the tracked {total} properties.',
+					notBestFor: 'Not the leader for: {properties}.',
+					bestInMatrix: 'leading in this matrix',
+					observed: 'observed',
+					noProcessContext: 'No process parameters were attached to this sample row.',
+					noTestConditions:
+						'No explicit test condition was attached to this row; verify the source paper before comparing across conditions.',
+					empty:
+						'No representative material state can be built from the current material matrix yet.'
+				},
+				state: {
+					cardLabel: 'State {index}',
+					sourceLine: 'Source: {source}',
+					roles: {
+						texture: 'texture prediction state',
+						hardness: 'high-hardness state',
+						densification: 'densification / porosity state',
+						tensile: 'tensile response state',
+						representative: 'representative material state'
+					},
+					interpretation: 'Observed response: {values}. {boundary}',
+					notGlobalBest:
+						'This does not make the state globally optimal; non-leading or unverified responses include {properties}.',
+					sourceBounded:
+						'Interpret this inside its source paper and test condition, not as a cross-paper global ranking.',
+					noValues: 'no comparable numeric response'
+				},
+				problems: {
+					densification: {
+						title: 'Densification and porosity',
+						body: 'Traceable density/porosity evidence includes {values}. These results need sample-bound tests before becoming a full corrosion or mechanical conclusion.',
+						empty: 'No density or porosity response is ready in the selected material values.'
+					},
+					mechanical: {
+						title: 'Strength, ductility, and hardness',
+						body: 'Traceable mechanical responses include {values}. Compare them within the same paper/test system before ranking material states.',
+						empty:
+							'No strength, ductility, or hardness response is ready in the selected material values.'
+					},
+					texture: {
+						title: 'Texture and model prediction',
+						body: 'Traceable texture/model responses include {values}. Treat these as model/texture evidence rather than laser-parameter optimization.',
+						empty: 'No texture or model-prediction response is attached to the selected values.'
+					},
+					unclosed: {
+						title: 'Corrosion, fatigue, and open chains',
+						body: 'Corrosion and fatigue conclusions require the same sample to connect preparation, defect state, test condition, response, and evidence. Current partial chains should be shown as incomplete rather than ranked.'
+					},
+					status: {
+						traceable: 'Traceable',
+						partial: 'Partial chain'
+					}
+				},
+				comparison: {
+					topic: 'Comparison topic: process variables and performance',
+					controls: 'Controlled variables: {controlled}',
+					defaultVariable: 'Process variable',
+					variable: 'Changed variable',
+					property: 'Affected property',
+					observation: 'Observed trend',
+					conclusion: 'Conclusion',
+					noClearWinner: 'No clear difference',
+					needsEvidence: 'Needs more evidence',
+					higherConclusion: '{sample} is higher for {property}',
+					empty: 'No comparable numeric values were returned for this material yet.',
+					summaryOnly:
+						'Collection-level values are available, but sample-level paired values are not comparable yet: {values}.'
+				},
+				chart: {
+					title: 'Trend chart: key property comparison',
+					caption:
+						'Under comparable process context, the changed variable can shift performance values.',
+					empty: 'No numeric trend is available yet.',
+					summaryOnly:
+						'Available collection summary values: {values}. A trend chart needs paired sample values.'
+				},
+				graph: {
+					label: 'Material-scoped research chain map',
+					chainLabel: 'Chain {index}',
+					sample: 'Sample and paper context',
+					empty: 'No high-signal research chain can be mapped from the current sample matrix yet.'
+				},
+				narrative: {
+					mainLabel: 'Narrative material research dossier',
+					eyebrow: 'Interactive review draft',
+					overviewTitle: 'What does this literature set study?',
+					lead: '{material} is studied in the current collection mainly through {processes}. The dossier covers {papers} paper(s), {samples} sample(s), {properties}, and {evidence} evidence anchor(s), so the narrative below stays tied to the structured matrix.',
+					unspecifiedProcess: 'unspecified processes',
+					unspecifiedProperties: 'reported properties',
+					sampleDesignTitle: 'How are the samples designed?',
+					sampleDesignBody:
+						'The current matrix identifies {samples} sample(s). Controlled variables include {controlled}; changed variables include {changed}. This makes the sample set useful for reading process-property differences while keeping the original values available below.',
+					noControlledVariables: 'no clearly controlled variable',
+					noChangedVariables: 'no clearly changed variable',
+					findingsTitle: 'What are the main performance findings?',
+					findingsBody:
+						'The cards summarize the strongest observed values first, then keep the supporting evidence close to each conclusion.',
+					trendQuestion: 'How do variables affect performance?',
+					trendBody:
+						'For {property}, {first} is reported as {firstValue}, while {second} is reported as {secondValue}. Current conclusion: {conclusion}. Treat this as an evidence-backed comparison, not a full mechanism unless more source context supports it.',
+					trendEmpty:
+						'The current matrix does not yet expose enough comparable numeric values to write a trend narrative.',
+					evidenceTitle: 'Where is the evidence?',
+					evidenceBody:
+						'Each evidence chip opens the same source drawer used by the structured tables, so the narrative remains traceable to source locations.'
+				},
+				evidence: {
+					drawerTitle: 'Evidence detail',
+					code: 'No.',
+					claim: 'Data / conclusion',
+					type: 'Evidence type',
+					location: 'Source location',
+					anchor: 'Evidence anchor',
+					confidence: 'Confidence',
+					value: 'Value',
+					source: 'Source',
+					excerpt: 'Original excerpt',
+					tableData: 'Table data',
+					textConclusion: 'Conclusion text',
+					sourceEvidence: 'Source evidence',
+					contextUnavailable: 'Open the source paper to review the original context.',
+					empty: 'No evidence-backed values were returned for this material yet.',
+					viewAll: 'View all {count} evidence items ->'
+				},
+				confidence: {
+					high: 'High',
+					medium: 'Medium',
+					low: 'Low'
+				},
+				aside: {
+					label: 'Material dossier sidebar',
+					sourceInfo: 'Source info',
+					sourcePapers: 'Source papers',
+					lastUpdated: 'Last updated',
+					lastUpdatedUnknown: 'Not returned',
+					quickNav: 'Quick navigation',
+					literatureInfo: 'Literature info',
+					noLiterature: 'No source paper metadata was returned.',
+					actions: 'Actions',
+					tip: 'Tip',
+					tipBody: 'Click a performance value or evidence anchor to inspect the source context.'
+				},
+				pdf: {
+					title: 'Generate material review PDF',
+					body: 'AI will generate a review from key findings, trend interpretation, supporting performance data, and evidence locations.',
+					generate: 'Generate review',
+					cancel: 'Cancel',
+					generatedTitle: 'Material review PDF',
+					generatedStatus: 'Generated',
+					generatedWithWarnings: 'Generated with {count} warning(s)',
+					loadingStatus: 'Checking for an existing review draft...',
+					generatingStatus: 'Generating review draft...',
+					failedStatus: 'Report generation failed. Regenerate to try again.',
+					reportTitle: 'Report title',
+					readiness: 'Readiness',
+					previewMarkdown: 'Preview Markdown',
+					view: 'View PDF',
+					download: 'Download',
+					regenerate: 'Regenerate'
+				}
+			},
+			paperMaterials: {
+				title: 'Materials in this paper'
+			},
+			documents: {
+				title: 'Documents',
+				directBody:
+					'Review each paper by contribution readiness, extracted facts, and source access.',
+				loading: 'Loading paper coverage...',
+				errorTitle: 'Paper coverage is unavailable',
+				emptyTitle: 'No paper coverage rows',
+				emptyBody:
+					'The research-view endpoint returned no paper coverage rows for this collection.',
+				refresh: 'Refresh coverage',
+				documentCount: '{count} paper(s)',
+				document: 'Paper',
+				coverageTitle: 'Paper coverage',
+				factCoverageTitle: 'Fact coverage',
+				coverageReady: 'Paper coverage is ready for review.',
+				coverageFailed: 'This paper failed during research-view aggregation.',
+				coverageNoEvidence: 'No extracted evidence is available for this paper yet.',
+				coverageNeedsConditions:
+					'Measurements are available, but test-condition evidence still needs review.',
+				tableTitle: 'Paper review list',
+				shortId: 'Short ID',
+				untitledPaper: 'Paper {number}',
+				state: 'State',
+				processParams: 'Process params',
+				conditions: 'Conditions',
+				evidence: 'Evidence',
+				issues: 'Issues',
+				openPaper: 'Open paper',
+				next: 'Next',
+				issueCount: '{count} issue(s)',
+				noIssues: 'No issues'
+			},
+			comparison: {
+				title: 'All comparisons',
+				directBody:
+					'Advanced browser for comparable groups and cross-paper matrices built by the research-view aggregation layer.',
+				loading: 'Loading research comparison...',
+				errorTitle: 'Research comparison is unavailable',
+				pendingTitle: 'Comparison artifacts are not ready',
+				pendingBody:
+					'Paper coverage is available, but comparable groups need generated comparison artifacts before this page can be used.',
+				emptyTitle: 'No comparable groups',
+				emptyBody: 'The research-view endpoint returned no comparable groups for this collection.',
+				refresh: 'Refresh comparison',
+				openOverview: 'Open collection overview',
+				groupCount: '{count} group(s)',
+				groups: 'Comparable groups',
+				variableAxis: 'Variable axis',
+				fixedConditions: 'Fixed conditions',
+				material: 'Material',
+				process: 'Process',
+				properties: 'Properties',
+				documents: 'Documents',
+				samples: 'Samples',
+				variableValue: 'Variable value',
+				testCondition: 'Test condition',
+				result: 'Result',
+				evidence: 'Evidence',
+				emptyMatrix: 'This group does not have matrix rows yet.',
+				status: {
+					comparable: 'Comparable',
+					limited: 'Limited',
+					blocked: 'Blocked'
+				}
+			},
+			sampleMatrix: {
+				title: 'Sample matrix',
+				sample: 'Sample'
+			},
+			conditionSeries: {
+				title: 'Condition series'
+			},
+			paper: {
+				title: 'Paper research view',
+				unavailableTitle: 'Paper research view is unavailable',
+				unavailableBody: 'The paper aggregation endpoint is required for this page.'
+			},
+			evidence: {
+				title: 'Evidence detail',
+				open: 'Evidence',
+				close: 'Close',
+				status: 'Status',
+				confidence: 'Confidence',
+				duplicates: 'Duplicates',
+				missing: 'No evidence reference is attached to this value.'
+			}
 		},
 		overview: {
 			title: 'Collection Overview',
@@ -180,7 +927,7 @@ const translations: Record<Language, Translations> = {
 			readiness: {
 				ready: {
 					title: 'Collection is ready',
-					body: 'This collection contains {count} document(s), and parsing plus evidence extraction are complete. You can enter the comparison view or inspect evidence and source documents.'
+					body: 'This collection contains {count} document(s), and parsing plus evidence extraction are complete. Start from Research objectives, then inspect materials, papers, evidence, and comparisons as needed.'
 				},
 				processing: {
 					title: 'Collection is processing',
@@ -201,6 +948,8 @@ const translations: Record<Language, Translations> = {
 			},
 			actions: {
 				enterComparisons: 'Enter comparison view',
+				enterMaterials: 'Enter materials',
+				enterObjectives: 'Enter objectives',
 				enterComparisonShort: 'Enter comparison',
 				viewEvidence: 'View evidence',
 				refreshStatus: 'Refresh status',
@@ -241,6 +990,15 @@ const translations: Record<Language, Translations> = {
 				trust: {
 					title: 'Trust reminder',
 					body: 'This collection may be usable, but comparison results still need human review. Check evidence sources, missing conditions, and comparability warnings first.',
+					readyToProcessTitle: 'Processing needed',
+					readyToProcessBody:
+						'Files are uploaded, but evidence, comparisons, and research objectives are not reliable until processing finishes.',
+					processingTitle: 'Processing in progress',
+					processingBody:
+						'Wait for processing to finish before opening evidence or comparisons. Use the progress view while the run is active.',
+					failedTitle: 'Resolve processing errors',
+					failedBody:
+						'The latest run did not finish. Review task errors or retry processing before trusting downstream outputs.',
 					comparison: 'Comparison',
 					evidence: 'Evidence',
 					documents: 'Documents'
@@ -255,7 +1013,7 @@ const translations: Record<Language, Translations> = {
 					title: 'Recommended next step',
 					readyTypes: 'Check document types',
 					readyEvidence: 'Review evidence and comparability',
-					readyCompare: 'Enter comparison view',
+					readyCompare: 'Open research objectives',
 					processingWait: 'Wait for tasks to finish',
 					processingLogs: 'Check processing log',
 					processingRefresh: 'Refresh status',
@@ -289,7 +1047,7 @@ const translations: Record<Language, Translations> = {
 				ready: {
 					label: 'Ready',
 					title: 'The main collection views are ready',
-					body: 'Start with the collection-level analysis views below. Protocol and graph remain secondary branches.'
+					body: 'Start with the collection-level analysis views below. Graph remains a secondary branch.'
 				},
 				ready_with_limits: {
 					label: 'Ready with limits',
@@ -323,9 +1081,7 @@ const translations: Record<Language, Translations> = {
 				documents: 'Documents',
 				graph: 'Graph',
 				graphml: 'GraphML',
-				sections: 'Sections',
-				procedureBlocks: 'Procedure Blocks',
-				protocolSteps: 'Protocol Steps'
+				sections: 'Sections'
 			},
 			ready: 'Ready',
 			pending: 'Pending',
@@ -358,19 +1114,16 @@ const translations: Record<Language, Translations> = {
 				'Then inspect one result at a time to understand what was actually extracted.',
 			previewEvidenceLead: 'Trace claims back to the figure, table, or text that supports them.',
 			previewDocumentsLead: 'Separate experimental papers from reviews and mixed documents.',
-			previewProtocolLead: 'Use only when the collection really contains usable procedural detail.',
 			uploadCta: 'Choose papers',
 			uploadWhyTitle: 'Why upload first',
 			uploadWhyBody:
-				'These papers are the raw source material for this collection. Without them, the system cannot extract steps, generate a draft plan, or build the graph.',
+				'These papers are the raw source material for this collection. Without them, the system cannot extract evidence, compare findings, or build the graph.',
 			uploadAfterTitle: 'What you can do after upload and processing',
 			uploadAfterBody:
 				'Once processing finishes, this collection unlocks the main Lens v1 workflow surfaces.',
 			uploadAfterComparisons: 'Inspect normalized comparison rows across the collection',
 			uploadAfterEvidence: 'Inspect evidence cards and source traceability',
-			uploadAfterDocuments:
-				'Check document type and protocol suitability before trusting downstream outputs',
-			uploadAfterProtocol: 'Use protocol browsing only when the collection is actually suitable',
+			uploadAfterDocuments: 'Check document type before trusting downstream outputs',
 			uploadFormTitle: 'Add papers to this collection',
 			uploadFormLead: 'Drop or choose PDF/TXT files. You can start processing right after upload.',
 			controlTitle: 'Control center',
@@ -382,9 +1135,6 @@ const translations: Record<Language, Translations> = {
 			primaryActionComparisons: 'Open comparisons',
 			primaryActionResults: 'Open extracted results',
 			primaryActionDocuments: 'Inspect documents',
-			primaryActionProtocol: 'Open protocol branch',
-			primaryActionSteps: 'Review paper steps',
-			primaryActionSop: 'Open draft plan',
 			primaryActionHelperUpload:
 				'Start by adding source papers. Everything else in this collection depends on them.',
 			primaryActionHelperProcess:
@@ -397,8 +1147,6 @@ const translations: Record<Language, Translations> = {
 				'Then inspect the result objects to see what each extracted finding actually says.',
 			primaryActionHelperDocuments:
 				'Start with documents if you first need to separate experimental papers from reviews and mixed content.',
-			primaryActionHelperProtocol:
-				'Protocol is available, but only as a follow-on branch after the main collection views.',
 			readyViewsCount: '{count} primary view(s) ready',
 			filesLead:
 				'Upload source papers here. They remain attached to this collection as the base material.',
@@ -409,8 +1157,10 @@ const translations: Record<Language, Translations> = {
 				'This section tells you what state the collection is in and what the next useful action is.',
 			statusFiles: 'Uploaded files',
 			statusLatestTask: 'Latest task',
-			statusStage: 'Current stage',
-			statusProgress: 'Current progress',
+			statusStage: 'Now',
+			statusSubProgress: 'Step progress',
+			statusStageName: 'Stage',
+			statusProgress: 'Estimated progress',
 			statusUpdated: 'Last updated',
 			statusWorkflowTitle: 'Workflow stages',
 			statusWorkflowLead:
@@ -425,11 +1175,6 @@ const translations: Record<Language, Translations> = {
 			docTypeMixed: 'Mixed',
 			docTypeUncertain: 'Uncertain',
 			docTypeBenchmark: 'Benchmark',
-			protocolSuitabilityTitle: 'Protocol suitability',
-			protocolExtractableYes: 'Good',
-			protocolExtractablePartial: 'Partial',
-			protocolExtractableNo: 'Not suitable',
-			protocolExtractableUncertain: 'Uncertain',
 			statusArtifactsTitle: 'Unlocked content',
 			statusArtifactsEmpty: 'Generated content will appear here after upload and processing.',
 			workflowStates: {
@@ -495,10 +1240,7 @@ const translations: Record<Language, Translations> = {
 				comparisons: 'Comparisons',
 				results: 'Extracted Results',
 				documents: 'Documents',
-				protocol: 'Protocol',
-				graph: 'Graph view',
-				steps: 'Paper steps',
-				sop: 'Draft plan'
+				graph: 'Graph view'
 			},
 			noTasks: 'No processing task has run for this collection yet.',
 			warningsTitle: 'Collection warnings',
@@ -507,9 +1249,6 @@ const translations: Record<Language, Translations> = {
 			nextComparisons: 'Open comparisons',
 			nextResults: 'Open extracted results',
 			nextDocuments: 'Inspect documents',
-			nextProtocol: 'Open protocol',
-			nextSteps: 'Review paper steps',
-			nextSop: 'Open draft plan',
 			nextGraph: 'Open graph',
 			primaryViewsTitle: 'Primary analysis views',
 			primaryViewsLead:
@@ -523,13 +1262,7 @@ const translations: Record<Language, Translations> = {
 			resultResultsLead:
 				'Inspect one extracted result at a time before jumping back to the paper or the comparison table.',
 			resultDocumentsLead:
-				'Separate experimental papers from reviews before using them in comparison or protocol workflows.',
-			resultProtocolLead:
-				'Use this only when the collection really contains usable procedural detail.',
-			resultStepsLead:
-				'Start here to inspect extracted procedures, materials, sequence, and conditions from the papers.',
-			resultSopLead:
-				'Then move here to review a generated experiment draft built from those extracted steps.',
+				'Separate experimental papers from reviews before using them in comparison workflows.',
 			resultGraphLead:
 				'Use graph view only if you want a secondary relationship view after reading the main pages.',
 			resultLocked: 'Available after processing',
@@ -588,7 +1321,6 @@ const translations: Record<Language, Translations> = {
 			warningsTitle: 'Profile warnings',
 			emptyWarnings: 'No collection-level profile warnings.',
 			filterDocType: 'Paper type',
-			filterExtractable: 'Protocol suitability',
 			allOption: 'All',
 			totalLabel: 'Papers',
 			docTypeExperimental: 'Experimental paper',
@@ -597,13 +1329,8 @@ const translations: Record<Language, Translations> = {
 			docTypeComputational: 'Computational paper',
 			docTypeMixed: 'Mixed',
 			docTypeUncertain: 'Uncertain',
-			extractableYes: 'Suitable',
-			extractablePartial: 'Partially suitable',
-			extractableNo: 'Not suitable',
-			extractableUncertain: 'Uncertain',
 			tableDocument: 'Document',
 			tableType: 'Type',
-			tableProtocol: 'Protocol suitability',
 			tableConfidence: 'Confidence',
 			tableWarnings: 'Hint',
 			tableActions: 'Next step',
@@ -615,7 +1342,6 @@ const translations: Record<Language, Translations> = {
 			filters: {
 				title: 'Document profile filters',
 				type: 'Paper type',
-				suitability: 'Protocol suitability',
 				all: 'All',
 				showing: 'Showing {filtered} / {total} documents'
 			},
@@ -624,27 +1350,19 @@ const translations: Record<Language, Translations> = {
 				reviewRisk:
 					'This collection is mostly review material and is not suitable for direct experimental result comparison yet. Add experimental or methods papers before entering comparison and graph analysis.',
 				ready:
-					'This collection contains documents that can support step extraction and evidence comparison. Review evidence sources first, then enter comparison.',
+					'This collection contains documents that can support evidence extraction and comparison. Review evidence sources first, then enter comparison.',
 				fewDocuments:
 					'This collection has few documents, so comparison results may be unstable. Add more related papers to improve comparability.',
 				limitedReady:
 					'This collection has some usable procedural or evidence material, but parts of the comparison should still be reviewed carefully.',
 				limited:
-					'This collection does not yet show strong protocol suitability. Review the documents and evidence before using downstream comparisons.',
+					'This collection needs more experimental material before downstream comparisons should be trusted.',
 				pending:
 					'Document profiles have not been generated yet. Refresh or rerun processing after the uploaded documents are ready.'
 			},
 			stats: {
 				documentType: 'Document type distribution',
-				protocolSuitability: 'Protocol suitability',
 				countPercent: '{count} ({percent}%)'
-			},
-			warning: {
-				title: 'Protocol suitability reminder',
-				noSuitableBody:
-					'No document suitable for step extraction was detected in this collection. To generate experimental steps, parameter matrices, or validation plans, add experimental papers, methods papers, or papers with explicit procedures.',
-				readyBody:
-					'This collection contains documents suitable for step extraction. Check original evidence, parameter conditions, and experimental context before using generated output.'
 			},
 			list: {
 				title: 'Document list',
@@ -674,16 +1392,9 @@ const translations: Record<Language, Translations> = {
 				mixed: 'Mixed',
 				uncertain: 'Uncertain'
 			},
-			suitability: {
-				yes: 'Suitable',
-				partial: 'Partially suitable',
-				no: 'Not suitable',
-				uncertain: 'Uncertain'
-			},
 			table: {
 				document: 'Document',
 				type: 'Type',
-				suitability: 'Protocol suitability',
 				confidence: 'Confidence',
 				hint: 'Hint',
 				next: 'Next step'
@@ -703,22 +1414,16 @@ const translations: Record<Language, Translations> = {
 			reasons: {
 				label: 'Reason',
 				review: 'Review paper',
-				extractable: 'Procedural details detected',
-				partial: 'Procedural information is incomplete',
-				noProtocol: 'No clear protocol details',
 				insufficient: 'Insufficient information'
 			},
 			hints: {
-				noProtocol: 'No clear experimental steps, parameters, or method details were detected.',
-				extractable: 'Experimental workflow was detected and can support step extraction.',
-				partial: 'Some procedural information exists, but manual review is still needed.',
 				insufficient: 'Information is insufficient and should be checked manually.',
 				processing: 'This document is still being processed. Check progress before analysis.',
 				failed: 'Processing failed for this document. Check the error before trusting output.'
 			},
 			emptyState: {
 				title: 'No documents yet',
-				body: 'After you upload papers or technical documents, Lens will identify document types, judge Protocol suitability, and prepare evidence extraction and comparison analysis.'
+				body: 'After you upload papers or technical documents, Lens will identify document types and prepare evidence extraction and comparison analysis.'
 			},
 			pending: {
 				title: 'Document profiles pending',
@@ -1369,11 +2074,9 @@ const translations: Record<Language, Translations> = {
 			penTool: 'Pen',
 			searchTool: 'Search',
 			extractionTabsLabel: 'Structured extraction tabs',
-			tabSummary: 'Summary',
-			tabMethods: 'Methods',
+			tabOverview: 'Overview',
 			tabResults: 'Results',
 			tabEvidence: 'Evidence',
-			tabQa: 'Q&A',
 			confidenceLabel: 'Confidence',
 			jumpToSource: 'Jump to source',
 			materialSystem: 'Material system',
@@ -1386,15 +2089,18 @@ const translations: Record<Language, Translations> = {
 			resultDetailLabel: 'Result detail',
 			noResultWarnings: 'No visible warnings for this result.',
 			openResult: 'Open result',
-			quickQa: 'Quick Q&A',
-			qaPlaceholderBody: 'Ask against this paper. The UI is ready; API wiring can follow.',
-			qaInputPlaceholder: 'Ask this paper...',
-			send: 'Send',
 			extractionLabel: 'Structured Extraction',
 			keyResults: 'Key results',
 			keyFinding: 'Key Finding',
+			sourceBacked: 'Source-backed',
+			needsSourceReview: 'Needs source review',
 			methodOverview: 'Method overview',
 			sourceMethod: 'Source: Method',
+			paperScope: 'Paper scope',
+			experimentalObjects: 'Experimental objects',
+			processingConditions: 'Preparation / processing / treatment',
+			testMethods: 'Test and characterization methods',
+			measuredResults: 'Measured results',
 			graphLabel: 'Local Knowledge Graph',
 			localGraph: 'Local Knowledge Graph',
 			collapse: 'Collapse',
@@ -1416,131 +2122,11 @@ const translations: Record<Language, Translations> = {
 			documents: 'Documents',
 			searchLabel: 'Global search',
 			searchPlaceholder: 'Search papers, authors, materials, methods...',
-			actionSummary: 'Summary',
+			actionOverview: 'Overview',
 			actionEvidence: 'Evidence',
 			actionGraph: 'Graph',
 			actionExport: 'Export',
 			loading: 'Loading paper workbench'
-		},
-		protocolHub: {
-			title: 'Protocol branch',
-			lead: 'Use this branch only when the collection really contains usable experimental procedures.',
-			readyTitle: 'Protocol outputs are available',
-			readyBody:
-				'This collection currently exposes protocol-facing outputs. Use them as a branch of the workflow, not as the primary collection summary.',
-			limitedTitle: 'Protocol is limited or not yet available',
-			limitedBody:
-				'This collection may still be unsuitable for protocol extraction, or the branch may not be ready yet. Use comparisons, evidence, and document profiles first.',
-			actionsTitle: 'Protocol actions',
-			stepsCta: 'Browse protocol steps',
-			sopCta: 'Open SOP draft'
-		},
-		search: {
-			title: 'Protocol Search',
-			lead: 'Search extracted protocol steps by action, materials, and conditions.',
-			inputLabel: 'Query',
-			placeholder: 'Search for anneal, mix, 600C, Ar...',
-			submit: 'Search',
-			searching: 'Searching...',
-			exampleText: 'anneal 600C Ar',
-			advanced: 'Advanced options',
-			paperIdLabel: 'Paper ID',
-			paperIdPlaceholder: 'Optional paper filter',
-			limitLabel: 'Limit',
-			resultTitle: 'Results',
-			resultCount: '{count} hit(s)',
-			viewSteps: 'View all steps',
-			sourcePaperLabel: 'Source paper',
-			matchFieldsLabel: 'Matched fields',
-			scoreLabel: 'Score',
-			noResults: 'No protocol steps matched this query.',
-			errorNoQuery: 'Enter a query to search protocol steps.'
-		},
-		steps: {
-			title: 'Paper Steps',
-			lead: 'This page shows extracted procedures, materials, and conditions from the source papers.',
-			purpose:
-				'Use this page to answer: what did the papers actually do, in what order, and under which conditions?',
-			blockTypeLabel: 'Block Type',
-			blockTypePlaceholder: 'Optional block type',
-			limitLabel: 'Limit',
-			searchHelper: 'Leave the query empty to browse the full step list.',
-			loading: 'Loading protocol steps...',
-			submit: 'Refresh steps',
-			resultTitle: 'Step list',
-			resultCount: '{count} step(s)',
-			empty: 'No protocol steps are available yet.',
-			sourcePaperLabel: 'Source paper',
-			unknownPaper: 'Untitled paper',
-			notReadyTitle: 'Steps unlock after processing completes',
-			notReadyBody:
-				'Finish processing and protocol artifact generation in the workspace before browsing steps or searching protocol content.',
-			backToWorkspace: 'Back to workspace',
-			nextSop: 'Open draft plan',
-			phaseLabel: 'Phase',
-			confidenceLabel: 'Confidence',
-			materialsTitle: 'Materials',
-			conditionsTitle: 'Conditions',
-			outputLabel: 'Expected output'
-		},
-		sop: {
-			title: 'Draft Plan',
-			lead: 'This page generates a reviewable experiment draft from the extracted paper steps.',
-			purpose:
-				'Use this page to answer: if you were starting from these papers, what experiment draft should you review first?',
-			readinessLoading: 'Checking whether this collection is ready for draft generation...',
-			goalLabel: 'Goal',
-			goalPlaceholder: 'Design a protocol for thermal and mechanical optimization',
-			collectionScopeNote: 'By default, the draft is generated from the whole collection.',
-			advancedTitle: 'Advanced options',
-			advancedLead:
-				'Only add extra constraints if you need them. Most users can leave these empty.',
-			targetPropertiesLabel: 'Target properties (optional)',
-			targetPropertiesPlaceholder: 'mechanical, thermal',
-			maxStepsLabel: 'Max steps (optional)',
-			submit: 'Generate draft plan',
-			generating: 'Generating draft plan...',
-			loadExample: 'Load example goal',
-			loadExampleNote: 'This only fills the form with sample input. It does not submit anything.',
-			exampleTitle: 'What a draft plan looks like',
-			exampleTag: 'Example only',
-			exampleLead:
-				'Use this sample to understand the structure of a generated draft before you run it on real paper steps.',
-			exampleObjective:
-				'Optimize thermal stability and mechanical performance for a composite formulation.',
-			exampleHypothesis:
-				'A staged synthesis, controlled post-treatment, and targeted measurements can balance dispersion, curing, and thermal behavior.',
-			exampleStepOne: 'Prepare precursor materials and document target ratios.',
-			exampleStepTwo: 'Run drying or annealing under a controlled atmosphere.',
-			exampleStepThree: 'Measure mechanical and thermal outcomes against a baseline.',
-			exampleMeasurement:
-				'Track tensile strength, thermal conductivity, and structural characterization.',
-			exampleRisk:
-				'Critical temperatures, durations, or atmosphere settings may still need confirmation from the source papers.',
-			errorGoal: 'Enter a goal before generating a draft plan.',
-			notReadyError: 'Finish processing and generate paper steps before creating a draft plan.',
-			notReadyTitle: 'Generate the draft after paper steps are ready',
-			notReadyBody:
-				'This collection still has no paper steps. Return to the workspace, complete processing, and then generate the draft plan.',
-			notReadyStepOne: 'Upload the source papers into this collection.',
-			notReadyStepTwo: 'Run processing from the workspace.',
-			notReadyStepThree: 'Return here once paper steps are available.',
-			goProcess: 'Go to workspace',
-			backToWorkspace: 'Back to workspace',
-			resultTitle: 'Draft plan result',
-			viewSteps: 'Back to paper steps',
-			sourcePaperLabel: 'Source paper',
-			unknownPaper: 'Untitled paper',
-			objectiveTitle: 'Objective',
-			hypothesisTitle: 'Hypothesis',
-			risksTitle: 'Risks',
-			questionsTitle: 'Open questions',
-			stepsTitle: 'Recommended draft steps',
-			measurementTitle: 'Measurement plan',
-			emptySteps: 'No structured steps were returned.',
-			emptyMeasurement: 'No measurement plan was returned.',
-			emptyRisks: 'No risks were listed.',
-			emptyQuestions: 'No open questions were listed.'
 		},
 		tasks: {
 			title: 'Task History',
@@ -1577,15 +2163,29 @@ const translations: Record<Language, Translations> = {
 				source_artifacts_started: 'Source Artifacts Started',
 				source_artifacts_completed: 'Source Artifacts Completed',
 				document_profiles_started: 'Document Profiles Started',
+				research_objectives_started: 'Research Objectives Started',
+				objective_paper_skim_started: 'Scanning Papers',
+				objective_discovery_started: 'Discovering Objectives',
+				objective_paper_framing_started: 'Framing Objective Papers',
+				objective_evidence_routing_started: 'Routing Objective Evidence',
+				objective_evidence_units_started: 'Extracting Objective Evidence',
+				objective_logic_chains_started: 'Assembling Logic Chains',
 				paper_facts_started: 'Paper Facts Started',
 				comparison_rows_started: 'Comparison Rows Started',
-				protocol_artifacts_started: 'Protocol Artifacts Started',
 				artifacts_ready: 'Artifacts Ready',
 				failed: 'Failed'
+			},
+			progressUnit: {
+				documents: 'documents',
+				objectives: 'objectives',
+				frames: 'frames',
+				routes: 'routes',
+				tables: 'tables',
+				steps: 'steps'
 			}
 		},
 		graph: {
-			title: 'Collection Evidence Graph',
+			title: 'Collection Knowledge Map',
 			lead: 'Explore material, property, comparison, and source-evidence relationships across this collection.',
 			filtersTitle: 'Graph filters',
 			filtersLead:
@@ -1675,7 +2275,6 @@ const translations: Record<Language, Translations> = {
 			detailAggregateValue: 'Filter value',
 			detailSourceFile: 'Source file',
 			detailDocType: 'Document type',
-			detailProtocol: 'Protocol extractable',
 			detailConfidence: 'Confidence',
 			detailClaim: 'Claim',
 			detailClaimType: 'Claim type',
@@ -1690,7 +2289,7 @@ const translations: Record<Language, Translations> = {
 			detailComparability: 'Comparability',
 			detailEvidenceIds: 'Evidence IDs',
 			description:
-				'Explore themes, materials, methods, evidence, and comparison relationships in this collection.',
+				'Review the collection structure across papers, materials, properties, process context, and review buckets.',
 			meta: {
 				label: 'Graph metadata',
 				nodes: '{count} nodes',
@@ -1716,7 +2315,7 @@ const translations: Record<Language, Translations> = {
 			actions: {
 				refresh: 'Refresh graph',
 				resetView: 'Reset view',
-				export: 'Export',
+				export: 'Export graph',
 				exportPng: 'Export PNG',
 				downloadGraphml: 'Download GraphML',
 				copyView: 'Copy current view',
@@ -1724,10 +2323,26 @@ const translations: Record<Language, Translations> = {
 				refreshStatus: 'Refresh status'
 			},
 			workspace: {
-				label: 'Graph exploration workspace'
+				label: 'Collection map workspace'
+			},
+			overview: {
+				title: 'Collection overview',
+				lead: 'Aggregated map of papers, materials, properties, process context, and review buckets.',
+				metricsLabel: 'Collection overview metrics',
+				materials: 'Materials',
+				documents: 'Papers',
+				properties: 'Properties',
+				themes: 'Themes',
+				reviewBuckets: 'Review buckets',
+				detailNodes: '{count} comparison/evidence nodes kept out of the default map',
+				coreMaterials: 'Core materials',
+				denseThemes: 'Dense themes',
+				qualityIssues: 'Needs review',
+				emptyList: 'None yet'
 			},
 			controls: {
-				title: 'Graph controls',
+				title: 'Overview controls',
+				viewMode: 'View mode',
 				search: 'Search nodes',
 				searchPlaceholder: 'Search node name or keyword...',
 				focusSearch: 'Focus matching node',
@@ -1741,25 +2356,37 @@ const translations: Record<Language, Translations> = {
 				visibleEdges: 'Visible edges',
 				loadState: 'Load state'
 			},
+			viewMode: {
+				keyChain: 'Key research chain',
+				materialCentric: 'Material hub',
+				full: 'Full graph'
+			},
 			layout: {
+				logicChain: 'Logic chain layout',
 				fcose: 'fCoSE force layout',
 				cose: 'CoSE force layout',
 				grid: 'Grid layout',
 				circle: 'Circle layout'
 			},
 			canvas: {
-				title: 'Collection relationship graph',
+				title: 'Research logic chain',
+				materialTitle: 'Material-centered research map',
+				fullTitle: 'Full collection graph',
 				meta: 'Nodes {nodes} · Edges {edges}',
 				fit: 'Fit canvas',
 				zoomIn: 'Zoom in',
 				zoomOut: 'Zoom out',
 				center: 'Center',
 				layout: 'Layout',
-				ariaLabel: 'Interactive collection graph canvas',
+				ariaLabel: 'Interactive research logic chain canvas',
+				materialAriaLabel: 'Interactive material-centered research map canvas',
+				fullAriaLabel: 'Interactive full collection graph canvas',
 				empty: 'No visible graph elements match the current controls.'
 			},
 			legend: {
 				label: 'Node type legend',
+				objective: 'Objective',
+				logicChainStep: 'Logic step',
 				document: 'Document',
 				evidence: 'Evidence',
 				comparison: 'Comparison',
@@ -1772,11 +2399,20 @@ const translations: Record<Language, Translations> = {
 				unknown: 'Unknown'
 			},
 			detail: {
-				title: 'Selected object detail',
+				title: 'Chain step detail',
 				empty:
-					'Click a graph node or relationship to inspect source evidence, related comparisons, and original document locations.',
+					'Click an objective or logic-chain step to inspect its supporting evidence rows.',
 				clear: 'Clear',
 				loading: 'Loading detail...',
+				evidenceRows: 'Rows',
+				stepEvidence: 'Step evidence',
+				noStepEvidence: 'No evidence rows were extracted for this step.',
+				rowsLimited: 'Showing the first 12 of {count} rows.',
+				paper: 'Paper',
+				property: 'Property',
+				value: 'Value',
+				context: 'Context',
+				source: 'Source',
 				relatedEvidence: 'Evidence',
 				relatedComparisons: 'Comparisons',
 				relatedDocuments: 'Documents',
@@ -1786,6 +2422,7 @@ const translations: Record<Language, Translations> = {
 				noRelations: 'No visible relations for this object.',
 				viewEvidence: 'View evidence',
 				openComparison: 'Open comparison',
+				openMaterialGraph: 'Open research chain map',
 				locateSource: 'Locate source',
 				expand: 'Expand neighbors',
 				expanding: 'Expanding...',
@@ -1819,7 +2456,7 @@ const translations: Record<Language, Translations> = {
 			empty: {
 				title: 'Graph has not been built',
 				description:
-					'After document parsing and evidence extraction finish, Lens can generate a collection graph for exploring themes, evidence, and comparison relationships.',
+					'After document parsing and evidence extraction finish, Lens can generate a collection map for navigating papers, materials, properties, themes, and review buckets.',
 				action: 'Generate graph'
 			}
 		},
@@ -1869,7 +2506,7 @@ const translations: Record<Language, Translations> = {
 			pageTitle: 'Lens Guide',
 			eyebrow: 'Docs',
 			title: 'Using Lens',
-			lead: 'Lens is now organized around one researcher workflow: collection workspace, extracted steps, SOP draft, and graph evidence.',
+			lead: 'Lens is now organized around one researcher workflow: collection workspace, evidence review, comparison analysis, and graph evidence.',
 			quickNotesTitle: 'Quick notes',
 			quickNotesSub: 'Before you start',
 			quickNote1: 'PDFs must contain selectable text.',
@@ -1884,22 +2521,22 @@ const translations: Record<Language, Translations> = {
 				'Open the collection workspace and add PDF/TXT files in the files section.',
 			workflowIndexTitle: 'Start processing',
 			workflowIndexDesc: 'Start processing from Workspace and watch task progress inline.',
-			workflowSearchTitle: 'Review extracted steps',
+			workflowSearchTitle: 'Review evidence',
 			workflowSearchDesc:
-				'Use Paper Steps to review what the papers actually did: actions, materials, and conditions.',
-			workflowGraphTitle: 'Generate a draft plan',
+				'Use Evidence to verify where claims, materials, methods, and parameters came from.',
+			workflowGraphTitle: 'Enter comparison',
 			workflowGraphDesc:
-				'Move from Paper Steps to Draft Plan when the collection is ready. Use Graph as supporting evidence.',
+				'Move from Evidence to Comparison when the collection is ready. Use Graph as supporting evidence.',
 			surfaceTitle: 'Primary collection surfaces',
 			surfaceSub: 'Keep the main job focused on four pages.',
 			surfaceWorkspaceTitle: 'Workspace',
 			surfaceWorkspaceDesc:
 				'Upload files, start processing, watch progress, and open advanced analysis from one control center.',
-			surfaceStepsTitle: 'Paper Steps',
-			surfaceStepsDesc: 'Review extracted procedures from the source papers in one page.',
-			surfaceSopTitle: 'Draft Plan',
+			surfaceStepsTitle: 'Evidence Review',
+			surfaceStepsDesc: 'Review source evidence, materials, and conditions in one page.',
+			surfaceSopTitle: 'Comparison Analysis',
 			surfaceSopDesc:
-				'Turn extracted paper procedures into a reviewable experiment draft with goals, steps, risks, and open questions.',
+				'Organize comparable results in one view and judge which findings can really be compared side by side.',
 			surfaceGraphTitle: 'Graph',
 			surfaceGraphDesc:
 				'Use graph preview and GraphML export as secondary analysis, not the primary end state.',
@@ -2033,16 +2670,16 @@ const translations: Record<Language, Translations> = {
 			},
 			metricsPlaceholder: '等待接口',
 			updatedPlaceholder: '—',
-			nextCompare: '进入比较',
+			nextCompare: '进入研究目标',
 			nextProgress: '查看进度',
 			nextWorkspace: '进入工作区',
 			actionEnter: '进入',
 			moreActions: '{name} 的更多操作',
-			actionExport: '导出',
 			actionIndex: '处理',
+			actionStartProcessing: '启动处理',
+			actionRetryProcessing: '重新处理',
+			actionProcessing: '处理中',
 			actionDelete: '删除',
-			exporting: '准备导出...',
-			exported: '已完成导出',
 			indexing: '正在启动处理...',
 			indexStarted: '处理已启动',
 			indexNoFiles: '请先上传文件再启动处理。',
@@ -2093,11 +2730,17 @@ const translations: Record<Language, Translations> = {
 			moreLabel: '更多',
 			tabs: {
 				overview: '概览',
+				comparison: '比较',
 				comparisons: '比较',
 				results: '抽取结果',
+				extractedFacts: '抽取事实',
 				evidence: '证据',
 				documents: '文档',
-				protocol: 'Protocol',
+				materials: '材料',
+				objectives: '研究目标',
+				papers: '文献',
+				allComparisons: '全部比较',
+				assistant: 'AI 助手',
 				graph: '图谱'
 			},
 			actionsLabel: '集合操作',
@@ -2107,7 +2750,711 @@ const translations: Record<Language, Translations> = {
 			moreActions: '更多集合操作',
 			metaDocuments: '{count} 篇文档',
 			metaUpdated: '最近更新：{time}',
-			deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。'
+			deleteConfirm: '确定删除集合“{name}”吗？这会删除集合元数据、已上传文件和生成产物。',
+			lock: {
+				eyebrow: '页面已锁定',
+				title: '需要先完成处理',
+				readyToProcess: '请先处理该集合，再打开研究目标、证据、比较、材料、图谱或助手页面。',
+				processing: '集合仍在处理中。当前任务完成后，研究页面会自动解锁。',
+				failed: '最近一次处理失败。请先在工作区查看状态或重新处理，再信任下游页面。',
+				empty: '请先上传文档并处理集合，再打开研究页面。',
+				backToWorkspace: '返回工作区'
+			}
+		},
+		goalCopilot: {
+			eyebrow: '集合助手',
+			title: 'AI 研究助手',
+			beta: 'Beta',
+			subtitle:
+				'优先基于当前绑定的 collection 回答；Hybrid 模式只有在知识库缺少证据时才回退到通用背景。',
+			sidebarLabel: 'AI 研究助手会话',
+			contextLabel: 'Goal session 上下文',
+			chatLabel: 'Goal copilot 对话',
+			chatTitle: '绑定知识库的对话',
+			collection: '知识库',
+			goal: '目标',
+			goalPlaceholder: '比较 LPBF 工艺对强度和延伸率的影响...',
+			focusedMaterial: '关注材料',
+			focusedMaterialPlaceholder: '可选材料 ID 或名称',
+			focusedPaper: '关注文献',
+			focusedPaperPlaceholder: '可选 paper 或 document ID',
+			mode: '回答模式',
+			modes: {
+				grounded: '仅知识库',
+				hybrid: '知识库优先',
+				general: '通用背景'
+			},
+			saveContext: '保存上下文',
+			saving: '保存中...',
+			contextSaved: '上下文已保存',
+			newSession: '新建会话',
+			newSessionReady: '新会话已就绪',
+			historyTitle: '历史会话',
+			emptyHistory: '暂无历史会话',
+			untitledSession: '新建会话',
+			knowledgeCardLabel: '打开当前知识库',
+			currentKnowledge: '当前知识库',
+			commandsTitle: '命令',
+			sessionMeta: '{mode} · {id}',
+			openWorkspace: '打开工作区',
+			loading: '正在加载助手...',
+			headerPrefix: '正在基于当前 collection 回答问题：',
+			more: '更多',
+			emptyTitle: '直接询问这个 collection',
+			emptyBody: '我会优先基于当前 collection 的文献内容回答。',
+			userRole: '你',
+			assistantRole: 'Lens',
+			evidenceLabel: '使用的证据',
+			sourceLinks: {
+				label: '回答来源',
+				document: '文献 {number}',
+				evidence: '来源 {number}'
+			},
+			messageLabel: '消息',
+			messagePlaceholder: '向当前 collection 提问，例如：比较 LPBF 工艺对强度和延伸率的影响',
+			inputHint: 'AI 可能会生成不准确的信息，请核查重要内容。',
+			send: '发送',
+			sending: '发送中...',
+			suggestions: {
+				summary: '总结这批文献的主要结论',
+				lpbf: '比较 LPBF 工艺对强度和延伸率的影响',
+				elongation: '哪些文献提到了延伸率？',
+				samples: '这些论文里有哪些可比样品？'
+			},
+			actions: {
+				like: '点赞回答',
+				dislike: '点踩回答',
+				copy: '复制回答'
+			},
+			sourceMode: {
+				collection_grounded: '基于知识库证据',
+				collection_limited: '知识库证据不足',
+				general_fallback: '通用背景回退',
+				general_only: '通用背景'
+			}
+		},
+		research: {
+			emptyValue: '--',
+			warnings: '警告',
+			warningPaperCount: '{message}（{count} 篇文献）',
+			warningOccurrenceCount: '{message}（{count} 次）',
+			state: {
+				empty: '为空',
+				processing: '处理中',
+				partial: '部分可用',
+				ready: '可用',
+				failed: '失败'
+			},
+			valueStatus: {
+				observed: '有证据值',
+				normalized: '已规范化',
+				inferred: '推断值',
+				missing: '缺失',
+				conflicted: '冲突'
+			},
+			overview: {
+				title: '研究概览',
+				body: '按文献、样品、变量、性能和证据状态聚合后的视图。',
+				pendingTitle: '研究聚合视图尚未就绪',
+				pendingBody: '集合已经处理完成，但研究聚合视图不可用。请完成或重试 research-view 构建。',
+				documents: '文档',
+				samples: '样品',
+				measurements: '性能结果',
+				evidence: '证据',
+				materials: '材料体系',
+				processes: '工艺',
+				variables: '变量',
+				properties: '性能'
+			},
+			materials: {
+				title: '材料',
+				body: '集合中识别出的规范材料，包含文献覆盖、样品数量、已测性能和证据状态。',
+				loading: '正在加载材料...',
+				errorTitle: '材料视图不可用',
+				emptyTitle: '暂无材料档案',
+				emptyBody: '材料聚合接口没有返回该集合的材料摘要。',
+				refresh: '刷新材料',
+				summaryTitle: '材料摘要',
+				materialCount: '{count} 个材料',
+				paperCount: '{count} 篇文献',
+				sampleCount: '{count} 个样品',
+				aliases: '别名',
+				papers: '文献',
+				comparisons: '比较',
+				evidenceCoverage: '证据覆盖',
+				openProfile: '打开材料档案'
+			},
+			objectives: {
+				title: '研究目标',
+				body: '集合中识别出的研究问题，包含材料范围、工艺轴、性能轴和文献框架覆盖情况。',
+				loading: '正在加载研究目标...',
+				errorTitle: '研究目标不可用',
+				pendingTitle: '研究目标尚未生成',
+				pendingBody: '请先完成集合处理，再查看研究目标。',
+				emptyTitle: '暂无研究目标',
+				emptyBody: '研究目标接口没有返回该集合的目标摘要。',
+				refresh: '刷新研究目标',
+				openOverview: '打开集合概览',
+				summaryTitle: '研究目标摘要',
+				objectiveCount: '{count} 个目标',
+				paperFrameCount: '{count} 个文献框架',
+				routeCount: '{count} 条证据路由',
+				paperFrames: '文献框架',
+				routes: '证据路由',
+				evidenceUnits: '证据单元',
+				confidence: '可信度',
+				materialScope: '材料范围',
+				processAxes: '工艺轴',
+				propertyAxes: '性能轴',
+				noIntent: '接口未返回比较意图。',
+				openWorkspace: '打开目标工作区'
+			},
+			objectiveWorkspace: {
+				title: '目标工作区',
+				eyebrow: '研究目标',
+				back: '返回研究目标',
+				askCopilot: '询问助手',
+				loading: '正在加载目标工作区...',
+				errorTitle: '目标工作区不可用',
+				emptyTitle: '暂无目标工作区',
+				emptyBody: '目标 research-view 接口没有返回数据。',
+				noIntent: '接口未返回比较意图。',
+				ready: '可用',
+				pending: '待生成',
+				summary: '目标工作区摘要',
+				relevantPapers: '相关文献',
+				measurementResults: '测量结果',
+				testConditions: '测试条件',
+				characterizationObservations: '组织观察',
+				comparisonEvidence: '比较证据',
+				authorInterpretations: '作者解释',
+				otherEvidence: '其他证据',
+				contextTitle: '目标上下文',
+				variableAxes: '变化轴',
+				conclusionPackageTitle: '科研结论包',
+				conclusionPackageBody: '按该研究目标组织结论、文献贡献、支撑证据、机制链和不确定性。',
+				collectionConclusion: '集合级结论',
+				reportStatus: '结论包状态：{status}',
+				reportEvidenceMatrix: '报告证据矩阵',
+				reportConclusionTitle: '集合级发现',
+				primaryEvidenceTitle: '主要支撑数据表',
+				mechanismChainTitle: '机制链',
+				noConclusionPackage: '暂未生成结构化结论包；可先使用下方证据审查核对来源。',
+				researchFocus: '研究范围',
+				evidenceReadiness: '证据成熟度',
+				representativeEvidence: '代表性证据',
+				comparisonReadyTitle: '受控比较已具备',
+				comparisonReadyBody: '该目标已经具备测量结果、测试条件和直接比较证据。',
+				comparisonLimitedTitle: '受控比较仍受限',
+				comparisonLimitedBody: '已经抽到部分数值，但测试条件或比较证据还不完整。',
+				comparisonPendingTitle: '受控比较待补充',
+				comparisonPendingBody: '需要先补齐测量结果、测试条件和比较证据，才能形成可靠比较。',
+				scientificJudgements: '科研判断卡片',
+				controlledComparisons: '受控比较',
+				mechanismInterpretations: '机制解释',
+				limitations: '局限性与不确定性',
+				noControlledComparisons: '该目标暂未生成受控比较证据单元。',
+				noMechanismInterpretations: '该目标暂未生成作者机制解释证据单元。',
+				noLimitations: '当前暂未报告逻辑链缺口或未解析证据。',
+				logicGap: '逻辑链缺口',
+				unresolvedEvidenceGroupTitle: '样品、工艺或测试上下文未解析',
+				unresolvedEvidenceGroupBody:
+					'{count} 条{kinds}在 {status} 上下文解析前，不能支撑严格受控比较。',
+				unresolvedEvidenceGroupMeta: '未解析单元：{count}；文献：{documents}',
+				controlledAxes: '已控制：{axes}',
+				comparisonContext: '当前组：{current}；基线：{baseline}',
+				comparisonCurrentContext: '当前组：{current}；基线尚未解析',
+				comparisonAxisContext: '比较轴：{axis}',
+				comparisonGeneratedBody:
+					'{property}：{current} 对比基线 {baseline}；报告方向为 {direction}。',
+				comparisonGroupBody: '汇总 {count} 条关于 {property} 的比较证据。代表性发现：{summary}',
+				comparisonGroupMeta: '证据单元：{count}；文献：{documents}',
+				directionIncrease: '升高',
+				directionDecrease: '降低',
+				directionNoChange: '无明显变化',
+				directionObserved: '观察到差异',
+				gapLabels: {
+					sample_or_process_context_missing: '样品或工艺上下文缺失。',
+					test_condition_missing: '测试条件缺失。',
+					measurement_results_missing: '测量结果缺失。',
+					characterization_observations_missing: '组织表征观察缺失。',
+					comparison_units_missing: '受控比较证据单元缺失。',
+					unresolved_measurements_present: '部分测量证据尚未解析。'
+				},
+				scopeStep: '研究范围',
+				coverageStep: '文献覆盖',
+				conditionsStep: '实验条件',
+				measurementsStep: '测量结果',
+				observationsStep: '组织观察',
+				gapsStep: '缺口与比较',
+				noScope: '暂未得到材料、工艺或性能范围。',
+				noCoverage: '该目标暂未选出相关文献。',
+				noConditions: '暂未得到已解析测试条件证据。',
+				noMeasurements: '暂未得到测量结果证据。',
+				noObservations: '暂未得到表征观察证据。',
+				noGaps: '当前逻辑链暂未报告明确缺口。',
+				paperContributionTitle: '文献贡献地图',
+				paperContributionBody: '按每篇文献在该目标中的角色、贡献证据和来源区域组织。',
+				paperContributionFallback: '为该目标贡献变量 {variables} 和测量性能 {properties}。',
+				unitCount: '{count} 个单元',
+				routeCount: '{count} 条路由',
+				openPaper: '打开来源文献',
+				framesTitle: '文献框架',
+				tableCount: '{count} 个表格引用',
+				changedVariables: '变化变量',
+				measuredScope: '测量范围',
+				relevantSections: '相关章节',
+				relevantTables: '相关表格',
+				excludedTables: '排除表格',
+				noBackground: '接口未返回该文献的目标背景。',
+				noFrames: '该目标暂未返回文献框架。',
+				routesTitle: '证据路由',
+				source: '来源',
+				role: '角色',
+				extractable: '可抽取',
+				schema: '结构',
+				noRoutes: '暂未生成证据路由。',
+				evidenceUnitsTitle: '支撑证据',
+				evidenceUnitsBody: '先展示代表性证据；展开完整审查可查看全部已抽取证据单元。',
+				allEvidenceReview: '全部抽取证据',
+				evidenceFilters: '证据筛选',
+				evidenceKindFilter: '证据类型',
+				paperFilter: '文献',
+				allEvidenceKinds: '全部证据类型',
+				allPapers: '全部文献',
+				evidencePreviewLimit:
+					'当前分组显示前 {shown} / {total} 条证据。可用筛选器或右侧详情聚焦查看。',
+				noEvidenceUnits: '暂未生成已解析证据单元。',
+				evidenceDetail: '证据详情',
+				evidenceDetailBody: '查看当前证据单元，并跳回它的来源文献。',
+				kind: '类型',
+				property: '性能',
+				value: '数值',
+				status: '状态',
+				confidence: '可信度',
+				finding: '发现',
+				sampleAndProcess: '样品与工艺',
+				comparisonBaseline: '比较基线',
+				sourceTraceback: '来源追溯',
+				sampleContext: '样品上下文',
+				processContext: '工艺上下文',
+				testCondition: '测试条件',
+				resolvedCondition: '解析条件',
+				sources: '来源',
+				page: '第 {page} 页',
+				noValue: '接口未返回数值载荷。',
+				logicChainTitle: '逻辑链',
+				logicChainBody: '用这些步骤从研究范围跳转到对应的支撑证据分组。',
+				noLogicChain: '暂未生成目标逻辑链。',
+				diagnosticsTitle: '抽取诊断',
+				diagnosticsBody: '文献框架和证据路由保留在这里用于调试抽取路径，但不再作为主要研究视图。'
+			},
+			materialProfile: {
+				title: '材料档案',
+				body: '集合范围内的材料档案，包含文献、样品、工艺范围、性能、比较、条件序列和证据。',
+				back: '返回材料列表',
+				loading: '正在加载材料档案...',
+				errorTitle: '材料档案不可用',
+				emptyTitle: '暂无材料档案',
+				emptyBody: '材料档案接口没有返回这个材料的数据。',
+				refresh: '刷新档案',
+				summaryTitle: '材料档案摘要',
+				overview: '概览',
+				papers: '使用该材料的文献',
+				processRanges: '工艺参数范围',
+				propertySummaries: '性能摘要',
+				comparisons: '该材料下的比较',
+				rangeCoverage: '{samples} 个样品，{papers} 篇文献',
+				noProcessRanges: '这个材料还没有返回工艺参数范围。',
+				noPropertySummaries: '这个材料还没有返回性能摘要。',
+				seriesCount: '{count} 个序列'
+			},
+			materialDossier: {
+				title: '材料研究档案',
+				mainLabel: '材料研究档案内容',
+				subtitle: '一份材料报告：每个结果都保留制备状态、测试条件、证据来源和可比较边界。',
+				tabs: {
+					label: '材料档案视图',
+					structured: '结构化档案',
+					narrative: '叙事研究'
+				},
+				tags: {
+					alloySteel: '合金钢'
+				},
+				actions: {
+					label: '材料档案操作',
+					viewPapers: '查看文献',
+					viewEvidence: '查看证据',
+					askCopilot: '询问助手',
+					generatePdf: '生成综述 PDF',
+					refresh: '刷新',
+					exportCsv: '导出数据 CSV'
+				},
+				sections: {
+					overview: {
+						title: '材料报告概览',
+						body: '{material} 主要围绕 {processes} 展开。结果按材料状态、测试条件、性能响应和来源证据组织，而不是做跨论文最佳参数排行。'
+					},
+					findings: {
+						title: '关键发现',
+						body: '由样品数值和证据锚点约束生成的可追溯结论。'
+					},
+					samples: {
+						title: '样品与工艺参数',
+						body: '了解有哪些样品及其工艺条件差异。'
+					},
+					graph: {
+						title: '材料状态图',
+						body: '按制备、测试条件、观测响应和来源证据阅读样品级状态。'
+					},
+					chain: {
+						title: '代表性材料状态',
+						body: '把每个高信号样品作为一个材料状态阅读：制备/后处理、测试条件、性能响应、材料学解释和来源证据。'
+					},
+					materialProblems: {
+						title: '材料问题归纳',
+						body: '按材料科学问题归纳证据，而不是只展示一张平铺性能矩阵。'
+					},
+					performance: {
+						title: '支撑数据矩阵',
+						body: '用矩阵核对每条发现背后的样品、条件、数值和证据。'
+					},
+					trends: {
+						title: '可比较组',
+						body: '先把比较限定在来源论文、样品和测试条件内，再阅读跨集合趋势。'
+					},
+					evidence: {
+						title: '证据定位',
+						body: '查看每个数据与结论的原文证据。'
+					}
+				},
+				table: {
+					sampleId: '样品',
+					sampleCondition: '样品 / 条件',
+					primaryVariable: '主要变量',
+					processSummary: '工艺摘要',
+					collectionSummary: '集合汇总',
+					sampleFallback: '样品 {index}',
+					scanStrategy: '扫描策略',
+					laserPower: '激光功率 (W)',
+					scanSpeed: '扫描速度 (mm/s)',
+					energyDensity: '能量密度 (J/mm3)',
+					layerThickness: '层厚 (um)',
+					hatchSpacing: '道间距',
+					otherParameters: '其他参数',
+					testCondition: '测试条件',
+					evidenceAnchors: '证据锚点'
+				},
+				process: {
+					scan_strategy: '扫描策略',
+					laser_power_w: '激光功率',
+					scan_speed_mm_s: '扫描速度',
+					hatch_spacing_um: '道间距',
+					layer_thickness_um: '层厚',
+					energy_density_j_mm3: '能量密度',
+					energy_density_origin: '能量密度来源',
+					build_orientation: '成形方向',
+					post_treatment_summary: '后处理',
+					preheat_temperature_c: '预热温度',
+					shielding_gas: '保护气氛',
+					oxygen_level_ppm: '氧含量',
+					powder_size_distribution_um: '粉末粒径分布',
+					process_normalized: '工艺'
+				},
+				properties: {
+					relativeDensity: '相对密度 (%)',
+					relativeDensityShort: '相对密度',
+					hardness: '硬度 (HV)',
+					hardnessShort: '硬度',
+					yieldStrength: '屈服强度 (MPa)',
+					yieldStrengthShort: '屈服强度',
+					tensileStrength: '抗拉强度 (MPa)',
+					tensileStrengthShort: '抗拉强度',
+					elongation: '延伸率 (%)',
+					elongationShort: '延伸率',
+					density: '密度',
+					hardnesshv: '硬度 (HV)',
+					yieldstrength: '屈服强度',
+					tensilestrength: '抗拉强度'
+				},
+				samples: {
+					summary: '共 {count} 个样品。控制变量：{controlled}；变化变量：{changed}。'
+				},
+				performance: {
+					summary: '共 {samples} 个样品，{properties} 项性能指标。'
+				},
+				findings: {
+					empty: '当前材料数值还不足以生成可追溯关键发现。',
+					supportedByValues: '{values}。证据：{evidence}。',
+					highestStrengthTitle: '{sample} 表现出最高强度',
+					splitStrengthTitle: '强度最高项分布在不同样品',
+					highestElongationTitle: '{sample} 表现出最高延伸率',
+					highestPropertyTitle: '{sample} 表现出最高{property}',
+					summaryPropertyTitle: '{property} 已作为可追溯性能指标返回',
+					summaryPropertyBody: '{property} 报告值为 {value}。证据：{evidence}。',
+					densityMismatchTitle: '最高密度并不对应最高强度',
+					densityMismatchBody:
+						'{densitySample} 的密度最高（{densityValue}），但 {strengthSample} 的强度领先（{strengthValues}）。证据：{evidence}。',
+					tradeoffTitle: '当前数据提示存在强度-塑性权衡',
+					tradeoffBody:
+						'{strengthSample} 强度领先，而 {elongationSample} 延伸率领先。证据：{evidence}。',
+					processOnlyTitle: '样品之间存在工艺上下文差异',
+					processOnlyBody: '当前矩阵的变化变量是 {changed}，但可比较性能值尚未就绪。',
+					types: {
+						directObservation: '直接观察',
+						comparativeInference: '比较推断',
+						trendHypothesis: '趋势假设',
+						structuralObservation: '结构观察'
+					}
+				},
+				chain: {
+					stepsLabel: '代表性材料状态证据链',
+					processContext: '制备与后处理',
+					testConditions: '测试条件',
+					results: '性能响应',
+					whyBest: '材料学解释',
+					traceback: '证据回溯',
+					collectionScope: '集合级证据',
+					backgroundText:
+						'{material} 在当前集合中主要通过 {processes} 研究；该参数组合由 {paper} 支撑。',
+					scoreLabel: '{best}/{total} 项指标领先',
+					comparisonSummary: '该样品在 {total} 个跟踪指标中有 {count} 项领先：{best}。',
+					comparisonNoLeader:
+						'该样品有 {count} 个可比较数值，但在 {total} 个跟踪指标中暂未成为最高项。',
+					notBestFor: '非领先指标：{properties}。',
+					bestInMatrix: '本矩阵领先',
+					observed: '已观测',
+					noProcessContext: '该样品行暂未绑定工艺参数。',
+					noTestConditions: '该行暂未绑定明确测试条件；跨条件比较前需要回到原文核查。',
+					empty: '当前材料矩阵还不足以构建代表性材料状态。'
+				},
+				state: {
+					cardLabel: '状态 {index}',
+					sourceLine: '来源：{source}',
+					roles: {
+						texture: '织构预测状态',
+						hardness: '高硬度状态',
+						densification: '致密化 / 孔隙状态',
+						tensile: '拉伸响应状态',
+						representative: '代表性材料状态'
+					},
+					interpretation: '观测响应：{values}。{boundary}',
+					notGlobalBest: '这不能说明该状态全局最优；非领先或未验证响应包括 {properties}。',
+					sourceBounded: '应在来源论文和测试条件内解释，不能作为跨论文全局排名。',
+					noValues: '暂无可比较数值响应'
+				},
+				problems: {
+					densification: {
+						title: '致密化和孔隙',
+						body: '可追溯的密度/孔隙证据包括 {values}。这些结果需要接上同一样品测试后，才能形成完整腐蚀或力学结论。',
+						empty: '当前选中材料值中还没有可用的密度或孔隙响应。'
+					},
+					mechanical: {
+						title: '强度、塑性和硬度',
+						body: '可追溯的力学响应包括 {values}。这些结果应在同一论文/同一测试体系内比较后再排序。',
+						empty: '当前选中材料值中还没有强度、塑性或硬度响应。'
+					},
+					texture: {
+						title: '织构和模型预测',
+						body: '可追溯的织构/模型响应包括 {values}。这些应作为模型/织构证据解释，而不是激光参数优化排行。',
+						empty: '当前选中材料值中没有织构或模型预测响应。'
+					},
+					unclosed: {
+						title: '腐蚀、疲劳和未闭合链路',
+						body: '腐蚀和疲劳结论需要把同一样品的制备、缺陷状态、测试条件、响应和证据接起来。当前不完整链路应显示为未闭合，而不是参与排行。'
+					},
+					status: {
+						traceable: '可追溯',
+						partial: '未闭合'
+					}
+				},
+				comparison: {
+					topic: '比较主题：工艺变量对性能的影响',
+					controls: '控制变量：{controlled}',
+					defaultVariable: '工艺变量',
+					variable: '变化变量',
+					property: '影响性能',
+					observation: '观察趋势',
+					conclusion: '结论',
+					noClearWinner: '差异不明显',
+					needsEvidence: '需要更多证据',
+					higherConclusion: '{sample} 的{property}更高',
+					empty: '该材料暂未返回可比较的数值结果。',
+					summaryOnly: '已有集合级数值，但还没有可比较的样品级成对数值：{values}。'
+				},
+				chart: {
+					title: '趋势图：关键性能对比',
+					caption: '在可比工艺上下文下，变化变量会影响性能数值。',
+					empty: '暂无可绘制的数值趋势。',
+					summaryOnly: '可用集合汇总值：{values}。趋势图需要成对样品数值。'
+				},
+				graph: {
+					label: '材料范围科研链路图',
+					chainLabel: '链路 {index}',
+					sample: '样品与论文背景',
+					empty: '当前样品矩阵还不足以映射高信号科研链路。'
+				},
+				narrative: {
+					mainLabel: '叙事型材料研究档案',
+					eyebrow: '交互式综述草稿',
+					overviewTitle: '这批文献主要研究了什么？',
+					lead: '当前集合围绕 {material} 展开，主要涉及 {processes}。本档案覆盖 {papers} 篇文献、{samples} 个样品、{properties} 和 {evidence} 个证据锚点；下面的叙事内容仍由结构化矩阵支撑。',
+					unspecifiedProcess: '未明确工艺',
+					unspecifiedProperties: '已报告性能',
+					sampleDesignTitle: '样品是如何设计的？',
+					sampleDesignBody:
+						'当前矩阵识别到 {samples} 个样品。控制变量包括 {controlled}；变化变量包括 {changed}。这使得样品集适合阅读工艺差异与性能差异之间的关系，同时保留原始数值以便核查。',
+					noControlledVariables: '暂无明确控制变量',
+					noChangedVariables: '暂无明确变化变量',
+					findingsTitle: '主要性能结果是什么？',
+					findingsBody: '卡片先总结当前最高观测值，再把支撑证据贴近每条结论。',
+					trendQuestion: '变量如何影响性能？',
+					trendBody:
+						'对于 {property}，{first} 的报告值为 {firstValue}，{second} 的报告值为 {secondValue}。当前结论：{conclusion}。除非更多原文上下文支持，否则这里应视为有证据支撑的比较，而不是完整机制解释。',
+					trendEmpty: '当前矩阵还没有足够可比较的数值来写出趋势叙事。',
+					evidenceTitle: '证据在哪里？',
+					evidenceBody:
+						'每个证据 chip 都会打开和结构化表格相同的来源抽屉，因此叙事内容仍然可以追溯到原文位置。'
+				},
+				evidence: {
+					drawerTitle: '证据详情',
+					code: '编号',
+					claim: '数据 / 结论',
+					type: '证据类型',
+					location: '原文位置',
+					anchor: '证据锚点',
+					confidence: '可信度',
+					value: '数值',
+					source: '来源',
+					excerpt: '原文片段',
+					tableData: '表格数据',
+					textConclusion: '结论性描述',
+					sourceEvidence: '来源证据',
+					contextUnavailable: '请打开来源文献查看原文上下文。',
+					empty: '该材料暂未返回带证据的性能值。',
+					viewAll: '查看全部 {count} 条证据 ->'
+				},
+				confidence: {
+					high: '高',
+					medium: '中',
+					low: '低'
+				},
+				aside: {
+					label: '材料档案侧栏',
+					sourceInfo: '来源信息',
+					sourcePapers: '来源文献',
+					lastUpdated: '最后更新',
+					lastUpdatedUnknown: '接口未返回',
+					quickNav: '快速导航',
+					literatureInfo: '文献信息',
+					noLiterature: '接口未返回来源文献信息。',
+					actions: '操作',
+					tip: '提示',
+					tipBody: '点击表格中的性能值或证据锚点，可查看来源上下文。'
+				},
+				pdf: {
+					title: '生成材料综述 PDF',
+					body: 'AI 将基于关键发现、趋势解释、支撑性能数据和证据定位生成综述。',
+					generate: '生成综述',
+					cancel: '取消',
+					generatedTitle: '材料综述 PDF',
+					generatedStatus: '已生成',
+					generatedWithWarnings: '已生成，包含 {count} 条警告',
+					loadingStatus: '正在检查已有综述草稿...',
+					generatingStatus: '正在生成综述草稿...',
+					failedStatus: '报告生成失败。请重新生成后再试。',
+					reportTitle: '报告标题',
+					readiness: '就绪度',
+					previewMarkdown: '预览 Markdown',
+					view: '查看 PDF',
+					download: '下载',
+					regenerate: '重新生成'
+				}
+			},
+			paperMaterials: {
+				title: '本文献中的材料'
+			},
+			documents: {
+				title: '文档',
+				directBody: '按贡献成熟度、已抽取事实和来源入口审阅每篇文献。',
+				loading: '正在加载文献覆盖...',
+				errorTitle: '文献覆盖不可用',
+				emptyTitle: '暂无文献覆盖行',
+				emptyBody: 'research-view 接口没有返回该集合的文献覆盖结果。',
+				refresh: '刷新覆盖',
+				documentCount: '{count} 篇文献',
+				document: '文献',
+				coverageTitle: '文献覆盖',
+				factCoverageTitle: '事实覆盖',
+				coverageReady: '文献覆盖结果可查看。',
+				coverageFailed: '该文献的 research-view 聚合失败。',
+				coverageNoEvidence: '该文献暂未抽到可用证据。',
+				coverageNeedsConditions: '已抽到测量结果，但测试条件证据仍需审查。',
+				tableTitle: '文献审阅列表',
+				shortId: '短 ID',
+				untitledPaper: '文献 {number}',
+				state: '状态',
+				processParams: '工艺参数',
+				conditions: '条件',
+				evidence: '证据',
+				issues: '问题',
+				openPaper: '打开文献',
+				next: '下一步',
+				issueCount: '{count} 个问题',
+				noIssues: '无明显问题'
+			},
+			comparison: {
+				title: '全部比较',
+				directBody: '高级浏览入口，用于查看 research-view 聚合层生成的可比较组和跨文献矩阵。',
+				loading: '正在加载研究比较...',
+				errorTitle: '研究比较不可用',
+				pendingTitle: '比较产物尚未生成',
+				pendingBody: '文献覆盖已经可用，但该页面需要先生成比较产物，才能查看可比较组。',
+				emptyTitle: '暂无可比较组',
+				emptyBody: 'research-view 接口没有返回该集合的可比较组。',
+				refresh: '刷新比较',
+				openOverview: '打开集合概览',
+				groupCount: '{count} 个比较组',
+				groups: '可比较组',
+				variableAxis: '变化变量',
+				fixedConditions: '固定条件',
+				material: '材料',
+				process: '工艺',
+				properties: '性能',
+				documents: '文档',
+				samples: '样品',
+				variableValue: '变量值',
+				testCondition: '测试条件',
+				result: '结果',
+				evidence: '证据',
+				emptyMatrix: '这个比较组还没有矩阵行。',
+				status: {
+					comparable: '可比较',
+					limited: '有限可比',
+					blocked: '暂不应比较'
+				}
+			},
+			sampleMatrix: {
+				title: '样品矩阵',
+				sample: '样品'
+			},
+			conditionSeries: {
+				title: '条件序列'
+			},
+			paper: {
+				title: '文献研究视图',
+				unavailableTitle: '文献研究视图不可用',
+				unavailableBody: '该页面需要单篇文献 research-view 聚合接口。'
+			},
+			evidence: {
+				title: '证据详情',
+				open: '证据',
+				close: '关闭',
+				status: '状态',
+				confidence: '置信度',
+				duplicates: '重复数',
+				missing: '这个值没有关联证据引用。'
+			}
 		},
 		overview: {
 			title: '集合概览',
@@ -2123,7 +3470,7 @@ const translations: Record<Language, Translations> = {
 			readiness: {
 				ready: {
 					title: '集合已准备好',
-					body: '该集合包含 {count} 篇文档，解析与证据提取已完成。你可以进入比较视图查看跨文献结果，或检查证据与文档来源。'
+					body: '该集合包含 {count} 篇文档，解析与证据提取已完成。建议先进入研究目标，再按需要查看材料、文献、证据和比较。'
 				},
 				processing: {
 					title: '集合正在处理中',
@@ -2144,6 +3491,8 @@ const translations: Record<Language, Translations> = {
 			},
 			actions: {
 				enterComparisons: '进入比较视图',
+				enterMaterials: '进入材料视图',
+				enterObjectives: '进入研究目标',
 				enterComparisonShort: '进入比较',
 				viewEvidence: '查看证据',
 				refreshStatus: '刷新状态',
@@ -2184,6 +3533,12 @@ const translations: Record<Language, Translations> = {
 				trust: {
 					title: '可信度提醒',
 					body: '该集合已经可用，但比较结果仍需要人工审核。请优先检查证据来源、缺失条件和可比性提示。',
+					readyToProcessTitle: '需要先处理',
+					readyToProcessBody: '文件已上传，但证据、比较和研究目标要等处理完成后才可信。',
+					processingTitle: '处理正在进行',
+					processingBody: '任务运行时先查看进度，等待完成后再进入证据或比较视图。',
+					failedTitle: '先处理错误',
+					failedBody: '最近一次任务没有完成。请先查看错误或重新处理，再信任下游结果。',
 					comparison: '比较',
 					evidence: '证据',
 					documents: '文档'
@@ -2197,7 +3552,7 @@ const translations: Record<Language, Translations> = {
 					title: '推荐下一步',
 					readyTypes: '检查文档类型',
 					readyEvidence: '查看证据与可比性',
-					readyCompare: '进入比较视图',
+					readyCompare: '打开研究目标',
 					processingWait: '等待任务完成',
 					processingLogs: '查看处理日志',
 					processingRefresh: '刷新状态',
@@ -2230,7 +3585,7 @@ const translations: Record<Language, Translations> = {
 				ready: {
 					label: '已就绪',
 					title: '主要集合视图已经可用',
-					body: '先从下面的集合级分析页面开始，Protocol 和图谱仍然属于次级分支。'
+					body: '先从下面的集合级分析页面开始，图谱仍然属于次级分支。'
 				},
 				ready_with_limits: {
 					label: '部分就绪',
@@ -2264,9 +3619,7 @@ const translations: Record<Language, Translations> = {
 				documents: '文档',
 				graph: '图谱',
 				graphml: 'GraphML',
-				sections: 'sections',
-				procedureBlocks: 'procedure blocks',
-				protocolSteps: 'protocol steps'
+				sections: 'sections'
 			},
 			ready: '已就绪',
 			pending: '待生成',
@@ -2291,17 +3644,15 @@ const translations: Record<Language, Translations> = {
 			previewResultsLead: '再看单条结果，理解每个抽取结果到底说了什么。',
 			previewEvidenceLead: '回到原文确认一个结论到底由什么支撑。',
 			previewDocumentsLead: '先把实验论文、综述和混合内容分开。',
-			previewProtocolLead: '只有在集合确实包含可复用过程时才进入这个分支。',
 			uploadCta: '选择论文',
 			uploadWhyTitle: '为什么要先上传',
 			uploadWhyBody:
-				'论文就是这个集合的原始材料。没有源论文，系统就无法抽取步骤、生成 SOP 或构建图谱。',
+				'论文就是这个集合的原始材料。没有源论文，系统就无法抽取证据、比较结果或构建图谱。',
 			uploadAfterTitle: '上传并处理后可以做什么',
 			uploadAfterBody: '处理完成后，这个集合会进入 Lens v1 的主研究工作流。',
 			uploadAfterComparisons: '查看集合级 comparison rows 和可比性状态',
 			uploadAfterEvidence: '查看 evidence cards 和来源追溯',
-			uploadAfterDocuments: '先确认文档类型和 protocol 适配性，再决定如何使用下游结果',
-			uploadAfterProtocol: '只有在集合适合时才进入 protocol 分支',
+			uploadAfterDocuments: '先确认文档类型，再决定如何使用下游结果',
 			uploadFormTitle: '把论文加入集合',
 			uploadFormLead: '拖拽或选择 PDF/TXT 文件。上传后可以立即启动处理。',
 			controlTitle: '操作中心',
@@ -2312,9 +3663,6 @@ const translations: Record<Language, Translations> = {
 			primaryActionComparisons: '打开比较',
 			primaryActionResults: '打开抽取结果',
 			primaryActionDocuments: '查看文档',
-			primaryActionProtocol: '打开 Protocol 分支',
-			primaryActionSteps: '查看论文步骤',
-			primaryActionSop: '打开方案草案',
 			primaryActionHelperUpload: '先把源论文放进来，后面的所有结果都会建立在这些材料上。',
 			primaryActionHelperProcess:
 				'论文已经上传，现在开始处理，让系统先把这批材料整理成比较、证据和文档筛选结果。',
@@ -2322,14 +3670,15 @@ const translations: Record<Language, Translations> = {
 			primaryActionHelperComparisons: '先看比较，最快判断这批论文里哪些结果值得继续追。',
 			primaryActionHelperResults: '再看结果本体，确认每条抽取结果到底在说什么。',
 			primaryActionHelperDocuments: '先看文档筛选，分清哪些是实验论文，哪些是综述或混合内容。',
-			primaryActionHelperProtocol: '如果还要整理实验步骤，再进入 Protocol 分支。',
 			readyViewsCount: '已就绪主页面 {count} 个',
 			statusTitle: '当前状态',
 			statusLead: '这里告诉你这个集合现在到了哪一步，以及下一步最值得做什么。',
 			statusFiles: '已上传文件',
 			statusLatestTask: '最近任务',
-			statusStage: '当前阶段',
-			statusProgress: '当前进度',
+			statusStage: '正在处理',
+			statusSubProgress: '子进度',
+			statusStageName: '阶段',
+			statusProgress: '估算进度',
 			statusUpdated: '最近更新时间',
 			statusWorkflowTitle: '工作流阶段',
 			statusWorkflowLead: '这里展示的是这个集合已经可以支持什么工作，不只是后台生成了哪些文件。',
@@ -2342,11 +3691,6 @@ const translations: Record<Language, Translations> = {
 			docTypeMixed: '混合',
 			docTypeUncertain: '不确定',
 			docTypeBenchmark: 'Benchmark',
-			protocolSuitabilityTitle: 'Protocol 适配性',
-			protocolExtractableYes: '适合',
-			protocolExtractablePartial: '部分适合',
-			protocolExtractableNo: '不适合',
-			protocolExtractableUncertain: '不确定',
 			statusArtifactsTitle: '已生成内容',
 			statusArtifactsEmpty: '上传并开始处理后，这里会显示已生成的结果。',
 			workflowStates: {
@@ -2413,9 +3757,6 @@ const translations: Record<Language, Translations> = {
 			resultComparisonsLead: '看这批论文里哪些结果真的能放在一起比较，哪些只是表面相似。',
 			resultResultsLead: '逐条看结果本体，再决定是回到比较页还是进入文档核验。',
 			resultDocumentsLead: '先分清哪些是实验论文，哪些是综述，避免把不适合的材料继续往下用。',
-			resultProtocolLead: '只有当这批论文确实包含可整理的实验过程时，才进入这个分支。',
-			resultStepsLead: '先看这里，确认论文里实际做了什么：步骤顺序、材料和条件。',
-			resultSopLead: '再看这里，把已有步骤整理成一份可审阅的实验方案草案。',
 			resultGraphLead: '如果需要次级关系视图，再来这里看图谱。',
 			resultLocked: '处理完成后可查看',
 			additionalViewsTitle: '附加分支与工具',
@@ -2430,10 +3771,7 @@ const translations: Record<Language, Translations> = {
 				comparisons: '比较',
 				results: '抽取结果',
 				documents: '文档',
-				protocol: 'Protocol',
-				graph: '图谱查看',
-				steps: '论文步骤',
-				sop: '方案草案'
+				graph: '图谱查看'
 			},
 			noTasks: '还没有开始处理。先上传论文，然后启动处理。',
 			warningsTitle: '集合级提醒',
@@ -2441,9 +3779,6 @@ const translations: Record<Language, Translations> = {
 			nextComparisons: '打开比较',
 			nextResults: '打开抽取结果',
 			nextDocuments: '查看文档',
-			nextProtocol: '打开 Protocol',
-			nextSteps: '查看论文步骤',
-			nextSop: '打开方案草案',
 			nextGraph: '打开图谱',
 			advancedTitle: '高级分析与设置',
 			advancedLead: '报告、只读设置和原始标识符都收进这里，保证主流程保持干净。',
@@ -2486,8 +3821,8 @@ const translations: Record<Language, Translations> = {
 		},
 		profiles: {
 			title: '文档画像',
-			description: '识别文档类型与适配性，判断哪些文献适合继续用于证据提取和比较。',
-			lead: '识别文档类型与适配性，判断哪些文献适合继续用于证据提取和比较。',
+			description: '识别文档类型，判断哪些文献适合继续用于证据提取和比较。',
+			lead: '识别文档类型，判断哪些文献适合继续用于证据提取和比较。',
 			loading: '正在加载文档画像...',
 			error: '无法加载文档画像',
 			empty: '当前还没有文档画像结果。',
@@ -2495,7 +3830,6 @@ const translations: Record<Language, Translations> = {
 			warningsTitle: '画像提醒',
 			emptyWarnings: '当前没有集合级画像提醒。',
 			filterDocType: '论文类型',
-			filterExtractable: 'Protocol 适配性',
 			allOption: '全部',
 			totalLabel: '论文数',
 			docTypeExperimental: '实验论文',
@@ -2504,13 +3838,8 @@ const translations: Record<Language, Translations> = {
 			docTypeComputational: '计算论文',
 			docTypeMixed: '混合',
 			docTypeUncertain: '不确定',
-			extractableYes: '适合',
-			extractablePartial: '部分适合',
-			extractableNo: '不适合',
-			extractableUncertain: '不确定',
 			tableDocument: '论文',
 			tableType: '论文类型',
-			tableProtocol: '步骤抽取',
 			tableConfidence: '置信度',
 			tableWarnings: '问题',
 			tableActions: '下一步',
@@ -2522,7 +3851,6 @@ const translations: Record<Language, Translations> = {
 			filters: {
 				title: '文档画像筛选',
 				type: '论文类型',
-				suitability: 'Protocol 适配性',
 				all: '全部',
 				showing: '显示 {filtered} / {total} 篇文档'
 			},
@@ -2530,25 +3858,15 @@ const translations: Record<Language, Translations> = {
 				title: '画像结论',
 				reviewRisk:
 					'当前集合以综述为主，暂不适合直接进行实验结果比较。建议补充实验论文或方法论文后，再进入比较与图谱分析。',
-				ready: '当前集合包含可用于步骤抽取和证据比较的文档。建议先查看证据来源，再进入比较视图。',
+				ready: '当前集合包含可用于证据提取和结果比较的文档。建议先查看证据来源，再进入比较视图。',
 				fewDocuments: '当前集合文档较少，比较结果可能不稳定。建议补充更多相关论文以提高可比性。',
-				limitedReady:
-					'当前集合包含部分可用的步骤或证据信息，但进入比较前仍应检查原文证据和参数条件。',
-				limited:
-					'当前集合尚未显示出明确的 Protocol 适配性。建议先查看文档和证据，再决定是否进入下游比较。',
+				limitedReady: '当前集合包含部分可用的证据信息，但进入比较前仍应检查原文证据和参数条件。',
+				limited: '当前集合还需要更多实验材料，才适合信任下游比较结果。',
 				pending: '当前集合的文档画像尚未生成。请在处理完成后刷新，或回到工作区重新分析。'
 			},
 			stats: {
 				documentType: '文档类型分布',
-				protocolSuitability: 'Protocol 适配性',
 				countPercent: '{count} ({percent}%)'
-			},
-			warning: {
-				title: 'Protocol 适配性提醒',
-				noSuitableBody:
-					'当前集合没有检测到适合步骤抽取的文档。若要生成实验步骤、参数矩阵或验证计划，建议补充实验论文、方法论文或包含明确实验流程的文献。',
-				readyBody:
-					'当前集合包含适合步骤抽取的文档。请在使用生成结果前检查原文证据、参数条件和实验上下文。'
 			},
 			list: {
 				title: '文档列表',
@@ -2578,16 +3896,9 @@ const translations: Record<Language, Translations> = {
 				mixed: '混合',
 				uncertain: '不确定'
 			},
-			suitability: {
-				yes: '适合',
-				partial: '部分适合',
-				no: '不适合',
-				uncertain: '不确定'
-			},
 			table: {
 				document: '文档',
 				type: '类型',
-				suitability: 'Protocol 适配性',
 				confidence: '置信度',
 				hint: '提示',
 				next: '下一步'
@@ -2607,22 +3918,16 @@ const translations: Record<Language, Translations> = {
 			reasons: {
 				label: '原因',
 				review: '综述型文献',
-				extractable: '检测到实验流程',
-				partial: '步骤信息不完整',
-				noProtocol: '缺少明确实验步骤',
 				insufficient: '信息不足'
 			},
 			hints: {
-				noProtocol: '未检测到明确的实验步骤、参数或方法细节。',
-				extractable: '检测到实验流程，可用于步骤抽取。',
-				partial: '检测到部分方法信息，需要人工检查上下文。',
 				insufficient: '信息不足，需要人工检查。',
 				processing: '文档仍在处理中，请先查看进度。',
 				failed: '文档处理失败，请先查看错误再继续分析。'
 			},
 			emptyState: {
 				title: '还没有文档',
-				body: '上传论文或技术文档后，Lens 会识别文档类型、判断 Protocol 适配性，并为证据提取和比较分析做准备。'
+				body: '上传论文或技术文档后，Lens 会识别文档类型，并为证据提取和比较分析做准备。'
 			},
 			pending: {
 				title: '画像待生成',
@@ -3256,11 +4561,9 @@ const translations: Record<Language, Translations> = {
 			penTool: '标注',
 			searchTool: '搜索',
 			extractionTabsLabel: '结构化提取标签',
-			tabSummary: '摘要',
-			tabMethods: '方法',
+			tabOverview: '概览',
 			tabResults: '结果',
 			tabEvidence: '证据',
-			tabQa: '问答',
 			confidenceLabel: '置信度',
 			jumpToSource: '跳到原文',
 			materialSystem: '材料体系',
@@ -3273,15 +4576,18 @@ const translations: Record<Language, Translations> = {
 			resultDetailLabel: '结果详情',
 			noResultWarnings: '该结果没有默认可见警告。',
 			openResult: '打开结果',
-			quickQa: '快速问答',
-			qaPlaceholderBody: '先保留论文问答 UI，占位交互可用，后续再接真实 API。',
-			qaInputPlaceholder: '向这篇论文提问...',
-			send: '发送',
 			extractionLabel: '结构化提取',
 			keyResults: '关键结果',
 			keyFinding: '关键发现',
+			sourceBacked: '有原文支撑',
+			needsSourceReview: '需要核查原文',
 			methodOverview: '方法概览',
 			sourceMethod: '来源：方法',
+			paperScope: '论文范围',
+			experimentalObjects: '实验对象',
+			processingConditions: '制备 / 工艺 / 处理',
+			testMethods: '测试与表征方法',
+			measuredResults: '测量结果',
 			graphLabel: '局部关系图谱',
 			localGraph: '局部关系图谱',
 			collapse: '收起',
@@ -3303,121 +4609,11 @@ const translations: Record<Language, Translations> = {
 			documents: '文档',
 			searchLabel: '全局搜索',
 			searchPlaceholder: '搜索文献、作者、材料、方法...',
-			actionSummary: '摘要',
+			actionOverview: '概览',
 			actionEvidence: '证据',
 			actionGraph: '图谱',
 			actionExport: '导出',
 			loading: '正在加载论文工作台'
-		},
-		protocolHub: {
-			title: 'Protocol 分支',
-			lead: '只有当这批论文确实包含可用的实验过程时，才进入这个分支。',
-			readyTitle: '当前可进入 Protocol 输出',
-			readyBody:
-				'这个集合当前已经暴露 Protocol 相关输出，但它仍然是工作流中的分支，而不是主集合摘要。',
-			limitedTitle: 'Protocol 当前受限或尚未可用',
-			limitedBody:
-				'这个集合可能并不适合 protocol 抽取，或者分支还未就绪。应先看比较、证据和文档画像。',
-			actionsTitle: 'Protocol 操作',
-			stepsCta: '浏览 protocol steps',
-			sopCta: '打开 SOP 草案'
-		},
-		search: {
-			title: '在步骤中搜索',
-			lead: '按动作、材料和条件在 protocol steps 中定位具体步骤。',
-			inputLabel: '检索词',
-			placeholder: '搜索 anneal、mix、600C、Ar...',
-			submit: '检索',
-			searching: '检索中...',
-			exampleText: 'anneal 600C Ar',
-			advanced: '高级选项',
-			paperIdLabel: '论文 ID',
-			paperIdPlaceholder: '可选论文过滤',
-			limitLabel: '返回条数',
-			resultTitle: '结果',
-			resultCount: '{count} 条命中',
-			viewSteps: '查看全部步骤',
-			sourcePaperLabel: '来源论文',
-			matchFieldsLabel: '命中字段',
-			scoreLabel: '分数',
-			noResults: '没有匹配到 protocol steps。',
-			errorNoQuery: '请输入检索词。'
-		},
-		steps: {
-			title: '论文步骤',
-			lead: '这里展示从论文中抽取出的实验步骤、材料和条件。',
-			purpose: '这个页面回答：论文里实际做了什么、按什么顺序做、用了哪些条件？',
-			blockTypeLabel: 'Block 类型',
-			blockTypePlaceholder: '可选 block 类型',
-			limitLabel: '返回条数',
-			searchHelper: '输入动作、材料或条件即可筛选；留空时浏览完整步骤列表。',
-			loading: '步骤加载中...',
-			submit: '刷新步骤',
-			resultTitle: '步骤列表',
-			resultCount: '{count} 个步骤',
-			empty: '当前还没有 protocol steps。',
-			sourcePaperLabel: '来源论文',
-			unknownPaper: '未命名论文',
-			notReadyTitle: '处理完成后才能查看步骤',
-			notReadyBody: '请先回到工作区完成处理和 protocol 产物生成，再浏览步骤或搜索实验内容。',
-			backToWorkspace: '返回工作区',
-			nextSop: '打开方案草案',
-			phaseLabel: '阶段',
-			confidenceLabel: '置信度',
-			materialsTitle: '材料',
-			conditionsTitle: '条件',
-			outputLabel: '预期输出'
-		},
-		sop: {
-			title: '方案草案',
-			lead: '这里根据已抽取的论文步骤，生成一份可审阅的实验方案草案。',
-			purpose: '这个页面回答：如果你准备开始做，接下来可以先审阅怎样的一份实验方案？',
-			readinessLoading: '正在检查这个集合是否已经可以生成方案草案...',
-			goalLabel: '目标',
-			goalPlaceholder: '为热学和力学优化设计实验方案',
-			collectionScopeNote: '默认会基于整个集合生成方案草案。',
-			advancedTitle: '高级选项',
-			advancedLead: '只有在你确实需要额外约束时才填写。大多数情况下可以留空。',
-			targetPropertiesLabel: '目标性质（可选）',
-			targetPropertiesPlaceholder: 'mechanical, thermal',
-			maxStepsLabel: '最大步骤数（可选）',
-			submit: '生成方案草案',
-			generating: '方案草案生成中...',
-			loadExample: '载入示例目标',
-			loadExampleNote: '这只会把示例内容填入表单，不会直接提交。',
-			exampleTitle: '方案草案大致会长什么样',
-			exampleTag: '示例',
-			exampleLead: '先看这个示例，你可以更快理解生成后的方案草案结构。',
-			exampleObjective: '为一套复合材料配方同时优化热稳定性和力学性能。',
-			exampleHypothesis: '通过分阶段制备、受控后处理和目标表征，可以平衡分散、固化与热学表现。',
-			exampleStepOne: '准备前驱体材料，并记录目标配比。',
-			exampleStepTwo: '在受控气氛下完成干燥或退火等后处理。',
-			exampleStepThree: '围绕基线样品测量力学与热学结果。',
-			exampleMeasurement: '关注拉伸强度、热导率和结构表征结果。',
-			exampleRisk: '关键温度、时长或气氛条件仍需要回到源论文中进一步确认。',
-			errorGoal: '请先填写目标，再生成方案草案。',
-			notReadyError: '请先完成处理并生成论文步骤，再生成方案草案。',
-			notReadyTitle: '先生成论文步骤，再来起草方案',
-			notReadyBody: '当前集合还没有可用的论文步骤。请先回到工作区完成处理，再来生成方案草案。',
-			notReadyStepOne: '先把源论文上传到这个集合里。',
-			notReadyStepTwo: '在工作区启动处理流程。',
-			notReadyStepThree: '等论文步骤可用后，再回到这里生成方案草案。',
-			goProcess: '回到工作区去处理',
-			backToWorkspace: '返回工作区',
-			resultTitle: '方案草案结果',
-			viewSteps: '返回论文步骤',
-			sourcePaperLabel: '来源论文',
-			unknownPaper: '未命名论文',
-			objectiveTitle: '实验目标',
-			hypothesisTitle: '假设',
-			risksTitle: '风险',
-			questionsTitle: '待确认问题',
-			stepsTitle: '草案中的推荐步骤',
-			measurementTitle: '表征计划',
-			emptySteps: '没有返回结构化步骤。',
-			emptyMeasurement: '没有返回表征计划。',
-			emptyRisks: '没有列出风险。',
-			emptyQuestions: '没有列出待确认问题。'
 		},
 		tasks: {
 			title: '任务历史',
@@ -3454,15 +4650,29 @@ const translations: Record<Language, Translations> = {
 				source_artifacts_started: '源产物生成中',
 				source_artifacts_completed: '源产物已完成',
 				document_profiles_started: '文档画像生成中',
+				research_objectives_started: '研究目标抽取开始',
+				objective_paper_skim_started: '扫描文献目标',
+				objective_discovery_started: '合并研究目标',
+				objective_paper_framing_started: '判断文献与目标关系',
+				objective_evidence_routing_started: '路由目标证据',
+				objective_evidence_units_started: '抽取目标证据',
+				objective_logic_chains_started: '组装科研链路',
 				paper_facts_started: '论文事实生成中',
 				comparison_rows_started: '比较行生成中',
-				protocol_artifacts_started: 'Protocol 产物生成中',
 				artifacts_ready: '产物已就绪',
 				failed: '失败'
+			},
+			progressUnit: {
+				documents: '篇文档',
+				objectives: '个目标',
+				frames: '个文献-目标判断',
+				routes: '条证据路由',
+				tables: '张表格',
+				steps: '个步骤'
 			}
 		},
 		graph: {
-			title: '文献集合图谱',
+			title: '文献集合知识地图',
 			lead: '面向多篇论文的主题、证据与关系探索。',
 			filtersTitle: '图谱筛选',
 			filtersLead: '优先保留科研对象，需要时再打开来源类节点。',
@@ -3545,7 +4755,6 @@ const translations: Record<Language, Translations> = {
 			detailAggregateValue: '筛选值',
 			detailSourceFile: '源文件',
 			detailDocType: '文档类型',
-			detailProtocol: '是否适合 protocol',
 			detailConfidence: '置信度',
 			detailClaim: '主张',
 			detailClaimType: '主张类型',
@@ -3559,7 +4768,7 @@ const translations: Record<Language, Translations> = {
 			detailResult: '结果摘要',
 			detailComparability: '可比性',
 			detailEvidenceIds: '证据 ID',
-			description: '探索集合中的主题、材料、方法、证据和比较关系。',
+			description: '查看集合中的文献、材料、性能、工艺上下文和待审归属结构。',
 			meta: {
 				label: '图谱元信息',
 				nodes: '{count} 个节点',
@@ -3585,7 +4794,7 @@ const translations: Record<Language, Translations> = {
 			actions: {
 				refresh: '刷新图谱',
 				resetView: '重置视图',
-				export: '导出',
+				export: '导出图谱',
 				exportPng: '导出 PNG',
 				downloadGraphml: '下载 GraphML',
 				copyView: '复制当前视图',
@@ -3593,10 +4802,26 @@ const translations: Record<Language, Translations> = {
 				refreshStatus: '刷新状态'
 			},
 			workspace: {
-				label: '图谱探索工作台'
+				label: '集合地图工作台'
+			},
+			overview: {
+				title: '集合总览',
+				lead: '聚合展示文献、材料、性能、工艺上下文和待审归属节点。',
+				metricsLabel: '集合总览指标',
+				materials: '材料',
+				documents: '文献',
+				properties: '性能',
+				themes: '主题',
+				reviewBuckets: '待审 bucket',
+				detailNodes: '默认地图已收起 {count} 个比较/证据细节点',
+				coreMaterials: '核心材料',
+				denseThemes: '密集主题',
+				qualityIssues: '需要复核',
+				emptyList: '暂无'
 			},
 			controls: {
-				title: '图谱控制',
+				title: '总览控制',
+				viewMode: '视图模式',
 				search: '搜索节点',
 				searchPlaceholder: '搜索节点名称或关键词...',
 				focusSearch: '定位匹配节点',
@@ -3610,25 +4835,37 @@ const translations: Record<Language, Translations> = {
 				visibleEdges: '可见边',
 				loadState: '加载状态'
 			},
+			viewMode: {
+				keyChain: '关键科研链路',
+				materialCentric: '材料枢纽',
+				full: '完整图谱'
+			},
 			layout: {
+				logicChain: '逻辑链布局',
 				fcose: 'fCoSE 力导向布局',
 				cose: 'CoSE 力导向布局',
 				grid: '网格布局',
 				circle: '环形布局'
 			},
 			canvas: {
-				title: '集合关系图谱',
+				title: '科研逻辑链',
+				materialTitle: '材料中心科研图',
+				fullTitle: '完整集合图谱',
 				meta: '节点 {nodes} · 边 {edges}',
 				fit: '适配画布',
 				zoomIn: '放大',
 				zoomOut: '缩小',
 				center: '居中',
 				layout: '布局',
-				ariaLabel: '可交互的集合图谱画布',
+				ariaLabel: '可交互的科研逻辑链画布',
+				materialAriaLabel: '可交互的材料中心科研图画布',
+				fullAriaLabel: '可交互的完整集合图谱画布',
 				empty: '当前控制条件下没有可见图谱元素。'
 			},
 			legend: {
 				label: '节点类型图例',
+				objective: '研究目标',
+				logicChainStep: '逻辑环节',
 				document: '文档',
 				evidence: '证据',
 				comparison: '比较',
@@ -3641,10 +4878,19 @@ const translations: Record<Language, Translations> = {
 				unknown: '未知'
 			},
 			detail: {
-				title: '选中对象详情',
-				empty: '点击图谱中的节点或关系，查看它的来源证据、关联比较和原文位置。',
+				title: '链路环节详情',
+				empty: '点击研究目标或逻辑环节，查看支撑它的证据行。',
 				clear: '清除',
 				loading: '正在加载详情...',
+				evidenceRows: '证据行',
+				stepEvidence: '环节证据',
+				noStepEvidence: '该环节暂未抽取到证据行。',
+				rowsLimited: '当前显示 {count} 行中的前 12 行。',
+				paper: '文献',
+				property: '性质',
+				value: '数值',
+				context: '上下文',
+				source: '来源',
 				relatedEvidence: '关联证据',
 				relatedComparisons: '关联比较',
 				relatedDocuments: '关联文档',
@@ -3654,6 +4900,7 @@ const translations: Record<Language, Translations> = {
 				noRelations: '当前对象暂无可见关系。',
 				viewEvidence: '查看证据',
 				openComparison: '打开比较',
+				openMaterialGraph: '打开科研链路图',
 				locateSource: '定位原文',
 				expand: '展开邻域',
 				expanding: '展开中...',
@@ -3686,7 +4933,7 @@ const translations: Record<Language, Translations> = {
 			empty: {
 				title: '图谱尚未构建',
 				description:
-					'完成文档解析和证据提取后，Lens 可以生成文献集合图谱，用于探索主题、证据和比较关系。',
+					'完成文档解析和证据提取后，Lens 可以生成集合地图，用于导航文献、材料、性能、主题和待审归属节点。',
 				action: '生成图谱'
 			}
 		},
@@ -3735,7 +4982,7 @@ const translations: Record<Language, Translations> = {
 			pageTitle: 'Lens 使用指南',
 			eyebrow: '文档',
 			title: '如何使用 Lens',
-			lead: 'Lens 现在围绕一个科研工作流组织：集合工作区、步骤、SOP 草案，以及图谱证据。',
+			lead: 'Lens 现在围绕一个科研工作流组织：集合工作区、证据审查、比较分析，以及图谱证据。',
 			quickNotesTitle: '快速提示',
 			quickNotesSub: '开始前',
 			quickNote1: 'PDF 需可复制文本，扫描版不支持。',
@@ -3749,19 +4996,18 @@ const translations: Record<Language, Translations> = {
 			workflowUploadDesc: '进入集合工作区，在文件区批量添加 PDF/TXT。',
 			workflowIndexTitle: '启动处理',
 			workflowIndexDesc: '在工作区里启动处理，并内联查看任务进度。',
-			workflowSearchTitle: '审阅抽取步骤',
-			workflowSearchDesc: '在“论文步骤”页查看论文里实际做过的动作、材料和条件。',
-			workflowGraphTitle: '生成方案草案',
-			workflowGraphDesc: '集合就绪后，先看论文步骤，再进入方案草案；图谱作为辅助证据使用。',
+			workflowSearchTitle: '审阅证据',
+			workflowSearchDesc: '在证据页确认结论、材料、方法和参数来自哪里。',
+			workflowGraphTitle: '进入比较',
+			workflowGraphDesc: '集合就绪后，先看证据，再进入比较；图谱作为辅助证据使用。',
 			surfaceTitle: '集合内的 4 个主页面',
 			surfaceSub: '主任务只围绕这四个页面展开。',
 			surfaceWorkspaceTitle: '工作区',
 			surfaceWorkspaceDesc: '上传文件、开始处理、查看进度，并从这里进入高级分析。',
-			surfaceStepsTitle: '论文步骤',
-			surfaceStepsDesc: '在一个页面里查看从论文中抽取出的实验步骤、材料和条件。',
-			surfaceSopTitle: '方案草案',
-			surfaceSopDesc:
-				'把已抽取的论文步骤组织成可审阅的实验方案草案，包含目标、步骤、风险与待确认问题。',
+			surfaceStepsTitle: '证据审查',
+			surfaceStepsDesc: '在一个页面里查看支撑结论的原文证据、材料和条件。',
+			surfaceSopTitle: '比较分析',
+			surfaceSopDesc: '把可比结果组织到同一视图中，判断哪些结论能真正并排比较。',
 			surfaceGraphTitle: '图谱',
 			surfaceGraphDesc: '图谱预览和 GraphML 导出属于辅助分析，不是主终点。',
 			advancedTitle: '高级入口',

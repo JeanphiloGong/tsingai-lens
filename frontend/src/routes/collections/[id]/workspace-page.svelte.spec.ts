@@ -65,8 +65,7 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 			documents: 'ready',
 			results: 'ready',
 			evidence: 'ready',
-			comparisons: 'ready',
-			protocol: 'not_applicable'
+			comparisons: 'ready'
 		},
 		document_summary: {
 			total_documents: 2,
@@ -74,12 +73,6 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 				experimental: 2,
 				review: 0,
 				mixed: 0,
-				uncertain: 0
-			},
-			protocol_extractable_counts: {
-				yes: 0,
-				partial: 0,
-				no: 2,
 				uncertain: 0
 			},
 			warnings: []
@@ -104,10 +97,6 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 			graph_generated: false,
 			graph_ready: false,
 			graph_stale: false,
-			procedure_blocks_generated: false,
-			procedure_blocks_ready: false,
-			protocol_steps_generated: false,
-			protocol_steps_ready: false,
 			updated_at: '2026-04-22T00:00:00Z'
 		},
 		latest_task: null,
@@ -118,10 +107,7 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 			can_view_evidence: true,
 			can_view_comparisons: true,
 			can_view_graph: false,
-			can_download_graphml: false,
-			can_view_protocol_steps: false,
-			can_search_protocol: false,
-			can_generate_sop: false
+			can_download_graphml: false
 		},
 		links: {
 			workspace: '/collections/col_123',
@@ -129,7 +115,6 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 			results: '/collections/col_123/results',
 			evidence: '/collections/col_123/evidence',
 			comparisons: '/collections/col_123/comparisons',
-			protocol: '/collections/col_123/protocol',
 			graph: '/collections/col_123/graph'
 		},
 		...overrides
@@ -138,6 +123,7 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 
 describe('collections/[id]/+page.svelte', () => {
 	let workspacePayload: Record<string, unknown>;
+	let researchViewPayload: Record<string, unknown> | null;
 
 	beforeEach(() => {
 		setPage({
@@ -145,6 +131,7 @@ describe('collections/[id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123')
 		});
 		workspacePayload = buildWorkspacePayload();
+		researchViewPayload = null;
 		fetchMock.mockReset();
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
@@ -160,26 +147,28 @@ describe('collections/[id]/+page.svelte', () => {
 					items: []
 				});
 			}
+			if (url.pathname === '/api/v1/collections/col_123/research-view' && researchViewPayload) {
+				return jsonResponse(researchViewPayload);
+			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
 		});
 	});
 
-	it('shows comparisons as the primary action when comparisons are available', async () => {
+	it('shows objectives as the primary action when the collection is ready', async () => {
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'Enter comparison view' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 
-	it('falls back to documents as the primary action when comparisons are unavailable', async () => {
+	it('keeps objectives as the primary research action when comparisons are unavailable', async () => {
 		workspacePayload = buildWorkspacePayload({
 			workflow: {
 				documents: 'ready',
 				results: 'ready',
 				evidence: 'ready',
-				comparisons: 'not_started',
-				protocol: 'not_applicable'
+				comparisons: 'not_started'
 			},
 			capabilities: {
 				can_view_documents: true,
@@ -187,27 +176,23 @@ describe('collections/[id]/+page.svelte', () => {
 				can_view_evidence: true,
 				can_view_comparisons: false,
 				can_view_graph: false,
-				can_download_graphml: false,
-				can_view_protocol_steps: false,
-				can_search_protocol: false,
-				can_generate_sop: false
+				can_download_graphml: false
 			}
 		});
 
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'View documents' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 
-	it('falls back to documents as the primary action when only documents are available', async () => {
+	it('keeps objectives as the primary research action when only documents are available', async () => {
 		workspacePayload = buildWorkspacePayload({
 			workflow: {
 				documents: 'ready',
 				results: 'not_started',
 				evidence: 'ready',
-				comparisons: 'not_started',
-				protocol: 'not_applicable'
+				comparisons: 'not_started'
 			},
 			capabilities: {
 				can_view_documents: true,
@@ -215,16 +200,106 @@ describe('collections/[id]/+page.svelte', () => {
 				can_view_evidence: true,
 				can_view_comparisons: false,
 				can_view_graph: false,
-				can_download_graphml: false,
-				can_view_protocol_steps: false,
-				can_search_protocol: false,
-				can_generate_sop: false
+				can_download_graphml: false
 			}
 		});
 
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'View documents' });
+		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
 		await expect.element(primaryLink).toBeInTheDocument();
+	});
+
+	it('shows build subprogress when the latest task includes progress detail', async () => {
+		workspacePayload = buildWorkspacePayload({
+			collection: {
+				collection_id: 'col_123',
+				name: 'Flow coverage collection',
+				description: null,
+				status: 'running',
+				updated_at: '2026-04-22T00:00:00Z'
+			},
+			workflow: {
+				documents: 'processing',
+				results: 'processing',
+				evidence: 'processing',
+				comparisons: 'processing'
+			},
+			latest_task: {
+				task_id: 'task_123',
+				collection_id: 'col_123',
+				task_type: 'build',
+				status: 'running',
+				current_stage: 'objective_evidence_units_started',
+				progress_percent: 76,
+				progress_detail: {
+					phase: 'objective_evidence_units_started',
+					current: 18,
+					total: 1036,
+					unit: 'routes',
+					message: 'Extracting objective evidence units from routed sources.'
+				},
+				output_path: null,
+				errors: [],
+				warnings: [],
+				created_at: '2026-04-22T00:00:00Z',
+				updated_at: '2026-04-22T00:00:01Z',
+				started_at: '2026-04-22T00:00:00Z',
+				finished_at: null
+			}
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Extracting objective evidence units from routed sources.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('18 / 1036 routes')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Estimated progress')).toBeInTheDocument();
+	});
+
+	it('summarizes repeated research-view warnings in the overview', async () => {
+		researchViewPayload = {
+			collection_id: 'col_123',
+			state: 'empty',
+			overview: {
+				document_count: 2,
+				sample_count: 0,
+				measurement_count: 0,
+				evidence_count: 0,
+				material_systems: [],
+				process_families: [],
+				variable_axes: [],
+				measured_properties: []
+			},
+			paper_coverage: [],
+			comparable_groups: [],
+			warnings: [
+				{
+					warning_id: 'warning:no_measurement_results:paper:doc_1',
+					code: 'no_measurement_results',
+					severity: 'warning',
+					scope: 'paper',
+					message: 'No measurement results were detected for this paper.',
+					related_object_ids: ['doc_1']
+				},
+				{
+					warning_id: 'warning:no_measurement_results:paper:doc_2',
+					code: 'no_measurement_results',
+					severity: 'warning',
+					scope: 'paper',
+					message: 'No measurement results were detected for this paper.',
+					related_object_ids: ['doc_2']
+				}
+			]
+		};
+
+		render(Page);
+
+		await expect
+			.element(
+				browserPage.getByText('No measurement results were detected for this paper. (2 papers)')
+			)
+			.toBeInTheDocument();
 	});
 });

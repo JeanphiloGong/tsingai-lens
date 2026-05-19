@@ -15,7 +15,9 @@ def read_json(path: Path, default: T) -> T:
 
 def write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    temp_path = path.with_name(f".{path.name}.tmp")
+    temp_path.write_text(
         json.dumps(payload, ensure_ascii=True, indent=2),
         encoding="utf-8",
     )
+    temp_path.replace(path)

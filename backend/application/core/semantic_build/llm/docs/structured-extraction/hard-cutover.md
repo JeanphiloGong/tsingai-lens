@@ -211,8 +211,6 @@ Input:
 Output:
 
 - `doc_type`
-- `protocol_extractable`
-- `protocol_extractability_signals`
 - `parsing_warnings`
 - confidence and contamination markers
 
@@ -256,9 +254,9 @@ Output:
 - `baseline_references`
 - row-grounded anchors
 
-The extraction unit should be one table row, not the whole paper, so the model
-is forced to reason over bounded local evidence instead of mixing unrelated
-studies in review-heavy documents.
+The extraction unit should be one bounded table-row batch, not the whole paper,
+so the model can share table headers, captions, and unit context across several
+target rows without mixing unrelated studies in review-heavy documents.
 
 The contextual contract for this slice should no longer be:
 
@@ -268,6 +266,7 @@ The contextual contract for this slice should no longer be:
 Instead it should be:
 
 - row-local structure
+- the batch's target row indexes
 - nearby supporting text windows
 - optional caption or block-linked support text
 
@@ -383,8 +382,8 @@ not become a second semantic extraction path.
 1. Add the minimal OpenAI structured client and extraction models.
 2. Hard-cut Core text extraction from `section` payloads to text-window
    payloads over `blocks`.
-3. Hard-cut table-row extraction to consume row-local structure plus supporting
-   text windows.
+3. Hard-cut table-batch extraction to consume row-local structure, shared
+   table context, and supporting text windows.
 4. Move characterization support to first-class extracted facts or
    anchor-linked deterministic derivation only.
 5. Hard-cut document-profile classification to LLM structured parsing.
@@ -406,7 +405,7 @@ deterministic comparison assembly until the backbone artifacts improve.
   `material_system_normalized`
 - year-like values no longer appear as `unit`
 - numbering artifacts no longer appear as variant axes or variant labels
-- table-row extraction rejects literature-summary rows that are not
+- table-batch extraction rejects literature-summary rows that are not
   comparison-worthy
 - `comparison_rows` become fewer but materially higher signal
 - Core no longer requires `sections.parquet` or `section_type` to extract paper

@@ -24,7 +24,7 @@ Current backend docs already establish that:
 - `workspace` is the primary collection-facing entry surface
 - `document_profiles`, the paper-facts family, `evidence_cards`, and the
   comparable-result substrate are the intended backbone
-- `protocol/*` is a conditional downstream branch rather than the default
+- graph and reports are secondary derived surfaces rather than the default
   center of the workflow
 
 The main architecture correction is therefore not to weaken the Core. It is to
@@ -107,7 +107,7 @@ Responsibilities:
 
 - turn a collection into research objects
 - own document profiling, evidence extraction, comparison assembly,
-  traceback, warnings, and protocol gating
+  traceback, warnings, and readiness
 - provide the stable collection-facing workspace and artifact navigation
 
 Primary artifacts:
@@ -118,8 +118,6 @@ Primary artifacts:
 - `comparable_results`
 - `collection_comparable_results`
 - downstream `comparison_rows` projection
-- optional downstream `protocol_candidates`
-- optional downstream `protocol_steps`
 
 Boundary rule:
 
@@ -150,17 +148,14 @@ These are views or downstream capabilities derived from the Core.
 
 Examples:
 
-- protocol
 - graph
 - reports
 - export
-- future SOP drafts
 
 Boundary rules:
 
 - these surfaces consume or derive from Core artifacts
 - they must not redefine the primary system facts
-- protocol remains conditional rather than becoming the default backbone
 
 ### Collections And Indexing As Handoff Seams
 
@@ -186,7 +181,7 @@ Current contract-freeze target for the five-layer model:
 - Core remains the only layer that may emit:
   `document_profiles`, paper facts, `evidence_cards`,
   `comparable_results`, `collection_comparable_results`, downstream
-  `comparison_rows` projection, and downstream protocol artifacts
+  `comparison_rows` projection, and derived view artifacts
 - Goal Consumer may read Core outputs and emit filtered, ranked, gap, and
   next-step views only
 - Derived Views must consume or derive from Core outputs rather than inventing
@@ -209,9 +204,10 @@ The active child execution plan for this freeze is:
 - upload already terminates at collection boundaries
 - `workspace` already acts as the primary collection-facing navigation surface
 - `document_profiles` is already a real backend artifact
-- indexing already runs Core stages before the protocol branch
-- protocol generation is already gated by document suitability
+- indexing already runs Core stages before secondary derived surfaces
 - `application/goals/` now exists as a thin Goal Brief / Intake surface
+- `domain/goal/` owns the minimal collection-bound conversation model:
+  goal sessions, messages, answer source modes, and user-navigable source links
 
 ### Still Missing Or Blurred
 
@@ -220,7 +216,7 @@ The active child execution plan for this freeze is:
 - the current `goals/intake` surface is easy to misread as the full Goal
   layer, even though it is only the briefing side
 - a true Goal Consumer / Decision Layer over Core outputs does not exist yet
-- graph, reports, and protocol are not yet documented everywhere as derived
+- graph and reports are not yet documented everywhere as derived
   Core consumers consistently enough
 
 ## Package Direction
@@ -238,11 +234,9 @@ Near-term implications:
 - keep `application/documents/`, `application/evidence/`,
   `application/comparisons/`, and `application/workspace/` as the Core-owned
   artifact path
-- keep `application/protocol/`, `application/graph/`, and
-  `application/reports/` as derived or downstream consumers rather than
+- keep `application/graph/` and `application/reports/` as derived or downstream
+  consumers rather than
   alternate fact sources
-- keep shared parsing helpers under a Core-owned seam, not under protocol-owned
-  modules
 
 Controller implications:
 
@@ -251,7 +245,6 @@ Controller implications:
   `/workspace`, `/documents/profiles`, `/evidence/cards`, and `/comparisons`
 - any future Goal Consumer routes must consume Core outputs rather than
   replacing the collection-backed artifact URLs
-- `protocol/*` remains a downstream branch, not a parallel research fact model
 
 ## File Change Plan
 
@@ -262,7 +255,7 @@ Controller implications:
    goal seeding converge on one collection handoff shape.
 3. Keep Goal Brief / Intake intentionally thin and explicit.
 4. Add a true Goal Consumer / Decision layer over Core outputs.
-5. Keep protocol, graph, and report semantics downstream of the Core.
+5. Keep graph and report semantics downstream of the Core.
 
 ## Verification
 
@@ -272,7 +265,7 @@ Controller implications:
   directly
 - Core remains the only producer of stable research fact objects
 - Goal Consumer outputs remain traceable back to Core artifacts
-- protocol, graph, and reports behave as derived or downstream views rather
+- graph and reports behave as derived or downstream views rather
   than as primary fact definitions
 
 ## Risks

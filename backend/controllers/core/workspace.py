@@ -5,17 +5,14 @@ from fastapi import APIRouter, HTTPException
 from controllers.schemas.core.workspace import WorkspaceOverviewResponse
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.core.workspace_overview_service import WorkspaceService
 
 router = APIRouter(prefix="/collections", tags=["workspace"])
 collection_service = CollectionService()
 task_service = TaskService()
-artifact_registry_service = ArtifactRegistryService()
 workspace_service = WorkspaceService(
     collection_service=collection_service,
     task_service=task_service,
-    artifact_registry_service=artifact_registry_service,
 )
 
 

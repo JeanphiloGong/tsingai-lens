@@ -1,422 +1,373 @@
 from __future__ import annotations
 
-import json
 import sys
-from hashlib import sha1
-from pathlib import Path
 from types import SimpleNamespace
 
-import pandas as pd
-
 from application.derived.graph_projection_service import load_core_graph_payload
-from domain.core.comparison import (
-    ComparableResult,
-    build_collection_assessment_input_fingerprint,
-    build_comparison_row_id,
+from domain.core.document_profile import DocumentProfile
+from domain.core.fact_store import CoreFactSet
+from domain.core.research_objective import (
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
+    ResearchObjective,
 )
+from infra.persistence.sqlite import SqliteCoreFactRepository
 
 
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _semantic_node_id(prefix: str, label: str) -> str:
-    return f"{prefix}:{sha1(label.encode('utf-8')).hexdigest()}"
-
-
-def _comparison_rows_frame(*records: dict) -> pd.DataFrame:
-    return pd.DataFrame(list(records))
-
-
-def _current_scope_metadata(comparable_result: dict) -> dict[str, object]:
-    comparable_record = ComparableResult.from_mapping(comparable_result)
+def _profile(document_id: str = "paper-1") -> dict:
     return {
-        "policy_family": "default_collection_comparison_policy",
-        "policy_version": "comparison_policy_v1",
-        "comparable_result_normalization_version": comparable_record.normalization_version,
-        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
-            comparable_record
-        ),
-        "reassessment_triggers": [
-            "policy_family_changed",
-            "policy_version_changed",
-            "comparable_result_normalization_version_changed",
-            "assessment_input_fingerprint_changed",
-        ],
+        "document_id": document_id,
+        "collection_id": "col-1",
+        "title": "Core Graph Paper",
+        "source_filename": "paper.txt",
+        "doc_type": "experimental",
+        "parsing_warnings": [],
+        "confidence": 0.91,
     }
 
 
-def _write_semantic_comparison_artifacts(
-    output_dir: Path,
-    collection_id: str,
+def _objective(objective_id: str = "obj-1") -> dict:
+    return {
+        "objective_id": objective_id,
+        "question": "How does scan speed affect LPBF 316L tensile strength?",
+        "material_scope": ["316L stainless steel"],
+        "process_axes": ["LPBF", "scan speed"],
+        "property_axes": ["tensile strength"],
+        "comparison_intent": "compare process variants",
+        "seed_document_ids": ["paper-1"],
+        "excluded_document_ids": [],
+        "confidence": 0.9,
+        "reason": "Collection contains tensile data for process variants.",
+    }
+
+
+def _measurement_unit(
+    evidence_unit_id: str = "oeu-1",
     *,
-    comparable_result_id: str = "cres-1",
-    source_document_id: str = "paper-1",
-    supporting_evidence_ids: list[str] | None = None,
-) -> str:
-    evidence_ids = supporting_evidence_ids or ["ev-1"]
-    comparable_result = {
-        "comparable_result_id": comparable_result_id,
-        "source_result_id": f"res-{comparable_result_id}",
-        "source_document_id": source_document_id,
-        "binding": {
-            "variant_id": None,
-            "baseline_id": f"base-{comparable_result_id}",
-            "test_condition_id": f"tc-{comparable_result_id}",
-        },
-        "normalized_context": {
-            "material_system_normalized": "oxide cathode",
-            "process_normalized": "700 C",
-            "baseline_normalized": "as-prepared",
-            "test_condition_normalized": "EIS",
-        },
-        "axis": {
-            "axis_name": None,
-            "axis_value": None,
-            "axis_unit": None,
-        },
-        "value": {
-            "property_normalized": "conductivity",
-            "result_type": "scalar",
-            "numeric_value": 12.0,
-            "unit": "mS/cm",
-            "summary": "12 mS/cm",
-            "statistic_type": None,
-            "uncertainty": None,
-        },
-        "evidence": {
-            "direct_anchor_ids": ["anchor-1"],
-            "contextual_anchor_ids": [],
-            "evidence_ids": evidence_ids,
-            "structure_feature_ids": [],
-            "characterization_observation_ids": [],
-            "traceability_status": "direct",
-        },
-        "variant_label": None,
-        "baseline_reference": "as-prepared",
-        "result_source_type": "text",
-        "epistemic_status": "normalized_from_evidence",
-        "normalization_version": "comparable_result_v1",
+    objective_id: str = "obj-1",
+    document_id: str = "paper-1",
+) -> dict:
+    return {
+        "evidence_unit_id": evidence_unit_id,
+        "objective_id": objective_id,
+        "document_id": document_id,
+        "unit_kind": "measurement",
+        "property_normalized": "yield strength",
+        "material_system": {"family": "316L stainless steel"},
+        "sample_context": {"Case": "15", "sample_number": "15"},
+        "process_context": {"scan speed": "900 mm/s"},
+        "resolved_condition": {"energy density": "100 J/mm^3"},
+        "test_condition": {"method": "tensile test", "Case": "15"},
+        "value_payload": {"source_value_text": "365.6", "value": 365.6},
+        "unit": "MPa",
+        "baseline_context": {"reference": "Case 1"},
+        "interpretation": None,
+        "source_refs": [
+            {
+                "source_kind": "table",
+                "source_ref": "table-2",
+                "page": 7,
+                "role": "current_experimental_evidence",
+            }
+        ],
+        "evidence_anchor_ids": [],
+        "join_keys": {"Case": "15"},
+        "resolution_status": "resolved",
+        "confidence": 0.88,
     }
-    pd.DataFrame([comparable_result]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(
-        [
-            {
-                "collection_id": collection_id,
-                "comparable_result_id": comparable_result_id,
-                "assessment": {
-                    "missing_critical_context": [],
-                    "comparability_basis": ["baseline_resolved"],
-                    "comparability_warnings": [],
-                    "comparability_status": "comparable",
-                    "requires_expert_review": False,
-                    "assessment_epistemic_status": "normalized_from_evidence",
-                },
-                "epistemic_status": "normalized_from_evidence",
-                "included": True,
-                "sort_order": 0,
-                **_current_scope_metadata(comparable_result),
-            }
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    return build_comparison_row_id(
-        collection_id=collection_id,
-        comparable_result_id=comparable_result_id,
-    )
 
 
-def test_core_projection_builds_route_compatible_graph_payload(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
+def _comparison_unit() -> dict:
+    return {
+        **_measurement_unit("oeu-cmp"),
+        "unit_kind": "comparison",
+        "property_normalized": "yield strength",
+        "value_payload": {"source_value_text": "Case 15 higher than Case 1"},
+        "interpretation": "Case 15 improved yield strength over the baseline.",
+    }
 
-    output_dir = tmp_path / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "title": "Core Graph Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": ["methods_section_detected"],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "claim_text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-1",
-                        "source_type": "text",
-                        "section_id": None,
-                        "block_id": None,
-                        "snippet_id": "tu-1",
-                        "figure_or_table": None,
-                        "quote_span": "Flexural strength increased to 97 MPa.",
-                    }
-                ],
-                "material_system": {"family": "epoxy composite", "composition": None},
-                "condition_context": {
-                    "process": {"temperatures_c": [80.0]},
-                    "baseline": {"control": "untreated baseline"},
-                    "test": {"method": "SEM"},
-                },
-                "confidence": 0.82,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    comparison_rows = _comparison_rows_frame(
-        {
-            "row_id": "cmp-1",
-            "collection_id": "col-1",
-            "source_document_id": "paper-1",
-            "supporting_evidence_ids": ["ev-1"],
-            "material_system_normalized": "epoxy composite",
-            "process_normalized": "80 C",
-            "property_normalized": "flexural_strength",
-            "baseline_normalized": "untreated baseline",
-            "test_condition_normalized": "SEM",
-            "comparability_status": "comparable",
-            "comparability_warnings": [],
-            "value": 97.0,
-            "unit": "MPa",
-        }
+def _logic_chain() -> dict:
+    return {
+        "logic_chain_id": "chain-1",
+        "objective_id": "obj-1",
+        "chain_scope": "objective",
+        "document_id": None,
+        "question": "How does scan speed affect LPBF 316L tensile strength?",
+        "evidence_unit_ids": ["oeu-1", "oeu-cmp"],
+        "chain_payload": {},
+        "summary": "Scan speed changes yield strength through process variants.",
+        "confidence": 0.82,
+    }
+
+
+def _core_graph_fact_set(collection_id: str) -> CoreFactSet:
+    return CoreFactSet(
+        research_objectives_ready=True,
+        document_profiles=(DocumentProfile.from_mapping(_profile()),),
+        research_objectives=(ResearchObjective.from_mapping(_objective()),),
+        objective_evidence_units=(
+            ObjectiveEvidenceUnit.from_mapping(_measurement_unit()),
+            ObjectiveEvidenceUnit.from_mapping(_comparison_unit()),
+        ),
+        objective_logic_chains=(ObjectiveLogicChain.from_mapping(_logic_chain()),),
     )
 
+
+def test_core_projection_builds_semantic_logic_chain_graph_payload():
     nodes, edges, truncated = load_core_graph_payload(
-        base_dir=output_dir,
-        comparison_rows=comparison_rows,
-        max_nodes=20,
+        profiles=(_profile(),),
+        research_objectives=(_objective(),),
+        objective_evidence_units=(_measurement_unit(), _comparison_unit()),
+        objective_logic_chains=(_logic_chain(),),
+        max_nodes=40,
         min_weight=0.0,
     )
 
     assert truncated is False
-    assert len(nodes) == 7
-    assert len(edges) == 6
-
-    material_node_id = _semantic_node_id("mat", "epoxy composite")
-    property_node_id = _semantic_node_id("prop", "flexural_strength")
-    test_condition_node_id = _semantic_node_id("tc", "sem")
-    baseline_node_id = _semantic_node_id("base", "untreated baseline")
     nodes_by_id = {node["id"]: node for node in nodes}
-    assert set(nodes_by_id) == {
-        "doc:paper-1",
-        "evi:ev-1",
-        "cmp:cmp-1",
-        material_node_id,
-        property_node_id,
-        test_condition_node_id,
-        baseline_node_id,
+    assert "obj:obj-1" in nodes_by_id
+    assert nodes_by_id["obj:obj-1"]["type"] == "objective"
+    assert {node["type"] for node in nodes} == {
+        "objective",
+        "material_system",
+        "material_scope",
+        "process_sample_context",
+        "test_conditions",
+        "characterization",
+        "measurement_results",
+        "controlled_comparisons",
+        "mechanism_interpretation",
+        "limitations",
     }
-    assert nodes_by_id["doc:paper-1"]["type"] == "document"
-    assert nodes_by_id["evi:ev-1"]["type"] == "evidence"
-    assert nodes_by_id["evi:ev-1"]["degree"] == 2
-    assert nodes_by_id["cmp:cmp-1"]["type"] == "comparison"
-    assert nodes_by_id["cmp:cmp-1"]["label"] == "epoxy composite | flexural_strength"
-    assert nodes_by_id[material_node_id]["type"] == "material"
-    assert nodes_by_id[property_node_id]["type"] == "property"
-    assert nodes_by_id[test_condition_node_id]["type"] == "test_condition"
-    assert nodes_by_id[baseline_node_id]["type"] == "baseline"
-
-    edges_by_id = {edge["id"]: edge for edge in edges}
-    assert set(edges_by_id) == {
-        "edge:doc:paper-1:evi:ev-1",
-        "edge:evi:ev-1:cmp:cmp-1",
-        f"edge:cmp:cmp-1:{material_node_id}",
-        f"edge:cmp:cmp-1:{property_node_id}",
-        f"edge:cmp:cmp-1:{test_condition_node_id}",
-        f"edge:cmp:cmp-1:{baseline_node_id}",
+    assert {node["role"] for node in nodes if node["id"].startswith("step:")} == {
+        "material_scope",
+        "process_sample_context",
+        "test_conditions",
+        "characterization",
+        "measurement_results",
+        "controlled_comparisons",
+        "mechanism_interpretation",
+        "limitations",
     }
-    assert edges_by_id["edge:doc:paper-1:evi:ev-1"]["edge_description"] == (
-        "document_to_evidence"
-    )
-    assert edges_by_id[f"edge:cmp:cmp-1:{material_node_id}"]["edge_description"] == (
-        "comparison_to_material"
-    )
-    assert edges_by_id[f"edge:cmp:cmp-1:{property_node_id}"]["edge_description"] == (
-        "comparison_to_property"
-    )
+    material_nodes = [node for node in nodes if node["type"] == "material_system"]
+    assert len(material_nodes) == 1
+    assert material_nodes[0]["label"] == "316L stainless steel"
+    assert material_nodes[0]["logic_chain_id"] is None
+    assert material_nodes[0]["objective_id"] is None
+    assert material_nodes[0]["metrics"]["objective_count"] == 1
 
-
-def test_core_projection_skips_placeholder_semantic_nodes(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    output_dir = tmp_path / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "title": "Placeholder Graph Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": "col-1",
-                "claim_text": "Qualitative trend reported.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "epoxy composite", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.82,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    comparison_rows = _comparison_rows_frame(
+    measurement_step = nodes_by_id["step:chain-1:measurement_results"]
+    assert measurement_step["type"] == "measurement_results"
+    assert measurement_step["metrics"]["row_count"] == 1
+    assert measurement_step["detail_rows"] == [
         {
-            "row_id": "cmp-1",
-            "collection_id": "col-1",
-            "source_document_id": "paper-1",
-            "supporting_evidence_ids": ["ev-1"],
-            "material_system_normalized": "unspecified material system",
-            "process_normalized": "700 C",
-            "property_normalized": "qualitative",
-            "baseline_normalized": "unspecified baseline",
-            "test_condition_normalized": "--",
-            "comparability_status": "limited",
-            "comparability_warnings": [],
-            "value": None,
-            "unit": None,
+            "label": "yield strength | 365.6 MPa",
+            "row_type": "measurement",
+            "paper": "Core Graph Paper",
+            "document_id": "paper-1",
+            "evidence_unit_id": "oeu-1",
+            "property": "yield strength",
+            "value": "365.6 MPa",
+            "unit": "MPa",
+            "material": "316L stainless steel",
+            "sample": "Case: 15; sample_number: 15",
+            "process": "energy density: 100 J/mm^3; scan speed: 900 mm/s",
+            "test_condition": "method: tensile test",
+            "baseline": "reference: Case 1",
+            "source": "table:table-2 p.7",
+            "resolution_status": "resolved",
+            "confidence": 0.88,
         }
+    ]
+    comparison_step = nodes_by_id["step:chain-1:controlled_comparisons"]
+    assert comparison_step["detail_rows"][0]["evidence_unit_id"] == "oeu-cmp"
+    assert comparison_step["detail_rows"][0]["interpretation"] == (
+        "Case 15 improved yield strength over the baseline."
     )
+
+    process_step = nodes_by_id["step:chain-1:process_sample_context"]
+    assert "Case: 15" in process_step["detail_rows"][0]["sample"]
+    assert not any(node["type"] == "measurement" for node in nodes)
+    assert not any(node["type"] == "test_condition" for node in nodes)
+    assert not any(node["type"] == "controlled_comparison" for node in nodes)
+    assert not any(node["type"] == "document" for node in nodes)
+    assert not any(node["label"] == "Case: 15" for node in nodes)
+
+    edge_descriptions = {edge["edge_description"] for edge in edges}
+    assert {
+        "objective_to_material_system",
+        "material_system_to_material_scope",
+        "semantic_chain_step_to_step",
+    }.issubset(edge_descriptions)
+    assert any(
+        edge["edge_description"] == "semantic_chain_step_to_step"
+        and edge["source_role"] == "material_scope"
+        and edge["target_role"] == "process_sample_context"
+        and edge["objective_id"] == "obj-1"
+        and edge["logic_chain_id"] == "chain-1"
+        for edge in edges
+    )
+
+
+def test_core_projection_reuses_material_system_across_objectives():
+    second_objective = {
+        **_objective("obj-2"),
+        "question": "How does heat treatment affect LPBF 316L hardness?",
+        "process_axes": ["LPBF", "heat treatment"],
+        "property_axes": ["hardness"],
+    }
+    second_unit = {
+        **_measurement_unit("oeu-2", objective_id="obj-2"),
+        "property_normalized": "hardness",
+        "value_payload": {"source_value_text": "198.4", "value": 198.4},
+        "unit": "HV",
+    }
+    second_chain = {
+        **_logic_chain(),
+        "logic_chain_id": "chain-2",
+        "objective_id": "obj-2",
+        "question": second_objective["question"],
+        "evidence_unit_ids": ["oeu-2"],
+    }
 
     nodes, edges, truncated = load_core_graph_payload(
-        base_dir=output_dir,
-        comparison_rows=comparison_rows,
-        max_nodes=20,
+        profiles=(_profile(),),
+        research_objectives=(_objective(), second_objective),
+        objective_evidence_units=(_measurement_unit(), second_unit),
+        objective_logic_chains=(_logic_chain(), second_chain),
+        max_nodes=40,
         min_weight=0.0,
     )
 
     assert truncated is False
-    assert {node["type"] for node in nodes} == {
-        "document",
-        "evidence",
-        "comparison",
-        "property",
-    }
+    material_nodes = [node for node in nodes if node["type"] == "material_system"]
+    assert len(material_nodes) == 1
+    material_node = material_nodes[0]
+    assert material_node["label"] == "316L stainless steel"
+    assert material_node["metrics"]["objective_count"] == 2
+    assert material_node["metrics"]["logic_chain_count"] == 2
+    assert {
+        row.get("objective_id")
+        for row in material_node["detail_rows"]
+        if row.get("objective_id")
+    } == {"obj-1", "obj-2"}
+    assert {
+        row.get("logic_chain_id")
+        for row in material_node["detail_rows"]
+        if row.get("logic_chain_id")
+    } == {"chain-1", "chain-2"}
+
+    material_id = material_node["id"]
+    assert sum(1 for edge in edges if edge["target"] == material_id) == 2
     assert {
         edge["edge_description"]
         for edge in edges
-        if edge["edge_description"].startswith("comparison_to_")
-    } == {"comparison_to_property"}
+        if edge["target"] == material_id
+    } == {"objective_to_material_system"}
+    assert {
+        edge["logic_chain_id"]
+        for edge in edges
+        if edge["target"] == material_id
+    } == {"chain-1", "chain-2"}
 
 
-def test_core_projection_truncation_reserves_backbone_capacity(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
+def test_core_projection_canonicalizes_material_system_word_order():
+    second_objective = {
+        **_objective("obj-2"),
+        "material_scope": ["stainless steel 316L"],
+    }
+    second_unit = {
+        **_measurement_unit("oeu-2", objective_id="obj-2"),
+        "material_system": {"family": "stainless steel 316L"},
+    }
+    second_chain = {
+        **_logic_chain(),
+        "logic_chain_id": "chain-2",
+        "objective_id": "obj-2",
+        "evidence_unit_ids": ["oeu-2"],
+    }
 
-    output_dir = tmp_path / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    nodes, _edges, _truncated = load_core_graph_payload(
+        profiles=(_profile(),),
+        research_objectives=(_objective(), second_objective),
+        objective_evidence_units=(_measurement_unit(), second_unit),
+        objective_logic_chains=(_logic_chain(), second_chain),
+        max_nodes=40,
+        min_weight=0.0,
+    )
 
-    pd.DataFrame(
-        [
-            {
-                "document_id": f"paper-{index}",
-                "collection_id": "col-1",
-                "title": f"Paper {index}",
-                "source_filename": f"paper-{index}.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.9,
-            }
-            for index in range(1, 5)
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": f"ev-{index}",
-                "document_id": f"paper-{index}",
-                "collection_id": "col-1",
-                "claim_text": f"Claim {index}",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.82,
-                "traceability_status": "direct",
-            }
-            for index in range(1, 5)
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    comparison_rows = _comparison_rows_frame(
-        *[
-            {
-                "row_id": f"cmp-{index}",
-                "collection_id": "col-1",
-                "source_document_id": f"paper-{index}",
-                "supporting_evidence_ids": [f"ev-{index}"],
-                "material_system_normalized": "oxide cathode",
-                "process_normalized": "700 C",
-                "property_normalized": "conductivity",
-                "baseline_normalized": "as-prepared",
-                "test_condition_normalized": "EIS",
-                "comparability_status": "comparable",
-                "comparability_warnings": [],
-                "value": float(index),
-                "unit": "mS/cm",
-            }
-            for index in range(1, 5)
-        ]
+    material_nodes = [node for node in nodes if node["type"] == "material_system"]
+    assert len(material_nodes) == 1
+    assert material_nodes[0]["label"] == "316L stainless steel"
+    assert material_nodes[0]["metrics"]["objective_count"] == 2
+
+
+def test_core_projection_keeps_case_out_of_canvas_nodes():
+    unit = {
+        **_measurement_unit(),
+        "test_condition": {"Case": "15"},
+        "sample_context": {"Case": "15"},
+        "join_keys": {"Case": "15"},
+    }
+
+    nodes, _edges, _truncated = load_core_graph_payload(
+        profiles=(_profile(),),
+        research_objectives=(_objective(),),
+        objective_evidence_units=(unit,),
+        objective_logic_chains=(),
+        max_nodes=40,
+        min_weight=0.0,
+    )
+
+    assert {node["type"] for node in nodes} == {
+        "objective",
+        "material_system",
+        "material_scope",
+        "process_sample_context",
+        "test_conditions",
+        "characterization",
+        "measurement_results",
+        "controlled_comparisons",
+        "mechanism_interpretation",
+        "limitations",
+    }
+    assert not any(node["label"] == "Case: 15" for node in nodes)
+    test_step = next(node for node in nodes if node.get("role") == "test_conditions")
+    assert test_step["detail_rows"] == []
+
+
+def test_core_projection_truncates_step_graph_by_objective_and_step_order():
+    profiles = tuple(_profile(f"paper-{index}") for index in range(1, 5))
+    units = tuple(
+        {
+            **_measurement_unit(f"oeu-{index}", document_id=f"paper-{index}"),
+            "value_payload": {"source_value_text": str(index), "value": float(index)},
+        }
+        for index in range(1, 9)
     )
 
     nodes, _edges, truncated = load_core_graph_payload(
-        base_dir=output_dir,
-        comparison_rows=comparison_rows,
-        max_nodes=10,
+        profiles=profiles,
+        research_objectives=(_objective(),),
+        objective_evidence_units=units,
+        objective_logic_chains=(),
+        max_nodes=5,
         min_weight=0.0,
     )
 
     assert truncated is True
-    backbone_count = sum(
-        1 for node in nodes if node["type"] in {"document", "evidence", "comparison"}
-    )
-    semantic_count = len(nodes) - backbone_count
-    assert backbone_count >= 6
-    assert semantic_count <= 4
+    assert len(nodes) == 5
+    assert nodes[0]["type"] == "objective"
+    assert [node["type"] for node in nodes[1:]] == [
+        "material_system",
+        "material_scope",
+        "process_sample_context",
+        "test_conditions",
+    ]
 
 
-def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
+def test_graph_service_serves_objective_projection_without_comparison_rows(
     monkeypatch,
     tmp_path,
 ):
@@ -436,91 +387,60 @@ def test_graph_service_serves_core_projection_without_legacy_graph_artifacts(
         )
 
     import application.derived.graph_service as graph_service
-    _patch_parquet(monkeypatch)
 
     from application.source.collection_service import CollectionService
-    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     monkeypatch.setattr(graph_service, "collection_service", collection_service)
-    monkeypatch.setattr(graph_service, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
 
-    collection = collection_service.create_collection("Core Projection Collection")
+    collection = collection_service.create_collection("Objective Graph Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Core Route Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": ["methods_section_detected"],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-1",
-                        "source_type": "text",
-                        "section_id": None,
-                        "block_id": None,
-                        "snippet_id": "tu-1",
-                        "figure_or_table": None,
-                        "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
-                    }
-                ],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {
-                    "process": {"temperatures_c": [700.0]},
-                    "baseline": {"control": "as-prepared"},
-                    "test": {"method": "EIS"},
-                },
-                "confidence": 0.83,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    _write_semantic_comparison_artifacts(output_dir, collection_id)
-    artifact_registry.upsert(collection_id, output_dir)
-    assert not (output_dir / "comparison_rows.parquet").exists()
+    core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        paper_skims=(),
+        research_objectives=_core_graph_fact_set(collection_id).research_objectives,
+        objective_contexts=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(),
+        objective_evidence_units=_core_graph_fact_set(collection_id).objective_evidence_units,
+        objective_logic_chains=_core_graph_fact_set(collection_id).objective_logic_chains,
+    )
+    core_fact_repository.replace_collection_document_profiles(
+        collection_id,
+        _core_graph_fact_set(collection_id).document_profiles,
+    )
 
     payload = graph_service.get_collection_graph(
         collection_id=collection_id,
-        max_nodes=20,
+        max_nodes=40,
         min_weight=0.0,
     )
 
     assert payload["collection_id"] == collection_id
-    assert len(payload["nodes"]) == 7
-    assert len(payload["edges"]) == 6
-    assert not (output_dir / "comparison_rows.parquet").exists()
+    assert any(node["type"] == "objective" for node in payload["nodes"])
+    assert any(node["type"] == "material_system" for node in payload["nodes"])
+    assert any(node["type"] == "measurement_results" for node in payload["nodes"])
+    assert any(
+        node["role"] == "measurement_results" and node["detail_rows"]
+        for node in payload["nodes"]
+    )
+    assert not any(node["type"] == "measurement" for node in payload["nodes"])
+    assert not any(node["type"] == "comparison" for node in payload["nodes"])
 
     graphml_bytes, filename = graph_service.build_graphml(
         collection_id=collection_id,
-        max_nodes=20,
+        max_nodes=40,
         min_weight=0.0,
     )
 
     assert filename == f"{collection_id}.graphml"
     assert b"<graphml" in graphml_bytes
-    assert not (output_dir / "comparison_rows.parquet").exists()
+    assert b"material_system" in graphml_bytes
+    assert b"measurement_results" in graphml_bytes
+    assert b"semantic_chain_step_to_step" in graphml_bytes
 
 
 def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
@@ -541,69 +461,48 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
 
     import application.derived.graph_service as graph_service
 
-    _patch_parquet(monkeypatch)
-
     from application.source.collection_service import CollectionService
-    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     monkeypatch.setattr(graph_service, "collection_service", collection_service)
-    monkeypatch.setattr(graph_service, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
 
     collection = collection_service.create_collection("Graph Neighborhood Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Core Route Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.83,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    row_id = _write_semantic_comparison_artifacts(output_dir, collection_id)
-    artifact_registry.upsert(collection_id, output_dir)
+    fact_set = _core_graph_fact_set(collection_id)
+    core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        paper_skims=(),
+        research_objectives=fact_set.research_objectives,
+        objective_contexts=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(),
+        objective_evidence_units=fact_set.objective_evidence_units,
+        objective_logic_chains=fact_set.objective_logic_chains,
+    )
+    core_fact_repository.replace_collection_document_profiles(
+        collection_id,
+        fact_set.document_profiles,
+    )
 
     payload = graph_service.get_collection_graph_neighbors(
         collection_id=collection_id,
-        node_id="evi:ev-1",
+        node_id="step:chain-1:measurement_results",
     )
 
     assert payload["collection_id"] == collection_id
-    assert payload["center_node_id"] == "evi:ev-1"
+    assert payload["center_node_id"] == "step:chain-1:measurement_results"
     assert payload["truncated"] is False
-    assert {node["id"] for node in payload["nodes"]} == {
-        "doc:paper-1",
-        "evi:ev-1",
-        f"cmp:{row_id}",
+    assert {node["id"] for node in payload["nodes"]} >= {
+        "step:chain-1:characterization",
+        "step:chain-1:measurement_results",
+        "step:chain-1:controlled_comparisons",
     }
-    assert {edge["id"] for edge in payload["edges"]} == {
-        "edge:doc:paper-1:evi:ev-1",
-        f"edge:evi:ev-1:cmp:{row_id}",
+    assert {edge["id"] for edge in payload["edges"]} >= {
+        "edge:step:chain-1:characterization:measurement_results",
+        "edge:step:chain-1:measurement_results:controlled_comparisons",
+    }
+    assert {edge["edge_description"] for edge in payload["edges"]} == {
+        "semantic_chain_step_to_step"
     }

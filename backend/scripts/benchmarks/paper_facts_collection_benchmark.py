@@ -212,21 +212,27 @@ def load_collection_inputs_for_benchmark(
         load_table_cells_artifact,
         load_table_rows_artifact,
     )
+    from application.core.semantic_build.document_profile_service import (
+        DocumentProfileService,
+        DocumentProfilesNotReadyError,
+    )
     from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(root_dir=collections_root)
     output_dir = collection_service.get_paths(collection_id).output_dir
-    documents, text_units = load_collection_inputs(output_dir)
-    blocks = load_blocks_artifact(output_dir)
-    table_rows = load_table_rows_artifact(output_dir)
-    table_cells = load_table_cells_artifact(output_dir)
-    profiles_path = output_dir / "document_profiles.parquet"
-    if not profiles_path.is_file():
+    documents, text_units = load_collection_inputs(collection_id)
+    blocks = load_blocks_artifact(collection_id)
+    table_rows = load_table_rows_artifact(collection_id)
+    table_cells = load_table_cells_artifact(collection_id)
+    try:
+        profiles = DocumentProfileService(
+            collection_service=collection_service,
+        ).read_document_profiles(collection_id)
+    except DocumentProfilesNotReadyError as exc:
         raise SystemExit(
-            "document_profiles.parquet is missing. Build document profiles first so this "
+            "document profiles are missing. Build document profiles first so this "
             "benchmark isolates paper-facts extraction cost."
-        )
-    profiles = pd.read_parquet(profiles_path)
+        ) from exc
     return output_dir, documents, text_units, blocks, table_rows, table_cells, profiles
 
 

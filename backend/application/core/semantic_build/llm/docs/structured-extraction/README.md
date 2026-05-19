@@ -22,6 +22,12 @@ extractor boundary for this package, not a repo-wide planning bucket.
   model-facing contract
 - [`prompt-hardening-and-extraction-mode.md`](prompt-hardening-and-extraction-mode.md)
   Production prompt-hardening and temporary extraction-mode comparison plan
+- [`semantic-routing-targeted-extraction-plan.md`](semantic-routing-targeted-extraction-plan.md)
+  Next Core extraction redesign for routing source units before running
+  targeted method/sample and result/measurement prompts
+- [`table-first-extraction-plan.md`](table-first-extraction-plan.md)
+  Table-first routing and whole-table extraction plan for table-grounded paper
+  facts
 
 ## Related Docs
 

@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 
-import pandas as pd
 import pytest
 
 try:
@@ -13,11 +10,21 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from controllers.core import results as results_controller
-from domain.core.comparison import (
+from domain.core import (
+    BaselineReference,
+    CharacterizationObservation,
+    CollectionComparableResult,
     ComparableResult,
+    CoreFactSet,
+    DocumentProfile,
+    MeasurementResult,
+    SampleVariant,
+    StructureFeature,
+    TestCondition as CoreTestCondition,
+)
+from domain.core.comparison import (
     build_collection_assessment_input_fingerprint,
 )
 from tests.support.pbf_acceptance_fixture import (
@@ -26,40 +33,14 @@ from tests.support.pbf_acceptance_fixture import (
     PBF_S3_VARIANT_ID,
     PBF_YIELD_25_COMPARABLE_ID,
     PBF_YIELD_SERIES_KEY,
-    write_pbf_acceptance_artifacts,
+    pbf_acceptance_baseline_references,
+    pbf_acceptance_characterization_observations,
+    pbf_acceptance_comparison_records,
+    pbf_acceptance_measurement_results,
+    pbf_acceptance_sample_variants,
+    pbf_acceptance_structure_features,
+    pbf_acceptance_test_conditions,
 )
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        payload = {
-            "columns": list(frame.columns),
-            "records": frame.to_dict(orient="records"),
-        }
-        Path(path).write_text(json.dumps(payload), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload["records"], columns=payload["columns"])
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _write_semantic_comparison_artifacts(
-    output_dir: Path,
-    comparable_results: list[dict],
-    scoped_results: list[dict],
-) -> None:
-    pd.DataFrame(comparable_results).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(scoped_results).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
 
 
 def _build_semantic_result_record(
@@ -155,19 +136,76 @@ def _build_semantic_result_record(
     return comparable_result, scoped_result
 
 
+def _store_core_result_facts(
+    comparison_service: ComparisonService,
+    collection_id: str,
+    *,
+    document_profiles: list[dict] | None = None,
+    comparable_results: list[dict] | None = None,
+    scoped_results: list[dict] | None = None,
+    sample_variants: list[dict] | None = None,
+    test_conditions: list[dict] | None = None,
+    baseline_references: list[dict] | None = None,
+    measurement_results: list[dict] | None = None,
+    characterization_observations: list[dict] | None = None,
+    structure_features: list[dict] | None = None,
+) -> None:
+    comparison_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            comparison_artifacts_ready=True,
+            document_profiles=tuple(
+                DocumentProfile.from_mapping(row)
+                for row in (document_profiles or [])
+            ),
+            sample_variants=tuple(
+                SampleVariant.from_mapping(row) for row in (sample_variants or [])
+            ),
+            test_conditions=tuple(
+                CoreTestCondition.from_mapping(row)
+                for row in (test_conditions or [])
+            ),
+            baseline_references=tuple(
+                BaselineReference.from_mapping(row)
+                for row in (baseline_references or [])
+            ),
+            measurement_results=tuple(
+                MeasurementResult.from_mapping(row)
+                for row in (measurement_results or [])
+            ),
+            characterization_observations=tuple(
+                CharacterizationObservation.from_mapping(row)
+                for row in (characterization_observations or [])
+            ),
+            structure_features=tuple(
+                StructureFeature.from_mapping(row)
+                for row in (structure_features or [])
+            ),
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row)
+                for row in (comparable_results or [])
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row)
+                for row in (scoped_results or [])
+            ),
+        ),
+    )
+
+
 @pytest.fixture()
 def result_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(collection_service, artifact_registry)
+    comparison_service = ComparisonService(collection_service)
 
     monkeypatch.setattr(results_controller, "comparison_service", comparison_service)
 
-    return collection_service, artifact_registry, comparison_service
+    return collection_service, comparison_service
 
 
 def test_results_route_returns_409_when_semantic_artifacts_are_not_ready(result_services):
-    collection_service, _artifact_registry, _comparison_service = result_services
+    collection_service, _comparison_service = result_services
     record = collection_service.create_collection(name="Pending Results Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -179,61 +217,32 @@ def test_results_route_returns_409_when_semantic_artifacts_are_not_ready(result_
     assert exc.detail["collection_id"] == record["collection_id"]
 
 
-def test_results_route_returns_product_projection_without_row_cache(
-    result_services,
-    monkeypatch,
-):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _comparison_service = result_services
+def test_results_route_returns_product_projection_without_row_cache(result_services):
+    collection_service, comparison_service = result_services
     collection = collection_service.create_collection(name="Results Projection Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Flexural Strength Study",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.93,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Flexural strength increased to 97 MPa.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "epoxy composite"},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.84,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    document_profile = {
+        "document_id": "paper-1",
+        "collection_id": collection_id,
+        "title": "Flexural Strength Study",
+        "source_filename": "paper.txt",
+        "doc_type": "experimental",
+        "parsing_warnings": [],
+        "confidence": 0.93,
+    }
     comparable_result, scoped_result = _build_semantic_result_record(
         collection_id=collection_id,
         comparable_result_id="cres-route-1",
         source_document_id="paper-1",
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
+    _store_core_result_facts(
+        comparison_service,
+        collection_id,
+        document_profiles=[document_profile],
+        comparable_results=[comparable_result],
+        scoped_results=[scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         results_controller.list_collection_results(
@@ -261,64 +270,36 @@ def test_results_route_returns_product_projection_without_row_cache(
     assert item.traceability_status == "direct"
     assert item.comparability_status == "comparable"
     assert item.requires_expert_review is False
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
 
 def test_result_detail_route_returns_document_assessment_evidence_and_actions(
     result_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _comparison_service = result_services
+    collection_service, comparison_service = result_services
     collection = collection_service.create_collection(name="Results Detail Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Flexural Strength Study",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.93,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Flexural strength increased to 97 MPa.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "epoxy composite"},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.84,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    document_profile = {
+        "document_id": "paper-1",
+        "collection_id": collection_id,
+        "title": "Flexural Strength Study",
+        "source_filename": "paper.txt",
+        "doc_type": "experimental",
+        "parsing_warnings": [],
+        "confidence": 0.93,
+    }
     comparable_result, scoped_result = _build_semantic_result_record(
         collection_id=collection_id,
         comparable_result_id="cres-detail-1",
         source_document_id="paper-1",
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
+    _store_core_result_facts(
+        comparison_service,
+        collection_id,
+        document_profiles=[document_profile],
+        comparable_results=[comparable_result],
+        scoped_results=[scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         results_controller.get_collection_result(collection_id, "cres-detail-1")
@@ -361,35 +342,47 @@ def test_result_detail_route_returns_document_assessment_evidence_and_actions(
     assert payload.actions.open_evidence == f"/collections/{collection_id}/evidence"
 
 
-def test_result_detail_route_returns_pbf_acceptance_chain_fields(
-    result_services,
-    monkeypatch,
-):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _comparison_service = result_services
+def test_result_detail_route_returns_pbf_acceptance_chain_fields(result_services):
+    collection_service, comparison_service = result_services
     collection = collection_service.create_collection(name="Result Evidence Chain")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    pd.DataFrame(
-        [
-            {
-                "document_id": PBF_DOCUMENT_ID,
-                "collection_id": collection_id,
-                "title": "Ti64 Tensile Study",
-                "source_filename": "ti64.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.93,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    write_pbf_acceptance_artifacts(output_dir, collection_id=collection_id)
-    artifact_registry.upsert(collection_id, output_dir)
+    document_profile = {
+        "document_id": PBF_DOCUMENT_ID,
+        "collection_id": collection_id,
+        "title": "Ti64 Tensile Study",
+        "source_filename": "ti64.txt",
+        "doc_type": "experimental",
+        "parsing_warnings": [],
+        "confidence": 0.93,
+    }
+    sample_variants = pbf_acceptance_sample_variants(collection_id)
+    test_conditions = pbf_acceptance_test_conditions(collection_id)
+    baseline_references = pbf_acceptance_baseline_references(collection_id)
+    measurement_results = pbf_acceptance_measurement_results(collection_id)
+    characterization_observations = pbf_acceptance_characterization_observations(
+        collection_id
+    )
+    structure_features = pbf_acceptance_structure_features(collection_id)
+    comparable_results, scoped_results = pbf_acceptance_comparison_records(
+        collection_id,
+        sample_variants=sample_variants,
+        test_conditions=test_conditions,
+        baseline_references=baseline_references,
+        measurement_results=measurement_results,
+    )
+    _store_core_result_facts(
+        comparison_service,
+        collection_id,
+        document_profiles=[document_profile],
+        sample_variants=sample_variants,
+        test_conditions=test_conditions,
+        baseline_references=baseline_references,
+        measurement_results=measurement_results,
+        characterization_observations=characterization_observations,
+        structure_features=structure_features,
+        comparable_results=comparable_results,
+        scoped_results=scoped_results,
+    )
 
     payload = asyncio.run(
         results_controller.get_collection_result(collection_id, PBF_YIELD_25_COMPARABLE_ID)
@@ -430,29 +423,22 @@ def test_result_detail_route_returns_pbf_acceptance_chain_fields(
     ]
 
 
-def test_result_detail_route_returns_404_when_missing(
-    result_services,
-    monkeypatch,
-):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _comparison_service = result_services
+def test_result_detail_route_returns_404_when_missing(result_services):
+    collection_service, comparison_service = result_services
     collection = collection_service.create_collection(name="Missing Result Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     comparable_result, scoped_result = _build_semantic_result_record(
         collection_id=collection_id,
         comparable_result_id="cres-existing-1",
         source_document_id="paper-1",
     )
-    _write_semantic_comparison_artifacts(
-        output_dir,
-        [comparable_result],
-        [scoped_result],
+    _store_core_result_facts(
+        comparison_service,
+        collection_id,
+        comparable_results=[comparable_result],
+        scoped_results=[scoped_result],
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(

@@ -38,12 +38,12 @@ vi.mock('$app/stores', () => ({
 	page: pageStore
 }));
 
-vi.mock('pdfjs-dist', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
 	GlobalWorkerOptions: { workerSrc: '' },
 	getDocument: getDocumentMock
 }));
 
-vi.mock('pdfjs-dist/build/pdf.worker.mjs?url', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.worker.mjs?url', () => ({
 	default: '/mock-pdf-worker.mjs'
 }));
 
@@ -61,6 +61,84 @@ function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
 	});
 }
 
+function requestPath(input: string | URL | Request) {
+	const rawUrl =
+		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+	return new URL(rawUrl, 'http://localhost').pathname;
+}
+
+function tracebackCallPaths() {
+	return fetchMock.mock.calls
+		.map(([input]) => requestPath(input as string | URL | Request))
+		.filter((path) => path.endsWith('/traceback'));
+}
+
+function buildResearchPayload() {
+	return {
+		collection_id: 'col_123',
+		document_id: 'doc_1',
+		state: 'ready',
+		paper_title: 'Paper A',
+		overview: {
+			material_systems: ['oxide cathode'],
+			sample_variant_count: 1,
+			main_process_variables: ['anneal temperature'],
+			measured_properties: ['conductivity']
+		},
+		materials: [
+			{
+				material_id: 'oxide_cathode',
+				canonical_name: 'oxide cathode',
+				aliases: ['LiNiO2'],
+				sample_count: 1,
+				process_families: ['annealing'],
+				measured_properties: ['conductivity'],
+				comparison_count: 1
+			}
+		],
+		sample_matrix: {
+			matrix_id: 'sample_matrix',
+			columns: [{ value_key: 'conductivity', label: 'Conductivity' }],
+			rows: [
+				{
+					row_id: 'row_1',
+					sample_id: 'S1',
+					sample_label: 'Sample A',
+					material: 'oxide cathode',
+					process_context: { anneal: '700 C' },
+					values: {
+						conductivity: {
+							display_value: '12 mS/cm',
+							status: 'observed',
+							evidence_refs: [{ evidence_ref_id: 'ev_1', locator: 'Results' }]
+						}
+					}
+				}
+			]
+		},
+		condition_series: [
+			{
+				series_id: 'series_1',
+				property: 'conductivity',
+				condition_axis: { axis_name: 'temperature' },
+				points: [
+					{
+						point_id: 'point_1',
+						condition_value: 700,
+						condition_unit: 'C',
+						result: {
+							display_value: '12 mS/cm',
+							status: 'observed'
+						}
+					}
+				]
+			}
+		]
+	};
+}
+
+let researchPayload: unknown = null;
+
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -68,6 +146,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/documents/doc_1')
 		});
 		fetchMock.mockReset();
+		researchPayload = buildResearchPayload();
 		getDocumentMock.mockReset();
 		getDocumentMock.mockImplementation(() => ({
 			promise: Promise.resolve({
@@ -142,6 +221,12 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					],
 					warnings: []
 				});
+			}
+			if (
+				url.pathname === '/api/v1/collections/col_123/documents/doc_1/research-view' &&
+				researchPayload
+			) {
+				return jsonResponse(researchPayload);
 			}
 			if (url.pathname === '/api/v1/collections/col_123/results') {
 				return jsonResponse({
@@ -242,6 +327,48 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 												characterization_observation_ids: [],
 												traceability_status: 'direct'
 											}
+										},
+										{
+											result_id: 'cres_2',
+											source_result_id: 'mr_2',
+											measurement: {
+												property: 'capacity',
+												value: 145,
+												unit: 'mAh/g',
+												result_type: 'scalar',
+												summary: '145 mAh/g'
+											},
+											test_condition: {
+												test_method: 'cycling',
+												test_temperature_c: 25
+											},
+											baseline: {
+												label: 'as-prepared',
+												reference: 'same-paper control',
+												baseline_type: 'same_document',
+												resolved: true
+											},
+											assessment: {
+												comparability_status: 'limited',
+												warnings: ['Cycle count is not fully specified.'],
+												basis: [],
+												missing_context: ['cycle_count'],
+												requires_expert_review: true,
+												assessment_epistemic_status: 'partial'
+											},
+											value_provenance: {
+												value_origin: 'reported',
+												source_value_text: '145',
+												source_unit_text: 'mAh/g'
+											},
+											evidence: {
+												evidence_ids: ['ev_2'],
+												direct_anchor_ids: ['anc_2'],
+												contextual_anchor_ids: [],
+												structure_feature_ids: [],
+												characterization_observation_ids: [],
+												traceability_status: 'direct'
+											}
 										}
 									]
 								}
@@ -282,10 +409,16 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText('Lens')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('tab', { name: 'Summary' })).toBeInTheDocument();
+		expect(tracebackCallPaths()).toEqual([]);
+		await expect.element(browserPage.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('tab', { name: 'Methods' })).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('tab', { name: 'Q&A' })).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Graph').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Preparation / processing / treatment' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
@@ -294,8 +427,10 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await browserPage.getByRole('tab', { name: 'Results' }).click();
 		await expect.element(browserPage.getByText('oxide cathode').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Comparable').first()).toBeInTheDocument();
-		await browserPage.getByText('oxide cathode').first().click();
+		await browserPage.getByRole('button', { name: /oxide cathode.*conductivity/i }).click();
 		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
+		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
 		const resultHighlightStyle = browserPage
 			.getByTestId('pdf-highlight')
 			.first()
@@ -313,5 +448,103 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Jump to source' }).first().click();
 		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
+	});
+
+	it('uses parsed source text when the PDF cannot be rendered', async () => {
+		getDocumentMock.mockImplementationOnce(() => ({
+			promise: Promise.reject(new Error('connection reset')),
+			destroy: vi.fn()
+		}));
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Parsed source fallback')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Conductivity improved to 12 mS/cm under EIS.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Source preview unavailable')).not.toBeInTheDocument();
+	});
+
+	it('renders paper research sample matrix when research view is ready', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Paper research view' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Materials in this paper' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Sample matrix' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: '12 mS/cm' }).first())
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('conductivity / temperature')).toBeInTheDocument();
+	});
+
+	it('organizes structured understanding in scientific reading order', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Paper scope' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Experimental objects' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Preparation / processing / treatment' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Test and characterization methods' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Measured results' }))
+			.toBeInTheDocument();
+	});
+
+	it('renders an unavailable state when paper research view is missing', async () => {
+		researchPayload = null;
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Paper research view is unavailable' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
+			.not.toBeInTheDocument();
+	});
+
+	it('loads only the requested traceback for a document source deep link', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?evidence_id=ev_1&anchor_id=anc_1'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
+		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
+	});
+
+	it('honors page and return_to query parameters for source review links', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?page=2&return_to=/collections/col_123/objectives/obj_1'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('2');
+		expect(
+			browserPage.getByRole('link', { name: 'Documents' }).element().getAttribute('href')
+		).toBe('/collections/col_123/objectives/obj_1');
 	});
 });

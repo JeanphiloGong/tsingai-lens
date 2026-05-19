@@ -1,0 +1,1139 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import json
+import math
+import re
+from typing import Any, Iterable, Literal, Mapping
+
+
+SourceBlockType = Literal[
+    "title",
+    "heading",
+    "paragraph",
+    "list_item",
+    "figure_caption",
+    "table_caption",
+]
+
+_UNIT_HINT_PATTERN = re.compile(
+    r"\b(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class SourceBoundingBox:
+    l: float
+    t: float
+    r: float
+    b: float
+    coord_origin: str = ""
+
+    @classmethod
+    def from_value(cls, value: Any) -> "SourceBoundingBox | None":
+        if _is_missing_value(value):
+            return None
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            return cls.from_value(json.loads(text))
+        if isinstance(value, Mapping):
+            return cls(
+                l=float(value.get("l", 0.0)),
+                t=float(value.get("t", 0.0)),
+                r=float(value.get("r", 0.0)),
+                b=float(value.get("b", 0.0)),
+                coord_origin=str(value.get("coord_origin") or ""),
+            )
+        return cls(
+            l=float(getattr(value, "l", 0.0)),
+            t=float(getattr(value, "t", 0.0)),
+            r=float(getattr(value, "r", 0.0)),
+            b=float(getattr(value, "b", 0.0)),
+            coord_origin=str(
+                getattr(getattr(value, "coord_origin", None), "value", None) or ""
+            ),
+        )
+
+    @classmethod
+    def merge(cls, values: Iterable[Any]) -> "SourceBoundingBox | None":
+        boxes = [box for box in (cls.from_value(value) for value in values) if box]
+        if not boxes:
+            return None
+        return cls(
+            l=min(box.l for box in boxes),
+            t=min(box.t for box in boxes),
+            r=max(box.r for box in boxes),
+            b=max(box.b for box in boxes),
+            coord_origin=boxes[0].coord_origin,
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "l": self.l,
+            "t": self.t,
+            "r": self.r,
+            "b": self.b,
+            "coord_origin": self.coord_origin,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_payload(), ensure_ascii=True, sort_keys=True)
+
+
+@dataclass(frozen=True)
+class SourceCharRange:
+    start: int
+    end: int
+
+    @classmethod
+    def from_value(cls, value: Any) -> "SourceCharRange | None":
+        if _is_missing_value(value):
+            return None
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            return cls.from_value(json.loads(text))
+        if isinstance(value, Mapping):
+            return cls(start=int(value.get("start", 0)), end=int(value.get("end", 0)))
+        start, end = value
+        return cls(start=int(start), end=int(end))
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {"start": self.start, "end": self.end},
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+
+
+@dataclass(frozen=True)
+class SourceDocument:
+    document_id: str
+    human_readable_id: int
+    title: str
+    text: str
+    text_unit_ids: tuple[str, ...] = ()
+    creation_date: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceDocument":
+        return cls(
+            document_id=str(value.get("document_id") or value.get("id") or ""),
+            human_readable_id=safe_int(value.get("human_readable_id")) or 0,
+            title=str(value.get("title") or ""),
+            text=str(value.get("text") or ""),
+            text_unit_ids=_string_tuple(value.get("text_unit_ids")),
+            creation_date=normalize_optional_text(value.get("creation_date")),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "id": self.document_id,
+            "human_readable_id": self.human_readable_id,
+            "title": self.title,
+            "text": self.text,
+            "text_unit_ids": list(self.text_unit_ids),
+            "creation_date": self.creation_date,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceTextUnit:
+    text_unit_id: str
+    human_readable_id: int
+    text: str
+    n_tokens: int | None
+    document_ids: tuple[str, ...]
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceTextUnit":
+        return cls(
+            text_unit_id=str(value.get("text_unit_id") or value.get("id") or ""),
+            human_readable_id=safe_int(value.get("human_readable_id")) or 0,
+            text=str(value.get("text") or ""),
+            n_tokens=safe_int(value.get("n_tokens")),
+            document_ids=_string_tuple(value.get("document_ids")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "id": self.text_unit_id,
+            "human_readable_id": self.human_readable_id,
+            "text": self.text,
+            "n_tokens": self.n_tokens,
+            "document_ids": list(self.document_ids),
+        }
+
+
+@dataclass(frozen=True)
+class SourceBlock:
+    block_id: str
+    document_id: str
+    block_type: SourceBlockType | str
+    text: str
+    block_order: int
+    text_unit_ids: tuple[str, ...] = ()
+    page: int | None = None
+    bbox: SourceBoundingBox | None = None
+    char_range: SourceCharRange | None = None
+    heading_path: str | None = None
+    heading_level: int | None = None
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceBlock":
+        return cls(
+            block_id=str(value.get("block_id") or ""),
+            document_id=str(value.get("document_id") or value.get("id") or ""),
+            block_type=str(value.get("block_type") or "paragraph"),
+            text=str(value.get("text") or ""),
+            block_order=safe_int(value.get("block_order")) or 0,
+            text_unit_ids=_string_tuple(value.get("text_unit_ids")),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            char_range=SourceCharRange.from_value(value.get("char_range")),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+            heading_level=safe_int(value.get("heading_level")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "block_id": self.block_id,
+            "document_id": self.document_id,
+            "block_type": str(self.block_type),
+            "text": self.text,
+            "block_order": self.block_order,
+            "text_unit_ids": list(self.text_unit_ids),
+            "page": self.page,
+            "bbox": self.bbox.to_json() if self.bbox else None,
+            "char_range": self.char_range.to_json() if self.char_range else None,
+            "heading_path": self.heading_path,
+            "heading_level": self.heading_level,
+        }
+
+
+@dataclass(frozen=True)
+class SourceLayoutBlock:
+    block_id: str | None
+    text: str | None
+    page: int | None
+    bbox: SourceBoundingBox | None
+    block_order: int
+    block_type: str
+    heading_path: str | None
+
+    @classmethod
+    def from_value(cls, value: "SourceBlock | Mapping[str, Any]") -> "SourceLayoutBlock":
+        if isinstance(value, SourceBlock):
+            return cls(
+                block_id=value.block_id,
+                text=value.text,
+                page=value.page,
+                bbox=value.bbox,
+                block_order=value.block_order,
+                block_type=str(value.block_type),
+                heading_path=value.heading_path,
+            )
+        return cls(
+            block_id=normalize_optional_text(value.get("block_id")),
+            text=normalize_optional_text(value.get("text")),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            block_order=safe_int(value.get("block_order")) or 0,
+            block_type=str(value.get("block_type") or "").strip(),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+        )
+
+
+@dataclass(frozen=True)
+class SourceTable:
+    table_id: str
+    document_id: str
+    table_order: int
+    caption_text: str | None
+    caption_block_id: str | None
+    page: int | None
+    bbox: SourceBoundingBox | None
+    heading_path: str | None
+    column_headers: tuple[str, ...]
+    table_matrix: tuple[tuple[str, ...], ...]
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def row_count(self) -> int:
+        return len(self.table_matrix)
+
+    @property
+    def col_count(self) -> int:
+        return max((len(row) for row in self.table_matrix), default=0)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceTable":
+        return cls(
+            table_id=str(value.get("table_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            table_order=safe_int(value.get("table_order")) or 0,
+            caption_text=normalize_optional_text(value.get("caption_text")),
+            caption_block_id=normalize_optional_text(value.get("caption_block_id")),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+            column_headers=_string_tuple(value.get("column_headers")),
+            table_matrix=_table_matrix_tuple(value.get("table_matrix")),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        matrix = [list(row) for row in self.table_matrix]
+        headers = list(self.column_headers)
+        return {
+            "table_id": self.table_id,
+            "document_id": self.document_id,
+            "table_order": self.table_order,
+            "caption_text": self.caption_text,
+            "caption_block_id": self.caption_block_id,
+            "page": self.page,
+            "bbox": self.bbox.to_json() if self.bbox else None,
+            "heading_path": self.heading_path,
+            "row_count": self.row_count,
+            "col_count": self.col_count,
+            "column_headers": headers,
+            "table_matrix": matrix,
+            "table_markdown": render_markdown_table(matrix, headers),
+            "table_text": render_plain_table_text(matrix),
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceTableCell:
+    cell_id: str
+    document_id: str
+    table_id: str
+    row_index: int
+    col_index: int
+    cell_text: str
+    header_path: str | None = None
+    page: int | None = None
+    bbox: SourceBoundingBox | None = None
+    char_range: SourceCharRange | None = None
+    unit_hint: str | None = None
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceTableCell":
+        return cls(
+            cell_id=str(value.get("cell_id") or ""),
+            document_id=str(value.get("document_id") or value.get("id") or ""),
+            table_id=str(value.get("table_id") or ""),
+            row_index=safe_int(value.get("row_index")) or 0,
+            col_index=safe_int(value.get("col_index")) or 0,
+            cell_text=str(value.get("cell_text") or ""),
+            header_path=normalize_optional_text(value.get("header_path")),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            char_range=SourceCharRange.from_value(value.get("char_range")),
+            unit_hint=normalize_optional_text(value.get("unit_hint")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "cell_id": self.cell_id,
+            "document_id": self.document_id,
+            "id": self.document_id,
+            "table_id": self.table_id,
+            "row_index": self.row_index,
+            "col_index": self.col_index,
+            "cell_text": self.cell_text,
+            "header_path": self.header_path,
+            "page": self.page,
+            "bbox": self.bbox.to_json() if self.bbox else None,
+            "char_range": self.char_range.to_json() if self.char_range else None,
+            "unit_hint": self.unit_hint,
+        }
+
+
+@dataclass(frozen=True)
+class SourceTableRow:
+    row_id: str
+    document_id: str
+    table_id: str
+    row_index: int
+    row_text: str
+    page: int | None = None
+    bbox: SourceBoundingBox | None = None
+    heading_path: str | None = None
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceTableRow":
+        return cls(
+            row_id=str(value.get("row_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            table_id=str(value.get("table_id") or ""),
+            row_index=safe_int(value.get("row_index")) or 0,
+            row_text=str(value.get("row_text") or ""),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "row_id": self.row_id,
+            "document_id": self.document_id,
+            "table_id": self.table_id,
+            "row_index": self.row_index,
+            "row_text": self.row_text,
+            "page": self.page,
+            "bbox": self.bbox.to_json() if self.bbox else None,
+            "heading_path": self.heading_path,
+        }
+
+
+@dataclass(frozen=True)
+class SourceFigure:
+    figure_id: str
+    document_id: str
+    figure_order: int
+    figure_label: str | None
+    caption_text: str | None
+    caption_block_id: str | None
+    page: int | None
+    bbox: SourceBoundingBox | None
+    heading_path: str | None
+    image_path: str | None
+    image_mime_type: str | None
+    image_width: int | None
+    image_height: int | None
+    asset_sha256: str | None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceFigure":
+        return cls(
+            figure_id=str(value.get("figure_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            figure_order=safe_int(value.get("figure_order")) or 0,
+            figure_label=normalize_optional_text(value.get("figure_label")),
+            caption_text=normalize_optional_text(value.get("caption_text")),
+            caption_block_id=normalize_optional_text(value.get("caption_block_id")),
+            page=safe_int(value.get("page")),
+            bbox=SourceBoundingBox.from_value(value.get("bbox")),
+            heading_path=normalize_optional_text(value.get("heading_path")),
+            image_path=normalize_optional_text(value.get("image_path")),
+            image_mime_type=normalize_optional_text(value.get("image_mime_type")),
+            image_width=safe_int(value.get("image_width")),
+            image_height=safe_int(value.get("image_height")),
+            asset_sha256=normalize_optional_text(value.get("asset_sha256")),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "figure_id": self.figure_id,
+            "document_id": self.document_id,
+            "figure_order": self.figure_order,
+            "figure_label": self.figure_label,
+            "caption_text": self.caption_text,
+            "caption_block_id": self.caption_block_id,
+            "page": self.page,
+            "bbox": self.bbox.to_json() if self.bbox else None,
+            "heading_path": self.heading_path,
+            "image_path": self.image_path,
+            "image_mime_type": self.image_mime_type,
+            "image_width": self.image_width,
+            "image_height": self.image_height,
+            "asset_sha256": self.asset_sha256,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceArtifactSet:
+    documents: tuple[SourceDocument, ...] = ()
+    text_units: tuple[SourceTextUnit, ...] = ()
+    blocks: tuple[SourceBlock, ...] = ()
+    tables: tuple[SourceTable, ...] = ()
+    table_rows: tuple[SourceTableRow, ...] = ()
+    table_cells: tuple[SourceTableCell, ...] = ()
+    figures: tuple[SourceFigure, ...] = ()
+
+    @classmethod
+    def from_records(
+        cls,
+        *,
+        documents: Iterable[Mapping[str, Any]] = (),
+        text_units: Iterable[Mapping[str, Any]] = (),
+        blocks: Iterable[Mapping[str, Any]] = (),
+        tables: Iterable[Mapping[str, Any]] = (),
+        table_rows: Iterable[Mapping[str, Any]] = (),
+        table_cells: Iterable[Mapping[str, Any]] = (),
+        figures: Iterable[Mapping[str, Any]] = (),
+    ) -> "SourceArtifactSet":
+        return cls(
+            documents=tuple(SourceDocument.from_record(item) for item in documents),
+            text_units=tuple(SourceTextUnit.from_record(item) for item in text_units),
+            blocks=tuple(SourceBlock.from_record(item) for item in blocks),
+            tables=tuple(SourceTable.from_record(item) for item in tables),
+            table_rows=tuple(SourceTableRow.from_record(item) for item in table_rows),
+            table_cells=tuple(SourceTableCell.from_record(item) for item in table_cells),
+            figures=tuple(SourceFigure.from_record(item) for item in figures),
+        )
+
+    def is_empty(self) -> bool:
+        return not any(
+            (
+                self.documents,
+                self.text_units,
+                self.blocks,
+                self.tables,
+                self.table_rows,
+                self.table_cells,
+                self.figures,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class SourceReferenceEntry:
+    reference_id: str
+    document_id: str
+    raw_reference: str
+    reference_index: str | None = None
+    title: str | None = None
+    authors_text: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    source_block_id: str | None = None
+    page: int | None = None
+    confidence: float = 0.0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceEntry":
+        return cls(
+            reference_id=str(value.get("reference_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            raw_reference=str(value.get("raw_reference") or ""),
+            reference_index=normalize_optional_text(value.get("reference_index")),
+            title=normalize_optional_text(value.get("title")),
+            authors_text=normalize_optional_text(value.get("authors_text")),
+            year=safe_int(value.get("year")),
+            doi=normalize_optional_text(value.get("doi")),
+            source_block_id=normalize_optional_text(value.get("source_block_id")),
+            page=safe_int(value.get("page")),
+            confidence=float(value.get("confidence") or 0.0),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "reference_id": self.reference_id,
+            "document_id": self.document_id,
+            "raw_reference": self.raw_reference,
+            "reference_index": self.reference_index,
+            "title": self.title,
+            "authors_text": self.authors_text,
+            "year": self.year,
+            "doi": self.doi,
+            "source_block_id": self.source_block_id,
+            "page": self.page,
+            "confidence": self.confidence,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceReferenceMention:
+    mention_id: str
+    document_id: str
+    reference_id: str | None
+    citation_marker: str
+    context_text: str
+    source_block_id: str | None = None
+    page: int | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    confidence: float = 0.0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceMention":
+        return cls(
+            mention_id=str(value.get("mention_id") or ""),
+            document_id=str(value.get("document_id") or ""),
+            reference_id=normalize_optional_text(value.get("reference_id")),
+            citation_marker=str(value.get("citation_marker") or ""),
+            context_text=str(value.get("context_text") or ""),
+            source_block_id=normalize_optional_text(value.get("source_block_id")),
+            page=safe_int(value.get("page")),
+            char_start=safe_int(value.get("char_start")),
+            char_end=safe_int(value.get("char_end")),
+            confidence=float(value.get("confidence") or 0.0),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "mention_id": self.mention_id,
+            "document_id": self.document_id,
+            "reference_id": self.reference_id,
+            "citation_marker": self.citation_marker,
+            "context_text": self.context_text,
+            "source_block_id": self.source_block_id,
+            "page": self.page,
+            "char_start": self.char_start,
+            "char_end": self.char_end,
+            "confidence": self.confidence,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceReferenceResolution:
+    resolution_id: str
+    reference_id: str
+    provider: str
+    status: str
+    resolved_title: str | None = None
+    resolved_authors_text: str | None = None
+    resolved_year: int | None = None
+    resolved_venue: str | None = None
+    resolved_doi: str | None = None
+    resolved_url: str | None = None
+    open_access_url: str | None = None
+    confidence: float = 0.0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceResolution":
+        return cls(
+            resolution_id=str(value.get("resolution_id") or ""),
+            reference_id=str(value.get("reference_id") or ""),
+            provider=str(value.get("provider") or ""),
+            status=str(value.get("status") or "unresolved"),
+            resolved_title=normalize_optional_text(value.get("resolved_title")),
+            resolved_authors_text=normalize_optional_text(
+                value.get("resolved_authors_text")
+            ),
+            resolved_year=safe_int(value.get("resolved_year")),
+            resolved_venue=normalize_optional_text(value.get("resolved_venue")),
+            resolved_doi=normalize_optional_text(value.get("resolved_doi")),
+            resolved_url=normalize_optional_text(value.get("resolved_url")),
+            open_access_url=normalize_optional_text(value.get("open_access_url")),
+            confidence=float(value.get("confidence") or 0.0),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "resolution_id": self.resolution_id,
+            "reference_id": self.reference_id,
+            "provider": self.provider,
+            "status": self.status,
+            "resolved_title": self.resolved_title,
+            "resolved_authors_text": self.resolved_authors_text,
+            "resolved_year": self.resolved_year,
+            "resolved_venue": self.resolved_venue,
+            "resolved_doi": self.resolved_doi,
+            "resolved_url": self.resolved_url,
+            "open_access_url": self.open_access_url,
+            "confidence": self.confidence,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceReferenceCandidate:
+    candidate_id: str
+    reference_id: str
+    status: str
+    relevance_score: float = 0.0
+    relevance_reason: str | None = None
+    cited_by_document_id: str | None = None
+    mention_count: int = 0
+    representative_context: str | None = None
+    resolved_doi: str | None = None
+    resolved_url: str | None = None
+    open_access_url: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceCandidate":
+        return cls(
+            candidate_id=str(value.get("candidate_id") or ""),
+            reference_id=str(value.get("reference_id") or ""),
+            status=str(value.get("status") or "metadata_only"),
+            relevance_score=float(value.get("relevance_score") or 0.0),
+            relevance_reason=normalize_optional_text(value.get("relevance_reason")),
+            cited_by_document_id=normalize_optional_text(
+                value.get("cited_by_document_id")
+            ),
+            mention_count=safe_int(value.get("mention_count")) or 0,
+            representative_context=normalize_optional_text(
+                value.get("representative_context")
+            ),
+            resolved_doi=normalize_optional_text(value.get("resolved_doi")),
+            resolved_url=normalize_optional_text(value.get("resolved_url")),
+            open_access_url=normalize_optional_text(value.get("open_access_url")),
+            metadata=_mapping(value.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "reference_id": self.reference_id,
+            "status": self.status,
+            "relevance_score": self.relevance_score,
+            "relevance_reason": self.relevance_reason,
+            "cited_by_document_id": self.cited_by_document_id,
+            "mention_count": self.mention_count,
+            "representative_context": self.representative_context,
+            "resolved_doi": self.resolved_doi,
+            "resolved_url": self.resolved_url,
+            "open_access_url": self.open_access_url,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SourceReferenceSet:
+    entries: tuple[SourceReferenceEntry, ...] = ()
+    mentions: tuple[SourceReferenceMention, ...] = ()
+    resolutions: tuple[SourceReferenceResolution, ...] = ()
+    candidates: tuple[SourceReferenceCandidate, ...] = ()
+
+
+def build_heading_blocks(
+    blocks: Iterable[SourceBlock | Mapping[str, Any]],
+) -> list[SourceLayoutBlock]:
+    return sorted(
+        [
+            block
+            for block in (SourceLayoutBlock.from_value(item) for item in blocks)
+            if block.heading_path
+        ],
+        key=lambda item: (item.page is None, item.page or 0, item.block_order),
+    )
+
+
+def build_figure_caption_blocks(
+    blocks: Iterable[SourceBlock | Mapping[str, Any]],
+) -> list[SourceLayoutBlock]:
+    return _build_caption_blocks(blocks, "figure_caption")
+
+
+def build_table_caption_blocks(
+    blocks: Iterable[SourceBlock | Mapping[str, Any]],
+) -> list[SourceLayoutBlock]:
+    return _build_caption_blocks(blocks, "table_caption")
+
+
+def find_nearest_caption_block(
+    *,
+    page: int | None,
+    target_bbox: Any,
+    caption_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
+    used_block_ids: set[str],
+) -> SourceLayoutBlock | None:
+    normalized_page = safe_int(page)
+    candidates = [
+        block
+        for block in _coerce_layout_blocks(caption_blocks)
+        if block.block_id
+        and block.block_id not in used_block_ids
+        and (normalized_page is None or block.page == normalized_page)
+    ]
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda item: (
+            _caption_distance_score(target_bbox, item.bbox),
+            item.block_order,
+        ),
+    )
+
+
+def resolve_heading_path_for_page(
+    page: int | None,
+    heading_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
+) -> str | None:
+    blocks = _coerce_layout_blocks(heading_blocks)
+    if not blocks:
+        return None
+    normalized_page = safe_int(page)
+    eligible = [
+        item
+        for item in blocks
+        if item.heading_path
+        and (
+            normalized_page is None
+            or item.page is None
+            or item.page <= normalized_page
+        )
+    ]
+    if not eligible:
+        return blocks[-1].heading_path
+    return eligible[-1].heading_path
+
+
+def resolve_heading_path_for_target(
+    *,
+    page: int | None,
+    target_bbox: Any,
+    heading_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
+) -> str | None:
+    target = SourceBoundingBox.from_value(target_bbox)
+    blocks = _coerce_layout_blocks(heading_blocks)
+    normalized_page = safe_int(page)
+    if target is None or normalized_page is None:
+        return resolve_heading_path_for_page(page, blocks)
+
+    candidates = []
+    for item in blocks:
+        if item.block_type != "heading":
+            continue
+        if item.page != normalized_page:
+            continue
+        if not item.heading_path or item.bbox is None:
+            continue
+        distance = _heading_above_distance(target, item.bbox)
+        if distance is None:
+            continue
+        candidates.append((distance, -item.block_order, item))
+
+    if not candidates:
+        return resolve_heading_path_for_page(page, blocks)
+    return min(candidates, key=lambda item: (item[0], item[1]))[2].heading_path
+
+
+def build_source_table_rows_from_cells(
+    *,
+    document_id: str,
+    cells: Iterable[SourceTableCell],
+    heading_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
+) -> list[SourceTableRow]:
+    grouped: dict[str, list[SourceTableCell]] = {}
+    for cell in cells:
+        grouped.setdefault(cell.table_id, []).append(cell)
+
+    rows: list[SourceTableRow] = []
+    headings = _coerce_layout_blocks(heading_blocks)
+    for table_id, table_cells in grouped.items():
+        row_indices = sorted({cell.row_index for cell in table_cells})
+        for row_index in row_indices:
+            row_cells = [cell for cell in table_cells if cell.row_index == row_index]
+            if all(not normalize_optional_text(cell.header_path) for cell in row_cells):
+                continue
+            ordered_cells = sorted(row_cells, key=lambda cell: cell.col_index)
+            row_text = " | ".join(
+                cell.cell_text.strip()
+                for cell in ordered_cells
+                if cell.cell_text.strip()
+            )
+            if not row_text:
+                continue
+            page = first_non_null([cell.page for cell in ordered_cells])
+            bbox = SourceBoundingBox.merge(cell.bbox for cell in ordered_cells)
+            rows.append(
+                SourceTableRow(
+                    row_id=f"row_{document_id}_{table_id}_{row_index}",
+                    document_id=document_id,
+                    table_id=table_id,
+                    row_index=row_index,
+                    row_text=row_text,
+                    page=page,
+                    bbox=bbox,
+                    heading_path=resolve_heading_path_for_target(
+                        page=page,
+                        target_bbox=bbox,
+                        heading_blocks=headings,
+                    ),
+                )
+            )
+    return rows
+
+
+def render_markdown_table(matrix: list[list[str]], column_headers: list[str]) -> str | None:
+    if not matrix:
+        return None
+
+    col_count = max(len(column_headers), max((len(row) for row in matrix), default=0))
+    if col_count <= 0:
+        return None
+    normalized_rows = [_normalize_table_row(row, col_count) for row in matrix]
+    header = _normalize_table_row(
+        normalized_rows[0] if normalized_rows else column_headers,
+        col_count,
+    )
+    if not any(header):
+        header = _normalize_table_row(column_headers, col_count)
+    if not any(header):
+        header = [f"column_{index + 1}" for index in range(col_count)]
+
+    body_rows = normalized_rows[1:] if normalized_rows else []
+    lines = [
+        "| " + " | ".join(_escape_markdown_cell(value) for value in header) + " |",
+        "| " + " | ".join("---" for _ in range(col_count)) + " |",
+    ]
+    for row in body_rows:
+        lines.append(
+            "| " + " | ".join(_escape_markdown_cell(value) for value in row) + " |"
+        )
+    return "\n".join(lines)
+
+
+def render_plain_table_text(matrix: list[list[str]]) -> str | None:
+    if not matrix:
+        return None
+    lines = []
+    for row in matrix:
+        line = " | ".join(str(cell).strip() for cell in row if str(cell).strip())
+        if line:
+            lines.append(line)
+    return "\n".join(lines) or None
+
+
+def extract_unit_hint(header_path: str | None, cell_text: str) -> str | None:
+    for source in (header_path or "", cell_text):
+        match = _UNIT_HINT_PATTERN.search(str(source or ""))
+        if match:
+            return match.group(1)
+    return None
+
+
+def make_table_id(document_id: str, order: int, title: str | None) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", str(title or "").lower()).strip("_")
+    if not slug:
+        slug = f"table_{order}"
+    return f"tbl_{document_id}_{order}_{slug}"
+
+
+def update_heading_stack(stack: list[str], heading: str, level: int) -> list[str]:
+    normalized_heading = " ".join(str(heading or "").split())
+    if not normalized_heading:
+        return list(stack)
+
+    effective_level = max(1, int(level))
+    if effective_level > len(stack) + 1:
+        effective_level = len(stack) + 1
+    return [*stack[: effective_level - 1], normalized_heading]
+
+
+def normalize_optional_text(value: Any) -> str | None:
+    if _is_missing_value(value):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def safe_int(value: Any) -> int | None:
+    if _is_missing_value(value):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def first_non_null(values: Iterable[Any]) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if _is_missing_value(value):
+            continue
+        return value
+    return None
+
+
+def _is_missing_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    return False
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if _is_missing_value(value):
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return (text,)
+            return _string_tuple(parsed)
+        return (text,)
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, Mapping)):
+        return tuple(str(item) for item in value if not _is_missing_value(item))
+    return (str(value),)
+
+
+def _table_matrix_tuple(value: Any) -> tuple[tuple[str, ...], ...]:
+    if _is_missing_value(value):
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return ((text,),)
+        return _table_matrix_tuple(parsed)
+    if not isinstance(value, Iterable) or isinstance(value, (bytes, Mapping)):
+        return ((str(value),),)
+
+    rows = []
+    for row in value:
+        if isinstance(row, str) or not isinstance(row, Iterable):
+            rows.append((str(row),))
+        else:
+            rows.append(tuple(str(cell) for cell in row))
+    return tuple(rows)
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    if _is_missing_value(value):
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, Mapping) else {}
+    return {}
+
+
+def _build_caption_blocks(
+    blocks: Iterable[SourceBlock | Mapping[str, Any]],
+    block_type: str,
+) -> list[SourceLayoutBlock]:
+    return [
+        block
+        for block in (SourceLayoutBlock.from_value(item) for item in blocks)
+        if block.block_type == block_type
+    ]
+
+
+def _coerce_layout_blocks(
+    blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
+) -> list[SourceLayoutBlock]:
+    return [
+        block if isinstance(block, SourceLayoutBlock) else SourceLayoutBlock.from_value(block)
+        for block in blocks
+    ]
+
+
+def _caption_distance_score(figure_bbox: Any, caption_bbox: Any) -> float:
+    figure = SourceBoundingBox.from_value(figure_bbox)
+    caption = SourceBoundingBox.from_value(caption_bbox)
+    if figure is None or caption is None:
+        return float("inf")
+    return _bbox_vertical_gap(figure, caption)
+
+
+def _heading_above_distance(
+    target: SourceBoundingBox,
+    heading: SourceBoundingBox,
+) -> float | None:
+    if _uses_top_left_origin(target, heading):
+        distance = target.t - heading.b
+    else:
+        distance = heading.b - target.t
+    return distance if distance >= 0 else None
+
+
+def _bbox_vertical_gap(first: SourceBoundingBox, second: SourceBoundingBox) -> float:
+    if _uses_top_left_origin(first, second):
+        first_top = min(first.t, first.b)
+        first_bottom = max(first.t, first.b)
+        second_top = min(second.t, second.b)
+        second_bottom = max(second.t, second.b)
+    else:
+        first_top = max(first.t, first.b)
+        first_bottom = min(first.t, first.b)
+        second_top = max(second.t, second.b)
+        second_bottom = min(second.t, second.b)
+
+    if _uses_top_left_origin(first, second):
+        if first_bottom < second_top:
+            return second_top - first_bottom
+        if second_bottom < first_top:
+            return first_top - second_bottom
+    else:
+        if first_bottom > second_top:
+            return first_bottom - second_top
+        if second_bottom > first_top:
+            return second_bottom - first_top
+    return 0.0
+
+
+def _uses_top_left_origin(*payloads: SourceBoundingBox) -> bool:
+    return any("top" in payload.coord_origin.lower() for payload in payloads)
+
+
+def _normalize_table_row(row: list[str], col_count: int) -> list[str]:
+    values = [" ".join(str(value or "").split()) for value in row[:col_count]]
+    if len(values) < col_count:
+        values.extend([""] * (col_count - len(values)))
+    return values
+
+
+def _escape_markdown_cell(value: str) -> str:
+    return str(value or "").replace("|", "\\|").strip()
+
+
+__all__ = [
+    "SourceBlock",
+    "SourceBlockType",
+    "SourceBoundingBox",
+    "SourceCharRange",
+    "SourceDocument",
+    "SourceFigure",
+    "SourceReferenceCandidate",
+    "SourceReferenceEntry",
+    "SourceReferenceMention",
+    "SourceReferenceResolution",
+    "SourceReferenceSet",
+    "SourceArtifactSet",
+    "SourceLayoutBlock",
+    "SourceTable",
+    "SourceTableCell",
+    "SourceTableRow",
+    "SourceTextUnit",
+    "build_figure_caption_blocks",
+    "build_heading_blocks",
+    "build_source_table_rows_from_cells",
+    "build_table_caption_blocks",
+    "extract_unit_hint",
+    "find_nearest_caption_block",
+    "first_non_null",
+    "make_table_id",
+    "normalize_optional_text",
+    "render_markdown_table",
+    "render_plain_table_text",
+    "resolve_heading_path_for_page",
+    "resolve_heading_path_for_target",
+    "safe_int",
+    "update_heading_stack",
+]

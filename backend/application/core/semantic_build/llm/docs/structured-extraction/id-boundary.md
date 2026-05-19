@@ -130,7 +130,7 @@ right owner for persistent ids:
 
 This plan covers:
 
-- prompt payload cleanup for `paper_facts` text-window and table-row extraction
+- prompt payload cleanup for `paper_facts` text-window and table-batch extraction
 - response-schema cleanup for anchor locators and model-managed refs
 - backend-local anchor recovery from current scope and quote matching
 - deterministic backend relation resolution after model parse
@@ -249,7 +249,7 @@ After Wave 1, anchor recovery should follow backend-local rules:
 - the current extraction scope is authoritative
 - for text-window extraction, the backend should first try to match quote text
   inside the current bounded text window and its local block/text-unit context
-- for table-row extraction, the backend should default to current row scope and
+- for table-batch extraction, the backend should default to current row scope and
   nearby supporting text context
 - if exact quote matching fails, the backend may still emit a weak locator
   anchored to current scope with explicit low-confidence semantics

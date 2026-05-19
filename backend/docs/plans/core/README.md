@@ -10,6 +10,10 @@ domain-semantic backfill.
   Earlier stabilization wave for the shared parsing seam
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
   Current Core quality hardening wave
+- [`research-objective-first/README.md`](research-objective-first/README.md)
+  Topic family for objective-first Core extraction, including the parent
+  target-centric flow, domain-model slice, and objective-context extraction
+  slice
 - [`pbf-metal-extraction-and-comparison-validation/README.md`](pbf-metal-extraction-and-comparison-validation/README.md)
   Topic family for the PBF-metal validation wave, including the proposal,
   parameter-registry and report-scope note, and executable implementation plan
@@ -32,6 +36,9 @@ domain-semantic backfill.
   Core traceback vertical slice for reviewable evidence grounding
 - [`minimal-core-domain-backfill-plan.md`](minimal-core-domain-backfill-plan.md)
   Backfill stable Core research semantics into `backend/domain/`
+- [`core-api-pandas-retirement-plan.md`](core-api-pandas-retirement-plan.md)
+  Remove pandas from Core/API runtime paths while leaving Source parser
+  internals as the temporary allowed pandas boundary
 
 ## Comparable-Result Family
 

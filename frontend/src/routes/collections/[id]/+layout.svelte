@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { errorMessage } from '../../_shared/api';
@@ -13,7 +14,6 @@
 	import {
 		fetchWorkspaceOverview,
 		getOverviewReadinessState,
-		getWorkspaceSurfaceState,
 		type WorkspaceOverview
 	} from '../../_shared/workspace';
 
@@ -23,27 +23,46 @@
 	let loadedWorkspaceId = '';
 
 	$: collectionId = $page.params.id ?? '';
-	$: collection = workspace?.collection ?? $collections.find((item) => item.id === collectionId);
+	$: storeCollection = $collections.find((item) => item.id === collectionId);
+	$: collection = workspace?.collection
+		? {
+				...workspace.collection,
+				status: storeCollection?.status ?? workspace.collection.status
+			}
+		: storeCollection;
 	$: collectionName = collection?.name;
-	$: documentCount =
-		workspace?.document_summary.total_documents ??
-		collection?.paper_count ??
-		workspace?.file_count ??
-		0;
-	$: readinessState = workspace ? getOverviewReadinessState(workspace) : null;
+	$: effectiveDocumentCount = Math.max(
+		workspace?.document_summary.total_documents ?? 0,
+		workspace?.file_count ?? 0,
+		collection?.paper_count ?? 0,
+		storeCollection?.paper_count ?? 0
+	);
+	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveDocumentCount } : null;
+	$: documentCount = effectiveDocumentCount;
+	$: storeReadinessState = readinessFromCollectionStatus(storeCollection?.status);
+	$: readinessState = storeReadinessState
+		? storeReadinessState
+		: stateWorkspace
+			? getOverviewReadinessState(stateWorkspace)
+			: null;
 	$: statusLabel = readinessState
 		? $t(`overview.readinessLabels.${readinessState}`)
 		: formatStatus(collection?.status);
 	$: statusTone = readinessState ?? 'pending';
 	$: updatedAt = collection?.updated_at || workspace?.artifacts.updated_at || '';
-	$: resultsVisible =
-		!workspace || getWorkspaceSurfaceState(workspace, 'results') !== 'not_applicable';
-	$: protocolVisible =
-		!workspace || getWorkspaceSurfaceState(workspace, 'protocol') !== 'not_applicable';
 	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/evidence`;
 	$: moreActive =
+		$page.url.pathname.startsWith(`/collections/${collectionId}/materials`) ||
+		$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
-		$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`);
+		$page.url.pathname.startsWith(`/collections/${collectionId}/results`);
+	$: downstreamUnlocked = readinessState === 'ready';
+	$: currentPath = $page.url.pathname;
+	$: isOverviewRoute = currentPath === `/collections/${collectionId}`;
+	$: lockReason = buildLockReason(readinessState);
+	$: readinessKnown = Boolean(readinessState);
+	$: showLockedSurface =
+		collectionId && !isOverviewRoute && (!readinessKnown || !downstreamUnlocked);
 
 	$: if (collectionId && collectionId !== loadedWorkspaceId) {
 		loadedWorkspaceId = collectionId;
@@ -72,6 +91,41 @@
 		const key = `overview.status.${status}`;
 		const translated = $t(key);
 		return translated === key ? status : translated;
+	}
+
+	function readinessFromCollectionStatus(status?: string | null) {
+		const normalized = String(status ?? '').trim();
+		if (['processing', 'running', 'queued', 'started', 'in_progress'].includes(normalized)) {
+			return 'processing';
+		}
+		if (['idle', 'pending', 'uploaded', 'ready_to_process'].includes(normalized)) {
+			return 'ready_to_process';
+		}
+		if (['ready', 'complete', 'completed', 'document_profiled', 'graph_ready'].includes(normalized)) {
+			return 'ready';
+		}
+		if (['failed', 'error', 'attention_required'].includes(normalized)) {
+			return 'failed';
+		}
+		return null;
+	}
+
+	function buildLockReason(state: typeof readinessState) {
+		if (state === 'processing') return $t('collection.lock.processing');
+		if (state === 'failed') return $t('collection.lock.failed');
+		if (state === 'empty') return $t('collection.lock.empty');
+		if (state === 'ready_to_process') return $t('collection.lock.readyToProcess');
+		return $t('collection.lock.readyToProcess');
+	}
+
+	function tabClass(pathPrefix: string) {
+		return currentPath.startsWith(pathPrefix) ? 'active' : '';
+	}
+
+	function handleLockedTabClick(event: MouseEvent) {
+		if (!downstreamUnlocked) {
+			event.preventDefault();
+		}
 	}
 
 	function formatDate(value?: string | null) {
@@ -155,28 +209,42 @@
 		{$t('collection.tabs.overview')}
 	</a>
 	<a
-		href={`/collections/${collectionId}/documents`}
-		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/documents`)}
+		href={resolve('/collections/[id]/objectives', { id: collectionId })}
+		class={`${tabClass(`/collections/${collectionId}/objectives`)} ${downstreamUnlocked ? '' : 'locked'}`}
+		aria-disabled={downstreamUnlocked ? undefined : 'true'}
+		tabindex={downstreamUnlocked ? undefined : -1}
+		title={downstreamUnlocked ? undefined : lockReason}
+		on:click={handleLockedTabClick}
 	>
-		{$t('collection.tabs.documents')}
+		{$t('collection.tabs.objectives')}
 	</a>
-	{#if resultsVisible}
-		<a
-			href={`/collections/${collectionId}/results`}
-			class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/results`)}
-		>
-			{$t('collection.tabs.results')}
-		</a>
-	{/if}
 	<a
-		href={`/collections/${collectionId}/comparisons`}
-		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`)}
+		href={`/collections/${collectionId}/documents`}
+		class={`${tabClass(`/collections/${collectionId}/documents`)} ${downstreamUnlocked ? '' : 'locked'}`}
+		aria-disabled={downstreamUnlocked ? undefined : 'true'}
+		tabindex={downstreamUnlocked ? undefined : -1}
+		title={downstreamUnlocked ? undefined : lockReason}
+		on:click={handleLockedTabClick}
 	>
-		{$t('collection.tabs.comparisons')}
+		{$t('collection.tabs.papers')}
+	</a>
+	<a
+		href={`/collections/${collectionId}/assistant`}
+		class={`${tabClass(`/collections/${collectionId}/assistant`)} ${downstreamUnlocked ? '' : 'locked'}`}
+		aria-disabled={downstreamUnlocked ? undefined : 'true'}
+		tabindex={downstreamUnlocked ? undefined : -1}
+		title={downstreamUnlocked ? undefined : lockReason}
+		on:click={handleLockedTabClick}
+	>
+		{$t('collection.tabs.assistant')}
 	</a>
 	<a
 		href={`/collections/${collectionId}/graph`}
-		class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/graph`)}
+		class={`${tabClass(`/collections/${collectionId}/graph`)} ${downstreamUnlocked ? '' : 'locked'}`}
+		aria-disabled={downstreamUnlocked ? undefined : 'true'}
+		tabindex={downstreamUnlocked ? undefined : -1}
+		title={downstreamUnlocked ? undefined : lockReason}
+		on:click={handleLockedTabClick}
 	>
 		{$t('collection.tabs.graph')}
 	</a>
@@ -184,23 +252,60 @@
 		<summary>{$t('collection.moreLabel')}</summary>
 		<div class="collection-tabs__menu">
 			<a
+				href={`/collections/${collectionId}/materials`}
+				class={`${tabClass(`/collections/${collectionId}/materials`)} ${downstreamUnlocked ? '' : 'locked'}`}
+				aria-disabled={downstreamUnlocked ? undefined : 'true'}
+				tabindex={downstreamUnlocked ? undefined : -1}
+				title={downstreamUnlocked ? undefined : lockReason}
+				on:click={handleLockedTabClick}
+			>
+				{$t('collection.tabs.materials')}
+			</a>
+			<a
+				href={`/collections/${collectionId}/comparisons`}
+				class={`${tabClass(`/collections/${collectionId}/comparisons`)} ${downstreamUnlocked ? '' : 'locked'}`}
+				aria-disabled={downstreamUnlocked ? undefined : 'true'}
+				tabindex={downstreamUnlocked ? undefined : -1}
+				title={downstreamUnlocked ? undefined : lockReason}
+				on:click={handleLockedTabClick}
+			>
+				{$t('collection.tabs.allComparisons')}
+			</a>
+			<a
 				href={evidenceHref}
-				class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`)}
+				class={`${tabClass(`/collections/${collectionId}/evidence`)} ${downstreamUnlocked ? '' : 'locked'}`}
+				aria-disabled={downstreamUnlocked ? undefined : 'true'}
+				tabindex={downstreamUnlocked ? undefined : -1}
+				title={downstreamUnlocked ? undefined : lockReason}
+				on:click={handleLockedTabClick}
 			>
 				{$t('collection.tabs.evidence')}
 			</a>
-			{#if protocolVisible}
-				<a
-					href={`/collections/${collectionId}/protocol`}
-					class:active={$page.url.pathname.startsWith(`/collections/${collectionId}/protocol`)}
-				>
-					{$t('collection.tabs.protocol')}
-				</a>
-			{/if}
+			<a
+				href={`/collections/${collectionId}/results`}
+				class={`${tabClass(`/collections/${collectionId}/results`)} ${downstreamUnlocked ? '' : 'locked'}`}
+				aria-disabled={downstreamUnlocked ? undefined : 'true'}
+				tabindex={downstreamUnlocked ? undefined : -1}
+				title={downstreamUnlocked ? undefined : lockReason}
+				on:click={handleLockedTabClick}
+			>
+				{$t('collection.tabs.extractedFacts')}
+			</a>
 		</div>
 	</details>
 </nav>
 
 <div class="collection-panel">
-	<slot />
+	{#if showLockedSurface}
+		<section class="collection-locked-surface" aria-labelledby="collection-locked-title">
+			<p class="collection-locked-surface__eyebrow">{$t('collection.lock.eyebrow')}</p>
+			<h2 id="collection-locked-title">{$t('collection.lock.title')}</h2>
+			<p>{lockReason}</p>
+			<a class="btn btn--primary" href={`/collections/${collectionId}`}>
+				{$t('collection.lock.backToWorkspace')}
+			</a>
+		</section>
+	{:else}
+		<slot />
+	{/if}
 </div>

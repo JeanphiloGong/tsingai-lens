@@ -16,6 +16,7 @@ def _patch_core_llm_extractor(monkeypatch):
     from application.core.semantic_build import (
         document_profile_service,
         paper_facts_service,
+        research_objective_service,
     )
     from tests.support.fake_core_llm_extractor import FakeCoreLLMStructuredExtractor
 
@@ -30,6 +31,8 @@ def _patch_core_llm_extractor(monkeypatch):
         "build_default_core_llm_structured_extractor",
         lambda: fake,
     )
-    monkeypatch.setattr(document_profile_service, "core_semantic_rebuild_required", lambda _base_dir: False)
-    monkeypatch.setattr(paper_facts_service, "core_semantic_rebuild_required", lambda _base_dir: False)
-    monkeypatch.setattr(comparison_service, "core_semantic_rebuild_required", lambda _base_dir: False)
+    monkeypatch.setattr(
+        research_objective_service,
+        "build_default_core_llm_structured_extractor",
+        lambda: fake,
+    )

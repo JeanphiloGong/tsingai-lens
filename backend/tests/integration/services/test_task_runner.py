@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +14,11 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.collection_build_task_runner import CollectionBuildTaskRunner
 from application.source.task_service import TaskService
+from domain.source import SourceArtifactSet
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
+)
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
@@ -22,19 +26,6 @@ class DummyWorkflowOutput:
     def __init__(self, workflow: str = "build", errors: list[str] | None = None):
         self.workflow = workflow
         self.errors = errors
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
 
 
 def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
@@ -45,8 +36,16 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
-def _write_source_artifact_outputs(output_dir: Path) -> None:
+def _write_source_artifact_outputs(
+    output_dir: Path,
+    *,
+    collection_id: str | None = None,
+    source_repository=None,  # noqa: ANN001
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    collection_id = collection_id or output_dir.parent.name
+    if source_repository is None:
+        source_repository = SqliteSourceArtifactRepository(output_dir.parents[2] / "lens.sqlite")
     documents = pd.DataFrame(
         [
             {
@@ -59,7 +58,7 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
-                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                        "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
             }
@@ -79,55 +78,56 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
             },
             {
                 "id": "tu-3",
-                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                "text": "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
                 "document_ids": ["paper-1"],
             },
         ]
     )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
-
-
-def _write_review_only_outputs(output_dir: Path) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    documents = pd.DataFrame(
+    blocks = build_blocks(documents, text_units)
+    tables = pd.DataFrame(
         [
             {
-                "id": "paper-1",
-                "title": "A Review of Composite Fillers",
-                "text": "This review summarizes recent advances in composite fillers and processing routes.",
+                "table_id": "tbl-1",
+                "document_id": "paper-1",
+                "table_order": 0,
+                "caption_text": "Processing summary",
+                "caption_block_id": None,
+                "page": None,
+                "bbox": None,
+                "heading_path": ["Experimental Section"],
+                "row_count": 1,
+                "col_count": 2,
+                "column_headers": ["condition", "result"],
+                "table_markdown": "| condition | result |\n| --- | --- |\n| annealed | 97 MPa |",
+                "table_text": "condition: annealed; result: 97 MPa",
+                "metadata": {},
             }
         ]
     )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "This review summarizes recent advances in composite fillers.",
-                "document_ids": ["paper-1"],
-            }
-        ]
+    table_rows = build_table_rows(documents, text_units)
+    table_cells = build_table_cells(documents, text_units)
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=documents.to_dict(orient="records"),
+            text_units=text_units.to_dict(orient="records"),
+            blocks=blocks.to_dict(orient="records"),
+            tables=tables.to_dict(orient="records"),
+            table_rows=table_rows.to_dict(orient="records"),
+            table_cells=table_cells.to_dict(orient="records"),
+        ),
     )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
 
 
 def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
     import application.source.collection_build_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    artifact_registry = ArtifactRegistryService(
+        tmp_path / "collections",
+    )
     runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Composite Papers")
@@ -142,7 +142,10 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
-        _write_source_artifact_outputs(paths.output_dir)
+        _write_source_artifact_outputs(
+            paths.output_dir,
+            source_repository=source_artifact_repository,
+        )
         return [DummyWorkflowOutput()]
 
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
@@ -154,6 +157,7 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
 
     assert result["status"] == "completed"
     assert result["current_stage"] == "artifacts_ready"
+    assert result["progress_detail"]["phase"] == "artifacts_ready"
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
     assert "is_update_run" not in captured
     artifacts = artifact_registry.get(collection["collection_id"])
@@ -164,132 +168,40 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert artifacts["evidence_cards_generated"] is True
     assert artifacts["evidence_cards_ready"] is True
     assert artifacts["characterization_observations_generated"] is True
-    assert artifacts["characterization_observations_ready"] is True
-    assert artifacts["structure_features_generated"] is True
-    assert artifacts["structure_features_ready"] is False
-    assert artifacts["test_conditions_generated"] is True
-    assert artifacts["test_conditions_ready"] is True
-    assert artifacts["baseline_references_generated"] is True
-    assert artifacts["baseline_references_ready"] is True
-    assert artifacts["sample_variants_generated"] is True
-    assert artifacts["sample_variants_ready"] is True
-    assert artifacts["measurement_results_generated"] is True
-    assert artifacts["measurement_results_ready"] is True
-    assert artifacts["comparable_results_generated"] is True
-    assert artifacts["comparable_results_ready"] is True
-    assert artifacts["collection_comparable_results_generated"] is True
-    assert artifacts["collection_comparable_results_ready"] is True
-    assert artifacts["comparison_rows_generated"] is True
-    assert artifacts["comparison_rows_ready"] is True
-    assert artifacts["graph_generated"] is True
-    assert artifacts["graph_ready"] is True
-    assert artifacts["blocks_generated"] is True
-    assert artifacts["blocks_ready"] is True
-    assert artifacts["figures_generated"] is True
-    assert artifacts["figures_ready"] is False
-    assert artifacts["table_rows_generated"] is True
-    assert artifacts["table_rows_ready"] is False
-    assert artifacts["table_cells_generated"] is True
-    assert artifacts["table_cells_ready"] is False
-    assert artifacts["procedure_blocks_generated"] is True
-    assert artifacts["procedure_blocks_ready"] is True
-    assert artifacts["protocol_steps_generated"] is True
-    assert artifacts["protocol_steps_ready"] is True
-    assert paths.output_dir.joinpath("document_profiles.parquet").exists()
-    assert paths.output_dir.joinpath("evidence_cards.parquet").exists()
-    assert paths.output_dir.joinpath("comparable_results.parquet").exists()
-    assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()
-    assert paths.output_dir.joinpath("comparison_rows.parquet").exists()
-    assert paths.output_dir.joinpath("entities.parquet").exists() is False
-    assert paths.output_dir.joinpath("relationships.parquet").exists() is False
-
-
-def test_build_task_runner_skips_protocol_when_profiles_are_not_extractable(
-    monkeypatch, tmp_path
-):
-    _patch_parquet(monkeypatch)
-
-    import application.source.collection_build_task_runner as task_runner_module
-
-    collection_service = CollectionService(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
-
-    collection = collection_service.create_collection("Review Papers")
-    paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(
-        collection["collection_id"],
-        "paper.txt",
-        b"This review summarizes recent advances in composite fillers.",
-    )
-
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
-    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
-        _write_review_only_outputs(paths.output_dir)
-        return [DummyWorkflowOutput()]
-
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
-    monkeypatch.setattr(
-        task_runner_module,
-        "load_config",
-        lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
-    )
-    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
-
-    task = task_service.create_task(collection["collection_id"], "build")
-    result = asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
-
-    assert result["status"] == "completed"
-    assert "未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。" in result["warnings"]
-    artifacts = artifact_registry.get(collection["collection_id"])
-    assert artifacts["documents_generated"] is True
-    assert artifacts["documents_ready"] is True
-    assert artifacts["document_profiles_generated"] is True
-    assert artifacts["document_profiles_ready"] is True
-    assert artifacts["graph_generated"] is True
-    assert artifacts["graph_ready"] is True
-    assert artifacts["blocks_generated"] is True
-    assert artifacts["blocks_ready"] is True
-    assert artifacts["figures_generated"] is True
-    assert artifacts["figures_ready"] is False
-    assert artifacts["table_rows_generated"] is True
-    assert artifacts["table_rows_ready"] is False
-    assert artifacts["table_cells_generated"] is True
-    assert artifacts["table_cells_ready"] is False
-    assert artifacts["evidence_cards_generated"] is True
-    assert artifacts["evidence_cards_ready"] is False
-    assert artifacts["characterization_observations_generated"] is True
     assert artifacts["characterization_observations_ready"] is False
     assert artifacts["structure_features_generated"] is True
     assert artifacts["structure_features_ready"] is False
     assert artifacts["test_conditions_generated"] is True
-    assert artifacts["test_conditions_ready"] is False
+    assert artifacts["test_conditions_ready"] is True
     assert artifacts["baseline_references_generated"] is True
     assert artifacts["baseline_references_ready"] is False
     assert artifacts["sample_variants_generated"] is True
     assert artifacts["sample_variants_ready"] is False
     assert artifacts["measurement_results_generated"] is True
     assert artifacts["measurement_results_ready"] is False
-    assert artifacts["comparable_results_generated"] is True
+    assert artifacts["comparable_results_generated"] is False
     assert artifacts["comparable_results_ready"] is False
-    assert artifacts["collection_comparable_results_generated"] is True
+    assert artifacts["collection_comparable_results_generated"] is False
     assert artifacts["collection_comparable_results_ready"] is False
-    assert artifacts["comparison_rows_generated"] is True
+    assert artifacts["comparison_rows_generated"] is False
     assert artifacts["comparison_rows_ready"] is False
-    assert artifacts["protocol_steps_generated"] is False
-    assert artifacts["protocol_steps_ready"] is False
-    assert paths.output_dir.joinpath("document_profiles.parquet").exists()
-    assert paths.output_dir.joinpath("comparable_results.parquet").exists()
-    assert paths.output_dir.joinpath("collection_comparable_results.parquet").exists()
-
+    assert artifacts["graph_generated"] is False
+    assert artifacts["graph_ready"] is False
+    assert artifacts["blocks_generated"] is True
+    assert artifacts["blocks_ready"] is True
+    assert artifacts["figures_generated"] is True
+    assert artifacts["figures_ready"] is False
+    assert artifacts["table_rows_generated"] is True
+    assert artifacts["table_rows_ready"] is False
+    assert artifacts["table_cells_generated"] is True
+    assert artifacts["table_cells_ready"] is False
+    core_facts = SqliteCoreFactRepository(tmp_path / "lens.sqlite").read_collection_facts(
+        collection["collection_id"]
+    )
+    assert core_facts.research_objectives_ready is True
+    assert core_facts.paper_skims
 
 def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
-    _patch_parquet(monkeypatch)
-
     import application.source.collection_build_task_runner as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
@@ -329,8 +241,14 @@ def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
     )
     assert any(
         "Build task progress" in record.message
+        and "stage=objective_evidence_routing_started" in record.message
+        and "progress_percent=75" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Build task progress" in record.message
         and "stage=paper_facts_started" in record.message
-        and "progress_percent=76" in record.message
+        and "progress_percent=80" in record.message
         for record in caplog.records
     )
     assert any(
@@ -339,3 +257,5 @@ def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
         and "progress_percent=100" in record.message
         for record in caplog.records
     )
+    final_task = task_service.get_task(task["task_id"])
+    assert final_task["progress_detail"]["phase"] == "artifacts_ready"

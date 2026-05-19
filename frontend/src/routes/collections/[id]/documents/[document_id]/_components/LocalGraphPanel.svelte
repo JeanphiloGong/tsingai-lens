@@ -14,6 +14,24 @@
 		graph?.nodes.find((node) => node.id === selectedNodeId) ??
 		graph?.nodes.find((node) => node.position === 'center') ??
 		null;
+	$: selectedNodeEdges =
+		graph && selectedNode
+			? graph.edges.filter(
+					(edge) => edge.source === selectedNode?.id || edge.target === selectedNode?.id
+				)
+			: [];
+	$: relatedResultCount =
+		graph?.nodes.filter((node) => node.type === 'result' && node.id !== selectedNode?.id).length ??
+		0;
+
+	const graphPoints: Record<WorkbenchGraphNode['position'], { x: number; y: number }> = {
+		center: { x: 210, y: 235 },
+		top: { x: 210, y: 76 },
+		left: { x: 82, y: 198 },
+		right: { x: 338, y: 198 },
+		'bottom-left': { x: 126, y: 356 },
+		'bottom-right': { x: 294, y: 356 }
+	};
 
 	function handleNodeClick(node: WorkbenchGraphNode) {
 		onSelectNode(node.id);
@@ -22,6 +40,35 @@
 		} else if (node.source_span_id) {
 			onJumpToSource(node.source_span_id);
 		}
+	}
+
+	function nodePoint(nodeId: string) {
+		const node = graph?.nodes.find((candidate) => candidate.id === nodeId);
+		return graphPoints[node?.position ?? 'center'];
+	}
+
+	function edgeLine(edge: WorkbenchLocalGraph['edges'][number]) {
+		const source = nodePoint(edge.source);
+		const target = nodePoint(edge.target);
+		return {
+			x1: source.x,
+			y1: source.y,
+			x2: target.x,
+			y2: target.y
+		};
+	}
+
+	function edgeLabelPoint(edge: WorkbenchLocalGraph['edges'][number]) {
+		const line = edgeLine(edge);
+		return {
+			x: (line.x1 + line.x2) / 2,
+			y: (line.y1 + line.y2) / 2
+		};
+	}
+
+	function nodeStyle(node: WorkbenchGraphNode) {
+		const point = graphPoints[node.position];
+		return `left: ${(point.x / 420) * 100}%; top: ${(point.y / 470) * 100}%;`;
 	}
 </script>
 
@@ -58,16 +105,18 @@
 							<path d="M 0 0 L 10 5 L 0 10 z"></path>
 						</marker>
 					</defs>
-					<line x1="210" y1="235" x2="210" y2="75"></line>
-					<line x1="210" y1="235" x2="84" y2="197"></line>
-					<line x1="210" y1="235" x2="336" y2="197"></line>
-					<line x1="210" y1="235" x2="126" y2="357"></line>
-					<line x1="210" y1="235" x2="294" y2="357"></line>
-					<text x="222" y="154">goal</text>
-					<text x="126" y="196">uses</text>
-					<text x="282" y="196">uses</text>
-					<text x="136" y="296">produces</text>
-					<text x="280" y="296">source</text>
+					{#each graph.edges as edge}
+						{@const line = edgeLine(edge)}
+						{@const label = edgeLabelPoint(edge)}
+						<line
+							x1={line.x1}
+							y1={line.y1}
+							x2={line.x2}
+							y2={line.y2}
+							class:active={selectedNodeEdges.some((item) => item.id === edge.id)}
+						></line>
+						<text x={label.x + 8} y={label.y - 8}>{edge.label}</text>
+					{/each}
 				</svg>
 
 				{#each graph.nodes as node}
@@ -75,6 +124,7 @@
 						type="button"
 						class={`graph-node graph-node--${node.position} graph-node--${node.type}`}
 						class:active={selectedNode?.id === node.id}
+						style={nodeStyle(node)}
 						on:click={() => handleNodeClick(node)}
 					>
 						{node.label}
@@ -92,11 +142,11 @@
 						<p>{selectedNode.detail}</p>
 						<div class="related-row">
 							<span>{$t('workbench.relatedEvidence')}</span>
-							<strong>{graph.edges.length}</strong>
+							<strong>{selectedNodeEdges.length}</strong>
 						</div>
 						<div class="related-row">
 							<span>{$t('workbench.relatedResults')}</span>
-							<strong>{graph.nodes.filter((node) => node.type === 'result').length}</strong>
+							<strong>{relatedResultCount}</strong>
 						</div>
 						<button class="view-all" type="button">{$t('workbench.viewAllRelated')}</button>
 					</div>
@@ -216,6 +266,11 @@
 		stroke: #94a3b8;
 		stroke-width: 1.4;
 		marker-end: url(#graph-arrow);
+	}
+
+	line.active {
+		stroke: #2563eb;
+		stroke-width: 2.2;
 	}
 
 	path {

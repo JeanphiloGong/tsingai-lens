@@ -22,6 +22,9 @@ delivery order, and contract follow-up.
   Main backend rollout plan for the layering wave
 - [`contract-follow-up.md`](contract-follow-up.md)
   Backend contract cleanup and freeze follow-up after the main cut
+- [`collection-bound-short-conversation-plan.md`](collection-bound-short-conversation-plan.md)
+  Current implementation plan for keeping Goal sessions as a simple
+  collection-bound conversation surface before later decision-layer expansion
 
 ## Related Docs
 

@@ -1,15 +1,25 @@
 import os
 from time import perf_counter
 
-from controllers.core import comparable_results, comparisons, documents, evidence, results, workspace
-from controllers.derived import graph, protocol, reports
+from config import DATA_DIR
+from controllers.core import (
+    comparable_results,
+    comparisons,
+    documents,
+    evidence,
+    research_objectives,
+    research_view,
+    results,
+    workspace,
+)
+from controllers.derived import graph, material_review_reports, reports
 from controllers.goal import intake as goals
-from controllers.source import collections, tasks
+from controllers.goal import sessions as goal_sessions
+from controllers.source import collections, references, tasks
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from config import DATA_DIR
 from utils.logger import (
     REQUEST_ID_HEADER,
     bind_request_id,
@@ -34,7 +44,7 @@ def _parse_cors_allowed_origins() -> list[str]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.6.0",
+        version="0.7.0",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",
@@ -96,14 +106,18 @@ def create_app() -> FastAPI:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.mount(f"{PUBLIC_API_PREFIX}/static", StaticFiles(directory=DATA_DIR), name="static")
     app.include_router(reports.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(material_review_reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(references.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(goal_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(graph.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(protocol.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(research_view.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(comparisons.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(results.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(comparable_results.router, prefix=PUBLIC_API_V1_PREFIX)

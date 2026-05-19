@@ -2,7 +2,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Mapping, Protocol
+
+from domain.core.comparison import (
+    CollectionComparableResult,
+    ComparableResult,
+    ComparisonRowRecord,
+    PairwiseComparisonRelation,
+)
+from domain.core.document_profile import DocumentProfile
+from domain.core.fact_store import CoreFactSet
+from domain.core.research_objective import (
+    ObjectiveContext,
+    ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
+    ObjectivePaperFrame,
+    PaperSkim,
+    ResearchObjective,
+)
+from domain.source import (
+    SourceArtifactSet,
+    SourceBlock,
+    SourceDocument,
+    SourceFigure,
+    SourceReferenceSet,
+    SourceTable,
+    SourceTableCell,
+    SourceTableRow,
+    SourceTextUnit,
+)
 
 
 @dataclass(frozen=True)
@@ -65,3 +94,115 @@ class ArtifactRepository(Protocol):
     def read(self, collection_id: str) -> dict | None: ...
 
     def write(self, collection_id: str, payload: dict) -> None: ...
+
+
+class GoalSessionRepository(Protocol):
+    def read_session(self, session_id: str) -> dict[str, Any] | None: ...
+
+    def write_session(self, payload: Mapping[str, Any]) -> None: ...
+
+    def read_messages(self, session_id: str) -> list[dict[str, Any]]: ...
+
+    def write_messages(
+        self,
+        session_id: str,
+        messages: list[Mapping[str, Any]],
+    ) -> None: ...
+
+
+class SourceArtifactRepository(Protocol):
+    backend_name: str
+
+    def replace_collection_artifacts(
+        self,
+        collection_id: str,
+        artifacts: SourceArtifactSet,
+    ) -> None: ...
+
+    def read_collection_artifacts(self, collection_id: str) -> SourceArtifactSet: ...
+
+    def replace_collection_references(
+        self,
+        collection_id: str,
+        references: SourceReferenceSet,
+    ) -> None: ...
+
+    def read_collection_references(self, collection_id: str) -> SourceReferenceSet: ...
+
+    def list_documents(self, collection_id: str) -> list[SourceDocument]: ...
+
+    def list_text_units(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+    ) -> list[SourceTextUnit]: ...
+
+    def list_blocks(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+    ) -> list[SourceBlock]: ...
+
+    def list_tables(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+    ) -> list[SourceTable]: ...
+
+    def list_table_rows(
+        self,
+        collection_id: str,
+        table_id: str | None = None,
+    ) -> list[SourceTableRow]: ...
+
+    def list_table_cells(
+        self,
+        collection_id: str,
+        table_id: str | None = None,
+        row_index: int | None = None,
+    ) -> list[SourceTableCell]: ...
+
+    def list_figures(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+    ) -> list[SourceFigure]: ...
+
+
+class CoreFactRepository(Protocol):
+    backend_name: str
+
+    def replace_collection_research_objectives(
+        self,
+        collection_id: str,
+        paper_skims: tuple[PaperSkim, ...],
+        research_objectives: tuple[ResearchObjective, ...],
+        objective_contexts: tuple[ObjectiveContext, ...],
+        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
+        objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
+        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+        objective_logic_chains: tuple[ObjectiveLogicChain, ...],
+    ) -> None: ...
+
+    def replace_collection_document_profiles(
+        self,
+        collection_id: str,
+        document_profiles: tuple[DocumentProfile, ...],
+    ) -> None: ...
+
+    def replace_collection_facts(
+        self,
+        collection_id: str,
+        facts: CoreFactSet,
+    ) -> None: ...
+
+    def replace_collection_comparison_artifacts(
+        self,
+        collection_id: str,
+        comparable_results: tuple[ComparableResult, ...],
+        collection_comparable_results: tuple[CollectionComparableResult, ...],
+        comparison_rows: tuple[ComparisonRowRecord, ...],
+        pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = (),
+    ) -> None: ...
+
+    def read_collection_facts(self, collection_id: str) -> CoreFactSet: ...

@@ -50,223 +50,149 @@ function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
 	});
 }
 
-function buildWorkspacePayload() {
+function researchPayload() {
 	return {
-		collection: {
-			collection_id: 'col_123',
-			name: 'Flow coverage collection'
+		collection_id: 'col_123',
+		state: 'ready',
+		overview: {
+			document_count: 2,
+			material_systems: ['oxide cathode']
 		},
-		file_count: 2,
-		status_summary: 'ready',
-		workflow: {
-			documents: 'ready',
-			results: 'ready',
-			evidence: 'ready',
-			comparisons: 'ready',
-			protocol: 'not_applicable'
-		},
-		document_summary: {
-			total_documents: 2,
-			doc_type_counts: {
-				experimental: 2,
-				review: 0,
-				mixed: 0,
-				uncertain: 0
-			},
-			protocol_extractable_counts: {
-				yes: 0,
-				partial: 0,
-				no: 2,
-				uncertain: 0
-			},
-			warnings: []
-		},
-		warnings: [],
-		artifacts: {
-			output_path: '/tmp/col_123',
-			documents_generated: true,
-			documents_ready: true,
-			document_profiles_generated: true,
-			document_profiles_ready: true,
-			evidence_cards_generated: true,
-			evidence_cards_ready: true,
-			comparable_results_generated: true,
-			comparable_results_ready: true,
-			collection_comparable_results_generated: true,
-			collection_comparable_results_ready: true,
-			collection_comparable_results_stale: false,
-			comparison_rows_generated: true,
-			comparison_rows_ready: true,
-			comparison_rows_stale: false,
-			graph_generated: false,
-			graph_ready: false,
-			graph_stale: false,
-			procedure_blocks_generated: false,
-			procedure_blocks_ready: false,
-			protocol_steps_generated: false,
-			protocol_steps_ready: false,
-			updated_at: '2026-04-22T00:00:00Z'
-		},
-		latest_task: null,
-		recent_tasks: [],
-		capabilities: {
-			can_view_documents: true,
-			can_view_results: true,
-			can_view_evidence: true,
-			can_view_comparisons: true,
-			can_view_graph: false,
-			can_download_graphml: false,
-			can_view_protocol_steps: false,
-			can_search_protocol: false,
-			can_generate_sop: false
-		},
-		links: {
-			workspace: '/collections/col_123',
-			documents: '/collections/col_123/documents',
-			results: '/collections/col_123/results',
-			evidence: '/collections/col_123/evidence',
-			comparisons: '/collections/col_123/comparisons',
-			protocol: '/collections/col_123/protocol',
-			graph: '/collections/col_123/graph'
-		}
+		comparable_groups: [
+			{
+				group_id: 'grp_1',
+				title: 'Anneal temperature vs conductivity',
+				material_system: 'oxide cathode',
+				process_family: 'annealing',
+				variable_axis: 'temperature',
+				fixed_conditions: {
+					atmosphere: 'air'
+				},
+				properties: ['conductivity'],
+				documents: ['doc_1', 'doc_2'],
+				samples: ['S1', 'S2'],
+				comparability_status: 'comparable',
+				matrix: {
+					matrix_id: 'matrix_1',
+					group_id: 'grp_1',
+					rows: [
+						{
+							row_id: 'mx_row_1',
+							document_id: 'doc_1',
+							sample_id: 'S1',
+							material: 'oxide cathode',
+							process_context: { process: 'annealing' },
+							variable_value: '700 C',
+							test_condition: 'EIS',
+							property: 'conductivity',
+							result: {
+								display_value: '12 mS/cm',
+								status: 'observed',
+								evidence_refs: [
+									{
+										evidence_ref_id: 'ev_1',
+										document_id: 'doc_1',
+										locator: 'Table 1'
+									}
+								]
+							}
+						}
+					]
+				}
+			}
+		]
 	};
 }
 
 describe('collections/[id]/comparisons/+page.svelte', () => {
+	let researchResponse: Record<string, unknown>;
+
 	beforeEach(() => {
 		setPage({
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123/comparisons')
 		});
+		researchResponse = researchPayload();
 		fetchMock.mockReset();
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
 				typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 			const url = new URL(rawUrl, 'http://localhost');
 
-			if (url.pathname === '/api/v1/collections/col_123/workspace') {
-				return jsonResponse(buildWorkspacePayload());
-			}
-			if (url.pathname === '/api/v1/collections/col_123/comparisons') {
-				return jsonResponse({
-					collection_id: 'col_123',
-					total: 2,
-					count: 2,
-					items: [
-						{
-							row_id: 'row_1',
-							result_id: 'cres_1',
-							collection_id: 'col_123',
-							source_document_id: 'doc_1',
-							confidence: 0.9,
-							display: {
-								material_system_normalized: 'oxide cathode',
-								process_normalized: '700 C anneal',
-								variant_id: 'var_1',
-								variant_label: 'Sample A',
-								variable_axis: null,
-								variable_value: null,
-								property_normalized: 'conductivity',
-								result_type: 'scalar',
-								result_summary: '12 mS/cm',
-								value: 12,
-								unit: 'mS/cm',
-								test_condition_normalized: 'EIS',
-								baseline_reference: 'as-prepared',
-								baseline_normalized: 'as-prepared'
-							},
-							evidence_bundle: {
-								result_source_type: 'text',
-								supporting_evidence_ids: ['ev_1'],
-								supporting_anchor_ids: ['anc_1'],
-								characterization_observation_ids: [],
-								structure_feature_ids: []
-							},
-							assessment: {
-								comparability_status: 'comparable',
-								comparability_warnings: [],
-								comparability_basis: [],
-								requires_expert_review: false,
-								assessment_epistemic_status: 'grounded'
-							},
-							uncertainty: {
-								missing_critical_context: [],
-								unresolved_fields: [],
-								unresolved_baseline_link: false,
-								unresolved_condition_link: false
-							}
-						},
-						{
-							row_id: 'row_2',
-							result_id: 'cres_2',
-							collection_id: 'col_123',
-							source_document_id: 'doc_2',
-							confidence: 0.86,
-							display: {
-								material_system_normalized: 'oxide cathode',
-								process_normalized: '700 C anneal',
-								variant_id: 'var_2',
-								variant_label: 'Sample B',
-								variable_axis: null,
-								variable_value: null,
-								property_normalized: 'impedance',
-								result_type: 'result',
-								result_summary: 'Impedance improved with partial baseline alignment.',
-								value: null,
-								unit: null,
-								test_condition_normalized: 'EIS',
-								baseline_reference: 'as-prepared',
-								baseline_normalized: 'as-prepared'
-							},
-							evidence_bundle: {
-								result_source_type: 'text',
-								supporting_evidence_ids: [],
-								supporting_anchor_ids: [],
-								characterization_observation_ids: [],
-								structure_feature_ids: []
-							},
-							assessment: {
-								comparability_status: 'limited',
-								comparability_warnings: ['Baseline should be checked before comparison.'],
-								comparability_basis: [],
-								requires_expert_review: false,
-								assessment_epistemic_status: 'provisional'
-							},
-							uncertainty: {
-								missing_critical_context: [],
-								unresolved_fields: [],
-								unresolved_baseline_link: false,
-								unresolved_condition_link: false
-							}
-						}
-					]
-				});
+			if (url.pathname === '/api/v1/collections/col_123/research-view') {
+				return jsonResponse(researchResponse);
 			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
 		});
 	});
 
-	it('renders the comparison review cards and row actions', async () => {
+	it('renders comparable groups and cross-paper matrix from research view', async () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Comparison Review' }))
+			.element(browserPage.getByRole('heading', { name: 'Comparable groups' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Comparison conclusion')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Confidence 90%')).toBeInTheDocument();
-
-		const sourceLink = browserPage.getByRole('link', { name: 'View source evidence' });
 		await expect
-			.element(sourceLink)
-			.toHaveAttribute(
-				'href',
-				'/collections/col_123/documents/doc_1?evidence_id=ev_1&return_to=%2Fcollections%2Fcol_123%2Fcomparisons'
-			);
-
-		const comparisonLink = browserPage.getByRole('link', { name: 'View comparison' });
+			.element(browserPage.getByRole('heading', { name: 'Anneal temperature vs conductivity' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: '12 mS/cm' })).toBeInTheDocument();
 		await expect
-			.element(comparisonLink)
-			.toHaveAttribute('href', '/collections/col_123/results/cres_2');
+			.element(browserPage.getByRole('cell', { name: 'process: annealing' }))
+			.toBeInTheDocument();
+	});
+
+	it('shows a pending comparison artifact state when coverage exists without comparable groups', async () => {
+		researchResponse = {
+			collection_id: 'col_123',
+			state: 'empty',
+			overview: {
+				document_count: 2
+			},
+			paper_coverage: [
+				{
+					document_id: 'doc_1',
+					title: 'Paper A',
+					state: 'empty',
+					sample_count: 0,
+					process_param_count: 0,
+					measurement_count: 0,
+					condition_count: 0,
+					evidence_count: 0,
+					issue_count: 2
+				}
+			],
+			comparable_groups: [],
+			warnings: [
+				{
+					warning_id: 'warning:comparison_projection_unavailable',
+					code: 'comparison_projection_unavailable',
+					severity: 'info',
+					scope: 'collection',
+					message:
+						'Paper coverage is available, but comparable groups are not available until comparison artifacts are generated.',
+					related_object_ids: []
+				}
+			]
+		};
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Comparison artifacts are not ready' }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Paper coverage is available, but comparable groups need generated comparison artifacts before this page can be used.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open collection overview' }))
+			.toHaveAttribute('href', '/collections/col_123');
+		await expect
+			.element(browserPage.getByText(/Paper coverage is available, but comparable groups are not/))
+			.not.toBeInTheDocument();
 	});
 });

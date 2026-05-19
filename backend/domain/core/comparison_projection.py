@@ -1,0 +1,303 @@
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+import logging
+import math
+from typing import Any
+
+from domain.core.comparison import (
+    COMPARISON_ROW_PROJECTION_VERSION,
+    CollectionComparableResult,
+    ComparableResult,
+    ComparisonRowRecord,
+    build_comparison_row_id,
+)
+
+logger = logging.getLogger(__name__)
+
+
+COMPARISON_ROW_COLUMNS = [
+    "row_id",
+    "collection_id",
+    "comparable_result_id",
+    "source_document_id",
+    "variant_id",
+    "variant_label",
+    "variable_axis",
+    "variable_value",
+    "baseline_reference",
+    "result_source_type",
+    "result_type",
+    "result_summary",
+    "supporting_evidence_ids",
+    "supporting_anchor_ids",
+    "characterization_observation_ids",
+    "structure_feature_ids",
+    "material_system_normalized",
+    "process_normalized",
+    "property_normalized",
+    "baseline_normalized",
+    "test_condition_normalized",
+    "comparability_status",
+    "comparability_warnings",
+    "comparability_basis",
+    "requires_expert_review",
+    "assessment_epistemic_status",
+    "missing_critical_context",
+    "value",
+    "unit",
+]
+
+
+@dataclass(frozen=True)
+class ComparisonProjectionRecords:
+    comparable_results: tuple[ComparableResult, ...]
+    collection_comparable_results: tuple[CollectionComparableResult, ...]
+    comparison_rows: tuple[ComparisonRowRecord, ...]
+
+
+class ComparisonRowProjector:
+    """Project collection-scoped semantic comparison records into row records."""
+
+    def project_rows_from_semantic_artifacts(
+        self,
+        *,
+        collection_id: str,
+        comparable_results: Iterable[ComparableResult | Mapping[str, Any]],
+        scoped_results: Iterable[CollectionComparableResult | Mapping[str, Any]],
+    ) -> tuple[ComparisonRowRecord, ...]:
+        comparable_records = tuple(
+            _comparable_result_from_value(record) for record in comparable_results
+        )
+        scoped_records = tuple(
+            _collection_comparable_result_from_value(record)
+            for record in scoped_results
+        )
+        if not comparable_records or not scoped_records:
+            return ()
+
+        comparable_lookup = {
+            record.comparable_result_id: record
+            for record in comparable_records
+            if record.comparable_result_id
+        }
+
+        row_records_by_id: dict[str, ComparisonRowRecord] = {}
+        scoped_view = sorted(
+            (
+                record
+                for record in scoped_records
+                if self.safe_text(record.collection_id) == collection_id
+                and bool(record.included)
+            ),
+            key=lambda record: (
+                _sort_order_key(record.sort_order),
+                record.comparable_result_id,
+            ),
+        )
+
+        for scoped_result in scoped_view:
+            comparable_result = comparable_lookup.get(scoped_result.comparable_result_id)
+            if comparable_result is None:
+                logger.warning(
+                    "Comparison projection skipped scoped_result without semantic payload collection_id=%s comparable_result_id=%s",
+                    collection_id,
+                    scoped_result.comparable_result_id,
+                )
+                continue
+            row_record = self.project_row(
+                comparable_result=comparable_result,
+                scoped_result=scoped_result,
+            )
+            existing_row = row_records_by_id.get(row_record.row_id)
+            row_records_by_id[row_record.row_id] = (
+                self.merge_row_records(existing_row, row_record)
+                if existing_row is not None
+                else row_record
+            )
+
+        return self.normalize_row_records(
+            row_records_by_id.values(),
+            collection_id,
+        )
+
+    def project_row(
+        self,
+        *,
+        comparable_result: ComparableResult,
+        scoped_result: CollectionComparableResult,
+    ) -> ComparisonRowRecord:
+        assessment = scoped_result.assessment
+        return ComparisonRowRecord(
+            row_id=build_comparison_row_id(
+                collection_id=scoped_result.collection_id,
+                comparable_result_id=comparable_result.comparable_result_id,
+                projection_version=COMPARISON_ROW_PROJECTION_VERSION,
+            ),
+            collection_id=scoped_result.collection_id,
+            comparable_result_id=comparable_result.comparable_result_id,
+            source_document_id=comparable_result.source_document_id,
+            variant_id=comparable_result.binding.variant_id,
+            variant_label=comparable_result.variant_label,
+            variable_axis=comparable_result.axis.axis_name,
+            variable_value=comparable_result.axis.axis_value,
+            baseline_reference=comparable_result.baseline_reference,
+            result_source_type=comparable_result.result_source_type,
+            result_type=comparable_result.value.result_type,
+            result_summary=comparable_result.value.summary,
+            supporting_evidence_ids=comparable_result.evidence.evidence_ids,
+            supporting_anchor_ids=comparable_result.evidence.direct_anchor_ids,
+            characterization_observation_ids=comparable_result.evidence.characterization_observation_ids,
+            structure_feature_ids=comparable_result.evidence.structure_feature_ids,
+            material_system_normalized=comparable_result.normalized_context.material_system_normalized,
+            process_normalized=comparable_result.normalized_context.process_normalized
+            or "unspecified process",
+            property_normalized=comparable_result.value.property_normalized,
+            baseline_normalized=comparable_result.normalized_context.baseline_normalized
+            or "unspecified baseline",
+            test_condition_normalized=comparable_result.normalized_context.test_condition_normalized
+            or "unspecified test condition",
+            comparability_status=assessment.comparability_status,
+            comparability_warnings=assessment.comparability_warnings,
+            comparability_basis=assessment.comparability_basis,
+            requires_expert_review=assessment.requires_expert_review,
+            assessment_epistemic_status=assessment.assessment_epistemic_status,
+            missing_critical_context=assessment.missing_critical_context,
+            value=comparable_result.value.numeric_value,
+            unit=comparable_result.value.unit,
+        )
+
+    def merge_row_records(
+        self,
+        existing: ComparisonRowRecord,
+        incoming: ComparisonRowRecord,
+    ) -> ComparisonRowRecord:
+        return ComparisonRowRecord(
+            row_id=existing.row_id,
+            collection_id=existing.collection_id,
+            comparable_result_id=existing.comparable_result_id,
+            source_document_id=existing.source_document_id,
+            variant_id=existing.variant_id,
+            variant_label=existing.variant_label,
+            variable_axis=existing.variable_axis,
+            variable_value=existing.variable_value,
+            baseline_reference=existing.baseline_reference,
+            result_source_type=existing.result_source_type,
+            result_type=existing.result_type,
+            result_summary=existing.result_summary,
+            supporting_evidence_ids=tuple(
+                self.dedupe_strings(
+                    [
+                        *existing.supporting_evidence_ids,
+                        *incoming.supporting_evidence_ids,
+                    ]
+                )
+            ),
+            supporting_anchor_ids=tuple(
+                self.dedupe_strings(
+                    [
+                        *existing.supporting_anchor_ids,
+                        *incoming.supporting_anchor_ids,
+                    ]
+                )
+            ),
+            characterization_observation_ids=tuple(
+                self.dedupe_strings(
+                    [
+                        *existing.characterization_observation_ids,
+                        *incoming.characterization_observation_ids,
+                    ]
+                )
+            ),
+            structure_feature_ids=tuple(
+                self.dedupe_strings(
+                    [
+                        *existing.structure_feature_ids,
+                        *incoming.structure_feature_ids,
+                    ]
+                )
+            ),
+            material_system_normalized=existing.material_system_normalized,
+            process_normalized=existing.process_normalized,
+            property_normalized=existing.property_normalized,
+            baseline_normalized=existing.baseline_normalized,
+            test_condition_normalized=existing.test_condition_normalized,
+            comparability_status=existing.comparability_status,
+            comparability_warnings=existing.comparability_warnings,
+            comparability_basis=existing.comparability_basis,
+            requires_expert_review=existing.requires_expert_review,
+            assessment_epistemic_status=existing.assessment_epistemic_status,
+            missing_critical_context=existing.missing_critical_context,
+            value=existing.value,
+            unit=existing.unit,
+        )
+
+    def normalize_row_records(
+        self,
+        rows: Iterable[ComparisonRowRecord | Mapping[str, Any]],
+        collection_id: str | None,
+    ) -> tuple[ComparisonRowRecord, ...]:
+        records = []
+        for row in rows:
+            record = (
+                row
+                if isinstance(row, ComparisonRowRecord)
+                else ComparisonRowRecord.from_mapping(dict(row))
+            )
+            if collection_id is not None and not record.collection_id:
+                record = ComparisonRowRecord.from_mapping(
+                    {**record.to_record(), "collection_id": collection_id}
+                )
+            records.append(record)
+        return tuple(records)
+
+    def dedupe_strings(self, values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = self.safe_text(value)
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            deduped.append(text)
+        return deduped
+
+    def safe_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        text = str(value).strip()
+        return text or None
+
+
+def _sort_order_key(value: Any) -> int:
+    if value is None:
+        return 1_000_000_000
+    if isinstance(value, float) and math.isnan(value):
+        return 1_000_000_000
+    return int(value)
+
+
+def _comparable_result_from_value(
+    value: ComparableResult | Mapping[str, Any],
+) -> ComparableResult:
+    if isinstance(value, ComparableResult):
+        return value
+    return ComparableResult.from_mapping(value)
+
+
+def _collection_comparable_result_from_value(
+    value: CollectionComparableResult | Mapping[str, Any],
+) -> CollectionComparableResult:
+    if isinstance(value, CollectionComparableResult):
+        return value
+    return CollectionComparableResult.from_mapping(value)
+
+
+__all__ = [
+    "COMPARISON_ROW_COLUMNS",
+    "ComparisonProjectionRecords",
+    "ComparisonRowProjector",
+]

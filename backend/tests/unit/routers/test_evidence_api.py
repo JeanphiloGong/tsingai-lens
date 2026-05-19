@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 
-import pandas as pd
 import pytest
 
 try:
@@ -12,59 +9,29 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import evidence as evidence_controller
-from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        payload = {
-            "columns": list(frame.columns),
-            "records": frame.to_dict(orient="records"),
-        }
-        Path(path).write_text(json.dumps(payload), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload["records"], columns=payload["columns"])
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _write_source_artifacts(
-    output_dir: Path,
-    documents: pd.DataFrame,
-    text_units: pd.DataFrame | None = None,
-) -> None:
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
+from domain.core import CoreFactSet, EvidenceAnchor, MeasurementResult, SampleVariant
 
 
 @pytest.fixture()
 def evidence_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    document_profile_service = DocumentProfileService(collection_service)
     paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
     )
 
     monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
 
-    return collection_service, artifact_registry, paper_facts_service
+    return collection_service, paper_facts_service
 
 
 def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
-    collection_service, _artifact_registry, _paper_facts_service = evidence_services
+    collection_service, _paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -77,7 +44,7 @@ def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
 
 
 def test_evidence_route_returns_404_for_missing_collection(evidence_services):
-    _collection_service, _artifact_registry, _paper_facts_service = evidence_services
+    _collection_service, _paper_facts_service = evidence_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(evidence_controller.list_collection_evidence_cards("col_missing"))
@@ -89,38 +56,14 @@ def test_evidence_route_returns_404_for_missing_collection(evidence_services):
 
 def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
     evidence_services,
-    monkeypatch,
 ):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _paper_facts_service = evidence_services
+    collection_service, paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Empty Evidence Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    pd.DataFrame(
-        [
-            {
-                "id": "doc-1",
-                "title": "Review of Composite Fillers",
-                "text": "This review summarizes recent advances in composite filler systems.",
-            }
-        ]
-    ).to_parquet(output_dir / "documents.parquet", index=False)
-    _write_source_artifacts(
-        output_dir,
-        pd.DataFrame(
-            [
-                {
-                    "id": "doc-1",
-                    "title": "Review of Composite Fillers",
-                    "text": "This review summarizes recent advances in composite filler systems.",
-                }
-            ]
-        ),
-        None,
+    paper_facts_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(paper_facts_ready=True),
     )
-    artifact_registry.upsert(collection_id, output_dir)
 
     payload = asyncio.run(
         evidence_controller.list_collection_evidence_cards(collection_id)
@@ -131,37 +74,67 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
     assert payload.count == 0
 
 
-def test_evidence_card_route_returns_single_card(evidence_services, monkeypatch):
-    _patch_parquet(monkeypatch)
-
-    collection_service, artifact_registry, _paper_facts_service = evidence_services
+def test_evidence_card_route_returns_single_card(evidence_services):
+    collection_service, paper_facts_service = evidence_services
     record = collection_service.create_collection(name="Single Evidence Collection")
     collection_id = record["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity improved after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [],
-                "material_system": {"family": "oxide cathode"},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.83,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    payload = asyncio.run(
-        evidence_controller.get_collection_evidence_card(collection_id, "ev-1")
+    paper_facts_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            evidence_anchors=(
+                EvidenceAnchor.from_mapping(
+                    {
+                        "anchor_id": "anchor-1",
+                        "document_id": "paper-1",
+                        "locator_type": "text",
+                        "locator_confidence": "direct",
+                        "source_type": "text",
+                        "quote": "Conductivity improved after annealing.",
+                    }
+                ),
+            ),
+            sample_variants=(
+                SampleVariant.from_mapping(
+                    {
+                        "variant_id": "var-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "variant_label": "A1",
+                        "host_material_system": {"family": "oxide cathode"},
+                    }
+                ),
+            ),
+            measurement_results=(
+                MeasurementResult.from_mapping(
+                    {
+                        "result_id": "res-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "variant_id": "var-1",
+                        "property_normalized": "conductivity",
+                        "result_type": "scalar",
+                        "value_payload": {
+                            "value": 12.0,
+                            "statement": "Conductivity improved after annealing.",
+                        },
+                        "unit": "mS/cm",
+                        "evidence_anchor_ids": ["anchor-1"],
+                        "traceability_status": "direct",
+                        "result_source_type": "text",
+                    }
+                ),
+            ),
+        ),
     )
 
-    assert payload.evidence_id == "ev-1"
+    payload = asyncio.run(
+        evidence_controller.get_collection_evidence_card(
+            collection_id,
+            "ev_result_res-1",
+        )
+    )
+
+    assert payload.evidence_id == "ev_result_res-1"
     assert payload.collection_id == collection_id
     assert payload.claim_type == "property"

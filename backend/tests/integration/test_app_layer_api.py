@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import sys
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,10 +12,20 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
+from domain.core.comparison_projection import ComparisonRowProjector
 from domain.core.comparison import (
+    CollectionComparableResult,
     ComparableResult,
     build_collection_assessment_input_fingerprint,
     build_comparison_row_id,
+)
+from domain.core.document_profile import DocumentProfile
+from domain.core.evidence_backbone import EvidenceAnchor, MeasurementResult
+from domain.core.fact_store import CoreFactSet
+from domain.source import SourceArtifactSet
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
 )
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
@@ -36,17 +47,17 @@ class DummyWorkflowOutput:
         self.errors = errors
 
 
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+def _wait_for_task_terminal(app_client, task_id: str, timeout_s: float = 5.0) -> dict:  # noqa: ANN001
+    deadline = time.monotonic() + timeout_s
+    last_body: dict | None = None
+    while time.monotonic() < deadline:
+        response = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
+        assert response.status_code == 200
+        last_body = response.json()
+        if last_body["status"] in {"completed", "partial_success", "failed"}:
+            return last_body
+        time.sleep(0.02)
+    raise AssertionError(f"task {task_id} did not finish before timeout: {last_body}")
 
 
 def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
@@ -57,8 +68,22 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
-def _write_source_artifact_outputs(output_dir: Path) -> None:
+def _collection_output_dir(collection_id: str) -> Path:
+    from controllers.source import collections as collections_controller
+
+    return collections_controller.collection_service.get_paths(collection_id).output_dir
+
+
+def _write_source_artifact_outputs(
+    output_dir: Path,
+    *,
+    collection_id: str | None = None,
+    source_repository=None,  # noqa: ANN001
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    collection_id = collection_id or output_dir.parent.name
+    if source_repository is None:
+        source_repository = SqliteSourceArtifactRepository(output_dir.parents[2] / "lens.sqlite")
     documents = pd.DataFrame(
         [
             {
@@ -71,7 +96,7 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
-                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                        "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
                     ]
                 ),
             }
@@ -91,67 +116,50 @@ def _write_source_artifact_outputs(output_dir: Path) -> None:
             },
             {
                 "id": "tu-3",
-                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
+                "text": "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
                 "document_ids": ["paper-1"],
             },
         ]
     )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    pd.DataFrame(columns=["figure_id"]).to_parquet(output_dir / "figures.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
+    blocks = build_blocks(documents, text_units)
+    tables = pd.DataFrame(
+        [
+            {
+                "table_id": "tbl-1",
+                "document_id": "paper-1",
+                "table_order": 0,
+                "caption_text": "Processing summary",
+                "caption_block_id": None,
+                "page": None,
+                "bbox": None,
+                "heading_path": ["Experimental Section"],
+                "row_count": 1,
+                "col_count": 2,
+                "column_headers": ["condition", "result"],
+                "table_markdown": "| condition | result |\n| --- | --- |\n| annealed | 97 MPa |",
+                "table_text": "condition: annealed; result: 97 MPa",
+                "metadata": {},
+            }
+        ]
+    )
+    table_rows = build_table_rows(documents, text_units)
+    table_cells = build_table_cells(documents, text_units)
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=documents.to_dict(orient="records"),
+            text_units=text_units.to_dict(orient="records"),
+            blocks=blocks.to_dict(orient="records"),
+            tables=tables.to_dict(orient="records"),
+            table_rows=table_rows.to_dict(orient="records"),
+            table_cells=table_cells.to_dict(orient="records"),
+        ),
+    )
 
 
 def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Core Projection Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": ["methods_section_detected"],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-1",
-                        "source_type": "text",
-                        "section_id": None,
-                        "block_id": None,
-                        "snippet_id": "tu-1",
-                        "figure_or_table": None,
-                        "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
-                    }
-                ],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {
-                    "process": {"temperatures_c": [700.0]},
-                    "baseline": {"control": "as-prepared"},
-                    "test": {"method": "EIS"},
-                },
-                "confidence": 0.83,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
+    core_repository = SqliteCoreFactRepository(output_dir.parents[2] / "lens.sqlite")
     comparable_result, scoped_result, _row_id = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-graph-1",
@@ -164,7 +172,7 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
         result_source_type="text",
         result_type="scalar",
         result_summary="12 mS/cm",
-        supporting_evidence_ids=["ev-1"],
+        supporting_evidence_ids=["ev_result_res-graph-1"],
         supporting_anchor_ids=["anchor-1"],
         characterization_observation_ids=[],
         structure_feature_ids=[],
@@ -183,13 +191,60 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
         unit="mS/cm",
         sort_order=0,
     )
-    pd.DataFrame([comparable_result]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
+    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=(ComparableResult.from_mapping(comparable_result),),
+        scoped_results=(CollectionComparableResult.from_mapping(scoped_result),),
     )
-    pd.DataFrame([scoped_result]).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
+    core_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            comparison_artifacts_ready=True,
+            document_profiles=(
+                DocumentProfile.from_mapping(
+                    {
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "title": "Core Projection Paper",
+                        "source_filename": "paper.txt",
+                        "doc_type": "experimental",
+                        "confidence": 0.91,
+                    }
+                ),
+            ),
+            evidence_anchors=(
+                EvidenceAnchor.from_mapping(
+                    {
+                        "anchor_id": "anchor-1",
+                        "document_id": "paper-1",
+                        "source_type": "text",
+                        "quote": "Conductivity increased to 12 mS/cm after annealing.",
+                    }
+                ),
+            ),
+            measurement_results=(
+                MeasurementResult.from_mapping(
+                    {
+                        "result_id": "res-graph-1",
+                        "document_id": "paper-1",
+                        "collection_id": collection_id,
+                        "property_normalized": "conductivity",
+                        "result_type": "scalar",
+                        "value_payload": {"value": 12.0},
+                        "unit": "mS/cm",
+                        "evidence_anchor_ids": ["anchor-1"],
+                        "traceability_status": "direct",
+                        "result_source_type": "text",
+                    }
+                ),
+            ),
+            comparable_results=(ComparableResult.from_mapping(comparable_result),),
+            collection_comparable_results=(
+                CollectionComparableResult.from_mapping(scoped_result),
+            ),
+            comparison_rows=row_records,
+        ),
     )
 
 
@@ -305,6 +360,45 @@ def _build_semantic_comparison_record(
     return comparable_result, scoped_result, row_id
 
 
+def _store_core_comparison_facts(
+    comparison_service,
+    collection_id: str,
+    *,
+    comparable_results: list[dict],
+    scoped_results: list[dict],
+    document_profiles: list[dict] | None = None,
+) -> None:  # noqa: ANN001
+    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=(
+            ComparableResult.from_mapping(row) for row in comparable_results
+        ),
+        scoped_results=(
+            CollectionComparableResult.from_mapping(row)
+            for row in scoped_results
+        ),
+    )
+    comparison_service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            paper_facts_ready=True,
+            comparison_artifacts_ready=True,
+            document_profiles=tuple(
+                DocumentProfile.from_mapping(row)
+                for row in (document_profiles or [])
+            ),
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row) for row in comparable_results
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row)
+                for row in scoped_results
+            ),
+            comparison_rows=row_records,
+        ),
+    )
+
+
 def _create_built_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": name})
     assert create_resp.status_code == 200
@@ -319,6 +413,8 @@ def _create_built_collection(app_client, name: str = "Composite Set") -> tuple[s
     task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
     assert task_resp.status_code == 200
     task_id = task_resp.json()["task_id"]
+    final_task = _wait_for_task_terminal(app_client, task_id)
+    assert final_task["status"] == "completed"
     return collection_id, task_id
 
 
@@ -362,22 +458,26 @@ def test_request_id_is_echoed_and_propagated_to_background_build(app_client, mon
 
     assert task_resp.status_code == 200
     assert task_resp.headers[REQUEST_ID_HEADER] == request_id
+    final_task = _wait_for_task_terminal(app_client, task_resp.json()["task_id"])
+    assert final_task["status"] == "completed"
     assert captured["bound_request_id"] == request_id
 
 
-def test_build_task_route_uses_blocking_background_entry(app_client, monkeypatch):
+def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, monkeypatch):
     from controllers.source import tasks as tasks_controller
 
     captured: dict[str, object] = {}
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
 
     def fake_run_build_task_blocking(*args, **kwargs):  # noqa: ANN002, ANN003
         captured["args"] = args
         captured["kwargs"] = kwargs
-        return {
-            "task_id": args[0],
-            "collection_id": args[1],
-            "status": "queued",
-        }
+        started.set()
+        release.wait(timeout=5)
+        finished.set()
+        return {"task_id": args[0], "collection_id": args[1], "status": "queued"}
 
     def fail_run_build_task(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("async build entry should not be scheduled directly")
@@ -403,10 +503,16 @@ def test_build_task_route_uses_blocking_background_entry(app_client, monkeypatch
     )
     assert upload_resp.status_code == 200
 
-    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
+    try:
+        task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
 
-    assert task_resp.status_code == 200
-    assert captured["args"][1] == collection_id
+        assert task_resp.status_code == 200
+        assert started.wait(timeout=2)
+        assert captured["args"][1] == collection_id
+        assert not finished.is_set()
+    finally:
+        release.set()
+        finished.wait(timeout=2)
 
 
 def test_legacy_index_task_route_is_not_registered(app_client):
@@ -424,20 +530,52 @@ def test_legacy_index_task_route_is_not_registered(app_client):
     assert task_resp.status_code == 404
 
 
+def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_client):
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Research View Empty"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    response = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/research-view"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["collection_id"] == collection_id
+    assert body["state"] == "empty"
+    assert body["materials"] == []
+    assert body["paper_coverage"] == []
+    assert body["comparable_groups"] == []
+
+    materials = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/materials")
+    assert materials.status_code == 200
+    assert materials.json()["materials"] == []
+
+    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
+    assert workspace.status_code == 200
+    workspace_body = workspace.json()
+    assert workspace_body["links"]["research_view"] == (
+        f"/api/v1/collections/{collection_id}/research-view"
+    )
+    assert workspace_body["links"]["research_materials"] == (
+        f"/api/v1/collections/{collection_id}/materials"
+    )
+    assert workspace_body["capabilities"]["can_view_research_view"] is False
+
+
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
     from controllers.source import collections as collections_controller
     from controllers.core import comparable_results as comparable_results_controller
     from controllers.core import comparisons as comparisons_controller
     from controllers.core import documents as documents_controller
     from controllers.core import evidence as evidence_controller
+    from controllers.core import research_view as research_view_controller
     from controllers.core import results as results_controller
     from controllers.goal import intake as goals_controller
     from controllers.derived import graph as graph_controller
-    from controllers.derived import protocol as protocol_controller
-    from controllers.derived import reports as reports_controller
     from controllers.source import tasks as tasks_controller
     from controllers.core import workspace as workspace_controller
     from controllers.schemas.derived.report import (
@@ -453,6 +591,9 @@ def app_client(monkeypatch, tmp_path):
     from application.core.comparison_service import ComparisonService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
+    from application.core.research_view_aggregation_service import (
+        ResearchViewAggregationService,
+    )
     from application.goal.brief_service import GoalService
     from application.source.collection_build_task_runner import CollectionBuildTaskRunner
     from application.source.task_service import TaskService
@@ -461,17 +602,29 @@ def app_client(monkeypatch, tmp_path):
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    artifact_registry = ArtifactRegistryService(
+        tmp_path / "collections",
+        source_artifact_repository=source_artifact_repository,
+        core_fact_repository=core_fact_repository,
+    )
+    document_profile_service = DocumentProfileService(
+        collection_service=collection_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
+    )
     paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
     )
     comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
     )
     runner = CollectionBuildTaskRunner(
         collection_service,
@@ -482,10 +635,20 @@ def app_client(monkeypatch, tmp_path):
         comparison_service,
     )
     workspace_service = WorkspaceService(
-        collection_service,
-        task_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        task_service=task_service,
+        document_profile_service=document_profile_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
+    )
+    research_view_service = ResearchViewAggregationService(
+        collection_service=collection_service,
+        task_service=task_service,
+        document_profile_service=document_profile_service,
+        paper_facts_service=paper_facts_service,
+        comparison_service=comparison_service,
+        workspace_service=workspace_service,
+        core_fact_repository=core_fact_repository,
     )
     goal_service = GoalService(collection_service)
 
@@ -495,7 +658,10 @@ def app_client(monkeypatch, tmp_path):
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_source_artifact_outputs(output_dir)
+        _write_source_artifact_outputs(
+            output_dir,
+            source_repository=source_artifact_repository,
+        )
         return [DummyWorkflowOutput()]
 
     def fake_list_community_reports(  # noqa: ANN001
@@ -548,8 +714,11 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(goals_controller, "goal_service", goal_service)
     monkeypatch.setattr(graph_controller.graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_controller.graph_service, "artifact_registry_service", artifact_registry)
-    monkeypatch.setattr(protocol_controller, "collection_service", collection_service)
-    monkeypatch.setattr(protocol_controller, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(
+        graph_controller.graph_service,
+        "core_fact_repository",
+        comparison_service.core_fact_repository,
+    )
     monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
@@ -559,11 +728,17 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
     monkeypatch.setattr(graph_service_module, "collection_service", collection_service)
     monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(
+        graph_service_module,
+        "core_fact_repository",
+        comparison_service.core_fact_repository,
+    )
     monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
     monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(comparable_results_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
+    monkeypatch.setattr(research_view_controller, "research_view_service", research_view_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(results_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(
@@ -615,27 +790,27 @@ def test_collection_task_flow(app_client):
     assert body["evidence_cards_generated"] is True
     assert body["evidence_cards_ready"] is True
     assert body["characterization_observations_generated"] is True
-    assert body["characterization_observations_ready"] is True
+    assert body["characterization_observations_ready"] is False
     assert body["structure_features_generated"] is True
     assert body["structure_features_ready"] is False
     assert body["test_conditions_generated"] is True
     assert body["test_conditions_ready"] is True
     assert body["baseline_references_generated"] is True
-    assert body["baseline_references_ready"] is True
+    assert body["baseline_references_ready"] is False
     assert body["sample_variants_generated"] is True
-    assert body["sample_variants_ready"] is True
+    assert body["sample_variants_ready"] is False
     assert body["measurement_results_generated"] is True
-    assert body["measurement_results_ready"] is True
-    assert body["comparable_results_generated"] is True
-    assert body["comparable_results_ready"] is True
-    assert body["collection_comparable_results_generated"] is True
-    assert body["collection_comparable_results_ready"] is True
+    assert body["measurement_results_ready"] is False
+    assert body["comparable_results_generated"] is False
+    assert body["comparable_results_ready"] is False
+    assert body["collection_comparable_results_generated"] is False
+    assert body["collection_comparable_results_ready"] is False
     assert body["collection_comparable_results_stale"] is False
-    assert body["comparison_rows_generated"] is True
-    assert body["comparison_rows_ready"] is True
+    assert body["comparison_rows_generated"] is False
+    assert body["comparison_rows_ready"] is False
     assert body["comparison_rows_stale"] is False
-    assert body["graph_generated"] is True
-    assert body["graph_ready"] is True
+    assert body["graph_generated"] is False
+    assert body["graph_ready"] is False
     assert body["graph_stale"] is False
     assert body["blocks_generated"] is True
     assert body["blocks_ready"] is True
@@ -645,28 +820,12 @@ def test_collection_task_flow(app_client):
     assert body["table_rows_ready"] is False
     assert body["table_cells_generated"] is True
     assert body["table_cells_ready"] is False
-    assert body["protocol_steps_generated"] is True
-    assert body["protocol_steps_ready"] is True
 
     graph = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graph")
-    assert graph.status_code == 200
-    graph_body = graph.json()
-    assert graph_body["collection_id"] == collection_id
-    assert len(graph_body["nodes"]) >= 3
-    assert len(graph_body["edges"]) >= 2
-    assert {item["type"] for item in graph_body["nodes"]} >= {
-        "document",
-        "evidence",
-        "comparison",
-    }
+    assert graph.status_code == 409
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
-    assert graphml.status_code == 200
-    assert graphml.headers["content-type"].startswith("application/graphml+xml")
-
-    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
-    assert steps.status_code == 200
-    assert steps.json()["count"] >= 1
+    assert graphml.status_code == 409
 
     profiles = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/documents/profiles")
     assert profiles.status_code == 200
@@ -675,34 +834,15 @@ def test_collection_task_flow(app_client):
     assert profiles_body["items"][0]["title"] == "Composite Paper"
     assert profiles_body["items"][0]["source_filename"] == "paper.txt"
     assert profiles_body["items"][0]["doc_type"] == "experimental"
-    assert profiles_body["items"][0]["protocol_extractable"] == "yes"
 
     evidence = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/evidence/cards")
     assert evidence.status_code == 200
     evidence_body = evidence.json()
-    assert evidence_body["count"] >= 2
-    assert evidence_body["items"][0]["traceability_status"] in {"direct", "partial"}
+    assert evidence_body["count"] == 0
+    assert evidence_body["items"] == []
 
     comparisons = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/comparisons")
-    assert comparisons.status_code == 200
-    comparisons_body = comparisons.json()
-    assert comparisons_body["count"] >= 1
-    assert comparisons_body["items"][0]["assessment"]["comparability_status"] in {
-        "comparable",
-        "limited",
-        "not_comparable",
-        "insufficient",
-    }
-    assert "display" in comparisons_body["items"][0]
-    assert "evidence_bundle" in comparisons_body["items"][0]
-    assert "assessment" in comparisons_body["items"][0]
-    assert "uncertainty" in comparisons_body["items"][0]
-    assert "variant_id" in comparisons_body["items"][0]["display"]
-    assert "variant_label" in comparisons_body["items"][0]["display"]
-    assert "variable_axis" in comparisons_body["items"][0]["display"]
-    assert "variable_value" in comparisons_body["items"][0]["display"]
-    assert "baseline_reference" in comparisons_body["items"][0]["display"]
-    assert "result_source_type" in comparisons_body["items"][0]["evidence_bundle"]
+    assert comparisons.status_code == 409
 
     document_id = profiles_body["items"][0]["document_id"]
     profile = app_client.get(
@@ -714,39 +854,7 @@ def test_collection_task_flow(app_client):
     document_comparison_semantics = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents/{document_id}/comparison-semantics"
     )
-    assert document_comparison_semantics.status_code == 200
-    document_comparison_semantics_body = document_comparison_semantics.json()
-    assert document_comparison_semantics_body["document_id"] == document_id
-    assert document_comparison_semantics_body["count"] >= 1
-    assert document_comparison_semantics_body["items"][0]["source_document_id"] == document_id
-    assert "collection_overlays" in document_comparison_semantics_body["items"][0]
-    assert (
-        document_comparison_semantics_body["items"][0]["collection_overlays"][0]["policy_version"]
-        == "comparison_policy_v1"
-    )
-    assert document_comparison_semantics_body["items"][0]["collection_overlays"][0][
-        "reassessment_triggers"
-    ] == [
-        "policy_family_changed",
-        "policy_version_changed",
-        "comparable_result_normalization_version_changed",
-        "assessment_input_fingerprint_changed",
-    ]
-    assert document_comparison_semantics_body["items"][0]["projected_rows"] is None
-
-    evidence_id = evidence_body["items"][0]["evidence_id"]
-    evidence_detail = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/evidence/{evidence_id}"
-    )
-    assert evidence_detail.status_code == 200
-    assert evidence_detail.json()["evidence_id"] == evidence_id
-
-    row_id = comparisons_body["items"][0]["row_id"]
-    comparison_detail = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/comparisons/{row_id}"
-    )
-    assert comparison_detail.status_code == 200
-    assert comparison_detail.json()["row_id"] == row_id
+    assert document_comparison_semantics.status_code == 409
 
 
 def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
@@ -758,11 +866,6 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
     )
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    output_dir = Path(workspace.json()["artifacts"]["output_path"])
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     comparable_result_1, scoped_result_1, row_id_1 = _build_semantic_comparison_record(
         collection_id=collection_id,
@@ -826,17 +929,11 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
         unit=None,
         sort_order=1,
     )
-    pd.DataFrame([comparable_result_1, comparable_result_2]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame([scoped_result_1, scoped_result_2]).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
-    comparisons_controller.comparison_service.artifact_registry_service.upsert(
+    _store_core_comparison_facts(
+        comparisons_controller.comparison_service,
         collection_id,
-        output_dir,
+        comparable_results=[comparable_result_1, comparable_result_2],
+        scoped_results=[scoped_result_1, scoped_result_2],
     )
 
     response = app_client.get(
@@ -874,20 +971,6 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
     )
     assert second_create.status_code == 200
     second_collection_id = second_create.json()["collection_id"]
-
-    first_workspace = app_client.get(
-        f"{API_V1_PREFIX}/collections/{first_collection_id}/workspace"
-    )
-    second_workspace = app_client.get(
-        f"{API_V1_PREFIX}/collections/{second_collection_id}/workspace"
-    )
-    assert first_workspace.status_code == 200
-    assert second_workspace.status_code == 200
-
-    first_output_dir = Path(first_workspace.json()["artifacts"]["output_path"])
-    second_output_dir = Path(second_workspace.json()["artifacts"]["output_path"])
-    first_output_dir.mkdir(parents=True, exist_ok=True)
-    second_output_dir.mkdir(parents=True, exist_ok=True)
 
     shared_result, first_shared_overlay, _shared_row_id = _build_semantic_comparison_record(
         collection_id=first_collection_id,
@@ -951,33 +1034,20 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
         unit="mS/cm",
         sort_order=1,
     )
-    pd.DataFrame([shared_result, unique_result]).to_parquet(
-        first_output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame([first_shared_overlay, unique_overlay]).to_parquet(
-        first_output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
-    comparable_results_controller.comparison_service.artifact_registry_service.upsert(
+    _store_core_comparison_facts(
+        comparable_results_controller.comparison_service,
         first_collection_id,
-        first_output_dir,
-    )
-
-    pd.DataFrame([shared_result]).to_parquet(
-        second_output_dir / "comparable_results.parquet",
-        index=False,
+        comparable_results=[shared_result, unique_result],
+        scoped_results=[first_shared_overlay, unique_overlay],
     )
     second_shared_overlay = dict(first_shared_overlay)
     second_shared_overlay["collection_id"] = second_collection_id
     second_shared_overlay["sort_order"] = 4
-    pd.DataFrame([second_shared_overlay]).to_parquet(
-        second_output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
-    comparable_results_controller.comparison_service.artifact_registry_service.upsert(
+    _store_core_comparison_facts(
+        comparable_results_controller.comparison_service,
         second_collection_id,
-        second_output_dir,
+        comparable_results=[shared_result],
+        scoped_results=[second_shared_overlay],
     )
 
     response = app_client.get(
@@ -1000,9 +1070,6 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
     assert items_by_id["cres-corpus-unique-1"]["observed_collection_ids"] == [
         first_collection_id
     ]
-    assert not (first_output_dir / "comparison_rows.parquet").exists()
-    assert not (second_output_dir / "comparison_rows.parquet").exists()
-
     detail = app_client.get(
         f"{API_V1_PREFIX}/comparable-results/cres-corpus-shared-1",
         params={"collection_id": second_collection_id},
@@ -1018,7 +1085,7 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
 def test_collection_results_endpoints_project_product_results_and_workspace_exposes_results(
     app_client,
 ):
-    from controllers.core import workspace as workspace_controller
+    from controllers.core import results as results_controller
 
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
@@ -1027,26 +1094,15 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    output_dir = Path(workspace.json()["artifacts"]["output_path"])
-
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Result Projection Paper",
-                "source_filename": "paper-1.pdf",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": [],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-
+    document_profile = {
+        "document_id": "paper-1",
+        "collection_id": collection_id,
+        "title": "Result Projection Paper",
+        "source_filename": "paper-1.pdf",
+        "doc_type": "experimental",
+        "parsing_warnings": [],
+        "confidence": 0.91,
+    }
     first_result, first_scoped_result, _ = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-result-1",
@@ -1109,17 +1165,12 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
         unit="mS/cm",
         sort_order=1,
     )
-    pd.DataFrame([first_result, second_result]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame([first_scoped_result, second_scoped_result]).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
-    workspace_controller.workspace_service.artifact_registry_service.upsert(
+    _store_core_comparison_facts(
+        results_controller.comparison_service,
         collection_id,
-        output_dir,
+        comparable_results=[first_result, second_result],
+        scoped_results=[first_scoped_result, second_scoped_result],
+        document_profiles=[document_profile],
     )
 
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
@@ -1232,10 +1283,7 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     graph_detail = graph.json()["detail"]
     assert graph_detail["code"] == "graph_not_ready"
     assert graph_detail["collection_id"] == collection_id
-    assert "document_profiles.parquet" in graph_detail["missing_artifacts"]
-    assert "evidence_cards.parquet" in graph_detail["missing_artifacts"]
-    assert "comparable_results.parquet" in graph_detail["missing_artifacts"]
-    assert "collection_comparable_results.parquet" in graph_detail["missing_artifacts"]
+    assert "core_fact_repository.comparison_artifacts" in graph_detail["missing_artifacts"]
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 409
@@ -1256,24 +1304,20 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    output_dir = Path(workspace.json()["artifacts"]["output_path"])
+    output_dir = _collection_output_dir(collection_id)
 
     _write_core_graph_outputs(output_dir, collection_id)
     graph_controller.graph_service.artifact_registry_service.upsert(
         collection_id,
         output_dir,
     )
-    assert not output_dir.joinpath("comparison_rows.parquet").exists()
-
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()
     assert workspace_body["status_summary"] == "ready"
     assert workspace_body["workflow"]["comparisons"]["status"] == "ready"
-    assert workspace_body["artifacts"]["comparison_rows_generated"] is False
-    assert workspace_body["artifacts"]["comparison_rows_ready"] is False
+    assert workspace_body["artifacts"]["comparison_rows_generated"] is True
+    assert workspace_body["artifacts"]["comparison_rows_ready"] is True
     assert workspace_body["artifacts"]["collection_comparable_results_stale"] is False
     assert workspace_body["artifacts"]["comparison_rows_stale"] is False
     assert workspace_body["artifacts"]["graph_generated"] is True
@@ -1290,7 +1334,6 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert graph.status_code == 200
     payload = graph.json()
     assert payload["collection_id"] == collection_id
-    assert not output_dir.joinpath("comparison_rows.parquet").exists()
     assert len(payload["nodes"]) == 7
     assert len(payload["edges"]) == 6
     assert {item["type"] for item in payload["nodes"]} == {
@@ -1312,11 +1355,11 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     }
 
     neighbors = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/graph/nodes/evi:ev-1/neighbors"
+        f"{API_V1_PREFIX}/collections/{collection_id}/graph/nodes/evi:ev_result_res-graph-1/neighbors"
     )
     assert neighbors.status_code == 200
     neighbors_body = neighbors.json()
-    assert neighbors_body["center_node_id"] == "evi:ev-1"
+    assert neighbors_body["center_node_id"] == "evi:ev_result_res-graph-1"
     assert len(neighbors_body["nodes"]) == 3
     assert len(neighbors_body["edges"]) == 2
 
@@ -1416,97 +1459,14 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert task_resp.status_code == 200
 
     task_id = task_resp.json()["task_id"]
-    task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
-    assert task_status.status_code == 200
-    assert task_status.json()["task_type"] == "build"
-    assert task_status.json()["status"] == "completed"
+    task_status = _wait_for_task_terminal(app_client, task_id)
+    assert task_status["task_type"] == "build"
+    assert task_status["status"] == "completed"
 
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
     assert "is_update_run" not in captured
     assert captured["verbose"] is True
     assert captured["additional_context"] == {"caller": "legacy-frontend"}
-
-
-def test_collection_protocol_endpoints_return_readiness_error_until_artifacts_exist(app_client):
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Pending Collection"})
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
-        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
-    )
-    assert upload_resp.status_code == 200
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    workspace_body = workspace.json()
-    assert workspace_body["artifacts"]["protocol_steps_generated"] is False
-    assert workspace_body["artifacts"]["protocol_steps_ready"] is False
-    assert workspace_body["artifacts"]["comparable_results_generated"] is False
-    assert workspace_body["artifacts"]["collection_comparable_results_generated"] is False
-    assert workspace_body["artifacts"]["collection_comparable_results_stale"] is False
-    assert workspace_body["artifacts"]["comparison_rows_stale"] is False
-    assert workspace_body["artifacts"]["graph_stale"] is False
-    assert workspace_body["capabilities"]["can_view_protocol_steps"] is False
-
-    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
-    assert steps.status_code == 409
-    steps_detail = steps.json()["detail"]
-    assert steps_detail["code"] == "protocol_artifacts_not_ready"
-    assert steps_detail["collection_id"] == collection_id
-    assert steps_detail["artifacts"]["protocol_steps_generated"] is False
-    assert steps_detail["artifacts"]["protocol_steps_ready"] is False
-
-    search = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/search",
-        params={"q": "anneal", "limit": 5},
-    )
-    assert search.status_code == 409
-    assert search.json()["detail"]["code"] == "protocol_artifacts_not_ready"
-
-    sop = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/protocol/sop",
-        json={"goal": "Build a draft SOP"},
-    )
-    assert sop.status_code == 409
-    assert sop.json()["detail"]["code"] == "protocol_artifacts_not_ready"
-
-
-def test_collection_protocol_steps_returns_empty_list_when_generated_but_not_ready(
-    app_client,
-):
-    from controllers.derived import protocol as protocol_controller
-
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={"name": "Generated But Empty Protocol"},
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    output_dir = Path(workspace.json()["artifacts"]["output_path"])
-    output_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame().to_parquet(output_dir / "protocol_steps.parquet", index=False)
-    protocol_controller.artifact_registry_service.upsert(collection_id, output_dir)
-
-    workspace_after = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/workspace"
-    )
-    assert workspace_after.status_code == 200
-    artifacts = workspace_after.json()["artifacts"]
-    assert artifacts["protocol_steps_generated"] is True
-    assert artifacts["protocol_steps_ready"] is False
-    assert workspace_after.json()["capabilities"]["can_view_protocol_steps"] is True
-
-    steps = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/protocol/steps")
-    assert steps.status_code == 200
-    payload = steps.json()
-    assert payload["total"] == 0
-    assert payload["count"] == 0
-    assert payload["items"] == []
 
 
 def test_reports_routes_are_exposed(app_client):

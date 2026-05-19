@@ -4,16 +4,26 @@ import re
 from typing import Any
 
 from application.core.semantic_build.llm.schemas import (
-    BaselineReferencePayload,
-    EvidenceAnchorPayload,
-    ExtractedTestConditionPayload,
-    MeasurementResultPayload,
     MeasurementValuePayload,
-    MethodFactPayload,
-    SampleVariantPayload,
+    StructuredAxisCanonicalizationGroup,
+    StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
-    StructuredExtractionBundle,
+    StructuredObjectiveEvidenceRoute,
+    StructuredObjectiveEvidenceRoutes,
+    StructuredObjectiveEvidenceUnit,
+    StructuredObjectiveEvidenceUnits,
+    StructuredObjectivePaperFrame,
+    StructuredPaperSkim,
+    StructuredResearchObjective,
+    StructuredResearchObjectives,
+    StructuredTableBatchMentions,
+    StructuredTableBatchRowMentions,
+    StructuredTableRowMentions,
     StructuredTextWindowMentions,
+    TableRowBaselineMentionPayload,
+    TableRowFactMentionPayload,
+    TableRowResultClaimPayload,
+    TableRowSubjectMentionPayload,
     TextWindowBaselineMentionPayload,
     TextWindowConditionMentionPayload,
     TextWindowMaterialMentionPayload,
@@ -118,28 +128,434 @@ class FakeCoreLLMStructuredExtractor:
         warnings: list[str] = []
         if review_hits and experimental_score >= 3:
             doc_type = "mixed"
-            protocol_extractable = "partial"
         elif review_hits:
             doc_type = "review"
-            protocol_extractable = "no"
         elif experimental_score >= 5:
             doc_type = "experimental"
-            protocol_extractable = "yes"
         elif experimental_score >= 2:
             doc_type = "experimental"
-            protocol_extractable = "partial"
         else:
             doc_type = "uncertain"
-            protocol_extractable = "uncertain"
             warnings.append("classification_uncertain")
 
         return StructuredDocumentProfile(
             doc_type=doc_type,
-            protocol_extractable=protocol_extractable,
-            protocol_extractability_signals=[],
             parsing_warnings=sorted(set(warnings)),
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
+
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        title = str(payload.get("title") or "").strip()
+        profile = payload.get("document_profile") if isinstance(payload.get("document_profile"), dict) else {}
+        headings = payload.get("headings") if isinstance(payload.get("headings"), list) else []
+        text_preview = str(payload.get("text_preview") or "")
+        table_text = " ".join(
+            str(item.get("caption_text") or "")
+            for item in payload.get("table_captions", [])
+            if isinstance(item, dict)
+        )
+        figure_text = " ".join(
+            str(item.get("caption_text") or "")
+            for item in payload.get("figure_captions", [])
+            if isinstance(item, dict)
+        )
+        combined_text = " ".join(
+            part
+            for part in (
+                title,
+                " ".join(str(item) for item in headings),
+                text_preview,
+                table_text,
+                figure_text,
+            )
+            if part
+        )
+        lowered_text = combined_text.lower()
+
+        material_system = self._infer_material_system(title, combined_text)
+        material_family = material_system.get("family")
+        candidate_materials = (
+            []
+            if material_family == "unspecified material system"
+            else [str(material_family)]
+        )
+        candidate_processes: list[str] = []
+        if any(token in lowered_text for token in ("lpbf", "slm", "laser powder bed fusion")):
+            candidate_processes.append("LPBF")
+        if any(token in lowered_text for token in ("anneal", "heat treatment", "heated")):
+            candidate_processes.append("heat treatment")
+        if "mixed" in lowered_text or "stirred" in lowered_text:
+            candidate_processes.append("mixing")
+
+        candidate_properties = []
+        property_name = self._infer_property(combined_text)
+        if property_name:
+            candidate_properties.append(property_name)
+        changed_variables = []
+        if self._extract_process_context(combined_text).get("temperatures_c"):
+            changed_variables.append("temperature")
+        if self._extract_process_context(combined_text).get("durations"):
+            changed_variables.append("duration")
+        if "anneal" in lowered_text:
+            changed_variables.append("annealing")
+
+        possible_objectives = []
+        if candidate_materials and candidate_properties:
+            process_phrase = (
+                " and ".join(candidate_processes)
+                if candidate_processes
+                else "processing"
+            )
+            possible_objectives.append(
+                f"How does {process_phrase} affect {candidate_properties[0]} of {candidate_materials[0]}?"
+            )
+
+        doc_role = str(profile.get("doc_type") or "").strip() or "uncertain"
+        if doc_role not in {"experimental", "review", "mixed", "uncertain"}:
+            doc_role = "uncertain"
+        evidence_density = (
+            "high"
+            if possible_objectives
+            else "medium" if candidate_materials or candidate_properties else "low"
+        )
+        return StructuredPaperSkim(
+            doc_role=doc_role,
+            candidate_materials=candidate_materials,
+            candidate_processes=candidate_processes,
+            candidate_properties=candidate_properties,
+            changed_variables=changed_variables,
+            possible_objectives=possible_objectives,
+            evidence_density=evidence_density,
+            confidence=0.86 if possible_objectives else 0.62,
+            warnings=[] if possible_objectives else ["objective_uncertain"],
+        )
+
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        skims = payload.get("paper_skims") if isinstance(payload.get("paper_skims"), list) else []
+        objectives: list[StructuredResearchObjective] = []
+        seen_questions: set[str] = set()
+        for skim in skims:
+            if not isinstance(skim, dict):
+                continue
+            possible_objectives = skim.get("possible_objectives")
+            if not isinstance(possible_objectives, list):
+                possible_objectives = []
+            candidate_question = next(
+                (str(item).strip() for item in possible_objectives if str(item).strip()),
+                "",
+            )
+            if not candidate_question:
+                continue
+            key = candidate_question.lower()
+            if key in seen_questions:
+                continue
+            seen_questions.add(key)
+            document_id = str(skim.get("document_id") or "").strip()
+            objectives.append(
+                StructuredResearchObjective(
+                    question=candidate_question,
+                    material_scope=[
+                        str(item)
+                        for item in skim.get("candidate_materials", [])
+                        if str(item).strip()
+                    ],
+                    process_axes=[
+                        str(item)
+                        for item in skim.get("candidate_processes", [])
+                        if str(item).strip()
+                    ],
+                    property_axes=[
+                        str(item)
+                        for item in skim.get("candidate_properties", [])
+                        if str(item).strip()
+                    ],
+                    comparison_intent="compare process or treatment effects across papers",
+                    seed_document_ids=[document_id] if document_id else [],
+                    excluded_document_ids=[
+                        str(item.get("document_id") or "").strip()
+                        for item in skims
+                        if isinstance(item, dict)
+                        and str(item.get("doc_role") or "") == "review"
+                        and str(item.get("document_id") or "").strip()
+                    ],
+                    confidence=0.82,
+                    reason="derived from paper skim objective candidates",
+                )
+            )
+        return StructuredResearchObjectives(objectives=objectives)
+
+    def canonicalize_research_objective_axes(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredAxisCanonicalizationPlan:
+        axis_candidates = (
+            payload.get("axis_candidates")
+            if isinstance(payload.get("axis_candidates"), dict)
+            else {}
+        )
+        return StructuredAxisCanonicalizationPlan(
+            axis_groups=[
+                StructuredAxisCanonicalizationGroup(
+                    axis_type=axis_type,
+                    canonical=str(value),
+                    aliases=[str(value)],
+                    confidence=1.0,
+                    reason="kept separate",
+                )
+                for axis_type, values in axis_candidates.items()
+                if axis_type in {"material", "process", "property"}
+                and isinstance(values, list)
+                for value in values
+                if str(value).strip()
+            ]
+        )
+
+    def frame_objective_paper(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectivePaperFrame:
+        objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
+        paper_skim = payload.get("paper_skim") if isinstance(payload.get("paper_skim"), dict) else {}
+        document = payload.get("document") if isinstance(payload.get("document"), dict) else {}
+        document_id = str(document.get("document_id") or "")
+        table_summaries = (
+            payload.get("table_summaries")
+            if isinstance(payload.get("table_summaries"), list)
+            else []
+        )
+        excluded_document_ids = {
+            str(value)
+            for value in objective.get("excluded_document_ids", [])
+            if str(value).strip()
+        }
+        if document_id in excluded_document_ids or paper_skim.get("doc_role") == "review":
+            return StructuredObjectivePaperFrame(
+                relevance="irrelevant",
+                paper_role="review",
+                background="Paper does not directly support the objective.",
+                excluded_tables=[
+                    str(table.get("table_id"))
+                    for table in table_summaries
+                    if isinstance(table, dict) and table.get("table_id")
+                ],
+            )
+
+        axes = [
+            str(value).lower()
+            for value in (
+                *(objective.get("process_axes") or []),
+                *(objective.get("property_axes") or []),
+            )
+            if str(value).strip()
+        ]
+        relevant_tables: list[str] = []
+        excluded_tables: list[str] = []
+        for table in table_summaries:
+            if not isinstance(table, dict):
+                continue
+            table_id = str(table.get("table_id") or "")
+            table_text = " ".join(
+                str(value or "")
+                for value in (
+                    table.get("caption_text"),
+                    table.get("heading_path"),
+                    " ".join(str(item) for item in table.get("column_headers") or []),
+                )
+            ).lower()
+            if table_id and any(axis in table_text for axis in axes):
+                relevant_tables.append(table_id)
+            elif table_id:
+                excluded_tables.append(table_id)
+
+        section_labels = [
+            str(item.get("section_label"))
+            for item in payload.get("section_snippets", [])
+            if isinstance(item, dict) and item.get("section_label")
+        ]
+        return StructuredObjectivePaperFrame(
+            relevance="high" if paper_skim else "uncertain",
+            paper_role="primary_experiment",
+            background="Paper directly supports the objective.",
+            material_match=[
+                str(item)
+                for item in paper_skim.get("candidate_materials", [])
+                if str(item).strip()
+            ],
+            changed_variables=[
+                str(item)
+                for item in paper_skim.get("changed_variables", [])
+                if str(item).strip()
+            ],
+            measured_property_scope=[
+                str(item)
+                for item in objective.get("property_axes", [])
+                if str(item).strip()
+            ],
+            test_environment_scope=[],
+            relevant_sections=section_labels[:2],
+            relevant_tables=relevant_tables,
+            excluded_tables=excluded_tables,
+        )
+
+    def route_objective_evidence(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceRoutes:
+        objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
+        property_axes = [
+            str(value).lower()
+            for value in objective.get("property_axes", [])
+            if str(value).strip()
+        ]
+        candidates = (
+            payload.get("source_candidates")
+            if isinstance(payload.get("source_candidates"), list)
+            else []
+        )
+        routes: list[StructuredObjectiveEvidenceRoute] = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            source_kind = str(candidate.get("source_kind") or "text_window")
+            source_ref = str(candidate.get("source_ref") or "")
+            if not source_ref:
+                continue
+            if candidate.get("frame_status") == "excluded":
+                routes.append(
+                    StructuredObjectiveEvidenceRoute(
+                        source_kind=source_kind,
+                        source_ref=source_ref,
+                        role="low_value_or_irrelevant",
+                        extractable=False,
+                        reason="Excluded by objective paper frame.",
+                        confidence=0.7,
+                    )
+                )
+                continue
+            if source_kind == "table":
+                table_schema = (
+                    candidate.get("table_schema")
+                    if isinstance(candidate.get("table_schema"), dict)
+                    else {}
+                )
+                table_text = " ".join(
+                    str(value or "")
+                    for value in (
+                        candidate.get("caption_text"),
+                        candidate.get("heading_path"),
+                        " ".join(
+                            str(item)
+                            for item in table_schema.get("column_headers", [])
+                        ),
+                    )
+                ).lower()
+                role = (
+                    "current_experimental_evidence"
+                    if any(axis in table_text for axis in property_axes)
+                    else "process_or_treatment"
+                )
+                routes.append(
+                    StructuredObjectiveEvidenceRoute(
+                        source_kind="table",
+                        source_ref=source_ref,
+                        role=role,
+                        extractable=True,
+                        reason="Table is relevant to the active objective.",
+                        table_schema=table_schema,
+                        column_roles={
+                            header: "target_property"
+                            for header in table_schema.get("column_headers", [])
+                            if any(axis in str(header).lower() for axis in property_axes)
+                        },
+                        join_keys={"sample_key": "sample"}
+                        if "sample" in table_text
+                        else {},
+                        join_plan={"join_on": "sample_key"}
+                        if "sample" in table_text
+                        else {},
+                        confidence=0.82,
+                    )
+                )
+                continue
+            routes.append(
+                StructuredObjectiveEvidenceRoute(
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    role="process_or_treatment",
+                    extractable=True,
+                    reason="Text window is in a relevant objective section.",
+                    confidence=0.72,
+                )
+            )
+        return StructuredObjectiveEvidenceRoutes(routes=routes)
+
+    def extract_objective_evidence_units(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceUnits:
+        route = payload.get("evidence_route")
+        source = payload.get("source")
+        if not isinstance(route, dict) or not isinstance(source, dict):
+            return StructuredObjectiveEvidenceUnits()
+        if route.get("source_kind") == "table":
+            headers = [
+                str(value)
+                for value in source.get("column_headers", [])
+                if str(value).strip()
+            ]
+            matrix = source.get("table_matrix") if isinstance(source.get("table_matrix"), list) else []
+            property_header = next(
+                (
+                    header
+                    for header in headers
+                    if any(
+                        token in header.lower()
+                        for token in (
+                            "strength",
+                            "elongation",
+                            "hardness",
+                            "corrosion",
+                            "density",
+                        )
+                    )
+                ),
+                headers[-1] if headers else "value",
+            )
+            units: list[StructuredObjectiveEvidenceUnit] = []
+            for row in matrix[1:]:
+                if not isinstance(row, list) or len(row) < 2:
+                    continue
+                sample_label = str(row[0]).strip()
+                value_text = str(row[-1]).strip()
+                if not sample_label or not value_text:
+                    continue
+                units.append(
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="measurement",
+                        property_normalized=property_header,
+                        sample_context={"label": sample_label},
+                        value_payload={"source_value_text": value_text},
+                        join_keys={"sample_key": sample_label},
+                        resolution_status="partial",
+                        confidence=0.78,
+                    )
+                )
+            return StructuredObjectiveEvidenceUnits(evidence_units=units)
+        if route.get("source_kind") == "text_window" and source.get("text"):
+            return StructuredObjectiveEvidenceUnits(
+                evidence_units=[
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="process_context",
+                        value_payload={"statement": str(source.get("text"))[:160]},
+                        resolution_status="partial",
+                        confidence=0.7,
+                    )
+                ]
+            )
+        return StructuredObjectiveEvidenceUnits()
 
     def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
         document_title = str(payload.get("document_title") or "")
@@ -298,18 +714,47 @@ class FakeCoreLLMStructuredExtractor:
             result_claims=result_claims,
         )
 
-    def extract_table_row_bundle(self, payload: dict[str, Any]) -> StructuredExtractionBundle:
+    def extract_table_batch_mentions(self, payload: dict[str, Any]) -> StructuredTableBatchMentions:
         document_title = str(payload.get("document_title") or "")
         document_profile = payload.get("document_profile") or {}
-        row = payload.get("table_row") or {}
         supporting_windows = (
             payload.get("supporting_text_windows")
             if isinstance(payload.get("supporting_text_windows"), list)
             else []
         )
+        target_rows = (
+            payload.get("target_rows")
+            if isinstance(payload.get("target_rows"), list)
+            else []
+        )
         if str(document_profile.get("doc_type") or "") == "review":
-            return StructuredExtractionBundle()
+            return StructuredTableBatchMentions()
 
+        row_results: list[StructuredTableBatchRowMentions] = []
+        for row in target_rows:
+            if not isinstance(row, dict):
+                continue
+            row_index = int(row.get("row_index") or 0)
+            mentions = self._extract_table_row_mentions(
+                document_title=document_title,
+                row=row,
+                supporting_windows=supporting_windows,
+            )
+            row_results.append(
+                StructuredTableBatchRowMentions(
+                    row_index=row_index,
+                    **mentions.model_dump(),
+                )
+            )
+        return StructuredTableBatchMentions(row_results=row_results)
+
+    def _extract_table_row_mentions(
+        self,
+        *,
+        document_title: str,
+        row: dict[str, Any],
+        supporting_windows: list[Any],
+    ) -> StructuredTableRowMentions:
         row_summary = str(row.get("row_summary") or "")
         cells = row.get("cells") if isinstance(row.get("cells"), list) else []
         support_text = "\n\n".join(
@@ -350,92 +795,97 @@ class FakeCoreLLMStructuredExtractor:
                 variable_value = self._normalize_numeric_or_text(value)
 
         if not property_cells:
-            return StructuredExtractionBundle()
+            return StructuredTableRowMentions()
 
         variant_label = sample_label or self._default_variant_label(
             material_system.get("family"),
             document_title,
         )
-        sample_variants = [
-            SampleVariantPayload(
+        row_subjects = [
+            TableRowSubjectMentionPayload(
                 variant_label=variant_label,
-                host_material_system=material_system,
+                family=material_system.get("family"),
                 composition=material_system.get("composition"),
                 variable_axis_type=variable_axis_type,
                 variable_value=variable_value,
-                process_context=process_context,
-                confidence=0.86,
-                epistemic_status="normalized_from_evidence",
-                source_kind="table_row",
+                quote=variant_label,
             )
         ]
 
-        test_conditions = [
-            ExtractedTestConditionPayload(
-                property_type=property_cells[0][0],
-                condition_payload={
-                    "method": methods[0] if len(methods) == 1 else None,
-                    "methods": methods,
-                    "temperatures_c": process_context.get("temperatures_c") or [],
-                    "durations": process_context.get("durations") or [],
-                    "atmosphere": process_context.get("atmosphere"),
-                },
-                confidence=0.82,
+        process_mentions: list[TableRowFactMentionPayload] = []
+        for temperature in process_context.get("temperatures_c") or []:
+            process_mentions.append(
+                TableRowFactMentionPayload(
+                    name="temperature_c",
+                    value_text=temperature,
+                    unit="C",
+                    quote=f"{temperature:g} C",
+                )
             )
-        ] if (
-            methods
-            or process_context.get("temperatures_c")
-            or process_context.get("durations")
-        ) else []
+        for duration in process_context.get("durations") or []:
+            process_mentions.append(
+                TableRowFactMentionPayload(
+                    name="duration",
+                    value_text=duration,
+                    unit=None,
+                    quote=duration,
+                )
+            )
+        if process_context.get("atmosphere"):
+            process_mentions.append(
+                TableRowFactMentionPayload(
+                    name="atmosphere",
+                    value_text=process_context.get("atmosphere"),
+                    unit=None,
+                    quote=str(process_context.get("atmosphere")),
+                )
+            )
 
-        baseline_references = [
-            BaselineReferencePayload(
+        test_condition_mentions = [
+            TableRowFactMentionPayload(
+                name="method",
+                value_text=method,
+                unit=None,
+                quote=method,
+            )
+            for method in methods
+        ]
+
+        baseline_mentions = [
+            TableRowBaselineMentionPayload(
                 baseline_label=baseline_label,
-                confidence=0.82,
-                epistemic_status="normalized_from_evidence",
+                quote=baseline_label,
             )
         ] if baseline_label else []
 
-        measurement_results: list[MeasurementResultPayload] = []
+        result_claims: list[TableRowResultClaimPayload] = []
         for index, (property_name, value, unit) in enumerate(property_cells, start=1):
             parsed_value = self._normalize_numeric_or_text(value)
             if property_name == "retention":
-                value_payload = MeasurementValuePayload(
-                    retention_percent=float(parsed_value),
-                    statement=f"{property_name} of {parsed_value} {unit or '%'}".strip(),
-                )
                 result_type = "retention"
                 unit = unit or "%"
             else:
-                value_payload = MeasurementValuePayload(
-                    value=float(parsed_value),
-                    statement=f"{property_name} of {parsed_value} {unit or ''}".strip(),
-                )
                 result_type = "scalar"
-            measurement_results.append(
-                MeasurementResultPayload(
+            result_claims.append(
+                TableRowResultClaimPayload(
                     claim_text=f"{variant_label} reported {property_name} of {parsed_value} {unit or ''}".strip(),
                     property_normalized=property_name,
                     result_type=result_type,
-                    value_payload=value_payload,
+                    value_text=value,
                     unit=unit,
                     variant_label=variant_label,
-                    baseline_label=baseline_label if baseline_references else None,
-                    anchors=[
-                        EvidenceAnchorPayload(
-                            quote=row_summary,
-                            source_type="table",
-                        )
-                    ],
-                    confidence=0.9,
+                    baseline_label=baseline_label if baseline_mentions else None,
+                    claim_scope="current_work",
+                    quote=row_summary,
                 )
             )
 
-        return StructuredExtractionBundle(
-            sample_variants=sample_variants,
-            test_conditions=test_conditions,
-            baseline_references=baseline_references,
-            measurement_results=measurement_results,
+        return StructuredTableRowMentions(
+            row_subjects=row_subjects,
+            process_mentions=process_mentions,
+            test_condition_mentions=test_condition_mentions,
+            baseline_mentions=baseline_mentions,
+            result_claims=result_claims,
         )
 
     def _classify_text_window_role(self, heading_path: str, text: str) -> str | None:
@@ -453,7 +903,9 @@ class FakeCoreLLMStructuredExtractor:
 
     def _infer_material_system(self, title: str, text: str):
         lowered = f"{title}\n{text}".lower()
-        if "epoxy" in lowered:
+        if "316l" in lowered or "stainless steel" in lowered:
+            family = "316L stainless steel"
+        elif "epoxy" in lowered:
             family = "epoxy composite"
         elif "ti alloy" in lowered or "titanium" in lowered:
             family = "Ti alloy"

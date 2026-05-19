@@ -1,11 +1,20 @@
 """Persistence adapter factory helpers."""
+
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from domain.ports import ArtifactRepository, CollectionRepository, TaskRepository
+from config import DATA_DIR
+from domain.ports import (
+    ArtifactRepository,
+    CollectionRepository,
+    CoreFactRepository,
+    GoalSessionRepository,
+    SourceArtifactRepository,
+    TaskRepository,
+)
 from infra.persistence.file import (
     FileArtifactRepository,
     FileCollectionRepository,
@@ -15,6 +24,11 @@ from infra.persistence.memory import (
     MemoryArtifactRepository,
     MemoryCollectionRepository,
     MemoryTaskRepository,
+)
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteGoalSessionRepository,
+    SqliteSourceArtifactRepository,
 )
 
 DEFAULT_PERSISTENCE_BACKEND = "file"
@@ -28,7 +42,9 @@ class PersistenceBundle:
 
 
 def resolve_persistence_backend(backend: str | None = None) -> str:
-    resolved = (backend or os.getenv("LENS_PERSISTENCE_BACKEND") or DEFAULT_PERSISTENCE_BACKEND)
+    resolved = (
+        backend or os.getenv("LENS_PERSISTENCE_BACKEND") or DEFAULT_PERSISTENCE_BACKEND
+    )
     normalized = resolved.strip().lower()
     if normalized not in {"file", "memory", "mysql"}:
         raise ValueError(f"unsupported persistence backend: {resolved}")
@@ -69,6 +85,24 @@ def build_artifact_repository(
     if resolved == "memory":
         return MemoryArtifactRepository(root_dir)
     raise NotImplementedError("mysql persistence adapters are not implemented yet")
+
+
+def build_goal_session_repository(
+    db_path: Path | None = None,
+) -> GoalSessionRepository:
+    return SqliteGoalSessionRepository(db_path or (DATA_DIR / "lens.sqlite"))
+
+
+def build_source_artifact_repository(
+    db_path: Path | None = None,
+) -> SourceArtifactRepository:
+    return SqliteSourceArtifactRepository(db_path or (DATA_DIR / "lens.sqlite"))
+
+
+def build_core_fact_repository(
+    db_path: Path | None = None,
+) -> CoreFactRepository:
+    return SqliteCoreFactRepository(db_path or (DATA_DIR / "lens.sqlite"))
 
 
 def build_persistence_bundle(

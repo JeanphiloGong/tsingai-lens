@@ -6,23 +6,34 @@ This node owns the collection workspace route family in the frontend.
 
 - `collections/[id]/+layout.svelte`
 - `collections/[id]/+page.svelte`
+- `collections/[id]/objectives/+page.svelte`
+- `collections/[id]/objectives/[objective_id]/+page.svelte`
+- `collections/[id]/materials/+page.svelte`
+- `collections/[id]/materials/[material_id]/+page.svelte`
 - `collections/[id]/documents/+page.svelte`
 - `collections/[id]/evidence/+page.svelte`
 - `collections/[id]/comparisons/+page.svelte`
+- `collections/[id]/assistant/+page.svelte`
 - `collections/[id]/documents/[document_id]/+page.svelte`
 
 ## Responsibilities
 
 - render the collection workspace
-- render collection-level document profile screening and Protocol suitability
-  signals
+- render collection-level research objectives and objective-scoped logic-chain
+  workspaces with paper coverage, evidence units, source links, and extraction
+  diagnostics
+- render collection-level document profile screening signals
+- render canonical collection materials and collection-scoped material profiles as a More /
+  material dossier surface
 - render collection-level evidence cards and source-anchor entry points
-- render comparison review for cross-paper comparability, missing context, and
-  next actions
+- render global comparison review as a More / All Comparisons surface
+- render the collection-bound AI research copilot as a top-level collection tab
+  with explicit answer source modes and clickable document/evidence source links
+  back to Core-owned surfaces
 - render document detail as a paper reader plus structured understanding workbench
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness
-- surface graph, protocol, and report capabilities to the user
+- surface graph and report capabilities to the user
 - keep source traceback on the document page user-facing: original PDF/PDF.js
   reader first, page-level fallback when precise regions are missing, block IDs
   only for diagnostics
@@ -34,8 +45,15 @@ This node owns the collection workspace route family in the frontend.
   wave
 - [`../../../../docs/decisions/rfc-comparison-result-document-product-flow.md`](../../../../docs/decisions/rfc-comparison-result-document-product-flow.md)
   Shared product-flow decision for comparison, result, and document drilldown
-- [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
-  Collection-facing interface spec for the Lens v1 workspace flow
+- [`../../../../docs/contracts/research-view-aggregation-contract.md`](../../../../docs/contracts/research-view-aggregation-contract.md)
+  Shared frontend/backend target contract for paper matrices, collection
+  comparable groups, cross-paper matrices, and evidence-backed values
+- [`../../../../docs/contracts/research-objective-workspace-contract.md`](../../../../docs/contracts/research-objective-workspace-contract.md)
+  Shared frontend/backend contract for objective-first workspace routes,
+  payloads, readiness, and paper-frame rendering
+- [`../../../docs/research-view-aggregation/README.md`](../../../docs/research-view-aggregation/README.md)
+  Frontend implementation topic for research-view aggregation navigation,
+  route state, matrices, evidence drawers, and debug placement
 - [`core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md`](core-derived-graph-structure-and-drilldown-frontend-alignment-plan.md)
   Frontend-local graph cutover plan for the lean graph contract, canonical
   drilldown, and neighbors expansion

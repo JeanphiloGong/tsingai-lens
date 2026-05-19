@@ -1,28 +1,13 @@
 from __future__ import annotations
 
-import json
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
-import pandas as pd
-from domain.core.comparison import (
-    ComparableResult,
-    build_collection_assessment_input_fingerprint,
-)
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+from domain.core.comparison import ComparisonRowRecord
+from domain.core.document_profile import DocumentProfile
+from domain.core.evidence_backbone import EvidenceAnchor
+from domain.core.fact_store import CoreFactSet
+from infra.persistence.sqlite import SqliteCoreFactRepository
 
 
 def _ensure_fastapi_stub(monkeypatch) -> None:  # noqa: ANN001
@@ -42,158 +27,79 @@ def _ensure_fastapi_stub(monkeypatch) -> None:  # noqa: ANN001
         )
 
 
-def _current_scope_metadata(comparable_result: dict) -> dict[str, object]:
-    comparable_record = ComparableResult.from_mapping(comparable_result)
-    return {
-        "policy_family": "default_collection_comparison_policy",
-        "policy_version": "comparison_policy_v1",
-        "comparable_result_normalization_version": comparable_record.normalization_version,
-        "assessment_input_fingerprint": build_collection_assessment_input_fingerprint(
-            comparable_record
+def _core_report_fact_set(collection_id: str) -> CoreFactSet:
+    return CoreFactSet(
+        paper_facts_ready=True,
+        comparison_artifacts_ready=True,
+        document_profiles=(
+            DocumentProfile.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "collection_id": collection_id,
+                    "title": "Core Report Paper",
+                    "source_filename": "paper.txt",
+                    "doc_type": "experimental",
+                    "parsing_warnings": [],
+                    "confidence": 0.91,
+                }
+            ),
         ),
-        "reassessment_triggers": [
-            "policy_family_changed",
-            "policy_version_changed",
-            "comparable_result_normalization_version_changed",
-            "assessment_input_fingerprint_changed",
-        ],
-    }
+        evidence_anchors=(
+            EvidenceAnchor.from_mapping(
+                {
+                    "anchor_id": "anchor-1",
+                    "document_id": "paper-1",
+                    "source_type": "text",
+                    "snippet_id": "tu-1",
+                    "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
+                }
+            ),
+        ),
+        comparison_rows=(
+            ComparisonRowRecord.from_mapping(
+                {
+                    "row_id": "cmp-1",
+                    "collection_id": collection_id,
+                    "comparable_result_id": "cres-1",
+                    "source_document_id": "paper-1",
+                    "supporting_evidence_ids": ["ev-1"],
+                    "supporting_anchor_ids": ["anchor-1"],
+                    "material_system_normalized": "oxide cathode",
+                    "process_normalized": "700 C",
+                    "property_normalized": "conductivity",
+                    "baseline_normalized": "as-prepared",
+                    "test_condition_normalized": "EIS",
+                    "comparability_status": "comparable",
+                    "comparability_warnings": [],
+                    "comparability_basis": ["baseline_resolved"],
+                    "result_summary": "12 mS/cm",
+                    "result_source_type": "text",
+                    "value": 12.0,
+                    "unit": "mS/cm",
+                }
+            ),
+        ),
+    )
 
 
 def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
     _ensure_fastapi_stub(monkeypatch)
-    _patch_parquet(monkeypatch)
 
     from application.source.collection_service import CollectionService
     import application.derived.report_service as report_service
-    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     monkeypatch.setattr(report_service, "collection_service", collection_service)
-    monkeypatch.setattr(report_service, "artifact_registry_service", artifact_registry)
+    monkeypatch.setattr(report_service, "core_fact_repository", core_fact_repository)
 
     collection = collection_service.create_collection("Core Report Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(
-        [
-            {
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "title": "Core Report Paper",
-                "source_filename": "paper.txt",
-                "doc_type": "experimental",
-                "protocol_extractable": "yes",
-                "protocol_extractability_signals": ["methods_section_detected"],
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ]
-    ).to_parquet(output_dir / "document_profiles.parquet", index=False)
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "Conductivity increased to 12 mS/cm after annealing.",
-                "claim_type": "property",
-                "evidence_source_type": "text",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-1",
-                        "source_type": "text",
-                        "section_id": None,
-                        "block_id": None,
-                        "snippet_id": "tu-1",
-                        "figure_or_table": None,
-                        "quote_span": "Conductivity increased to 12 mS/cm after annealing.",
-                    }
-                ],
-                "material_system": {"family": "oxide cathode", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.83,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    comparable_result = {
-        "comparable_result_id": "cres-1",
-        "source_result_id": "res-1",
-        "source_document_id": "paper-1",
-        "binding": {
-            "variant_id": None,
-            "baseline_id": "base-1",
-            "test_condition_id": "tc-1",
-        },
-        "normalized_context": {
-            "material_system_normalized": "oxide cathode",
-            "process_normalized": "700 C",
-            "baseline_normalized": "as-prepared",
-            "test_condition_normalized": "EIS",
-        },
-        "axis": {
-            "axis_name": None,
-            "axis_value": None,
-            "axis_unit": None,
-        },
-        "value": {
-            "property_normalized": "conductivity",
-            "result_type": "scalar",
-            "numeric_value": 12.0,
-            "unit": "mS/cm",
-            "summary": "12 mS/cm",
-            "statistic_type": None,
-            "uncertainty": None,
-        },
-        "evidence": {
-            "direct_anchor_ids": ["anchor-1"],
-            "contextual_anchor_ids": [],
-            "evidence_ids": ["ev-1"],
-            "structure_feature_ids": [],
-            "characterization_observation_ids": [],
-            "traceability_status": "direct",
-        },
-        "variant_label": None,
-        "baseline_reference": "as-prepared",
-        "result_source_type": "text",
-        "epistemic_status": "normalized_from_evidence",
-        "normalization_version": "comparable_result_v1",
-    }
-    pd.DataFrame([comparable_result]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
+    core_fact_repository.replace_collection_facts(
+        collection_id,
+        _core_report_fact_set(collection_id),
     )
-    pd.DataFrame(
-        [
-            {
-                "collection_id": collection_id,
-                "comparable_result_id": "cres-1",
-                "assessment": {
-                    "missing_critical_context": [],
-                    "comparability_basis": ["baseline_resolved"],
-                    "comparability_warnings": [],
-                    "comparability_status": "comparable",
-                    "requires_expert_review": False,
-                    "assessment_epistemic_status": "normalized_from_evidence",
-                },
-                "epistemic_status": "normalized_from_evidence",
-                "included": True,
-                "sort_order": 0,
-                **_current_scope_metadata(comparable_result),
-            }
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    assert not (output_dir / "entities.parquet").exists()
-    assert not (output_dir / "relationships.parquet").exists()
-    assert not (output_dir / "communities.parquet").exists()
-    assert not (output_dir / "community_reports.parquet").exists()
-    assert not (output_dir / "comparison_rows.parquet").exists()
 
     listing = report_service.list_community_reports(
         collection_id=collection_id,
@@ -242,4 +148,3 @@ def test_report_service_projects_core_patterns(monkeypatch, tmp_path):
     assert patterns.total_relationships == 2
     assert patterns.total_documents == 1
     assert patterns.items[0].community_id == 1
-    assert not (output_dir / "comparison_rows.parquet").exists()

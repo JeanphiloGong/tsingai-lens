@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from domain.shared.enums import (
     DOC_TYPE_MIXED,
     DOC_TYPE_REVIEW,
     DOC_TYPE_UNCERTAIN,
-    PROTOCOL_EXTRACTABLE_PARTIAL,
-    PROTOCOL_EXTRACTABLE_YES,
 )
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import (
@@ -15,7 +11,11 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfilesNotReadyError,
 )
 from application.source.task_service import TaskService
-from application.source.artifact_registry_service import ArtifactRegistryService
+from domain.ports import CoreFactRepository, SourceArtifactRepository
+from infra.persistence.factory import (
+    build_core_fact_repository,
+    build_source_artifact_repository,
+)
 
 
 class WorkspaceService:
@@ -25,87 +25,96 @@ class WorkspaceService:
         self,
         collection_service: CollectionService | None = None,
         task_service: TaskService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
         document_profile_service: DocumentProfileService | None = None,
+        core_fact_repository: CoreFactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
-        self.artifact_registry_service = (
-            artifact_registry_service or ArtifactRegistryService()
+        self.core_fact_repository = (
+            core_fact_repository
+            or build_core_fact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
+        )
+        self.source_artifact_repository = (
+            source_artifact_repository
+            or build_source_artifact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
         )
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
+            core_fact_repository=self.core_fact_repository,
+            source_artifact_repository=self.source_artifact_repository,
         )
 
-    def _build_default_artifacts(self, collection_id: str) -> dict:
-        paths = self.collection_service.get_paths(collection_id)
+    def _build_artifacts(self, collection_id: str, collection: dict) -> dict:
+        source_artifacts = self.source_artifact_repository.read_collection_artifacts(
+            collection_id
+        )
+        core_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        source_artifacts_generated = not source_artifacts.is_empty()
         return {
             "collection_id": collection_id,
-            "output_path": str(paths.output_dir),
-            "documents_generated": False,
-            "documents_ready": False,
-            "document_profiles_generated": False,
-            "document_profiles_ready": False,
-            "evidence_anchors_generated": False,
-            "evidence_anchors_ready": False,
-            "method_facts_generated": False,
-            "method_facts_ready": False,
-            "evidence_cards_generated": False,
-            "evidence_cards_ready": False,
-            "characterization_observations_generated": False,
-            "characterization_observations_ready": False,
-            "structure_features_generated": False,
-            "structure_features_ready": False,
-            "test_conditions_generated": False,
-            "test_conditions_ready": False,
-            "baseline_references_generated": False,
-            "baseline_references_ready": False,
-            "sample_variants_generated": False,
-            "sample_variants_ready": False,
-            "measurement_results_generated": False,
-            "measurement_results_ready": False,
-            "comparable_results_generated": False,
-            "comparable_results_ready": False,
-            "collection_comparable_results_generated": False,
-            "collection_comparable_results_ready": False,
+            "documents_generated": bool(source_artifacts.documents),
+            "documents_ready": bool(source_artifacts.documents),
+            "document_profiles_generated": bool(core_facts.document_profiles),
+            "document_profiles_ready": bool(core_facts.document_profiles),
+            "evidence_anchors_generated": core_facts.paper_facts_generated,
+            "evidence_anchors_ready": bool(core_facts.evidence_anchors),
+            "method_facts_generated": core_facts.paper_facts_generated,
+            "method_facts_ready": bool(core_facts.method_facts),
+            "evidence_cards_generated": core_facts.evidence_cards_generated,
+            "evidence_cards_ready": core_facts.evidence_cards_ready,
+            "characterization_observations_generated": (
+                core_facts.paper_facts_generated
+            ),
+            "characterization_observations_ready": bool(
+                core_facts.characterization_observations
+            ),
+            "structure_features_generated": core_facts.paper_facts_generated,
+            "structure_features_ready": bool(core_facts.structure_features),
+            "test_conditions_generated": core_facts.paper_facts_generated,
+            "test_conditions_ready": bool(core_facts.test_conditions),
+            "baseline_references_generated": core_facts.paper_facts_generated,
+            "baseline_references_ready": bool(core_facts.baseline_references),
+            "sample_variants_generated": core_facts.paper_facts_generated,
+            "sample_variants_ready": bool(core_facts.sample_variants),
+            "measurement_results_generated": core_facts.paper_facts_generated,
+            "measurement_results_ready": bool(core_facts.measurement_results),
+            "comparable_results_generated": core_facts.comparison_artifacts_generated,
+            "comparable_results_ready": bool(core_facts.comparable_results),
+            "collection_comparable_results_generated": (
+                core_facts.comparison_artifacts_generated
+            ),
+            "collection_comparable_results_ready": bool(
+                core_facts.collection_comparable_results
+            ),
             "collection_comparable_results_stale": False,
-            "comparison_rows_generated": False,
-            "comparison_rows_ready": False,
+            "comparison_rows_generated": core_facts.comparison_artifacts_generated,
+            "comparison_rows_ready": bool(core_facts.comparison_rows),
             "comparison_rows_stale": False,
-            "graph_generated": False,
-            "graph_ready": False,
+            "graph_generated": core_facts.graph_generated,
+            "graph_ready": core_facts.graph_ready,
             "graph_stale": False,
-            "blocks_generated": False,
-            "blocks_ready": False,
-            "figures_generated": False,
-            "figures_ready": False,
-            "table_rows_generated": False,
-            "table_rows_ready": False,
-            "table_cells_generated": False,
-            "table_cells_ready": False,
-            "procedure_blocks_generated": False,
-            "procedure_blocks_ready": False,
-            "protocol_steps_generated": False,
-            "protocol_steps_ready": False,
-            "updated_at": self.collection_service.get_collection(collection_id)["updated_at"],
+            "blocks_generated": source_artifacts_generated,
+            "blocks_ready": bool(source_artifacts.blocks),
+            "figures_generated": source_artifacts_generated,
+            "figures_ready": bool(source_artifacts.figures),
+            "table_rows_generated": source_artifacts_generated,
+            "table_rows_ready": bool(source_artifacts.table_rows),
+            "table_cells_generated": source_artifacts_generated,
+            "table_cells_ready": bool(source_artifacts.table_cells),
+            "updated_at": collection["updated_at"],
         }
-
-    def _artifact_path_exists(self, artifacts: dict, filename: str) -> bool:
-        output_path = artifacts.get("output_path")
-        if not output_path:
-            return False
-        return (Path(str(output_path)).expanduser().resolve() / filename).exists()
 
     def _artifact_generated(
         self,
         artifacts: dict,
         generated_key: str,
-        filename: str,
     ) -> bool:
-        if generated_key in artifacts:
-            return bool(artifacts.get(generated_key))
-        return self._artifact_path_exists(artifacts, filename)
+        return bool(artifacts.get(generated_key))
 
     def _artifact_ready(
         self,
@@ -125,11 +134,9 @@ class WorkspaceService:
         return self._artifact_generated(
             artifacts,
             "comparable_results_generated",
-            "comparable_results.parquet",
         ) and self._artifact_generated(
             artifacts,
             "collection_comparable_results_generated",
-            "collection_comparable_results.parquet",
         )
 
     def _comparisons_ready(self, artifacts: dict) -> bool:
@@ -149,20 +156,23 @@ class WorkspaceService:
 
     def _build_capabilities(self, artifacts: dict) -> dict:
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
-        protocol_generated = self._artifact_generated(
-            artifacts,
-            "protocol_steps_generated",
-            "protocol_steps.parquet",
-        )
         comparisons_generated = self._comparisons_generated(artifacts)
+        research_view_generated = self._artifact_ready(
+            artifacts,
+            "evidence_cards_ready",
+        ) or self._artifact_generated(
+            artifacts,
+            "sample_variants_generated",
+        ) or self._artifact_generated(
+            artifacts,
+            "measurement_results_generated",
+        )
         return {
             "can_view_graph": graph_ready,
             "can_view_results": comparisons_generated,
             "can_view_comparable_results": comparisons_generated,
+            "can_view_research_view": research_view_generated,
             "can_download_graphml": graph_ready,
-            "can_view_protocol_steps": protocol_generated,
-            "can_search_protocol": protocol_generated,
-            "can_generate_sop": protocol_generated,
         }
 
     def _build_status_summary(
@@ -175,7 +185,6 @@ class WorkspaceService:
         document_profiles_generated = self._artifact_generated(
             artifacts,
             "document_profiles_generated",
-            "document_profiles.parquet",
         )
         comparisons_ready = self._comparisons_ready(artifacts)
         if latest_task:
@@ -205,7 +214,6 @@ class WorkspaceService:
             summary = {
                 "total_documents": 0,
                 "by_doc_type": {},
-                "by_protocol_extractable": {},
                 "warnings": [],
             }
         return summary
@@ -221,23 +229,15 @@ class WorkspaceService:
         documents_generated = self._artifact_generated(
             artifacts,
             "document_profiles_generated",
-            "document_profiles.parquet",
         )
         evidence_generated = self._artifact_generated(
             artifacts,
             "evidence_cards_generated",
-            "evidence_cards.parquet",
         )
         comparisons_generated = self._comparisons_generated(artifacts)
         graph_generated = self._artifact_generated(
             artifacts,
             "graph_generated",
-            "comparison_rows.parquet",
-        )
-        protocol_generated = self._artifact_generated(
-            artifacts,
-            "protocol_steps_generated",
-            "protocol_steps.parquet",
         )
         documents_ready = self._artifact_ready(
             artifacts,
@@ -247,22 +247,12 @@ class WorkspaceService:
         comparison_ready = self._comparisons_ready(artifacts)
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
         graph_stale = self._artifact_stale(artifacts, "graph_stale")
-        protocol_ready = self._artifact_ready(artifacts, "protocol_steps_ready")
-        protocol_candidates = (
-            document_summary.get("by_protocol_extractable", {}).get(
-                PROTOCOL_EXTRACTABLE_YES, 0
-            )
-            + document_summary.get("by_protocol_extractable", {}).get(
-                PROTOCOL_EXTRACTABLE_PARTIAL, 0
-            )
-        )
 
         any_generated = (
             documents_generated
             or evidence_generated
             or comparisons_generated
             or graph_generated
-            or protocol_generated
         )
         if file_count == 0 and not any_generated:
             return {
@@ -270,7 +260,6 @@ class WorkspaceService:
                 "results": {"status": "not_started", "detail": "Collection results are not generated yet."},
                 "evidence": {"status": "not_started", "detail": "Evidence cards are not generated yet."},
                 "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
-                "protocol": {"status": "not_applicable", "detail": "Protocol branch is unavailable before collection build."},
                 "graph": {"status": "not_started", "detail": "Graph projection is not generated yet."},
             }
         if task_status == "running":
@@ -279,7 +268,6 @@ class WorkspaceService:
                 "results": {"status": "not_started", "detail": "Collection results have not been prepared yet."},
                 "evidence": {"status": "not_started", "detail": "Paper facts extraction has not started yet."},
                 "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
-                "protocol": {"status": "not_started", "detail": "Protocol branch has not started yet."},
                 "graph": {"status": "not_started", "detail": "Graph projection has not started yet."},
             }
 
@@ -373,29 +361,6 @@ class WorkspaceService:
                 "detail": "Collection-scoped comparisons are not generated yet.",
             }
 
-        if protocol_ready:
-            protocol_stage = {"status": "ready", "detail": "Protocol artifacts are available."}
-        elif protocol_generated:
-            protocol_stage = {
-                "status": "limited",
-                "detail": "Protocol artifacts were generated but no usable protocol steps are currently available.",
-            }
-        elif (documents_ready or documents_generated) and protocol_candidates == 0:
-            protocol_stage = {
-                "status": "not_applicable",
-                "detail": "No protocol-suitable documents were detected in this collection.",
-            }
-        elif documents_ready or documents_generated:
-            protocol_stage = {
-                "status": "not_started",
-                "detail": "Protocol branch has not generated artifacts yet.",
-            }
-        else:
-            protocol_stage = {
-                "status": "not_started",
-                "detail": "Protocol branch has not started yet.",
-            }
-
         if graph_ready:
             graph_stage = {
                 "status": "ready",
@@ -427,7 +392,6 @@ class WorkspaceService:
             "results": results_stage,
             "evidence": evidence_stage,
             "comparisons": comparisons_stage,
-            "protocol": protocol_stage,
             "graph": graph_stage,
         }
 
@@ -435,7 +399,6 @@ class WorkspaceService:
         warnings: list[dict] = []
         total_documents = int(document_summary.get("total_documents", 0) or 0)
         by_doc_type = document_summary.get("by_doc_type", {})
-        by_protocol_extractable = document_summary.get("by_protocol_extractable", {})
 
         review_like = int(by_doc_type.get(DOC_TYPE_REVIEW, 0) or 0) + int(
             by_doc_type.get(DOC_TYPE_MIXED, 0) or 0
@@ -445,18 +408,7 @@ class WorkspaceService:
                 {
                     "code": "review_heavy_collection",
                     "severity": "warning",
-                    "message": "Most documents are review-heavy or mixed, so protocol outputs may stay limited.",
-                }
-            )
-        if total_documents and (
-            int(by_protocol_extractable.get(PROTOCOL_EXTRACTABLE_YES, 0) or 0)
-            + int(by_protocol_extractable.get(PROTOCOL_EXTRACTABLE_PARTIAL, 0) or 0)
-        ) == 0:
-            warnings.append(
-                {
-                    "code": "protocol_limited_collection",
-                    "severity": "warning",
-                    "message": "No protocol-suitable documents were detected in this collection.",
+                    "message": "Most documents are review-heavy or mixed; experimental evidence may require manual review.",
                 }
             )
         if int(by_doc_type.get(DOC_TYPE_UNCERTAIN, 0) or 0) > 0:
@@ -469,26 +421,35 @@ class WorkspaceService:
             )
         return warnings
 
-    def _build_links(self, collection_id: str, artifacts: dict) -> dict:
+    def _build_links(self, collection_id: str) -> dict:
         payload = {
             "documents": f"/api/v1/collections/{collection_id}/documents/profiles",
             "documents_profiles": f"/api/v1/collections/{collection_id}/documents/profiles",
             "evidence": f"/api/v1/collections/{collection_id}/evidence/cards",
             "evidence_cards": f"/api/v1/collections/{collection_id}/evidence/cards",
+            "research_view": f"/api/v1/collections/{collection_id}/research-view",
+            "research_materials": f"/api/v1/collections/{collection_id}/materials",
+            "research_material": (
+                f"/api/v1/collections/{collection_id}/materials/"
+                "{material_id}/research-view"
+            ),
+            "research_documents": (
+                f"/api/v1/collections/{collection_id}/documents/"
+                "{document_id}/research-view"
+            ),
+            "research_document_materials": (
+                f"/api/v1/collections/{collection_id}/documents/"
+                "{document_id}/materials"
+            ),
+            "research_document_material": (
+                f"/api/v1/collections/{collection_id}/documents/"
+                "{document_id}/materials/{material_id}/research-view"
+            ),
             "comparisons": f"/api/v1/collections/{collection_id}/comparisons",
             "results": f"/api/v1/collections/{collection_id}/results",
             "comparable_results": f"/api/v1/comparable-results?collection_id={collection_id}",
-            "protocol": None,
-            "protocol_steps": None,
             "graph": f"/api/v1/collections/{collection_id}/graph",
         }
-        if self._artifact_generated(
-            artifacts,
-            "protocol_steps_generated",
-            "protocol_steps.parquet",
-        ):
-            payload["protocol"] = f"/api/v1/collections/{collection_id}/protocol/steps"
-            payload["protocol_steps"] = f"/api/v1/collections/{collection_id}/protocol/steps"
         return payload
 
     def get_workspace_overview(
@@ -503,15 +464,8 @@ class WorkspaceService:
             limit=recent_task_limit,
         )
         latest_task = recent_tasks[0] if recent_tasks else None
-        try:
-            artifacts = self.artifact_registry_service.get(collection_id)
-        except FileNotFoundError:
-            artifacts = self._build_default_artifacts(collection_id)
         document_summary = self._build_document_summary(collection_id)
-        try:
-            artifacts = self.artifact_registry_service.get(collection_id)
-        except FileNotFoundError:
-            pass
+        artifacts = self._build_artifacts(collection_id, collection)
         return {
             "collection": collection,
             "file_count": len(files),
@@ -522,7 +476,6 @@ class WorkspaceService:
                 document_summary,
             ),
             "artifacts": {
-                "output_path": artifacts["output_path"],
                 "documents_generated": bool(artifacts.get("documents_generated")),
                 "documents_ready": bool(artifacts.get("documents_ready")),
                 "document_profiles_generated": bool(artifacts.get("document_profiles_generated")),
@@ -590,23 +543,16 @@ class WorkspaceService:
                 "table_rows_ready": bool(artifacts.get("table_rows_ready")),
                 "table_cells_generated": bool(artifacts.get("table_cells_generated")),
                 "table_cells_ready": bool(artifacts.get("table_cells_ready")),
-                "procedure_blocks_generated": bool(artifacts.get("procedure_blocks_generated")),
-                "procedure_blocks_ready": bool(artifacts.get("procedure_blocks_ready")),
-                "protocol_steps_generated": bool(artifacts.get("protocol_steps_generated")),
-                "protocol_steps_ready": bool(artifacts.get("protocol_steps_ready")),
                 "updated_at": artifacts["updated_at"],
             },
             "workflow": self._build_workflow(len(files), latest_task, artifacts, document_summary),
             "document_summary": {
                 "total_documents": int(document_summary.get("total_documents", 0) or 0),
                 "by_doc_type": dict(document_summary.get("by_doc_type", {})),
-                "by_protocol_extractable": dict(
-                    document_summary.get("by_protocol_extractable", {})
-                ),
             },
             "warnings": self._build_warnings(document_summary),
             "latest_task": latest_task,
             "recent_tasks": recent_tasks,
             "capabilities": self._build_capabilities(artifacts),
-            "links": self._build_links(collection_id, artifacts),
+            "links": self._build_links(collection_id),
         }

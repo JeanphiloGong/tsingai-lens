@@ -1,8 +1,8 @@
 # TsingAI-Lens Frontend
 
 The frontend is a SvelteKit browser application for collection creation,
-workspace browsing, file upload, task polling, graph export, protocol browsing,
-and report access through the same-origin `/api/*` and `/api/v1/*` contract.
+workspace browsing, file upload, task polling, graph export, and report access
+through the same-origin `/api/*` and `/api/v1/*` contract.
 
 This file is the frontend module entry page. Formal frontend docs live in
 `frontend/docs/`. Shared route ownership seams use local `README.md` files next
@@ -27,9 +27,12 @@ to code.
   Frontend same-origin API integration guide
 - [`docs/goal-copilot-proposal.md`](docs/goal-copilot-proposal.md)
   Proposal for a workflow-first, Core-grounded goal chat entry
+- [`docs/research-view-aggregation/README.md`](docs/research-view-aggregation/README.md)
+  Frontend implementation topic for collection research-view navigation,
+  paper matrices, comparison matrices, evidence drawers, and debug placement
 - [`src/routes/collections/lens-v1-interface-spec.md`](src/routes/collections/lens-v1-interface-spec.md)
   Lens v1 collection UI migration spec for workspace, comparisons, evidence,
-  documents, protocol, and graph surfaces
+  documents, and graph surfaces
 - [`src/routes/collections/collection-ui-restructure-proposal.md`](src/routes/collections/collection-ui-restructure-proposal.md)
   Narrow proposal for collection UI information architecture, state machine,
   and page hierarchy cleanup after the first Lens v1 frontend wave

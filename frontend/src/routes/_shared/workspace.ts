@@ -22,10 +22,6 @@ export type WorkspaceArtifactStatus = {
 	graph_generated: boolean;
 	graph_ready: boolean;
 	graph_stale: boolean;
-	procedure_blocks_generated: boolean;
-	procedure_blocks_ready: boolean;
-	protocol_steps_generated: boolean;
-	protocol_steps_ready: boolean;
 	updated_at: string;
 };
 
@@ -42,13 +38,11 @@ export type WorkspaceWorkflow = {
 	results: WorkflowStageStatus;
 	evidence: WorkflowStageStatus;
 	comparisons: WorkflowStageStatus;
-	protocol: WorkflowStageStatus;
 };
 
 export type WorkspaceDocumentSummary = {
 	total_documents: number;
 	doc_type_counts: Record<'experimental' | 'review' | 'mixed' | 'uncertain', number>;
-	protocol_extractable_counts: Record<'yes' | 'partial' | 'no' | 'uncertain', number>;
 	warnings: string[];
 };
 
@@ -58,7 +52,6 @@ export type WorkspaceLinks = {
 	results: string;
 	evidence: string;
 	comparisons: string;
-	protocol: string;
 	graph: string;
 };
 
@@ -69,9 +62,6 @@ export type WorkspaceCapabilities = {
 	can_view_comparisons: boolean;
 	can_view_graph: boolean;
 	can_download_graphml: boolean;
-	can_view_protocol_steps: boolean;
-	can_search_protocol: boolean;
-	can_generate_sop: boolean;
 };
 
 export type WorkspaceOverview = {
@@ -132,13 +122,6 @@ const DEFAULT_DOC_TYPE_COUNTS = {
 	uncertain: 0
 };
 
-const DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS = {
-	yes: 0,
-	partial: 0,
-	no: 0,
-	uncertain: 0
-};
-
 function asRecord(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === 'object' && !Array.isArray(value)
 		? (value as Record<string, unknown>)
@@ -190,7 +173,6 @@ function defaultLinks(collectionId: string): WorkspaceLinks {
 		results: `/collections/${encoded}/results`,
 		evidence: `/collections/${encoded}/evidence`,
 		comparisons: `/collections/${encoded}/comparisons`,
-		protocol: `/collections/${encoded}/protocol`,
 		graph: `/collections/${encoded}/graph`
 	};
 }
@@ -199,7 +181,7 @@ function normalizeWorkspaceRoute(
 	value: unknown,
 	fallback: string,
 	collectionId: string,
-	surface: 'workspace' | 'documents' | 'results' | 'evidence' | 'comparisons' | 'protocol' | 'graph'
+	surface: 'workspace' | 'documents' | 'results' | 'evidence' | 'comparisons' | 'graph'
 ) {
 	if (typeof value !== 'string' || !value.trim()) return fallback;
 
@@ -212,7 +194,6 @@ function normalizeWorkspaceRoute(
 		results: `/collections/${encoded}/results`,
 		evidence: `/collections/${encoded}/evidence`,
 		comparisons: `/collections/${encoded}/comparisons`,
-		protocol: `/collections/${encoded}/protocol`,
 		graph: `/collections/${encoded}/graph`
 	} as const;
 
@@ -239,9 +220,6 @@ function normalizeWorkspaceRoute(
 	}
 	if (surface === 'comparisons' && normalized === `${apiPrefix}/comparisons`) {
 		return routeMap.comparisons;
-	}
-	if (surface === 'protocol' && normalized.startsWith(`${apiPrefix}/protocol/`)) {
-		return routeMap.protocol;
 	}
 	if (surface === 'graph' && normalized.startsWith(`${apiPrefix}/graph`)) {
 		return routeMap.graph;
@@ -285,12 +263,6 @@ function normalizeLinks(value: unknown, collectionId: string): WorkspaceLinks {
 			defaults.comparisons,
 			collectionId,
 			'comparisons'
-		),
-		protocol: normalizeWorkspaceRoute(
-			record.protocol ?? record.protocol_steps,
-			defaults.protocol,
-			collectionId,
-			'protocol'
 		),
 		graph: normalizeWorkspaceRoute(record.graph, defaults.graph, collectionId, 'graph')
 	};
@@ -485,6 +457,7 @@ function normalizeTask(item: unknown): Task | null {
 			typeof record.progress_percent === 'number'
 				? record.progress_percent
 				: Number(record.progress_percent ?? 0),
+		progress_detail: normalizeTaskProgressDetail(record.progress_detail),
 		output_path: typeof record.output_path === 'string' ? record.output_path : null,
 		errors: Array.isArray(record.errors) ? record.errors.map((value) => String(value)) : [],
 		warnings: Array.isArray(record.warnings) ? record.warnings.map((value) => String(value)) : [],
@@ -495,8 +468,32 @@ function normalizeTask(item: unknown): Task | null {
 	};
 }
 
+function normalizeTaskProgressDetail(value: unknown): Task['progress_detail'] {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	const phase = String(record.phase ?? '').trim();
+	if (!phase) return null;
+	return {
+		phase,
+		current: normalizeOptionalTaskProgressNumber(record.current),
+		total: normalizeOptionalTaskProgressNumber(record.total),
+		unit: typeof record.unit === 'string' ? record.unit : null,
+		message: typeof record.message === 'string' ? record.message : null,
+		active_document_id:
+			typeof record.active_document_id === 'string' ? record.active_document_id : null,
+		active_objective_id:
+			typeof record.active_objective_id === 'string' ? record.active_objective_id : null
+	};
+}
+
+function normalizeOptionalTaskProgressNumber(value: unknown) {
+	if (value === null || value === undefined || value === '') return null;
+	if (typeof value === 'number' && Number.isFinite(value)) return value;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
 function deriveLegacyWorkflow(
-	collectionId: string,
 	fileCount: number,
 	latestTask: Task | null,
 	artifacts: WorkspaceArtifactStatus
@@ -548,34 +545,25 @@ function deriveLegacyWorkflow(
 						? 'processing'
 						: failedTask
 							? 'failed'
-							: 'not_started',
-		protocol: artifacts.protocol_steps_ready
-			? 'ready'
-			: activeTask
-				? 'processing'
-				: fileCount > 0 && collectionId
-					? 'limited'
-					: 'not_started'
+							: 'not_started'
 	};
 }
 
 function normalizeWorkflow(
 	value: unknown,
-	collectionId: string,
 	fileCount: number,
 	latestTask: Task | null,
 	artifacts: WorkspaceArtifactStatus
 ): WorkspaceWorkflow {
 	const record = asRecord(value);
-	const fallback = deriveLegacyWorkflow(collectionId, fileCount, latestTask, artifacts);
+	const fallback = deriveLegacyWorkflow(fileCount, latestTask, artifacts);
 	if (!record) return fallback;
 
 	return {
 		documents: normalizeStageEntry(record.documents, fallback.documents),
 		results: normalizeStageEntry(record.results, fallback.results),
 		evidence: normalizeStageEntry(record.evidence, fallback.evidence),
-		comparisons: normalizeStageEntry(record.comparisons, fallback.comparisons),
-		protocol: normalizeStageEntry(record.protocol, fallback.protocol)
+		comparisons: normalizeStageEntry(record.comparisons, fallback.comparisons)
 	};
 }
 
@@ -599,7 +587,6 @@ function normalizeDocumentSummary(value: unknown, fileCount: number): WorkspaceD
 		return {
 			total_documents: fileCount,
 			doc_type_counts: { ...DEFAULT_DOC_TYPE_COUNTS },
-			protocol_extractable_counts: { ...DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS },
 			warnings: []
 		};
 	}
@@ -609,10 +596,6 @@ function normalizeDocumentSummary(value: unknown, fileCount: number): WorkspaceD
 		doc_type_counts: normalizeCountRecord(
 			record.doc_type_counts ?? record.by_doc_type,
 			DEFAULT_DOC_TYPE_COUNTS
-		),
-		protocol_extractable_counts: normalizeCountRecord(
-			record.protocol_extractable_counts ?? record.by_protocol_extractable,
-			DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS
 		),
 		warnings: toStringList(record.warnings)
 	};
@@ -642,10 +625,6 @@ function normalizeArtifacts(value: unknown): WorkspaceArtifactStatus {
 		graph_generated: Boolean(record?.graph_generated),
 		graph_ready: Boolean(record?.graph_ready),
 		graph_stale: Boolean(record?.graph_stale),
-		procedure_blocks_generated: Boolean(record?.procedure_blocks_generated),
-		procedure_blocks_ready: Boolean(record?.procedure_blocks_ready),
-		protocol_steps_generated: Boolean(record?.protocol_steps_generated),
-		protocol_steps_ready: Boolean(record?.protocol_steps_ready),
 		updated_at: String(record?.updated_at ?? '')
 	};
 }
@@ -667,7 +646,6 @@ export async function fetchWorkspaceOverview(collectionId: string) {
 	const latest_task = normalizeTask(data.latest_task) ?? null;
 	const workflow = normalizeWorkflow(
 		data.workflow,
-		collectionId,
 		file_count,
 		latest_task,
 		artifacts
@@ -710,17 +688,7 @@ export async function fetchWorkspaceOverview(collectionId: string) {
 			),
 			can_download_graphml: Boolean(
 				(data.capabilities as Record<string, unknown> | undefined)?.can_download_graphml
-			),
-			can_view_protocol_steps:
-				Boolean(
-					(data.capabilities as Record<string, unknown> | undefined)?.can_view_protocol_steps
-				) || stageIsActionable(workflow.protocol),
-			can_search_protocol:
-				Boolean((data.capabilities as Record<string, unknown> | undefined)?.can_search_protocol) ||
-				stageIsActionable(workflow.protocol),
-			can_generate_sop:
-				Boolean((data.capabilities as Record<string, unknown> | undefined)?.can_generate_sop) ||
-				stageIsActionable(workflow.protocol)
+			)
 		},
 		links
 	} satisfies WorkspaceOverview;

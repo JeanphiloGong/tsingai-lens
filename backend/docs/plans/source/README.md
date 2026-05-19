@@ -26,6 +26,16 @@ GraphRAG-era Source seams.
 - [`source-figure-asset-extraction-plan.md`](source-figure-asset-extraction-plan.md)
   Add Source-owned figure rows and cropped figure assets without moving image
   semantics into Source
+- [`source-table-artifact-plan.md`](source-table-artifact-plan.md)
+  Harden Source-owned whole-table artifacts so Core consumes complete table
+  structure while rows and cells remain evidence anchors
+- [`source-runtime-organization-plan.md`](source-runtime-organization-plan.md)
+  Clarify the active Source runtime path and split the large artifact builder
+  into parser, mapping, and layout-binding modules
+- [`rag-anything-source-reference-plan.md`](rag-anything-source-reference-plan.md)
+  Borrow MinerU parser benchmarking, cache, pre-parsed input, and
+  local-context ideas from RAG-Anything while keeping Source evidence-first
+  and non-RAG
 - [`retrieval-package-retirement-plan.md`](retrieval-package-retirement-plan.md)
   Finish retirement of the historical `backend/retrieval/` package after
   Source runtime cutover

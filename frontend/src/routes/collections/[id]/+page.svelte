@@ -1,14 +1,29 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../_shared/api';
+	import { collections } from '../../_shared/collections';
 	import {
 		listCollectionFiles,
 		uploadCollectionFiles,
 		type CollectionFile
 	} from '../../_shared/files';
 	import { t } from '../../_shared/i18n';
-	import { createBuildTask, getTask, isTaskActive, type Task } from '../../_shared/tasks';
+	import {
+		fetchCollectionResearchView,
+		getResearchViewStateTone,
+		type CollectionAggregation,
+		type ResearchViewState,
+		type ResearchViewWarning
+	} from '../../_shared/researchView';
+	import {
+		createBuildTask,
+		getTask,
+		isTaskActive,
+		type Task,
+		type TaskProgressDetail
+	} from '../../_shared/tasks';
 	import {
 		buildOverviewPipelineSteps,
 		fetchWorkspaceOverview,
@@ -28,7 +43,16 @@
 		count: number;
 	};
 
+	type WarningSummary = {
+		key: string;
+		message: string;
+		scope: string;
+		count: number;
+	};
+
 	let workspace: WorkspaceOverview | null = null;
+	let researchView: CollectionAggregation | null = null;
+	let researchViewError = '';
 	let loading = false;
 	let error = '';
 	let actionStatus = '';
@@ -46,20 +70,51 @@
 	let filesError = '';
 
 	$: collectionId = $page.params.id ?? '';
-	$: effectiveFileCount = Math.max(workspace?.file_count ?? 0, collectionFiles.length);
+	$: effectiveFileCount = Math.max(
+		workspace?.file_count ?? 0,
+		collectionFiles.length,
+		uploadResult?.count ?? 0
+	);
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
 	$: readinessState = getOverviewReadinessState(stateWorkspace);
+	$: hasActiveTask = isTaskActive(stateWorkspace?.latest_task);
+	$: uploadControlsDisabled = uploadLoading || hasActiveTask;
 	$: pipelineSteps = buildOverviewPipelineSteps(stateWorkspace);
-	$: paperCount = stateWorkspace?.document_summary.total_documents ?? effectiveFileCount;
+	$: paperCount = Math.max(stateWorkspace?.document_summary.total_documents ?? 0, effectiveFileCount);
+	$: statusChecklistItems = [
+		{
+			label: $t('overview.cards.currentStatus.uploaded', { count: paperCount }),
+			done: stepStatus(pipelineSteps, 'upload') === 'completed'
+		},
+		{
+			label: $t('overview.cards.currentStatus.parsed'),
+			done: stepStatus(pipelineSteps, 'parse') === 'completed'
+		},
+		{
+			label: $t('overview.cards.currentStatus.evidence'),
+			done: stepStatus(pipelineSteps, 'evidence') === 'completed'
+		},
+		{
+			label: $t('overview.cards.currentStatus.comparison'),
+			done: stepStatus(pipelineSteps, 'comparisons') === 'completed'
+		},
+		{
+			label: $t('overview.cards.currentStatus.graph'),
+			done: stepStatus(pipelineSteps, 'graph') === 'completed'
+		}
+	];
 	$: showUploadPanel =
 		readinessState === 'empty' ||
 		readinessState === 'ready_to_process' ||
 		selectedFiles.length > 0 ||
 		Boolean(uploadError || uploadResult);
+	$: nextStepItems = buildNextStepItems(readinessState);
+	$: trustCardTitle = buildTrustCardTitle(readinessState);
+	$: trustCardBody = buildTrustCardBody(readinessState);
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		clearPoll();
-		void Promise.all([loadWorkspace(), loadFiles()]);
+		void Promise.all([loadWorkspace(), loadFiles(), loadResearchView()]);
 	}
 
 	onDestroy(() => {
@@ -101,7 +156,12 @@
 			schedulePoll(task.task_id);
 		} else {
 			clearPoll();
-			await Promise.all([loadWorkspace(false), loadFiles(false)]);
+			await Promise.all([loadWorkspace(false), loadFiles(false), loadResearchView()]);
+			uploadResult = null;
+			actionStatus =
+				task.status === 'failed'
+					? task.errors[0] || $t('overview.actions.viewErrors')
+					: $t('documents.indexDone');
 		}
 	}
 
@@ -109,7 +169,12 @@
 		error = '';
 		if (showLoading) loading = true;
 		try {
-			workspace = await fetchWorkspaceOverview(collectionId);
+			const nextWorkspace = await fetchWorkspaceOverview(collectionId);
+			workspace = nextWorkspace;
+			collections.update((items) => [
+				nextWorkspace.collection,
+				...items.filter((item) => item.id !== nextWorkspace.collection.id)
+			]);
 			const latestTask = workspace.latest_task;
 			if (latestTask && isTaskActive(latestTask)) {
 				schedulePoll(latestTask.task_id);
@@ -121,6 +186,16 @@
 			workspace = null;
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadResearchView() {
+		researchViewError = '';
+		try {
+			researchView = await fetchCollectionResearchView(collectionId);
+		} catch (err) {
+			researchView = null;
+			researchViewError = errorMessage(err);
 		}
 	}
 
@@ -139,10 +214,11 @@
 	}
 
 	async function refreshAll() {
-		await Promise.all([loadWorkspace(), loadFiles()]);
+		await Promise.all([loadWorkspace(), loadFiles(), loadResearchView()]);
 	}
 
 	function browseFiles() {
+		if (uploadControlsDisabled) return;
 		fileInput?.click();
 	}
 
@@ -153,6 +229,7 @@
 
 	function handleDrop(event: DragEvent) {
 		event.preventDefault();
+		if (uploadControlsDisabled) return;
 		isDragging = false;
 		handleFiles(event.dataTransfer?.files ?? null);
 	}
@@ -168,6 +245,7 @@
 	}
 
 	function handleDropzoneKeydown(event: KeyboardEvent) {
+		if (uploadControlsDisabled) return;
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
 			browseFiles();
@@ -181,9 +259,21 @@
 		}
 
 		actionStatus = '';
+		if (hasActiveTask) {
+			actionStatus = $t('documents.indexing');
+			return;
+		}
+
 		try {
 			const task = await createBuildTask(collectionId);
 			mergeTask(task);
+			collections.update((items) =>
+				items.map((item) =>
+					item.id === collectionId
+						? { ...item, status: 'processing', updated_at: task.updated_at || item.updated_at }
+						: item
+				)
+			);
 			actionStatus = $t('documents.indexing');
 			schedulePoll(task.task_id);
 		} catch (err) {
@@ -205,7 +295,7 @@
 			uploadResult = await uploadCollectionFiles(collectionId, selectedFiles);
 			selectedFiles = [];
 			if (fileInput) fileInput.value = '';
-			await Promise.all([loadFiles(false), loadWorkspace(false)]);
+			await Promise.all([loadFiles(false), loadWorkspace(false), loadResearchView()]);
 			actionStatus = $t('documents.uploadDone');
 		} catch (err) {
 			uploadError = errorMessage(err);
@@ -214,17 +304,34 @@
 		}
 	}
 
-	async function handleUploadPrimary() {
-		if (selectedFiles.length) {
-			await submitUpload();
-			return;
-		}
-		browseFiles();
-	}
-
 	function formatPercent(value?: number | null) {
 		if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
 		return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
+	}
+
+	function formatProgressDetail(detail?: TaskProgressDetail | null) {
+		if (!detail) return '';
+		if (
+			typeof detail.current === 'number' &&
+			Number.isFinite(detail.current) &&
+			typeof detail.total === 'number' &&
+			Number.isFinite(detail.total) &&
+			detail.total > 0
+		) {
+			const unit = detail.unit ? ` ${formatProgressUnit(detail.unit)}` : '';
+			return `${Math.max(0, Math.round(detail.current))} / ${Math.round(detail.total)}${unit}`;
+		}
+		return detail.message ?? '';
+	}
+
+	function formatProgressUnit(unit: string) {
+		const key = `tasks.progressUnit.${unit}`;
+		const translated = $t(key);
+		return translated === key ? unit : translated;
+	}
+
+	function taskStageMessage(task: Task) {
+		return task.progress_detail?.message || formatTaskStage(task.current_stage);
 	}
 
 	function formatTaskStatus(status?: string | null) {
@@ -262,20 +369,73 @@
 	}
 
 	function readyPrimaryHref() {
-		if (!stateWorkspace) return '#';
-		if (stateWorkspace.capabilities.can_view_comparisons) return stateWorkspace.links.comparisons;
-		if (stateWorkspace.capabilities.can_view_documents) return stateWorkspace.links.documents;
-		return stateWorkspace.links.workspace;
+		return resolve('/collections/[id]/objectives', { id: collectionId });
 	}
 
 	function readyPrimaryLabel() {
-		if (stateWorkspace?.capabilities.can_view_comparisons) {
-			return $t('overview.actions.enterComparisons');
+		return $t('overview.actions.enterObjectives');
+	}
+
+	function primaryResearchHref() {
+		return resolve('/collections/[id]/objectives', { id: collectionId });
+	}
+
+	function researchStateLabel(state: ResearchViewState) {
+		return $t(`research.state.${state}`);
+	}
+
+	function summarizeWarnings(warnings: ResearchViewWarning[]): WarningSummary[] {
+		const summaries = new Map<string, WarningSummary>();
+		for (const warning of warnings) {
+			const message = warning.message.trim();
+			if (!message) continue;
+			const key = `${warning.scope}:${message}`;
+			const existing = summaries.get(key);
+			if (existing) {
+				existing.count += 1;
+			} else {
+				summaries.set(key, {
+					key,
+					message,
+					scope: warning.scope,
+					count: 1
+				});
+			}
 		}
-		if (stateWorkspace?.capabilities.can_view_documents) {
-			return $t('overview.actions.viewDocuments');
+		return [...summaries.values()];
+	}
+
+	function overviewWarnings() {
+		const collectionWarnings = researchView?.warnings ?? [];
+		const rowWarnings = (researchView?.paper_coverage ?? []).flatMap((row) => row.primary_warnings);
+		return summarizeWarnings(collectionWarnings.length ? collectionWarnings : rowWarnings).slice(0, 5);
+	}
+
+	function warningSummaryLabel(summary: WarningSummary) {
+		if (summary.count <= 1) return summary.message;
+		if (summary.scope === 'paper') {
+			return $t('research.warningPaperCount', {
+				message: summary.message,
+				count: summary.count
+			});
 		}
-		return $t('overview.actions.refreshStatus');
+		return $t('research.warningOccurrenceCount', {
+			message: summary.message,
+			count: summary.count
+		});
+	}
+
+	function coverageSummary() {
+		const rows = researchView?.paper_coverage ?? [];
+		return { total: rows.length };
+	}
+
+	function formatResearchViewState(state: ResearchViewState) {
+		return researchStateLabel(state);
+	}
+
+	function researchListLabel(items: string[]) {
+		return items.length ? items.slice(0, 6).join(', ') : $t('research.emptyValue');
 	}
 
 	function evidenceHref() {
@@ -298,33 +458,8 @@
 		return 'pending';
 	}
 
-	function stepStatus(key: OverviewPipelineStep['key']) {
-		return pipelineSteps.find((step) => step.key === key)?.status ?? 'pending';
-	}
-
-	function statusChecklist() {
-		return [
-			{
-				label: $t('overview.cards.currentStatus.uploaded', { count: paperCount }),
-				done: stepStatus('upload') === 'completed'
-			},
-			{
-				label: $t('overview.cards.currentStatus.parsed'),
-				done: stepStatus('parse') === 'completed'
-			},
-			{
-				label: $t('overview.cards.currentStatus.evidence'),
-				done: stepStatus('evidence') === 'completed'
-			},
-			{
-				label: $t('overview.cards.currentStatus.comparison'),
-				done: stepStatus('comparisons') === 'completed'
-			},
-			{
-				label: $t('overview.cards.currentStatus.graph'),
-				done: stepStatus('graph') === 'completed'
-			}
-		];
+	function stepStatus(steps: OverviewPipelineStep[], key: OverviewPipelineStep['key']) {
+		return steps.find((step) => step.key === key)?.status ?? 'pending';
 	}
 
 	function paperMixRows(): PaperMixRow[] {
@@ -336,7 +471,11 @@
 		};
 		return [
 			{ key: 'review', label: $t('overview.docTypeReview'), count: counts.review },
-			{ key: 'experimental', label: $t('overview.docTypeExperimental'), count: counts.experimental },
+			{
+				key: 'experimental',
+				label: $t('overview.docTypeExperimental'),
+				count: counts.experimental
+			},
 			{ key: 'mixed', label: $t('overview.docTypeMixed'), count: counts.mixed },
 			{ key: 'uncertain', label: $t('overview.docTypeUncertain'), count: counts.uncertain },
 			{ key: 'benchmark', label: $t('overview.docTypeBenchmark'), count: 0 }
@@ -353,22 +492,29 @@
 		return paperCount > 0 && review >= Math.max(1, paperCount / 2);
 	}
 
-	function nextStepItems() {
-		if (readinessState === 'empty') {
+	function buildNextStepItems(state: OverviewReadinessState) {
+		if (state === 'empty') {
 			return [
 				$t('overview.cards.next.emptyUpload'),
 				$t('overview.cards.next.emptyDescribe'),
 				$t('overview.cards.next.emptyStart')
 			];
 		}
-		if (readinessState === 'processing' || readinessState === 'ready_to_process') {
+		if (state === 'processing' || state === 'ready_to_process') {
+			if (state === 'ready_to_process') {
+				return [
+					$t('overview.actions.startProcessing'),
+					$t('overview.cards.next.emptyUpload'),
+					$t('overview.cards.next.processingLogs')
+				];
+			}
 			return [
 				$t('overview.cards.next.processingWait'),
 				$t('overview.cards.next.processingLogs'),
 				$t('overview.cards.next.processingRefresh')
 			];
 		}
-		if (readinessState === 'failed') {
+		if (state === 'failed') {
 			return [
 				$t('overview.cards.next.failedErrors'),
 				$t('overview.cards.next.failedRetry'),
@@ -380,6 +526,20 @@
 			$t('overview.cards.next.readyEvidence'),
 			$t('overview.cards.next.readyCompare')
 		];
+	}
+
+	function buildTrustCardTitle(state: OverviewReadinessState) {
+		if (state === 'ready_to_process') return $t('overview.cards.trust.readyToProcessTitle');
+		if (state === 'processing') return $t('overview.cards.trust.processingTitle');
+		if (state === 'failed') return $t('overview.cards.trust.failedTitle');
+		return $t('overview.cards.trust.title');
+	}
+
+	function buildTrustCardBody(state: OverviewReadinessState) {
+		if (state === 'ready_to_process') return $t('overview.cards.trust.readyToProcessBody');
+		if (state === 'processing') return $t('overview.cards.trust.processingBody');
+		if (state === 'failed') return $t('overview.cards.trust.failedBody');
+		return $t('overview.cards.trust.body');
 	}
 
 	function actionStatusTone(value: string) {
@@ -441,9 +601,9 @@
 						class="btn btn--primary"
 						type="button"
 						disabled={uploadLoading}
-						on:click={handleUploadPrimary}
+						on:click={browseFiles}
 					>
-						{selectedFiles.length ? $t('documents.upload') : $t('overview.actions.uploadDocuments')}
+						{$t('overview.actions.uploadDocuments')}
 					</button>
 					<a class="btn btn--ghost" href="/">{$t('collection.backToCollections')}</a>
 				{/if}
@@ -454,6 +614,96 @@
 			<div class={`status ${actionStatusTone(actionStatus)}`} role="status">{actionStatus}</div>
 		{/if}
 
+		{#if researchView}
+			<section
+				class="overview-card research-overview-card"
+				aria-labelledby="research-overview-title"
+			>
+				<div class="overview-card__header">
+					<div>
+						<h2 id="research-overview-title">{$t('research.overview.title')}</h2>
+						<p>{$t('research.overview.body')}</p>
+					</div>
+					<span
+						class={`status-badge status-badge--${getResearchViewStateTone(researchView.state)}`}
+					>
+						{formatResearchViewState(researchView.state)}
+					</span>
+				</div>
+
+				<div class="research-metric-grid">
+					<div>
+						<span>{$t('research.overview.documents')}</span>
+						<strong>{coverageSummary().total || researchView.overview.document_count}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.samples')}</span>
+						<strong>{researchView.overview.sample_count}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.measurements')}</span>
+						<strong>{researchView.overview.measurement_count}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.evidence')}</span>
+						<strong>{researchView.overview.evidence_count}</strong>
+					</div>
+				</div>
+
+				<div class="research-overview-grid">
+					<div>
+						<span>{$t('research.overview.materials')}</span>
+						<strong>{researchListLabel(researchView.overview.material_systems)}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.processes')}</span>
+						<strong>{researchListLabel(researchView.overview.process_families)}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.variables')}</span>
+						<strong>{researchListLabel(researchView.overview.variable_axes)}</strong>
+					</div>
+					<div>
+						<span>{$t('research.overview.properties')}</span>
+						<strong>{researchListLabel(researchView.overview.measured_properties)}</strong>
+					</div>
+				</div>
+
+				{#if overviewWarnings().length}
+					<div class="research-warning-list">
+						<strong>{$t('research.warnings')}</strong>
+						<ul>
+							{#each overviewWarnings() as warning}
+								<li>{warningSummaryLabel(warning)}</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+
+				<div class="split-actions">
+					<a class="btn btn--primary btn--small" href={primaryResearchHref()}>
+						{$t('overview.actions.enterObjectives')}
+					</a>
+					<a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/documents`}>
+						{$t('overview.actions.viewDocumentList')}
+					</a>
+				</div>
+			</section>
+		{:else if researchViewError && readinessState === 'ready'}
+			<section class="overview-card research-overview-card research-overview-card--pending">
+				<div class="overview-card__header">
+					<div>
+						<h2>{$t('research.overview.pendingTitle')}</h2>
+						<p>{$t('research.overview.pendingBody')}</p>
+					</div>
+					<span class="status-badge status-badge--processing">
+						{$t('research.state.partial')}
+					</span>
+				</div>
+				<div class="status" role="status">{researchViewError}</div>
+			</section>
+		{/if}
+
 		{#if showUploadPanel}
 			<section id="upload" class="overview-card overview-upload-card">
 				<div>
@@ -461,7 +711,7 @@
 					<p>{$t('overview.uploadFormLead')}</p>
 				</div>
 				<div
-					class={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
+					class={`dropzone ${isDragging ? 'dropzone--active' : ''} ${uploadControlsDisabled ? 'dropzone--disabled' : ''}`}
 					on:drop={handleDrop}
 					on:dragover={handleDragOver}
 					on:dragleave={handleDragLeave}
@@ -469,12 +719,14 @@
 					on:keydown={handleDropzoneKeydown}
 					role="button"
 					tabindex="0"
+					aria-disabled={uploadControlsDisabled}
 				>
 					<input
 						class="dropzone-input"
 						bind:this={fileInput}
 						type="file"
 						multiple
+						disabled={uploadControlsDisabled}
 						on:change={(event) => handleFiles((event.currentTarget as HTMLInputElement).files)}
 					/>
 					<div class="dropzone-title">{$t('documents.dropHint')}</div>
@@ -490,12 +742,17 @@
 						class="btn btn--primary"
 						type="button"
 						on:click={submitUpload}
-						disabled={uploadLoading || !selectedFiles.length}
+						disabled={uploadControlsDisabled || !selectedFiles.length}
 					>
 						{uploadLoading ? $t('documents.uploading') : $t('documents.upload')}
 					</button>
 					{#if effectiveFileCount > 0}
-						<button class="btn btn--ghost" type="button" on:click={startBuildRun}>
+						<button
+							class="btn btn--ghost"
+							type="button"
+							disabled={hasActiveTask}
+							on:click={startBuildRun}
+						>
 							{$t('overview.actions.startProcessing')}
 						</button>
 					{/if}
@@ -512,6 +769,15 @@
 						<div class="detail-section__title">{$t('documents.uploadResultTitle')}</div>
 						<ul class="result-list">
 							{#each uploadResult.items as item}
+								<li>{getFileLabel(item)}</li>
+							{/each}
+						</ul>
+					</div>
+				{:else if collectionFiles.length}
+					<div class="detail-section">
+						<div class="detail-section__title">{$t('documents.listTitle')}</div>
+						<ul class="result-list">
+							{#each collectionFiles as item}
 								<li>{getFileLabel(item)}</li>
 							{/each}
 						</ul>
@@ -541,7 +807,7 @@
 			<article id="status-card" class="overview-card overview-info-card">
 				<h3>{$t('overview.cards.currentStatus.title')}</h3>
 				<ul class="check-list">
-					{#each statusChecklist() as item}
+					{#each statusChecklistItems as item}
 						<li class:complete={item.done}>
 							<span aria-hidden="true"></span>
 							{item.label}
@@ -559,6 +825,16 @@
 						</div>
 						<div>
 							<span>{$t('overview.statusStage')}</span>
+							<strong>{taskStageMessage(stateWorkspace.latest_task)}</strong>
+						</div>
+						{#if formatProgressDetail(stateWorkspace.latest_task.progress_detail)}
+							<div>
+								<span>{$t('overview.statusSubProgress')}</span>
+								<strong>{formatProgressDetail(stateWorkspace.latest_task.progress_detail)}</strong>
+							</div>
+						{/if}
+						<div>
+							<span>{$t('overview.statusStageName')}</span>
 							<strong>{formatTaskStage(stateWorkspace.latest_task.current_stage)}</strong>
 						</div>
 						<div>
@@ -575,8 +851,8 @@
 			</article>
 
 			<article class="overview-card overview-info-card">
-				<h3>{$t('overview.cards.trust.title')}</h3>
-				<p>{$t('overview.cards.trust.body')}</p>
+				<h3>{trustCardTitle}</h3>
+				<p>{trustCardBody}</p>
 				<div class="trust-chip-row">
 					<span class={`trust-chip trust-chip--${surfaceTone('comparisons')}`}>
 						{$t('overview.cards.trust.comparison')}: {surfaceLabel('comparisons')}
@@ -587,17 +863,42 @@
 					<span class={`trust-chip trust-chip--${surfaceTone('documents')}`}>
 						{$t('overview.cards.trust.documents')}: {surfaceLabel('documents')}
 					</span>
-					<span class={`trust-chip trust-chip--${surfaceTone('protocol')}`}>
-						Protocol: {surfaceLabel('protocol')}
-					</span>
 				</div>
 				<div class="split-actions">
-					<a class="btn btn--ghost btn--small" href={evidenceHref()}>
-						{$t('overview.actions.viewEvidence')}
-					</a>
-					<a class="btn btn--primary btn--small" href={readyPrimaryHref()}>
-						{$t('overview.actions.enterComparisonShort')}
-					</a>
+					{#if readinessState === 'ready'}
+						<a class="btn btn--ghost btn--small" href={evidenceHref()}>
+							{$t('overview.actions.viewEvidence')}
+						</a>
+						<a class="btn btn--primary btn--small" href={readyPrimaryHref()}>
+							{$t('overview.actions.enterObjectives')}
+						</a>
+					{:else if readinessState === 'processing'}
+						<a class="btn btn--primary btn--small" href="#pipeline">
+							{$t('overview.actions.viewProgress')}
+						</a>
+						<button class="btn btn--ghost btn--small" type="button" on:click={refreshAll}>
+							{$t('overview.actions.refreshStatus')}
+						</button>
+					{:else if readinessState === 'ready_to_process'}
+						<button class="btn btn--primary btn--small" type="button" on:click={startBuildRun}>
+							{$t('overview.actions.startProcessing')}
+						</button>
+						<button
+							class="btn btn--ghost btn--small"
+							type="button"
+							disabled={uploadControlsDisabled}
+							on:click={browseFiles}
+						>
+							{$t('overview.actions.uploadDocuments')}
+						</button>
+					{:else if readinessState === 'failed'}
+						<a class="btn btn--ghost btn--small" href="#status-card">
+							{$t('overview.actions.viewErrors')}
+						</a>
+						<button class="btn btn--primary btn--small" type="button" on:click={startBuildRun}>
+							{$t('overview.actions.retryProcessing')}
+						</button>
+					{/if}
 				</div>
 			</article>
 
@@ -626,7 +927,7 @@
 			<article class="overview-card overview-info-card">
 				<h3>{$t('overview.cards.next.title')}</h3>
 				<ul class="next-list">
-					{#each nextStepItems() as item}
+					{#each nextStepItems as item}
 						<li>{item}</li>
 					{/each}
 				</ul>
@@ -640,3 +941,91 @@
 		<div class="overview-footer-note">{$t('overview.footerNote')}</div>
 	</section>
 {/if}
+
+<style>
+	.research-overview-card {
+		display: grid;
+		gap: 18px;
+	}
+
+	.research-metric-grid,
+	.research-overview-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 12px;
+	}
+
+	.research-metric-grid > div,
+	.research-overview-grid > div {
+		display: grid;
+		gap: 6px;
+		min-width: 0;
+		padding: 14px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--bg-subtle);
+	}
+
+	.research-metric-grid span,
+	.research-overview-grid span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.research-metric-grid strong,
+	.research-overview-grid strong {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+		font-size: 15px;
+		line-height: 22px;
+	}
+
+	.research-metric-grid strong {
+		font-size: 24px;
+		line-height: 30px;
+	}
+
+	.research-warning-list {
+		display: grid;
+		gap: 8px;
+		padding: 14px;
+		border: 1px solid var(--warning-border);
+		border-radius: var(--radius-md);
+		background: var(--warning-bg);
+		color: var(--text-primary);
+	}
+
+	.research-warning-list strong {
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.research-warning-list ul {
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-overview-card--pending {
+		border-style: dashed;
+	}
+
+	@media (max-width: 900px) {
+		.research-metric-grid,
+		.research-overview-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 560px) {
+		.research-metric-grid,
+		.research-overview-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>

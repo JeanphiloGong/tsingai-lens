@@ -1,14 +1,14 @@
 # TsingAI-Lens Backend
 
 FastAPI backend for collection ingestion, indexing orchestration, workspace
-assembly, evidence/comparison browsing, graph/report browsing, conditional
-protocol generation, and the browser-facing API contract.
+assembly, evidence/comparison browsing, graph/report browsing, and the
+browser-facing API contract.
 
 ## Module Purpose
 
 The backend owns collection-oriented ingestion, indexing orchestration,
-workspace state, artifact generation, conditional protocol extraction, report
-retrieval, and the browser-facing API contract.
+workspace state, artifact generation, report retrieval, and the
+browser-facing API contract.
 
 This file is the backend module entry page. Formal backend source-of-truth docs
 live in `backend/docs/`. Narrower ownership seams use local `README.md` files
@@ -92,7 +92,7 @@ uvicorn main:app --reload --port 8010
 
 - The current Lens v1 backbone order is
   `document_profiles -> paper facts family -> comparison_rows /
-  evidence_cards -> protocol branch`.
+  evidence_cards`.
 - Collection-facing `/api/v1/*` surfaces are currently hosted through
   `controllers/source/*`, `controllers/core/*`, `controllers/derived/*`, and
   `controllers/goal/*`.
@@ -104,9 +104,6 @@ uvicorn main:app --reload --port 8010
   when unset, the backend uses `4`.
 - The active backend cleanup direction is to keep the
   `goal / source / core / derived` split explicit in `controllers/`,
-  `application/`, and `infra/`, keep Source runtime under `infra/source/*`,
-  and keep protocol behind the evidence/comparison backbone.
-- Public protocol browsing is collection-scoped under
-  `/api/v1/collections/{collection_id}/protocol/*`.
+  `application/`, and `infra/`, and keep Source runtime under `infra/source/*`.
 - Use `python3 ../scripts/check_docs_governance.py` when changing governed docs
   or node-local module entry pages.

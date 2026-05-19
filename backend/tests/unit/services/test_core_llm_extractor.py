@@ -2,9 +2,23 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
+from application.core.semantic_build.llm.prompts import (
+    build_objective_evidence_unit_prompt,
+)
 from application.core.semantic_build.llm.schemas import (
+    StructuredAxisCanonicalizationPlan,
     StructuredExtractionBundle,
+    StructuredObjectiveEvidenceRoutes,
+    StructuredObjectiveEvidenceUnits,
+    StructuredObjectiveMergePlan,
+    StructuredObjectivePaperFrame,
+    StructuredPaperSkim,
+    StructuredResearchObjectives,
+    StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
 
@@ -80,7 +94,7 @@ def test_core_llm_extractor_validates_json_text_response():
     mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
         }
     )
@@ -92,6 +106,34 @@ def test_core_llm_extractor_validates_json_text_response():
     assert "JSON schema:" in client.chat.completions.calls[0]["messages"][1]["content"]
 
 
+def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "method_mentions": [],
+          "material_mentions": [],
+          "variant_mentions": [],
+          "condition_mentions": [],
+          "baseline_mentions": [],
+          "result_claims": [],
+          "confidence": 0.9
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    mentions = extractor.extract_text_window_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental"},
+            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
+        }
+    )
+
+    assert isinstance(mentions, StructuredTextWindowMentions)
+    assert mentions.result_claims == []
+
+
 def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     parsed_mentions = StructuredTextWindowMentions()
@@ -101,7 +143,7 @@ def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
     mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
         }
     )
@@ -112,6 +154,302 @@ def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredTextWindowMentions
     assert "JSON schema:" in parse_call["messages"][1]["content"]
+
+
+def test_core_llm_extractor_validates_paper_skim_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "doc_role": "experimental",
+          "candidate_materials": ["316L stainless steel"],
+          "candidate_processes": ["LPBF", "heat treatment"],
+          "candidate_properties": ["corrosion"],
+          "changed_variables": ["temperature"],
+          "possible_objectives": [
+            "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
+          ],
+          "evidence_density": "high",
+          "confidence": 0.91,
+          "warnings": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "LPBF 316L corrosion study",
+            "text_preview": "LPBF 316L was heat treated.",
+            "table_captions": [],
+        }
+    )
+
+    assert isinstance(skim, StructuredPaperSkim)
+    assert skim.doc_role == "experimental"
+    assert skim.candidate_materials == ["316L stainless steel"]
+
+
+def test_core_llm_extractor_validates_research_objective_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "objectives": [
+            {
+              "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
+              "material_scope": ["316L stainless steel"],
+              "process_axes": ["LPBF", "heat treatment"],
+              "property_axes": ["corrosion"],
+              "comparison_intent": "compare as-built and heat-treated corrosion behavior",
+              "seed_document_ids": ["paper-1"],
+              "excluded_document_ids": [],
+              "confidence": 0.88,
+              "reason": "paper skims share the same comparison axis"
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    objectives = extractor.discover_research_objectives(
+        {
+            "collection_id": "col-1",
+            "paper_skims": [],
+        }
+    )
+
+    assert isinstance(objectives, StructuredResearchObjectives)
+    assert objectives.objectives[0].question.startswith("How does heat treatment")
+
+
+def test_core_llm_extractor_validates_axis_canonicalization_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "axis_groups": [
+            {
+              "axis_type": "process",
+              "canonical": "scanning strategy",
+              "aliases": ["scanning strategy", "scan strategy"],
+              "confidence": 0.95,
+              "reason": "same process variable phrased two ways"
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    canonicalization_plan = extractor.canonicalize_research_objective_axes(
+        {
+            "collection_id": "col-1",
+            "paper_skims": [],
+            "axis_candidates": {
+                "material": [],
+                "process": ["scanning strategy", "scan strategy"],
+                "property": [],
+            },
+        }
+    )
+
+    assert isinstance(canonicalization_plan, StructuredAxisCanonicalizationPlan)
+    assert canonicalization_plan.axis_groups[0].canonical == "scanning strategy"
+
+
+def test_core_llm_extractor_validates_research_objective_merge_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "merged_objectives": [
+            {
+              "source_objective_ids": ["obj-1", "obj-2"],
+              "question": "How do SLM parameters affect mechanical properties of 316L stainless steel?",
+              "material_scope": ["316L stainless steel"],
+              "process_axes": ["Selective Laser Melting", "energy density"],
+              "property_axes": ["yield strength", "elongation"],
+              "comparison_intent": "compare SLM parameter effects on mechanical properties",
+              "confidence": 0.88,
+              "reason": "the source objectives describe the same mechanical comparison"
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    merge_plan = extractor.merge_research_objectives(
+        {
+            "collection_id": "col-1",
+            "paper_skims": [],
+            "candidate_objectives": [],
+        }
+    )
+
+    assert isinstance(merge_plan, StructuredObjectiveMergePlan)
+    assert merge_plan.merged_objectives[0].source_objective_ids == ["obj-1", "obj-2"]
+
+
+def test_core_llm_extractor_validates_objective_paper_frame_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "relevance": "high",
+          "paper_role": "primary_experiment",
+          "background": "Direct current-work evidence for the objective.",
+          "material_match": ["316L stainless steel"],
+          "changed_variables": ["heat treatment"],
+          "measured_property_scope": ["corrosion"],
+          "test_environment_scope": ["3.5 wt.% NaCl"],
+          "relevant_sections": ["Results"],
+          "relevant_tables": ["table-1"],
+          "excluded_tables": ["table-2"]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    frame = extractor.frame_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "paper_skim": {"document_id": "paper-1"},
+            "section_snippets": [{"section_label": "Results"}],
+            "table_summaries": [{"table_id": "table-1"}, {"table_id": "table-2"}],
+        }
+    )
+
+    assert isinstance(frame, StructuredObjectivePaperFrame)
+    assert frame.relevance == "high"
+    assert frame.relevant_tables == ["table-1"]
+
+
+def test_core_llm_extractor_validates_objective_evidence_routes_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "routes": [
+            {
+              "source_kind": "table",
+              "source_ref": "table-1",
+              "role": "current_experimental_evidence",
+              "extractable": true,
+              "reason": "Target result table.",
+              "table_schema": {
+                "column_headers": ["sample", "corrosion current"]
+              },
+              "column_roles": {
+                "corrosion current": "target_property"
+              },
+              "join_keys": {
+                "sample_key": "sample"
+              },
+              "join_plan": {
+                "join_on": "sample_key"
+              },
+              "confidence": 0.88
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    routes = extractor.route_objective_evidence(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "paper_frame": {"frame_id": "opf-1"},
+            "source_candidates": [
+                {"source_kind": "table", "source_ref": "table-1"}
+            ],
+        }
+    )
+
+    assert isinstance(routes, StructuredObjectiveEvidenceRoutes)
+    assert routes.routes[0].role == "current_experimental_evidence"
+    assert routes.routes[0].join_plan == {"join_on": "sample_key"}
+
+
+def test_core_llm_extractor_validates_objective_evidence_units_response():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "evidence_units": [
+            {
+              "unit_kind": "measurement",
+              "property_normalized": "corrosion current density",
+              "material_system": {"family": "316L stainless steel"},
+              "sample_context": {"label": "heat-treated"},
+              "process_context": {"process": "LPBF"},
+              "resolved_condition": {},
+              "test_condition": {"environment": "NaCl"},
+              "value_payload": {"value": 0.4},
+              "unit": "uA/cm2",
+              "baseline_context": {},
+              "interpretation": null,
+              "source_refs": [
+                {"source_kind": "table", "source_ref": "table-1"}
+              ],
+              "evidence_anchor_ids": [],
+              "join_keys": {"sample_key": "heat-treated"},
+              "resolution_status": "resolved",
+              "confidence": 0.86
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    units = extractor.extract_objective_evidence_units(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "evidence_route": {
+                "source_kind": "table",
+                "source_ref": "table-1",
+            },
+            "source": {
+                "source_kind": "table",
+                "source_ref": "table-1",
+                "table_matrix": [["sample", "corrosion"], ["HT", "0.4"]],
+            },
+        }
+    )
+
+    assert isinstance(units, StructuredObjectiveEvidenceUnits)
+    assert units.evidence_units[0].unit_kind == "measurement"
+    assert units.evidence_units[0].resolution_status == "resolved"
+
+
+def test_objective_evidence_unit_prompt_requires_text_multi_value_splitting():
+    _, prompt = build_objective_evidence_unit_prompt(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does preheating affect 316L?"},
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": (
+                    "The cooling rate values were 1.43x10^6 C/s for P150, "
+                    "and 1.65x10^6 C/s for NP."
+                ),
+            },
+        }
+    )
+
+    assert "one evidence unit per binding" in prompt
+    assert "Do not merge those bindings into one `interpretation`" in prompt
+    assert "1.43x10^6 C/s for P150" in prompt
+    assert "1.65x10^6 C/s for NP" in prompt
+    assert "17.8 MPa" in prompt
+    assert "99.5 MPa" in prompt
+    assert "Bad text example" in prompt
 
 
 def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
@@ -168,7 +506,7 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
     mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
+            "document_profile": {"doc_type": "experimental"},
             "text_window": {
                 "text": "Prior work reported lower residual stress with in situ heating.",
                 "heading_path": "Introduction",
@@ -182,61 +520,26 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
     assert mentions.result_claims[0].claim_scope == "prior_work"
 
 
-def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_rows(
-    monkeypatch,
-):
-    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient("unused", parsed=StructuredExtractionBundle())
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
-
-    bundle = extractor.extract_table_row_bundle(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
-            "table_row": {"row_summary": "Sample A | 560 MPa", "cells": []},
-            "supporting_text_windows": [],
-        }
-    )
-
-    assert bundle == StructuredExtractionBundle()
-    parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredExtractionBundle
-    assert parse_call["max_completion_tokens"] == 4096
-
-
-def test_core_llm_extractor_coerces_null_nested_table_row_fields():
+def test_core_llm_extractor_accepts_null_result_property_names():
     client = _FakeOpenAIClient(
         """
         {
-          "method_facts": [],
-          "sample_variants": [],
-          "test_conditions": [
+          "method_mentions": [],
+          "material_mentions": [],
+          "variant_mentions": [],
+          "condition_mentions": [],
+          "baseline_mentions": [],
+          "result_claims": [
             {
-              "property_type": "hardness",
-              "condition_payload": {
-                "method": null,
-                "methods": null,
-                "temperatures_c": null,
-                "durations": null,
-                "atmosphere": null
-              },
-              "confidence": 0.78,
-              "epistemic_status": "normalized_from_evidence"
-            }
-          ],
-          "baseline_references": [],
-          "measurement_results": [
-            {
-              "claim_text": "Hardness reached 210 HV.",
-              "property_normalized": "hardness",
-              "result_type": "scalar",
-              "value_payload": null,
-              "unit": "HV",
-              "variant_label": null,
-              "baseline_label": null,
-              "anchors": null,
-              "claim_scope": "current work",
-              "confidence": 0.81
+              "claim_text": "The behavior was improved.",
+              "property_normalized": null,
+              "result_type": "trend",
+              "value_text": null,
+              "unit": null,
+              "claim_scope": "current_work",
+              "eligible_for_measurement_result": false,
+              "evidence_quote": "The behavior was improved.",
+              "confidence": 0.7
             }
           ]
         }
@@ -244,21 +547,176 @@ def test_core_llm_extractor_coerces_null_nested_table_row_fields():
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
-    bundle = extractor.extract_table_row_bundle(
+    mentions = extractor.extract_text_window_mentions(
         {
             "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental", "protocol_extractable": "yes"},
-            "table_row": {"row_summary": "Sample A | 210 HV", "cells": []},
+            "document_profile": {"doc_type": "experimental"},
+            "text_window": {
+                "text": "The behavior was improved.",
+                "heading_path": "Results",
+            },
+        }
+    )
+
+    assert mentions.result_claims[0].property_normalized == ""
+
+
+def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batches(
+    monkeypatch,
+):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    mentions = extractor.extract_table_batch_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental"},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
             "supporting_text_windows": [],
         }
     )
 
-    assert bundle.test_conditions[0].condition_payload.methods == []
-    assert bundle.test_conditions[0].condition_payload.temperatures_c == []
-    assert bundle.test_conditions[0].condition_payload.durations == []
-    assert bundle.measurement_results[0].value_payload.value is None
-    assert bundle.measurement_results[0].anchors == []
-    assert bundle.measurement_results[0].claim_scope == "current_work"
+    assert mentions == StructuredTableBatchMentions()
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["response_format"] is StructuredTableBatchMentions
+    assert parse_call["max_completion_tokens"] == 4096
+
+
+def test_core_llm_extractor_validates_lightweight_table_batch_mentions():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "row_results": [
+            {
+              "row_index": 1,
+              "row_subjects": [
+                {
+                  "variant_label": "Sample A",
+                  "family": null,
+                  "composition": null,
+                  "variable_axis_type": null,
+                  "variable_value": null,
+                  "quote": "Sample A"
+                }
+              ],
+              "process_mentions": null,
+              "test_condition_mentions": [
+                {
+                  "name": "test temperature",
+                  "value_text": "25",
+                  "unit": "C",
+                  "quote": "25 C"
+                }
+              ],
+              "baseline_mentions": [],
+              "result_claims": [
+                {
+                  "property_normalized": "hardness",
+                  "result_type": "scalar",
+                  "value_text": "210",
+                  "unit": "HV",
+                  "variant_label": "Sample A",
+                  "baseline_label": null,
+                  "claim_scope": "current work",
+                  "claim_text": "Hardness reached 210 HV.",
+                  "quote": "210 HV"
+                }
+              ]
+            }
+          ]
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    mentions = extractor.extract_table_batch_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental"},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 210 HV", "cells": []}],
+            "supporting_text_windows": [],
+        }
+    )
+
+    row_result = mentions.row_results[0]
+    assert row_result.row_index == 1
+    assert row_result.row_subjects[0].variant_label == "Sample A"
+    assert row_result.process_mentions == []
+    assert row_result.test_condition_mentions[0].name == "test temperature"
+    assert row_result.result_claims[0].claim_scope == "current_work"
+
+
+def test_structured_bundle_defaults_null_backend_metadata():
+    bundle = StructuredExtractionBundle.model_validate(
+        {
+            "sample_variants": [
+                {
+                    "variant_label": "Sample A",
+                    "confidence": None,
+                    "epistemic_status": None,
+                }
+            ],
+            "measurement_results": [
+                {
+                    "claim_text": "Hardness reached 210 HV.",
+                    "property_normalized": "hardness",
+                    "result_type": "scalar",
+                    "confidence": None,
+                }
+            ],
+        }
+    )
+
+    assert bundle.sample_variants[0].confidence == 0.85
+    assert bundle.sample_variants[0].epistemic_status == "normalized_from_evidence"
+    assert bundle.measurement_results[0].confidence == 0.85
+
+
+def test_core_llm_extractor_accepts_empty_table_batch_mentions():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "row_results": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    mentions = extractor.extract_table_batch_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental"},
+            "target_rows": [{"row_index": 1, "row_summary": "Sample A | no grounded result", "cells": []}],
+            "supporting_text_windows": [],
+        }
+    )
+
+    assert mentions == StructuredTableBatchMentions()
+
+
+def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "keywords": ["yield strength"],
+          "row_results": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    with pytest.raises(ValidationError) as exc_info:
+        extractor.extract_table_batch_mentions(
+            {
+                "document_title": "LPBF Paper",
+                "document_profile": {"doc_type": "experimental"},
+                "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
+                "supporting_text_windows": [],
+            }
+        )
+
+    assert "keywords" in str(exc_info.value)
 
 
 def test_core_llm_extractor_falls_back_to_json_text_for_invalid_mode(monkeypatch, caplog):

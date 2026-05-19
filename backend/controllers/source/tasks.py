@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from controllers.schemas.source.task import (
     ArtifactStatusResponse,
@@ -25,6 +26,14 @@ build_task_runner = CollectionBuildTaskRunner(
     artifact_registry_service=artifact_registry_service,
 )
 logger = logging.getLogger(__name__)
+_build_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="source-build")
+
+
+def _log_unexpected_build_failure(future: Future) -> None:
+    try:
+        future.result()
+    except Exception:  # noqa: BLE001
+        logger.exception("Build task crashed after route scheduling")
 
 
 @router.post(
@@ -35,7 +44,6 @@ logger = logging.getLogger(__name__)
 async def create_build_task(
     collection_id: str,
     payload: BuildTaskCreateRequest,
-    background_tasks: BackgroundTasks,
     request: Request,
 ) -> TaskResponse:
     try:
@@ -55,7 +63,7 @@ async def create_build_task(
         collection_id,
         payload.verbose,
     )
-    background_tasks.add_task(
+    future = _build_executor.submit(
         build_task_runner.run_build_task_blocking,
         task["task_id"],
         collection_id,
@@ -63,6 +71,7 @@ async def create_build_task(
         additional_context=payload.additional_context,
         request_id=request_id,
     )
+    future.add_done_callback(_log_unexpected_build_failure)
     return TaskResponse(**task)
 
 

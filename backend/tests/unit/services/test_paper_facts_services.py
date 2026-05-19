@@ -1,36 +1,34 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from types import SimpleNamespace
-
 import numpy as np
 import pandas as pd
-import pytest
 
-from application.core.comparison_assembly import ComparableResultAssembler
-from application.core.comparison_projection import ComparisonRowProjector
+from domain.core.comparison_assembly import (
+    ComparableResultAssembler,
+    ComparisonInputRecords,
+)
+from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
-from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.llm.prompts import (
-    build_table_row_extraction_prompt,
+    build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.semantic_build.llm.schemas import (
-    EvidenceAnchorPayload,
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
     MethodFactPayload,
     SampleVariantPayload,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
+    StructuredTableBatchMentions,
+    StructuredTableBatchRowMentions,
+    TableRowFactMentionPayload,
+    TableRowResultClaimPayload,
+    TableRowSubjectMentionPayload,
     StructuredTextWindowMentions,
-    TextWindowBaselineMentionPayload,
-    TextWindowConditionMentionPayload,
     TextWindowMethodMentionPayload,
     TextWindowResultClaimPayload,
-    TextWindowVariantMentionPayload,
 )
 from domain.core.comparison import (
     COMPARABLE_RESULT_NORMALIZATION_VERSION,
@@ -46,38 +44,26 @@ from domain.core.comparison import (
     ContextBinding,
     EvidenceTrace,
     NormalizedComparisonContext,
+    PairwiseComparisonRelation,
     ResultValue,
     build_collection_assessment_input_fingerprint,
     evaluate_comparison_assessment,
 )
-from infra.source.runtime.source_evidence import (
-    build_blocks,
-    build_table_cells,
-    build_table_rows,
+from domain.core.evidence_backbone import (
+    MeasurementResult,
+    SampleVariant,
 )
-
-
-def _patch_parquet(monkeypatch) -> None:  # noqa: ANN001
-    def fake_to_parquet(self, path, index=False):  # noqa: ANN001
-        frame = self.reset_index(drop=True) if index else self
-        Path(path).write_text(frame.to_json(orient="records"), encoding="utf-8")
-
-    def fake_read_parquet(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return pd.DataFrame(payload)
-
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet, raising=False)
-    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
-
-
-def _write_source_artifacts(
-    output_dir: Path,
-    documents: pd.DataFrame,
-    text_units: pd.DataFrame | None = None,
-) -> None:
-    build_blocks(documents, text_units).to_parquet(output_dir / "blocks.parquet", index=False)
-    build_table_rows(documents, text_units).to_parquet(output_dir / "table_rows.parquet", index=False)
-    build_table_cells(documents, text_units).to_parquet(output_dir / "table_cells.parquet", index=False)
+from domain.core.research_objective import (
+    ObjectiveContext,
+    ObjectiveEvidenceRoute,
+    ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
+    ResearchObjective,
+)
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
+)
 
 
 def _build_test_comparable_result(
@@ -162,12 +148,29 @@ def _build_collection_overlay(
     )
 
 
+def _store_core_comparison_artifacts(
+    comparison_service: ComparisonService,
+    collection_id: str,
+    comparable_results: list[ComparableResult],
+    scoped_results: list[CollectionComparableResult],
+) -> None:
+    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=comparable_results,
+        scoped_results=scoped_results,
+    )
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        tuple(comparable_results),
+        tuple(scoped_results),
+        row_records,
+    )
+
+
 class EvidenceOnlyExtractor:
     def extract_document_profile(self, payload):  # noqa: ANN001
         return StructuredDocumentProfile(
             doc_type="experimental",
-            protocol_extractable="yes",
-            protocol_extractability_signals=[],
             parsing_warnings=[],
             confidence=0.9,
         )
@@ -187,8 +190,22 @@ class EvidenceOnlyExtractor:
             ]
         )
 
-    def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-        return StructuredExtractionBundle()
+    def extract_table_batch_mentions(self, payload):  # noqa: ANN001, ARG002
+        return StructuredTableBatchMentions()
+
+
+class CountingEvidenceExtractor(EvidenceOnlyExtractor):
+    def __init__(self) -> None:
+        self.text_window_payloads: list[dict] = []
+        self.table_batch_payloads: list[dict] = []
+
+    def extract_text_window_mentions(self, payload):  # noqa: ANN001
+        self.text_window_payloads.append(payload)
+        return super().extract_text_window_mentions(payload)
+
+    def extract_table_batch_mentions(self, payload):  # noqa: ANN001
+        self.table_batch_payloads.append(payload)
+        return StructuredTableBatchMentions()
 
 
 def test_paper_facts_prompt_payloads_exclude_internal_ids():
@@ -199,7 +216,6 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
-            "protocol_extractable": "yes",
         },
         text_window={
             "window_id": "win-1",
@@ -218,7 +234,6 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
         "text_unit_ids",
         "block_ids",
         "table_id",
-        "row_index",
         "method_ref",
         "variant_ref",
         "test_condition_ref",
@@ -235,33 +250,43 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert "If none fit exactly, use `other`." in text_window_prompt
     assert "If unsure, use `unclear`." in text_window_prompt
 
-    table_row_payload = service._build_table_row_extraction_payload(
+    table_batch_payload = service._build_table_batch_extraction_payload(
         title="Prompt Boundary Paper",
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
-            "protocol_extractable": "yes",
         },
-        table_row={
+        table_context={
+            "caption_text": "Table 1 Mechanical results.",
+            "heading_path": "Results > Table 1",
+            "column_headers": ["Sample", "Strength"],
+            "table_matrix": [["Sample", "Strength"], ["A", "12 MPa"]],
+            "table_markdown": "| Sample | Strength |\n| --- | --- |\n| A | 12 MPa |",
+            "table_text": "Sample | Strength\nA | 12 MPa",
+            "page": 5,
+        },
+        table_rows=[{
             "table_id": "tbl-1",
             "row_index": 2,
             "row_text": "Sample A | 12 MPa | as-built",
             "heading_path": "Results > Table 1",
+        }],
+        row_cells_by_index={
+            2: [
+                {
+                    "header_path": "Sample",
+                    "cell_text": "A",
+                    "unit_hint": None,
+                    "col_index": 0,
+                },
+                {
+                    "header_path": "Strength",
+                    "cell_text": "12",
+                    "unit_hint": "MPa",
+                    "col_index": 1,
+                },
+            ],
         },
-        row_cells=[
-            {
-                "header_path": "Sample",
-                "cell_text": "A",
-                "unit_hint": None,
-                "col_index": 0,
-            },
-            {
-                "header_path": "Strength",
-                "cell_text": "12",
-                "unit_hint": "MPa",
-                "col_index": 1,
-            },
-        ],
         text_windows=[
             {
                 "window_id": "win-2",
@@ -274,31 +299,1034 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
             }
         ],
     )
-    _, table_row_prompt = build_table_row_extraction_prompt(table_row_payload)
+    _, table_batch_prompt = build_table_batch_mentions_prompt(table_batch_payload)
     for field in (
         "document_id",
         "window_id",
         "text_unit_ids",
         "block_ids",
         "table_id",
-        "row_index",
         "method_ref",
         "variant_ref",
         "test_condition_ref",
         "baseline_ref",
         "result_ref",
     ):
-        assert f'"{field}"' not in table_row_prompt
-    assert '"page"' in table_row_prompt
-    assert "Use exactly the schema keys and no others." in table_row_prompt
-    assert '"keywords"' in table_row_prompt
-    assert '"temperatures_c": []' in table_row_prompt
-    assert '"unit": "MPa"' in table_row_prompt
-    assert "Use `supporting_text_windows` only when they are required to interpret the row." in table_row_prompt
-    assert "Emit at most 2 `method_facts`" in table_row_prompt
-    assert '"laser_power_w": null' in table_row_prompt
-    assert '"strain_rate_s-1": null' in table_row_prompt
-    assert '"value_origin": "reported"' in table_row_prompt
+        assert f'"{field}"' not in table_batch_prompt
+    assert '"page"' in table_batch_prompt
+    assert '"table_context"' in table_batch_prompt
+    assert '"table_markdown"' in table_batch_prompt
+    assert "Use exactly the schema keys and no others." in table_batch_prompt
+    assert '"keywords"' in table_batch_prompt
+    assert '"row_subjects": [' in table_batch_prompt
+    assert '"unit": "MPa"' in table_batch_prompt
+    assert "Non-target rows are context only" in table_batch_prompt
+    assert "Use `supporting_text_windows` only when they are required to interpret a row." in table_batch_prompt
+    assert "Emit at most 2 `row_subjects`" in table_batch_prompt
+    assert "Do not emit `confidence`, `epistemic_status`" in table_batch_prompt
+    assert '"target_rows"' in table_batch_prompt
+    assert '"row_results": [' in table_batch_prompt
+    assert '"row_index": 2' in table_batch_prompt
+    assert '"method_facts"' not in table_batch_prompt
+    assert '"measurement_results"' in table_batch_prompt
+    assert '"process_context": {' not in table_batch_prompt
+    assert '"value_payload": {"value": 940}' in table_batch_prompt
+    assert '"name": "laser_power_w"' in table_batch_prompt
+    assert "strain_rate_s-1" in table_batch_prompt
+    assert '"laser_power_w": null' not in table_batch_prompt
+    assert '"strain_rate_s-1": null' not in table_batch_prompt
+    assert '"result_claims": [' in table_batch_prompt
+
+
+def test_paper_facts_payloads_include_sanitized_objective_context():
+    service = PaperFactsService()
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-internal-1",
+            "question": "How does scan speed affect LPBF 316L yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["scanning speed"],
+            "process_context_axes": ["LPBF"],
+            "target_property_axes": ["yield strength"],
+            "excluded_property_axes": ["relative density"],
+            "routing_hints": [
+                {
+                    "table_id": "tbl-internal-1",
+                    "document_id": "doc-internal-1",
+                    "role": "result_table",
+                    "strength": "strong",
+                    "matched_property_axes": ["yield strength"],
+                    "matched_variable_process_axes": ["scanning speed"],
+                    "reason": "Table contains target property columns.",
+                }
+            ],
+            "extraction_guidance": {
+                "focus": "Extract mechanical current-work evidence.",
+            },
+            "confidence": 0.9,
+        }
+    )
+
+    text_window_payload = service._build_text_window_extraction_payload(
+        title="Objective Prompt Paper",
+        source_filename="objective.pdf",
+        profile={"doc_type": "experimental"},
+        text_window={
+            "heading": "Results",
+            "heading_path": "Results",
+            "text": "Yield strength increased with scanning speed.",
+            "page": 4,
+        },
+        objective_context=objective_context,
+    )
+
+    assert text_window_payload["objective_context"] == {
+        "focus": "How does scan speed affect LPBF 316L yield strength?",
+        "material_scope": ["316L stainless steel"],
+        "variable_process_axes": ["scanning speed"],
+        "process_context_axes": ["LPBF"],
+        "target_property_axes": ["yield strength"],
+        "excluded_property_axes": ["relative density"],
+        "routing_hints": [],
+        "extraction_guidance": {"focus": "Extract mechanical current-work evidence."},
+        "confidence": 0.9,
+    }
+    _, text_window_prompt = build_text_window_extraction_prompt(text_window_payload)
+    assert "Objective-context rules:" in text_window_prompt
+    assert "objective_context.target_property_axes" in text_window_prompt
+    assert '"objective_id"' not in text_window_prompt
+    assert '"table_id"' not in text_window_prompt
+    assert '"document_id"' not in text_window_prompt
+
+    table_batch_payload = service._build_table_batch_extraction_payload(
+        title="Objective Prompt Paper",
+        source_filename="objective.pdf",
+        profile={"doc_type": "experimental"},
+        table_context={
+            "caption_text": "Mechanical properties by scanning speed.",
+            "column_headers": ["Sample", "Scanning speed", "Yield strength"],
+            "table_matrix": [["Sample", "Scanning speed", "Yield strength"], ["A", "100", "560"]],
+        },
+        table_rows=[{
+            "table_id": "tbl-internal-1",
+            "row_index": 1,
+            "row_text": "A | 100 | 560",
+        }],
+        row_cells_by_index={},
+        text_windows=[],
+        objective_context=objective_context,
+        objective_table_route=objective_context.routing_hints[0],
+    )
+
+    table_objective_context = table_batch_payload["objective_context"]
+    assert table_objective_context["routing_hints"] == [
+        {
+            "role": "result_table",
+            "strength": "strong",
+            "matched_property_axes": ["yield strength"],
+            "matched_variable_process_axes": ["scanning speed"],
+            "reason": "Table contains target property columns.",
+        }
+    ]
+    _, table_batch_prompt = build_table_batch_mentions_prompt(table_batch_payload)
+    assert "The active table route is `result_table`" in table_batch_prompt
+    assert '"objective_id"' not in table_batch_prompt
+    assert '"table_id"' not in table_batch_prompt
+    assert '"document_id"' not in table_batch_prompt
+
+
+def test_paper_facts_selects_objective_context_by_text_and_table_route():
+    service = PaperFactsService()
+    structural_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-structural",
+            "question": "How do SLM parameters affect densification?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["energy density", "scanning speed"],
+            "process_context_axes": ["Selective Laser Melting"],
+            "target_property_axes": ["relative density"],
+            "excluded_property_axes": ["yield strength"],
+            "routing_hints": [
+                {
+                    "table_id": "table-1",
+                    "document_id": "paper-1",
+                    "role": "result_table",
+                    "strength": "strong",
+                    "matched_property_axes": ["relative density"],
+                    "matched_variable_process_axes": ["energy density"],
+                }
+            ],
+            "extraction_guidance": {},
+        }
+    )
+    mechanical_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "question": "How do SLM parameters affect mechanical properties?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["energy density", "scanning speed"],
+            "process_context_axes": ["Selective Laser Melting"],
+            "target_property_axes": ["yield strength", "ultimate tensile strength"],
+            "excluded_property_axes": ["relative density"],
+            "routing_hints": [
+                {
+                    "table_id": "table-1",
+                    "document_id": "paper-1",
+                    "role": "condition_context",
+                    "strength": "strong",
+                    "matched_variable_process_axes": ["energy density"],
+                },
+                {
+                    "table_id": "table-2",
+                    "document_id": "paper-1",
+                    "role": "result_table",
+                    "strength": "strong",
+                    "matched_property_axes": [
+                        "yield strength",
+                        "ultimate tensile strength",
+                    ],
+                },
+            ],
+            "extraction_guidance": {},
+        }
+    )
+    contexts = (structural_context, mechanical_context)
+
+    selected_text_context = service._select_text_window_objective_context(
+        contexts,
+        text_window={
+            "heading": "Mechanical properties",
+            "heading_path": "Results > Mechanical properties",
+            "text": "Yield strength and ultimate tensile strength increased.",
+        },
+    )
+    assert selected_text_context == mechanical_context
+
+    table_1_context, table_1_route = service._select_table_batch_objective_context(
+        contexts,
+        document_id="paper-1",
+        table_id="table-1",
+        table_context={"caption_text": "Processing parameters and relative density."},
+        table_rows=[{"row_index": 1, "row_text": "A | 70 | 99.2"}],
+        row_cells_by_index={},
+    )
+    assert table_1_context == structural_context
+    assert table_1_route is not None
+    assert table_1_route["role"] == "result_table"
+
+    table_2_context, table_2_route = service._select_table_batch_objective_context(
+        contexts,
+        document_id="paper-1",
+        table_id="table-2",
+        table_context={"caption_text": "Mechanical properties."},
+        table_rows=[{"row_index": 1, "row_text": "A | 560 | 690"}],
+        row_cells_by_index={},
+    )
+    assert table_2_context == mechanical_context
+    assert table_2_route is not None
+    assert table_2_route["role"] == "result_table"
+
+
+def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
+    tmp_path,
+    caplog,
+):
+    from application.core.semantic_build.document_profile_service import (
+        DocumentProfileService,
+    )
+    from application.source.collection_service import CollectionService
+    from domain.source import SourceArtifactSet
+
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Route Gated Facts")
+    collection_id = collection["collection_id"]
+    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    extractor = CountingEvidenceExtractor()
+    document_profile_service = DocumentProfileService(
+        collection_service=collection_service,
+        structured_extractor=extractor,
+        core_fact_repository=core_repository,
+        source_artifact_repository=source_repository,
+    )
+    service = PaperFactsService(
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
+        structured_extractor=extractor,
+        core_fact_repository=core_repository,
+        source_artifact_repository=source_repository,
+    )
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "LPBF 316L Route Gated Paper",
+                    "text": "Allowed process text. Excluded composition text.",
+                }
+            ],
+            text_units=[
+                {
+                    "id": "tu-1",
+                    "text": "Allowed process text.",
+                    "document_ids": ["paper-1"],
+                },
+                {
+                    "id": "tu-2",
+                    "text": "Excluded composition text.",
+                    "document_ids": ["paper-1"],
+                },
+            ],
+            blocks=[
+                {
+                    "block_id": "block-allowed",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "Allowed process text reports LPBF scan speed.",
+                    "block_order": 1,
+                    "heading_path": "Results",
+                    "text_unit_ids": ["tu-1"],
+                },
+                {
+                    "block_id": "block-excluded",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "Excluded composition text reports Fe Cr Ni only.",
+                    "block_order": 2,
+                    "heading_path": "Composition",
+                    "text_unit_ids": ["tu-2"],
+                },
+            ],
+            tables=[
+                {
+                    "table_id": "table-allowed",
+                    "document_id": "paper-1",
+                    "table_order": 1,
+                    "caption_text": "Allowed tensile results",
+                    "heading_path": "Results",
+                    "column_headers": ["Sample", "Yield strength"],
+                    "table_matrix": [
+                        ["Sample", "Yield strength"],
+                        ["Sample A", "560 MPa"],
+                    ],
+                },
+                {
+                    "table_id": "table-excluded",
+                    "document_id": "paper-1",
+                    "table_order": 2,
+                    "caption_text": "Excluded chemical composition",
+                    "heading_path": "Composition",
+                    "column_headers": ["Fe", "Cr", "Ni"],
+                    "table_matrix": [
+                        ["Fe", "Cr", "Ni"],
+                        ["balance", "17", "12"],
+                    ],
+                },
+            ],
+            table_rows=[
+                {
+                    "row_id": "row-allowed-1",
+                    "document_id": "paper-1",
+                    "table_id": "table-allowed",
+                    "row_index": 1,
+                    "row_text": "Sample A | 560 MPa",
+                    "heading_path": "Results",
+                },
+                {
+                    "row_id": "row-excluded-1",
+                    "document_id": "paper-1",
+                    "table_id": "table-excluded",
+                    "row_index": 1,
+                    "row_text": "balance | 17 | 12",
+                    "heading_path": "Composition",
+                },
+            ],
+            table_cells=[
+                {
+                    "cell_id": "cell-allowed-1",
+                    "document_id": "paper-1",
+                    "table_id": "table-allowed",
+                    "row_index": 1,
+                    "col_index": 1,
+                    "header_path": "Sample",
+                    "cell_text": "Sample A",
+                },
+                {
+                    "cell_id": "cell-allowed-2",
+                    "document_id": "paper-1",
+                    "table_id": "table-allowed",
+                    "row_index": 1,
+                    "col_index": 2,
+                    "header_path": "Yield strength",
+                    "cell_text": "560",
+                    "unit_hint": "MPa",
+                },
+                {
+                    "cell_id": "cell-excluded-1",
+                    "document_id": "paper-1",
+                    "table_id": "table-excluded",
+                    "row_index": 1,
+                    "col_index": 1,
+                    "header_path": "Fe",
+                    "cell_text": "balance",
+                },
+                {
+                    "cell_id": "cell-excluded-2",
+                    "document_id": "paper-1",
+                    "table_id": "table-excluded",
+                    "row_index": 1,
+                    "col_index": 2,
+                    "header_path": "Cr",
+                    "cell_text": "17",
+                    "unit_hint": "wt%",
+                },
+            ],
+        ),
+    )
+
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "question": "How does scan speed affect LPBF 316L yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan speed"],
+            "property_axes": ["yield strength"],
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "question": objective.question,
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["scan speed"],
+            "process_context_axes": ["LPBF"],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+    existing_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-existing",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield_strength",
+            "value_payload": {"value": 560},
+            "resolution_status": "resolved",
+        }
+    )
+    existing_chain = ObjectiveLogicChain.from_mapping(
+        {
+            "logic_chain_id": "olc-existing",
+            "objective_id": objective.objective_id,
+            "chain_scope": "objective",
+            "evidence_unit_ids": [existing_unit.evidence_unit_id],
+            "chain_payload": {"schema_version": "objective_logic_chain.v1"},
+        }
+    )
+    core_repository.replace_collection_research_objectives(
+        collection_id,
+        (),
+        (objective,),
+        (objective_context,),
+        (),
+        (
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "text_window",
+                    "source_ref": "block-allowed",
+                    "role": "current_experimental_evidence",
+                    "extractable": True,
+                }
+            ),
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "text_window",
+                    "source_ref": "block-excluded",
+                    "role": "low_value_or_irrelevant",
+                    "extractable": False,
+                }
+            ),
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "table",
+                    "source_ref": "table-allowed",
+                    "role": "current_experimental_evidence",
+                    "extractable": True,
+                }
+            ),
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "table",
+                    "source_ref": "table-excluded",
+                    "role": "low_value_or_irrelevant",
+                    "extractable": False,
+                }
+            ),
+        ),
+        (existing_unit,),
+        (existing_chain,),
+    )
+
+    with caplog.at_level("INFO"):
+        service.build_paper_facts(collection_id)
+
+    assert len(extractor.text_window_payloads) == 1
+    assert extractor.text_window_payloads[0]["text_window"]["text"].startswith(
+        "Allowed process text"
+    )
+    assert len(extractor.table_batch_payloads) == 1
+    target_rows = extractor.table_batch_payloads[0]["target_rows"]
+    assert len(target_rows) == 1
+    assert target_rows[0]["row_summary"] == "Sample A | 560 MPa"
+    assert all("balance" not in row["row_summary"] for row in target_rows)
+
+    facts = core_repository.read_collection_facts(collection_id)
+    assert facts.objective_evidence_units == (existing_unit,)
+    assert facts.objective_logic_chains == (existing_chain,)
+    assert any(
+        "Paper facts objective route gate loaded" in record.message
+        and "text_window_routes=1" in record.message
+        and "table_routes=1" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts extraction started" in record.message
+        and "total_extraction_units=2" in record.message
+        for record in caplog.records
+    )
+
+    extractor.text_window_payloads.clear()
+    extractor.table_batch_payloads.clear()
+    caplog.clear()
+    core_repository.replace_collection_research_objectives(
+        collection_id,
+        (),
+        (objective,),
+        (objective_context,),
+        (),
+        (
+            ObjectiveEvidenceRoute.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "table",
+                    "source_ref": "table-allowed",
+                    "role": "current_experimental_evidence",
+                    "extractable": True,
+                }
+            ),
+        ),
+        (existing_unit,),
+        (existing_chain,),
+    )
+
+    with caplog.at_level("INFO"):
+        service.build_paper_facts(collection_id)
+
+    assert extractor.text_window_payloads == []
+    assert len(extractor.table_batch_payloads) == 1
+    assert any(
+        "Paper facts objective route gate loaded" in record.message
+        and "text_window_routes=0" in record.message
+        and "table_routes=1" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Paper facts extraction started" in record.message
+        and "total_extraction_units=1" in record.message
+        for record in caplog.records
+    )
+
+
+def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
+    from application.source.collection_service import CollectionService
+
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Evidence Cards")
+    collection_id = collection["collection_id"]
+    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    service = PaperFactsService(
+        collection_service=collection_service,
+        core_fact_repository=core_repository,
+    )
+    unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-as-built-icorr",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "as-built"},
+            "process_context": {"process": "LPBF"},
+            "test_condition": {"method": "potentiodynamic polarization"},
+            "property_normalized": "corrosion current density",
+            "value_payload": {"value": 1.2, "source_value_text": "1.2 uA/cm2"},
+            "unit": "uA/cm2",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-1",
+                    "page": 4,
+                }
+            ],
+            "evidence_anchor_ids": ["anc-as-built"],
+            "resolution_status": "resolved",
+            "confidence": 0.88,
+        }
+    )
+    core_repository.replace_collection_research_objectives(
+        collection_id,
+        (),
+        (),
+        (),
+        (),
+        (),
+        (unit,),
+        (),
+    )
+
+    def fail_build_paper_facts(collection_id: str):  # noqa: ARG001
+        raise AssertionError("objective evidence cards should not build paper facts")
+
+    service.build_paper_facts = fail_build_paper_facts
+
+    cards = service.build_evidence_cards(collection_id)
+    payload = service.list_evidence_cards(collection_id)
+
+    assert len(cards) == 1
+    assert payload["total"] == 1
+    card = payload["items"][0]
+    assert card["evidence_id"] == "ev_objective_oeu-as-built-icorr"
+    assert card["claim_type"] == "property"
+    assert card["claim_text"] == (
+        "as-built reported corrosion current density of 1.2 uA/cm2."
+    )
+    assert card["evidence_source_type"] == "table"
+    assert card["traceability_status"] == "direct"
+    assert card["material_system"]["family"] == "316L stainless steel"
+    assert card["evidence_anchors"][0]["anchor_id"] == "anc-as-built"
+    assert card["evidence_anchors"][0]["figure_or_table"] == "table-1"
+
+
+def test_document_method_family_conditions_bind_table_results():
+    service = PaperFactsService()
+    text_windows = [
+        {
+            "window_id": "win-tensile",
+            "heading": "Mechanical testing",
+            "heading_path": "Experimental > Mechanical testing",
+            "text": (
+                "Tensile tests followed ASTM E8M on an INSTRON mechanical "
+                "testing machine at a strain rate of 0.02 mm/min with all "
+                "blocks built horizontally on substrate."
+            ),
+            "block_ids": ["blk-tensile"],
+            "page": 2,
+        },
+        {
+            "window_id": "win-hardness",
+            "heading": "Microhardness",
+            "heading_path": "Experimental > Microhardness",
+            "text": (
+                "Vickers microhardness was measured using a Wilson tester "
+                "under a 10 N load and 15 s holding time with 20 readings "
+                "per sample."
+            ),
+            "block_ids": ["blk-hardness"],
+            "page": 3,
+        },
+        {
+            "window_id": "win-sem",
+            "heading": "SEM characterization",
+            "heading_path": "Experimental > SEM characterization",
+            "text": (
+                "Horizontal and vertical sections were polished with 400-1200 "
+                "grit papers and colloidal silica for SEM and ImageJ relative "
+                "density and porosity analysis at 100x-10000x magnification."
+            ),
+            "block_ids": ["blk-sem"],
+            "page": 4,
+        },
+    ]
+    evidence_anchor_rows: list[dict[str, object]] = []
+    test_condition_rows: list[dict[str, object]] = []
+    document_state = service._build_document_state()
+
+    service._materialize_document_method_family_test_conditions(
+        collection_id="col-1",
+        document_id="doc-1",
+        text_windows=text_windows,
+        evidence_anchor_rows=evidence_anchor_rows,
+        test_condition_rows=test_condition_rows,
+        document_state=document_state,
+    )
+
+    test_conditions = service._normalize_test_condition_records(
+        test_condition_rows,
+        "col-1",
+    )
+    assert {row["property_type"] for row in test_conditions} == {
+        "tensile_mechanics",
+        "microhardness",
+        "density_porosity_microstructure",
+    }
+    test_condition_by_type = {
+        row["property_type"]: row
+        for row in test_conditions
+    }
+    tensile_payload = test_condition_by_type["tensile_mechanics"]["condition_payload"]
+    assert tensile_payload["standard"] == "ASTM E8M"
+    assert tensile_payload["strain_rate_s-1"] == "0.02 mm/min"
+
+    measurement_results = service._attach_document_test_condition_ids_to_measurements(
+        measurement_results=(
+            {
+                "result_id": "res-yield",
+                "document_id": "doc-1",
+                "collection_id": "col-1",
+                "variant_id": "var-1",
+                "property_normalized": "yield_strength",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 560},
+                "unit": "MPa",
+                "result_source_type": "table",
+            },
+            {
+                "result_id": "res-hardness",
+                "document_id": "doc-1",
+                "collection_id": "col-1",
+                "variant_id": "var-1",
+                "property_normalized": "hardness",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 215},
+                "unit": "HV",
+                "result_source_type": "table",
+            },
+            {
+                "result_id": "res-density",
+                "document_id": "doc-1",
+                "collection_id": "col-1",
+                "variant_id": "var-1",
+                "property_normalized": "density",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 99.4},
+                "unit": "%",
+                "result_source_type": "table",
+            },
+        ),
+        test_conditions=test_conditions,
+    )
+
+    condition_ids_by_property = {
+        row["property_normalized"]: row["test_condition_id"]
+        for row in measurement_results
+    }
+    assert condition_ids_by_property["yield_strength"] == test_condition_by_type[
+        "tensile_mechanics"
+    ][
+        "test_condition_id"
+    ]
+    assert condition_ids_by_property["hardness"] == test_condition_by_type[
+        "microhardness"
+    ][
+        "test_condition_id"
+    ]
+    assert condition_ids_by_property["density"] == test_condition_by_type[
+        "density_porosity_microstructure"
+    ][
+        "test_condition_id"
+    ]
+
+
+def test_characterization_observations_include_table_derived_pbf_context():
+    service = PaperFactsService()
+    sample_variants = (
+        {
+            "variant_id": "var-1",
+            "document_id": "doc-1",
+            "collection_id": "col-1",
+            "variant_label": "1",
+            "process_context": {"scan_strategy": "A"},
+        },
+        {
+            "variant_id": "var-2",
+            "document_id": "doc-1",
+            "collection_id": "col-1",
+            "variant_label": "2",
+            "process_context": {"scan_strategy": "B"},
+        },
+    )
+    measurement_results = (
+        {
+            "result_id": "res-1",
+            "document_id": "doc-1",
+            "collection_id": "col-1",
+            "variant_id": "var-1",
+            "property_normalized": "density",
+            "result_type": "scalar",
+            "value_payload": {"value": 95.4},
+            "unit": "%",
+            "result_source_type": "table",
+            "evidence_anchor_ids": ["anc-1"],
+        },
+        {
+            "result_id": "res-2",
+            "document_id": "doc-1",
+            "collection_id": "col-1",
+            "variant_id": "var-2",
+            "property_normalized": "density",
+            "result_type": "scalar",
+            "value_payload": {"value": 97.7},
+            "unit": "%",
+            "result_source_type": "table",
+            "evidence_anchor_ids": ["anc-2"],
+        },
+    )
+
+    observations = service._build_characterization_observations(
+        collection_id="col-1",
+        method_facts=(),
+        evidence_anchors=(
+            {"anchor_id": "anc-1", "document_id": "doc-1"},
+            {"anchor_id": "anc-2", "document_id": "doc-1"},
+        ),
+        text_windows_by_doc={
+            "doc-1": [
+                {
+                    "window_id": "win-1",
+                    "block_ids": ["blk-1"],
+                    "text": (
+                        "Horizontal and vertical SEM sections were examined. "
+                        "The dendrite width increased as scan speed decreased. "
+                        "Low energy input caused pores, while overheating led to balling."
+                    ),
+                }
+            ]
+        },
+        sample_variants=sample_variants,
+        measurement_results=measurement_results,
+    )
+
+    observation_types = {row["characterization_type"] for row in observations}
+    assert "density_porosity_sem_imagej" in observation_types
+    assert "highest_density_sample" in observation_types
+    assert "scan_strategy_a" in observation_types
+    assert "scan_strategy_b" in observation_types
+    highest_density = next(
+        row
+        for row in observations
+        if row["characterization_type"] == "highest_density_sample"
+    )
+    assert highest_density["variant_id"] == "var-2"
+
+
+def test_table_row_process_context_uses_cell_header_bindings():
+    service = PaperFactsService()
+
+    context = service._build_table_row_process_context(
+        [],
+        row_cells=[
+            {"col_index": 1, "header_path": "Sample number", "cell_text": "5"},
+            {"col_index": 2, "header_path": "Hatch space (mm)", "cell_text": "0.111"},
+            {"col_index": 3, "header_path": "Scan strategy", "cell_text": "A"},
+            {"col_index": 4, "header_path": "Scanning speed (mm/s)", "cell_text": "0.12"},
+            {"col_index": 5, "header_path": "Energy density (J/mm 3 )", "cell_text": "150"},
+        ],
+    )
+
+    assert context.hatch_spacing_um == 111.0
+    assert context.scan_strategy == "A"
+    assert context.scan_speed_mm_s == 0.12
+    assert context.energy_density_j_mm3 == 150.0
+
+
+def test_table_row_process_context_keeps_p001_process_columns_separate():
+    service = PaperFactsService()
+
+    context = service._build_table_row_process_context(
+        [],
+        row_cells=[
+            {"col_index": 1, "header_path": "Sample number", "cell_text": "9"},
+            {"col_index": 2, "header_path": "Hatch space (mm)", "cell_text": "0.12"},
+            {"col_index": 3, "header_path": "Scan strategy", "cell_text": "B"},
+            {"col_index": 4, "header_path": "Scanning speed (mm/s)", "cell_text": "0.239"},
+            {"col_index": 5, "header_path": "Energy density (J/mm 3 )", "cell_text": "70"},
+        ],
+    )
+
+    assert context.hatch_spacing_um == 120.0
+    assert context.scan_strategy == "B"
+    assert context.scan_speed_mm_s == 0.239
+    assert context.energy_density_j_mm3 == 70.0
+
+
+def test_text_window_test_conditions_skip_empty_payload():
+    service = PaperFactsService()
+    text_window = {
+        "text": "Yield strength reached 560 MPa.",
+        "window_id": "window-1",
+    }
+    claim = TextWindowResultClaimPayload(
+        claim_text="Yield strength reached 560 MPa.",
+        property_normalized="yield_strength",
+        result_type="scalar",
+        value_text="560",
+        unit="MPa",
+        claim_scope="current_work",
+        eligible_for_measurement_result=True,
+        evidence_quote="Yield strength reached 560 MPa.",
+    )
+
+    conditions = service._build_text_window_test_conditions(
+        StructuredTextWindowMentions(result_claims=[claim]),
+        text_window,
+        [claim],
+    )
+
+    assert conditions == []
+
+
+def test_generic_text_samples_are_removed_when_table_samples_exist():
+    service = PaperFactsService()
+    samples = service._normalize_sample_variant_records(
+        [
+            {
+                "variant_id": "var-generic",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_label": "316L stainless steel samples",
+                "host_material_system": {},
+                "composition": None,
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": {},
+                "profile_payload": {"source_kind": "text_window"},
+                "structure_feature_ids": [],
+                "source_anchor_ids": [],
+                "confidence": 0.8,
+                "epistemic_status": "inferred_with_low_confidence",
+            },
+            {
+                "variant_id": "var-1",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_label": "1",
+                "host_material_system": {},
+                "composition": None,
+                "variable_axis_type": None,
+                "variable_value": None,
+                "process_context": {},
+                "profile_payload": {"source_kind": "table_row"},
+                "structure_feature_ids": [],
+                "source_anchor_ids": [],
+                "confidence": 0.9,
+                "epistemic_status": "normalized_from_evidence",
+            },
+        ],
+        None,
+    )
+    filtered, removed_ids = service._filter_generic_text_sample_variants(samples)
+
+    assert {row["variant_label"] for row in filtered} == {"1"}
+    assert removed_ids == {"var-generic"}
+
+    measurements = service._normalize_measurement_result_records(
+        [
+            {
+                "result_id": "res-1",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_id": "var-generic",
+                "property_normalized": "density",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 95.0, "statement": "Relative density was 95%."},
+                "unit": "%",
+                "evidence_anchor_ids": ["anchor-1"],
+                "traceability_status": "direct",
+                "result_source_type": "text",
+            }
+        ],
+        None,
+    )
+    cleared = service._clear_removed_variant_ids_from_measurements(
+        measurements,
+        removed_ids,
+    )
+
+    assert cleared[0]["variant_id"] is None
+
+
+def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistics():
+    service = PaperFactsService()
+    measurements = service._normalize_measurement_result_records(
+        [
+            {
+                "result_id": "res-1",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_id": "var-1",
+                "property_normalized": "hardness",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 187.7, "statement": "Microhardness is 187.7 HV."},
+                "unit": None,
+                "evidence_anchor_ids": ["anchor-1"],
+                "traceability_status": "direct",
+                "result_source_type": "table",
+            },
+            {
+                "result_id": "res-2",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_id": "var-1",
+                "property_normalized": "hardness",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {"value": 187.7, "statement": "Microhardness measured at 187.7."},
+                "unit": "HV",
+                "evidence_anchor_ids": ["anchor-2"],
+                "traceability_status": "direct",
+                "result_source_type": "table",
+            },
+            {
+                "result_id": "res-std",
+                "document_id": "paper-1",
+                "collection_id": "collection-1",
+                "variant_id": "var-1",
+                "property_normalized": "hardness",
+                "result_type": "scalar",
+                "claim_scope": "current_work",
+                "value_payload": {
+                    "value": 11.4,
+                    "statement": "Standard deviation of microhardness is 11.4 HV.",
+                },
+                "unit": "HV",
+                "evidence_anchor_ids": ["anchor-std"],
+                "traceability_status": "direct",
+                "result_source_type": "table",
+            },
+        ],
+        None,
+    )
+
+    deduped = service._deduplicate_measurement_result_records(measurements)
+
+    assert len(deduped) == 1
+    assert deduped[0]["unit"] == "HV"
+    assert set(deduped[0]["evidence_anchor_ids"]) == {"anchor-1", "anchor-2"}
 
 
 def test_pbf_fact_schema_accepts_process_test_and_value_provenance_fields():
@@ -402,30 +1430,32 @@ def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
     )
 
 
-def test_table_row_payload_truncates_supporting_window_text():
+def test_table_batch_payload_truncates_supporting_window_text():
     service = PaperFactsService()
 
-    payload = service._build_table_row_extraction_payload(
+    payload = service._build_table_batch_extraction_payload(
         title="Prompt Boundary Paper",
         source_filename="prompt-boundary.pdf",
         profile={
             "doc_type": "experimental",
-            "protocol_extractable": "yes",
         },
-        table_row={
+        table_context=None,
+        table_rows=[{
             "table_id": "tbl-1",
             "row_index": 2,
             "row_text": "Sample A | 12 MPa | as-built",
             "heading_path": "Results > Table 1",
+        }],
+        row_cells_by_index={
+            2: [
+                {
+                    "header_path": "Sample",
+                    "cell_text": "A",
+                    "unit_hint": None,
+                    "col_index": 0,
+                }
+            ],
         },
-        row_cells=[
-            {
-                "header_path": "Sample",
-                "cell_text": "A",
-                "unit_hint": None,
-                "col_index": 0,
-            }
-        ],
         text_windows=[
             {
                 "window_id": "win-2",
@@ -443,1278 +1473,223 @@ def test_table_row_payload_truncates_supporting_window_text():
     assert len(payload["supporting_text_windows"][0]["text"]) == 1200
 
 
-def test_evidence_and_comparison_services_build_backbone_artifacts(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
+def test_table_batch_payload_includes_source_table_context():
+    service = PaperFactsService()
 
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-    )
-    comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
-    )
-
-    collection = collection_service.create_collection("Evidence Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Epoxy Composite Study",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "The epoxy and SiO2 powders were mixed in ethanol and stirred for 2 h.",
-                        "The slurry was dried at 80 C and annealed at 600 C under Ar.",
-                        "Characterization",
-                        "XRD and SEM were used to characterize the powders.",
-                        "SEM showed columnar beta phase with grain size of 12 um.",
-                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "The epoxy and SiO2 powders were mixed in ethanol and stirred for 2 h.",
-                "document_ids": ["paper-1"],
-            },
-            {
-                "id": "tu-2",
-                "text": "The slurry was dried at 80 C and annealed at 600 C under Ar.",
-                "document_ids": ["paper-1"],
-            },
-            {
-                "id": "tu-3",
-                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
-                "document_ids": ["paper-1"],
-            },
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    profiles = document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
-    comparisons = comparison_service.build_comparison_rows(collection_id, output_dir)
-
-    assert not profiles.empty
-    assert len(evidence) >= 2
-    assert set(evidence["claim_type"]) >= {"process", "characterization", "property"}
-    assert not comparisons.empty
-    assert "comparable_result_id" in comparisons.columns
-    assert "comparability_status" in comparisons.columns
-    assert "limited" in set(comparisons["comparability_status"]) or "comparable" in set(
-        comparisons["comparability_status"]
-    )
-    characterization = pd.read_parquet(output_dir / "characterization_observations.parquet")
-    structure_features = pd.read_parquet(output_dir / "structure_features.parquet")
-    method_facts = pd.read_parquet(output_dir / "method_facts.parquet")
-    evidence_anchors = pd.read_parquet(output_dir / "evidence_anchors.parquet")
-    test_conditions = pd.read_parquet(output_dir / "test_conditions.parquet")
-    baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
-    sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
-    measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
-    comparable_results = pd.read_parquet(output_dir / "comparable_results.parquet")
-    collection_comparable_results = pd.read_parquet(
-        output_dir / "collection_comparable_results.parquet"
-    )
-    assert not characterization.empty
-    assert not method_facts.empty
-    assert not evidence_anchors.empty
-    assert not baseline_references.empty
-    assert not sample_variants.empty
-    assert not measurement_results.empty
-    assert not comparable_results.empty
-    assert not collection_comparable_results.empty
-    assert "directly_observed" in set(characterization["epistemic_status"])
-    if not structure_features.empty:
-        assert "inferred_from_characterization" in set(structure_features["epistemic_status"])
-    if not test_conditions.empty:
-        assert "normalized_from_evidence" in set(test_conditions["epistemic_status"])
-    assert set(baseline_references["baseline_type"]) == {"implicit_within_document_control"}
-    assert "inferred_with_low_confidence" in set(sample_variants["epistemic_status"])
-    assert set(measurement_results["result_type"]) == {"scalar"}
-    artifacts = artifact_registry.get(collection_id)
-    assert artifacts["document_profiles_ready"] is True
-    assert artifacts["evidence_anchors_ready"] is True
-    assert artifacts["method_facts_ready"] is True
-    assert artifacts["evidence_cards_ready"] is True
-    assert artifacts["characterization_observations_ready"] is True
-    assert artifacts["structure_features_ready"] is (not structure_features.empty)
-    assert artifacts["test_conditions_ready"] is (not test_conditions.empty)
-    assert artifacts["baseline_references_ready"] is True
-    assert artifacts["sample_variants_ready"] is True
-    assert artifacts["measurement_results_ready"] is True
-    assert artifacts["comparable_results_ready"] is True
-    assert artifacts["collection_comparable_results_ready"] is True
-    assert artifacts["comparison_rows_ready"] is True
-
-
-def test_evidence_service_builds_table_backed_property_cards(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
+    payload = service._build_table_batch_extraction_payload(
+        title="Prompt Boundary Paper",
+        source_filename="prompt-boundary.pdf",
+        profile={
+            "doc_type": "experimental",
+        },
+        table_context={
+            "caption_text": "Table 1 Mechanical properties.",
+            "heading_path": "Results > Mechanical Properties",
+            "column_headers": ["Sample", "Yield strength (MPa)", "Baseline"],
+            "table_matrix": [
+                ["Sample", "Yield strength (MPa)", "Baseline"],
+                ["A", "560", "as-built"],
+            ],
+            "table_markdown": "| Sample | Yield strength (MPa) | Baseline |\n| --- | --- | --- |\n| A | 560 | as-built |",
+            "table_text": "Sample | Yield strength (MPa) | Baseline\nA | 560 | as-built",
+            "page": 5,
+        },
+        table_rows=[{
+            "table_id": "tbl-1",
+            "row_index": 1,
+            "row_text": "A | 560 | as-built",
+            "heading_path": "Results > Mechanical Properties",
+            "page": 5,
+        }],
+        row_cells_by_index={
+            1: [
+                {
+                    "header_path": "Sample",
+                    "cell_text": "A",
+                    "unit_hint": None,
+                    "col_index": 0,
+                },
+                {
+                    "header_path": "Yield strength (MPa)",
+                    "cell_text": "560",
+                    "unit_hint": "MPa",
+                    "col_index": 1,
+                },
+            ],
+        },
+        text_windows=[],
     )
 
-    collection = collection_service.create_collection("Table Evidence Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Conductivity Table Study",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Powders were mixed and annealed.",
-                        "Table 1 Conductivity Results",
-                        "Sample | Conductivity (mS/cm) | Baseline",
-                        "A | 12 | as-prepared",
-                        "B | 18 | annealed",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Powders were mixed and annealed.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
-
-    table_cards = evidence[evidence["evidence_source_type"] == "table"]
-    assert len(table_cards) == 2
-    assert any("12 mS/cm" in claim for claim in table_cards["claim_text"])
-    assert any("18 mS/cm" in claim for claim in table_cards["claim_text"])
-    assert set(table_cards["traceability_status"]) == {"direct"}
-
-
-def test_evidence_service_builds_sample_variants_and_measurement_results(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-    )
-
-    collection = collection_service.create_collection("Wave D Backbone Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Induction Assisted AM Study",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Ti alloy samples were fabricated under different induction currents.",
-                        "The powders were annealed at 600 C under Ar for 2 h.",
-                        "Characterization",
-                        "SEM showed columnar beta phase with grain size of 12 um.",
-                        "Table 1 Tensile Results",
-                        "Sample | Induction Current (A) | Tensile Strength (MPa) | Retention (%) | Baseline",
-                        "A0 | 0 | 950 | 88 | as-built",
-                        "A1 | 10 | 1010 | 92 | as-built",
-                        "A3 | 30 | 1085 | 95 | as-built",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Ti alloy samples were fabricated under different induction currents.",
-                "document_ids": ["paper-1"],
-            },
-            {
-                "id": "tu-2",
-                "text": "The powders were annealed at 600 C under Ar for 2 h.",
-                "document_ids": ["paper-1"],
-            },
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    paper_facts_service.build_evidence_cards(collection_id, output_dir)
-
-    frames = paper_facts_service._load_paper_fact_frames(collection_id, output_dir)
-    sample_variants = frames["sample_variants"]
-    measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
-    baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
-
-    assert set(sample_variants["variant_label"]) == {"A0", "A1", "A3"}
-    assert set(sample_variants["variable_axis_type"]) == {"induction_current"}
-    assert set(sample_variants["variable_value"]) == {0, 10, 30}
-    assert all(sample_variants["source_anchor_ids"].astype(str) != "[]")
-
-    assert len(measurement_results) == 6
-    assert set(measurement_results["property_normalized"]) == {
-        "tensile_strength",
-        "retention",
+    assert payload["table_context"] == {
+        "caption_text": "Table 1 Mechanical properties.",
+        "heading_path": "Results > Mechanical Properties",
+        "column_headers": ["Sample", "Yield strength (MPa)", "Baseline"],
+        "table_matrix": [
+            ["Sample", "Yield strength (MPa)", "Baseline"],
+            ["A", "560", "as-built"],
+        ],
+        "table_markdown": "| Sample | Yield strength (MPa) | Baseline |\n| --- | --- | --- |\n| A | 560 | as-built |",
+        "table_text": "Sample | Yield strength (MPa) | Baseline\nA | 560 | as-built",
+        "page": 5,
     }
-    assert set(measurement_results["result_type"]) == {"scalar", "retention"}
-    assert measurement_results["variant_id"].notna().all()
-    assert measurement_results["baseline_id"].notna().all()
-    assert all(measurement_results["evidence_anchor_ids"].astype(str) != "[]")
-    assert set(baseline_references["baseline_label"]) == {"as-built"}
+    assert payload["target_rows"][0]["row_summary"] == "A | 560 | as-built"
+    assert payload["target_rows"][0]["row_index"] == 1
 
 
-def test_evidence_service_logs_warning_when_measurements_are_empty(monkeypatch, tmp_path, caplog):
-    _patch_parquet(monkeypatch)
+def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables():
+    service = PaperFactsService()
 
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = EvidenceOnlyExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
-    )
-
-    collection = collection_service.create_collection("Evidence Only Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Process Note",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Powders were mixed and dried under Ar.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Powders were mixed and dried under Ar.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    with caplog.at_level("WARNING"):
-        paper_facts_service.build_evidence_cards(collection_id, output_dir)
-
-    assert any(
-        "Paper facts extraction produced zero measurement_results" in record.message
-        for record in caplog.records
-    )
-
-
-def test_paper_facts_service_logs_window_and_table_progress(monkeypatch, tmp_path, caplog):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = EvidenceOnlyExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
-    )
-
-    collection = collection_service.create_collection("Paper Facts Logging Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Logging Paper",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Process conditions were reported.",
-                        "Table 1 Mechanical Results",
-                        "Sample | Strength",
-                        "A1 | 12",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Process conditions were reported.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    with caplog.at_level("INFO"):
-        paper_facts_service.build_evidence_cards(collection_id, output_dir)
-
-    assert any(
-        "Paper facts text-window extraction started" in record.message
-        and "window_position=" in record.message
-        and "window_count=" in record.message
-        and "completed_units=" in record.message
-        and "remaining_units=" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Paper facts text-window extraction finished" in record.message
-        and "elapsed_s=" in record.message
-        and "elapsed_ms=" in record.message
-        and "completed_units=" in record.message
-        and "remaining_units=" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Paper facts table-row extraction started" in record.message
-        and "row_position=" in record.message
-        and "table_row_count=" in record.message
-        and "completed_units=" in record.message
-        and "remaining_units=" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Paper facts table-row extraction finished" in record.message
-        and "elapsed_s=" in record.message
-        and "elapsed_ms=" in record.message
-        and "completed_units=" in record.message
-        and "remaining_units=" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Paper facts extraction document finished" in record.message
-        and "document_position=" in record.message
-        and "remaining_documents=" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Paper facts extraction started" in record.message
-        and "total_extraction_units=" in record.message
-        for record in caplog.records
-    )
-
-
-def test_paper_facts_service_prunes_low_value_text_windows_before_model_calls(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    class CountingExtractor:
-        def __init__(self) -> None:
-            self.text_payloads: list[dict[str, object]] = []
-            self.table_payloads: list[dict[str, object]] = []
-
-        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
-            return StructuredDocumentProfile(
-                doc_type="experimental",
-                protocol_extractable="yes",
-                protocol_extractability_signals=[],
-                parsing_warnings=[],
-                confidence=0.9,
-            )
-
-        def extract_text_window_mentions(self, payload):  # noqa: ANN001
-            self.text_payloads.append(payload)
-            return StructuredTextWindowMentions()
-
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001
-            self.table_payloads.append(payload)
-            return StructuredExtractionBundle()
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = CountingExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
-    )
-
-    collection = collection_service.create_collection("Pruning Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "LPBF Study",
-                "text": "\n".join(
-                    [
-                        "Introduction",
-                        "Previous work is summarized here.",
-                        "Experimental Section",
-                        "Powders were mixed and annealed at 600 C under Ar.",
-                        "Results and Discussion",
-                        "Relative density reached 99.1%.",
-                        "Acknowledgements",
-                        "This work was supported by a grant.",
-                        "References",
-                        "[1] Example reference.",
-                        "Table 1 Mechanical Results",
-                        "Sample | Tensile Strength (MPa)",
-                        "A1 | 950",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Powders were mixed and annealed at 600 C under Ar.",
-                "document_ids": ["paper-1"],
-            },
-            {
-                "id": "tu-2",
-                "text": "Relative density reached 99.1%.",
-                "document_ids": ["paper-1"],
-            },
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    paper_facts_service.build_paper_facts(collection_id, output_dir)
-
-    extracted_texts = [
-        str((payload.get("text_window") or {}).get("text") or "")
-        for payload in extractor.text_payloads
+    small_rows = [
+        {"table_id": "tbl-small", "row_index": index, "row_text": f"A{index} | {index}"}
+        for index in range(1, 7)
     ]
-    assert extracted_texts == [
-        "Powders were mixed and annealed at 600 C under Ar.",
-        "Relative density reached 99.1%.",
+    large_rows = [
+        {"table_id": "tbl-large", "row_index": index, "row_text": f"B{index} | {index}"}
+        for index in range(1, 42)
     ]
-    assert len(extractor.table_payloads) == 1
+
+    batches = service._batch_table_rows_for_extraction([*small_rows, *large_rows])
+
+    assert [len(batch) for batch in batches] == [
+        6,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        1,
+    ]
 
 
-def test_measurement_results_link_entities_without_model_refs(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
+def test_table_batch_payload_bounds_large_table_matrix_to_target_rows():
+    service = PaperFactsService()
+    matrix = [["Sample", "Strength"]]
+    matrix.extend([[f"A{index}", str(index)] for index in range(1, 50)])
 
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    class SemanticLinkExtractor:
-        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
-            return StructuredDocumentProfile(
-                doc_type="experimental",
-                protocol_extractable="yes",
-                protocol_extractability_signals=[],
-                parsing_warnings=[],
-                confidence=0.9,
-            )
-
-        def extract_text_window_mentions(self, payload):  # noqa: ANN001
-            text_window = payload.get("text_window") or {}
-            quote = "A0 reached 950 MPa while A1 reached 1010 MPa relative to A0."
-            if quote not in str(text_window.get("text") or ""):
-                return StructuredTextWindowMentions()
-            return StructuredTextWindowMentions(
-                method_mentions=[
-                    TextWindowMethodMentionPayload(
-                        method_role="test",
-                        method_name="tensile test",
-                        details=quote,
-                        evidence_quote=quote,
-                        confidence=0.8,
-                    )
-                ],
-                variant_mentions=[
-                    TextWindowVariantMentionPayload(
-                        variant_label="A0",
-                        variable_axis_type=None,
-                        variable_value=None,
-                        evidence_quote=quote,
-                        confidence=0.8,
-                    ),
-                    TextWindowVariantMentionPayload(
-                        variant_label="A1",
-                        variable_axis_type=None,
-                        variable_value=None,
-                        evidence_quote=quote,
-                        confidence=0.8,
-                    ),
-                ],
-                baseline_mentions=[
-                    TextWindowBaselineMentionPayload(
-                        baseline_label="A0",
-                        baseline_type="reference",
-                        evidence_quote=quote,
-                        confidence=0.8,
-                    )
-                ],
-                result_claims=[
-                    TextWindowResultClaimPayload(
-                        claim_text="A0 reached 950 MPa.",
-                        property_normalized="tensile_strength",
-                        result_type="scalar",
-                        value_text="950 MPa",
-                        unit="MPa",
-                        claim_scope="current_work",
-                        eligible_for_measurement_result=True,
-                        evidence_quote=quote,
-                        confidence=0.84,
-                    ),
-                    TextWindowResultClaimPayload(
-                        claim_text="A1 reached 1010 MPa.",
-                        property_normalized="tensile_strength",
-                        result_type="scalar",
-                        value_text="1010 MPa",
-                        unit="MPa",
-                        claim_scope="current_work",
-                        eligible_for_measurement_result=True,
-                        evidence_quote=quote,
-                        confidence=0.84,
-                    ),
-                ],
-            )
-
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = SemanticLinkExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
-    )
-
-    collection = collection_service.create_collection("Semantic Link Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
+    payload = service._build_table_batch_extraction_payload(
+        title="Large Table Paper",
+        source_filename="large-table.pdf",
+        profile={
+            "doc_type": "experimental",
+        },
+        table_context={
+            "caption_text": "Table 1 Large result table.",
+            "heading_path": "Results",
+            "column_headers": ["Sample", "Strength"],
+            "table_matrix": matrix,
+            "table_markdown": "| Sample | Strength |",
+            "table_text": "Sample | Strength",
+            "page": 3,
+        },
+        table_rows=[
             {
-                "id": "paper-1",
-                "title": "Semantic Link Paper",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "A0 reached 950 MPa while A1 reached 1010 MPa relative to A0.",
-                    ]
-                ),
+                "table_id": "tbl-large",
+                "row_index": 24,
+                "row_text": "A24 | 24",
+                "heading_path": "Results",
+                "page": 3,
             }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "A0 reached 950 MPa while A1 reached 1010 MPa relative to A0.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    paper_facts_service.build_evidence_cards(collection_id, output_dir)
-
-    sample_variants = pd.read_parquet(output_dir / "sample_variants.parquet")
-    test_conditions = pd.read_parquet(output_dir / "test_conditions.parquet")
-    baseline_references = pd.read_parquet(output_dir / "baseline_references.parquet")
-    measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
-
-    variant_lookup = {
-        row["variant_label"]: row["variant_id"]
-        for _, row in sample_variants.iterrows()
-    }
-    assert set(variant_lookup) == {"A0", "A1"}
-    assert len(test_conditions) == 1
-    assert len(baseline_references) == 1
-    assert len(measurement_results) == 2
-    assert set(measurement_results["variant_id"]) == {
-        variant_lookup["A0"],
-        variant_lookup["A1"],
-    }
-    assert measurement_results["test_condition_id"].nunique() == 1
-    assert measurement_results["baseline_id"].nunique() == 1
-
-
-def test_prior_work_text_window_claims_do_not_materialize_measurement_results(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    class PriorWorkClaimExtractor:
-        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
-            return StructuredDocumentProfile(
-                doc_type="experimental",
-                protocol_extractable="yes",
-                protocol_extractability_signals=[],
-                parsing_warnings=[],
-                confidence=0.9,
-            )
-
-        def extract_text_window_mentions(self, payload):  # noqa: ANN001
-            text_window = payload.get("text_window") or {}
-            quote = "Previous work demonstrated residual stress reduction by over 90%."
-            if quote not in str(text_window.get("text") or ""):
-                return StructuredTextWindowMentions()
-            return StructuredTextWindowMentions(
-                method_mentions=[
-                    TextWindowMethodMentionPayload(
-                        method_role="process",
-                        method_name="laser powder bed fusion",
-                        details=quote,
-                        evidence_quote=quote,
-                        confidence=0.8,
-                    )
-                ],
-                result_claims=[
-                    TextWindowResultClaimPayload(
-                        claim_text="Previous work demonstrated residual stress reduction by over 90%.",
-                        property_normalized="residual_stress",
-                        result_type="reduction",
-                        value_text="over 90%",
-                        unit="%",
-                        claim_scope="prior_work",
-                        eligible_for_measurement_result=True,
-                        evidence_quote=quote,
-                        confidence=0.84,
-                    )
-                ],
-            )
-
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = PriorWorkClaimExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
+        ],
+        row_cells_by_index={},
+        text_windows=[],
     )
 
-    collection = collection_service.create_collection("Prior Work Claim Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Prior Work Claim Paper",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Previous work demonstrated residual stress reduction by over 90%.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Previous work demonstrated residual stress reduction by over 90%.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    paper_facts_service.build_evidence_cards(collection_id, output_dir)
-
-    measurement_results = pd.read_parquet(output_dir / "measurement_results.parquet")
-    method_facts = pd.read_parquet(output_dir / "method_facts.parquet")
-
-    assert not method_facts.empty
-    assert measurement_results.empty
+    bounded_matrix = payload["table_context"]["table_matrix"]
+    assert ["A24", "24"] in bounded_matrix
+    assert ["A23", "23"] in bounded_matrix
+    assert ["A25", "25"] in bounded_matrix
+    assert ["A49", "49"] in bounded_matrix
+    assert ["A10", "10"] not in bounded_matrix
 
 
-def test_paper_facts_service_persists_mixed_variant_values_with_real_parquet(tmp_path):
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
+def test_table_row_binding_repairs_split_lpbf_variant_labels():
+    service = PaperFactsService()
+    row_cells = [
+        {
+            "header_path": None,
+            "cell_text": "100) HT-SLM (100/",
+            "unit_hint": None,
+            "col_index": 0,
+        },
+        {
+            "header_path": "Type of heat treatment",
+            "cell_text": "Furnace HT",
+            "unit_hint": None,
+            "col_index": 1,
+        },
+        {
+            "header_path": "Laser power (W)",
+            "cell_text": "100",
+            "unit_hint": None,
+            "col_index": 2,
+        },
+        {
+            "header_path": "Scan speed (mm/s)",
+            "cell_text": "100",
+            "unit_hint": None,
+            "col_index": 3,
+        },
+        {
+            "header_path": "Density (%)",
+            "cell_text": "98.70",
+            "unit_hint": "%",
+            "col_index": 4,
+        },
+    ]
 
-    class MixedVariantValueExtractor:
-        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
-            return StructuredDocumentProfile(
-                doc_type="experimental",
-                protocol_extractable="yes",
-                protocol_extractability_signals=[],
-                parsing_warnings=[],
-                confidence=0.9,
-            )
-
-        def extract_text_window_mentions(self, payload):  # noqa: ANN001
-            text_window = payload.get("text_window") or {}
-            text = str(text_window.get("text") or "")
-            if "Field conditions varied across samples." not in text:
-                return StructuredTextWindowMentions()
-            return StructuredTextWindowMentions(
-                variant_mentions=[
-                    TextWindowVariantMentionPayload(
-                        variant_label="V10",
-                        variable_axis_type="field_level",
-                        variable_value=10,
-                        evidence_quote="Field conditions varied across samples.",
-                        confidence=0.8,
-                    ),
-                    TextWindowVariantMentionPayload(
-                        variant_label="Vair",
-                        variable_axis_type="field_level",
-                        variable_value="air",
-                        evidence_quote="Field conditions varied across samples.",
-                        confidence=0.8,
-                    ),
-                ]
-            )
-
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = MixedVariantValueExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
-    )
-    comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
+    bundle = service._bind_table_row_mentions_to_bundle(
+        mentions=StructuredTableBatchRowMentions(
+            row_index=2,
+            row_subjects=[
+                TableRowSubjectMentionPayload(
+                    variant_label="100) HT-SLM (100/",
+                    family="316L stainless steel",
+                )
+            ],
+            process_mentions=[
+                TableRowFactMentionPayload(
+                    name="post_treatment_summary",
+                    value_text="Furnace HT",
+                )
+            ],
+            result_claims=[
+                TableRowResultClaimPayload(
+                    property_normalized="density",
+                    value_text="98.70",
+                    unit="%",
+                    variant_label="100) HT-SLM (100/",
+                    quote="100) HT-SLM (100/ | Furnace HT | 100 | 100 | 98.70",
+                )
+            ],
+        ),
+        table_row={
+            "table_id": "tbl-1",
+            "row_index": 2,
+            "row_text": "100) HT-SLM (100/ | Furnace HT | 100 | 100 | 98.70",
+            "page": 3,
+        },
+        row_cells=row_cells,
+        table_context=None,
     )
 
-    collection = collection_service.create_collection("Mixed Variant Value Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Mixed Variant Value Paper",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Field conditions varied across samples.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Field conditions varied across samples.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    paper_facts_service.build_paper_facts(collection_id, output_dir)
-
-    frames = paper_facts_service._load_paper_fact_frames(collection_id, output_dir)
-    assert set(frames["sample_variants"]["variable_value"]) == {10, "air"}
-
-    comparison_inputs = comparison_service._load_comparison_inputs(collection_id, output_dir)
-    assert set(comparison_inputs.sample_variants["variable_value"]) == {10, "air"}
-
-
-def test_paper_facts_service_normalizes_null_like_variant_values_before_parquet(tmp_path):
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    class NullLikeVariantValueExtractor:
-        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
-            return StructuredDocumentProfile(
-                doc_type="experimental",
-                protocol_extractable="yes",
-                protocol_extractability_signals=[],
-                parsing_warnings=[],
-                confidence=0.9,
-            )
-
-        def extract_text_window_mentions(self, payload):  # noqa: ANN001
-            text_window = payload.get("text_window") or {}
-            text = str(text_window.get("text") or "")
-            if "Field conditions varied across samples." not in text:
-                return StructuredTextWindowMentions()
-            return StructuredTextWindowMentions(
-                variant_mentions=[
-                    TextWindowVariantMentionPayload(
-                        variant_label="V10",
-                        variable_axis_type="field_level",
-                        variable_value=10,
-                        evidence_quote="Field conditions varied across samples.",
-                        confidence=0.8,
-                    ),
-                    TextWindowVariantMentionPayload(
-                        variant_label="Vnull",
-                        variable_axis_type="field_level",
-                        variable_value="null",
-                        evidence_quote="Field conditions varied across samples.",
-                        confidence=0.8,
-                    ),
-                ]
-            )
-
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = NullLikeVariantValueExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
-    )
-    comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
-    )
-
-    collection = collection_service.create_collection("Null Like Variant Value Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Null Like Variant Value Paper",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Field conditions varied across samples.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Field conditions varied across samples.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    paper_facts_service.build_paper_facts(collection_id, output_dir)
-
-    frames = paper_facts_service._load_paper_fact_frames(collection_id, output_dir)
-    frame_values_by_label = {
-        row["variant_label"]: row["variable_value"]
-        for _, row in frames["sample_variants"].iterrows()
-    }
-    assert frame_values_by_label["V10"] == 10
-    assert pd.isna(frame_values_by_label["Vnull"])
-
-    comparison_inputs = comparison_service._load_comparison_inputs(collection_id, output_dir)
-    comparison_values_by_label = {
-        row["variant_label"]: row["variable_value"]
-        for _, row in comparison_inputs.sample_variants.iterrows()
-    }
-    assert comparison_values_by_label["V10"] == 10
-    assert pd.isna(comparison_values_by_label["Vnull"])
-
-
-def test_quote_only_anchor_outputs_resolve_traceback_from_local_scope(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    class QuoteOnlyScopeExtractor:
-        def extract_document_profile(self, payload):  # noqa: ANN001, ARG002
-            return StructuredDocumentProfile(
-                doc_type="experimental",
-                protocol_extractable="yes",
-                protocol_extractability_signals=[],
-                parsing_warnings=[],
-                confidence=0.9,
-            )
-
-        def extract_text_window_mentions(self, payload):  # noqa: ANN001
-            text_window = payload.get("text_window") or {}
-            quote = "Process conditions were reported."
-            if quote not in str(text_window.get("text") or ""):
-                return StructuredTextWindowMentions()
-            return StructuredTextWindowMentions(
-                method_mentions=[
-                    TextWindowMethodMentionPayload(
-                        method_role="process",
-                        method_name="sample preparation",
-                        details=quote,
-                        evidence_quote=quote,
-                        confidence=0.7,
-                    )
-                ]
-            )
-
-        def extract_table_row_bundle(self, payload):  # noqa: ANN001, ARG002
-            return StructuredExtractionBundle()
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = QuoteOnlyScopeExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
-    )
-
-    collection = collection_service.create_collection("Quote Only Anchor Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Quote Only Anchor Paper",
-                "text": "Process conditions were reported.",
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Process conditions were reported.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
-    evidence_anchors = pd.read_parquet(output_dir / "evidence_anchors.parquet")
-    blocks = build_blocks(documents, text_units)
-    methods_block = blocks[
-        blocks["text_unit_ids"].apply(lambda value: "tu-1" in (value or []))
-    ].iloc[0]
-
-    assert not evidence.empty
-    assert not evidence_anchors.empty
-    assert evidence_anchors.iloc[0]["section_id"] == methods_block["block_id"]
-    assert evidence_anchors.iloc[0]["block_id"] == methods_block["block_id"]
-    assert evidence_anchors.iloc[0]["char_range"] is not None
-
-    traceback = paper_facts_service.get_evidence_traceback(
-        collection_id,
-        str(evidence.iloc[0]["evidence_id"]),
-    )
-    assert traceback["traceback_status"] == "ready"
-    assert traceback["anchors"][0]["locator_type"] == "char_range"
-    assert traceback["anchors"][0]["block_id"] == methods_block["block_id"]
-
-
-def test_comparison_service_logs_warning_when_upstream_measurements_are_empty(
-    monkeypatch,
-    tmp_path,
-    caplog,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    extractor = EvidenceOnlyExtractor()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        artifact_registry,
-        structured_extractor=extractor,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-        structured_extractor=extractor,
-    )
-    comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
-    )
-
-    collection = collection_service.create_collection("No Measurement Comparison Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Process Note",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "Powders were mixed and dried under Ar.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "Powders were mixed and dried under Ar.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    paper_facts_service.build_evidence_cards(collection_id, output_dir)
-    with caplog.at_level("WARNING"):
-        comparison_service.build_comparison_rows(collection_id, output_dir)
-
-    assert any(
-        "Comparison assembly produced zero rows because upstream measurement_results were empty"
-        in record.message
-        for record in caplog.records
-    )
-
-
-def test_evidence_cards_parquet_write_handles_empty_nested_contexts(tmp_path):
-    pytest.importorskip("pyarrow")
-
-    from application.source.collection_service import CollectionService
-    from application.core.semantic_build.document_profile_service import DocumentProfileService
-    from application.core.semantic_build.paper_facts_service import PaperFactsService
-    from application.source.artifact_registry_service import ArtifactRegistryService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-    )
-
-    collection = collection_service.create_collection("Process Only Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Process Only Study",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "The slurry was stirred for 2 h and dried at 80 C under Ar.",
-                        "Characterization",
-                        "SEM was used to inspect the coating.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "The slurry was stirred for 2 h and dried at 80 C under Ar.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
-
-    assert not evidence.empty
-    assert output_dir.joinpath("evidence_cards.parquet").exists()
-    reloaded = pd.read_parquet(output_dir / "evidence_cards.parquet")
-    assert not reloaded.empty
-    assert isinstance(reloaded.iloc[0]["condition_context"], str)
+    assert bundle.sample_variants[0].variant_label == "HT-SLM (100/100)"
+    assert bundle.measurement_results[0].variant_label == "HT-SLM (100/100)"
+    assert "HT-SLM (100/100)" in bundle.measurement_results[0].claim_text
 
 
 def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
     from application.source.collection_service import CollectionService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
-    from application.source.artifact_registry_service import ArtifactRegistryService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
+    document_profile_service = DocumentProfileService(collection_service)
     paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
     )
 
     normalized = paper_facts_service._normalize_condition_context_payload(
@@ -1978,6 +1953,252 @@ def test_pbf_comparison_assembly_uses_process_test_and_value_context():
     assert "strain_rate_s-1" in limited_scope.assessment.missing_critical_context
 
 
+def test_comparison_assembly_builds_pairwise_sample_relations():
+    assembler = ComparableResultAssembler()
+    records = ComparisonInputRecords(
+        sample_variants=(
+            SampleVariant(
+                variant_id="var-a",
+                document_id="doc-1",
+                collection_id="col-1",
+                domain_profile="core_neutral",
+                variant_label="A",
+                host_material_system={"family": "316L stainless steel"},
+                composition=None,
+                variable_axis_type=None,
+                variable_value=None,
+                process_context={
+                    "energy_density_j_mm3": 70,
+                    "scan_speed_mm_s": 0.25,
+                    "scan_strategy": "A",
+                },
+                profile_payload={"source_kind": "table_row"},
+                structure_feature_ids=(),
+                source_anchor_ids=(),
+                confidence=0.9,
+                epistemic_status="normalized_from_evidence",
+            ),
+            SampleVariant(
+                variant_id="var-b",
+                document_id="doc-1",
+                collection_id="col-1",
+                domain_profile="core_neutral",
+                variant_label="B",
+                host_material_system={"family": "316L stainless steel"},
+                composition=None,
+                variable_axis_type=None,
+                variable_value=None,
+                process_context={
+                    "energy_density_j_mm3": 70,
+                    "scan_speed_mm_s": 0.25,
+                    "scan_strategy": "B",
+                },
+                profile_payload={"source_kind": "table_row"},
+                structure_feature_ids=(),
+                source_anchor_ids=(),
+                confidence=0.9,
+                epistemic_status="normalized_from_evidence",
+            ),
+        ),
+        measurement_results=(
+            MeasurementResult(
+                result_id="res-a",
+                document_id="doc-1",
+                collection_id="col-1",
+                domain_profile="core_neutral",
+                variant_id="var-a",
+                property_normalized="yield_strength",
+                result_type="scalar",
+                claim_scope="current_work",
+                value_payload={"value": 560},
+                unit="MPa",
+                test_condition_id=None,
+                baseline_id=None,
+                structure_feature_ids=(),
+                characterization_observation_ids=(),
+                evidence_anchor_ids=("anc-a",),
+                traceability_status="direct",
+                result_source_type="table",
+                epistemic_status="directly_observed",
+            ),
+            MeasurementResult(
+                result_id="res-b",
+                document_id="doc-1",
+                collection_id="col-1",
+                domain_profile="core_neutral",
+                variant_id="var-b",
+                property_normalized="yield_strength",
+                result_type="scalar",
+                claim_scope="current_work",
+                value_payload={"value": 480},
+                unit="MPa",
+                test_condition_id=None,
+                baseline_id=None,
+                structure_feature_ids=(),
+                characterization_observation_ids=(),
+                evidence_anchor_ids=("anc-b",),
+                traceability_status="direct",
+                result_source_type="table",
+                epistemic_status="directly_observed",
+            ),
+        ),
+        test_conditions=(),
+        baseline_references=(),
+    )
+
+    semantic_records = assembler.assemble_semantic_records(
+        collection_id="col-1",
+        records=records,
+    )
+
+    assert len(semantic_records.pairwise_comparison_relations) == 1
+    relation = semantic_records.pairwise_comparison_relations[0]
+    assert isinstance(relation, PairwiseComparisonRelation)
+    assert relation.comparison_axis == "scan_strategy"
+    assert relation.current_variant_id == "var-a"
+    assert relation.reference_variant_id == "var-b"
+    assert relation.current_value == 560
+    assert relation.reference_value == 480
+    assert relation.evidence_anchor_ids == ("anc-a", "anc-b")
+
+
+def test_comparison_assembly_selects_p001_style_salient_pairwise_relations():
+    assembler = ComparableResultAssembler()
+    sample_rows = [
+        ("1", 70, 0.25, "A"),
+        ("2", 70, 0.25, "B"),
+        ("3", 70, 0.25, "C"),
+        ("4", 100, 0.175, "A"),
+        ("5", 150, 0.12, "A"),
+        ("6", 150, 0.12, "B"),
+        ("7", 150, 0.12, "C"),
+        ("8", 70, 0.239, "A"),
+        ("9", 70, 0.239, "B"),
+        ("10", 70, 0.239, "C"),
+        ("11", 100, 0.167, "A"),
+        ("12", 100, 0.167, "B"),
+        ("13", 100, 0.167, "C"),
+        ("14", 150, 0.111, "A"),
+        ("15", 150, 0.111, "B"),
+        ("16", 150, 0.111, "C"),
+    ]
+    values = {
+        "1": (95.4, 236.65, 375.13, 7.21),
+        "2": (97.7, 159.97, 196.78, 1.79),
+        "3": (93.8, 169.40, 199.47, 2.27),
+        "4": (93.9, 341.38, 459.58, 6.62),
+        "5": (97.14, 302.24, 384.50, 6.40),
+        "6": (95.7, 200.31, 278.13, 1.62),
+        "7": (94.3, 263.55, 356.84, 2.93),
+        "8": (96.8, 187.82, 269.95, 3.66),
+        "9": (92.4, 148.36, 178.37, 2.08),
+        "10": (93.8, 161.61, 198.47, 2.12),
+        "11": (96.2, 177.68, 203.48, 3.31),
+        "12": (96.1, 201.08, 239.34, 2.42),
+        "13": (98.0, 186.46, 256.68, 2.194),
+        "14": (99.45, 462.02, 584.44, 41.9),
+        "15": (96.7, 278.76, 342.23, 4.29),
+        "16": (98.6, 414.07, 530.37, 1.17),
+    }
+    properties = (
+        ("density", "%", 0),
+        ("yield_strength", "MPa", 1),
+        ("tensile_strength", "MPa", 2),
+        ("elongation", "%", 3),
+    )
+    samples = tuple(
+        SampleVariant(
+            variant_id=f"var-{label}",
+            document_id="doc-1",
+            collection_id="col-1",
+            domain_profile="core_neutral",
+            variant_label=label,
+            host_material_system={"family": "316L stainless steel"},
+            composition=None,
+            variable_axis_type=None,
+            variable_value=None,
+            process_context={
+                "energy_density_j_mm3": energy_density,
+                "scan_speed_mm_s": scan_speed,
+                "scan_strategy": strategy,
+            },
+            profile_payload={"source_kind": "table_row"},
+            structure_feature_ids=(),
+            source_anchor_ids=(),
+            confidence=0.9,
+            epistemic_status="normalized_from_evidence",
+        )
+        for label, energy_density, scan_speed, strategy in sample_rows
+    )
+    measurements = tuple(
+        MeasurementResult(
+            result_id=f"res-{label}-{property_name}",
+            document_id="doc-1",
+            collection_id="col-1",
+            domain_profile="core_neutral",
+            variant_id=f"var-{label}",
+            property_normalized=property_name,
+            result_type="scalar",
+            claim_scope="current_work",
+            value_payload={"value": values[label][value_index]},
+            unit=unit,
+            test_condition_id=None,
+            baseline_id=None,
+            structure_feature_ids=(),
+            characterization_observation_ids=(),
+            evidence_anchor_ids=(f"anc-{label}-{property_name}",),
+            traceability_status="direct",
+            result_source_type="table",
+            epistemic_status="directly_observed",
+        )
+        for label, *_ in sample_rows
+        for property_name, unit, value_index in properties
+    )
+    records = ComparisonInputRecords(
+        sample_variants=samples,
+        measurement_results=measurements,
+        test_conditions=(),
+        baseline_references=(),
+    )
+
+    semantic_records = assembler.assemble_semantic_records(
+        collection_id="col-1",
+        records=records,
+    )
+
+    relation_keys = {
+        (
+            relation.current_variant_id.removeprefix("var-"),
+            relation.reference_variant_id.removeprefix("var-"),
+            relation.property_normalized,
+        )
+        for relation in semantic_records.pairwise_comparison_relations
+    }
+
+    assert len(relation_keys) == 19
+    assert relation_keys == {
+        ("1", "3", "density"),
+        ("2", "1", "density"),
+        ("1", "2", "yield_strength"),
+        ("1", "2", "tensile_strength"),
+        ("1", "2", "elongation"),
+        ("1", "8", "yield_strength"),
+        ("1", "8", "tensile_strength"),
+        ("1", "8", "elongation"),
+        ("11", "4", "density"),
+        ("4", "11", "yield_strength"),
+        ("4", "11", "tensile_strength"),
+        ("14", "5", "density"),
+        ("14", "5", "yield_strength"),
+        ("14", "5", "tensile_strength"),
+        ("14", "5", "elongation"),
+        ("14", "15", "yield_strength"),
+        ("14", "16", "yield_strength"),
+        ("14", "15", "elongation"),
+        ("14", "16", "elongation"),
+    }
+
+
 def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
     assembler = ComparableResultAssembler()
     projector = ComparisonRowProjector()
@@ -2096,837 +2317,76 @@ def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
     assert merged.supporting_anchor_ids == ("anchor-1", "anchor-2")
 
 
-def test_comparison_service_persists_semantic_and_scope_artifacts_for_duplicate_results(
-    monkeypatch,
+def test_comparison_service_lists_corpus_results_without_manifest_cache_artifacts(
     tmp_path,
 ):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
-    )
-    collection = collection_service.create_collection("Duplicate Comparable Result Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    measurement_results = pd.DataFrame(
-        [
-            {
-                "result_id": "res-1",
-                "document_id": "paper-1",
-                "variant_id": "var-1",
-                "property_normalized": "flexural_strength",
-                "result_type": "scalar",
-                "value_payload": {
-                    "value": 97.0,
-                    "statement": "Flexural strength increased to 97 MPa.",
-                },
-                "unit": "MPa",
-                "test_condition_id": "tc-1",
-                "baseline_id": "base-1",
-                "structure_feature_ids": [],
-                "characterization_observation_ids": [],
-                "evidence_anchor_ids": ["anchor-1"],
-                "traceability_status": "direct",
-                "result_source_type": "text",
-            },
-            {
-                "result_id": "res-2",
-                "document_id": "paper-1",
-                "variant_id": "var-1",
-                "property_normalized": "flexural_strength",
-                "result_type": "scalar",
-                "value_payload": {
-                    "statement": "Flexural strength increased to 97 MPa.",
-                    "value": 97.0,
-                },
-                "unit": "MPa",
-                "test_condition_id": "tc-1",
-                "baseline_id": "base-1",
-                "structure_feature_ids": [],
-                "characterization_observation_ids": [],
-                "evidence_anchor_ids": ["anchor-2"],
-                "traceability_status": "direct",
-                "result_source_type": "text",
-            },
-        ]
-    )
-    sample_variants = pd.DataFrame(
-        [
-            {
-                "variant_id": "var-1",
-                "variant_label": "epoxy composite",
-                "variable_axis_type": None,
-                "variable_value": None,
-                "host_material_system": {
-                    "family": "epoxy composite",
-                    "composition": None,
-                },
-                "process_context": {
-                    "temperatures_c": [80.0],
-                    "durations": ["2 h"],
-                    "atmosphere": "Ar",
-                },
-                "source_anchor_ids": [],
-            }
-        ]
-    )
-    test_conditions = pd.DataFrame(
-        [
-            {
-                "test_condition_id": "tc-1",
-                "condition_payload": {
-                    "methods": ["SEM"],
-                    "method": None,
-                },
-                "missing_fields": [],
-                "evidence_anchor_ids": [],
-            }
-        ]
-    )
-    baseline_references = pd.DataFrame(
-        [
-            {
-                "baseline_id": "base-1",
-                "baseline_label": "untreated baseline",
-                "baseline_type": "implicit_within_document_control",
-                "baseline_scope": None,
-                "evidence_anchor_ids": [],
-            }
-        ]
-    )
-
-    monkeypatch.setattr(
-        comparison_service,
-        "_load_comparison_inputs",
-        lambda collection_id, base_dir: SimpleNamespace(
-            sample_variants=sample_variants,
-            measurement_results=measurement_results,
-            test_conditions=test_conditions,
-            baseline_references=baseline_references,
-        ),
-    )
-
-    comparison_rows = comparison_service.build_comparison_rows(collection_id, output_dir)
-    stored_comparable_results = comparison_service.read_comparable_results(collection_id)
-    stored_scoped_results = comparison_service.read_collection_comparable_results(
-        collection_id
-    )
-
-    assert len(comparison_rows) == 1
-    assert len(stored_comparable_results) == 1
-    assert len(stored_scoped_results) == 1
-    assert stored_comparable_results.iloc[0]["comparable_result_id"].startswith("cres_")
-    assert stored_scoped_results.iloc[0]["comparable_result_id"] == stored_comparable_results.iloc[0][
-        "comparable_result_id"
-    ]
-    assert stored_comparable_results.iloc[0]["evidence"]["evidence_ids"] == [
-        "ev_result_res-1",
-        "ev_result_res-2",
-    ]
-    assert stored_comparable_results.iloc[0]["evidence"]["direct_anchor_ids"] == [
-        "anchor-1",
-        "anchor-2",
-    ]
-    assert (output_dir / "comparable_results.parquet").exists()
-    assert (output_dir / "collection_comparable_results.parquet").exists()
-
-
-def test_evidence_and_comparison_services_round_trip_real_parquet_storage(tmp_path):
-    pytest.importorskip("pyarrow")
-
-    from application.source.collection_service import CollectionService
-    from application.core.semantic_build.document_profile_service import DocumentProfileService
-    from application.core.semantic_build.paper_facts_service import PaperFactsService
-    from application.source.artifact_registry_service import ArtifactRegistryService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-    )
-    comparison_service = ComparisonService(
-        collection_service,
-        artifact_registry,
-        paper_facts_service,
-    )
-
-    collection = collection_service.create_collection("Round Trip Evidence Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Epoxy Composite Study",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "The epoxy and SiO2 powders were mixed in ethanol and stirred for 2 h.",
-                        "The slurry was dried at 80 C and annealed at 600 C under Ar.",
-                        "Characterization",
-                        "SEM was used to characterize the powders.",
-                        "Flexural strength increased to 97 MPa relative to the untreated baseline.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "The epoxy and SiO2 powders were mixed in ethanol and stirred for 2 h.",
-                "document_ids": ["paper-1"],
-            },
-            {
-                "id": "tu-2",
-                "text": "Flexural strength increased to 97 MPa relative to the untreated baseline.",
-                "document_ids": ["paper-1"],
-            },
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    evidence = paper_facts_service.build_evidence_cards(collection_id, output_dir)
-    comparisons = comparison_service.build_comparison_rows(collection_id, output_dir)
-
-    assert not evidence.empty
-    assert not comparisons.empty
-
-    stored_evidence = pd.read_parquet(output_dir / "evidence_cards.parquet")
-    stored_comparable_results = pd.read_parquet(output_dir / "comparable_results.parquet")
-    stored_scoped_results = pd.read_parquet(output_dir / "collection_comparable_results.parquet")
-    stored_comparisons = pd.read_parquet(output_dir / "comparison_rows.parquet")
-    assert isinstance(stored_evidence.iloc[0]["evidence_anchors"], str)
-    assert isinstance(stored_evidence.iloc[0]["material_system"], str)
-    assert isinstance(stored_evidence.iloc[0]["condition_context"], str)
-    assert isinstance(stored_comparable_results.iloc[0]["binding"], str)
-    assert isinstance(stored_comparable_results.iloc[0]["normalized_context"], str)
-    assert isinstance(stored_comparable_results.iloc[0]["axis"], str)
-    assert isinstance(stored_comparable_results.iloc[0]["value"], str)
-    assert isinstance(stored_comparable_results.iloc[0]["evidence"], str)
-    assert isinstance(stored_scoped_results.iloc[0]["assessment"], str)
-    assert isinstance(stored_comparisons.iloc[0]["comparable_result_id"], str)
-    assert isinstance(stored_comparisons.iloc[0]["supporting_evidence_ids"], str)
-    assert isinstance(stored_comparisons.iloc[0]["supporting_anchor_ids"], str)
-    assert isinstance(stored_comparisons.iloc[0]["comparability_warnings"], str)
-    assert isinstance(stored_comparisons.iloc[0]["comparability_basis"], str)
-    assert isinstance(stored_comparisons.iloc[0]["missing_critical_context"], str)
-
-    restored_evidence = paper_facts_service.read_evidence_cards(collection_id)
-    restored_comparable_results = comparison_service.read_comparable_results(collection_id)
-    restored_scoped_results = comparison_service.read_collection_comparable_results(
-        collection_id
-    )
-    restored_comparisons = comparison_service.read_comparison_rows(collection_id)
-    assert isinstance(restored_evidence.iloc[0]["evidence_anchors"], list)
-    assert isinstance(restored_evidence.iloc[0]["material_system"], dict)
-    assert isinstance(restored_evidence.iloc[0]["condition_context"], dict)
-    assert isinstance(restored_comparable_results.iloc[0]["binding"], dict)
-    assert isinstance(restored_comparable_results.iloc[0]["normalized_context"], dict)
-    assert isinstance(restored_comparable_results.iloc[0]["axis"], dict)
-    assert isinstance(restored_comparable_results.iloc[0]["value"], dict)
-    assert isinstance(restored_comparable_results.iloc[0]["evidence"], dict)
-    assert isinstance(restored_scoped_results.iloc[0]["assessment"], dict)
-    assert restored_comparisons.iloc[0]["comparable_result_id"].startswith("cres_")
-    assert isinstance(restored_comparisons.iloc[0]["supporting_evidence_ids"], list)
-    assert isinstance(restored_comparisons.iloc[0]["supporting_anchor_ids"], list)
-    assert isinstance(restored_comparisons.iloc[0]["comparability_warnings"], list)
-    assert isinstance(restored_comparisons.iloc[0]["comparability_basis"], list)
-    assert isinstance(restored_comparisons.iloc[0]["missing_critical_context"], list)
-
-    comparison_rows_path = output_dir / "comparison_rows.parquet"
-    comparison_rows_path.unlink()
-
-    projection_tables = comparison_service.read_comparison_projection(
-        collection_id,
-        materialize_row_cache=False,
-    )
-    assert not comparison_rows_path.exists()
-    assert not projection_tables.comparable_results.empty
-    assert not projection_tables.collection_comparable_results.empty
-    assert not projection_tables.comparison_rows.empty
-    assert (
-        projection_tables.comparison_rows.iloc[0]["comparable_result_id"]
-        == restored_comparable_results.iloc[0]["comparable_result_id"]
-    )
-
-    reprojected_comparisons = comparison_service.read_comparison_rows(collection_id)
-    assert comparison_rows_path.exists()
-    assert not reprojected_comparisons.empty
-    assert (
-        reprojected_comparisons.iloc[0]["comparable_result_id"]
-        == restored_comparable_results.iloc[0]["comparable_result_id"]
-    )
-
-
-def test_comparison_service_inspects_document_semantics_from_semantic_artifacts(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(collection_service, artifact_registry)
-
-    collection = collection_service.create_collection("Document Semantic Inspection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    first = _build_test_comparable_result(
-        comparable_result_id="cres-doc-1-a",
-        source_document_id="paper-1",
-        source_result_id="res-1",
-    )
-    second = _build_test_comparable_result(
-        comparable_result_id="cres-doc-1-b",
-        source_document_id="paper-1",
-        source_result_id="res-2",
-        property_normalized="impact_strength",
-        summary="Impact strength increased to 61 MPa.",
-        numeric_value=61.0,
-    )
-    other_document = _build_test_comparable_result(
-        comparable_result_id="cres-doc-2-a",
-        source_document_id="paper-2",
-        source_result_id="res-3",
-    )
-    pd.DataFrame(
-        [
-            first.to_record(),
-            second.to_record(),
-            other_document.to_record(),
-        ]
-    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=first,
-                sort_order=2,
-            ).to_record(),
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=other_document,
-                sort_order=0,
-            ).to_record(),
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    payload = comparison_service.inspect_document_comparison_semantics(
-        collection_id,
-        "paper-1",
-    )
-
-    assert payload["collection_id"] == collection_id
-    assert payload["source_document_id"] == "paper-1"
-    assert payload["total"] == 2
-    assert payload["count"] == 2
-    assert [item["comparable_result_id"] for item in payload["items"]] == [
-        "cres-doc-1-a",
-        "cres-doc-1-b",
-    ]
-    assert payload["items"][0]["collection_overlays"] == [
-        _build_collection_overlay(
-            collection_id=collection_id,
-            comparable_result=first,
-            sort_order=2,
-        ).to_record()
-    ]
-    assert payload["items"][0]["collection_overlays"][0]["policy_family"] == (
-        COLLECTION_COMPARISON_POLICY_FAMILY
-    )
-    assert payload["items"][0]["collection_overlays"][0]["policy_version"] == (
-        COLLECTION_COMPARISON_POLICY_VERSION
-    )
-    assert payload["items"][1]["collection_overlays"] == [
-        _build_collection_overlay(
-            collection_id=collection_id,
-            comparable_result=second,
-            sort_order=3,
-        ).to_record()
-    ]
-    assert "projected_rows" not in payload["items"][0]
-    assert (output_dir / "comparison_rows.parquet").exists()
-
-
-def test_comparison_service_document_semantic_inspection_can_project_rows_without_row_cache(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(collection_service, artifact_registry)
-
-    collection = collection_service.create_collection("Document Semantic Projection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    comparable_result = _build_test_comparable_result(
-        comparable_result_id="cres-doc-1-a",
-        source_document_id="paper-1",
-        source_result_id="res-1",
-    )
-    pd.DataFrame([comparable_result.to_record()]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=comparable_result,
-                sort_order=0,
-            ).to_record()
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    payload = comparison_service.inspect_document_comparison_semantics(
-        collection_id,
-        "paper-1",
-        include_row_projections=True,
-    )
-
-    assert payload["total"] == 1
-    projected_rows = payload["items"][0]["projected_rows"]
-    assert len(projected_rows) == 1
-    assert projected_rows[0]["row_id"].startswith("cmp_")
-    assert projected_rows[0]["collection_id"] == collection_id
-    assert projected_rows[0]["source_document_id"] == "paper-1"
-    assert projected_rows[0]["display"]["property_normalized"] == "flexural_strength"
-    assert projected_rows[0]["assessment"]["comparability_status"] == "comparable"
-    assert not (output_dir / "comparison_rows.parquet").exists()
-
-
-def test_comparison_service_persists_policy_metadata_on_collection_overlays(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(
-        collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
-    )
-    collection = collection_service.create_collection("Policy Metadata Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    comparable_result = _build_test_comparable_result(
-        comparable_result_id="cres-policy-1",
-        source_document_id="paper-1",
-        source_result_id="res-policy-1",
-    )
-    pd.DataFrame([comparable_result.to_record()]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=comparable_result,
-                sort_order=0,
-            ).to_record()
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    overlays = comparison_service.read_collection_comparable_results(collection_id)
-
-    assert overlays.iloc[0]["policy_family"] == COLLECTION_COMPARISON_POLICY_FAMILY
-    assert overlays.iloc[0]["policy_version"] == COLLECTION_COMPARISON_POLICY_VERSION
-    assert overlays.iloc[0]["comparable_result_normalization_version"] == (
-        COMPARABLE_RESULT_NORMALIZATION_VERSION
-    )
-    assert overlays.iloc[0]["assessment_input_fingerprint"].startswith("cafp_")
-    assert overlays.iloc[0]["reassessment_triggers"] == [
-        COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED,
-        COLLECTION_REASSESSMENT_TRIGGER_POLICY_VERSION_CHANGED,
-        COLLECTION_REASSESSMENT_TRIGGER_NORMALIZATION_VERSION_CHANGED,
-        COLLECTION_REASSESSMENT_TRIGGER_ASSESSMENT_INPUT_CHANGED,
-    ]
-
-
-def test_comparison_service_reassesses_stale_scope_artifacts_and_refreshes_row_cache(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(
-        collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
-    )
-    collection = collection_service.create_collection("Stale Scope Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    comparable_result = _build_test_comparable_result(
-        comparable_result_id="cres-stale-1",
-        source_document_id="paper-1",
-        source_result_id="res-stale-1",
-    )
-    pd.DataFrame([comparable_result.to_record()]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    stale_overlay = _build_collection_overlay(
-        collection_id=collection_id,
-        comparable_result=comparable_result,
-        sort_order=7,
-    ).to_record()
-    stale_overlay["policy_version"] = "comparison_policy_v0"
-    stale_overlay["assessment_input_fingerprint"] = "cafp_outdated"
-    pd.DataFrame([stale_overlay]).to_parquet(
-        output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
-    artifact_registry.upsert(collection_id, output_dir)
-
-    overlays = comparison_service.read_collection_comparable_results(collection_id)
-
-    assert overlays.iloc[0]["policy_version"] == COLLECTION_COMPARISON_POLICY_VERSION
-    assert overlays.iloc[0]["assessment_input_fingerprint"].startswith("cafp_")
-    assert overlays.iloc[0]["assessment_input_fingerprint"] != "cafp_outdated"
-    assert overlays.iloc[0]["sort_order"] == 7
-    assert (output_dir / "comparison_rows.parquet").exists()
-
-    artifacts = artifact_registry.get(collection_id)
-    assert artifacts["collection_comparable_results_ready"] is True
-    assert artifacts["collection_comparable_results_stale"] is False
-    assert artifacts["comparison_rows_generated"] is True
-    assert artifacts["comparison_rows_ready"] is True
-    assert artifacts["comparison_rows_stale"] is False
-    assert artifacts["graph_generated"] is False
-    assert artifacts["graph_ready"] is False
-    assert artifacts["graph_stale"] is False
-
-
-def test_comparison_service_lists_corpus_comparable_results_across_collections_without_row_cache(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(
-        collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
-    )
-
-    first_collection = collection_service.create_collection("Corpus Collection A")
-    second_collection = collection_service.create_collection("Corpus Collection B")
-    first_collection_id = first_collection["collection_id"]
-    second_collection_id = second_collection["collection_id"]
-
-    first_output_dir = collection_service.get_paths(first_collection_id).output_dir
-    second_output_dir = collection_service.get_paths(second_collection_id).output_dir
-    first_output_dir.mkdir(parents=True, exist_ok=True)
-    second_output_dir.mkdir(parents=True, exist_ok=True)
-
-    shared_result = _build_test_comparable_result(
-        comparable_result_id="cres-shared-1",
-        source_document_id="paper-shared",
-        source_result_id="res-shared-1",
-    )
-    unique_result = _build_test_comparable_result(
-        comparable_result_id="cres-unique-1",
-        source_document_id="paper-unique",
-        source_result_id="res-unique-1",
-        property_normalized="impact_strength",
-        summary="Impact strength increased to 61 MPa.",
-        numeric_value=61.0,
-    )
-
-    pd.DataFrame(
-        [
-            shared_result.to_record(),
-            unique_result.to_record(),
-        ]
-    ).to_parquet(first_output_dir / "comparable_results.parquet", index=False)
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=first_collection_id,
-                comparable_result=shared_result,
-                sort_order=0,
-            ).to_record(),
-            _build_collection_overlay(
-                collection_id=first_collection_id,
-                comparable_result=unique_result,
-                sort_order=1,
-            ).to_record(),
-        ]
-    ).to_parquet(first_output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(first_collection_id, first_output_dir)
-
-    pd.DataFrame([shared_result.to_record()]).to_parquet(
-        second_output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=second_collection_id,
-                comparable_result=shared_result,
-                sort_order=4,
-            ).to_record()
-        ]
-    ).to_parquet(second_output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(second_collection_id, second_output_dir)
-
-    payload = comparison_service.list_corpus_comparable_results()
-
-    assert payload["total"] == 2
-    assert payload["count"] == 2
-    items_by_id = {
-        item["comparable_result_id"]: item
-        for item in payload["items"]
-    }
-    assert set(items_by_id) == {"cres-shared-1", "cres-unique-1"}
-    assert items_by_id["cres-shared-1"]["observed_collection_ids"] == sorted(
-        [first_collection_id, second_collection_id]
-    )
-    assert len(items_by_id["cres-shared-1"]["collection_overlays"]) == 2
-    assert {
-        overlay["collection_id"]
-        for overlay in items_by_id["cres-shared-1"]["collection_overlays"]
-    } == {first_collection_id, second_collection_id}
-    assert items_by_id["cres-unique-1"]["observed_collection_ids"] == [first_collection_id]
-    assert len(items_by_id["cres-unique-1"]["collection_overlays"]) == 1
-    assert not (first_output_dir / "comparison_rows.parquet").exists()
-    assert not (second_output_dir / "comparison_rows.parquet").exists()
-
-
-def test_comparison_service_filters_corpus_results_to_one_collection_and_refreshes_stale_overlay(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(
-        collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
-    )
-
-    first_collection = collection_service.create_collection("Policy Current A")
-    second_collection = collection_service.create_collection("Policy Current B")
-    first_collection_id = first_collection["collection_id"]
-    second_collection_id = second_collection["collection_id"]
-
-    first_output_dir = collection_service.get_paths(first_collection_id).output_dir
-    second_output_dir = collection_service.get_paths(second_collection_id).output_dir
-    first_output_dir.mkdir(parents=True, exist_ok=True)
-    second_output_dir.mkdir(parents=True, exist_ok=True)
-
-    shared_result = _build_test_comparable_result(
-        comparable_result_id="cres-policy-shared-1",
-        source_document_id="paper-shared",
-        source_result_id="res-policy-shared-1",
-    )
-
-    pd.DataFrame([shared_result.to_record()]).to_parquet(
-        first_output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=first_collection_id,
-                comparable_result=shared_result,
-                sort_order=0,
-            ).to_record()
-        ]
-    ).to_parquet(first_output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(first_collection_id, first_output_dir)
-
-    pd.DataFrame([shared_result.to_record()]).to_parquet(
-        second_output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    stale_overlay = _build_collection_overlay(
-        collection_id=second_collection_id,
-        comparable_result=shared_result,
-        sort_order=7,
-    ).to_record()
-    stale_overlay["policy_version"] = "comparison_policy_v0"
-    stale_overlay["assessment_input_fingerprint"] = "cafp_stale"
-    pd.DataFrame([stale_overlay]).to_parquet(
-        second_output_dir / "collection_comparable_results.parquet",
-        index=False,
-    )
-    artifact_registry.upsert(second_collection_id, second_output_dir)
-
-    payload = comparison_service.list_corpus_comparable_results(
-        collection_id=second_collection_id,
-    )
-
-    assert payload["collection_id"] == second_collection_id
-    assert payload["total"] == 1
-    assert payload["count"] == 1
-    item = payload["items"][0]
-    assert item["comparable_result_id"] == "cres-policy-shared-1"
-    assert item["observed_collection_ids"] == [second_collection_id]
-    assert len(item["collection_overlays"]) == 1
-    assert item["collection_overlays"][0]["collection_id"] == second_collection_id
-    assert item["collection_overlays"][0]["policy_version"] == (
-        COLLECTION_COMPARISON_POLICY_VERSION
-    )
-    assert item["collection_overlays"][0]["assessment_input_fingerprint"] != "cafp_stale"
-    assert (second_output_dir / "comparison_rows.parquet").exists()
-
-
-def test_comparison_service_reuses_corpus_manifest_cache_without_rescanning(
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    comparison_service = ComparisonService(
-        collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
     )
 
     collection = collection_service.create_collection("Corpus Cache Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     comparable_result = _build_test_comparable_result(
         comparable_result_id="cres-cache-1",
         source_document_id="paper-cache-1",
         source_result_id="res-cache-1",
     )
-    pd.DataFrame([comparable_result.to_record()]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
-    )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=comparable_result,
-                sort_order=0,
-            ).to_record()
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    first_payload = comparison_service.list_corpus_comparable_results()
-
-    cache_table_path, cache_meta_path = comparison_service._resolve_corpus_comparable_results_cache_paths()
-    assert cache_table_path.exists()
-    assert cache_meta_path.exists()
-
-    def fail_scan(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("corpus cache should avoid rescanning collection outputs")
-
-    monkeypatch.setattr(
+    scoped_results = [
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=comparable_result,
+            sort_order=0,
+        )
+    ]
+    _store_core_comparison_artifacts(
         comparison_service,
-        "_scan_corpus_comparable_result_items",
-        fail_scan,
+        collection_id,
+        [comparable_result],
+        scoped_results,
     )
 
-    second_payload = comparison_service.list_corpus_comparable_results()
+    payload = comparison_service.list_corpus_comparable_results()
 
-    assert second_payload == first_payload
+    assert payload["total"] == 1
+    assert payload["items"][0]["comparable_result_id"] == "cres-cache-1"
+    assert not (collection_service.root_dir / "_core_cache").exists()
 
 
-def test_comparison_service_refreshes_corpus_manifest_cache_when_semantic_artifacts_change(
-    monkeypatch,
+def test_comparison_service_reflects_repository_updates_without_manifest_cache(
     tmp_path,
 ):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
 
     collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry,
     )
 
     collection = collection_service.create_collection("Corpus Refresh Collection")
     collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     first_result = _build_test_comparable_result(
         comparable_result_id="cres-refresh-1",
         source_document_id="paper-refresh-1",
         source_result_id="res-refresh-1",
     )
-    pd.DataFrame([first_result.to_record()]).to_parquet(
-        output_dir / "comparable_results.parquet",
-        index=False,
+    first_scoped_results = [
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=first_result,
+            sort_order=0,
+        )
+    ]
+    _store_core_comparison_artifacts(
+        comparison_service,
+        collection_id,
+        [first_result],
+        first_scoped_results,
     )
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=first_result,
-                sort_order=0,
-            ).to_record()
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
 
     first_payload = comparison_service.list_corpus_comparable_results()
     assert first_payload["total"] == 1
@@ -2939,370 +2399,30 @@ def test_comparison_service_refreshes_corpus_manifest_cache_when_semantic_artifa
         summary="Impact strength increased to 73 MPa.",
         numeric_value=73.0,
     )
-    pd.DataFrame(
-        [
-            first_result.to_record(),
-            second_result.to_record(),
-        ]
-    ).to_parquet(output_dir / "comparable_results.parquet", index=False)
-    pd.DataFrame(
-        [
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=first_result,
-                sort_order=0,
-            ).to_record(),
-            _build_collection_overlay(
-                collection_id=collection_id,
-                comparable_result=second_result,
-                sort_order=1,
-            ).to_record(),
-        ]
-    ).to_parquet(output_dir / "collection_comparable_results.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    original_scan = comparison_service._scan_corpus_comparable_result_items
-    scan_calls = 0
-
-    def track_scan(*, collection_id=None):  # noqa: ANN001
-        nonlocal scan_calls
-        scan_calls += 1
-        return original_scan(collection_id=collection_id)
-
-    monkeypatch.setattr(
+    refreshed_scoped_results = [
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=first_result,
+            sort_order=0,
+        ),
+        _build_collection_overlay(
+            collection_id=collection_id,
+            comparable_result=second_result,
+            sort_order=1,
+        ),
+    ]
+    _store_core_comparison_artifacts(
         comparison_service,
-        "_scan_corpus_comparable_result_items",
-        track_scan,
+        collection_id,
+        [first_result, second_result],
+        refreshed_scoped_results,
     )
 
     refreshed_payload = comparison_service.list_corpus_comparable_results()
 
-    assert scan_calls == 1
     assert refreshed_payload["total"] == 2
     assert {
         item["comparable_result_id"]
         for item in refreshed_payload["items"]
     } == {"cres-refresh-1", "cres-refresh-2"}
-
-
-def test_evidence_service_list_recovers_quote_span_as_string(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-    from controllers.schemas.core.evidence import EvidenceCardListResponse
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-    )
-
-    collection = collection_service.create_collection("Evidence Quote Span Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    cards = pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-1",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "The document reports process evidence.",
-                "claim_type": "process",
-                "evidence_source_type": "method",
-                "evidence_anchors": json.dumps(
-                    [
-                        {
-                            "anchor_id": "anchor-1",
-                            "source_type": "method",
-                            "section_id": "sec-1",
-                            "block_id": None,
-                            "snippet_id": "tu-1",
-                            "figure_or_table": None,
-                            "quote_span": "[31]",
-                        }
-                    ],
-                    ensure_ascii=False,
-                ),
-                "material_system": json.dumps(
-                    {"family": "composite", "composition": None},
-                    ensure_ascii=False,
-                ),
-                "condition_context": json.dumps(
-                    {"process": {}, "baseline": {}, "test": {}},
-                    ensure_ascii=False,
-                ),
-                "confidence": 0.8,
-                "traceability_status": "direct",
-            }
-        ]
-    )
-    cards.to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    payload = paper_facts_service.list_evidence_cards(collection_id)
-    assert payload["items"][0]["evidence_anchors"][0]["quote_span"] == "[31]"
-
-    response = EvidenceCardListResponse(**payload)
-    assert response.items[0].evidence_anchors[0].quote_span == "[31]"
-
-
-def test_document_content_and_traceback_ready_resolve_stable_section_ids(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-    )
-
-    collection = collection_service.create_collection("Traceback Ready Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Traceback Ready Paper",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "The precursor powders were mixed in ethanol and stirred for 2 h.",
-                        "The slurry was dried at 80 C and annealed at 600 C under Ar.",
-                        "Characterization",
-                        "XRD and SEM were used to characterize the powders.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
-                "document_ids": ["paper-1"],
-            },
-            {
-                "id": "tu-2",
-                "text": "The slurry was dried at 80 C and annealed at 600 C under Ar.",
-                "document_ids": ["paper-1"],
-            },
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    blocks = build_blocks(documents, text_units)
-    methods_block = blocks[
-        blocks["text_unit_ids"].apply(lambda value: "tu-1" in (value or []))
-    ].iloc[0]
-
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-ready",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
-                "claim_type": "process",
-                "evidence_source_type": "method",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-ready",
-                        "source_type": "method",
-                        "section_id": methods_block["block_id"],
-                        "block_id": methods_block["block_id"],
-                        "snippet_id": "tu-1",
-                        "quote_span": "The precursor powders were mixed in ethanol and stirred for 2 h.",
-                    }
-                ],
-                "material_system": {"family": "composite", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.8,
-                "traceability_status": "direct",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    content = document_profile_service.get_document_content(collection_id, "paper-1")
-    matched_block = next(
-        item for item in content["blocks"] if item["block_id"] == methods_block["block_id"]
-    )
-    assert matched_block["start_offset"] is not None
-
-    traceback = paper_facts_service.get_evidence_traceback(collection_id, "ev-ready")
-    assert traceback["traceback_status"] == "ready"
-    assert traceback["anchors"][0]["locator_type"] == "char_range"
-    assert traceback["anchors"][0]["char_range"] is not None
-    assert traceback["anchors"][0]["block_id"] == methods_block["block_id"]
-    assert "evidence_id=ev-ready" in traceback["anchors"][0]["deep_link"]
-
-
-def test_evidence_traceback_partial_falls_back_to_section(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-    )
-
-    collection = collection_service.create_collection("Traceback Partial Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Traceback Partial Paper",
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "The precursor powders were mixed in ethanol and stirred for 2 h.",
-                        "Characterization",
-                        "XRD and SEM were used to characterize the powders.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
-                "document_ids": ["paper-1"],
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    text_units.to_parquet(output_dir / "text_units.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, text_units)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-    blocks = build_blocks(documents, text_units)
-    methods_block = blocks[
-        blocks["text_unit_ids"].apply(lambda value: "tu-1" in (value or []))
-    ].iloc[0]
-
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-partial",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "The document reports a process route.",
-                "claim_type": "process",
-                "evidence_source_type": "method",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-partial",
-                        "source_type": "method",
-                        "section_id": methods_block["block_id"],
-                        "block_id": methods_block["block_id"],
-                        "quote_span": "This quote is not present in the document.",
-                    }
-                ],
-                "material_system": {"family": "composite", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.72,
-                "traceability_status": "partial",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    traceback = paper_facts_service.get_evidence_traceback(collection_id, "ev-partial")
-    assert traceback["traceback_status"] == "partial"
-    assert traceback["anchors"][0]["locator_type"] == "section"
-    assert traceback["anchors"][0]["block_id"] == methods_block["block_id"]
-    assert traceback["anchors"][0]["char_range"] is None
-
-
-def test_evidence_traceback_unavailable_when_no_locator_can_be_resolved(monkeypatch, tmp_path):
-    _patch_parquet(monkeypatch)
-
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(tmp_path / "collections")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service, artifact_registry)
-    paper_facts_service = PaperFactsService(
-        collection_service,
-        artifact_registry,
-        document_profile_service,
-    )
-
-    collection = collection_service.create_collection("Traceback Unavailable Collection")
-    collection_id = collection["collection_id"]
-    output_dir = collection_service.get_paths(collection_id).output_dir
-
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Traceback Unavailable Paper",
-                "text": "A short note without section structure.",
-            }
-        ]
-    )
-    documents.to_parquet(output_dir / "documents.parquet", index=False)
-    _write_source_artifacts(output_dir, documents, None)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    document_profile_service.build_document_profiles(collection_id, output_dir)
-
-    pd.DataFrame(
-        [
-            {
-                "evidence_id": "ev-unavailable",
-                "document_id": "paper-1",
-                "collection_id": collection_id,
-                "claim_text": "No usable anchor is available.",
-                "claim_type": "property",
-                "evidence_source_type": "figure",
-                "evidence_anchors": [
-                    {
-                        "anchor_id": "anchor-unavailable",
-                        "source_type": "figure",
-                        "figure_or_table": "Figure 2",
-                    }
-                ],
-                "material_system": {"family": "composite", "composition": None},
-                "condition_context": {"process": {}, "baseline": {}, "test": {}},
-                "confidence": 0.51,
-                "traceability_status": "missing",
-            }
-        ]
-    ).to_parquet(output_dir / "evidence_cards.parquet", index=False)
-    artifact_registry.upsert(collection_id, output_dir)
-
-    traceback = paper_facts_service.get_evidence_traceback(collection_id, "ev-unavailable")
-    assert traceback["traceback_status"] == "unavailable"
-    assert traceback["anchors"] == []
+    assert not (collection_service.root_dir / "_core_cache").exists()

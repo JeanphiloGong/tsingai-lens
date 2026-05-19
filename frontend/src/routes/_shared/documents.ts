@@ -10,7 +10,6 @@ export type DocumentType =
 	| 'computational'
 	| 'mixed'
 	| 'uncertain';
-export type ProtocolExtractable = 'yes' | 'partial' | 'no' | 'uncertain';
 export type DocumentProcessingStatus =
 	| 'pending'
 	| 'processing'
@@ -24,8 +23,6 @@ export type DocumentProfile = {
 	title: string | null;
 	source_filename: string | null;
 	doc_type: DocumentType;
-	protocol_extractable: ProtocolExtractable;
-	protocol_extractability_signals: string[];
 	parsing_warnings: string[];
 	confidence: number | null;
 	page_count?: number | null;
@@ -40,7 +37,6 @@ export type DocumentProfilesResponse = {
 	summary: {
 		total_documents: number;
 		doc_type_counts: Record<DocumentType, number>;
-		protocol_extractable_counts: Record<ProtocolExtractable, number>;
 		warnings: string[];
 	};
 	items: DocumentProfile[];
@@ -265,6 +261,7 @@ export type WorkbenchSummaryCard = {
 	body: string;
 	source_label: string;
 	source_span_id: string;
+	status: 'supported' | 'review';
 };
 
 export type WorkbenchMethodRow = {
@@ -280,6 +277,7 @@ export type WorkbenchKeyResultCard = {
 	trend: string;
 	source_label: string;
 	source_span_id: string;
+	status: 'supported' | 'review';
 };
 
 export type WorkbenchResultRow = {
@@ -307,11 +305,6 @@ export type WorkbenchEvidenceCard = {
 	status: 'strong' | 'limited' | 'missing';
 	source_span_id: string;
 	result_id: string | null;
-};
-
-export type WorkbenchQaSuggestion = {
-	id: string;
-	text: string;
 };
 
 export type WorkbenchGraphNodeType =
@@ -363,7 +356,7 @@ export type WorkbenchSelectableItem = {
 	graph_id: string;
 };
 
-export type WorkbenchTab = 'summary' | 'methods' | 'results' | 'evidence' | 'qa';
+export type WorkbenchTab = 'overview' | 'results' | 'evidence';
 
 export type DocumentWorkbenchModel = {
 	collection_id: string;
@@ -381,7 +374,6 @@ export type DocumentWorkbenchModel = {
 	key_results: WorkbenchKeyResultCard[];
 	result_rows: WorkbenchResultRow[];
 	evidence_cards: WorkbenchEvidenceCard[];
-	qa_suggestions: WorkbenchQaSuggestion[];
 	selectable_items: WorkbenchSelectableItem[];
 	graphs_by_item_id: Record<string, WorkbenchLocalGraph>;
 	default_item_id: string;
@@ -396,13 +388,6 @@ const DEFAULT_DOC_TYPE_COUNTS: Record<DocumentType, number> = {
 	uncertain: 0
 };
 
-const DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS: Record<ProtocolExtractable, number> = {
-	yes: 0,
-	partial: 0,
-	no: 0,
-	uncertain: 0
-};
-
 const DOCUMENT_TYPE_KEYS: DocumentType[] = [
 	'review',
 	'experimental',
@@ -412,10 +397,7 @@ const DOCUMENT_TYPE_KEYS: DocumentType[] = [
 	'uncertain'
 ];
 
-const PROTOCOL_SUITABILITY_KEYS: ProtocolExtractable[] = ['yes', 'partial', 'no', 'uncertain'];
-
 const DOCUMENT_TYPE_VALUES = new Set<DocumentType>(DOCUMENT_TYPE_KEYS);
-const PROTOCOL_SUITABILITY_VALUES = new Set<ProtocolExtractable>(PROTOCOL_SUITABILITY_KEYS);
 
 export type DocumentTypeStat = {
 	key: DocumentType;
@@ -426,19 +408,9 @@ export type DocumentTypeStat = {
 	tone: DocumentType;
 };
 
-export type ProtocolSuitabilityStat = {
-	key: ProtocolExtractable;
-	labelKey: string;
-	count: number;
-	percent: number;
-	dominant: boolean;
-	tone: 'ready' | 'partial' | 'warning' | 'neutral';
-};
-
 export type ProfileConclusionStats = {
 	total: number;
 	documentTypeStats: DocumentTypeStat[];
-	protocolSuitabilityStats: ProtocolSuitabilityStat[];
 };
 
 export type ProfileConclusionTone = 'warning' | 'ready' | 'limited' | 'neutral';
@@ -480,19 +452,6 @@ function normalizeDocumentTypeValue(value: unknown): DocumentType {
 	return 'uncertain';
 }
 
-function normalizeProtocolExtractableValue(value: unknown): ProtocolExtractable {
-	const suitability = String(value ?? '')
-		.trim()
-		.toLowerCase();
-	if (PROTOCOL_SUITABILITY_VALUES.has(suitability as ProtocolExtractable)) {
-		return suitability as ProtocolExtractable;
-	}
-	if (['true', 'good', 'suitable', 'extractable'].includes(suitability)) return 'yes';
-	if (['limited', 'partially', 'partially_suitable'].includes(suitability)) return 'partial';
-	if (['false', 'not_suitable', 'not_extractable'].includes(suitability)) return 'no';
-	return 'uncertain';
-}
-
 function normalizeProcessingStatusValue(value: unknown): DocumentProcessingStatus {
 	const status = String(value ?? '')
 		.trim()
@@ -517,13 +476,6 @@ function findStatCount<K extends string>(stats: Array<{ key: K; count: number }>
 	return stats.find((item) => item.key === key)?.count ?? 0;
 }
 
-function protocolSuitabilityTone(key: ProtocolExtractable): ProtocolSuitabilityStat['tone'] {
-	if (key === 'yes') return 'ready';
-	if (key === 'partial') return 'partial';
-	if (key === 'no') return 'warning';
-	return 'neutral';
-}
-
 export function buildDocumentTypeStats(profiles: DocumentProfile[]): DocumentTypeStat[] {
 	const counts = { ...DEFAULT_DOC_TYPE_COUNTS };
 	for (const profile of profiles) {
@@ -543,36 +495,11 @@ export function buildDocumentTypeStats(profiles: DocumentProfile[]): DocumentTyp
 	}));
 }
 
-export function buildProtocolSuitabilityStats(
-	profiles: DocumentProfile[]
-): ProtocolSuitabilityStat[] {
-	const counts = { ...DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS };
-	for (const profile of profiles) {
-		const key = normalizeProtocolExtractableValue(profile.protocol_extractable);
-		counts[key] += 1;
-	}
-
-	const total = profiles.length;
-	const maxCount = Math.max(0, ...PROTOCOL_SUITABILITY_KEYS.map((key) => counts[key]));
-	return PROTOCOL_SUITABILITY_KEYS.map((key) => ({
-		key,
-		labelKey: `profiles.suitability.${key}`,
-		count: counts[key],
-		percent: percentage(counts[key], total),
-		dominant: counts[key] > 0 && counts[key] === maxCount,
-		tone: protocolSuitabilityTone(key)
-	}));
-}
-
 export function buildProfileConclusion(stats: ProfileConclusionStats): ProfileConclusion {
 	const reviewCount = findStatCount(stats.documentTypeStats, 'review');
 	const experimentalCount = findStatCount(stats.documentTypeStats, 'experimental');
 	const methodCount = findStatCount(stats.documentTypeStats, 'method');
-	const suitableCount = findStatCount(stats.protocolSuitabilityStats, 'yes');
-	const partialCount = findStatCount(stats.protocolSuitabilityStats, 'partial');
-	const notSuitableCount = findStatCount(stats.protocolSuitabilityStats, 'no');
 	const reviewDominant = stats.total > 0 && reviewCount >= Math.ceil(stats.total / 2);
-	const notSuitableDominant = stats.total > 0 && notSuitableCount >= Math.ceil(stats.total / 2);
 
 	if (stats.total < 1) {
 		return {
@@ -582,7 +509,7 @@ export function buildProfileConclusion(stats: ProfileConclusionStats): ProfileCo
 		};
 	}
 
-	if (reviewDominant && notSuitableDominant) {
+	if (reviewDominant) {
 		return {
 			tone: 'warning',
 			messageKey: 'profiles.conclusion.reviewRisk',
@@ -590,7 +517,7 @@ export function buildProfileConclusion(stats: ProfileConclusionStats): ProfileCo
 		};
 	}
 
-	if (suitableCount > 0 && experimentalCount + methodCount > 0) {
+	if (experimentalCount + methodCount > 0) {
 		return {
 			tone: 'ready',
 			messageKey: 'profiles.conclusion.ready',
@@ -603,14 +530,6 @@ export function buildProfileConclusion(stats: ProfileConclusionStats): ProfileCo
 			tone: 'warning',
 			messageKey: 'profiles.conclusion.fewDocuments',
 			actionKeys: ['upload_more']
-		};
-	}
-
-	if (suitableCount + partialCount > 0) {
-		return {
-			tone: 'ready',
-			messageKey: 'profiles.conclusion.limitedReady',
-			actionKeys: ['view_evidence', 'open_comparison']
 		};
 	}
 
@@ -627,13 +546,12 @@ export function getDocumentNextActions(profile: DocumentProfile): DocumentProfil
 	if (status === 'failed') return ['view_error', 'retry_processing'];
 
 	const docType = normalizeDocumentTypeValue(profile.doc_type);
-	const suitability = normalizeProtocolExtractableValue(profile.protocol_extractable);
 
-	if (docType === 'review' && suitability === 'no') return ['view_document', 'view_evidence'];
-	if ((docType === 'experimental' || docType === 'method') && suitability === 'yes') {
-		return ['view_evidence', 'open_comparison'];
+	if (docType === 'review') return ['view_document', 'view_evidence'];
+	if (docType === 'experimental' || docType === 'method') {
+		return ['view_document', 'view_evidence', 'open_comparison'];
 	}
-	if (docType === 'uncertain' || suitability === 'uncertain') {
+	if (docType === 'uncertain') {
 		return ['view_document', 'manual_mark'];
 	}
 	return ['view_document', 'view_evidence'];
@@ -651,17 +569,6 @@ export function getDocumentTypeBadge(type: DocumentProfile['doc_type']): Profile
 		key,
 		labelKey: `profiles.docTypes.${key}`,
 		tone: key
-	};
-}
-
-export function getSuitabilityBadge(
-	suitability: DocumentProfile['protocol_extractable']
-): ProfileBadge {
-	const key = normalizeProtocolExtractableValue(suitability);
-	return {
-		key,
-		labelKey: `profiles.suitability.${key}`,
-		tone: protocolSuitabilityTone(key)
 	};
 }
 
@@ -810,8 +717,6 @@ function normalizeProfile(value: unknown, collectionId: string): DocumentProfile
 			toOptionalText(record.original_filename) ??
 			toOptionalText(record.source_file_name),
 		doc_type: normalizeDocumentTypeValue(record.doc_type),
-		protocol_extractable: normalizeProtocolExtractableValue(record.protocol_extractable),
-		protocol_extractability_signals: toStringList(record.protocol_extractability_signals),
 		parsing_warnings: toStringList(record.parsing_warnings),
 		confidence: Number.isFinite(confidence) ? confidence : null,
 		page_count: toPositiveInteger(record.page_count ?? record.pages),
@@ -1502,6 +1407,35 @@ function readableTraceabilityStatus(status: string) {
 	return 'Source support is not yet available';
 }
 
+function textNeedsDocumentReview(value: string | null | undefined) {
+	const normalized = (value ?? '').trim().toLowerCase();
+	if (!normalized || normalized === '--') return true;
+	return (
+		normalized.includes('not clearly') ||
+		normalized.includes('not reported') ||
+		normalized.includes('unspecified') ||
+		normalized.includes('pending') ||
+		normalized.includes('insufficient')
+	);
+}
+
+function resultNeedsDocumentReview(row: WorkbenchResultRow | null | undefined) {
+	if (!row) return true;
+	return (
+		row.warnings_count > 0 ||
+		textNeedsDocumentReview(row.material_system) ||
+		textNeedsDocumentReview(row.process) ||
+		textNeedsDocumentReview(row.baseline) ||
+		textNeedsDocumentReview(row.test_condition) ||
+		row.comparability_status.toLowerCase().includes('limited') ||
+		row.comparability_status.toLowerCase().includes('insufficient')
+	);
+}
+
+function documentReviewStatus(needsReview: boolean): 'review' | 'supported' {
+	return needsReview ? 'review' : 'supported';
+}
+
 function readableWarning(raw: string) {
 	const value = raw.trim().toLowerCase();
 	if (!value) return '';
@@ -1550,6 +1484,17 @@ function workbenchMaterialLabel(
 		relatedResults.find((item) => item.material_label)?.material_label ??
 		'Material system not clearly specified'
 	);
+}
+
+function displayMaterialLabel(
+	contexts: WorkbenchChainContext[],
+	relatedResults: ResultListItem[],
+	resultRows: WorkbenchResultRow[]
+) {
+	const material = workbenchMaterialLabel(contexts, relatedResults);
+	if (!textNeedsDocumentReview(material)) return material;
+	const reviewed = resultRows.find((row) => !textNeedsDocumentReview(row.material_system));
+	return reviewed?.material_system ?? 'Material system needs source review';
 }
 
 function buildWorkbenchResultRows(
@@ -1621,56 +1566,66 @@ function buildWorkbenchSummaryCards(
 	resultRows: WorkbenchResultRow[],
 	sourceSpans: WorkbenchSourceSpan[]
 ): WorkbenchSummaryCard[] {
-	const material = workbenchMaterialLabel(contexts, []);
+	const material = displayMaterialLabel(contexts, [], resultRows);
 	const firstContext = contexts[0];
 	const firstResult = resultRows[0];
+	const firstNeedsReview = resultNeedsDocumentReview(firstResult);
+	const materialNeedsReview = textNeedsDocumentReview(material);
+	const processNeedsReview = textNeedsDocumentReview(firstResult?.process);
+	const comparableResult = resultRows.find((row) => !resultNeedsDocumentReview(row));
 	return [
 		{
 			id: 'summary-question',
 			title: 'Research question',
 			body:
-				firstContext?.series.test_family && firstContext.series.property_family
+				firstContext?.series.test_family && firstContext.series.property_family && !firstNeedsReview
 					? `How does the reported ${firstContext.series.test_family} setup affect ${firstContext.series.property_family}?`
-					: 'How does the paper connect its method or material design to measurable outcomes?',
+					: 'The extracted research question needs source review before it is used as a paper-level conclusion.',
 			source_label: 'Abstract',
-			source_span_id: spanAt(sourceSpans, 0)
+			source_span_id: spanAt(sourceSpans, 0),
+			status: documentReviewStatus(firstNeedsReview)
 		},
 		{
 			id: 'summary-contribution',
 			title: 'Main contribution',
 			body:
-				firstResult?.property && firstResult.material_system
+				firstResult?.property && firstResult.material_system && !firstNeedsReview
 					? `The paper organizes evidence around ${firstResult.material_system} and reports ${firstResult.property} with source-backed context.`
-					: 'The paper provides a structured method-result chain that can be reviewed next to the original source.',
+					: 'The main contribution is not yet supported by enough structured material, process, and baseline context.',
 			source_label: 'Abstract',
-			source_span_id: spanAt(sourceSpans, 0)
+			source_span_id: spanAt(sourceSpans, 0),
+			status: documentReviewStatus(firstNeedsReview)
 		},
 		{
 			id: 'summary-materials',
 			title: 'Dataset / materials',
 			body: material,
 			source_label: 'Methodology',
-			source_span_id: spanAt(sourceSpans, 2)
+			source_span_id: spanAt(sourceSpans, 2),
+			status: documentReviewStatus(materialNeedsReview)
 		},
 		{
 			id: 'summary-method',
 			title: 'Method',
 			body:
-				firstResult?.process && firstResult.process !== 'Process not clearly reported'
+				firstResult?.process && !processNeedsReview
 					? firstResult.process
-					: 'Method details are represented as a source-linked extraction until the backend provides richer section roles.',
+					: 'Processing and test setup details need source review before they are treated as structured method facts.',
 			source_label: 'Methodology',
-			source_span_id: spanAt(sourceSpans, 2)
+			source_span_id: spanAt(sourceSpans, 2),
+			status: documentReviewStatus(processNeedsReview)
 		},
 		{
 			id: 'summary-key-result',
 			title: 'Key result',
 			body:
-				firstResult?.property && firstResult.comparability_status
-					? `${firstResult.property}: ${firstResult.comparability_status}.`
+				comparableResult?.property && comparableResult.comparability_status
+					? `${comparableResult.property}: ${comparableResult.comparability_status}.`
 					: 'Key results are available as reviewable cards with source jumps.',
 			source_label: 'Results',
-			source_span_id: firstResult?.source_span_id ?? spanAt(sourceSpans, 3)
+			source_span_id:
+				comparableResult?.source_span_id ?? firstResult?.source_span_id ?? spanAt(sourceSpans, 3),
+			status: documentReviewStatus(!comparableResult)
 		}
 	];
 }
@@ -1717,7 +1672,7 @@ function buildWorkbenchKeyResults(
 	resultRows: WorkbenchResultRow[],
 	sourceSpans: WorkbenchSourceSpan[]
 ): WorkbenchKeyResultCard[] {
-	const cards = contexts.slice(0, 3).map((context, index) => ({
+	const cards: WorkbenchKeyResultCard[] = contexts.slice(0, 3).map((context, index) => ({
 		id: `key-${context.chain.result_id}`,
 		label: context.chain.measurement.property,
 		value: workbenchMeasurementValue(
@@ -1729,18 +1684,20 @@ function buildWorkbenchKeyResults(
 				? 'Key Finding'
 				: 'Review Needed',
 		source_label: 'Results',
-		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3)
+		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3),
+		status: documentReviewStatus(resultNeedsDocumentReview(resultRows[index]))
 	}));
 
 	if (cards.length) return cards;
 
-	return relatedResults.slice(0, 3).map((result, index) => ({
+	return relatedResults.slice(0, 3).map((result, index): WorkbenchKeyResultCard => ({
 		id: `key-${result.result_id}`,
 		label: result.property,
 		value: workbenchMeasurementValue(result.value, result.unit),
 		trend: result.comparability_status === 'comparable' ? 'Key Finding' : 'Review Needed',
 		source_label: 'Results',
-		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3)
+		source_span_id: resultRows[index]?.source_span_id ?? spanAt(sourceSpans, index + 3),
+		status: documentReviewStatus(resultNeedsDocumentReview(resultRows[index]))
 	}));
 }
 
@@ -1765,15 +1722,6 @@ function buildWorkbenchEvidenceCards(resultRows: WorkbenchResultRow[]): Workbenc
 			result_id: row.id || null
 		};
 	});
-}
-
-function buildWorkbenchQaSuggestions(resultRows: WorkbenchResultRow[]): WorkbenchQaSuggestion[] {
-	const firstProperty = resultRows[0]?.property || 'the main result';
-	return [
-		{ id: 'qa-source', text: `Where does the paper support ${firstProperty}?` },
-		{ id: 'qa-baseline', text: 'Which baseline should I compare against?' },
-		{ id: 'qa-limits', text: 'What context is missing or uncertain?' }
-	];
 }
 
 function graphNode(
@@ -1890,7 +1838,7 @@ function buildWorkbenchSelectableItems(
 		...summaryCards.map((card) => ({
 			id: card.id,
 			kind: 'summary' as const,
-			tab: 'summary' as const,
+			tab: 'overview' as const,
 			title: card.title,
 			source_span_id: card.source_span_id,
 			graph_id: `graph-${card.id}`
@@ -1898,7 +1846,7 @@ function buildWorkbenchSelectableItems(
 		...methodRows.map((row, index) => ({
 			id: `method-${index}`,
 			kind: 'method' as const,
-			tab: 'methods' as const,
+			tab: 'overview' as const,
 			title: row.label,
 			source_span_id: row.source_span_id,
 			graph_id: `graph-method-${index}`
@@ -1966,7 +1914,6 @@ export function buildDocumentWorkbenchModel({
 	const methodRows = buildWorkbenchMethodRows(contexts, resultRows, sourceSpans);
 	const keyResults = buildWorkbenchKeyResults(contexts, relatedResults, resultRows, sourceSpans);
 	const evidenceCards = buildWorkbenchEvidenceCards(resultRows);
-	const qaSuggestions = buildWorkbenchQaSuggestions(resultRows);
 	const selectableItems = buildWorkbenchSelectableItems(
 		summaryCards,
 		methodRows,
@@ -2005,7 +1952,6 @@ export function buildDocumentWorkbenchModel({
 		key_results: keyResults,
 		result_rows: resultRows,
 		evidence_cards: evidenceCards,
-		qa_suggestions: qaSuggestions,
 		selectable_items: selectableItems,
 		graphs_by_item_id: graphsByItemId,
 		default_item_id: defaultItem?.id ?? ''
@@ -2020,8 +1966,6 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
 			title: 'High-entropy oxide cycling study',
 			source_filename: 'high-entropy-oxide-cycling-study.pdf',
 			doc_type: 'experimental',
-			protocol_extractable: 'partial',
-			protocol_extractability_signals: ['methods density', 'condition completeness'],
 			parsing_warnings: [],
 			confidence: 0.88,
 			page_count: 12,
@@ -2034,8 +1978,6 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
 			title: 'Review of interface engineering strategies',
 			source_filename: 'interface-engineering-review.pdf',
 			doc_type: 'review',
-			protocol_extractable: 'no',
-			protocol_extractability_signals: ['review contamination'],
 			parsing_warnings: ['Weak procedural continuity'],
 			confidence: 0.93,
 			page_count: 18,
@@ -2048,8 +1990,6 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
 			title: null,
 			source_filename: 'mixed-experimental-survey-benchmark.txt',
 			doc_type: 'mixed',
-			protocol_extractable: 'uncertain',
-			protocol_extractability_signals: ['critical parameter missingness'],
 			parsing_warnings: ['Baseline definition varies across sections'],
 			confidence: 0.64,
 			page_count: null,
@@ -2071,12 +2011,6 @@ function buildFixture(collectionId: string): DocumentProfilesResponse {
 				computational: 0,
 				mixed: 1,
 				uncertain: 0
-			},
-			protocol_extractable_counts: {
-				yes: 0,
-				partial: 1,
-				no: 1,
-				uncertain: 1
 			},
 			warnings: ['Fixture mode is enabled for document profiles.']
 		},
@@ -2207,13 +2141,6 @@ function normalizeResponse(value: unknown, collectionId: string): DocumentProfil
 				...DEFAULT_DOC_TYPE_COUNTS,
 				...((summaryRecord?.doc_type_counts ?? summaryRecord?.by_doc_type) as
 					| Record<DocumentType, number>
-					| undefined)
-			},
-			protocol_extractable_counts: {
-				...DEFAULT_PROTOCOL_EXTRACTABLE_COUNTS,
-				...((summaryRecord?.protocol_extractable_counts ??
-					summaryRecord?.by_protocol_extractable) as
-					| Record<ProtocolExtractable, number>
 					| undefined)
 			},
 			warnings: toStringList(summaryRecord?.warnings)

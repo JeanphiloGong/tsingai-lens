@@ -1,7 +1,13 @@
 # Source Application Layer
 
-This package owns collection construction, Source build orchestration, and
-artifact readiness handoff inside the backend application layer.
+This package owns collection construction, build-task orchestration, and
+artifact readiness handoff inside the backend application layer. It is not the
+parser implementation layer.
+
+The Source parser and artifact builder live under
+`backend/infra/source/runtime/`. After that Source runtime finishes, this
+application package starts Core post-processing for document profiles, paper
+skims, research objectives, paper facts, and comparison rows.
 
 - `collection_service.py`
   Collection lifecycle, file membership, import provenance, and goal handoff
@@ -14,5 +20,4 @@ artifact readiness handoff inside the backend application layer.
   Normalized Source artifact loading for downstream consumers
 - `artifact_registry_service.py`
   Collection artifact readiness and capability flags, including semantic/scope
-  comparison artifacts such as `comparable_results.parquet` and
-  `collection_comparable_results.parquet`
+  comparison artifacts persisted through the Core repository

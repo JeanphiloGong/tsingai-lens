@@ -1,27 +1,22 @@
 <script lang="ts">
 	import { tick, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
-	import cytoscape, { type Core, type EdgeSingular, type NodeSingular } from 'cytoscape';
+	import cytoscape, { type CollectionReturnValue, type Core, type NodeSingular } from 'cytoscape';
 	import fcose from 'cytoscape-fcose';
 	import { errorMessage, getApiErrorCode, isHttpStatusError } from '../../../_shared/api';
 	import {
 		buildCytoscapeElements,
 		buildCytoscapeStyles,
 		buildGraphMeta,
+		buildMaterialCentricGraph,
 		buildNodeTypeCounts,
 		downloadGraphml as downloadGraphmlFile,
 		exportGraphPng,
 		fetchCollectionGraph,
-		fetchCollectionGraphNeighbors,
 		filterGraphElements,
-		formatGraphLabel,
 		getEdgeTypeStyle,
-		getLinkedComparisons,
-		getLinkedDocuments,
-		getLinkedEvidence,
 		getNodeDescription,
 		getNodeTypeStyle,
-		getSelectedObjectDetail,
 		graphNodeTypeOrder,
 		parseGraphNodeId,
 		runGraphLayout,
@@ -30,24 +25,8 @@
 		type GraphNode,
 		type GraphNodeType,
 		type GraphPosition,
-		type GraphResponse,
-		type GraphSelectedObject
+		type GraphResponse
 	} from '../../../_shared/graph';
-	import {
-		fetchComparisonRow,
-		fetchComparisons,
-		type ComparisonRow
-	} from '../../../_shared/comparisons';
-	import {
-		fetchDocumentProfile,
-		fetchDocumentProfiles,
-		type DocumentProfile
-	} from '../../../_shared/documents';
-	import {
-		fetchEvidenceCard,
-		fetchEvidenceCards,
-		type EvidenceCard
-	} from '../../../_shared/evidence';
 	import { t } from '../../../_shared/i18n';
 	import { createBuildTask } from '../../../_shared/tasks';
 	import { buildDocumentViewerHref } from '../../../_shared/traceback';
@@ -59,8 +38,8 @@
 
 	cytoscape.use(fcose);
 
-	type LayoutName = 'fcose' | 'cose' | 'grid' | 'circle';
-	type LinkedTab = 'evidence' | 'comparison' | 'documents';
+	type LayoutName = 'logic_chain' | 'fcose' | 'cose' | 'grid' | 'circle';
+	type GraphViewMode = 'objective_chain' | 'material_centric' | 'full';
 	type SelectedNode = GraphNode & {
 		kind: GraphNodeType | 'unknown';
 		resourceId: string | null;
@@ -71,21 +50,12 @@
 		targetLabel: string;
 		relationLabel: string;
 	};
-	type NodeDetail =
-		| { kind: 'document'; data: DocumentProfile }
-		| { kind: 'evidence'; data: EvidenceCard }
-		| { kind: 'comparison'; data: ComparisonRow };
 	type HoverPreview = {
 		label: string;
 		typeLabel: string;
 		left: number;
 		top: number;
 	};
-	type RelationPreview = {
-		label: string;
-		target: string;
-	};
-
 	const defaultMaxNodes = 200;
 	const defaultMinWeight = 0;
 	const graphPadding = 72;
@@ -99,19 +69,15 @@
 	let loadedCollectionId = '';
 
 	let loading = false;
-	let supportLoading = false;
-	let detailLoading = false;
-	let expandingNeighborhood = false;
 	let exportMenuOpen = false;
 	let notFound = false;
 	let error = '';
 	let status = '';
-	let supportStatus = '';
-	let detailError = '';
 
 	let maxNodes = defaultMaxNodes;
 	let minWeight = defaultMinWeight;
-	let layoutName: LayoutName = 'fcose';
+	let viewMode: GraphViewMode = 'objective_chain';
+	let layoutName: LayoutName = 'logic_chain';
 	let searchQuery = '';
 	let visibleNodeTypes: Partial<Record<GraphNodeType, boolean>> = buildDefaultVisibleTypes();
 	let visibleNodes = 0;
@@ -119,40 +85,18 @@
 
 	let selectedNode: SelectedNode | null = null;
 	let selectedEdge: SelectedEdge | null = null;
-	let selectedNodeDetail: NodeDetail | null = null;
 	let hoverPreview: HoverPreview | null = null;
-	let linkedTab: LinkedTab = 'evidence';
-	let detailRequestId = 0;
-
-	let evidenceItems: EvidenceCard[] = [];
-	let comparisonItems: ComparisonRow[] = [];
-	let documentItems: DocumentProfile[] = [];
 
 	$: collectionId = $page.params.id ?? '';
-	$: graphMeta = buildGraphMeta(graphData);
-	$: nodeTypeCounts = buildNodeTypeCounts(graphData);
+	$: displayGraphData = buildDisplayGraphData(graphData);
+	$: graphMeta = buildGraphMeta(displayGraphData);
+	$: graphLoading = loading && !graphData;
+	$: nodeTypeCounts = buildNodeTypeCounts(displayGraphData);
 	$: availableNodeTypes = graphNodeTypeOrder.filter((type) => nodeTypeCounts[type] > 0);
 	$: surfaceState = getWorkspaceSurfaceState(workspace, 'graph');
-	$: selectedObject = selectedNode
-		? ({ kind: 'node', node: selectedNode } as GraphSelectedObject)
-		: selectedEdge
-			? ({ kind: 'edge', edge: selectedEdge } as GraphSelectedObject)
-			: null;
-	$: selectedDetail = getSelectedObjectDetail(selectedObject);
-	$: linkedEvidence = getLinkedEvidence(selectedObject, evidenceItems);
-	$: linkedComparisons = getLinkedComparisons(selectedObject, comparisonItems);
-	$: linkedDocuments = buildLinkedDocuments(
-		getLinkedDocuments(selectedObject, documentItems),
-		linkedEvidence,
-		linkedComparisons
-	);
-	$: selectedStats = {
-		evidence: linkedEvidence.length,
-		comparison: linkedComparisons.length,
-		documents: linkedDocuments.length
-	};
-	$: commonRelations = buildCommonRelations();
-	$: showEmptyGraph = !loading && (!graphData || !graphData.nodes.length || (notFound && !visibleNodes));
+	$: selectedObject = selectedNode || selectedEdge;
+	$: showEmptyGraph =
+		!graphLoading && (!graphData || !graphData.nodes.length || (notFound && !visibleNodes));
 	$: if (cy) {
 		searchQuery;
 		visibleNodeTypes;
@@ -177,10 +121,10 @@
 	function resetControlState() {
 		maxNodes = defaultMaxNodes;
 		minWeight = defaultMinWeight;
-		layoutName = 'fcose';
+		viewMode = 'objective_chain';
+		layoutName = 'logic_chain';
 		searchQuery = '';
 		visibleNodeTypes = buildDefaultVisibleTypes();
-		linkedTab = 'evidence';
 	}
 
 	function disposeRenderer() {
@@ -206,6 +150,19 @@
 		if (!cy) return;
 		const visible = visibleGraphElements();
 		if (!visible || visible.empty()) return;
+		if (viewMode === 'material_centric') {
+			fitVisibleGraph(visible, animate);
+			return;
+		}
+		if (viewMode !== 'full' && layoutName === 'logic_chain') {
+			fitLogicChainGraph(visible, animate);
+			return;
+		}
+		fitVisibleGraph(visible, animate);
+	}
+
+	function fitVisibleGraph(visible: CollectionReturnValue, animate = true) {
+		if (!cy) return;
 		if (animate) {
 			cy.animate({
 				fit: { eles: visible, padding: graphPadding },
@@ -215,6 +172,30 @@
 			return;
 		}
 		cy.fit(visible, graphPadding);
+	}
+
+	function fitLogicChainGraph(visible: CollectionReturnValue, animate = true) {
+		if (!cy) return;
+		const objective = visible.nodes('[entityType = "objective"]').first();
+		const material = visible.nodes('[entityType = "material_system"]').first();
+		const scope = visible.nodes('[entityType = "material_scope"]').first();
+		const firstRow =
+			viewMode === 'material_centric'
+				? material.union(objective).filter((element) => !element.empty())
+				: objective.union(material).union(scope).filter((element) => !element.empty());
+		const target = firstRow.length ? firstRow : visible;
+		const zoom = 0.88;
+		if (animate) {
+			cy.animate({
+				center: { eles: target },
+				zoom,
+				duration: graphAnimationDuration,
+				easing: 'ease-out-cubic'
+			});
+			return;
+		}
+		cy.center(target);
+		cy.zoom(zoom);
 	}
 
 	function centerGraph() {
@@ -242,12 +223,33 @@
 	}
 
 	function buildVisibleGraphPayload() {
-		if (!graphData) return { nodes: [], edges: [] };
-		return filterGraphElements(graphData, {
+		const displayGraph = buildDisplayGraphData(graphData);
+		if (!displayGraph) return { nodes: [], edges: [] };
+		return filterGraphElements(displayGraph, {
 			maxNodes,
 			minWeight,
 			visibleNodeTypes
 		});
+	}
+
+	function buildDisplayGraphData(sourceGraph: GraphResponse | null) {
+		if (!sourceGraph) return null;
+		if (viewMode === 'material_centric') {
+			return buildMaterialCentricGraph(sourceGraph, { maxNodes });
+		}
+		return sourceGraph;
+	}
+
+	function canvasTitleKey() {
+		if (viewMode === 'material_centric') return 'graph.canvas.materialTitle';
+		if (viewMode === 'full') return 'graph.canvas.fullTitle';
+		return 'graph.canvas.title';
+	}
+
+	function canvasAriaLabelKey() {
+		if (viewMode === 'material_centric') return 'graph.canvas.materialAriaLabel';
+		if (viewMode === 'full') return 'graph.canvas.fullAriaLabel';
+		return 'graph.canvas.ariaLabel';
 	}
 
 	async function renderGraph(focusNodeId: string | null = null) {
@@ -257,7 +259,7 @@
 		}
 		if (!graphContainer) return;
 
-		const previousPositions = currentPositions();
+		const previousPositions = layoutName === 'logic_chain' ? undefined : currentPositions();
 		const payload = buildVisibleGraphPayload();
 		disposeRenderer();
 		clearSelection(false);
@@ -269,11 +271,14 @@
 			layout: { name: 'preset' },
 			minZoom: 0.2,
 			maxZoom: 2.6,
-			wheelSensitivity: 0.2,
 			boxSelectionEnabled: false
 		});
 
 		attachRendererEvents();
+		applyVisibilityAndSearch();
+		fitGraph(false);
+		loading = false;
+		await tick();
 		await runGraphLayout(cy, layoutName);
 		applyVisibilityAndSearch();
 		fitGraph(false);
@@ -290,9 +295,6 @@
 		if (!cy) return;
 		cy.on('tap', 'node', (event) => {
 			void selectNode(event.target.id(), { focus: true });
-		});
-		cy.on('dbltap', 'node', (event) => {
-			void expandNeighborhood(event.target.id());
 		});
 		cy.on('mouseover', 'node', (event) => {
 			updateHoverPreview(event.target as NodeSingular);
@@ -383,12 +385,8 @@
 	}
 
 	function clearSelection(sync = true) {
-		detailRequestId += 1;
 		selectedNode = null;
 		selectedEdge = null;
-		selectedNodeDetail = null;
-		detailError = '';
-		detailLoading = false;
 		hoverPreview = null;
 		if (sync) syncSelectionStyles();
 	}
@@ -403,27 +401,32 @@
 			id: node.id(),
 			label: String(node.data('fullLabel') ?? node.id()),
 			type: entityType,
+			role: String(node.data('role') ?? entityType),
+			summary:
+				typeof node.data('summary') === 'string' ? String(node.data('summary')) : null,
+			metrics: (node.data('metrics') ?? {}) as Record<string, unknown>,
+			detail_rows: Array.isArray(node.data('detailRows')) ? node.data('detailRows') : [],
+			objective_id:
+				typeof node.data('objectiveId') === 'string' ? String(node.data('objectiveId')) : null,
+			logic_chain_id:
+				typeof node.data('logicChainId') === 'string'
+					? String(node.data('logicChainId'))
+					: null,
 			degree: Number(node.data('degree') ?? 0),
 			kind: parsed.kind === 'unknown' ? entityType : parsed.kind,
 			resourceId: parsed.resourceId || null,
 			displayLabel: String(node.data('displayLabel') ?? node.data('fullLabel') ?? node.id())
 		};
 		selectedEdge = null;
-		linkedTab = 'evidence';
 		syncSelectionStyles();
 		if (options.focus) focusNode(nodeId);
-		void loadNodeDetail(selectedNode);
 	}
 
 	function selectEdge(edgeId: string, focus = false) {
 		if (!cy) return;
 		const edge = cy.$id(edgeId);
 		if (edge.empty()) return;
-		detailRequestId += 1;
 		selectedNode = null;
-		selectedNodeDetail = null;
-		detailError = '';
-		detailLoading = false;
 		selectedEdge = {
 			id: edge.id(),
 			source: String(edge.data('source') ?? ''),
@@ -432,9 +435,8 @@
 			weight: typeof edge.data('weight') === 'number' ? Number(edge.data('weight')) : null,
 			sourceLabel: nodeLabelForId(String(edge.data('source') ?? '')),
 			targetLabel: nodeLabelForId(String(edge.data('target') ?? '')),
-			relationLabel: String(edge.data('label') ?? '')
+			relationLabel: String(edge.data('fullLabel') ?? edge.data('label') ?? '')
 		};
-		linkedTab = 'evidence';
 		syncSelectionStyles();
 		if (focus) {
 			cy.animate({
@@ -449,9 +451,13 @@
 		if (!cy) return;
 		const node = cy.$id(nodeId);
 		if (node.empty()) return;
+		const visibleContext = node
+			.closedNeighborhood()
+			.filter((element) => !element.hasClass('is-hidden'));
+		const target = visibleContext.length > 1 ? visibleContext : node;
 		cy.animate({
-			center: { eles: node },
-			zoom: Math.max(cy.zoom(), 0.88),
+			center: { eles: target },
+			zoom: Math.min(Math.max(cy.zoom(), 0.35), 0.72),
 			duration: graphAnimationDuration,
 			easing: 'ease-out-cubic'
 		});
@@ -465,50 +471,13 @@
 		}
 	}
 
-	async function loadNodeDetail(node: SelectedNode) {
-		const requestId = ++detailRequestId;
-		selectedNodeDetail = null;
-		detailError = '';
-		detailLoading =
-			node.kind === 'document' || node.kind === 'evidence' || node.kind === 'comparison';
-
-		if (!detailLoading || !node.resourceId) return;
-
-		try {
-			if (node.kind === 'document') {
-				selectedNodeDetail = {
-					kind: 'document',
-					data: await fetchDocumentProfile(collectionId, node.resourceId)
-				};
-			} else if (node.kind === 'evidence') {
-				selectedNodeDetail = {
-					kind: 'evidence',
-					data: await fetchEvidenceCard(collectionId, node.resourceId)
-				};
-			} else if (node.kind === 'comparison') {
-				selectedNodeDetail = {
-					kind: 'comparison',
-					data: await fetchComparisonRow(collectionId, node.resourceId)
-				};
-			}
-		} catch (err) {
-			if (requestId !== detailRequestId) return;
-			detailError = errorMessage(err);
-			selectedNodeDetail = null;
-		} finally {
-			if (requestId === detailRequestId) {
-				detailLoading = false;
-			}
-		}
-	}
-
 	async function loadGraph() {
 		loading = true;
 		error = '';
 		status = '';
-		supportStatus = '';
 		notFound = false;
 		clearSelection(false);
+		let nextStatus = '';
 
 		const [graphResult, workspaceResult] = await Promise.allSettled([
 			fetchCollectionGraph(collectionId, { maxNodes, minWeight }),
@@ -520,11 +489,13 @@
 		try {
 			if (graphResult.status !== 'fulfilled') throw graphResult.reason;
 			graphData = graphResult.value;
-			visibleNodeTypes = ensureVisibleTypes(graphData);
+			const nextDisplayGraph = buildDisplayGraphData(graphData);
+			visibleNodeTypes = ensureVisibleTypes(nextDisplayGraph);
 			await renderGraph();
-			status = graphData.truncated
-				? $t('graph.status.loadedTruncated')
-				: $t('graph.status.loaded');
+			nextStatus =
+				graphData.truncated || nextDisplayGraph?.truncated
+					? $t('graph.status.loadedTruncated')
+					: '';
 		} catch (err) {
 			const errorCode = getApiErrorCode(err);
 			error = errorMessage(err);
@@ -535,31 +506,8 @@
 			disposeRenderer();
 		} finally {
 			loading = false;
-			void loadSupportData();
+			if (!error) status = nextStatus;
 		}
-	}
-
-	async function loadSupportData() {
-		if (!collectionId) return;
-		supportLoading = true;
-		supportStatus = '';
-		const [evidenceResult, comparisonResult, documentResult] = await Promise.allSettled([
-			fetchEvidenceCards(collectionId),
-			fetchComparisons(collectionId, { limit: 120 }),
-			fetchDocumentProfiles(collectionId)
-		]);
-
-		evidenceItems = evidenceResult.status === 'fulfilled' ? evidenceResult.value.items : [];
-		comparisonItems = comparisonResult.status === 'fulfilled' ? comparisonResult.value.items : [];
-		documentItems = documentResult.status === 'fulfilled' ? documentResult.value.items : [];
-		if (
-			evidenceResult.status === 'rejected' ||
-			comparisonResult.status === 'rejected' ||
-			documentResult.status === 'rejected'
-		) {
-			supportStatus = $t('graph.status.supportPartial');
-		}
-		supportLoading = false;
 	}
 
 	async function handleGenerateGraph() {
@@ -591,8 +539,16 @@
 		}
 	}
 
+	async function handleViewModeChange() {
+		if (!graphData) return;
+		visibleNodeTypes = ensureVisibleTypes(buildDisplayGraphData(graphData));
+		clearSelection(false);
+		await renderGraph();
+	}
+
 	async function handleControlRender() {
 		if (!graphData) return;
+		visibleNodeTypes = ensureVisibleTypes(buildDisplayGraphData(graphData));
 		await renderGraph(selectedNode?.id ?? null);
 	}
 
@@ -600,40 +556,6 @@
 		if (!cy) return;
 		await runGraphLayout(cy, layoutName);
 		fitGraph(true);
-	}
-
-	async function expandNeighborhood(nodeId: string) {
-		if (!nodeId || expandingNeighborhood) return;
-		expandingNeighborhood = true;
-		detailError = '';
-		try {
-			const response = await fetchCollectionGraphNeighbors(collectionId, nodeId);
-			graphData = mergeGraphPayload(graphData, response);
-			await renderGraph(nodeId);
-			status = $t('graph.status.neighborsExpanded');
-		} catch (err) {
-			detailError = errorMessage(err);
-		} finally {
-			expandingNeighborhood = false;
-		}
-	}
-
-	function mergeGraphPayload(
-		current: GraphResponse | null,
-		next: Pick<GraphResponse, 'collection_id' | 'nodes' | 'edges' | 'truncated'>
-	): GraphResponse {
-		const nodes = new Map<string, GraphNode>();
-		const edges = new Map<string, GraphEdge>();
-		for (const node of current?.nodes ?? []) nodes.set(node.id, node);
-		for (const node of next.nodes) nodes.set(node.id, node);
-		for (const edge of current?.edges ?? []) edges.set(edge.id, edge);
-		for (const edge of next.edges) edges.set(edge.id, edge);
-		return {
-			collection_id: next.collection_id,
-			nodes: Array.from(nodes.values()),
-			edges: Array.from(edges.values()),
-			truncated: Boolean(current?.truncated || next.truncated)
-		};
 	}
 
 	function ensureVisibleTypes(graph: GraphResponse | null) {
@@ -650,7 +572,24 @@
 	}
 
 	function nodeTypeLabel(type: string) {
-		const key = type === 'test_condition' ? 'testCondition' : type;
+		const key =
+			type === 'test_condition'
+				? 'testCondition'
+				: type === 'test_conditions'
+					? 'testConditions'
+					: type === 'material_system'
+						? 'materialSystem'
+						: type === 'material_scope'
+							? 'materialScope'
+							: type === 'process_sample_context'
+								? 'processSampleContext'
+								: type === 'measurement_results'
+									? 'measurementResults'
+									: type === 'controlled_comparisons'
+										? 'controlledComparisons'
+										: type === 'mechanism_interpretation'
+											? 'mechanismInterpretation'
+											: type;
 		const translated = $t(`graph.legend.${key}`);
 		return translated === `graph.legend.${key}` ? formatMachineText(type) : translated;
 	}
@@ -664,118 +603,37 @@
 
 	function selectedNodeDescription() {
 		if (!selectedNode) return '';
-		if (selectedNodeDetail?.kind === 'document') {
-			return (
-				selectedNodeDetail.data.title ||
-				selectedNodeDetail.data.source_filename ||
-				getNodeDescription(selectedNode)
-			);
-		}
-		if (selectedNodeDetail?.kind === 'evidence') {
-			return selectedNodeDetail.data.claim_text || getNodeDescription(selectedNode);
-		}
-		if (selectedNodeDetail?.kind === 'comparison') {
-			return selectedNodeDetail.data.display.result_summary || getNodeDescription(selectedNode);
-		}
+		if (selectedNode.summary) return selectedNode.summary;
 		return getNodeDescription(selectedNode);
 	}
 
-	function selectedActionHref(action: 'evidence' | 'comparison' | 'source') {
-		const returnTo = `/collections/${encodeURIComponent(collectionId)}/graph`;
-		if (action === 'evidence') return `/collections/${encodeURIComponent(collectionId)}/evidence`;
-		if (action === 'comparison') {
-			const filter = selectedNodeComparisonFilter();
-			if (filter) {
-				const params = new URLSearchParams({ [filter.key]: filter.value });
-				return `/collections/${encodeURIComponent(collectionId)}/comparisons?${params.toString()}`;
-			}
-			if (selectedNode?.kind === 'comparison' && selectedNode.resourceId) {
-				if (selectedNodeDetail?.kind === 'comparison') {
-					return `/collections/${encodeURIComponent(collectionId)}/results/${encodeURIComponent(
-						selectedNodeDetail.data.result_id
-					)}`;
-				}
-				return `/collections/${encodeURIComponent(collectionId)}/comparisons`;
-			}
-			return `/collections/${encodeURIComponent(collectionId)}/comparisons`;
-		}
-
-		if (selectedNode?.kind === 'document' && selectedNode.resourceId) {
-			return buildDocumentViewerHref(collectionId, selectedNode.resourceId, { returnTo });
-		}
-		if (
-			selectedNode?.kind === 'evidence' &&
-			selectedNodeDetail?.kind === 'evidence' &&
-			selectedNodeDetail.data.document_id
-		) {
-			return buildDocumentViewerHref(collectionId, selectedNodeDetail.data.document_id, {
-				evidenceId: selectedNodeDetail.data.evidence_id,
-				anchorId: selectedNodeDetail.data.evidence_anchors[0]?.anchor_id,
-				returnTo
-			});
-		}
-		if (linkedEvidence[0]?.document_id) {
-			return buildDocumentViewerHref(collectionId, linkedEvidence[0].document_id, {
-				evidenceId: linkedEvidence[0].evidence_id,
-				anchorId: linkedEvidence[0].evidence_anchors[0]?.anchor_id,
-				returnTo
-			});
-		}
-		if (linkedComparisons[0]?.source_document_id) {
-			const evidenceId = linkedComparisons[0].evidence_bundle.supporting_evidence_ids[0] ?? null;
-			return buildDocumentViewerHref(collectionId, linkedComparisons[0].source_document_id, {
-				evidenceId,
-				returnTo
-			});
-		}
-		return null;
+	function selectedNodeDetailRows() {
+		return selectedNode?.detail_rows ?? [];
 	}
 
-	function selectedNodeComparisonFilter() {
-		if (!selectedNode) return null;
-		const value = selectedNode.label.trim();
-		if (!value) return null;
-		if (selectedNode.kind === 'material') return { key: 'material_system_normalized', value };
-		if (selectedNode.kind === 'property') return { key: 'property_normalized', value };
-		if (selectedNode.kind === 'test_condition') return { key: 'test_condition_normalized', value };
-		if (selectedNode.kind === 'baseline') return { key: 'baseline_normalized', value };
-		return null;
+	function selectedNodeMetrics() {
+		const metrics = selectedNode?.metrics ?? {};
+		return Object.entries(metrics)
+			.filter(([, value]) => value !== null && value !== undefined && value !== '')
+			.map(([key, value]) => ({ label: formatMachineText(key), value: String(value) }));
 	}
 
-	function buildLinkedDocuments(
-		directDocuments: DocumentProfile[],
-		evidence: EvidenceCard[],
-		comparisons: ComparisonRow[]
-	) {
-		const docs = new Map(documentItems.map((item) => [item.document_id, item]));
-		const linked = new Map<string, DocumentProfile>();
-		for (const document of directDocuments) linked.set(document.document_id, document);
-		for (const item of evidence) {
-			const document = docs.get(item.document_id);
-			if (document) linked.set(document.document_id, document);
-		}
-		for (const item of comparisons) {
-			const document = docs.get(item.source_document_id);
-			if (document) linked.set(document.document_id, document);
-		}
-		return Array.from(linked.values());
+	function detailRowValue(row: Record<string, unknown>, key: string) {
+		const value = row[key];
+		if (value === null || value === undefined || value === '') return '--';
+		if (Array.isArray(value)) return value.length ? value.join(', ') : '--';
+		if (typeof value === 'object') return JSON.stringify(value);
+		return String(value);
 	}
 
-	function buildCommonRelations(): RelationPreview[] {
-		if (!cy || !selectedNode) return [];
-		const node = cy.$id(selectedNode.id);
-		if (node.empty()) return [];
-		const relations: RelationPreview[] = [];
-		node.connectedEdges().forEach((item) => {
-			const edge = item as EdgeSingular;
-			if (edge.hasClass('is-hidden') || relations.length >= 5) return;
-			const other = edge.source().id() === selectedNode?.id ? edge.target() : edge.source();
-			relations.push({
-				label: String(edge.data('label') ?? 'related'),
-				target: String(other.data('displayLabel') ?? other.data('fullLabel') ?? other.id())
-			});
+	function detailRowSourceHref(row: Record<string, unknown>) {
+		const documentId = typeof row.document_id === 'string' ? row.document_id : '';
+		if (!documentId) return null;
+		const evidenceId = typeof row.evidence_unit_id === 'string' ? row.evidence_unit_id : null;
+		return buildDocumentViewerHref(collectionId, documentId, {
+			evidenceId,
+			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
 		});
-		return relations;
 	}
 
 	function formatMachineText(value?: string | null) {
@@ -797,44 +655,19 @@
 	}
 
 	function statusBadgeLabel(meta: GraphMeta) {
-		if (loading) return $t('graph.status.loading');
+		if (graphLoading) return $t('graph.status.loading');
 		if (meta.nodeCount > 0) return $t('graph.status.built');
 		return $t('graph.status.pending');
 	}
 
 	function statusBadgeTone() {
-		if (loading) return 'warning';
+		if (graphLoading) return 'warning';
 		if (graphMeta.nodeCount > 0) return 'success';
 		return 'neutral';
 	}
 
-	function evidenceSourceHref(item: EvidenceCard) {
-		if (!item.document_id) return null;
-		return buildDocumentViewerHref(collectionId, item.document_id, {
-			evidenceId: item.evidence_id,
-			anchorId: item.evidence_anchors[0]?.anchor_id,
-			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
-		});
-	}
-
-	function comparisonHref(item: ComparisonRow) {
-		return `/collections/${encodeURIComponent(collectionId)}/results/${encodeURIComponent(
-			item.result_id
-		)}`;
-	}
-
-	function comparisonSourceHref(item: ComparisonRow) {
-		if (!item.source_document_id) return null;
-		return buildDocumentViewerHref(collectionId, item.source_document_id, {
-			evidenceId: item.evidence_bundle.supporting_evidence_ids[0] ?? null,
-			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
-		});
-	}
-
-	function documentHref(item: DocumentProfile) {
-		return buildDocumentViewerHref(collectionId, item.document_id, {
-			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
-		});
+	function graphLoadStateLabel() {
+		return statusBadgeLabel(graphMeta);
 	}
 
 	function handleExportImage() {
@@ -867,6 +700,7 @@
 				maxNodes,
 				minWeight,
 				layoutName,
+				viewMode,
 				searchQuery,
 				visibleNodeTypes
 			}
@@ -956,8 +790,8 @@
 		</div>
 	</header>
 
-	{#if status || supportStatus}
-		<div class="graph-inline-status" role="status">{status || supportStatus}</div>
+	{#if status}
+		<div class="graph-inline-status" role="status">{status}</div>
 	{/if}
 	{#if error}
 		<div class="graph-inline-status graph-inline-status--error" role="alert">
@@ -976,15 +810,25 @@
 			<h2>{$t('graph.empty.title')}</h2>
 			<p>{$t('graph.empty.description')}</p>
 			<div class="graph-empty-state__actions">
-				<button class="graph-button graph-button--primary" type="button" on:click={handleGenerateGraph}>
+				<button
+					class="graph-button graph-button--primary"
+					type="button"
+					on:click={handleGenerateGraph}
+				>
 					{$t('graph.empty.action')}
 				</button>
-				<button class="graph-button graph-button--ghost" type="button" on:click={handleRefreshGraph}>
+				<button
+					class="graph-button graph-button--ghost"
+					type="button"
+					on:click={handleRefreshGraph}
+				>
 					{$t('graph.actions.refreshStatus')}
 				</button>
 			</div>
 			{#if workspace && surfaceState !== 'ready'}
-				<p class="graph-empty-state__note">{$t(`overview.surfaceStateCards.${surfaceState}.body`)}</p>
+				<p class="graph-empty-state__note">
+					{$t(`overview.surfaceStateCards.${surfaceState}.body`)}
+				</p>
 			{/if}
 		</section>
 	{:else}
@@ -1004,7 +848,7 @@
 							class="graph-input"
 							bind:value={searchQuery}
 							placeholder={$t('graph.controls.searchPlaceholder')}
-							disabled={loading}
+							disabled={graphLoading}
 							on:keydown={(event) => {
 								if (event.key === 'Enter') focusFirstSearchMatch();
 							}}
@@ -1035,7 +879,7 @@
 								<input
 									type="checkbox"
 									checked={visibleNodeTypes[type] ?? true}
-									disabled={loading}
+									disabled={graphLoading}
 									on:change={(event) =>
 										toggleNodeType(type, (event.currentTarget as HTMLInputElement).checked)}
 								/>
@@ -1047,6 +891,20 @@
 				<details class="graph-advanced-settings" open>
 					<summary>{$t('graph.controls.advanced')}</summary>
 					<div class="graph-advanced-grid">
+						<label class="graph-control-field" for="graph-view-mode">
+							<span>{$t('graph.controls.viewMode')}</span>
+							<select
+								id="graph-view-mode"
+								class="graph-input"
+								bind:value={viewMode}
+								disabled={graphLoading}
+								on:change={handleViewModeChange}
+							>
+								<option value="objective_chain">{$t('graph.viewMode.keyChain')}</option>
+								<option value="material_centric">{$t('graph.viewMode.materialCentric')}</option>
+								<option value="full">{$t('graph.viewMode.full')}</option>
+							</select>
+						</label>
 						<label class="graph-control-field" for="graph-max-nodes">
 							<span>{$t('graph.controls.maxNodes')}</span>
 							<input
@@ -1056,7 +914,7 @@
 								min="1"
 								max="2000"
 								bind:value={maxNodes}
-								disabled={loading}
+								disabled={graphLoading}
 								on:change={handleControlRender}
 							/>
 						</label>
@@ -1069,7 +927,7 @@
 								min="0"
 								step="0.01"
 								bind:value={minWeight}
-								disabled={loading}
+								disabled={graphLoading}
 								on:change={handleControlRender}
 							/>
 						</label>
@@ -1079,16 +937,21 @@
 								id="graph-layout"
 								class="graph-input"
 								bind:value={layoutName}
-								disabled={loading}
+								disabled={graphLoading}
 								on:change={handleLayout}
 							>
+								<option value="logic_chain">{$t('graph.layout.logicChain')}</option>
 								<option value="fcose">{$t('graph.layout.fcose')}</option>
 								<option value="cose">{$t('graph.layout.cose')}</option>
 								<option value="grid">{$t('graph.layout.grid')}</option>
 								<option value="circle">{$t('graph.layout.circle')}</option>
 							</select>
 						</label>
-						<button class="graph-link-button graph-link-button--icon" type="button" on:click={handleRestoreDefaults}>
+						<button
+							class="graph-link-button graph-link-button--icon"
+							type="button"
+							on:click={handleRestoreDefaults}
+						>
 							<span class="action-icon action-icon--refresh" aria-hidden="true"></span>
 							{$t('graph.controls.restoreDefaults')}
 						</button>
@@ -1106,7 +969,7 @@
 					</div>
 					<div>
 						<span>{$t('graph.controls.loadState')}</span>
-						<strong>{supportLoading ? $t('graph.status.loading') : $t('graph.status.loaded')}</strong>
+						<strong>{graphLoadStateLabel()}</strong>
 					</div>
 				</div>
 			</aside>
@@ -1114,23 +977,47 @@
 			<section class="graph-page-card graph-canvas-panel" aria-labelledby="graph-canvas-title">
 				<div class="graph-canvas-toolbar">
 					<div>
-						<h2 id="graph-canvas-title">{$t('graph.canvas.title')}</h2>
+						<h2 id="graph-canvas-title">{$t(canvasTitleKey())}</h2>
 						<p>{$t('graph.canvas.meta', { nodes: visibleNodes, edges: visibleEdges })}</p>
 					</div>
 					<div class="graph-canvas-actions">
-						<button class="graph-tool-button" type="button" title={$t('graph.canvas.fit')} on:click={() => fitGraph(true)}>
+						<button
+							class="graph-tool-button"
+							type="button"
+							title={$t('graph.canvas.fit')}
+							on:click={() => fitGraph(true)}
+						>
 							<span class="action-icon action-icon--fit" aria-hidden="true"></span>
 						</button>
-						<button class="graph-tool-button" type="button" title={$t('graph.canvas.zoomIn')} on:click={() => zoomGraph(1.18)}>
+						<button
+							class="graph-tool-button"
+							type="button"
+							title={$t('graph.canvas.zoomIn')}
+							on:click={() => zoomGraph(1.18)}
+						>
 							<span class="action-icon action-icon--plus" aria-hidden="true"></span>
 						</button>
-						<button class="graph-tool-button" type="button" title={$t('graph.canvas.zoomOut')} on:click={() => zoomGraph(0.84)}>
+						<button
+							class="graph-tool-button"
+							type="button"
+							title={$t('graph.canvas.zoomOut')}
+							on:click={() => zoomGraph(0.84)}
+						>
 							<span class="action-icon action-icon--minus" aria-hidden="true"></span>
 						</button>
-						<button class="graph-tool-button" type="button" title={$t('graph.canvas.center')} on:click={centerGraph}>
+						<button
+							class="graph-tool-button"
+							type="button"
+							title={$t('graph.canvas.center')}
+							on:click={centerGraph}
+						>
 							<span class="action-icon action-icon--target" aria-hidden="true"></span>
 						</button>
-						<button class="graph-tool-button graph-tool-button--text" type="button" on:click={handleLayout}>
+						<button
+							class="graph-tool-button graph-tool-button--text"
+							type="button"
+							on:click={handleLayout}
+						>
 							{$t('graph.canvas.layout')}
 						</button>
 					</div>
@@ -1138,10 +1025,7 @@
 
 				<div class="graph-legend" aria-label={$t('graph.legend.label')}>
 					{#each availableNodeTypes as type}
-						<span
-							class="graph-legend-item"
-							style={`--node-color:${getNodeTypeStyle(type).color};`}
-						>
+						<span class="graph-legend-item" style={`--node-color:${getNodeTypeStyle(type).color};`}>
 							<i aria-hidden="true"></i>
 							{nodeTypeLabel(type)}
 						</span>
@@ -1149,8 +1033,12 @@
 				</div>
 
 				<div class="graph-canvas-stage">
-					<div class="graph-cytoscape" bind:this={graphContainer} aria-label={$t('graph.canvas.ariaLabel')}></div>
-					{#if loading}
+					<div
+						class="graph-cytoscape"
+						bind:this={graphContainer}
+						aria-label={$t(canvasAriaLabelKey())}
+					></div>
+					{#if graphLoading}
 						<div class="graph-canvas-state graph-canvas-state--loading">
 							<div class="graph-spinner" aria-hidden="true"></div>
 							<span>{$t('graph.status.loading')}</span>
@@ -1198,120 +1086,109 @@
 
 					<div class="graph-detail-stat-grid">
 						<div>
-							<span>{$t('graph.detail.relatedEvidence')}</span>
-							<strong>{selectedStats.evidence}</strong>
+							<span>{$t('graph.detail.evidenceRows')}</span>
+							<strong>{selectedNode.detail_rows?.length ?? 0}</strong>
 						</div>
-						<div>
-							<span>{$t('graph.detail.relatedComparisons')}</span>
-							<strong>{selectedStats.comparison}</strong>
-						</div>
-						<div>
-							<span>{$t('graph.detail.relatedDocuments')}</span>
-							<strong>{selectedStats.documents}</strong>
-						</div>
+						{#each selectedNodeMetrics().slice(0, 2) as metric}
+							<div>
+								<span>{metric.label}</span>
+								<strong>{metric.value}</strong>
+							</div>
+						{/each}
 					</div>
 
 					<div class="graph-detail-section">
 						<h4>{$t('graph.detail.description')}</h4>
-						{#if detailLoading}
-							<p class="graph-muted">{$t('graph.detail.loading')}</p>
-						{:else if detailError}
-							<p class="graph-error-text">{detailError}</p>
-						{:else}
-							<p>{selectedNodeDescription()}</p>
-						{/if}
+						<p>{selectedNodeDescription()}</p>
 					</div>
 
 					<div class="graph-detail-section">
-						<h4>{$t('graph.detail.relatedContent')}</h4>
-						<ul class="graph-compact-list">
-							<li>
-								<span>{$t('graph.linked.evidence')}</span>
-								<strong>{selectedStats.evidence}</strong>
-							</li>
-							<li>
-								<span>{$t('graph.linked.comparison')}</span>
-								<strong>{selectedStats.comparison}</strong>
-							</li>
-							<li>
-								<span>{$t('graph.linked.documents')}</span>
-								<strong>{selectedStats.documents}</strong>
-							</li>
-						</ul>
-					</div>
-
-					<div class="graph-detail-section">
-						<h4>{$t('graph.detail.commonRelations')}</h4>
-						{#if commonRelations.length}
-							<ul class="graph-relation-list">
-								{#each commonRelations as relation}
-									<li>
-										<span>{relation.label}</span>
-										<strong>{relation.target}</strong>
-									</li>
-								{/each}
-							</ul>
+						<h4>{$t('graph.detail.stepEvidence')}</h4>
+						{#if selectedNodeDetailRows().length}
+							<div class="graph-step-table-wrap">
+								<table class="graph-step-table">
+									<thead>
+										<tr>
+											<th>{$t('graph.detail.paper')}</th>
+											<th>{$t('graph.detail.property')}</th>
+											<th>{$t('graph.detail.value')}</th>
+											<th>{$t('graph.detail.context')}</th>
+											<th>{$t('graph.detail.source')}</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each selectedNodeDetailRows().slice(0, 12) as row}
+											<tr>
+												<td>{detailRowValue(row, 'paper')}</td>
+												<td>{detailRowValue(row, 'property')}</td>
+												<td>{detailRowValue(row, 'value')}</td>
+												<td>
+													<div class="graph-step-context">
+														{#if detailRowValue(row, 'sample') !== '--'}
+															<span>{detailRowValue(row, 'sample')}</span>
+														{/if}
+														{#if detailRowValue(row, 'process') !== '--'}
+															<span>{detailRowValue(row, 'process')}</span>
+														{/if}
+														{#if detailRowValue(row, 'test_condition') !== '--'}
+															<span>{detailRowValue(row, 'test_condition')}</span>
+														{/if}
+														{#if detailRowValue(row, 'interpretation') !== '--'}
+															<span>{detailRowValue(row, 'interpretation')}</span>
+														{/if}
+													</div>
+												</td>
+												<td>
+													{#if detailRowSourceHref(row)}
+														<a class="graph-link-button" href={detailRowSourceHref(row) ?? '#'}>
+															{detailRowValue(row, 'source')}
+														</a>
+													{:else}
+														{detailRowValue(row, 'source')}
+													{/if}
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+							{#if selectedNodeDetailRows().length > 12}
+								<p class="graph-muted">
+									{$t('graph.detail.rowsLimited', { count: selectedNodeDetailRows().length })}
+								</p>
+							{/if}
 						{:else}
-							<p class="graph-muted">{$t('graph.detail.noRelations')}</p>
+							<p class="graph-muted">{$t('graph.detail.noStepEvidence')}</p>
 						{/if}
 					</div>
 
 					<div class="graph-detail-actions">
-						<a class="graph-button graph-button--primary" href={selectedActionHref('evidence') ?? '#'}>
-							{$t('graph.detail.viewEvidence')}
-						</a>
-						<a class="graph-button graph-button--ghost" href={selectedActionHref('comparison') ?? '#'}>
-							{$t('graph.detail.openComparison')}
-						</a>
-						{#if selectedActionHref('source')}
-							<a class="graph-button graph-button--ghost" href={selectedActionHref('source') ?? '#'}>
+						{#if selectedNodeDetailRows()[0] && detailRowSourceHref(selectedNodeDetailRows()[0])}
+							<a
+								class="graph-button graph-button--primary"
+								href={detailRowSourceHref(selectedNodeDetailRows()[0]) ?? '#'}
+							>
 								{$t('graph.detail.locateSource')}
 							</a>
 						{/if}
-						<button
-							class="graph-button graph-button--ghost"
-							type="button"
-							disabled={expandingNeighborhood}
-							on:click={() => void expandNeighborhood(selectedNode?.id ?? '')}
-						>
-							{expandingNeighborhood ? $t('graph.detail.expanding') : $t('graph.detail.expand')}
-						</button>
 					</div>
 				{:else if selectedEdge}
 					<div class="graph-edge-detail">
 						<h3>{selectedEdge.sourceLabel} -&gt; {selectedEdge.targetLabel}</h3>
 						<div class="graph-detail-kv">
 							<span>{$t('graph.detail.relationshipType')}</span>
-							<strong>{selectedEdge.relationLabel || formatMachineText(selectedEdge.edge_description)}</strong>
+							<strong
+								>{selectedEdge.relationLabel ||
+									formatMachineText(selectedEdge.edge_description)}</strong
+							>
 						</div>
 						<div class="graph-detail-kv">
 							<span>{$t('graph.detail.confidence')}</span>
 							<strong>{formatConfidence(selectedEdge.weight)}</strong>
 						</div>
 						<div class="graph-detail-kv">
-							<span>{$t('graph.detail.sourceEvidence')}</span>
-							<strong>{selectedStats.evidence}</strong>
-						</div>
-						<div class="graph-detail-section">
-							<h4>{$t('graph.detail.originalEvidence')}</h4>
-							<p>
-								{linkedEvidence[0]?.claim_text ||
-									getEdgeTypeStyle(selectedEdge.edge_description).label ||
-									$t('graph.detail.noEvidenceQuote')}
-							</p>
-						</div>
-						<div class="graph-detail-actions">
-							{#if selectedActionHref('source')}
-								<a class="graph-button graph-button--primary" href={selectedActionHref('source') ?? '#'}>
-									{$t('graph.detail.viewSource')}
-								</a>
-							{/if}
-							<a class="graph-button graph-button--ghost" href={selectedActionHref('evidence') ?? '#'}>
-								{$t('graph.detail.viewEvidence')}
-							</a>
-							<a class="graph-button graph-button--ghost" href={selectedActionHref('comparison') ?? '#'}>
-								{$t('graph.detail.openComparison')}
-							</a>
+							<span>{$t('graph.detail.description')}</span>
+							<strong>{getEdgeTypeStyle(selectedEdge.edge_description).label}</strong>
 						</div>
 					</div>
 				{:else}
@@ -1323,156 +1200,6 @@
 			</aside>
 		</div>
 
-		<section class="graph-page-card graph-linked-panel" aria-labelledby="graph-linked-title">
-			<div class="graph-linked-header">
-				<div>
-					<h2 id="graph-linked-title">
-						{#if selectedDetail}
-							{$t('graph.linked.relatedTitle', { name: selectedDetail.title })}
-						{:else}
-							{$t('graph.linked.title')}
-						{/if}
-					</h2>
-					<p>
-						{#if selectedObject}
-							{$t('graph.linked.stats', {
-								evidence: selectedStats.evidence,
-								comparison: selectedStats.comparison,
-								documents: selectedStats.documents
-							})}
-						{:else}
-							{$t('graph.linked.empty')}
-						{/if}
-					</p>
-				</div>
-				{#if selectedObject}
-					<a class="graph-link-button" href={selectedActionHref('comparison') ?? `/collections/${collectionId}/comparisons`}>
-						{$t('graph.linked.viewAll')}
-					</a>
-				{/if}
-			</div>
-
-			<div class="graph-linked-tabs" role="tablist" aria-label={$t('graph.linked.title')}>
-				<button
-					type="button"
-					role="tab"
-					class:active={linkedTab === 'evidence'}
-					on:click={() => (linkedTab = 'evidence')}
-				>
-					{$t('graph.linked.evidence')} ({selectedStats.evidence})
-				</button>
-				<button
-					type="button"
-					role="tab"
-					class:active={linkedTab === 'comparison'}
-					on:click={() => (linkedTab = 'comparison')}
-				>
-					{$t('graph.linked.comparison')} ({selectedStats.comparison})
-				</button>
-				<button
-					type="button"
-					role="tab"
-					class:active={linkedTab === 'documents'}
-					on:click={() => (linkedTab = 'documents')}
-				>
-					{$t('graph.linked.documents')} ({selectedStats.documents})
-				</button>
-			</div>
-
-			{#if !selectedObject}
-				<div class="graph-linked-empty">{$t('graph.linked.empty')}</div>
-			{:else if linkedTab === 'evidence'}
-				{#if linkedEvidence.length}
-					<div class="graph-linked-grid graph-linked-grid--evidence">
-						{#each linkedEvidence.slice(0, 6) as item}
-							<article class="graph-linked-card">
-								<div class="graph-linked-card__header">
-									<h3>{item.claim_type || $t('graph.linked.evidence')}</h3>
-									<span class="graph-chip graph-chip--success">{item.traceability_status}</span>
-								</div>
-								<p>{item.claim_text || $t('graph.linked.noSummary')}</p>
-								<div class="graph-linked-card__meta">
-									<span>{item.source_document_title || item.document_id || '--'}</span>
-								</div>
-								<div class="graph-linked-card__actions">
-									<a class="graph-link-button" href={`/collections/${collectionId}/evidence`}>
-										{$t('graph.linked.viewEvidence')}
-									</a>
-									{#if evidenceSourceHref(item)}
-										<a class="graph-link-button" href={evidenceSourceHref(item) ?? '#'}>
-											{$t('graph.linked.viewSource')}
-										</a>
-									{/if}
-								</div>
-							</article>
-						{/each}
-					</div>
-				{:else}
-					<div class="graph-linked-empty">{$t('graph.linked.noEvidence')}</div>
-				{/if}
-			{:else if linkedTab === 'comparison'}
-				{#if linkedComparisons.length}
-					<div class="graph-linked-grid graph-linked-grid--comparison">
-						{#each linkedComparisons.slice(0, 6) as item}
-							<article class="graph-linked-card">
-								<div class="graph-linked-card__header">
-									<h3>{item.display.result_summary || item.row_id}</h3>
-									<span class="graph-chip">{formatMachineText(item.assessment.comparability_status)}</span>
-								</div>
-								<p>
-									{formatGraphLabel(item.display.material_system_normalized)} /
-									{formatGraphLabel(item.display.property_normalized)}
-								</p>
-								{#if item.uncertainty.missing_critical_context.length}
-									<div class="graph-missing-chip-row">
-										{#each item.uncertainty.missing_critical_context.slice(0, 3) as missing}
-											<span>{formatMachineText(missing)}</span>
-										{/each}
-									</div>
-								{/if}
-								<div class="graph-linked-card__actions">
-									<a class="graph-link-button" href={comparisonHref(item)}>
-										{$t('graph.linked.openComparison')}
-									</a>
-									{#if comparisonSourceHref(item)}
-										<a class="graph-link-button" href={comparisonSourceHref(item) ?? '#'}>
-											{$t('graph.linked.viewSource')}
-										</a>
-									{/if}
-								</div>
-							</article>
-						{/each}
-					</div>
-				{:else}
-					<div class="graph-linked-empty">{$t('graph.linked.noComparisons')}</div>
-				{/if}
-			{:else if linkedDocuments.length}
-				<div class="graph-linked-grid graph-linked-grid--documents">
-					{#each linkedDocuments.slice(0, 6) as item}
-						<article class="graph-linked-card">
-							<div class="graph-linked-card__header">
-								<h3>{item.title || item.source_filename || item.document_id}</h3>
-								<span class="graph-chip">{formatMachineText(item.doc_type)}</span>
-							</div>
-							<p>{item.source_filename || item.document_id}</p>
-							<div class="graph-linked-card__meta">
-								<span>{formatMachineText(item.processing_status ?? 'unknown')}</span>
-								{#if item.page_count}
-									<span>{$t('graph.linked.pages', { count: item.page_count })}</span>
-								{/if}
-							</div>
-							<div class="graph-linked-card__actions">
-								<a class="graph-link-button" href={documentHref(item)}>
-									{$t('graph.linked.viewDocument')}
-								</a>
-							</div>
-						</article>
-					{/each}
-				</div>
-			{:else}
-				<div class="graph-linked-empty">{$t('graph.linked.noDocuments')}</div>
-			{/if}
-		</section>
 	{/if}
 </section>
 
@@ -1585,8 +1312,7 @@
 	.graph-header-actions,
 	.graph-canvas-actions,
 	.graph-empty-state__actions,
-	.graph-detail-actions,
-	.graph-linked-card__actions {
+	.graph-detail-actions {
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
@@ -1770,9 +1496,9 @@
 
 	.graph-workspace {
 		display: grid;
-		grid-template-columns: 260px minmax(0, 1fr) 320px;
+		grid-template-columns: 260px minmax(0, 1fr);
 		gap: 16px;
-		align-items: stretch;
+		align-items: start;
 	}
 
 	.graph-controls-panel,
@@ -1784,16 +1510,13 @@
 	}
 
 	.graph-detail-panel {
-		position: sticky;
-		top: 96px;
-		max-height: calc(100vh - 128px);
-		overflow: auto;
+		grid-column: 1 / -1;
+		max-height: none;
+		overflow: visible;
 	}
 
 	.graph-panel-header,
-	.graph-canvas-toolbar,
-	.graph-linked-header,
-	.graph-linked-card__header {
+	.graph-canvas-toolbar {
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
@@ -1801,8 +1524,7 @@
 	}
 
 	.graph-panel-header h2,
-	.graph-canvas-toolbar h2,
-	.graph-linked-header h2 {
+	.graph-canvas-toolbar h2 {
 		margin: 0;
 		color: #0f172a;
 		font-size: 16px;
@@ -1810,8 +1532,7 @@
 		line-height: 24px;
 	}
 
-	.graph-canvas-toolbar p,
-	.graph-linked-header p {
+	.graph-canvas-toolbar p {
 		margin: 2px 0 0;
 		color: #64748b;
 		font-size: 13px;
@@ -2037,7 +1758,7 @@
 
 	.graph-canvas-stage {
 		position: relative;
-		min-height: 600px;
+		min-height: 720px;
 		border: 1px solid #e6ebf2;
 		border-radius: 16px;
 		background:
@@ -2120,8 +1841,7 @@
 	}
 
 	.graph-selected-summary h3,
-	.graph-edge-detail h3,
-	.graph-linked-card h3 {
+	.graph-edge-detail h3 {
 		margin: 0;
 		color: #0f172a;
 		font-size: 17px;
@@ -2142,11 +1862,6 @@
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 18px;
-	}
-
-	.graph-chip--success {
-		color: #15803d;
-		background: #dcfce7;
 	}
 
 	.graph-detail-stat-grid {
@@ -2192,26 +1907,59 @@
 		line-height: 20px;
 	}
 
-	.graph-detail-section p,
-	.graph-edge-detail p,
-	.graph-linked-card p {
+	.graph-detail-section p {
 		margin: 0;
 		color: #64748b;
 		font-size: 14px;
 		line-height: 22px;
 	}
 
-	.graph-compact-list,
-	.graph-relation-list {
-		display: grid;
-		gap: 6px;
-		margin: 0;
-		padding: 0;
-		list-style: none;
+	.graph-step-table-wrap {
+		max-height: 360px;
+		overflow: auto;
+		border: 1px solid #e6ebf2;
+		border-radius: 10px;
 	}
 
-	.graph-compact-list li,
-	.graph-relation-list li,
+	.graph-step-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.graph-step-table th,
+	.graph-step-table td {
+		padding: 8px 9px;
+		border-bottom: 1px solid #eef2f7;
+		text-align: left;
+		vertical-align: top;
+	}
+
+	.graph-step-table th {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: #f8fafc;
+		color: #475569;
+		font-weight: 800;
+	}
+
+	.graph-step-table td {
+		color: #0f172a;
+	}
+
+	.graph-step-context {
+		display: grid;
+		gap: 4px;
+		min-width: 160px;
+	}
+
+	.graph-step-context span {
+		color: #475569;
+		overflow-wrap: anywhere;
+	}
+
 	.graph-detail-kv {
 		display: flex;
 		align-items: baseline;
@@ -2222,28 +1970,12 @@
 		background: #f8fafc;
 	}
 
-	.graph-compact-list span,
-	.graph-relation-list span {
-		color: #64748b;
-		font-size: 13px;
-	}
-
-	.graph-compact-list strong,
-	.graph-relation-list strong {
-		min-width: 0;
-		color: #0f172a;
-		font-size: 13px;
-		text-align: right;
-		overflow-wrap: anywhere;
-	}
-
 	.graph-edge-detail {
 		display: grid;
 		gap: 14px;
 	}
 
-	.graph-detail-empty,
-	.graph-linked-empty {
+	.graph-detail-empty {
 		display: grid;
 		place-items: center;
 		gap: 12px;
@@ -2256,98 +1988,10 @@
 		text-align: center;
 	}
 
-	.graph-detail-empty p,
-	.graph-linked-empty {
+	.graph-detail-empty p {
 		margin: 0;
 		font-size: 14px;
 		line-height: 22px;
-	}
-
-	.graph-linked-panel {
-		display: grid;
-		gap: 14px;
-		padding: 20px;
-	}
-
-	.graph-linked-tabs {
-		display: flex;
-		align-items: center;
-		gap: 20px;
-		border-bottom: 1px solid #e6ebf2;
-	}
-
-	.graph-linked-tabs button {
-		position: relative;
-		min-height: 42px;
-		padding: 0 2px;
-		border: 0;
-		background: transparent;
-		color: #64748b;
-		font-size: 14px;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.graph-linked-tabs button.active {
-		color: #2563eb;
-	}
-
-	.graph-linked-tabs button.active::after {
-		content: '';
-		position: absolute;
-		left: 0;
-		right: 0;
-		bottom: -1px;
-		height: 2px;
-		border-radius: 999px;
-		background: #2563eb;
-	}
-
-	.graph-linked-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-		gap: 12px;
-	}
-
-	.graph-linked-card {
-		min-width: 0;
-		display: grid;
-		align-content: start;
-		gap: 10px;
-		padding: 14px;
-		border: 1px solid #e6ebf2;
-		border-radius: 12px;
-		background: #ffffff;
-	}
-
-	.graph-linked-card h3 {
-		font-size: 14px;
-		line-height: 20px;
-		display: -webkit-box;
-		-webkit-line-clamp: 2;
-		line-clamp: 2;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
-	}
-
-	.graph-linked-card__meta,
-	.graph-missing-chip-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-	}
-
-	.graph-linked-card__meta span,
-	.graph-missing-chip-row span {
-		display: inline-flex;
-		min-height: 22px;
-		align-items: center;
-		padding: 2px 8px;
-		border-radius: 999px;
-		background: #f1f5f9;
-		color: #64748b;
-		font-size: 12px;
-		font-weight: 700;
 	}
 
 	.graph-muted {
@@ -2378,7 +2022,20 @@
 		inset: 6px;
 		border: 3px solid currentColor;
 		border-radius: 999px;
-		clip-path: polygon(0 38%, 42% 38%, 42% 0, 58% 0, 58% 38%, 100% 38%, 100% 58%, 58% 58%, 58% 100%, 42% 100%, 42% 58%, 0 58%);
+		clip-path: polygon(
+			0 38%,
+			42% 38%,
+			42% 0,
+			58% 0,
+			58% 38%,
+			100% 38%,
+			100% 58%,
+			58% 58%,
+			58% 100%,
+			42% 100%,
+			42% 58%,
+			0 58%
+		);
 	}
 
 	.graph-icon--network::after {
@@ -2545,6 +2202,18 @@
 			grid-template-columns: 1fr;
 		}
 
+		.graph-canvas-panel {
+			order: 1;
+		}
+
+		.graph-controls-panel {
+			order: 2;
+		}
+
+		.graph-detail-panel {
+			order: 3;
+		}
+
 		.graph-controls-panel {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			align-items: start;
@@ -2569,8 +2238,7 @@
 			gap: 12px;
 		}
 
-		.graph-header-card,
-		.graph-linked-panel {
+		.graph-header-card {
 			padding: 16px;
 		}
 
@@ -2597,8 +2265,7 @@
 			grid-column: auto;
 		}
 
-		.graph-canvas-toolbar,
-		.graph-linked-header {
+		.graph-canvas-toolbar {
 			display: grid;
 		}
 
@@ -2614,14 +2281,10 @@
 			grid-template-columns: 1fr;
 		}
 
-		.graph-linked-tabs {
-			overflow-x: auto;
-		}
 	}
 
 	:global(:root[data-theme='dark']) .graph-page-card,
-	:global(:root[data-theme='dark']) .graph-export-dropdown,
-	:global(:root[data-theme='dark']) .graph-linked-card {
+	:global(:root[data-theme='dark']) .graph-export-dropdown {
 		border-color: rgba(122, 145, 185, 0.2);
 		background: rgba(16, 26, 44, 0.94);
 	}
@@ -2629,26 +2292,19 @@
 	:global(:root[data-theme='dark']) .graph-header-copy h1,
 	:global(:root[data-theme='dark']) .graph-panel-header h2,
 	:global(:root[data-theme='dark']) .graph-canvas-toolbar h2,
-	:global(:root[data-theme='dark']) .graph-linked-header h2,
 	:global(:root[data-theme='dark']) .graph-selected-summary h3,
 	:global(:root[data-theme='dark']) .graph-edge-detail h3,
-	:global(:root[data-theme='dark']) .graph-linked-card h3,
 	:global(:root[data-theme='dark']) .graph-detail-section h4,
 	:global(:root[data-theme='dark']) .graph-control-status strong,
 	:global(:root[data-theme='dark']) .graph-detail-stat-grid strong,
-	:global(:root[data-theme='dark']) .graph-detail-kv strong,
-	:global(:root[data-theme='dark']) .graph-compact-list strong,
-	:global(:root[data-theme='dark']) .graph-relation-list strong {
+	:global(:root[data-theme='dark']) .graph-detail-kv strong {
 		color: #e6efff;
 	}
 
 	:global(:root[data-theme='dark']) .graph-header-copy p,
 	:global(:root[data-theme='dark']) .graph-meta-row,
 	:global(:root[data-theme='dark']) .graph-canvas-toolbar p,
-	:global(:root[data-theme='dark']) .graph-linked-header p,
 	:global(:root[data-theme='dark']) .graph-detail-section p,
-	:global(:root[data-theme='dark']) .graph-edge-detail p,
-	:global(:root[data-theme='dark']) .graph-linked-card p,
 	:global(:root[data-theme='dark']) .graph-control-label,
 	:global(:root[data-theme='dark']) .graph-node-type-fieldset legend,
 	:global(:root[data-theme='dark']) .graph-control-field span {
@@ -2663,11 +2319,8 @@
 	:global(:root[data-theme='dark']) .graph-node-type-row,
 	:global(:root[data-theme='dark']) .graph-control-status,
 	:global(:root[data-theme='dark']) .graph-detail-stat-grid div,
-	:global(:root[data-theme='dark']) .graph-compact-list li,
-	:global(:root[data-theme='dark']) .graph-relation-list li,
 	:global(:root[data-theme='dark']) .graph-detail-kv,
-	:global(:root[data-theme='dark']) .graph-detail-empty,
-	:global(:root[data-theme='dark']) .graph-linked-empty {
+	:global(:root[data-theme='dark']) .graph-detail-empty {
 		border-color: rgba(122, 145, 185, 0.24);
 		background: rgba(12, 20, 34, 0.8);
 		color: #e6efff;

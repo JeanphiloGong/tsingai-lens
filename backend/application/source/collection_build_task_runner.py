@@ -8,16 +8,31 @@ from typing import Any
 from config import CONFIG_DIR
 from infra.source.config.pipeline_mode import IndexingMethod
 
-from application.core.comparison_service import ComparisonService
+from application.core.comparison_service import (
+    ComparisonRowsNotReadyError,
+    ComparisonService,
+)
 from application.source.collection_service import CollectionService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.semantic_build.research_objective_service import (
+    ResearchObjectiveService,
+)
 from application.source.task_service import TaskService
-from application.derived.protocol.pipeline_service import build_protocol_artifacts
 from application.source.artifact_registry_service import ArtifactRegistryService
 from utils.logger import bind_request_id, clear_request_id
 
 logger = logging.getLogger(__name__)
+
+_OBJECTIVE_PROGRESS_STAGE_PERCENT = {
+    "objective_paper_skim_started": 72,
+    "objective_discovery_started": 73,
+    "objective_paper_framing_started": 74,
+    "objective_evidence_routing_started": 75,
+    "objective_evidence_units_started": 76,
+    "objective_logic_chains_started": 78,
+}
+_OBJECTIVE_PROGRESS_UPDATE_INTERVAL = 5
 
 try:  # pragma: no cover - exercised indirectly in runtime, patched in tests
     from infra.source.runtime.build_source_artifacts import (  # type: ignore
@@ -43,6 +58,7 @@ class CollectionBuildTaskRunner:
         document_profile_service: DocumentProfileService | None = None,
         paper_facts_service: PaperFactsService | None = None,
         comparison_service: ComparisonService | None = None,
+        research_objective_service: ResearchObjectiveService | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
@@ -51,17 +67,20 @@ class CollectionBuildTaskRunner:
         )
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
         )
         self.paper_facts_service = paper_facts_service or PaperFactsService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
             document_profile_service=self.document_profile_service,
+        )
+        self.research_objective_service = (
+            research_objective_service
+            or ResearchObjectiveService(
+                collection_service=self.collection_service,
+                document_profile_service=self.document_profile_service,
+            )
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
-            artifact_registry_service=self.artifact_registry_service,
-            paper_facts_service=self.paper_facts_service,
         )
 
     def _resolve_load_config(self):
@@ -114,6 +133,50 @@ class CollectionBuildTaskRunner:
         )
         return record
 
+    def _build_objective_progress_callback(self, task_id: str, collection_id: str):
+        last_update: dict[str, tuple[str, int | None, int | None]] = {
+            "value": ("", None, None),
+        }
+
+        def callback(progress_detail: dict[str, Any]) -> None:
+            phase = str(progress_detail.get("phase") or "").strip()
+            if not phase:
+                return
+            current = self._safe_int(progress_detail.get("current"))
+            total = self._safe_int(progress_detail.get("total"))
+            previous_phase, previous_current, previous_total = last_update["value"]
+            should_update = (
+                phase != previous_phase
+                or total != previous_total
+                or current is None
+                or total is None
+                or current == 1
+                or current >= total
+                or previous_current is None
+                or current - previous_current >= _OBJECTIVE_PROGRESS_UPDATE_INTERVAL
+            )
+            if not should_update:
+                return
+            last_update["value"] = (phase, current, total)
+            self._update_task_progress(
+                task_id,
+                collection_id,
+                current_stage=phase,
+                progress_percent=_OBJECTIVE_PROGRESS_STAGE_PERCENT.get(phase, 76),
+                progress_detail=progress_detail,
+            )
+
+        return callback
+
+    @staticmethod
+    def _safe_int(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     def run_build_task_blocking(
         self,
         task_id: str,
@@ -152,6 +215,11 @@ class CollectionBuildTaskRunner:
             status="running",
             current_stage="files_registered",
             progress_percent=5,
+            progress_detail={
+                "phase": "files_registered",
+                "unit": "documents",
+                "message": "Registered collection files for processing.",
+            },
         )
         if not task.get("started_at"):
             task = self.task_service.update_task(task_id, started_at=task["updated_at"])
@@ -164,6 +232,11 @@ class CollectionBuildTaskRunner:
                 status="failed",
                 current_stage="failed",
                 progress_percent=100,
+                progress_detail={
+                    "phase": "failed",
+                    "unit": "steps",
+                    "message": "Build failed before processing documents.",
+                },
                 errors=["集合内没有可构建文件"],
                 finished_at=self.task_service.get_task(task_id)["updated_at"],
             )
@@ -186,6 +259,11 @@ class CollectionBuildTaskRunner:
                 collection_id,
                 current_stage="source_artifacts_started",
                 progress_percent=25,
+                progress_detail={
+                    "phase": "source_artifacts_started",
+                    "unit": "documents",
+                    "message": "Parsing source PDFs and tables into source artifacts.",
+                },
                 output_path=str(output_dir),
             )
             resolved_build_source_artifacts = self._resolve_build_source_artifacts()
@@ -201,6 +279,11 @@ class CollectionBuildTaskRunner:
                 collection_id,
                 current_stage="source_artifacts_completed",
                 progress_percent=60,
+                progress_detail={
+                    "phase": "source_artifacts_completed",
+                    "unit": "documents",
+                    "message": "Source artifacts were generated.",
+                },
                 output_path=str(output_dir),
                 errors=errors,
             )
@@ -211,25 +294,44 @@ class CollectionBuildTaskRunner:
                     collection_id,
                     current_stage="document_profiles_started",
                     progress_percent=70,
+                    progress_detail={
+                        "phase": "document_profiles_started",
+                        "unit": "documents",
+                        "message": "Building document profiles before objective extraction.",
+                    },
                 )
-                document_profiles = self.document_profile_service.build_document_profiles(
+                self.document_profile_service.build_document_profiles(collection_id)
+                self._update_task_progress(
+                    task_id,
                     collection_id,
-                    output_dir,
+                    current_stage="research_objectives_started",
+                    progress_percent=71,
+                    progress_detail={
+                        "phase": "research_objectives_started",
+                        "unit": "steps",
+                        "message": "Starting research-objective-first extraction.",
+                    },
                 )
-                protocol_candidate_count = self.document_profile_service.count_protocol_suitable(
-                    document_profiles
+                self.research_objective_service.build_research_objectives(
+                    collection_id,
+                    progress_callback=self._build_objective_progress_callback(
+                        task_id,
+                        collection_id,
+                    ),
                 )
                 self._update_task_progress(
                     task_id,
                     collection_id,
                     current_stage="paper_facts_started",
-                    progress_percent=76,
+                    progress_percent=80,
+                    progress_detail={
+                        "phase": "paper_facts_started",
+                        "unit": "steps",
+                        "message": "Projecting extracted evidence into paper facts.",
+                    },
                 )
-                evidence_cards = self.paper_facts_service.build_evidence_cards(
-                    collection_id,
-                    output_dir,
-                )
-                if evidence_cards.empty:
+                evidence_cards = self.paper_facts_service.build_evidence_cards(collection_id)
+                if not evidence_cards:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))
                     warnings.append("未抽取到 evidence cards，collection 暂时只能依赖 document profiles。")
@@ -239,30 +341,23 @@ class CollectionBuildTaskRunner:
                     task_id,
                     collection_id,
                     current_stage="comparison_rows_started",
-                    progress_percent=82,
+                    progress_percent=88,
+                    progress_detail={
+                        "phase": "comparison_rows_started",
+                        "unit": "steps",
+                        "message": "Generating collection comparison rows.",
+                    },
                 )
-                comparison_rows = self.comparison_service.build_comparison_rows(
-                    collection_id,
-                    output_dir,
-                )
-                if comparison_rows.empty:
+                try:
+                    comparison_rows = self.comparison_service.build_comparison_rows(
+                        collection_id
+                    )
+                except ComparisonRowsNotReadyError:
+                    comparison_rows = ()
+                if not comparison_rows:
                     record = self.task_service.get_task(task_id)
                     warnings = list(record.get("warnings", []))
                     warnings.append("未生成 comparison rows，当前 collection 还不能直接做结构化比较。")
-                    self.task_service.update_task(task_id, warnings=warnings)
-
-                self._update_task_progress(
-                    task_id,
-                    collection_id,
-                    current_stage="protocol_artifacts_started",
-                    progress_percent=88,
-                )
-                if protocol_candidate_count > 0:
-                    build_protocol_artifacts(output_dir)
-                else:
-                    record = self.task_service.get_task(task_id)
-                    warnings = list(record.get("warnings", []))
-                    warnings.append("未检测到适合 protocol 提取的文档，已跳过 protocol artifacts。")
                     self.task_service.update_task(task_id, warnings=warnings)
 
             artifacts = self.artifact_registry_service.upsert(collection_id, output_dir)
@@ -274,6 +369,11 @@ class CollectionBuildTaskRunner:
                 status=status,
                 current_stage="artifacts_ready",
                 progress_percent=100,
+                progress_detail={
+                    "phase": "artifacts_ready",
+                    "unit": "steps",
+                    "message": "Build artifacts are ready.",
+                },
                 output_path=artifacts["output_path"],
                 finished_at=self.task_service.get_task(task_id)["updated_at"],
             )
@@ -302,6 +402,11 @@ class CollectionBuildTaskRunner:
                 status="failed",
                 current_stage="failed",
                 progress_percent=100,
+                progress_detail={
+                    "phase": "failed",
+                    "unit": "steps",
+                    "message": "Build failed before artifacts were ready.",
+                },
                 errors=errors,
                 output_path=str(output_dir),
                 finished_at=record["updated_at"],

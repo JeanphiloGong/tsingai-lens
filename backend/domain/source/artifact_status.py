@@ -64,10 +64,6 @@ class ArtifactStatusRecord:
     table_rows_ready: bool
     table_cells_generated: bool
     table_cells_ready: bool
-    procedure_blocks_generated: bool
-    procedure_blocks_ready: bool
-    protocol_steps_generated: bool
-    protocol_steps_ready: bool
     updated_at: str
 
     @classmethod
@@ -130,10 +126,6 @@ class ArtifactStatusRecord:
         table_rows_ready: bool = False,
         table_cells_generated: bool = False,
         table_cells_ready: bool = False,
-        procedure_blocks_generated: bool = False,
-        procedure_blocks_ready: bool = False,
-        protocol_steps_generated: bool = False,
-        protocol_steps_ready: bool = False,
     ) -> "ArtifactStatusRecord":
         collection_comparable_results_generated = bool(
             collection_comparable_results_generated
@@ -220,10 +212,6 @@ class ArtifactStatusRecord:
             table_rows_ready=bool(table_rows_ready),
             table_cells_generated=bool(table_cells_generated),
             table_cells_ready=bool(table_cells_ready),
-            procedure_blocks_generated=bool(procedure_blocks_generated),
-            procedure_blocks_ready=bool(procedure_blocks_ready),
-            protocol_steps_generated=bool(protocol_steps_generated),
-            protocol_steps_ready=bool(protocol_steps_ready),
             updated_at=str(updated_at),
         )
 
@@ -304,12 +292,6 @@ class ArtifactStatusRecord:
             table_rows_ready=_normalize_bool(source.get("table_rows_ready")),
             table_cells_generated=_normalize_bool(source.get("table_cells_generated")),
             table_cells_ready=_normalize_bool(source.get("table_cells_ready")),
-            procedure_blocks_generated=_normalize_bool(
-                source.get("procedure_blocks_generated")
-            ),
-            procedure_blocks_ready=_normalize_bool(source.get("procedure_blocks_ready")),
-            protocol_steps_generated=_normalize_bool(source.get("protocol_steps_generated")),
-            protocol_steps_ready=_normalize_bool(source.get("protocol_steps_ready")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -357,10 +339,6 @@ class ArtifactStatusRecord:
             "table_rows_ready": self.table_rows_ready,
             "table_cells_generated": self.table_cells_generated,
             "table_cells_ready": self.table_cells_ready,
-            "procedure_blocks_generated": self.procedure_blocks_generated,
-            "procedure_blocks_ready": self.procedure_blocks_ready,
-            "protocol_steps_generated": self.protocol_steps_generated,
-            "protocol_steps_ready": self.protocol_steps_ready,
             "updated_at": self.updated_at,
         }
 

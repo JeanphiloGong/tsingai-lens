@@ -1,27 +1,14 @@
 from __future__ import annotations
 
-from application.source.artifact_input_service import resolve_collection_artifact_paths
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
     FIGURES_FINAL_COLUMNS,
     TABLE_CELLS_FINAL_COLUMNS,
+    TABLES_FINAL_COLUMNS,
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-
-
-def test_collection_artifact_paths_include_materials_comparison_v2_source_targets(tmp_path):
-    paths = resolve_collection_artifact_paths(tmp_path / "collection-output")
-
-    assert paths.documents.name == "documents.parquet"
-    assert paths.text_units.name == "text_units.parquet"
-    assert paths.blocks.name == "blocks.parquet"
-    assert paths.figures.name == "figures.parquet"
-    assert paths.table_rows.name == "table_rows.parquet"
-    assert paths.table_cells.name == "table_cells.parquet"
-    assert paths.image_assets_dir.name == "image_assets"
-    assert paths.procedure_blocks.name == "procedure_blocks.parquet"
 
 
 def test_source_contract_columns_cover_materials_comparison_v2_targets():
@@ -69,6 +56,23 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "image_width",
         "image_height",
         "asset_sha256",
+        "metadata",
+    ]
+    assert TABLES_FINAL_COLUMNS == [
+        "table_id",
+        "document_id",
+        "table_order",
+        "caption_text",
+        "caption_block_id",
+        "page",
+        "bbox",
+        "heading_path",
+        "row_count",
+        "col_count",
+        "column_headers",
+        "table_matrix",
+        "table_markdown",
+        "table_text",
         "metadata",
     ]
     assert TABLE_ROWS_FINAL_COLUMNS == [

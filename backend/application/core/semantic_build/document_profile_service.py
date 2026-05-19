@@ -5,49 +5,30 @@ import json
 import logging
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-import pandas as pd
-
+from application.source.collection_service import CollectionService
 from domain.core.document_profile import (
     DocumentProfile,
     summarize_document_profile_collection,
 )
+from domain.ports import CoreFactRepository, SourceArtifactRepository
+from domain.source import SourceArtifactSet
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
-    PROTOCOL_EXTRACTABLE_UNCERTAIN,
-    PROTOCOL_SUITABLE_EXTRACTABILITY,
 )
-from infra.persistence.backbone_codec import (
-    normalize_backbone_value,
-    prepare_frame_for_storage,
-    restore_frame_from_storage,
-)
-from application.source.collection_service import CollectionService
-from .core_semantic_version import (
-    core_semantic_rebuild_required,
-    purge_stale_core_semantic_artifacts,
-    write_core_semantic_manifest,
+from domain.shared.record_normalization import normalize_record_value
+from infra.persistence.factory import (
+    build_core_fact_repository,
+    build_source_artifact_repository,
 )
 from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
 )
-from application.source.artifact_input_service import (
-    build_document_records,
-    load_blocks_artifact,
-    load_collection_inputs,
-)
-from application.source.artifact_registry_service import ArtifactRegistryService
 
 logger = logging.getLogger(__name__)
 
-
-_DOCUMENT_PROFILES_FILE = "document_profiles.parquet"
-_DOCUMENT_PROFILE_JSON_COLUMNS = (
-    "protocol_extractability_signals",
-    "parsing_warnings",
-)
 
 _TITLE_FIELD_CANDIDATES = (
     "parsed_title",
@@ -86,18 +67,16 @@ _PROFILE_FRONT_MATTER_HEADINGS = (
 class DocumentProfilesNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve document profile outputs."""
 
-    def __init__(self, collection_id: str, output_dir: Path) -> None:
+    def __init__(self, collection_id: str) -> None:
         self.collection_id = collection_id
-        self.output_dir = output_dir
         super().__init__(f"document profiles not ready: {collection_id}")
 
 
 class DocumentContentNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve document content."""
 
-    def __init__(self, collection_id: str, output_dir: Path) -> None:
+    def __init__(self, collection_id: str) -> None:
         self.collection_id = collection_id
-        self.output_dir = output_dir
         super().__init__(f"document content not ready: {collection_id}")
 
 
@@ -116,14 +95,24 @@ class DocumentProfileService:
     def __init__(
         self,
         collection_service: CollectionService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
+        core_fact_repository: CoreFactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
-        self.artifact_registry_service = (
-            artifact_registry_service or ArtifactRegistryService()
-        )
         self._structured_extractor = structured_extractor
+        self.core_fact_repository = (
+            core_fact_repository
+            or build_core_fact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
+        )
+        self.source_artifact_repository = (
+            source_artifact_repository
+            or build_source_artifact_repository(
+                self.collection_service.root_dir.parent / "lens.sqlite"
+            )
+        )
 
     def list_document_profiles(
         self,
@@ -134,8 +123,8 @@ class DocumentProfileService:
         profiles = self.read_document_profiles(collection_id)
         summary = self.summarize_document_profiles(profiles)
         items = [
-            self._serialize_profile_row(row)
-            for _, row in profiles.iloc[offset : offset + limit].iterrows()
+            self._serialize_profile_record(profile)
+            for profile in profiles[offset : offset + limit]
         ]
         return {
             "collection_id": collection_id,
@@ -155,35 +144,35 @@ class DocumentProfileService:
         document_id: str,
     ) -> dict[str, Any]:
         profiles = self.read_document_profiles(collection_id)
-        matched = profiles[profiles["document_id"].astype(str) == str(document_id)]
-        if matched.empty:
-            raise DocumentNotFoundError(collection_id, document_id)
-        return self._serialize_profile_row(matched.iloc[0])
+        for profile in profiles:
+            if str(profile.document_id) == str(document_id):
+                return self._serialize_profile_record(profile)
+        raise DocumentNotFoundError(collection_id, document_id)
 
     def get_document_content(
         self,
         collection_id: str,
         document_id: str,
     ) -> dict[str, Any]:
-        output_dir = self._resolve_output_dir(collection_id)
-        documents_path = output_dir / "documents.parquet"
-        if not documents_path.is_file():
-            raise DocumentContentNotReadyError(collection_id, output_dir)
-
-        documents, text_units = load_collection_inputs(output_dir)
+        self.collection_service.get_collection(collection_id)
         try:
-            blocks = load_blocks_artifact(output_dir)
+            artifacts = self._load_source_artifacts(collection_id)
         except FileNotFoundError as exc:
-            raise DocumentContentNotReadyError(collection_id, output_dir) from exc
-        document_records = build_document_records(documents, text_units)
-        matched = document_records[
-            document_records["paper_id"].astype(str) == str(document_id)
-        ]
-        if matched.empty:
+            raise DocumentContentNotReadyError(collection_id) from exc
+
+        document_records = self._build_document_records(artifacts)
+        row = next(
+            (
+                record
+                for record in document_records
+                if str(record.get("paper_id") or "") == str(document_id)
+            ),
+            None,
+        )
+        if row is None:
             raise DocumentNotFoundError(collection_id, document_id)
 
-        row = matched.iloc[0]
-        blocks_by_doc = self._group_blocks_by_document(blocks)
+        blocks_by_doc = self._group_blocks_by_document(artifacts)
         profile = self._find_profile_row(collection_id, document_id)
         file_lookup = self._build_collection_file_lookup(collection_id)
 
@@ -222,55 +211,37 @@ class DocumentProfileService:
             "warnings": warnings,
         }
 
-    def read_document_profiles(self, collection_id: str) -> pd.DataFrame:
-        output_dir = self._resolve_output_dir(collection_id)
-        path = output_dir / _DOCUMENT_PROFILES_FILE
-        if path.is_file():
-            profiles = restore_frame_from_storage(
-                pd.read_parquet(path),
-                _DOCUMENT_PROFILE_JSON_COLUMNS,
+    def read_document_profiles(self, collection_id: str) -> tuple[DocumentProfile, ...]:
+        self.collection_service.get_collection(collection_id)
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if facts.document_profiles:
+            return self._normalize_profile_records(
+                facts.document_profiles,
+                collection_id,
             )
-            if (
-                self._profile_rebuild_required(profiles)
-                or core_semantic_rebuild_required(output_dir)
-            ) and (output_dir / "documents.parquet").is_file():
-                profiles = self.build_document_profiles(collection_id, output_dir)
-        else:
-            profiles = self.build_document_profiles(collection_id, output_dir)
-        return self._normalize_profiles_table(profiles, collection_id)
+        return self.build_document_profiles(collection_id)
 
     def build_document_profiles(
         self,
         collection_id: str,
-        output_dir: str | Path | None = None,
-    ) -> pd.DataFrame:
-        base_dir = (
-            Path(output_dir).expanduser().resolve()
-            if output_dir is not None
-            else self._resolve_output_dir(collection_id)
-        )
-        purge_stale_core_semantic_artifacts(base_dir)
-        documents_path = base_dir / "documents.parquet"
-        if not documents_path.is_file():
-            raise DocumentProfilesNotReadyError(collection_id, base_dir)
-
-        documents, text_units = load_collection_inputs(base_dir)
+    ) -> tuple[DocumentProfile, ...]:
+        self.collection_service.get_collection(collection_id)
         try:
-            blocks = load_blocks_artifact(base_dir)
+            artifacts = self._load_source_artifacts(collection_id)
         except FileNotFoundError as exc:
-            raise DocumentProfilesNotReadyError(collection_id, base_dir) from exc
-        document_records = build_document_records(documents, text_units)
-        blocks_by_doc = self._group_blocks_by_document(blocks)
+            raise DocumentProfilesNotReadyError(collection_id) from exc
+        document_records = self._build_document_records(artifacts)
+        blocks_by_doc = self._group_blocks_by_document(artifacts)
         file_lookup = self._build_collection_file_lookup(collection_id)
         logger.info(
             "Document profile build started collection_id=%s document_count=%s block_count=%s",
             collection_id,
             len(document_records),
-            len(blocks),
+            len(artifacts.blocks),
         )
 
-        rows: list[dict[str, Any]] = []
-        for _, row in document_records.iterrows():
+        profiles: list[DocumentProfile] = []
+        for row in document_records:
             document_id = str(row.get("paper_id") or row.get("document_id") or "")
             document_blocks = blocks_by_doc.get(document_id, [])
             profiled = self._profile_document_row(
@@ -280,70 +251,81 @@ class DocumentProfileService:
                 file_lookup=file_lookup,
             )
             logger.info(
-                "Document profile extracted collection_id=%s document_id=%s doc_type=%s protocol_extractable=%s block_count=%s warning_count=%s",
+                "Document profile extracted collection_id=%s document_id=%s doc_type=%s block_count=%s warning_count=%s",
                 collection_id,
                 document_id,
                 profiled.get("doc_type"),
-                profiled.get("protocol_extractable"),
                 len(document_blocks),
                 len(profiled.get("parsing_warnings", [])),
             )
-            rows.append(profiled)
-        profiles = pd.DataFrame(
-            rows,
-            columns=[
-                "document_id",
-                "collection_id",
-                "title",
-                "source_filename",
-                "doc_type",
-                "protocol_extractable",
-                "protocol_extractability_signals",
-                "parsing_warnings",
-                "confidence",
-            ],
-        )
-        profiles = self._normalize_profiles_table(profiles, collection_id)
-        base_dir.mkdir(parents=True, exist_ok=True)
-        prepare_frame_for_storage(
+            profiles.append(DocumentProfile.from_mapping(profiled))
+        normalized_profiles = self._normalize_profile_records(
             profiles,
-            _DOCUMENT_PROFILE_JSON_COLUMNS,
-        ).to_parquet(base_dir / _DOCUMENT_PROFILES_FILE, index=False)
-        write_core_semantic_manifest(base_dir)
-        self.artifact_registry_service.upsert(collection_id, base_dir)
-        logger.info(
-            "Document profile build finished collection_id=%s profile_count=%s protocol_candidate_count=%s",
             collection_id,
-            len(profiles),
-            self.count_protocol_suitable(profiles),
         )
-        return profiles
+        self.core_fact_repository.replace_collection_document_profiles(
+            collection_id,
+            normalized_profiles,
+        )
+        logger.info(
+            "Document profile build finished collection_id=%s profile_count=%s",
+            collection_id,
+            len(normalized_profiles),
+        )
+        return normalized_profiles
 
     def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
         if self._structured_extractor is None:
             self._structured_extractor = build_default_core_llm_structured_extractor()
         return self._structured_extractor
 
-    def count_protocol_suitable(self, profiles: pd.DataFrame) -> int:
-        normalized = self._normalize_profiles_table(profiles, None)
-        return int(normalized["protocol_extractable"].isin(list(PROTOCOL_SUITABLE_EXTRACTABILITY)).sum())
+    def _load_source_artifacts(self, collection_id: str) -> SourceArtifactSet:
+        artifacts = self.source_artifact_repository.read_collection_artifacts(
+            collection_id
+        )
+        if not artifacts.documents:
+            raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
+        return artifacts
 
-    def _resolve_output_dir(self, collection_id: str) -> Path:
-        self.collection_service.get_collection(collection_id)
-        try:
-            artifacts = self.artifact_registry_service.get(collection_id)
-        except FileNotFoundError:
-            artifacts = None
-        if artifacts:
-            output_path = artifacts.get("output_path")
-            if output_path:
-                return Path(str(output_path)).expanduser().resolve()
-        return self.collection_service.get_paths(collection_id).output_dir.resolve()
+    def _build_document_records(
+        self,
+        artifacts: SourceArtifactSet,
+    ) -> list[dict[str, Any]]:
+        text_unit_lookup = {
+            text_unit.text_unit_id: text_unit
+            for text_unit in artifacts.text_units
+            if text_unit.text_unit_id
+        }
+        records: list[dict[str, Any]] = []
+        for document in artifacts.documents:
+            text = str(document.text or "").strip()
+            if not text and document.text_unit_ids:
+                text = "\n\n".join(
+                    str(text_unit_lookup[text_unit_id].text or "").strip()
+                    for text_unit_id in document.text_unit_ids
+                    if text_unit_id in text_unit_lookup
+                    and str(text_unit_lookup[text_unit_id].text or "").strip()
+                )
+            records.append(
+                {
+                    "paper_id": document.document_id,
+                    "document_id": document.document_id,
+                    "title": document.title,
+                    "text": text,
+                    "text_unit_ids": list(document.text_unit_ids),
+                    "creation_date": document.creation_date,
+                    "metadata": dict(document.metadata),
+                    "source_filename": document.metadata.get("source_filename"),
+                    "original_filename": document.metadata.get("original_filename"),
+                    "stored_filename": document.metadata.get("stored_filename"),
+                }
+            )
+        return records
 
     def _profile_document_row(
         self,
         collection_id: str,
-        row: pd.Series,
+        row: Mapping[str, Any],
         blocks: list[dict[str, Any]],
         file_lookup: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -373,8 +355,6 @@ class DocumentProfileService:
                     "title": title,
                     "source_filename": source_filename,
                     "doc_type": DOC_TYPE_UNCERTAIN,
-                    "protocol_extractable": PROTOCOL_EXTRACTABLE_UNCERTAIN,
-                    "protocol_extractability_signals": [],
                     "parsing_warnings": ["insufficient_content"],
                     "confidence": 0.0,
                 }
@@ -384,10 +364,7 @@ class DocumentProfileService:
             profile_payload
         )
         parsing_warnings = list(extracted.parsing_warnings)
-        if (
-            extracted.doc_type == DOC_TYPE_UNCERTAIN
-            or extracted.protocol_extractable == PROTOCOL_EXTRACTABLE_UNCERTAIN
-        ) and "classification_uncertain" not in parsing_warnings:
+        if extracted.doc_type == DOC_TYPE_UNCERTAIN and "classification_uncertain" not in parsing_warnings:
             parsing_warnings.append("classification_uncertain")
         normalized = DocumentProfile.from_mapping(
             {
@@ -396,12 +373,6 @@ class DocumentProfileService:
                 "title": title,
                 "source_filename": source_filename,
                 "doc_type": str(extracted.doc_type or DOC_TYPE_UNCERTAIN),
-                "protocol_extractable": str(
-                    extracted.protocol_extractable or PROTOCOL_EXTRACTABLE_UNCERTAIN
-                ),
-                "protocol_extractability_signals": list(
-                    extracted.protocol_extractability_signals
-                ),
                 "parsing_warnings": parsing_warnings,
                 "confidence": extracted.confidence,
             }
@@ -508,77 +479,41 @@ class DocumentProfileService:
             key=lambda item: self._safe_int(item.get("block_order"), default=0),
         )
 
-    def summarize_document_profiles(self, profiles: pd.DataFrame) -> dict[str, Any]:
-        normalized = self._normalize_profiles_table(profiles, None)
-        summary = summarize_document_profile_collection(
-            DocumentProfile.from_mapping(dict(row))
-            for _, row in normalized.iterrows()
-        )
+    def summarize_document_profiles(
+        self,
+        profiles: tuple[DocumentProfile, ...],
+    ) -> dict[str, Any]:
+        summary = summarize_document_profile_collection(profiles)
         return summary.to_payload()
 
-    def _normalize_profiles_table(
+    def _normalize_profile_records(
         self,
-        profiles: pd.DataFrame,
+        profiles: tuple[DocumentProfile, ...] | list[DocumentProfile],
         collection_id: str | None,
-    ) -> pd.DataFrame:
-        if profiles is None or profiles.empty:
-            return pd.DataFrame(
-                columns=[
-                    "document_id",
-                    "collection_id",
-                    "title",
-                    "source_filename",
-                    "doc_type",
-                    "protocol_extractable",
-                    "protocol_extractability_signals",
-                    "parsing_warnings",
-                    "confidence",
-                ]
-            )
+    ) -> tuple[DocumentProfile, ...]:
+        normalized: list[DocumentProfile] = []
+        for profile in profiles:
+            payload = profile.to_record()
+            if collection_id is not None and not payload.get("collection_id"):
+                payload["collection_id"] = collection_id
+            normalized.append(DocumentProfile.from_mapping(payload))
+        return tuple(normalized)
 
-        normalized = profiles.copy()
-        if collection_id is not None and "collection_id" not in normalized.columns:
-            normalized["collection_id"] = collection_id
-
-        columns = [
-            "document_id",
-            "collection_id",
-            "title",
-            "source_filename",
-            "doc_type",
-            "protocol_extractable",
-            "protocol_extractability_signals",
-            "parsing_warnings",
-            "confidence",
-        ]
-        records = [
-            DocumentProfile.from_mapping(dict(row)).to_record()
-            for _, row in normalized.iterrows()
-        ]
-        return pd.DataFrame(records, columns=columns)
-
-    def _serialize_profile_row(self, row: pd.Series) -> dict[str, Any]:
-        return DocumentProfile.from_mapping(dict(row)).to_record()
+    def _serialize_profile_record(self, profile: DocumentProfile) -> dict[str, Any]:
+        return profile.to_record()
 
     def _group_blocks_by_document(
         self,
-        blocks: pd.DataFrame,
+        artifacts: SourceArtifactSet,
     ) -> dict[str, list[dict[str, Any]]]:
-        if blocks is None or blocks.empty:
-            return {}
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for _, row in blocks.iterrows():
-            document_id = str(
-                row.get("document_id")
-                or row.get("paper_id")
-                or row.get("id")
-                or ""
-            )
-            grouped.setdefault(document_id, []).append(dict(row))
+        for block in artifacts.blocks:
+            document_id = str(block.document_id or "")
+            grouped.setdefault(document_id, []).append(block.to_record())
         return grouped
 
     def _normalize_string_list(self, value: Any) -> list[str]:
-        normalized = normalize_backbone_value(value)
+        normalized = normalize_record_value(value)
         if normalized is None:
             return []
         if isinstance(normalized, list):
@@ -588,13 +523,10 @@ class DocumentProfileService:
     def _normalize_optional_text(self, value: Any) -> str | None:
         if value is None:
             return None
-        if isinstance(value, float) and pd.isna(value):
+        if isinstance(value, float) and math.isnan(value):
             return None
         text = str(value).strip()
         return text or None
-
-    def _profile_rebuild_required(self, profiles: pd.DataFrame) -> bool:
-        return not {"title", "source_filename"}.issubset(set(profiles.columns))
 
     def _find_profile_row(
         self,
@@ -606,13 +538,10 @@ class DocumentProfileService:
         except DocumentProfilesNotReadyError:
             return None
 
-        if profiles.empty:
-            return None
-
-        matched = profiles[profiles["document_id"].astype(str) == str(document_id)]
-        if matched.empty:
-            return None
-        return dict(matched.iloc[0])
+        for profile in profiles:
+            if str(profile.document_id) == str(document_id):
+                return profile.to_record()
+        return None
 
     def _build_document_content_blocks(
         self,
@@ -755,7 +684,7 @@ class DocumentProfileService:
             return value
         if value is None:
             return None
-        if isinstance(value, float) and pd.isna(value):
+        if isinstance(value, float) and math.isnan(value):
             return None
         if not isinstance(value, str):
             return None
@@ -783,7 +712,7 @@ class DocumentProfileService:
     def _finite_float(self, value: Any) -> float | None:
         if value is None:
             return None
-        if isinstance(value, float) and pd.isna(value):
+        if isinstance(value, float) and math.isnan(value):
             return None
         try:
             number = float(value)
@@ -821,7 +750,7 @@ class DocumentProfileService:
 
     def _resolve_document_title(
         self,
-        row: pd.Series,
+        row: Mapping[str, Any],
         document_id: str,
         source_filename: str | None,
         file_lookup: dict[str, Any],
@@ -840,7 +769,7 @@ class DocumentProfileService:
 
     def _resolve_source_filename(
         self,
-        row: pd.Series,
+        row: Mapping[str, Any],
         document_id: str,
         file_lookup: dict[str, Any],
     ) -> str | None:
@@ -864,7 +793,7 @@ class DocumentProfileService:
 
         return file_lookup.get("single_source_filename")
 
-    def _iter_document_title_candidates(self, row: pd.Series) -> list[str]:
+    def _iter_document_title_candidates(self, row: Mapping[str, Any]) -> list[str]:
         seen: set[str] = set()
         values: list[str] = []
         for key in _TITLE_FIELD_CANDIDATES:
@@ -875,8 +804,8 @@ class DocumentProfileService:
                 values.append(normalized)
         return values
 
-    def _extract_row_or_metadata_value(self, row: pd.Series, key: str) -> Any:
-        if key in row.index:
+    def _extract_row_or_metadata_value(self, row: Mapping[str, Any], key: str) -> Any:
+        if key in row:
             value = row.get(key)
             normalized = self._normalize_optional_text(value)
             if normalized is not None:
@@ -894,7 +823,7 @@ class DocumentProfileService:
             return value
         if value is None:
             return {}
-        if isinstance(value, float) and pd.isna(value):
+        if isinstance(value, float) and math.isnan(value):
             return {}
         if not isinstance(value, str):
             return {}

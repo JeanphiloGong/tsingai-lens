@@ -259,7 +259,9 @@
 	$: loadKey = `${collectionId}:${materialId}`;
 	$: sampleRows = materialProfile?.sample_matrix.rows ?? [];
 	$: reportPackage = materialProfile?.report_package ?? null;
-	$: reportChains = reportPackage?.material_state_chains ?? [];
+	$: reportChains = reportPackage?.representative_states?.length
+		? reportPackage.representative_states
+		: (reportPackage?.material_state_chains ?? []);
 	$: sampleColumns = sampleMatrixColumns(materialProfile, sampleRows);
 	$: propertySummaries = materialProfile?.measured_properties ?? [];
 	$: propertyColumns = materialPropertyColumns(materialProfile, sampleRows, sampleColumns, $t);
@@ -1112,6 +1114,14 @@
 		return locations.slice(0, 3).join(', ') || '--';
 	}
 
+	function reportReferenceCodes(
+		refs: EvidenceReference[],
+		codeMap: Map<string, string>,
+		limit = 5
+	) {
+		return reportEvidenceCodes(refs, codeMap).slice(0, limit);
+	}
+
 	function chainMetricRows(
 		row: SampleMatrixRow,
 		columns: PropertyColumn[],
@@ -1676,6 +1686,17 @@
 		return (paper?.title || paper?.source_filename || '').replace(/\.pdf$/i, '');
 	}
 
+	function reportPaperTitle(paper: {
+		title?: string | null;
+		source_filename?: string | null;
+		document_id: string;
+	}) {
+		return (paper.title || paper.source_filename || formatShortIdentifier(paper.document_id)).replace(
+			/\.pdf$/i,
+			''
+		);
+	}
+
 	function paperForRow(row: SampleMatrixRow) {
 		if (!row.document_id) return undefined;
 		return materialPapers().find((paper) => paper.document_id === row.document_id);
@@ -2236,35 +2257,53 @@
 							<span class="section-number">1</span>
 							<h3>{$t('research.materialDossier.sections.overview.title')}</h3>
 							<p>
-								{$t('research.materialDossier.sections.overview.body', {
-									material: materialProfile.canonical_name,
-									processes: joinedList(
-										materialProfile.overview.process_families,
-										$t('research.materialDossier.narrative.unspecifiedProcess')
-									)
-								})}
+								{reportPackage?.executive_summary ||
+									$t('research.materialDossier.sections.overview.body', {
+										material: materialProfile.canonical_name,
+										processes: joinedList(
+											materialProfile.overview.process_families,
+											$t('research.materialDossier.narrative.unspecifiedProcess')
+										)
+									})}
 							</p>
 						</div>
 						<div class="report-stat-grid">
 							<div>
-								<strong>{paperCount}</strong>
+								<strong>{reportPackage?.material_scope.source_paper_count || paperCount}</strong>
 								<span>{$t('research.materialDossier.aside.sourcePapers')}</span>
 							</div>
 							<div>
-								<strong>{sampleCount}</strong>
+								<strong>{reportPackage?.material_scope.sample_row_count || sampleCount}</strong>
 								<span>{$t('research.overview.samples')}</span>
 							</div>
 							<div>
-								<strong>{measuredPropertyCount}</strong>
+								<strong>{reportPackage?.evidence_appendix.property_count || measuredPropertyCount}</strong>
 								<span>{$t('research.overview.properties')}</span>
 							</div>
 							<div>
-								<strong>{evidenceCount}</strong>
+								<strong>{reportPackage?.material_scope.evidence_count || evidenceCount}</strong>
 								<span>{$t('research.overview.evidence')}</span>
 							</div>
 						</div>
+						{#if reportPackage?.key_findings.length}
+							<div class="report-finding-list">
+								{#each reportPackage.key_findings as finding (finding.finding_id)}
+									<article class="report-finding">
+										<h4>{finding.title}</h4>
+										<p>{finding.body}</p>
+										<div class="evidence-chip-row">
+											{#each reportReferenceCodes(finding.evidence_refs, evidenceCodeMap) as code}
+												<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
+													{code}
+												</button>
+											{/each}
+										</div>
+									</article>
+								{/each}
+							</div>
+						{/if}
 						<div class="paper-contribution-grid">
-							{#each materialPapers().slice(0, 6) as paper (paper.document_id)}
+							{#each (reportPackage?.paper_contributions?.length ? reportPackage.paper_contributions : materialPapers()).slice(0, 6) as paper (paper.document_id)}
 								<a
 									class="paper-contribution-card"
 									href={resolve('/collections/[id]/documents/[document_id]', {
@@ -2272,7 +2311,7 @@
 										document_id: paper.document_id
 									})}
 								>
-									<strong>{paperDisplayName(paper) || formatShortIdentifier(paper.document_id)}</strong>
+									<strong>{reportPaperTitle(paper)}</strong>
 									<span>
 										{paper.sample_count}
 										{$t('research.overview.samples')} ·
@@ -2288,9 +2327,43 @@
 						</div>
 					</section>
 
+					{#if reportPackage?.thematic_sections.length}
+						<section id="material-report-sections" class="dossier-card report-section-card">
+							<div class="dossier-section-heading">
+								<span class="section-number">2</span>
+								<h3>{$t('research.materialDossier.report.sectionsTitle')}</h3>
+								<p>{$t('research.materialDossier.report.sectionsBody')}</p>
+							</div>
+							<div class="report-section-list">
+								{#each reportPackage.thematic_sections as section (section.section_id)}
+									<article class="report-section">
+										<strong class="report-section__title">
+											{$t('research.materialDossier.report.sectionLabel', { title: section.title })}
+										</strong>
+										<p>{section.body}</p>
+										{#if section.key_points.length}
+											<ul>
+												{#each section.key_points as point}
+													<li>{point}</li>
+												{/each}
+											</ul>
+										{/if}
+										<div class="evidence-chip-row">
+											{#each reportReferenceCodes(section.evidence_refs, evidenceCodeMap) as code}
+												<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
+													{code}
+												</button>
+											{/each}
+										</div>
+									</article>
+								{/each}
+							</div>
+						</section>
+					{/if}
+
 					<section id="representative-material-states" class="dossier-card chain-card">
 						<div class="dossier-section-heading">
-							<span class="section-number">2</span>
+							<span class="section-number">{reportPackage?.thematic_sections.length ? 3 : 2}</span>
 							<h3>{$t('research.materialDossier.sections.chain.title')}</h3>
 							<p>{$t('research.materialDossier.sections.chain.body')}</p>
 						</div>
@@ -3460,6 +3533,8 @@
 	}
 
 	.paper-contribution-card strong,
+	.report-finding h4,
+	.report-section__title,
 	.problem-card h4 {
 		margin: 0;
 		color: #0f172a;

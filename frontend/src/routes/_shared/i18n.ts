@@ -691,6 +691,12 @@ const translations: Record<Language, Translations> = {
 					packageUnavailable:
 						'Material report package has not been generated for this material.'
 				},
+				report: {
+					sectionsTitle: 'Thematic analysis',
+					sectionsBody:
+						'Read the material evidence as scoped scientific themes; the complete sample matrix stays in the supporting appendix.',
+					sectionLabel: 'Report theme: {title}'
+				},
 				state: {
 					cardLabel: 'State {index}',
 					sourceLine: 'Source: {source}',
@@ -3261,6 +3267,11 @@ const translations: Record<Language, Translations> = {
 					noTestConditions: '该行暂未绑定明确测试条件；跨条件比较前需要回到原文核查。',
 					empty: '当前材料报告包还不足以构建代表性材料状态。',
 					packageUnavailable: '该材料尚未生成材料报告包。'
+				},
+				report: {
+					sectionsTitle: '主题分析',
+					sectionsBody: '按材料科学问题阅读证据；完整样品矩阵保留在支撑附录中。',
+					sectionLabel: '报告主题：{title}'
 				},
 				state: {
 					cardLabel: '状态 {index}',

@@ -360,6 +360,15 @@ function materialProfilePayload() {
 			canonical_name: '316L stainless steel',
 			summary:
 				'316L stainless steel has 2 resolved material-state chains covering density and mechanical response.',
+			executive_summary:
+				'316L stainless steel is best read as a scoped material report rather than a global parameter ranking.',
+			material_scope: {
+				material_system: '316L stainless steel',
+				preparation_routes: ['LPBF', 'SLM'],
+				source_paper_count: 1,
+				sample_row_count: 2,
+				evidence_count: 1
+			},
 			paper_contributions: [
 				{
 					document_id: 'doc_1',
@@ -369,6 +378,39 @@ function materialProfilePayload() {
 					measured_properties: ['relative density', 'hardness', 'yield strength'],
 					contribution_summary:
 						'Paper A contributes 2 material-state sample(s) with relative density, hardness, yield strength measurements.'
+				}
+			],
+			key_findings: [
+				{
+					finding_id: 'finding:S001',
+					title: 'S001 links preparation, testing, and response',
+					body: 'S001 keeps hardness tied to tensile testing and table evidence.',
+					evidence_refs: [
+						{
+							evidence_ref_id: 'ev_hardness_s001',
+							document_id: 'doc_1',
+							source_kind: 'table',
+							locator: 'Table 2',
+							confidence: 0.95
+						}
+					]
+				}
+			],
+			thematic_sections: [
+				{
+					section_id: 'strength-ductility-hardness',
+					title: 'Strength, ductility, and hardness',
+					body: 'Hardness and tensile values are scoped to Paper A testing conditions.',
+					key_points: ['S001: hardness 215.6'],
+					evidence_refs: [
+						{
+							evidence_ref_id: 'ev_hardness_s001',
+							document_id: 'doc_1',
+							source_kind: 'table',
+							locator: 'Table 2',
+							confidence: 0.95
+						}
+					]
 				}
 			],
 			material_state_chains: [
@@ -420,7 +462,62 @@ function materialProfilePayload() {
 					unresolved_fields: []
 				}
 			],
+			representative_states: [
+				{
+					chain_id: 'material-chain:S001',
+					document_id: 'doc_1',
+					sample_id: 'S001',
+					sample_label: 'S001',
+					material: '316L stainless steel',
+					material_state: 'S001',
+					preparation_context: {
+						scan_strategy: 'Alternating strategy A',
+						laser_power_w: '200',
+						scan_speed_mm_s: '800'
+					},
+					test_conditions: {
+						method: 'Tensile testing',
+						standard: 'ASTM E8'
+					},
+					performance_results: [
+						{
+							property: 'hardness',
+							display_value: '215.6',
+							status: 'observed',
+							evidence_refs: [
+								{
+									evidence_ref_id: 'ev_hardness_s001',
+									document_id: 'doc_1',
+									source_kind: 'table',
+									locator: 'Table 2',
+									confidence: 0.95
+								}
+							]
+						}
+					],
+					source_evidence: [
+						{
+							evidence_ref_id: 'ev_hardness_s001',
+							document_id: 'doc_1',
+							source_kind: 'table',
+							locator: 'Table 2',
+							confidence: 0.95
+						}
+					],
+					comparability_boundary: [
+						'Compare only within Paper A tensile and hardness conditions.'
+					],
+					confidence: 0.95,
+					unresolved_fields: []
+				}
+			],
 			limitations: ['S002 is missing test_conditions.'],
+			evidence_appendix: {
+				sample_matrix_row_count: 2,
+				property_count: 3,
+				evidence_count: 1,
+				source_table_count: 1
+			},
 			source_refs: [
 				{
 					evidence_ref_id: 'ev_hardness_s001',
@@ -492,6 +589,18 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Material report overview' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('scoped material report rather than a global parameter ranking'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('S001 links preparation, testing, and response'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Thematic analysis' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Hardness and tensile values are scoped to Paper A testing conditions.'))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Representative material states' }))

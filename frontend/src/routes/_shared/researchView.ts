@@ -639,6 +639,36 @@ export type MaterialReportPaperContribution = {
 	contribution_summary: string;
 };
 
+export type MaterialReportScope = {
+	material_system: string;
+	preparation_routes: string[];
+	source_paper_count: number;
+	sample_row_count: number;
+	evidence_count: number;
+};
+
+export type MaterialReportFinding = {
+	finding_id: string;
+	title: string;
+	body: string;
+	evidence_refs: EvidenceReference[];
+};
+
+export type MaterialReportSection = {
+	section_id: string;
+	title: string;
+	body: string;
+	key_points: string[];
+	evidence_refs: EvidenceReference[];
+};
+
+export type MaterialReportAppendix = {
+	sample_matrix_row_count: number;
+	property_count: number;
+	evidence_count: number;
+	source_table_count: number;
+};
+
 export type MaterialReportPackage = {
 	schema_version: string;
 	status: ResearchViewState;
@@ -646,9 +676,15 @@ export type MaterialReportPackage = {
 	material_id: string;
 	canonical_name: string;
 	summary: string;
+	executive_summary: string;
+	material_scope: MaterialReportScope;
 	paper_contributions: MaterialReportPaperContribution[];
+	key_findings: MaterialReportFinding[];
+	representative_states: MaterialReportStateChain[];
+	thematic_sections: MaterialReportSection[];
 	material_state_chains: MaterialReportStateChain[];
 	limitations: string[];
+	evidence_appendix: MaterialReportAppendix;
 	source_refs: EvidenceReference[];
 };
 
@@ -917,10 +953,63 @@ function normalizeMaterialReportContribution(value: unknown): MaterialReportPape
 	};
 }
 
+function normalizeMaterialReportScope(value: unknown): MaterialReportScope {
+	const record = asRecord(value);
+	return {
+		material_system: toText(record?.material_system),
+		preparation_routes: toStringList(record?.preparation_routes ?? record?.routes),
+		source_paper_count: toNumber(record?.source_paper_count ?? record?.paper_count),
+		sample_row_count: toNumber(record?.sample_row_count ?? record?.sample_count),
+		evidence_count: toNumber(record?.evidence_count)
+	};
+}
+
+function normalizeMaterialReportFinding(value: unknown): MaterialReportFinding | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const title = toText(record.title);
+	const body = toText(record.body ?? record.summary);
+	if (!title && !body) return null;
+	return {
+		finding_id: toText(record.finding_id ?? record.id, title || body),
+		title: title || body,
+		body,
+		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence)
+	};
+}
+
+function normalizeMaterialReportSection(value: unknown): MaterialReportSection | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const title = toText(record.title);
+	const body = toText(record.body ?? record.summary);
+	if (!title && !body) return null;
+	return {
+		section_id: toText(record.section_id ?? record.id, title || body),
+		title: title || body,
+		body,
+		key_points: toStringList(record.key_points ?? record.points),
+		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence)
+	};
+}
+
+function normalizeMaterialReportAppendix(value: unknown): MaterialReportAppendix {
+	const record = asRecord(value);
+	return {
+		sample_matrix_row_count: toNumber(record?.sample_matrix_row_count),
+		property_count: toNumber(record?.property_count),
+		evidence_count: toNumber(record?.evidence_count),
+		source_table_count: toNumber(record?.source_table_count)
+	};
+}
+
 function normalizeMaterialReportPackage(value: unknown): MaterialReportPackage | null {
 	const record = asRecord(value);
 	if (!record) return null;
 	const chains = normalizeObjectList(record.material_state_chains ?? record.chains, 'items')
+		.map((item) => normalizeMaterialReportChain(item))
+		.filter((item): item is MaterialReportStateChain => item !== null);
+	const representativeStates = normalizeObjectList(record.representative_states, 'items')
 		.map((item) => normalizeMaterialReportChain(item))
 		.filter((item): item is MaterialReportStateChain => item !== null);
 
@@ -931,11 +1020,21 @@ function normalizeMaterialReportPackage(value: unknown): MaterialReportPackage |
 		material_id: toText(record.material_id),
 		canonical_name: toText(record.canonical_name),
 		summary: toText(record.summary),
+		executive_summary: toText(record.executive_summary ?? record.summary),
+		material_scope: normalizeMaterialReportScope(record.material_scope),
 		paper_contributions: normalizeObjectList(record.paper_contributions, 'items')
 			.map((item) => normalizeMaterialReportContribution(item))
 			.filter((item): item is MaterialReportPaperContribution => item !== null),
+		key_findings: normalizeObjectList(record.key_findings, 'items')
+			.map((item) => normalizeMaterialReportFinding(item))
+			.filter((item): item is MaterialReportFinding => item !== null),
+		representative_states: representativeStates.length ? representativeStates : chains,
+		thematic_sections: normalizeObjectList(record.thematic_sections, 'items')
+			.map((item) => normalizeMaterialReportSection(item))
+			.filter((item): item is MaterialReportSection => item !== null),
 		material_state_chains: chains,
 		limitations: toStringList(record.limitations),
+		evidence_appendix: normalizeMaterialReportAppendix(record.evidence_appendix),
 		source_refs: normalizeEvidenceReferences(record.source_refs ?? record.evidence_refs)
 	};
 }

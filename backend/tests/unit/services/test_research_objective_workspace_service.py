@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from application.core.semantic_build.research_objective_service import (
@@ -412,6 +414,38 @@ def test_objective_workspace_detail_returns_conclusion_package(tmp_path):
     assert conclusion_package["limitations"] == []
     assert conclusion_package["source_refs"][0]["source_ref"] == "table-1"
     assert conclusion_package["source_refs"][0]["display_label"] == "P001 · Table 1"
+    expert_report = conclusion_package["expert_report"]
+    assert expert_report["schema_version"] == "objective_expert_report.v1"
+    assert expert_report["status"] == "ready"
+    assert "The strongest contribution is P001 - Profile Title" in (
+        expert_report["headline_conclusion"]
+    )
+    assert expert_report["scientific_context"].startswith("Objective:")
+    assert expert_report["key_findings"][0]["finding_id"] == "finding-001"
+    assert expert_report["key_findings"][0]["evidence_unit_ids"] == [
+        "oeu-corrosion"
+    ]
+    assert expert_report["key_findings"][0]["source_refs"][0]["display_label"] == (
+        "P001 · Table 1"
+    )
+    assert expert_report["evidence_matrix"]["relevant_paper_count"] == 1
+    assert expert_report["evidence_matrix"]["measurement_result_count"] == 1
+    assert expert_report["evidence_matrix"]["controlled_comparison_count"] == 1
+    assert expert_report["evidence_matrix"]["mechanism_evidence_count"] == 1
+    assert expert_report["paper_contribution_map"][0]["paper_label"] == "P001"
+    assert expert_report["paper_contribution_map"][0]["display_title"] == (
+        "P001 - Profile Title"
+    )
+    assert "source_filename" not in expert_report["paper_contribution_map"][0]
+    assert expert_report["controlled_comparisons"][0]["validity"] == "controlled"
+    assert expert_report["controlled_comparisons"][0]["source_refs"][0][
+        "display_label"
+    ] == "P001 · Table 1"
+    assert expert_report["mechanism_chain"]["evidence"][0]["summary"].startswith(
+        "heat treatment changed the passive film"
+    )
+    assert expert_report["limitations"] == []
+    assert expert_report["source_traceback"][0]["display_label"] == "P001 · Table 1"
 
 
 def test_objective_conclusion_uses_readable_paper_labels_for_hashed_pdf_titles(
@@ -485,6 +519,13 @@ def test_objective_conclusion_uses_readable_paper_labels_for_hashed_pdf_titles(
     assert "2eb73dc558fc4b16ba1fa23d917ad671" not in answer_section["body"]
     assert "P001 - P001" not in answer_section["body"]
     assert ".pdf" not in contribution["display_title"]
+    expert_report_text = json.dumps(
+        payload["conclusion_package"]["expert_report"],
+        ensure_ascii=False,
+    )
+    assert "2eb73dc558fc4b16ba1fa23d917ad671" not in expert_report_text
+    assert "P001 - P001" not in expert_report_text
+    assert ".pdf" not in expert_report_text
 
 
 def test_objective_workspace_detail_filters_textual_measurement_without_numeric_value(

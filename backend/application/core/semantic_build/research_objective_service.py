@@ -954,6 +954,10 @@ class ResearchObjectiveService:
             evidence_units,
             paper_contributions=paper_contributions,
         )
+        status = self._objective_conclusion_status(
+            measurements=measurements,
+            logic_chain=logic_chain,
+        )
         narrative_sections = self._objective_conclusion_narrative_sections(
             objective=objective,
             paper_contributions=paper_contributions,
@@ -966,6 +970,19 @@ class ResearchObjectiveService:
             source_refs=source_refs,
         )
         traceability = self._objective_conclusion_traceability(narrative_sections)
+        expert_report = self._objective_expert_report(
+            objective=objective,
+            status=status,
+            paper_contributions=paper_contributions,
+            measurement_ranges=measurement_ranges,
+            primary_evidence_tables=primary_evidence_tables,
+            controlled_comparisons=controlled_comparisons,
+            mechanism_chain=mechanism_chain,
+            conclusions=conclusions,
+            limitations=limitations,
+            source_refs=source_refs,
+            traceability=traceability,
+        )
         return {
             "schema_version": "objective_conclusion_package.v1",
             "title": objective.question,
@@ -980,10 +997,7 @@ class ResearchObjectiveService:
                     else list(objective.property_axes)
                 ),
             },
-            "status": self._objective_conclusion_status(
-                measurements=measurements,
-                logic_chain=logic_chain,
-            ),
+            "status": status,
             "narrative": {
                 "status": (
                     "ready"
@@ -1000,7 +1014,305 @@ class ResearchObjectiveService:
             "limitations": limitations,
             "source_refs": source_refs,
             "traceability": traceability,
+            "expert_report": expert_report,
         }
+
+    def _objective_expert_report(
+        self,
+        *,
+        objective: ResearchObjective,
+        status: str,
+        paper_contributions: list[dict[str, Any]],
+        measurement_ranges: list[dict[str, Any]],
+        primary_evidence_tables: list[dict[str, Any]],
+        controlled_comparisons: list[dict[str, Any]],
+        mechanism_chain: dict[str, Any],
+        conclusions: list[dict[str, Any]],
+        limitations: list[dict[str, Any]],
+        source_refs: list[dict[str, Any]],
+        traceability: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": "objective_expert_report.v1",
+            "status": status,
+            "headline_conclusion": self._objective_conclusion_answer(
+                objective=objective,
+                paper_contributions=paper_contributions,
+                measurement_ranges=measurement_ranges,
+                controlled_comparisons=controlled_comparisons,
+                mechanism_chain=mechanism_chain,
+                limitations=limitations,
+            ),
+            "scientific_context": self._objective_conclusion_context_summary(
+                objective=objective,
+                paper_contributions=paper_contributions,
+            ),
+            "key_findings": self._objective_expert_key_findings(
+                conclusions=conclusions,
+                source_refs=source_refs,
+            ),
+            "evidence_matrix": self._objective_expert_evidence_matrix(
+                paper_contributions=paper_contributions,
+                measurement_ranges=measurement_ranges,
+                primary_evidence_tables=primary_evidence_tables,
+                controlled_comparisons=controlled_comparisons,
+                mechanism_chain=mechanism_chain,
+                limitations=limitations,
+                source_refs=source_refs,
+            ),
+            "paper_contribution_map": self._objective_expert_paper_contribution_map(
+                paper_contributions=paper_contributions,
+                source_refs=source_refs,
+            ),
+            "controlled_comparisons": self._objective_expert_controlled_comparisons(
+                controlled_comparisons=controlled_comparisons,
+                source_refs=source_refs,
+            ),
+            "mechanism_chain": self._objective_expert_mechanism_chain(
+                mechanism_chain=mechanism_chain,
+                source_refs=source_refs,
+            ),
+            "limitations": self._objective_expert_limitations(
+                limitations=limitations,
+                source_refs=source_refs,
+            ),
+            "source_traceback": self._objective_expert_source_traceback(source_refs),
+            "traceability": traceability,
+        }
+
+    def _objective_expert_key_findings(
+        self,
+        *,
+        conclusions: list[dict[str, Any]],
+        source_refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        findings: list[dict[str, Any]] = []
+        for index, conclusion in enumerate(conclusions, start=1):
+            statement = str(conclusion.get("claim") or "").strip()
+            if not statement:
+                continue
+            evidence_unit_ids = self._dedupe_preserving_order(
+                [
+                    str(evidence_unit_id or "")
+                    for evidence_unit_id in conclusion.get("evidence_unit_ids", [])
+                ]
+            )
+            findings.append(
+                {
+                    key: value
+                    for key, value in {
+                        "finding_id": f"finding-{index:03d}",
+                        "statement": statement,
+                        "strength": conclusion.get("strength") or "evidence",
+                        "evidence_unit_ids": evidence_unit_ids,
+                        "source_refs": self._objective_source_refs_for_evidence_ids(
+                            source_refs,
+                            evidence_unit_ids,
+                        ),
+                    }.items()
+                    if value not in (None, "", [], {})
+                }
+            )
+        return findings
+
+    def _objective_expert_evidence_matrix(
+        self,
+        *,
+        paper_contributions: list[dict[str, Any]],
+        measurement_ranges: list[dict[str, Any]],
+        primary_evidence_tables: list[dict[str, Any]],
+        controlled_comparisons: list[dict[str, Any]],
+        mechanism_chain: dict[str, Any],
+        limitations: list[dict[str, Any]],
+        source_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        measurement_result_count = sum(
+            len(table.get("rows", []))
+            for table in primary_evidence_tables
+        )
+        return {
+            "relevant_paper_count": len(paper_contributions),
+            "measurement_result_count": measurement_result_count,
+            "measurement_property_count": len(measurement_ranges),
+            "controlled_comparison_count": len(controlled_comparisons),
+            "mechanism_evidence_count": len(mechanism_chain.get("evidence", [])),
+            "limitation_count": len(limitations),
+            "source_ref_count": len(source_refs),
+            "measurement_value_ranges": measurement_ranges,
+        }
+
+    def _objective_expert_paper_contribution_map(
+        self,
+        *,
+        paper_contributions: list[dict[str, Any]],
+        source_refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        contribution_map: list[dict[str, Any]] = []
+        for contribution in paper_contributions:
+            evidence_unit_ids = self._dedupe_preserving_order(
+                [
+                    str(evidence_unit_id or "")
+                    for evidence_unit_id in contribution.get("evidence_unit_ids", [])
+                ]
+            )
+            contribution_map.append(
+                {
+                    key: value
+                    for key, value in {
+                        "document_id": contribution.get("document_id"),
+                        "paper_label": contribution.get("paper_label"),
+                        "display_title": contribution.get("display_title"),
+                        "paper_role": contribution.get("paper_role"),
+                        "relevance": contribution.get("relevance"),
+                        "contribution_summary": self._objective_contribution_claim(
+                            contribution
+                        ),
+                        "changed_variables": contribution.get("changed_variables"),
+                        "measured_property_scope": contribution.get(
+                            "measured_property_scope"
+                        ),
+                        "evidence_unit_count": contribution.get("evidence_unit_count"),
+                        "evidence_unit_ids": evidence_unit_ids,
+                        "source_refs": self._objective_source_refs_for_evidence_ids(
+                            source_refs,
+                            evidence_unit_ids,
+                        ),
+                    }.items()
+                    if value not in (None, "", [], {})
+                }
+            )
+        return contribution_map
+
+    def _objective_expert_controlled_comparisons(
+        self,
+        *,
+        controlled_comparisons: list[dict[str, Any]],
+        source_refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        report_comparisons: list[dict[str, Any]] = []
+        for index, comparison in enumerate(controlled_comparisons, start=1):
+            evidence_unit_id = str(comparison.get("evidence_unit_id") or "")
+            source_ref_items = self._objective_source_refs_for_evidence_ids(
+                source_refs,
+                [evidence_unit_id],
+            )
+            report_comparisons.append(
+                {
+                    key: value
+                    for key, value in {
+                        "comparison_id": f"comparison-{index:03d}",
+                        "evidence_unit_id": evidence_unit_id,
+                        "document_id": comparison.get("document_id"),
+                        "property": comparison.get("property"),
+                        "comparison_axis": comparison.get("comparison_axis"),
+                        "direction": comparison.get("direction"),
+                        "validity": comparison.get("validity"),
+                        "summary": comparison.get("summary"),
+                        "sample_context": comparison.get("sample_context"),
+                        "process_context": comparison.get("process_context"),
+                        "baseline_context": comparison.get("baseline_context"),
+                        "source_refs": source_ref_items,
+                    }.items()
+                    if value not in (None, "", [], {})
+                }
+            )
+        return report_comparisons
+
+    def _objective_expert_mechanism_chain(
+        self,
+        *,
+        mechanism_chain: dict[str, Any],
+        source_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        report_evidence: list[dict[str, Any]] = []
+        for evidence in mechanism_chain.get("evidence", []):
+            if not isinstance(evidence, dict):
+                continue
+            evidence_unit_id = str(evidence.get("evidence_unit_id") or "")
+            value_payload = evidence.get("value_payload")
+            summary = (
+                self._value_payload_text(value_payload)
+                if isinstance(value_payload, dict)
+                else None
+            )
+            report_evidence.append(
+                {
+                    key: value
+                    for key, value in {
+                        "evidence_unit_id": evidence_unit_id,
+                        "document_id": evidence.get("document_id"),
+                        "unit_kind": evidence.get("unit_kind"),
+                        "property": evidence.get("property_normalized"),
+                        "summary": summary or evidence.get("interpretation"),
+                        "sample_context": evidence.get("sample_context"),
+                        "process_context": evidence.get("process_context"),
+                        "source_refs": self._objective_source_refs_for_evidence_ids(
+                            source_refs,
+                            [evidence_unit_id],
+                        ),
+                    }.items()
+                    if value not in (None, "", [], {})
+                }
+            )
+        return {
+            "steps": list(mechanism_chain.get("steps", [])),
+            "evidence": report_evidence,
+            "evidence_unit_ids": list(mechanism_chain.get("evidence_unit_ids", [])),
+        }
+
+    def _objective_expert_limitations(
+        self,
+        *,
+        limitations: list[dict[str, Any]],
+        source_refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        report_limitations: list[dict[str, Any]] = []
+        for limitation in limitations:
+            evidence_unit_ids = self._dedupe_preserving_order(
+                [
+                    str(evidence_unit_id or "")
+                    for evidence_unit_id in limitation.get("evidence_unit_ids", [])
+                ]
+            )
+            report_limitations.append(
+                {
+                    key: value
+                    for key, value in {
+                        "code": limitation.get("code"),
+                        "message": limitation.get("message"),
+                        "evidence_unit_ids": evidence_unit_ids,
+                        "source_refs": self._objective_source_refs_for_evidence_ids(
+                            source_refs,
+                            evidence_unit_ids,
+                        ),
+                    }.items()
+                    if value not in (None, "", [], {})
+                }
+            )
+        return report_limitations
+
+    def _objective_expert_source_traceback(
+        self,
+        source_refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                key: value
+                for key, value in {
+                    "evidence_unit_id": source_ref.get("evidence_unit_id"),
+                    "document_id": source_ref.get("document_id"),
+                    "display_label": source_ref.get("display_label"),
+                    "source_kind": source_ref.get("source_kind"),
+                    "source_ref": source_ref.get("source_ref"),
+                    "page": source_ref.get("page") or source_ref.get("page_number"),
+                    "anchor_id": source_ref.get("anchor_id"),
+                    "route_id": source_ref.get("route_id"),
+                    "role": source_ref.get("role"),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+            for source_ref in source_refs
+        ]
 
     def _objective_conclusion_narrative_sections(
         self,

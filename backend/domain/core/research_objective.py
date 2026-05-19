@@ -58,6 +58,9 @@ EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
 LOGIC_CHAIN_SCOPE_VALUES: Final[frozenset[str]] = frozenset(
     {"objective", "paper", "cross_paper"}
 )
+OBJECTIVE_REPORT_STATUS_VALUES: Final[frozenset[str]] = frozenset(
+    {"generating", "ready", "ready_with_warnings", "failed"}
+)
 _QUESTION_SIGNAL_TERMS: Final[tuple[str, ...]] = (
     "how ",
     "what ",
@@ -541,6 +544,77 @@ class ObjectiveLogicChain:
             "chain_payload": dict(self.chain_payload),
             "summary": self.summary,
             "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class ObjectiveReportArtifact:
+    report_id: str
+    objective_id: str
+    status: str
+    stage: str
+    message: str | None
+    title: str
+    language: str
+    model: str | None
+    data_version: str
+    markdown: str | None
+    warnings: tuple[str, ...]
+    source_refs: tuple[dict[str, Any], ...]
+    created_at: str
+    updated_at: str
+    generated_at: str | None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveReportArtifact":
+        objective_id = _normalize_text(payload.get("objective_id")) or ""
+        title = (
+            _normalize_text(payload.get("title"))
+            or _normalize_text(payload.get("question"))
+            or "Research objective report"
+        )
+        created_at = _normalize_text(payload.get("created_at")) or ""
+        updated_at = _normalize_text(payload.get("updated_at")) or created_at
+        return cls(
+            report_id=_normalize_text(payload.get("report_id"))
+            or _build_scoped_id("orp", objective_id, title),
+            objective_id=objective_id,
+            status=_normalize_choice(
+                payload.get("status"),
+                allowed=OBJECTIVE_REPORT_STATUS_VALUES,
+                default="generating",
+            ),
+            stage=_normalize_text(payload.get("stage")) or "requested",
+            message=_normalize_text(payload.get("message")),
+            title=title,
+            language=_normalize_text(payload.get("language")) or "zh",
+            model=_normalize_text(payload.get("model")),
+            data_version=_normalize_text(payload.get("data_version")) or "",
+            markdown=_normalize_text(payload.get("markdown")),
+            warnings=normalize_objective_terms(payload.get("warnings")),
+            source_refs=_normalize_mapping_sequence(payload.get("source_refs")),
+            created_at=created_at,
+            updated_at=updated_at,
+            generated_at=_normalize_text(payload.get("generated_at")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "report_id": self.report_id,
+            "objective_id": self.objective_id,
+            "status": self.status,
+            "stage": self.stage,
+            "message": self.message,
+            "title": self.title,
+            "language": self.language,
+            "model": self.model,
+            "data_version": self.data_version,
+            "markdown": self.markdown,
+            "warnings": list(self.warnings),
+            "source_refs": [dict(item) for item in self.source_refs],
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "generated_at": self.generated_at,
         }
 
 

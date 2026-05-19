@@ -338,9 +338,17 @@ message 返回必须包含：
 
 - `GET /api/v1/collections/{collection_id}/objectives`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
+- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/report`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/report`
 
 这是 objective-first 工作区的主读取合同。接口只读取已经落库的 Core
 research-objective records，不在 GET 请求中触发 LLM 构建。
+
+Objective report 是显式生成的持久化 Markdown artifact：
+
+- `POST .../report` 只负责请求/排队生成，并返回 artifact 当前状态
+- `GET .../report` 只读取已持久化 artifact 状态和 markdown
+- `GET .../research-view` 可附带 `objective_report`，但不触发 LLM 调用
 
 Objective list 最小返回结构：
 
@@ -361,6 +369,8 @@ Objective research-view 最小返回结构：
 - `evidence_routes`
 - `evidence_units`
 - `logic_chain`
+- `conclusion_package`
+- `objective_report`
 - `existing_comparison_rows`
 - `warnings`
 
@@ -391,6 +401,8 @@ Objective research-view 最小返回结构：
 - `relevant_tables` 与 `excluded_tables` 必须是真实 Source table id
 - `evidence_routes`、`evidence_units`、`logic_chain`
   在下游 builder 未完成时可以为空，但字段必须保留
+- `objective_report` 在尚未显式生成时报 `null`；生成中可返回
+  `status=generating` 且 `markdown=null`；生成完成后返回持久化 Markdown
 - `existing_comparison_rows` 当前是投影保留字段，不作为第一版 objective
   research-view 的事实来源
 

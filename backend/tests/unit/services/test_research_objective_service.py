@@ -26,10 +26,13 @@ from domain.core import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
     ObjectivePaperFrame,
+    PaperSkim,
     ResearchObjective,
 )
 from domain.source import SourceArtifactSet
+from infra.persistence.sqlite import SqliteCoreFactRepository
 
 
 class _ObjectiveExtractor:
@@ -373,6 +376,21 @@ class _ObjectiveExtractor:
                 ]
             )
         return StructuredObjectiveEvidenceUnits()
+
+
+class _FakeObjectiveReportLLMClient:
+    def __init__(self, markdown: str) -> None:
+        self.markdown = markdown
+        self.calls: list[dict[str, Any]] = []
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self._create_completion)
+        )
+
+    def _create_completion(self, **kwargs):
+        self.calls.append(kwargs)
+        message = SimpleNamespace(content=self.markdown)
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
 
 
 class _BroadObjectiveExtractor(_ObjectiveExtractor):
@@ -1104,6 +1122,129 @@ def _merge_candidate_values(
             seen.add(normalized)
             merged.append(text)
     return merged
+
+
+def test_research_objective_service_persists_generated_objective_report(tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Report")
+    collection_id = collection["collection_id"]
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does heat treatment affect LPBF 316L yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+        }
+    )
+    evidence_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "material_system": {"family": "316L stainless steel"},
+            "sample_context": {"sample": "HT-SLM"},
+            "process_context": {"process": "LPBF", "heat_treatment": "HT"},
+            "test_condition": {"method": "tensile test"},
+            "value_payload": {
+                "value": 560,
+                "source_value_text": "560 MPa",
+            },
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-2",
+                    "page": 5,
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+    logic_chain = ObjectiveLogicChain.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "chain_scope": "objective",
+            "question": objective.question,
+            "evidence_unit_ids": [evidence_unit.evidence_unit_id],
+            "chain_payload": {"claim": "HT-SLM reaches 560 MPa."},
+            "summary": "Heat treatment is linked to yield strength.",
+            "confidence": 0.8,
+        }
+    )
+    repository.replace_collection_research_objectives(
+        collection_id,
+        (
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "title": "LPBF 316L heat treatment",
+                    "source_filename": "paper-1.pdf",
+                    "doc_role": "experimental",
+                }
+            ),
+        ),
+        (objective,),
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "question": objective.question,
+                    "material_scope": ["316L stainless steel"],
+                    "target_property_axes": ["yield strength"],
+                }
+            ),
+        ),
+        (
+            ObjectivePaperFrame.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "background": "Reports HT-SLM tensile testing.",
+                    "measured_property_scope": ["yield strength"],
+                }
+            ),
+        ),
+        (),
+        (evidence_unit,),
+        (logic_chain,),
+    )
+    llm_client = _FakeObjectiveReportLLMClient(
+        "# 研究目标\n\n## 结论摘要\nHT-SLM reaches 560 MPa [paper-1 · table-2].\n\n"
+        "## 文献贡献\nP001 reports tensile testing.\n\n"
+        "## 样品、工艺和测试条件\nLPBF 316L, HT-SLM, tensile test.\n\n"
+        "## 支撑数据\n560 MPa.\n\n"
+        "## 受控比较\n当前证据不足。\n\n"
+        "## 机制解释\n当前证据不足。\n\n"
+        "## 局限性与不确定性\n单篇文献。\n\n"
+        "## 证据来源\npaper-1 table-2."
+    )
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        core_fact_repository=repository,
+        llm_client=llm_client,
+        report_model="test-model",
+    )
+
+    requested = service.request_objective_report(collection_id, objective.objective_id)
+    generated = service.generate_objective_report(collection_id, objective.objective_id)
+    detail = service.get_objective_research_view(collection_id, objective.objective_id)
+
+    assert requested["status"] == "generating"
+    assert requested["markdown"] is None
+    assert generated["status"] == "ready"
+    assert generated["markdown"].startswith("# 研究目标")
+    assert generated["model"] == "test-model"
+    assert detail["objective_report"]["report_id"] == generated["report_id"]
+    assert detail["objective_report"]["markdown"] == generated["markdown"]
+    assert len(llm_client.calls) == 1
+    user_prompt = llm_client.calls[0]["messages"][1]["content"]
+    assert "560 MPa" in user_prompt
+    assert "table-2" in user_prompt
 
 
 def test_research_objective_service_forces_extractable_objective_route_roles(

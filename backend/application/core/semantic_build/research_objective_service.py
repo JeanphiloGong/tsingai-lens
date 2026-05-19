@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from hashlib import sha1
+from hashlib import sha1, sha256
 import json
 import logging
 import math
+import os
 import re
 from typing import Any, Callable, Mapping
+from uuid import uuid4
+
+from openai import OpenAI
 
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
@@ -19,6 +24,7 @@ from domain.core import (
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
+    ObjectiveReportArtifact,
     PaperSkim,
     ResearchObjective,
     build_research_objective_id,
@@ -42,6 +48,8 @@ from .llm.schemas import (
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
+
+_DEFAULT_OBJECTIVE_REPORT_LANGUAGE = "zh"
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
@@ -254,6 +262,15 @@ class ResearchObjectiveNotFoundError(FileNotFoundError):
         super().__init__(f"research objective not found: {collection_id}/{objective_id}")
 
 
+class ResearchObjectiveReportNotFoundError(FileNotFoundError):
+    """Raised when an objective report has not been requested yet."""
+
+    def __init__(self, collection_id: str, objective_id: str) -> None:
+        self.collection_id = collection_id
+        self.objective_id = objective_id
+        super().__init__(f"research objective report not found: {collection_id}/{objective_id}")
+
+
 class ResearchObjectiveService:
     """Build and serve Core research-objective records."""
 
@@ -264,9 +281,18 @@ class ResearchObjectiveService:
         core_fact_repository: CoreFactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
         document_profile_service: DocumentProfileService | None = None,
+        llm_client: Any | None = None,
+        report_model: str | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self._structured_extractor = structured_extractor
+        self.report_model = (
+            report_model
+            or os.getenv("OBJECTIVE_REPORT_LLM_MODEL")
+            or os.getenv("LLM_MODEL")
+            or "gpt-4o-mini"
+        ).strip()
+        self._report_llm_client = llm_client
         self.core_fact_repository = (
             core_fact_repository
             or getattr(document_profile_service, "core_fact_repository", None)
@@ -393,6 +419,10 @@ class ResearchObjectiveService:
             evidence_units=evidence_units,
         )
         frame_views = self._objective_paper_frame_views(frames, facts=facts)
+        report_artifact = self.core_fact_repository.read_objective_report_artifact(
+            collection_id,
+            objective_id,
+        )
 
         return {
             "collection_id": collection_id,
@@ -419,9 +449,150 @@ class ResearchObjectiveService:
                 evidence_units=evidence_units,
                 logic_chain=logic_chain,
             ),
+            "objective_report": (
+                self._objective_report_response(collection_id, report_artifact)
+                if report_artifact is not None
+                else None
+            ),
             "existing_comparison_rows": [],
             "warnings": [],
         }
+
+    def request_objective_report(
+        self,
+        collection_id: str,
+        objective_id: str,
+        *,
+        language: str = _DEFAULT_OBJECTIVE_REPORT_LANGUAGE,
+        force_regenerate: bool = False,
+    ) -> dict[str, Any]:
+        existing = self.core_fact_repository.read_objective_report_artifact(
+            collection_id,
+            objective_id,
+        )
+        if existing is not None and not force_regenerate:
+            return self._objective_report_response(collection_id, existing)
+
+        context = self._build_objective_report_context(collection_id, objective_id)
+        now = self._now_iso()
+        artifact = ObjectiveReportArtifact.from_mapping(
+            {
+                "report_id": f"orp_{uuid4().hex[:12]}",
+                "objective_id": objective_id,
+                "status": "generating",
+                "stage": "requested",
+                "message": "Objective report generation started.",
+                "title": context["objective"]["question"],
+                "language": language,
+                "model": self.report_model,
+                "data_version": self._objective_report_data_version(context),
+                "markdown": None,
+                "warnings": [],
+                "source_refs": context["source_refs"],
+                "created_at": now,
+                "updated_at": now,
+                "generated_at": None,
+            }
+        )
+        self.core_fact_repository.upsert_objective_report_artifact(
+            collection_id,
+            artifact,
+        )
+        return self._objective_report_response(collection_id, artifact)
+
+    def generate_objective_report(
+        self,
+        collection_id: str,
+        objective_id: str,
+        *,
+        language: str = _DEFAULT_OBJECTIVE_REPORT_LANGUAGE,
+        force_regenerate: bool = False,
+    ) -> dict[str, Any]:
+        requested = self.request_objective_report(
+            collection_id,
+            objective_id,
+            language=language,
+            force_regenerate=force_regenerate,
+        )
+        if requested["status"] in {"ready", "ready_with_warnings"} and not force_regenerate:
+            return requested
+        if requested["status"] == "failed" and not force_regenerate:
+            return requested
+
+        context = self._build_objective_report_context(collection_id, objective_id)
+        existing = self.core_fact_repository.read_objective_report_artifact(
+            collection_id,
+            objective_id,
+        )
+        if existing is None:
+            raise ResearchObjectiveReportNotFoundError(collection_id, objective_id)
+
+        try:
+            markdown = self._generate_objective_report_markdown(
+                context,
+                language=language,
+            )
+            if not markdown:
+                raise RuntimeError("objective report generation returned empty markdown")
+            warnings = self._objective_report_warnings(context, markdown)
+            status = "ready_with_warnings" if warnings else "ready"
+            now = self._now_iso()
+            artifact = ObjectiveReportArtifact.from_mapping(
+                {
+                    **existing.to_record(),
+                    "status": status,
+                    "stage": status,
+                    "message": (
+                        "Objective report generated with evidence warnings."
+                        if warnings
+                        else "Objective report generated."
+                    ),
+                    "title": self._extract_objective_report_title(markdown)
+                    or existing.title,
+                    "language": language,
+                    "model": self.report_model,
+                    "data_version": self._objective_report_data_version(context),
+                    "markdown": markdown,
+                    "warnings": warnings,
+                    "source_refs": context["source_refs"],
+                    "updated_at": now,
+                    "generated_at": now,
+                }
+            )
+            self.core_fact_repository.upsert_objective_report_artifact(
+                collection_id,
+                artifact,
+            )
+            return self._objective_report_response(collection_id, artifact)
+        except Exception as exc:
+            now = self._now_iso()
+            failed = ObjectiveReportArtifact.from_mapping(
+                {
+                    **existing.to_record(),
+                    "status": "failed",
+                    "stage": "failed",
+                    "message": str(exc),
+                    "updated_at": now,
+                }
+            )
+            self.core_fact_repository.upsert_objective_report_artifact(
+                collection_id,
+                failed,
+            )
+            raise
+
+    def get_objective_report_status(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any]:
+        artifact = self.core_fact_repository.read_objective_report_artifact(
+            collection_id,
+            objective_id,
+        )
+        if artifact is None:
+            raise ResearchObjectiveReportNotFoundError(collection_id, objective_id)
+        return self._objective_report_response(collection_id, artifact)
 
     def build_research_objectives(
         self,
@@ -2436,6 +2607,223 @@ class ResearchObjectiveService:
             }
             for frame in frames
         ]
+
+    def _build_objective_report_context(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any]:
+        detail = self.get_objective_research_view(collection_id, objective_id)
+        conclusion_package = detail.get("conclusion_package") or {}
+        expert_report = conclusion_package.get("expert_report") or {}
+        source_refs = (
+            conclusion_package.get("source_refs")
+            or expert_report.get("source_traceback")
+            or []
+        )
+        context = {
+            "schema_version": "objective_report_context.v1",
+            "collection_id": collection_id,
+            "objective": detail["objective"],
+            "readiness": detail["readiness"],
+            "paper_frames": detail["paper_frames"],
+            "evidence_summary": {
+                "evidence_unit_count": len(detail["evidence_units"]),
+                "measurement_count": self._count_records_by_kind(
+                    detail["evidence_units"],
+                    "measurement",
+                ),
+                "comparison_count": self._count_records_by_kind(
+                    detail["evidence_units"],
+                    "comparison",
+                ),
+                "characterization_count": self._count_records_by_kind(
+                    detail["evidence_units"],
+                    "characterization",
+                ),
+                "interpretation_count": self._count_records_by_kind(
+                    detail["evidence_units"],
+                    "interpretation",
+                ),
+            },
+            "evidence_units": self._objective_report_evidence_units(
+                detail["evidence_units"],
+            ),
+            "logic_chain": detail["logic_chain"],
+            "conclusion_package": conclusion_package,
+            "source_refs": self._objective_report_source_refs(source_refs),
+        }
+        return context
+
+    def _objective_report_evidence_units(
+        self,
+        evidence_units: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        compact_units: list[dict[str, Any]] = []
+        for unit in evidence_units:
+            compact_units.append(
+                {
+                    key: value
+                    for key, value in {
+                        "evidence_unit_id": unit.get("evidence_unit_id"),
+                        "document_id": unit.get("document_id"),
+                        "unit_kind": unit.get("unit_kind"),
+                        "property_normalized": unit.get("property_normalized"),
+                        "material_system": unit.get("material_system"),
+                        "sample_context": unit.get("sample_context"),
+                        "process_context": unit.get("process_context"),
+                        "test_condition": unit.get("test_condition"),
+                        "value_payload": unit.get("value_payload"),
+                        "unit": unit.get("unit"),
+                        "baseline_context": unit.get("baseline_context"),
+                        "interpretation": unit.get("interpretation"),
+                        "source_refs": unit.get("source_refs"),
+                        "resolution_status": unit.get("resolution_status"),
+                        "confidence": unit.get("confidence"),
+                    }.items()
+                    if value not in (None, "", [], {})
+                }
+            )
+        return compact_units
+
+    def _objective_report_source_refs(
+        self,
+        source_refs: Any,
+    ) -> list[dict[str, Any]]:
+        compact_refs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for source_ref in source_refs if isinstance(source_refs, list) else []:
+            if not isinstance(source_ref, dict):
+                continue
+            record = {
+                key: value
+                for key, value in {
+                    "evidence_unit_id": source_ref.get("evidence_unit_id"),
+                    "document_id": source_ref.get("document_id"),
+                    "display_label": source_ref.get("display_label"),
+                    "source_kind": source_ref.get("source_kind"),
+                    "source_ref": source_ref.get("source_ref"),
+                    "page": source_ref.get("page") or source_ref.get("page_number"),
+                    "anchor_id": source_ref.get("anchor_id"),
+                    "route_id": source_ref.get("route_id"),
+                    "role": source_ref.get("role"),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+            if not record:
+                continue
+            key = json.dumps(record, ensure_ascii=False, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            compact_refs.append(record)
+        return compact_refs
+
+    def _generate_objective_report_markdown(
+        self,
+        context: dict[str, Any],
+        *,
+        language: str,
+    ) -> str:
+        system_prompt = (
+            "You are a senior materials scientist writing a research-objective "
+            "report from a provided evidence package. Use only the provided "
+            "facts. Do not invent samples, values, mechanisms, papers, or "
+            "comparisons. Every concrete claim with a value or comparison must "
+            "cite the provided source labels when available."
+        )
+        user_prompt = (
+            f"Language: {'Chinese' if language == 'zh' else 'English'}\n"
+            "Write one Markdown report for this research objective.\n"
+            "Required sections:\n"
+            "# 研究目标\n"
+            "## 结论摘要\n"
+            "## 文献贡献\n"
+            "## 样品、工艺和测试条件\n"
+            "## 支撑数据\n"
+            "## 受控比较\n"
+            "## 机制解释\n"
+            "## 局限性与不确定性\n"
+            "## 证据来源\n"
+            "If a section lacks evidence, say so explicitly instead of filling it with generic text.\n\n"
+            f"EvidencePackage:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
+        )
+        completion = self._get_report_llm_client().chat.completions.create(
+            model=self.report_model,
+            temperature=0.15,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        content = completion.choices[0].message.content if completion.choices else None
+        return self._coerce_llm_message_content(content)
+
+    def _get_report_llm_client(self):
+        if self._report_llm_client is None:
+            self._report_llm_client = OpenAI(
+                api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
+                base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
+            )
+        return self._report_llm_client
+
+    def _objective_report_warnings(
+        self,
+        context: dict[str, Any],
+        markdown: str,
+    ) -> list[str]:
+        warnings: list[str] = []
+        if not context["source_refs"]:
+            warnings.append("No source references are available for this report.")
+        if not context["evidence_units"]:
+            warnings.append("No objective evidence units are available for this report.")
+        if markdown.count("## ") < 6:
+            warnings.append("Generated report is missing one or more expected sections.")
+        return warnings
+
+    def _objective_report_response(
+        self,
+        collection_id: str,
+        artifact: ObjectiveReportArtifact,
+    ) -> dict[str, Any]:
+        return {
+            "collection_id": collection_id,
+            **artifact.to_record(),
+        }
+
+    def _objective_report_data_version(self, context: dict[str, Any]) -> str:
+        payload = json.dumps(context, ensure_ascii=False, sort_keys=True)
+        return sha256(payload.encode("utf-8")).hexdigest()
+
+    def _extract_objective_report_title(self, markdown: str) -> str | None:
+        match = re.search(r"^\s*#\s+(.+?)\s*$", markdown, flags=re.MULTILINE)
+        if not match:
+            return None
+        return match.group(1).strip() or None
+
+    def _count_records_by_kind(
+        self,
+        records: list[dict[str, Any]],
+        unit_kind: str,
+    ) -> int:
+        return sum(1 for record in records if record.get("unit_kind") == unit_kind)
+
+    def _now_iso(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _coerce_llm_message_content(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if not isinstance(content, list):
+            return str(content or "").strip()
+        parts: list[str] = []
+        for item in content:
+            text = item if isinstance(item, str) else getattr(item, "text", None)
+            if text is None and isinstance(item, dict):
+                text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        return "\n".join(parts).strip()
 
     def _objective_document_metadata(self, facts) -> dict[str, dict[str, str | None]]:
         metadata: dict[str, dict[str, str | None]] = {}

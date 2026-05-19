@@ -487,6 +487,27 @@ export type ObjectiveExpertReport = {
 	traceability: Record<string, unknown>;
 };
 
+export type ObjectiveReportStatus = 'generating' | 'ready' | 'ready_with_warnings' | 'failed';
+
+export type ObjectiveReportArtifact = {
+	collection_id: string;
+	report_id: string;
+	objective_id: string;
+	status: ObjectiveReportStatus;
+	stage: string;
+	message: string | null;
+	title: string;
+	language: string;
+	model: string | null;
+	data_version: string;
+	markdown: string | null;
+	warnings: string[];
+	source_refs: Record<string, unknown>[];
+	created_at: string;
+	updated_at: string;
+	generated_at: string | null;
+};
+
 export type ObjectiveConclusionPackage = {
 	schema_version: string;
 	title: string;
@@ -528,6 +549,7 @@ export type ObjectiveResearchView = {
 	evidence_units: ObjectiveEvidenceUnit[];
 	logic_chain: ObjectiveLogicChain | null;
 	conclusion_package: ObjectiveConclusionPackage | null;
+	objective_report: ObjectiveReportArtifact | null;
 	existing_comparison_rows: Record<string, unknown>[];
 	warnings: ResearchViewWarning[];
 };
@@ -1792,6 +1814,44 @@ function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusio
 	};
 }
 
+function normalizeObjectiveReportArtifact(value: unknown): ObjectiveReportArtifact | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const reportId = toText(record.report_id);
+	const objectiveId = toText(record.objective_id);
+	if (!reportId || !objectiveId) return null;
+
+	const status = toText(record.status, 'generating') as ObjectiveReportStatus;
+	const normalizedStatus: ObjectiveReportStatus = [
+		'generating',
+		'ready',
+		'ready_with_warnings',
+		'failed'
+	].includes(status)
+		? status
+		: 'generating';
+
+	return {
+		collection_id: toText(record.collection_id),
+		report_id: reportId,
+		objective_id: objectiveId,
+		status: normalizedStatus,
+		stage: toText(record.stage, normalizedStatus),
+		message: nonEmptyText(record.message),
+		title: toText(record.title, 'Research objective report'),
+		language: toText(record.language, 'zh'),
+		model: nonEmptyText(record.model),
+		data_version: toText(record.data_version),
+		markdown: nonEmptyText(record.markdown),
+		warnings: toStringList(record.warnings),
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		created_at: toText(record.created_at),
+		updated_at: toText(record.updated_at),
+		generated_at: nonEmptyText(record.generated_at)
+	};
+}
+
 export function normalizeMaterialSummary(value: unknown): MaterialSummary | null {
 	const record = asRecord(value);
 	if (!record) return null;
@@ -2300,6 +2360,7 @@ export function normalizeObjectiveResearchView(
 		evidence_units: evidenceUnits,
 		logic_chain: normalizeObjectiveLogicChain(record?.logic_chain),
 		conclusion_package: normalizeObjectiveConclusionPackage(record?.conclusion_package),
+		objective_report: normalizeObjectiveReportArtifact(record?.objective_report),
 		existing_comparison_rows: normalizeUnknownRecordList(record?.existing_comparison_rows),
 		warnings: normalizeWarnings(record?.warnings)
 	};
@@ -2361,6 +2422,46 @@ export async function fetchObjectiveResearchView(
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/research-view`
 	);
 	return normalizeObjectiveResearchView(data, collectionId, objectiveId);
+}
+
+export async function fetchObjectiveReport(
+	collectionId: string,
+	objectiveId: string
+): Promise<ObjectiveReportArtifact> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/report`
+	);
+	const report = normalizeObjectiveReportArtifact(data);
+	if (!report) {
+		throw new Error('Invalid objective report response');
+	}
+	return report;
+}
+
+export async function createObjectiveReport(
+	collectionId: string,
+	objectiveId: string,
+	options: { language?: 'zh' | 'en'; force_regenerate?: boolean } = {}
+): Promise<ObjectiveReportArtifact> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/report`,
+		{
+			method: 'POST',
+			body: JSON.stringify({
+				language: options.language ?? 'zh',
+				force_regenerate: options.force_regenerate ?? false
+			})
+		}
+	);
+	const report = normalizeObjectiveReportArtifact(data);
+	if (!report) {
+		throw new Error('Invalid objective report response');
+	}
+	return report;
 }
 
 export async function fetchDocumentMaterials(

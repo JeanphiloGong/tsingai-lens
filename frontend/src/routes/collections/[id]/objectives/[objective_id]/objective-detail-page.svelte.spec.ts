@@ -770,6 +770,40 @@ function objectivePayload() {
 					unsupported_claim_count: 0
 				}
 			}
+		},
+		objective_report: {
+			collection_id: 'col_123',
+			report_id: 'orp_1',
+			objective_id: 'obj_1',
+			status: 'ready',
+			stage: 'ready',
+			message: 'Objective report generated.',
+			title: 'Research objective report',
+			language: 'zh',
+			model: 'test-model',
+			data_version: 'v1',
+			markdown:
+				'# 研究目标\n\n' +
+				'How does heat treatment affect LPBF 316L tensile strength?\n\n' +
+				'## 结论摘要\n\n' +
+				'Heat treatment changes LPBF 316L tensile response; yield strength is bounded by 540-560 MPa in the persisted report.\n\n' +
+				'## 文献贡献\n\n' +
+				'- P001 provides tensile measurements, comparison evidence, and microstructure interpretation.\n\n' +
+				'## 支撑数据\n\n' +
+				'The report cites P001 Table 2 page 5 for the 560 MPa measurement.',
+			warnings: [],
+			source_refs: [
+				{
+					document_id: 'doc_1',
+					source_kind: 'table',
+					source_ref: 'table-2',
+					page: 5,
+					display_label: 'P001 · Table 2 · p.5'
+				}
+			],
+			created_at: '2026-05-19T00:00:00+00:00',
+			updated_at: '2026-05-19T00:00:01+00:00',
+			generated_at: '2026-05-19T00:00:01+00:00'
 		}
 	};
 }
@@ -792,7 +826,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 	});
 
-	it('renders the objective as a report-first conclusion package with evidence groups and source links', async () => {
+	it('renders the persisted objective report as the primary view and keeps evidence in audit', async () => {
 		render(Page);
 
 		await expect
@@ -803,129 +837,81 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research conclusion package' }))
+			.element(browserPage.getByRole('heading', { name: 'Research objective report' }))
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('heading', { name: '结论摘要' })).toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
-					'Expert report: heat treatment changes LPBF 316L tensile response, with the current evidence bounded by 540-560 MPa yield-strength measurements.'
+					'Heat treatment changes LPBF 316L tensile response; yield strength is bounded by 540-560 MPa in the persisted report.'
 				)
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Package status: ready'))
+			.element(browserPage.getByText('P001 provides tensile measurements, comparison evidence, and microstructure interpretation.'))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Scientific context' }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Expert context: this objective compares as-built and heat-treated LPBF 316L under tensile testing, then ties the response to microstructure observations.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Key findings' }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Expert finding: yield strength is supported by two heat-treated measurements spanning 540-560 MPa.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'The key evidence table contains 2 measurement rows. Across those rows, yield strength range 540-560 MPa.'
-				)
-			)
+			.element(browserPage.getByText('Expert report: heat treatment changes LPBF 316L tensile response'))
 			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Primary evidence table' }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Controlled comparisons' }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Expert comparison: heat-treated samples exceed the as-built baseline for yield strength.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Mechanism chain' }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Expert mechanism step: heat treatment changes cellular substructure.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Limitations and uncertainties' }).first())
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Expert limitation: one measurement remains partially resolved, so the comparison should stay source-bounded.'
-				)
-			)
-			.toBeInTheDocument();
-		const pageText = document.body.textContent ?? '';
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Extraction diagnostics' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Supporting evidence' }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Evidence audit and diagnostics'))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Evidence audit and diagnostics')).toBeInTheDocument();
 		await browserPage.getByText('Evidence audit and diagnostics').click();
 		await expect.element(browserPage.getByText('LPBF 316L heat treatment study').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: /Yield strength reached 560 MPa/ }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('All extracted evidence')).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Measurement results' }))
-			.not.toBeInTheDocument();
-		expect(pageText.indexOf('Research conclusion package')).toBeLessThan(
-			pageText.indexOf('Evidence audit and diagnostics')
-		);
-		expect(pageText.indexOf('Research conclusion package')).toBeLessThan(
-			pageText.indexOf('Extraction diagnostics')
-		);
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Paper contribution map' }).first())
-			.toBeInTheDocument();
-		const contributionMap = browserPage.getByRole('region', { name: 'Paper contribution map' });
-		await expect
-			.element(contributionMap.getByText('P001 · primary_experiment · high'))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				contributionMap.getByText(
-					'Expert contribution: P001 provides the tensile measurements, comparison evidence, and microstructure interpretation for this objective.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect.element(contributionMap.getByText('11 unit(s)')).toBeInTheDocument();
-
-		const sourceLink = browserPage.getByRole('link', { name: 'P001 · Table 2 · p.5' }).first();
-		await expect
-			.element(sourceLink)
-			.toHaveAttribute(
-				'href',
-				'/collections/col_123/documents/doc_1?page=5&evidence_id=ev_1&anchor_id=anc_1&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
-			);
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
 		).toEqual(['/api/v1/collections/col_123/objectives/obj_1/research-view']);
+	});
+
+	it('requests objective report generation when no persisted report is available', async () => {
+		const payload: any = objectivePayload();
+		payload.objective_report = null;
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/objectives/obj_1/research-view') {
+				return jsonResponse(payload);
+			}
+
+			if (path === '/api/v1/collections/col_123/objectives/obj_1/report' && init?.method === 'POST') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					report_id: 'orp_generating',
+					objective_id: 'obj_1',
+					status: 'generating',
+					stage: 'requested',
+					message: 'Objective report generation started.',
+					title: 'Research objective report',
+					language: 'zh',
+					model: 'test-model',
+					data_version: 'v2',
+					markdown: null,
+					warnings: [],
+					source_refs: [],
+					created_at: '2026-05-19T00:00:00+00:00',
+					updated_at: '2026-05-19T00:00:00+00:00',
+					generated_at: null
+				});
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Report has not been generated' })).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Generate report' }).click();
+		await expect.element(browserPage.getByText('Objective report generation started.')).toBeInTheDocument();
+
+		const reportRequest = fetchMock.mock.calls.find(
+			([input]) => requestPath(input as string | URL | Request) === '/api/v1/collections/col_123/objectives/obj_1/report'
+		);
+		expect(reportRequest?.[1]?.method).toBe('POST');
+		expect(JSON.parse(String(reportRequest?.[1]?.body))).toEqual({
+			language: 'zh',
+			force_regenerate: false
+		});
 	});
 
 	it('filters evidence units by kind and updates the inspector', async () => {

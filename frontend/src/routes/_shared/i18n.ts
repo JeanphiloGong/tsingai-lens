@@ -357,6 +357,15 @@ const translations: Record<Language, Translations> = {
 				otherEvidence: 'Other evidence',
 				contextTitle: 'Objective context',
 				variableAxes: 'Variable axes',
+				objectiveReportTitle: 'Research objective report',
+				objectiveReportBody:
+					'LLM-generated Markdown report persisted by the backend from objective-scoped evidence.',
+				objectiveReportNotReadyTitle: 'Report has not been generated',
+				objectiveReportNotReadyBody:
+					'Generate a report after the objective evidence units are ready. The page does not call the LLM while loading.',
+				generateObjectiveReport: 'Generate report',
+				refreshObjectiveReport: 'Refresh report',
+				regenerateObjectiveReport: 'Regenerate report',
 				conclusionPackageTitle: 'Research conclusion package',
 				conclusionPackageBody:
 					'Objective-scoped report package with conclusions, paper contributions, evidence, mechanism, and uncertainty.',
@@ -2941,6 +2950,14 @@ const translations: Record<Language, Translations> = {
 				otherEvidence: '其他证据',
 				contextTitle: '目标上下文',
 				variableAxes: '变化轴',
+				objectiveReportTitle: '研究目标报告',
+				objectiveReportBody: '由后端基于该目标证据持久化生成的 Markdown 报告。',
+				objectiveReportNotReadyTitle: '报告尚未生成',
+				objectiveReportNotReadyBody:
+					'目标证据单元就绪后可生成报告。页面加载时不会调用 LLM。',
+				generateObjectiveReport: '生成报告',
+				refreshObjectiveReport: '刷新报告',
+				regenerateObjectiveReport: '重新生成报告',
 				conclusionPackageTitle: '科研结论包',
 				conclusionPackageBody: '按该研究目标组织结论、文献贡献、支撑证据、机制链和不确定性。',
 				collectionConclusion: '集合级结论',

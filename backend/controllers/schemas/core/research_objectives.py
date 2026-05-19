@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -172,6 +172,45 @@ class ObjectiveLogicChainResponse(BaseModel):
     confidence: float = Field(default=0.0)
 
 
+ObjectiveReportStatus = Literal[
+    "generating",
+    "ready",
+    "ready_with_warnings",
+    "failed",
+]
+
+
+class ObjectiveReportRequest(BaseModel):
+    """Request body for generating an objective-scoped report."""
+
+    language: Literal["zh", "en"] = Field(default="zh", description="报告语言")
+    force_regenerate: bool = Field(default=False, description="是否强制重新生成")
+
+
+class ObjectiveReportResponse(BaseModel):
+    """Persisted objective report artifact."""
+
+    collection_id: str = Field(..., description="Collection ID")
+    report_id: str = Field(..., description="Report ID")
+    objective_id: str = Field(..., description="Objective ID")
+    status: ObjectiveReportStatus = Field(..., description="Report generation status")
+    stage: str = Field(..., description="Report generation stage")
+    message: str | None = Field(default=None, description="Status message")
+    title: str = Field(..., description="Report title")
+    language: str = Field(default="zh", description="Report language")
+    model: str | None = Field(default=None, description="LLM model")
+    data_version: str = Field(..., description="Objective evidence context version")
+    markdown: str | None = Field(default=None, description="Persisted Markdown report")
+    warnings: list[str] = Field(default_factory=list, description="Report warnings")
+    source_refs: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Source references used by the report",
+    )
+    created_at: str = Field(..., description="Created timestamp")
+    updated_at: str = Field(..., description="Updated timestamp")
+    generated_at: str | None = Field(default=None, description="Generated timestamp")
+
+
 class ObjectiveListResponse(BaseModel):
     """Collection research objective list."""
 
@@ -197,6 +236,10 @@ class ObjectiveResearchViewResponse(BaseModel):
     conclusion_package: dict[str, Any] = Field(
         default_factory=dict,
         description="Structured objective-scoped scientific report package",
+    )
+    objective_report: ObjectiveReportResponse | None = Field(
+        default=None,
+        description="Persisted LLM-generated objective report artifact",
     )
     existing_comparison_rows: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[ResearchViewWarningResponse] = Field(default_factory=list)

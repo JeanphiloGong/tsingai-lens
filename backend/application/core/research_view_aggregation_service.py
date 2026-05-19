@@ -1922,37 +1922,56 @@ class ResearchViewAggregationService:
             representative_chains,
             property_names,
         )
+        material_scope = self._build_material_report_scope(
+            canonical_name,
+            sample_matrix,
+            papers,
+            evidence_refs,
+        )
+        limitations = self._dedupe_strings(limitations)
+        paper_contributions = [
+            self._build_material_report_paper_contribution(paper)
+            for paper in papers
+        ]
+        key_findings = self._build_material_report_findings(representative_chains)
+        thematic_sections = self._build_material_report_sections(
+            canonical_name,
+            all_chains,
+            representative_chains,
+        )
+        evidence_appendix = self._build_material_report_appendix(
+            sample_matrix,
+            property_names,
+            evidence_refs,
+        )
+        status = "ready" if representative_chains and not limitations else "partial"
         return {
             "schema_version": "material_report_package.v1",
-            "status": "ready" if representative_chains and not limitations else "partial",
+            "status": status,
             "title": f"{canonical_name} material-state report",
             "material_id": material_id,
             "canonical_name": canonical_name,
             "summary": executive_summary,
             "executive_summary": executive_summary,
-            "material_scope": self._build_material_report_scope(
-                canonical_name,
-                sample_matrix,
-                papers,
-                evidence_refs,
-            ),
-            "paper_contributions": [
-                self._build_material_report_paper_contribution(paper)
-                for paper in papers
-            ],
-            "key_findings": self._build_material_report_findings(representative_chains),
+            "material_scope": material_scope,
+            "paper_contributions": paper_contributions,
+            "key_findings": key_findings,
             "representative_states": representative_chains,
-            "thematic_sections": self._build_material_report_sections(
-                canonical_name,
-                all_chains,
-                representative_chains,
-            ),
+            "thematic_sections": thematic_sections,
             "material_state_chains": representative_chains,
-            "limitations": self._dedupe_strings(limitations),
-            "evidence_appendix": self._build_material_report_appendix(
-                sample_matrix,
-                property_names,
-                evidence_refs,
+            "limitations": limitations,
+            "evidence_appendix": evidence_appendix,
+            "document": self._build_material_report_document(
+                canonical_name=canonical_name,
+                status=status,
+                executive_summary=executive_summary,
+                material_scope=material_scope,
+                paper_contributions=paper_contributions,
+                key_findings=key_findings,
+                representative_chains=representative_chains,
+                thematic_sections=thematic_sections,
+                limitations=limitations,
+                evidence_appendix=evidence_appendix,
             ),
             "source_refs": evidence_refs,
         }
@@ -2209,6 +2228,269 @@ class ResearchViewAggregationService:
             "evidence_count": len(evidence_refs),
             "source_table_count": len(source_tables),
         }
+
+    def _build_material_report_document(
+        self,
+        *,
+        canonical_name: str,
+        status: str,
+        executive_summary: str,
+        material_scope: dict[str, Any],
+        paper_contributions: list[dict[str, Any]],
+        key_findings: list[dict[str, Any]],
+        representative_chains: list[dict[str, Any]],
+        thematic_sections: list[dict[str, Any]],
+        limitations: list[str],
+        evidence_appendix: dict[str, Any],
+    ) -> dict[str, Any]:
+        citations = self._material_report_citations(
+            key_findings=key_findings,
+            representative_chains=representative_chains,
+            thematic_sections=thematic_sections,
+        )
+        citation_lookup = {
+            ref.get("evidence_ref_id"): citation_id
+            for citation_id, ref in citations.items()
+            if self._safe_text(ref.get("evidence_ref_id"))
+        }
+        headings = [
+            (1, f"{canonical_name} Material Report"),
+            (2, "Executive Summary"),
+            (2, "Material Scope"),
+            (2, "Paper Contributions"),
+            (2, "Key Findings"),
+            (2, "Representative Material States"),
+            (2, "Thematic Analysis"),
+            (2, "Limitations And Comparability"),
+            (2, "Evidence Appendix"),
+        ]
+        outline = [
+            {
+                "level": level,
+                "title": title,
+                "anchor": self._slug(title),
+            }
+            for level, title in headings
+        ]
+        markdown = self._material_report_markdown(
+            canonical_name=canonical_name,
+            executive_summary=executive_summary,
+            material_scope=material_scope,
+            paper_contributions=paper_contributions,
+            key_findings=key_findings,
+            representative_chains=representative_chains,
+            thematic_sections=thematic_sections,
+            limitations=limitations,
+            evidence_appendix=evidence_appendix,
+            citation_lookup=citation_lookup,
+        )
+        return {
+            "schema_version": "material_report_document.v1",
+            "status": status,
+            "title": f"{canonical_name} Material Report",
+            "markdown": markdown,
+            "citations": citations,
+            "outline": outline,
+            "warnings": [],
+            "evidence_appendix": evidence_appendix,
+        }
+
+    def _material_report_citations(
+        self,
+        *,
+        key_findings: list[dict[str, Any]],
+        representative_chains: list[dict[str, Any]],
+        thematic_sections: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        refs = self._dedupe_evidence_refs(
+            [
+                *[
+                    ref
+                    for finding in key_findings
+                    for ref in self._as_list(finding.get("evidence_refs"))
+                ],
+                *[
+                    ref
+                    for chain in representative_chains
+                    for ref in self._as_list(chain.get("source_evidence"))
+                ],
+                *[
+                    ref
+                    for section in thematic_sections
+                    for ref in self._as_list(section.get("evidence_refs"))
+                ],
+            ]
+        )
+        return {
+            f"E{index:03d}": ref
+            for index, ref in enumerate(refs, start=1)
+        }
+
+    def _material_report_markdown(
+        self,
+        *,
+        canonical_name: str,
+        executive_summary: str,
+        material_scope: dict[str, Any],
+        paper_contributions: list[dict[str, Any]],
+        key_findings: list[dict[str, Any]],
+        representative_chains: list[dict[str, Any]],
+        thematic_sections: list[dict[str, Any]],
+        limitations: list[str],
+        evidence_appendix: dict[str, Any],
+        citation_lookup: dict[str, str],
+    ) -> str:
+        lines = [
+            f"# {canonical_name} Material Report",
+            "",
+            "## Executive Summary",
+            "",
+            executive_summary,
+            "",
+            "## Material Scope",
+            "",
+            f"- Material system: {material_scope.get('material_system') or canonical_name}",
+            f"- Source papers: {material_scope.get('source_paper_count', 0)}",
+            f"- Resolved material states: {material_scope.get('sample_row_count', 0)}",
+            f"- Evidence references: {material_scope.get('evidence_count', 0)}",
+        ]
+        routes = self._as_list(material_scope.get("preparation_routes"))
+        if routes:
+            lines.append(f"- Preparation routes: {', '.join(str(route) for route in routes[:6])}")
+        lines.extend(["", "## Paper Contributions", ""])
+        if paper_contributions:
+            for paper in paper_contributions:
+                summary = self._safe_text(paper.get("contribution_summary"))
+                if summary:
+                    lines.append(f"- {summary}")
+        else:
+            lines.append("- No paper-level contribution summary is available.")
+        lines.extend(["", "## Key Findings", ""])
+        if key_findings:
+            for finding in key_findings:
+                citation = self._material_report_first_citation(
+                    self._as_list(finding.get("evidence_refs")),
+                    citation_lookup,
+                )
+                body = self._safe_text(finding.get("body")) or "Traceable finding."
+                lines.append(f"- {body}{citation}")
+        else:
+            lines.append("- No evidence-backed key finding is available.")
+        lines.extend(["", "## Representative Material States", ""])
+        if representative_chains:
+            for chain in representative_chains:
+                lines.extend(
+                    self._material_report_chain_markdown_lines(
+                        chain,
+                        citation_lookup,
+                    )
+                )
+        else:
+            lines.append("No representative material-state chain is available.")
+        lines.extend(["", "## Thematic Analysis", ""])
+        for section in thematic_sections:
+            citation = self._material_report_first_citation(
+                self._as_list(section.get("evidence_refs")),
+                citation_lookup,
+            )
+            lines.extend(
+                [
+                    f"### {section.get('title')}",
+                    "",
+                    f"{section.get('body')}{citation}",
+                ]
+            )
+            key_points = [
+                self._safe_text(point)
+                for point in self._as_list(section.get("key_points"))
+                if self._safe_text(point)
+            ]
+            if key_points:
+                lines.extend(["", *[f"- {point}" for point in key_points]])
+            lines.append("")
+        lines.extend(["## Limitations And Comparability", ""])
+        if limitations:
+            lines.extend(f"- {limitation}" for limitation in limitations)
+        else:
+            lines.append("- No explicit limitation was detected in the resolved report package.")
+        lines.extend(
+            [
+                "",
+                "## Evidence Appendix",
+                "",
+                f"- Sample matrix rows: {evidence_appendix.get('sample_matrix_row_count', 0)}",
+                f"- Property count: {evidence_appendix.get('property_count', 0)}",
+                f"- Evidence count: {evidence_appendix.get('evidence_count', 0)}",
+                f"- Source table count: {evidence_appendix.get('source_table_count', 0)}",
+            ]
+        )
+        return "\n".join(lines).strip() + "\n"
+
+    def _material_report_chain_markdown_lines(
+        self,
+        chain: dict[str, Any],
+        citation_lookup: dict[str, str],
+    ) -> list[str]:
+        label = self._safe_text(chain.get("sample_label")) or self._safe_text(
+            chain.get("sample_id")
+        ) or "material state"
+        citation = self._material_report_first_citation(
+            self._as_list(chain.get("source_evidence")),
+            citation_lookup,
+        )
+        lines = [f"### {label}", ""]
+        context_lines = self._material_report_mapping_lines(
+            "Preparation",
+            self._as_mapping(chain.get("preparation_context")),
+        )
+        condition_lines = self._material_report_mapping_lines(
+            "Testing",
+            self._as_mapping(chain.get("test_conditions")),
+        )
+        result_text = self._material_report_result_summary(
+            self._as_list(chain.get("performance_results"))
+        )
+        if context_lines:
+            lines.extend(context_lines)
+        if condition_lines:
+            lines.extend(condition_lines)
+        if result_text:
+            lines.append(f"- Response: {result_text}{citation}")
+        else:
+            lines.append(f"- Response: unresolved{citation}")
+        boundaries = [
+            self._safe_text(boundary)
+            for boundary in self._as_list(chain.get("comparability_boundary"))
+            if self._safe_text(boundary)
+        ]
+        if boundaries:
+            lines.extend(f"- Comparability: {boundary}" for boundary in boundaries)
+        lines.append("")
+        return lines
+
+    def _material_report_mapping_lines(
+        self,
+        label: str,
+        values: dict[str, Any],
+    ) -> list[str]:
+        parts = [
+            f"{key}: {value}"
+            for key, value in values.items()
+            if self._has_observed_value(value)
+        ][:6]
+        return [f"- {label}: {', '.join(parts)}"] if parts else []
+
+    def _material_report_first_citation(
+        self,
+        refs: list[Any],
+        citation_lookup: dict[str, str],
+    ) -> str:
+        for ref_value in refs:
+            ref = self._as_mapping(ref_value)
+            ref_id = self._safe_text(ref.get("evidence_ref_id"))
+            if ref_id and (citation_id := citation_lookup.get(ref_id)):
+                return f" [{citation_id}]"
+        return ""
 
     def _chain_has_property_token(
         self,

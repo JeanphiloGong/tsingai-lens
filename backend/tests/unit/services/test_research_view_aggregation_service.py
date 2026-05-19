@@ -6,6 +6,7 @@ from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
     ResearchViewNotReadyError,
 )
+from controllers.schemas.core.research_view import MaterialProfileResponse
 from domain.core import (
     BaselineReference,
     CharacterizationObservation,
@@ -576,6 +577,7 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
         "mat-316l-stainless-steel",
     )
 
+    MaterialProfileResponse.model_validate(profile)
     assert profile["state"] == "ready"
     assert profile["overview"]["sample_count"] == 2
     assert profile["overview"]["measured_properties"] == [
@@ -601,6 +603,21 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     assert report_package["representative_states"] == chains
     assert report_package["key_findings"]
     assert report_package["thematic_sections"]
+    document = report_package["document"]
+    assert document["schema_version"] == "material_report_document.v1"
+    assert document["title"] == "316L stainless steel Material Report"
+    assert "# 316L stainless steel Material Report" in document["markdown"]
+    assert "## Representative Material States" in document["markdown"]
+    assert "as-built" in document["markdown"]
+    assert "heat-treated" in document["markdown"]
+    assert "[E001]" in document["markdown"]
+    assert document["citations"]["E001"]["fact_ids"] == ["oeu-as-built-icorr"]
+    assert document["outline"][0] == {
+        "level": 1,
+        "title": "316L stainless steel Material Report",
+        "anchor": "316l-stainless-steel-material-report",
+    }
+    assert document["evidence_appendix"] == report_package["evidence_appendix"]
     assert chains[0]["preparation_context"] == {"process": "LPBF"}
     assert chains[0]["test_conditions"] == {
         "method": "potentiodynamic polarization",

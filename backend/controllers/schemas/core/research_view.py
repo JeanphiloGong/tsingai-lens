@@ -468,6 +468,39 @@ class MaterialReportAppendixResponse(BaseModel):
     source_table_count: int = Field(default=0, description="来源表格数")
 
 
+class MaterialReportOutlineItemResponse(BaseModel):
+    """One heading in the material report document outline."""
+
+    level: int = Field(..., description="Markdown heading level")
+    title: str = Field(..., description="章节标题")
+    anchor: str = Field(..., description="前端可使用的章节 anchor")
+
+
+class MaterialReportDocumentResponse(BaseModel):
+    """Markdown-first material report document with clickable citations."""
+
+    schema_version: str = Field(..., description="文档 schema 版本")
+    status: ResearchViewState = Field(..., description="文档状态")
+    title: str = Field(..., description="报告标题")
+    markdown: str = Field(..., description="证据引用 Markdown 正文")
+    citations: dict[str, EvidenceReferenceResponse] = Field(
+        default_factory=dict,
+        description="Markdown 引用 ID 到证据引用的映射",
+    )
+    outline: list[MaterialReportOutlineItemResponse] = Field(
+        default_factory=list,
+        description="Markdown 章节目录",
+    )
+    warnings: list[ResearchViewWarningResponse] = Field(
+        default_factory=list,
+        description="文档级 warning",
+    )
+    evidence_appendix: MaterialReportAppendixResponse = Field(
+        ...,
+        description="文档引用的证据附录摘要",
+    )
+
+
 class MaterialReportPackageResponse(BaseModel):
     """Backend-built package for rendering the material research report."""
 
@@ -501,6 +534,10 @@ class MaterialReportPackageResponse(BaseModel):
     )
     limitations: list[str] = Field(default_factory=list, description="限制和不确定性")
     evidence_appendix: MaterialReportAppendixResponse = Field(..., description="证据附录摘要")
+    document: MaterialReportDocumentResponse | None = Field(
+        default=None,
+        description="Markdown-first 报告文档",
+    )
     source_refs: list[EvidenceReferenceResponse] = Field(
         default_factory=list,
         description="包级证据引用",

@@ -12,6 +12,8 @@
 		type ObjectiveConclusionContribution,
 		type ObjectiveConclusionMeasurementRow,
 		type ObjectiveConclusionPackage,
+		type ObjectiveConclusionNarrativeClaim,
+		type ObjectiveConclusionNarrativeSection,
 		type ObjectiveConclusionStatement,
 		type ObjectiveEvidenceRoute,
 		type ObjectiveEvidenceUnit,
@@ -122,6 +124,7 @@
 	$: conclusionContributions = conclusionPackage?.paper_contributions ?? [];
 	$: conclusionComparisons = conclusionPackage?.controlled_comparisons ?? [];
 	$: conclusionLimitations = conclusionPackage?.limitations ?? [];
+	$: reportSections = conclusionPackage?.narrative.sections ?? [];
 	$: relevantFrameCount = frames.filter((frame) => frame.relevance !== 'irrelevant').length;
 	$: evidenceKindOptions = buildEvidenceKindOptions(evidenceUnits);
 	$: evidenceDocumentOptions = buildEvidenceDocumentOptions(frames, evidenceUnits);
@@ -182,6 +185,12 @@
 	}
 
 	function collectionConclusionText(view: ObjectiveResearchView) {
+		const collectionSection = view.conclusion_package?.narrative.sections.find(
+			(section) => section.section_id === 'collection_level_conclusion'
+		);
+		const sectionClaim = collectionSection?.claims[0]?.claim;
+		if (sectionClaim) return sectionClaim;
+		if (collectionSection?.body) return collectionSection.body;
 		const packageClaim = view.conclusion_package?.conclusions[0]?.claim;
 		if (packageClaim) return packageClaim;
 		const summary = view.logic_chain?.summary || view.objective.comparison_intent || '';
@@ -211,6 +220,23 @@
 					})
 				: ''
 		]).join(' · ');
+	}
+
+	function reportClaimMeta(claim: ObjectiveConclusionNarrativeClaim) {
+		return uniqueMeta([
+			claim.strength,
+			claim.evidence_unit_ids.length
+				? $t('research.objectiveWorkspace.unitCount', {
+						count: claim.evidence_unit_ids.length
+					})
+				: ''
+		]).join(' · ');
+	}
+
+	function sectionTone(section: ObjectiveConclusionNarrativeSection) {
+		if (section.section_id === 'limitations') return 'limited';
+		if (section.section_id === 'source_traceback') return 'source';
+		return 'default';
 	}
 
 	function conclusionMeasurementValue(row: ObjectiveConclusionMeasurementRow) {
@@ -837,6 +863,35 @@
 
 		return refs.map((sourceRef) => sourceEntry(unit, sourceRef));
 	}
+
+	function sourceEntryFromRef(sourceRef: Record<string, unknown>): SourceEntry | null {
+		const documentId = displayValue(sourceRef.document_id);
+		if (!documentId) return null;
+		const pageNumber = displayValue(sourceRef.page);
+		const evidenceId =
+			displayValue(sourceRef.evidence_id) || displayValue(sourceRef.evidence_ref_id);
+		const anchorId = displayValue(sourceRef.anchor_id);
+		const params: [string, string][] = [];
+		if (pageNumber) params.push(['page', pageNumber]);
+		if (evidenceId) params.push(['evidence_id', evidenceId]);
+		if (anchorId) params.push(['anchor_id', anchorId]);
+		params.push(['return_to', objectiveHref()]);
+		return {
+			label: sourceRefLabel(sourceRef),
+			documentId,
+			query: queryString(params)
+		};
+	}
+
+	function sectionSourceEntries(section: ObjectiveConclusionNarrativeSection): SourceEntry[] {
+		const refs = section.source_refs.length
+			? section.source_refs
+			: section.claims.flatMap((claim) => claim.source_refs);
+		return refs
+			.map((sourceRef) => sourceEntryFromRef(sourceRef))
+			.filter((entry): entry is SourceEntry => entry !== null)
+			.slice(0, 6);
+	}
 </script>
 
 <svelte:head>
@@ -946,12 +1001,59 @@
 						</article>
 					</div>
 
-					{#if conclusionPackage.conclusions.length}
+					{#if reportSections.length || conclusionPackage.conclusions.length}
 						<section class="report-section">
 							<div class="report-section__heading">
 								<h4>{$t('research.objectiveWorkspace.reportConclusionTitle')}</h4>
-								<span>{conclusionPackage.conclusions.length}</span>
+								<span>{reportSections.length || conclusionPackage.conclusions.length}</span>
 							</div>
+							{#if reportSections.length}
+								<div class="report-narrative">
+									{#each reportSections as section (section.section_id)}
+										<article class={`report-narrative-card report-narrative-card--${sectionTone(section)}`}>
+											<div class="report-narrative-card__heading">
+												<h5>{section.title}</h5>
+												{#if section.evidence_unit_ids.length}
+													<span>
+														{$t('research.objectiveWorkspace.unitCount', {
+															count: section.evidence_unit_ids.length
+														})}
+													</span>
+												{/if}
+											</div>
+											{#if section.body}
+												<p>{section.body}</p>
+											{/if}
+											{#if section.claims.length && section.section_id !== 'collection_level_conclusion'}
+												<div class="report-claim-list">
+													{#each section.claims as claim, index (`${section.section_id}-${index}`)}
+														<div>
+															<strong>{claim.claim}</strong>
+															{#if reportClaimMeta(claim)}
+																<small>{reportClaimMeta(claim)}</small>
+															{/if}
+														</div>
+													{/each}
+												</div>
+											{/if}
+											{#if sectionSourceEntries(section).length}
+												<div class="report-source-row">
+													{#each sectionSourceEntries(section) as source, index (`${section.section_id}-${source.label}-${index}`)}
+														<a
+															href={`${resolve('/collections/[id]/documents/[document_id]', {
+																id: collectionId,
+																document_id: source.documentId || ''
+															})}${source.query}`}
+														>
+															{source.label}
+														</a>
+													{/each}
+												</div>
+											{/if}
+										</article>
+									{/each}
+								</div>
+							{:else}
 							<div class="report-statement-list">
 								{#each conclusionPackage.conclusions as statement, index (`statement-${index}`)}
 									<article>
@@ -962,6 +1064,7 @@
 									</article>
 								{/each}
 							</div>
+							{/if}
 						</section>
 					{/if}
 
@@ -1914,19 +2017,100 @@
 			text-transform: uppercase;
 		}
 
-		.report-lead h4 {
-			color: var(--text-primary);
-			font-size: 20px;
-			line-height: 30px;
-			font-weight: 650;
-			overflow-wrap: anywhere;
-		}
+	.report-lead h4 {
+		color: var(--text-primary);
+		font-size: 20px;
+		line-height: 30px;
+		font-weight: 650;
+		overflow-wrap: anywhere;
+	}
 
-		.report-metrics,
-		.report-range-list {
-			display: grid;
-			grid-template-columns: repeat(4, minmax(0, 1fr));
-			gap: 10px;
+	.report-narrative,
+	.report-claim-list {
+		display: grid;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.report-narrative-card {
+		display: grid;
+		gap: 10px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 14px;
+		background: var(--surface-card);
+	}
+
+	.report-narrative-card--limited {
+		border-color: var(--warning-border);
+		background: var(--warning-bg);
+	}
+
+	.report-narrative-card--source {
+		background: var(--bg-subtle);
+	}
+
+	.report-narrative-card__heading {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.report-narrative-card h5 {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 16px;
+		line-height: 22px;
+		overflow-wrap: anywhere;
+	}
+
+	.report-narrative-card p,
+	.report-claim-list strong {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 22px;
+		font-weight: 500;
+		overflow-wrap: anywhere;
+	}
+
+	.report-claim-list {
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.report-claim-list div {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.report-source-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.report-source-row a {
+		max-width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 9px;
+		color: var(--color-accent);
+		font-size: 12px;
+		line-height: 16px;
+		text-decoration: none;
+		overflow-wrap: anywhere;
+	}
+
+	.report-metrics,
+	.report-range-list {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 10px;
 		}
 
 		.report-metrics article,
@@ -1961,18 +2145,21 @@
 			padding-top: 16px;
 		}
 
-		.report-section__heading {
-			display: flex;
-			align-items: baseline;
-			justify-content: space-between;
-			gap: 12px;
-		}
+	.report-section__heading {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+	}
 
-		.report-statement-list article,
-		.report-paper-list article,
-		.report-range-list article {
-			background: var(--surface-card);
-		}
+	.report-narrative-card__heading span,
+	.report-claim-list small,
+	.report-source-row a,
+	.report-statement-list article,
+	.report-paper-list article,
+	.report-range-list article {
+		background: var(--surface-card);
+	}
 
 		.report-statement-list p,
 		.report-paper-list p,

@@ -281,9 +281,25 @@ export type ObjectiveLogicChain = {
 	confidence: number;
 };
 
+export type ObjectiveConclusionNarrativeClaim = {
+	claim: string;
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+	strength: string;
+};
+
+export type ObjectiveConclusionNarrativeSection = {
+	section_id: string;
+	title: string;
+	body: string;
+	claims: ObjectiveConclusionNarrativeClaim[];
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+};
+
 export type ObjectiveConclusionNarrative = {
 	status: string;
-	sections: Record<string, unknown>[];
+	sections: ObjectiveConclusionNarrativeSection[];
 };
 
 export type ObjectiveConclusionContribution = {
@@ -1296,6 +1312,46 @@ function normalizeConclusionLimitation(value: unknown): ObjectiveConclusionLimit
 	};
 }
 
+function normalizeConclusionNarrativeClaim(
+	value: unknown
+): ObjectiveConclusionNarrativeClaim | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const claim = toText(record.claim ?? record.message ?? record.summary);
+	if (!claim) return null;
+
+	return {
+		claim,
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		strength: toText(record.strength, 'statement')
+	};
+}
+
+function normalizeConclusionNarrativeSection(
+	value: unknown
+): ObjectiveConclusionNarrativeSection | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const sectionId = toText(record.section_id ?? record.id);
+	const title = toText(record.title ?? record.heading, sectionId);
+	const body = toText(record.body ?? record.summary ?? record.text);
+	if (!sectionId || (!title && !body)) return null;
+
+	return {
+		section_id: sectionId,
+		title,
+		body,
+		claims: asArray(record.claims)
+			.map((item) => normalizeConclusionNarrativeClaim(item))
+			.filter((item): item is ObjectiveConclusionNarrativeClaim => item !== null),
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
 function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusionPackage | null {
 	const record = asRecord(value);
 	if (!record) return null;
@@ -1318,7 +1374,9 @@ function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusio
 		status: toText(record.status, 'empty'),
 		narrative: {
 			status: toText(narrativeRecord?.status, 'not_generated'),
-			sections: normalizeUnknownRecordList(narrativeRecord?.sections)
+			sections: asArray(narrativeRecord?.sections)
+				.map((item) => normalizeConclusionNarrativeSection(item))
+				.filter((item): item is ObjectiveConclusionNarrativeSection => item !== null)
 		},
 		paper_contributions: asArray(record.paper_contributions)
 			.map((item) => normalizeConclusionContribution(item))

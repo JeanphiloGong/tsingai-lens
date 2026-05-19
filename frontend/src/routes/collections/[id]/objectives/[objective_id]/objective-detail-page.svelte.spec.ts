@@ -341,8 +341,71 @@ function objectivePayload() {
 			},
 			status: 'ready',
 			narrative: {
-				status: 'not_generated',
-				sections: []
+				status: 'ready',
+				sections: [
+					{
+						section_id: 'research_objective',
+						title: 'Research objective',
+						body: 'How does heat treatment affect LPBF 316L tensile strength?',
+						claims: [],
+						evidence_unit_ids: [],
+						source_refs: []
+					},
+					{
+						section_id: 'collection_level_conclusion',
+						title: 'Collection-level conclusion',
+						body:
+							'The collection shows traceable tensile evidence that heat-treated LPBF 316L changes yield strength, while the current package still needs complete condition resolution.',
+						claims: [
+							{
+								claim:
+									'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.',
+								evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
+								source_refs: [
+									{
+										evidence_unit_id: 'unit_measure',
+										document_id: 'doc_1',
+										source_kind: 'table',
+										source_ref: 'table-2',
+										evidence_id: 'ev_1',
+										anchor_id: 'anc_1',
+										page: 5
+									}
+								],
+								strength: 'measured'
+							}
+						],
+						evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
+						source_refs: [
+							{
+								evidence_unit_id: 'unit_measure',
+								document_id: 'doc_1',
+								source_kind: 'table',
+								source_ref: 'table-2',
+								evidence_id: 'ev_1',
+								anchor_id: 'anc_1',
+								page: 5
+							}
+						]
+					},
+					{
+						section_id: 'limitations',
+						title: 'Limitations and uncertainties',
+						body:
+							'Some measurements do not have complete sample and process context, so strict comparison remains limited.',
+						claims: [],
+						evidence_unit_ids: ['unit_measure', 'unit_measure_secondary'],
+						source_refs: [
+							{
+								evidence_unit_id: 'unit_measure',
+								document_id: 'doc_1',
+								source_kind: 'table',
+								source_ref: 'table-2',
+								page: 5
+							}
+						]
+					}
+				]
 			},
 			paper_contributions: [
 				{
@@ -556,9 +619,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(
-				browserPage.getByRole('heading', {
-					name: 'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.'
-				})
+				browserPage.getByText(
+					'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.'
+				)
 			)
 			.toBeInTheDocument();
 		await expect
@@ -566,6 +629,16 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Collection-level findings' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Collection-level conclusion' }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'The collection shows traceable tensile evidence that heat-treated LPBF 316L changes yield strength, while the current package still needs complete condition resolution.'
+				)
+			)
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Primary evidence table' }))
@@ -577,7 +650,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Mechanism chain' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Limitations and uncertainties' }))
+			.element(browserPage.getByRole('heading', { name: 'Limitations and uncertainties' }).first())
 			.toBeInTheDocument();
 		const pageText = document.body.textContent ?? '';
 		await expect.element(browserPage.getByText('LPBF 316L heat treatment study').first()).toBeInTheDocument();
@@ -631,7 +704,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(contributionMap.getByText('11', { exact: true })).toBeInTheDocument();
 
-		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' });
+		const sourceLink = browserPage.getByRole('link', { name: 'table · table-2 · p. 5' }).first();
 		await expect
 			.element(sourceLink)
 			.toHaveAttribute(

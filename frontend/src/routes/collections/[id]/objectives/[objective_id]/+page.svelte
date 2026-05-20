@@ -59,6 +59,11 @@
 		count: number;
 	};
 
+	type MarkdownReportBlock =
+		| { kind: 'h1' | 'h2' | 'h3' | 'p'; text: string }
+		| { kind: 'ul' | 'ol'; items: string[] }
+		| { kind: 'table'; headers: string[]; rows: string[][] };
+
 	const evidenceKindOrder = [
 		'measurement',
 		'test_condition',
@@ -195,39 +200,105 @@
 		return items.length ? items.join(', ') : $t('research.emptyValue');
 	}
 
-	function parseMarkdownReport(markdown: string) {
-		const blocks: { kind: 'h1' | 'h2' | 'h3' | 'li' | 'p'; text: string }[] = [];
+	function parseMarkdownReport(markdown: string): MarkdownReportBlock[] {
+		const blocks: MarkdownReportBlock[] = [];
 		let paragraph: string[] = [];
+		let listKind: 'ul' | 'ol' | null = null;
+		let listItems: string[] = [];
+		let tableLines: string[] = [];
 		const flushParagraph = () => {
 			const text = paragraph.join(' ').trim();
 			if (text) blocks.push({ kind: 'p', text });
 			paragraph = [];
 		};
+		const flushList = () => {
+			if (listKind && listItems.length) {
+				blocks.push({ kind: listKind, items: listItems });
+			}
+			listKind = null;
+			listItems = [];
+		};
+		const flushTable = () => {
+			const table = parseMarkdownTable(tableLines);
+			if (table) {
+				blocks.push(table);
+			} else if (tableLines.length) {
+				paragraph.push(...tableLines);
+				flushParagraph();
+			}
+			tableLines = [];
+		};
+		const flushOpenBlocks = () => {
+			flushTable();
+			flushList();
+			flushParagraph();
+		};
 		for (const rawLine of markdown.split(/\r?\n/)) {
 			const line = rawLine.trim();
 			if (!line) {
-				flushParagraph();
+				flushOpenBlocks();
 				continue;
 			}
 			const heading = /^(#{1,3})\s+(.+)$/.exec(line);
 			if (heading) {
-				flushParagraph();
+				flushOpenBlocks();
 				blocks.push({
 					kind: heading[1].length === 1 ? 'h1' : heading[1].length === 2 ? 'h2' : 'h3',
 					text: heading[2].trim()
 				});
 				continue;
 			}
+			if (line.startsWith('|') && line.endsWith('|')) {
+				flushParagraph();
+				flushList();
+				tableLines.push(line);
+				continue;
+			}
 			const listItem = /^[-*]\s+(.+)$/.exec(line);
 			if (listItem) {
 				flushParagraph();
-				blocks.push({ kind: 'li', text: listItem[1].trim() });
+				flushTable();
+				if (listKind && listKind !== 'ul') flushList();
+				listKind = 'ul';
+				listItems.push(listItem[1].trim());
 				continue;
 			}
+			const orderedListItem = /^\d+[.)]\s+(.+)$/.exec(line);
+			if (orderedListItem) {
+				flushParagraph();
+				flushTable();
+				if (listKind && listKind !== 'ol') flushList();
+				listKind = 'ol';
+				listItems.push(orderedListItem[1].trim());
+				continue;
+			}
+			flushTable();
+			flushList();
 			paragraph.push(line);
 		}
-		flushParagraph();
+		flushOpenBlocks();
 		return blocks;
+	}
+
+	function parseMarkdownTable(lines: string[]): MarkdownReportBlock | null {
+		if (lines.length < 2 || !isMarkdownSeparatorRow(lines[1])) return null;
+		const headers = splitMarkdownTableRow(lines[0]);
+		const rows = lines.slice(2).map(splitMarkdownTableRow).filter((row) => row.length);
+		if (!headers.length || !rows.length) return null;
+		return { kind: 'table', headers, rows };
+	}
+
+	function isMarkdownSeparatorRow(line: string) {
+		const cells = splitMarkdownTableRow(line);
+		return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+	}
+
+	function splitMarkdownTableRow(line: string) {
+		return line
+			.replace(/^\|/, '')
+			.replace(/\|$/, '')
+			.split('|')
+			.map((cell) => cell.trim());
 	}
 
 	function frameTitle(frame: ObjectivePaperFrame) {
@@ -790,9 +861,40 @@
 								<h2>{block.text}</h2>
 							{:else if block.kind === 'h3'}
 								<h3>{block.text}</h3>
-							{:else if block.kind === 'li'}
-								<p class="objective-report-document__list-item">{block.text}</p>
-							{:else}
+							{:else if block.kind === 'ul'}
+								<ul class="objective-report-document__list">
+									{#each block.items as item, itemIndex (`report-ul-${index}-${itemIndex}`)}
+										<li>{item}</li>
+									{/each}
+								</ul>
+							{:else if block.kind === 'ol'}
+								<ol class="objective-report-document__list">
+									{#each block.items as item, itemIndex (`report-ol-${index}-${itemIndex}`)}
+										<li>{item}</li>
+									{/each}
+								</ol>
+							{:else if block.kind === 'table'}
+								<div class="objective-report-table-wrap">
+									<table class="objective-report-table">
+										<thead>
+											<tr>
+												{#each block.headers as header, headerIndex (`report-table-${index}-header-${headerIndex}`)}
+													<th>{header}</th>
+												{/each}
+											</tr>
+										</thead>
+										<tbody>
+											{#each block.rows as row, rowIndex (`report-table-${index}-row-${rowIndex}`)}
+												<tr>
+													{#each block.headers as _header, cellIndex (`report-table-${index}-cell-${rowIndex}-${cellIndex}`)}
+														<td>{row[cellIndex] ?? ''}</td>
+													{/each}
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							{:else if block.kind === 'p'}
 								<p>{block.text}</p>
 							{/if}
 						{/each}
@@ -1596,6 +1698,7 @@
 	}
 
 	.objective-report-document p,
+	.objective-report-document li,
 	.objective-report-empty p {
 		margin: 0;
 		color: var(--text-primary);
@@ -1604,16 +1707,53 @@
 		overflow-wrap: anywhere;
 	}
 
-	.objective-report-document__list-item {
-		padding-left: 18px;
-		position: relative;
+	.objective-report-document__list {
+		display: grid;
+		gap: 7px;
+		margin: 0;
+		padding-left: 22px;
 	}
 
-	.objective-report-document__list-item::before {
-		position: absolute;
-		left: 2px;
-		content: '•';
+	.objective-report-table-wrap {
+		overflow-x: auto;
+		max-width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+	}
+
+	.objective-report-table {
+		width: 100%;
+		min-width: 640px;
+		border-collapse: collapse;
+		background: var(--surface-card);
+	}
+
+	.objective-report-table th,
+	.objective-report-table td {
+		border-bottom: 1px solid var(--border-default);
+		padding: 10px 12px;
+		text-align: left;
+		vertical-align: top;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+
+	.objective-report-table th {
 		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+		background: var(--bg-subtle);
+	}
+
+	.objective-report-table td {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 22px;
+	}
+
+	.objective-report-table tr:last-child td {
+		border-bottom: 0;
 	}
 
 	.objective-report-actions button {

@@ -789,7 +789,13 @@ function objectivePayload() {
 				'Heat treatment changes LPBF 316L tensile response; yield strength is bounded by 540-560 MPa in the persisted report.\n\n' +
 				'## 文献贡献\n\n' +
 				'- P001 provides tensile measurements, comparison evidence, and microstructure interpretation.\n\n' +
+				'1. Heat treatment is the controlled process variable.\n' +
+				'2. Tensile testing is the target property path.\n\n' +
 				'## 支撑数据\n\n' +
+				'| Sample | Yield strength | Source |\n' +
+				'| --- | --- | --- |\n' +
+				'| HT-SLM | 560 MPa | P001 Table 2 page 5 |\n' +
+				'| HT-SLM-2 | 540 MPa | P001 Table 2 page 5 |\n\n' +
 				'The report cites P001 Table 2 page 5 for the 560 MPa measurement.',
 			warnings: [],
 			source_refs: [
@@ -850,6 +856,12 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('P001 provides tensile measurements, comparison evidence, and microstructure interpretation.'))
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Heat treatment is the controlled process variable.'))
+			.toBeInTheDocument();
+		await expect.poll(() => document.querySelector('.objective-report-table')?.textContent ?? '').toContain('Sample');
+		await expect.poll(() => document.querySelector('.objective-report-table')?.textContent ?? '').toContain('HT-SLM');
+		await expect.poll(() => document.querySelector('.objective-report-table')?.textContent ?? '').toContain('560 MPa');
 		await expect
 			.element(browserPage.getByText('Expert report: heat treatment changes LPBF 316L tensile response'))
 			.not.toBeInTheDocument();

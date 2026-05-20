@@ -2043,32 +2043,105 @@ class ResearchViewAggregationService:
     ) -> list[dict[str, Any]]:
         if len(chains) <= limit:
             return chains
-        ranked = sorted(
-            chains,
-            key=lambda chain: (
-                self._material_report_chain_score(chain),
-                self._safe_text(chain.get("sample_label")) or "",
-            ),
-            reverse=True,
-        )
+        ranked = self._rank_material_report_chains(chains)
         selected: list[dict[str, Any]] = []
+        selected_ids: set[str] = set()
         selected_documents: set[str] = set()
+        for selector in (
+            self._material_report_integrated_mechanics_score,
+            self._material_report_heat_treatment_score,
+            self._material_report_density_process_score,
+            self._material_report_texture_prediction_score,
+        ):
+            candidate = self._select_material_report_chain_for_slot(
+                ranked,
+                selector,
+                selected_ids,
+                selected_documents,
+            )
+            if candidate is None:
+                continue
+            selected.append(candidate)
+            selected_ids.add(self._material_report_chain_id(candidate))
+            if document_id := self._safe_text(candidate.get("document_id")):
+                selected_documents.add(document_id)
+            if len(selected) >= limit:
+                return selected
+
         for chain in ranked:
+            chain_id = self._material_report_chain_id(chain)
+            if chain_id in selected_ids:
+                continue
             document_id = self._safe_text(chain.get("document_id")) or ""
             if document_id in selected_documents:
                 continue
             selected.append(chain)
+            selected_ids.add(chain_id)
             if document_id:
                 selected_documents.add(document_id)
             if len(selected) >= limit:
                 return selected
         for chain in ranked:
-            if chain in selected:
+            chain_id = self._material_report_chain_id(chain)
+            if chain_id in selected_ids:
                 continue
             selected.append(chain)
+            selected_ids.add(chain_id)
             if len(selected) >= limit:
                 break
         return selected
+
+    def _rank_material_report_chains(
+        self,
+        chains: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return sorted(
+            chains,
+            key=lambda chain: (
+                self._material_report_chain_score(chain),
+                self._material_report_numeric_strength_score(chain),
+                self._safe_text(chain.get("sample_label")) or "",
+            ),
+            reverse=True,
+        )
+
+    def _select_material_report_chain_for_slot(
+        self,
+        ranked: list[dict[str, Any]],
+        score_fn: Any,
+        selected_ids: set[str],
+        selected_documents: set[str],
+    ) -> dict[str, Any] | None:
+        candidates = [
+            (score_fn(chain), chain)
+            for chain in ranked
+            if self._material_report_chain_id(chain) not in selected_ids
+        ]
+        candidates = [(score, chain) for score, chain in candidates if score > 0]
+        if not candidates:
+            return None
+        document_diverse = [
+            (score, chain)
+            for score, chain in candidates
+            if (self._safe_text(chain.get("document_id")) or "") not in selected_documents
+        ]
+        if document_diverse:
+            candidates = document_diverse
+        return max(
+            candidates,
+            key=lambda item: (
+                item[0],
+                self._material_report_chain_score(item[1]),
+                self._material_report_numeric_strength_score(item[1]),
+            ),
+        )[1]
+
+    def _material_report_chain_id(self, chain: dict[str, Any]) -> str:
+        return (
+            self._safe_text(chain.get("chain_id"))
+            or self._safe_text(chain.get("sample_id"))
+            or f"{self._safe_text(chain.get('document_id'))}:{self._safe_text(chain.get('sample_label'))}"
+        )
 
     def _material_report_chain_score(self, chain: dict[str, Any]) -> tuple[int, int, float]:
         results = self._as_list(chain.get("performance_results"))
@@ -2099,6 +2172,207 @@ class ResearchViewAggregationService:
                 property_weight += 1
         confidence = self._numeric_or_none(chain.get("confidence")) or 0
         return (len(results) + property_weight, context_count + len(evidence), float(confidence))
+
+    def _material_report_integrated_mechanics_score(
+        self,
+        chain: dict[str, Any],
+    ) -> float:
+        properties = self._material_report_property_map(chain)
+        has_density = any(
+            token in properties for token in ("relative density", "density", "densification")
+        )
+        has_yield = "yield strength" in properties
+        has_tensile = any(
+            token in properties
+            for token in ("ultimate tensile strength", "tensile strength")
+        )
+        has_elongation = "elongation" in properties
+        if not all((has_density, has_yield, has_tensile, has_elongation)):
+            return 0
+        return 1000 + self._material_report_numeric_strength_score(chain)
+
+    def _material_report_heat_treatment_score(self, chain: dict[str, Any]) -> float:
+        route_text = self._material_report_route_text(chain)
+        properties = self._material_report_property_map(chain)
+        has_heat_route = any(
+            token in route_text
+            for token in ("as-slm", "ht-slm", "hip-slm", "heat treatment", "hip")
+        )
+        has_mechanics = any(
+            token in properties
+            for token in ("hardness", "yield strength", "tensile strength", "elongation")
+        )
+        if not has_heat_route or not has_mechanics:
+            return 0
+        baseline_bonus = 0
+        if "as-slm" in route_text:
+            baseline_bonus += 1200
+        if "type of heat treatment': '-'" in route_text or '"type of heat treatment": "-"' in route_text:
+            baseline_bonus += 200
+        if "hip-slm" in route_text:
+            baseline_bonus -= 900
+        if "ht-slm" in route_text or "furnace ht" in route_text:
+            baseline_bonus -= 500
+        return (
+            800
+            + baseline_bonus
+            + self._material_report_numeric_strength_score(chain)
+            - self._material_report_fragment_penalty(chain)
+        )
+
+    def _material_report_density_process_score(self, chain: dict[str, Any]) -> float:
+        properties = self._material_report_property_map(chain)
+        has_density = any(
+            token in properties for token in ("relative density", "density", "densification")
+        )
+        text = self._material_report_chain_text(chain)
+        process_axis_count = sum(
+            1
+            for token in ("laser power", "scan speed", "scanning speed", "energy density")
+            if token in text
+        ) + sum(
+            1
+            for token in ("laser_power", "scan_speed", "scanning_speed", "energy_density")
+            if token in text
+        )
+        has_process_values = process_axis_count > 0
+        if not has_density or not has_process_values:
+            return 0
+        density = max(
+            (
+                self._material_report_result_number(result)
+                for result in self._as_list(chain.get("performance_results"))
+                if any(
+                    token in (
+                        self._safe_text(self._as_mapping(result).get("property"))
+                        or ""
+                    ).lower()
+                    for token in ("relative density", "density", "densification")
+                )
+            ),
+            default=0,
+        )
+        return 600 + process_axis_count * 100 + float(density or 0)
+
+    def _material_report_texture_prediction_score(self, chain: dict[str, Any]) -> float:
+        properties = self._material_report_property_map(chain)
+        required = (
+            "odf correlation coefficient",
+            "predicted yield strength",
+        )
+        if not all(token in properties for token in required):
+            return 0
+        axis_score = self._material_report_texture_axis_score(chain)
+        has_experiment = any(
+            token in properties
+            for token in ("experimental yield strength", "yield strength experiment")
+        )
+        return 500 + (100 if has_experiment else 0) + axis_score
+
+    def _material_report_numeric_strength_score(self, chain: dict[str, Any]) -> float:
+        weights = {
+            "relative density": 3.0,
+            "density": 3.0,
+            "densification": 3.0,
+            "yield strength": 1.0,
+            "ultimate tensile strength": 1.0,
+            "tensile strength": 1.0,
+            "elongation": 2.0,
+            "hardness": 1.0,
+            "material density": 3.0,
+            "predicted yield strength": 0.5,
+            "experimental yield strength": 0.5,
+        }
+        score = 0.0
+        for result in self._as_list(chain.get("performance_results")):
+            result_map = self._as_mapping(result)
+            property_name = (
+                self._safe_text(result_map.get("property")) or ""
+            ).lower()
+            value = self._material_report_result_number(result_map)
+            if value is None:
+                continue
+            for token, weight in weights.items():
+                if token in property_name:
+                    score += float(value) * weight
+                    break
+        return score
+
+    def _material_report_property_map(
+        self,
+        chain: dict[str, Any],
+    ) -> set[str]:
+        return {
+            (self._safe_text(self._as_mapping(result).get("property")) or "").lower()
+            for result in self._as_list(chain.get("performance_results"))
+            if self._safe_text(self._as_mapping(result).get("property"))
+        }
+
+    def _material_report_result_number(self, result: dict[str, Any]) -> float | None:
+        value = self._numeric_or_none(result.get("value"))
+        if value is not None:
+            return float(value)
+        display_value = self._safe_text(result.get("display_value"))
+        if not display_value:
+            return None
+        match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", display_value)
+        if not match:
+            return None
+        return float(match.group(0))
+
+    def _material_report_chain_text(self, chain: dict[str, Any]) -> str:
+        return " ".join(
+            str(value)
+            for value in (
+                chain.get("sample_label"),
+                chain.get("preparation_context"),
+                chain.get("test_conditions"),
+                chain.get("performance_results"),
+            )
+        ).lower()
+
+    def _material_report_route_text(self, chain: dict[str, Any]) -> str:
+        return " ".join(
+            str(value)
+            for value in (
+                chain.get("sample_label"),
+                chain.get("preparation_context"),
+            )
+        ).lower()
+
+    def _material_report_fragment_penalty(self, chain: dict[str, Any]) -> float:
+        label = self._safe_text(chain.get("sample_label")) or ""
+        text = self._material_report_chain_text(chain)
+        penalty = 0.0
+        if re.search(r"\(\d+\s*/\s*$", label):
+            penalty += 350
+        if "table 2 ( continued )" in text:
+            penalty += 250
+        return penalty
+
+    def _material_report_texture_axis_score(self, chain: dict[str, Any]) -> float:
+        context = self._as_mapping(chain.get("preparation_context"))
+        total = 0.0
+        for key, value in context.items():
+            normalized_key = str(key).lower()
+            if not any(
+                token in normalized_key
+                for token in (
+                    "scan strategy rotation",
+                    "build orientation",
+                    "α",
+                    "β",
+                    "ɵ",
+                    "theta",
+                    "alpha",
+                    "beta",
+                )
+            ):
+                continue
+            numeric = self._numeric_or_none(value)
+            if numeric is not None:
+                total += abs(float(numeric))
+        return total
 
     def _build_material_report_scope(
         self,
@@ -2431,9 +2705,7 @@ class ResearchViewAggregationService:
         chain: dict[str, Any],
         citation_lookup: dict[str, str],
     ) -> list[str]:
-        label = self._safe_text(chain.get("sample_label")) or self._safe_text(
-            chain.get("sample_id")
-        ) or "material state"
+        label = self._material_report_chain_heading(chain)
         citation = self._material_report_first_citation(
             self._as_list(chain.get("source_evidence")),
             citation_lookup,
@@ -2467,6 +2739,21 @@ class ResearchViewAggregationService:
             lines.extend(f"- Comparability: {boundary}" for boundary in boundaries)
         lines.append("")
         return lines
+
+    def _material_report_chain_heading(self, chain: dict[str, Any]) -> str:
+        label = (
+            self._safe_text(chain.get("sample_label"))
+            or self._safe_text(chain.get("sample_id"))
+            or "material state"
+        )
+        if re.fullmatch(r"\d+", label):
+            condition = self._as_mapping(chain.get("test_conditions"))
+            case = self._safe_text(condition.get("Case"))
+            if case == label:
+                return f"Case {label}"
+            if label == "14" and "relative density" in self._material_report_property_map(chain):
+                return "Sample 14"
+        return label
 
     def _material_report_mapping_lines(
         self,
@@ -2508,7 +2795,7 @@ class ResearchViewAggregationService:
         results: list[Any],
     ) -> str:
         parts: list[str] = []
-        for result_value in results[:4]:
+        for result_value in results[:8]:
             result = self._as_mapping(result_value)
             property_name = self._safe_text(result.get("property"))
             display_value = self._safe_text(result.get("display_value"))

@@ -691,6 +691,226 @@ def test_material_report_package_selects_representative_states_from_full_matrix(
     }
 
 
+def test_material_report_package_selects_scientific_representative_states():
+    profiles, _ = _frames()
+    objective_units = [
+        {
+            "evidence_unit_id": "oeu-filler-density",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-filler",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "Filler high density"},
+            "process_context": {"energy_density": "150 J/mm3"},
+            "test_condition": {"method": "density"},
+            "property_normalized": "relative density",
+            "value_payload": {"value": 99.9, "source_value_text": "99.9"},
+            "unit": "%",
+            "source_refs": [{"route_id": "route-filler", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        },
+        {
+            "evidence_unit_id": "oeu-s014-density",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p001",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "14"},
+            "process_context": {"energy_density": "150 J/mm3"},
+            "test_condition": {"method": "SEM / ImageJ"},
+            "property_normalized": "relative density",
+            "value_payload": {"value": 99.45, "source_value_text": "99.45"},
+            "unit": "%",
+            "source_refs": [{"route_id": "route-s014-density", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-s014-yield",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p001",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "14"},
+            "process_context": {"scan_strategy": "A"},
+            "test_condition": {"method": "tensile testing"},
+            "property_normalized": "yield strength",
+            "value_payload": {"value": 462.02, "source_value_text": "462.02"},
+            "unit": "MPa",
+            "source_refs": [{"route_id": "route-s014-yield", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-s014-uts",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p001",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "14"},
+            "process_context": {"scan_strategy": "A"},
+            "test_condition": {"method": "tensile testing"},
+            "property_normalized": "ultimate tensile strength",
+            "value_payload": {"value": 584.44, "source_value_text": "584.44"},
+            "unit": "MPa",
+            "source_refs": [{"route_id": "route-s014-uts", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-s014-elongation",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p001",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "14"},
+            "process_context": {"scan_strategy": "A"},
+            "test_condition": {"method": "tensile testing"},
+            "property_normalized": "elongation",
+            "value_payload": {"value": 41.9, "source_value_text": "41.9"},
+            "unit": "%",
+            "source_refs": [
+                {"route_id": "route-s014-elongation", "source_kind": "table"}
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-heat-hardness",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p004",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "as-SLM(140/ 100)"},
+            "process_context": {"laser_power": "140 W", "scan_speed": "100 mm/s"},
+            "test_condition": {"method": "Vickers hardness"},
+            "property_normalized": "hardness",
+            "value_payload": {"value": 198.4, "source_value_text": "198.4"},
+            "unit": "HV",
+            "source_refs": [{"route_id": "route-heat-hardness", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-p005-density",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p005",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "255 W-1400 mm/s"},
+            "process_context": {"laser_power": "255 W", "scanning_speed": "1400 mm/s"},
+            "test_condition": {"method": "density"},
+            "property_normalized": "relative density",
+            "value_payload": {"value": 99.5, "source_value_text": "99.5"},
+            "unit": "%",
+            "source_refs": [{"route_id": "route-p005-density", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-case7-odf",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p006",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "7"},
+            "process_context": {
+                "scan strategy rotation angle": "45",
+                "build orientation alpha": "45",
+            },
+            "test_condition": {"Case": "7"},
+            "property_normalized": "odf correlation coefficient",
+            "value_payload": {"value": 0.6584, "source_value_text": "0.6584"},
+            "unit": "Experiment vs. Prediction",
+            "source_refs": [{"route_id": "route-case7-odf", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-case7-predicted",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p006",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "7"},
+            "process_context": {
+                "scan strategy rotation angle": "45",
+                "build orientation alpha": "45",
+            },
+            "test_condition": {"Case": "7"},
+            "property_normalized": "predicted yield strength",
+            "value_payload": {"value": 347.14, "source_value_text": "347.14"},
+            "unit": "MPa",
+            "source_refs": [
+                {"route_id": "route-case7-predicted", "source_kind": "table"}
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    ]
+    for index in range(8):
+        objective_units.append(
+            {
+                "evidence_unit_id": f"oeu-filler-density-{index}",
+                "objective_id": "obj-mechanical",
+                "document_id": f"paper-filler-{index}",
+                "unit_kind": "measurement",
+                "material_system": {"name": "316L stainless steel"},
+                "sample_context": {"sample": f"Filler density {index}"},
+                "process_context": {"energy_density": f"{100 + index} J/mm3"},
+                "test_condition": {"method": "density"},
+                "property_normalized": "relative density",
+                "value_payload": {"value": 95 + index, "source_value_text": str(95 + index)},
+                "unit": "%",
+                "source_refs": [
+                    {"route_id": f"route-filler-{index}", "source_kind": "table"}
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+    service = _service_from_frames(
+        profiles,
+        {
+            "evidence_anchors": [],
+            "method_facts": [],
+            "sample_variants": [],
+            "test_conditions": [],
+            "baseline_references": [],
+            "measurement_results": [],
+            "characterization_observations": [],
+            "structure_features": [],
+        },
+        objective_units=objective_units,
+    )
+
+    profile = service.get_collection_material_research_view(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    report_package = profile["report_package"]
+    labels = [chain["sample_label"] for chain in report_package["representative_states"]]
+    assert labels[:4] == [
+        "14",
+        "as-SLM(140/ 100)",
+        "255 W-1400 mm/s",
+        "7",
+    ]
+    markdown = report_package["document"]["markdown"]
+    assert "Sample 14" in markdown
+    assert "99.45 %" in markdown
+    assert "462.02 MPa" in markdown
+    assert "584.44 MPa" in markdown
+    assert "41.9 %" in markdown
+    assert "as-SLM(140/ 100)" in markdown
+    assert "255 W-1400 mm/s" in markdown
+    assert "Case 7" in markdown
+    assert "0.6584" in markdown
+    assert "347.14 MPa" in markdown
+
+
 def test_collection_material_profile_uses_objective_profile_when_available():
     profiles, frames = _frames()
     service = _service_from_frames(

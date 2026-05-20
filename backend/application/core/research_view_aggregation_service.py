@@ -2401,9 +2401,11 @@ class ResearchViewAggregationService:
     ) -> list[dict[str, Any]]:
         findings: list[dict[str, Any]] = []
         for index, chain in enumerate(chains[:6], start=1):
-            label = self._safe_text(chain.get("sample_label")) or self._safe_text(
-                chain.get("sample_id")
-            ) or f"state {index}"
+            label = self._material_report_display_label(
+                self._safe_text(chain.get("sample_label"))
+                or self._safe_text(chain.get("sample_id"))
+                or f"state {index}"
+            )
             results = self._as_list(chain.get("performance_results"))
             result_text = self._material_report_result_summary(results)
             findings.append(
@@ -2753,7 +2755,10 @@ class ResearchViewAggregationService:
                 return f"Case {label}"
             if label == "14" and "relative density" in self._material_report_property_map(chain):
                 return "Sample 14"
-        return label
+        return self._material_report_display_label(label)
+
+    def _material_report_display_label(self, value: str) -> str:
+        return re.sub(r"/\s+(?=\d)", "/", value)
 
     def _material_report_mapping_lines(
         self,

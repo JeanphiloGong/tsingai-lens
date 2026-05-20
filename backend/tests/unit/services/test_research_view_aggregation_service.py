@@ -904,7 +904,7 @@ def test_material_report_package_selects_scientific_representative_states():
     assert "462.02 MPa" in markdown
     assert "584.44 MPa" in markdown
     assert "41.9 %" in markdown
-    assert "as-SLM(140/ 100)" in markdown
+    assert "as-SLM(140/100)" in markdown
     assert "255 W-1400 mm/s" in markdown
     assert "Case 7" in markdown
     assert "0.6584" in markdown
